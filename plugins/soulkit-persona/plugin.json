@@ -1,10 +1,10 @@
 {
   "id": "soulkit-persona",
   "name": "soulkit 人格适配器",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "从 soulkit 读取人格卡，作为桥接的人格来源；soulkit 不可用时回落 roles/*.md",
   "main": "index.mjs",
   "apiVersion": 1,
-  "permissions": ["state", "persona:provide", "net:http"],
-  "hooks": ["onInbound", "onShutdown"]
+  "permissions": ["persona:provide", "net:http"],
+  "hooks": []
 }

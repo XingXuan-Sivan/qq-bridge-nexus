@@ -77,9 +77,11 @@ const tests = [
   'test-integration-v030.mjs',
   // L1 只读 agent preset 的工具白名单守卫（不依赖 Windows 沙箱）。
   'test-agent-readonly-guard.mjs',
-  // 插件内核（v1.2.0）：清单/配置坏输入只降级、钩子超时隔离、人格 provider 同步解析、关闭流程。
+  // 插件内核（v1.2.0）：清单/配置坏输入只降级、钩子超时隔离、人格 provider 注册表、关闭流程。
   'test-plugin-kernel.mjs',
-  // soulkit 人格适配器：启动即拉卡、失败保留旧卡且只告警一次、TTL 由 onInbound 触发、坏卡不覆盖缓存。
+  // 人格三层解析：会话覆盖 → provider → 全局本地卡，off 硬覆盖，缺卡时继续往下落。
+  'test-persona-resolve.mjs',
+  // soulkit 人格适配器：协议三态、标题行剥离、ETag、坏响应抛错。
   'test-soulkit-persona.mjs',
   // preset 源与 bundle patch 不漂移（v0.3.0 起多了 qq-agent-readonly，一并钉住）。
   'test-agent-preset-patches.mjs',

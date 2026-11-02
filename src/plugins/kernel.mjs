@@ -46,7 +46,14 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     enabled: config.audit.enabled,
     log: logLine,
   });
-  const persona = createPersonaRegistry({ log: logLine });
+  const persona = createPersonaRegistry({
+    log: logLine,
+    stateFile: path.join(stateDir, 'persona-cache.json'),
+    ttlMs: config.persona.cache.ttlMs,
+    minRefreshGapMs: config.persona.cache.minRefreshGapMs,
+    staleMaxMs: config.persona.cache.staleMaxMs,
+    now: deps.now,
+  });
 
   const entries = [];
   const entryById = new Map();
@@ -140,7 +147,16 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       stateDir,
       log: logLine,
       deps: {
-        registerPersona: (provider, pluginId) => persona.register(provider, pluginId),
+        // provider 白名单：plugins.json 里指定了 persona.provider 时，只接受那一个 id。
+        // 多个插件都声明 persona:provide 是允许的，但同一时刻只能有一个生效。
+        registerPersona: (provider, pluginId) => {
+          const wanted = config.persona.provider;
+          if (wanted && wanted !== provider?.id) {
+            logLine(`[plugins] ${pluginId} 的人格 provider "${provider?.id}" 未在 plugins.json 的 persona.provider 中启用，已忽略`);
+            return;
+          }
+          persona.register(provider, pluginId);
+        },
         unregisterPersona: (pluginId) => persona.unregister(pluginId),
         sendToQQ: deps.sendToQQ,
         hasSession: deps.hasSession,
@@ -287,13 +303,30 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return persona.resolve(key);
   }
 
+  /** 唤醒时把人格卡刷新一次（异步、有超时、失败保留旧缓存）。 */
+  function personaWarm(key, options) {
+    return persona.warm(key, options);
+  }
+
   function status() {
+    const personaStatus = persona.status();
     return {
       enabled: config.enabled,
       dir: config.dir,
       limits: { ...config.limits },
       audit: { enabled: config.audit.enabled, file: 'state/plugin-audit.jsonl', maxBytes: config.audit.maxBytes, keep: config.audit.keep },
-      persona: persona.describe(),
+      // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
+      persona: {
+        ...(personaStatus.provider ?? {}),
+        keys: personaStatus.keys,
+        cards: personaStatus.cards,
+        stale: personaStatus.stale,
+        degraded: personaStatus.degraded,
+        lastError: personaStatus.lastError,
+        lastErrorAt: personaStatus.lastErrorAt,
+        lastRefreshAt: personaStatus.lastRefreshAt,
+        failures: personaStatus.failures,
+      },
       plugins: entries.map((entry) => ({
         id: entry.id,
         name: entry.name,
@@ -327,6 +360,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     notify,
     promptAdditions,
     personaResolve,
+    personaWarm,
     status,
     shutdown,
     config,

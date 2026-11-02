@@ -94,23 +94,32 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
   }
 
   if (granted.has('net:http')) {
+    // requestJson 暴露状态码与 ETag，304 也算正常返回——人格 provider 的条件请求必需；
+    // fetchJson 保持「只给 JSON」的旧签名，老插件不用改。
+    async function requestJson(rawUrl, options = {}) {
+      const url = assertSafeUrl(rawUrl);
+      const timeoutMs = Math.max(200, Math.min(10000, Number(options.timeoutMs) || 2000));
+      const response = await fetchImpl(url.href, {
+        method: options.method ?? 'GET',
+        headers: options.headers,
+        body: options.body,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      // 重定向目标也可能落在被禁网段，落地后再查一次。
+      if (response.url) assertSafeUrl(response.url);
+      const etag = typeof response.headers?.get === 'function' ? response.headers.get('etag') : null;
+      if (response.status === 304) return { status: 304, etag, json: null };
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = Buffer.from(await response.arrayBuffer());
+      if (body.length > MAX_HTTP_BYTES) throw new Error(`响应超过 ${MAX_HTTP_BYTES} 字节`);
+      return { status: response.status, etag, json: JSON.parse(body.toString('utf8')) };
+    }
     ctx.http = {
+      requestJson,
       async fetchJson(rawUrl, options = {}) {
-        const url = assertSafeUrl(rawUrl);
-        const timeoutMs = Math.max(200, Math.min(10000, Number(options.timeoutMs) || 2000));
-        const response = await fetchImpl(url.href, {
-          method: options.method ?? 'GET',
-          headers: options.headers,
-          body: options.body,
-          redirect: 'follow',
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        // 重定向目标也可能落在被禁网段，落地后再查一次。
-        if (response.url) assertSafeUrl(response.url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const body = Buffer.from(await response.arrayBuffer());
-        if (body.length > MAX_HTTP_BYTES) throw new Error(`响应超过 ${MAX_HTTP_BYTES} 字节`);
-        return JSON.parse(body.toString('utf8'));
+        const { json } = await requestJson(rawUrl, options);
+        return json;
       },
     };
   }

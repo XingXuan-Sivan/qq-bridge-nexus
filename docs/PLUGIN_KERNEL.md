@@ -106,10 +106,14 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
     "maxPromptAppendChars": 4000
   },
   "audit": { "enabled": true, "maxBytes": 5242880, "keep": 3 },
+  "persona": {
+    "provider": "soulkit",
+    "cache": { "ttlMs": 300000, "minRefreshGapMs": 30000, "staleMaxMs": 86400000 }
+  },
   "plugins": {
     "soulkit-persona": {
       "enabled": true,
-      "config": { "baseUrl": "http://127.0.0.1:3110", "timeoutMs": 1200, "holder": "star" }
+      "config": { "baseUrl": "http://127.0.0.1:3110", "timeoutMs": 1200 }
     }
   }
 }
@@ -119,6 +123,8 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 
 - `enabled: false` 时内核不加载任何插件（配置仍校验，便于先备好再开）。
 - `plugins.<id>.enabled: false` 只停这一个；`config` 原样交给插件，内核不解释字段。
+- `persona.provider`：只启用这一个 provider（多个插件都声明 `persona:provide` 时其余被忽略）；`null`/缺省 = 第一个注册成功的生效。
+- `persona.cache` 是**内核**的缓存策略，不是 provider 的字段：`ttlMs` 多久算新鲜、`minRefreshGapMs` 两次尝试的最小间隔、`staleMaxMs` 旧卡最多用多久（超过就回落本地卡）。
 - 未知 `id` 只告警，不阻断启动（插件可能还没装）。
 - 所有数值有上限（`hookTimeoutMs` ≤ 10000、`maxPlugins` ≤ 128、`maxBytes` ≥ 64KB），越界取默认并告警。
 - 插件代码**不得**读写 `plugins.json`；需要持久化的东西走 `ctx.state`。
@@ -202,7 +208,8 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 | `ctx.persona.register(provider)` | `persona:provide` | 注册人格 provider（§8），同时只能有一个生效 |
 | `ctx.persona.unregister()` | `persona:provide` | 注销自己注册的 provider |
 | `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
-| `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；不跟随跨域重定向 |
+| `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
+| `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
 | `ctx.now()` / `ctx.random()` | —— | 便于测试注入 |
 
 约束：
@@ -232,35 +239,48 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 
 ## 9. 人格 provider 契约
 
-### 9.1 接口
+完整设计（三层优先级、缓存与降级、控制台）见 [`PERSONA_PROVIDER.md`](PERSONA_PROVIDER.md)。这里只写插件作者必须遵守的部分。
+
+### 9.1 接口（`persona-provider/1`）
 
 ```js
-{
-  id: 'soulkit',                       // 稳定标识
-  async refresh(key) {},               // 可选：拉取/刷新缓存，失败抛错由内核记为日志
-  resolve(key) {                       // 同步；只读缓存
-    return { name: '星苒', text: '……', fingerprint: 'sha256:…' } | null;
-  }
-}
+ctx.persona.register({
+  id: 'soulkit',
+  contract: 'persona-provider/1',
+  capabilities: { perSession: true, conditional: true, listable: false },
+  async get(key, { etag } = {}) {
+    // 三选一：
+    return { status: 'card', card: { name: '星苒', text: '……' }, etag: 'W/"1"' };
+    // return { status: 'none', reason: 'unbound' };          // 这个会话没有卡
+    // return { status: 'not-modified', etag: 'W/"1"' };      // 条件请求命中 304
+  },
+});
 ```
 
-- `resolve` 必须同步（prompt 组装是同步链路）。需要网络的 provider 自己在 `refresh` 里预取，`resolve` 只读缓存。
-- 返回 `null` 表示「这个会话我不提供」，桥接回落到 `roles/*.md`。
-- `fingerprint` 用于「换卡后是否需要重新注入」；缺省时内核用 `sha256(name + '\n' + text)`。
+- `get` 允许异步；桥接的注入点是同步的，由内核的注册表在唤醒时 `warm()` 一次，注入时只读缓存。
+- 返回 `card` 时 `name`/`text` 必填；**指纹不用给**，内核按 `name + text` 算（16 位十六进制，供角色刷新去重）。
+- `get` 抛错 = 本次不可用：注册表保留旧卡（`staleMaxMs` 内继续用），超时后回落本地卡；连续失败只告警一次。
+- TTL、单飞、最小刷新间隔、旧卡降级、持久化都在注册表里。**provider 不要自己再写一套缓存**，否则会出现两份 TTL、两套行为。
 
 ### 9.2 与桥接的接线
 
-- `currentRoleHintV2(key)`：先 `plugins.persona.resolve(key)`，有值用它的 `text`；否则走 `roleHintForMode('v2', key)`。
-- `buildWakePromptV2Core(key)`：`roleName` 先取 provider 的 `name`，否则 `roleNameForKey(key)`。
-- 控制台的「人格与角色」页与 `/role` 命令**不受** provider 影响（P1）：它们管理的是 `roles/*.md`；provider 只替换注入内容。文档与页面需明确写这一句。
+| 位置 | 行为 |
+| --- | --- |
+| `currentRoleHintV2(key)`（注入正文） | 三层解析：L1 会话覆盖 → L2 provider 缓存卡 → L3 全局本地卡；`off` 硬覆盖 |
+| `currentRoleFingerprintV2(key)` | 同一张卡的指纹，决定是否注入「角色卡已更新」；没卡时也给稳定指纹 |
+| `buildWakePromptV2Core` / `buildWakeReminderPromptV2` / `qq_get_prompt` | 角色名用同一解析结果，不再各自读 `roles/*.md` |
+| `deliverPromptNow(key)`（唤醒时） | 先 `personaWarm(key)`（异步、有超时、失败不阻塞），再组 prompt |
+| `/role` 命令与「人格与角色」页 | 仍管理 `roles/*.md` 与会话覆盖（L1/L3）；provider 不接管选择，`off` 对 provider 生效 |
 
 ### 9.3 soulkit 适配器（第一个插件）
 
-- `GET {baseUrl}/api/persona/card?holder=<holder>` 取卡；响应 `{ name, text, fingerprint? }`（缺 `name`/`text` 视为坏卡）。
-- **依赖状态**：soulkit 侧尚未实现该端点，适配器已按契约实现并有离线测试；端点上线条前运行时会一直回落 `roles/*.md`。
-- 缓存：内存 + `ctx.state`（`card.json`），TTL 5 分钟；`onInbound` 时若缓存过期则后台 `refresh`（不阻塞消息处理）。
-- `baseUrl` 默认 `http://127.0.0.1:3110`；`holder` 默认空（soulkit 用默认 holder）。
-- 失败策略：保留上一份缓存；一次失败期内只打一行日志（成功后重置），异常不抛到主链。
+- 端点已实现（`soulkit/src/api/http.mjs`）：`GET {baseUrl}/api/persona/card?platform=qq&key=<group:…|private:…>`。
+  - 命中 → `{ ok: true, mode: 'card', name, text, sha, chars, etag, … }` + `ETag`。
+  - 未绑定 → `{ ok: true, mode: 'none', reason: 'unbound' }`；没有 key → `reason: 'no-key'`。
+  - 带 `If-None-Match` 命中缓存 → `304`。
+- 适配器把 `mode: 'none'` 映射为 `status: 'none'`，把卡片正文开头的 `【人格卡：名字｜sha】` 行剥掉（桥接自己会注入【当前角色】），其余原样交给注册表。
+- `baseUrl` 默认 `http://127.0.0.1:3110`；`timeoutMs` 默认 1200（200–5000）。插件没有钩子，刷新时机由内核决定。
+- `plugins.json` 建议显式写 `persona.provider: "soulkit"`：多个 provider 插件同时装着时，避免「谁先注册谁生效」的隐式行为。
 
 ---
 

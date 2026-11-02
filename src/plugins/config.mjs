@@ -21,6 +21,13 @@ const AUDIT_SPECS = Object.freeze({
   keep: { min: 1, max: 10, def: 3 },
 });
 
+// provider 只决定「用哪个外部人格源」；TTL/间隔/旧卡上限是缓存策略，属于内核，不属于单个 provider。
+const PERSONA_SPECS = Object.freeze({
+  ttlMs: { min: 60 * 1000, max: 60 * 60 * 1000, def: 5 * 60 * 1000 },
+  minRefreshGapMs: { min: 5 * 1000, max: 5 * 60 * 1000, def: 30 * 1000 },
+  staleMaxMs: { min: 60 * 60 * 1000, max: 7 * 24 * 60 * 60 * 1000, def: 24 * 60 * 60 * 1000 },
+});
+
 export function defaultConfig() {
   return {
     enabled: true,
@@ -34,6 +41,15 @@ export function defaultConfig() {
       enabled: true,
       maxBytes: AUDIT_SPECS.maxBytes.def,
       keep: AUDIT_SPECS.keep.def,
+    },
+    // 外部人格源：null = 用第一个注册成功的 provider；填 id = 只启用该 provider（其余注册被内核忽略）。
+    persona: {
+      provider: null,
+      cache: {
+        ttlMs: PERSONA_SPECS.ttlMs.def,
+        minRefreshGapMs: PERSONA_SPECS.minRefreshGapMs.def,
+        staleMaxMs: PERSONA_SPECS.staleMaxMs.def,
+      },
     },
     plugins: {},
   };
@@ -126,6 +142,17 @@ export function normalizeConfig(raw) {
         };
       }
     }
+  }
+
+  const rawPersona = isPlainObject(raw.persona) ? raw.persona : {};
+  if (rawPersona.provider !== undefined && rawPersona.provider !== null) {
+    const provider = typeof rawPersona.provider === 'string' ? rawPersona.provider.trim() : '';
+    if (!provider) warnings.push('persona.provider 必须是非空字符串或 null，已忽略');
+    else config.persona.provider = provider;
+  }
+  const rawCache = isPlainObject(rawPersona.cache) ? rawPersona.cache : {};
+  for (const [key, spec] of Object.entries(PERSONA_SPECS)) {
+    config.persona.cache[key] = clampInteger(rawCache[key], spec, `persona.cache.${key}`, warnings);
   }
 
   return { config, warnings };

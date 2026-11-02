@@ -36,6 +36,8 @@ import * as defaultRolesLib from '../src/default-roles.js';
 import * as backfillLib from '../src/backfill.js';
 import * as rolePerKeyLib from '../src/role-per-key.js';
 import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
+// 人格三层解析是纯函数模块（不读盘、不联网），直接用真实现：夹具要验证它读到的本地卡是否正确。
+import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
 import * as voiceLib from '../src/send-voice-lib.js';
 import * as presetPrompt from '../src/preset-prompt.js';
@@ -208,6 +210,17 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
     ...modelPrices, ...dshModel, ...quoteForward, ...modeHandover, ...roleCard, ...tokenLedger,
     createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...dshAuthHintLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...bridgeExt,
+    // 插件内核与人格解析在 VM 里桩掉：这个夹具只验证 bridge.js 的接线与主链，不加载真插件、不连 soulkit。
+    createPersonaResolver,
+    createPluginKernel: async () => ({
+      init: async () => {},
+      notify: () => {},
+      promptAdditions: async () => ({ prependText: '', appendText: '' }),
+      personaResolve: () => null,
+      personaWarm: async () => null,
+      status: () => ({ enabled: true, plugins: [], persona: { id: null } }),
+      shutdown: async () => {},
+    }),
     // ACL 收紧会 spawn icacls 去改**真实**文件系统；测试不该做这件事（同理见下面的
     // cleanupTemp / processAudioVolume 桩）。桩成成功，让 hardenStateDirAcl 走正常分支。
     hardenDir: () => ({ ok: true, detail: 'stub' }),

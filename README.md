@@ -326,6 +326,7 @@ qq-bridge-enhanced/      # 克隆下来的目录名是 dsh-qq
   roles/                # 人格（角色卡）
   src/
     bridge.js           # 主程序（只负责接线；新功能都是 src/ 下的独立模块）
+    persona-resolve.mjs # 人格三层解析：会话覆盖 → 外部 provider（soulkit）→ 全局本地卡（docs/PERSONA_PROVIDER.md）
     plugins/            # 插件内核：清单/配置/审计/权限/人格 provider（docs/PLUGIN_KERNEL.md）
     launcher/           # 控制中心
     dsh-client.js       # Node 版 DSH API 客户端（WS 下行）

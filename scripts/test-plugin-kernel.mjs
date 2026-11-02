@@ -22,11 +22,12 @@ const DEMO_INDEX = `
 export function activate(ctx) {
   ctx.persona.register({
     id: 'demo-persona',
-    async refresh() {},
-    resolve(key) {
+    contract: 'persona-provider/1',
+    capabilities: { perSession: true, conditional: false, listable: false },
+    async get(key) {
       return key === 'group:123'
-        ? { name: '星苒', text: '这是人格卡正文', fingerprint: 'fp-1' }
-        : null;
+        ? { status: 'card', card: { name: '星苒', text: '这是人格卡正文' } }
+        : { status: 'none', reason: 'unbound' };
     },
   });
   return {
@@ -179,9 +180,16 @@ test('内核：加载/禁用/坏清单的状态与人格 provider', async () => 
   assert.equal(byId.bad.status, 'invalid');
   assert.match(byId.bad.error, /id/);
 
-  assert.equal(kernel.personaResolve('group:123').name, '星苒');
+  // 注册表不再同步 resolve：先 warm 拿卡，再同步读缓存（bridge 的注入点只做后者）。
+  assert.equal(kernel.personaResolve('group:123'), null);
+  const card = await kernel.personaWarm('group:123');
+  assert.equal(card.name, '星苒');
+  assert.match(card.fingerprint, /^[0-9a-f]{16}$/);
+  assert.equal(kernel.personaResolve('group:123').text, '这是人格卡正文');
+  assert.equal(await kernel.personaWarm('group:999'), null);
   assert.equal(kernel.personaResolve('group:999'), null);
   assert.equal(kernel.status().persona.plugin, 'demo');
+  assert.equal(kernel.status().persona.cards, 1);
 
   const additions = await kernel.promptAdditions({ key: 'group:123', mode: 'reserved2', text: '原始提示词' });
   assert.equal(additions.prependText, 'PRE:reserved2');

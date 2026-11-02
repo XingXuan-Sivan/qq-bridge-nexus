@@ -5,6 +5,16 @@
 
 ## 未发布
 
+### 新增：桥接插件内核与人格 provider（v1.2.0）
+- `plugins/` 成为桥接运行时插件目录，内核在 `src/plugins/`（`manifest` / `config` / `audit` / `persona` / `host-api` / `kernel`）；原先给 DSH 加载的两个 bundle 改名到 `dsh-bundles/`，避免「插件」一词指两样东西。
+- 四个钩子：`onInbound` / `onPromptBuild` / `onAfterSend` / `onShutdown`；钩子超时（默认 2s）与异常只记审计，不阻断消息主链；`plugins.json` 独立配置（不入库，模板 `plugins.example.json`）。
+- 人格 provider 契约 `persona-provider/1`：按会话取卡、ETag/304、未绑定返回 `none`；缓存与降级（TTL 5 分钟、最小刷新 30 秒、旧卡最多用 24 小时、单飞、持久化 `state/persona-cache.json`）由内核统一负责。
+- 三层解析 `src/persona-resolve.mjs`：会话覆盖（`/role`、控制台按会话设置；`off` 硬覆盖）→ 外部 provider → 全局本地卡；`currentRoleHintV2` / `currentRoleFingerprintV2` / 唤醒提示词 / `qq_get_prompt` 都改走这一处。
+- 第一个 provider 插件 `plugins/soulkit-persona`：`GET /api/persona/card?platform=qq&key=…`，剥掉 `【人格卡：…】` 标题行，失败保留旧卡；soulkit 不在线时按解析链回落本地角色卡。
+- 控制台：「桥接插件」只读页（`/api/plugins`）、「人格来源（只读）」页（`/api/persona/sources`）；`role.maxInjectChars` 默认 6000 → 8000（soulkit 卡片约 6.5k 字符）。
+- 测试：`test-plugin-kernel`、`test-soulkit-persona`、`test-persona-resolve`，均已接入 `test:audit`。
+- 文档：新增 `docs/PLUGIN_KERNEL.md`、`docs/PERSONA_PROVIDER.md`。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

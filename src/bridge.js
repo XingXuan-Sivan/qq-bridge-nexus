@@ -113,6 +113,8 @@ import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, proce
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
+// 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
+import { createPersonaResolver } from './persona-resolve.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -344,12 +346,15 @@ function listRoles() {
 // ── 人格文件读写 ────────────────────────────────────────────────────────────
 // 人格提示词 = roles/<名称>.md，由桥接在每条消息前注入（热生效，无需重启 DSH）。
 const ROLES_DIR = path.join(ROOT, 'roles');
+// 人格卡原文缓存（人格名 -> { key: mtime+size, raw }）。角色卡是纯文本、按 mtime+size 失效，
+// 放模块作用域是因为 personaResolver 在 main() 开头初始化，函数内晚定义的 const 会踩 TDZ。
+const roleHintCache = new Map();
 const ROLE_NAME_MAX = 40;
 const ROLE_CONTENT_MAX_BYTES = 64 * 1024;
 // 注入上限：**按模式筛完小节之后**再截断，避免另一模式的专属内容白白占掉预算。
 // 默认 6000（沿用历史值，是每条约 4~6k token 的成本护栏），可用 config.json 的
 // role.maxInjectChars 调整（1000~20000）；启动时由 applyRoleInjectLimit() 写入。
-const ROLE_INJECT_MAX_CHARS_DEFAULT = 6000;
+const ROLE_INJECT_MAX_CHARS_DEFAULT = 8000;
 let roleInjectMaxChars = ROLE_INJECT_MAX_CHARS_DEFAULT;
 function applyRoleInjectLimit(value) {
   const n = Number(value);
@@ -1549,6 +1554,17 @@ async function main() {
     plugins = null;
     log(`⚠️ 插件内核初始化失败，已跳过：${error?.message ?? error}`);
   }
+
+  // 人格三层解析（docs/PERSONA_PROVIDER.md）：会话覆盖 → provider → 全局本地卡。
+  // 它是个 const，必须在任何 currentRoleHintV2 调用之前初始化，所以放在 main() 开头附近。
+  const personaResolver = createPersonaResolver({
+    get plugins() { return plugins; },
+    roleSourceFor: (key) => roleSourceFor(readRoleState(), key),
+    roleNameFor: (key) => roleNameFor(readRoleState(), key),
+    roleCardFor,
+    globalRoleName: () => readRoleState().role ?? null,
+    log,
+  });
 
   // ── 群聊黑话/网络用语学习（slang） ──────────────────────────────────────
   let slangEntries = [];
@@ -4568,6 +4584,25 @@ async function main() {
           sendJson({ ok: false, restartRequired: true, message: '插件变更需重启桥接后生效' }, 409);
           return;
         }
+        // 人格来源只读视图：每个会话实际落在哪一层（会话覆盖 / provider / 全局）。不返回卡片正文。
+        if (req.method === 'GET' && url.pathname === '/api/persona/sources') {
+          const roleState = readRoleState();
+          const keys = new Set([
+            ...Object.keys(state.sessions ?? {}),
+            ...Object.keys(roleState.byKey ?? {}),
+          ]);
+          const rows = [...keys].sort().map((key) => {
+            const resolved = personaResolver ? personaResolver.resolve(key) : null;
+            return {
+              key,
+              source: resolved?.source ?? 'none',
+              name: resolved?.name ?? null,
+              stale: Boolean(resolved?.stale),
+            };
+          });
+          sendJson({ ok: true, provider: plugins?.status()?.persona?.id ?? null, rows });
+          return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/presets') {
           let presets = [];
           try {
@@ -5629,7 +5664,7 @@ async function main() {
             return;
           }
           const isV2 = currentMode === 'reserved2';
-          const roleName = roleNameForKey(key);
+          const roleName = currentRoleName(key);
           const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
           // 二代必须带会话令牌，否则 AI 调用任何 MCP 状态/发送工具都会被拒。
           let tokenLine = '';
@@ -5935,12 +5970,12 @@ async function main() {
           if (cfg.socialV2?.sticker?.enabled !== false) {
             try { await syncStickerLibrary(false); } catch {}
           }
-          // 按这个会话取卡：各会话可以单独指定人格或不挂卡
-          const roleNameForPrompt = roleNameForKey(key);
+          // 按这个会话取卡：各会话可以单独指定人格、不挂卡，或由 provider 提供
+          const roleNameForPrompt = currentRoleName(key);
           const roleHintForPrompt = currentMode === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key);
           // AI 自己读了卡：记下这一版（只认带令牌的调用，控制台查看不算）
           if (req.headers['x-agent-token'] && currentMode === 'reserved2' && state.sessions[key]) {
-            roleRefresh.markSeen(key, state.sessions[key], roleFingerprint(roleNameForPrompt, roleHintForPrompt));
+            roleRefresh.markSeen(key, state.sessions[key], currentRoleFingerprintV2(key));
           }
           const toolMap = {
             getPrompt: 'qq_get_prompt',
@@ -10932,6 +10967,9 @@ async function main() {
     let blockPlan = null;
     if (opts.wakeReason) {
       if (wakeBlocked()) return skipWake();
+      // 唤醒时顺手刷新人格卡：TTL、单飞、失败降级都在内核注册表里，这里只给它一次机会。
+      // 首次唤醒缓存为空时也在这里拿卡；超时/失败不阻塞唤醒，回落旧缓存或本地卡。
+      if (plugins) await plugins.personaWarm(key).catch(() => {});
       // Build only after session creation: retries may rotate the token, and an
       // offline queue may have received more messages since this wake was queued.
       wakeState = getSocialV2State(key);
@@ -10959,7 +10997,7 @@ async function main() {
         sessionId,
         mode: currentMode,
         text: modelText,
-        persona: plugins.personaResolve(key)?.name ?? null,
+        persona: currentRoleName(key),
       });
       if (additions.prependText) modelText = `${additions.prependText}\n\n${modelText}`;
       if (additions.appendText) modelText = `${modelText}\n\n${additions.appendText}`;
@@ -11238,12 +11276,12 @@ async function main() {
   // 每个会话可以单独指定一张卡或者不挂卡（byKey，见 src/role-per-key.js），所以下面几个函数都带 key；
   // 不传 key 时用全局默认。
   // 缓存按人格名各存一份（几个群用不同的卡时不会互相挤掉），key 为文件 mtime + 大小。
-  const roleHintCache = new Map(); // 人格名 -> { key, raw }
-  // 原始人格卡（按 mtime 缓存，不截断）。
-  function roleRawContent(key) {
+  // 放在模块作用域：personaResolver 在 main() 开头就要用它，函数里晚定义的 const 会踩 TDZ。
+
+  // 原始人格卡（按 mtime 缓存，不截断）。按名字取：会话覆盖 / provider / 全局三条路径都走这里。
+  function roleRawByName(name) {
+    if (!name) return '';
     try {
-      const name = roleNameForKey(key);
-      if (!name) return '';
       // 读取点也必须校验人格名：写入点（控制台 /role 命令）都过 sanitizeRoleName，
       // 但 state/current-role.json 是**用户可直接编辑**的文件。没有这道校验时，
       // {"role":"../../../../Users/Public/x"} 会让 roles/ 之外的文件被读进来并注入每一条提示词。
@@ -11264,6 +11302,19 @@ async function main() {
     } catch {
       return '';
     }
+  }
+
+  function roleRawContent(key) {
+    return roleRawByName(roleNameForKey(key));
+  }
+
+  // 给 persona-resolve 用的本地卡：正文要过二代的过滤与示例改写，指纹与注入内容一一对应。
+  function roleCardFor(name) {
+    const raw = roleRawByName(name);
+    if (!raw) return null;
+    const text = sanitizeRoleTextV2(raw);
+    if (!text) return null;
+    return { text, fingerprint: roleFingerprint(name, text) };
   }
   // 按仿真模式取用：先用标题里的 〔一代〕/〔二代〕 标记筛掉另一模式的专属小节，
   // **再**按上限截断——这样另一模式的内容不会白白占掉本次的注入预算。
@@ -11363,12 +11414,10 @@ async function main() {
     return `第 ${bad.join('，')} 条之间像是把同一句话拆开了；如果两条拼起来才完整，请合并成一条，或把断点移到完整句子的边界。`;
   }
 
-  function currentRoleHintV2(key) {
-    // 人格 provider 优先：有插件提供人格卡就用它的正文，否则完全回落到 roles/*.md 的既有逻辑。
-    const provided = plugins?.personaResolve(key);
-    if (provided?.text) return provided.text;
-    // 先按 〔二代〕/〔一代〕 标记筛小节；下面的逐行过滤只是给「没标记的老卡片」兜底。
-    const raw = roleHintForMode('v2', key);
+  // 二代角色卡的统一清洗：一代专用指令整行过滤 + 「回复示例」节里的空格改逗号。
+  // 抽出来是因为 provider（soulkit）的卡也要过同一套规则——否则同一张卡走不同来源，
+  // 注入内容会出现两套行为。
+  function sanitizeRoleTextV2(raw) {
     if (!raw) return '';
     // 一代仿真模式专用指令整行过滤，避免污染二代工具协议。
     // 用 role-card.js 导出的那份（文件顶部已 import）：这里原先又抄了一份同源正则，
@@ -11394,6 +11443,21 @@ async function main() {
       }
     }
     return kept.join('\n');
+  }
+
+  /** 这个会话最终生效的人格名；显式 off 或没卡时返回 null。 */
+  function currentRoleName(key) {
+    const resolved = personaResolver.resolve(key);
+    return resolved?.kind === 'card' ? resolved.name : null;
+  }
+
+  function currentRoleHintV2(key) {
+    // 优先级与 off 的处理都在 persona-resolve 里；这里只负责清洗与截断。
+    const resolved = personaResolver.resolve(key);
+    if (resolved?.kind !== 'card' || !resolved.text) return '';
+    const text = resolved.source === 'provider' ? resolved.text.trim() : sanitizeRoleTextV2(resolved.text);
+    if (!text) return '';
+    return text.length > roleInjectMaxChars ? truncateText(text, roleInjectMaxChars) : text;
   }
 
   // QQ 群成员名片/昵称缓存：@ 段解析用，避免每条消息都调一次 OneBot API。
@@ -12043,7 +12107,11 @@ async function main() {
   // 托付在最终投递时才取走（见 deliverPrompt 里的 ownerRelayStore.take）。
   /** 这个会话当前角色卡（二代注入的那份文字）的指纹。各会话可以用不同的卡，按会话各算各的。 */
   function currentRoleFingerprintV2(key) {
-    return roleFingerprint(roleNameForKey(key), currentRoleHintV2(key));
+    const resolved = personaResolver.resolve(key);
+    // 没卡时也要给一个稳定指纹：刷新记录器靠它判断「这一版已经读过」，
+    // 空字符串会被判非法而永远记不住，结果是每次唤醒都重复注入「角色卡已更新」。
+    if (resolved?.kind !== 'card' || !resolved.text) return roleFingerprint(null, '');
+    return resolved.fingerprint ?? roleFingerprint(resolved.name, currentRoleHintV2(key));
   }
 
   /** 这次唤醒要不要带「角色卡已更新」块；要的话返回块文字，否则 ''。 */
@@ -12051,7 +12119,7 @@ async function main() {
     if (reason === 'bootstrap') return '';
     const sid = state.sessions[key];
     if (!sid || !roleRefresh.needsRefresh(key, sid, currentRoleFingerprintV2(key))) return '';
-    return buildRoleRefreshBlock({ name: roleNameForKey(key), hint: currentRoleHintV2(key) });
+    return buildRoleRefreshBlock({ name: currentRoleName(key), hint: currentRoleHintV2(key) });
   }
 
   /**
@@ -12107,7 +12175,7 @@ async function main() {
   }
 
   function buildWakePromptV2Core(key, reason, blockPlan = null) {
-    const roleName = plugins?.personaResolve(key)?.name || roleNameForKey(key);
+    const roleName = currentRoleName(key);
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
@@ -12193,7 +12261,7 @@ async function main() {
   }
 
   function buildWakeReminderPromptV2(key) {
-    const roleName = plugins?.personaResolve(key)?.name || roleNameForKey(key);
+    const roleName = currentRoleName(key);
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const identityLine = selfIdentityTextV2();
     const st = getSocialV2State(key);

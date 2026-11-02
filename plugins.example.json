@@ -11,12 +11,19 @@
     "maxBytes": 5242880,
     "keep": 3
   },
+  "persona": {
+    "provider": "soulkit",
+    "cache": {
+      "ttlMs": 300000,
+      "minRefreshGapMs": 30000,
+      "staleMaxMs": 86400000
+    }
+  },
   "plugins": {
     "soulkit-persona": {
-      "enabled": true,
+      "enabled": false,
       "config": {
         "baseUrl": "http://127.0.0.1:3110",
-        "holder": "",
         "timeoutMs": 1200
       }
     }

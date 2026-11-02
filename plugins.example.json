@@ -1,0 +1,24 @@
+{
+  "enabled": true,
+  "dir": "plugins",
+  "limits": {
+    "hookTimeoutMs": 2000,
+    "maxPlugins": 32,
+    "maxPromptAppendChars": 4000
+  },
+  "audit": {
+    "enabled": true,
+    "maxBytes": 5242880,
+    "keep": 3
+  },
+  "plugins": {
+    "soulkit-persona": {
+      "enabled": true,
+      "config": {
+        "baseUrl": "http://127.0.0.1:3110",
+        "holder": "",
+        "timeoutMs": 1200
+      }
+    }
+  }
+}

@@ -1930,6 +1930,7 @@ button:active:not(:disabled) {
       <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
       <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
       <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>
+<button data-view="plugins" class="nav-item"><span class="nav-icon" aria-hidden="true">⧉</span>桥接插件</button>
       <div class="nav-label">聊天行为</div>
       <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>二代仿真<span class="nav-note">V2</span></button>
       <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
@@ -2118,6 +2119,15 @@ button:active:not(:disabled) {
         <span class="meta" id="simPromptMsg"></span>
       </div>
       <div class="meta" id="simPromptRestart"></div>
+    </section>
+    <section id="section-plugins" data-page="plugins" class="card span-all">
+      <h2>桥接插件</h2>
+      <div class="meta">插件只在桥接启动时加载一次：改 <code>plugins.json</code> 或插件代码后需重启桥接生效（P1 不做热重载）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="pluginsRefresh">刷新</button>
+        <span class="meta" id="pluginsMeta">加载中…</span>
+      </div>
+      <div id="pluginsList" style="margin-top:8px">加载中…</div>
     </section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
@@ -5229,6 +5239,7 @@ const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
+  plugins: ['桥接插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；改配置或代码后重启桥接生效。'],
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
@@ -5822,6 +5833,50 @@ async function refreshUsageRecent() {
   }
 }
 
+// ── 桥接插件 ────────────────────────────────────────────────────────────────
+// 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。
+const PLUGIN_STATUS_LABELS = {
+  active: ['已加载', 'pill g'],
+  disabled: ['已禁用', 'pill'],
+  invalid: ['清单无效', 'pill r'],
+  failed: ['加载失败', 'pill r'],
+  stopped: ['已停止', 'pill']
+};
+async function refreshPlugins() {
+  const meta = document.getElementById('pluginsMeta');
+  const list = document.getElementById('pluginsList');
+  if (!meta || !list) return;
+  try {
+    const data = await api('/api/plugins');
+    const plugins = Array.isArray(data?.plugins) ? data.plugins : [];
+    const personaSource = data?.persona?.plugin ? `插件 ${data.persona.plugin}` : 'roles/*.md';
+    meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}`;
+    if (!plugins.length) {
+      list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接。</div>';
+      return;
+    }
+    list.innerHTML = plugins.map((plugin) => {
+      const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
+      const hooks = (plugin.hooks || []).join(' / ') || '—';
+      const counters = plugin.counters || {};
+      const recent = counters.lastHookAt ? ` · 最近 ${esc(counters.lastHookAt)}` : '';
+      const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
+      return `<div class="card" style="margin-bottom:8px">
+        <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="pill">${esc(plugin.id)}</span><span class="pill">${esc(plugin.version || '—')}</span><span class="${cls}">${esc(label)}</span></div>
+        <div class="meta">钩子：${esc(hooks)} · 调用 ${Number(counters.hookCalls) || 0} 次 · 失败 ${Number(counters.hookErrors) || 0} 次${recent}</div>
+        ${error}
+      </div>`;
+    }).join('');
+  } catch (error) {
+    meta.textContent = '';
+    list.innerHTML = `<div class="meta err">读取失败：${esc(error?.message || '未知错误')}</div>`;
+  }
+}
+document.getElementById('pluginsRefresh').addEventListener('click', () => {
+  refreshPlugins();
+  showConsoleToast('插件状态已刷新');
+});
+
 document.getElementById('usageRefresh').addEventListener('click', () => {
   refreshUsage();
   refreshUsageChart();
@@ -6286,6 +6341,8 @@ loadCompactConfig();
 setInterval(() => { if (currentConsolePage === 'usage') loadCompactConfig(); }, 60_000);
 // 停在人格页时，每 15 秒同步一次「按会话设置人格」（QQ 里发了 /role、新群建了会话都能看到；没保存的选择会保留）
 setInterval(() => { if (currentConsolePage === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
+setInterval(() => { if (currentConsolePage === 'plugins' && !document.hidden) refreshPlugins().catch(() => {}); }, 15_000);
+refreshPlugins();
 
 
 refresh(); refreshRoles(); refreshWhitelist(); refreshSessions(); refreshPending(); refreshPresets(); loadSocialForm(); loadV2Config(); refreshV2Activity(); loadV2ToolLog(); loadV2SessionOptions(); refreshSocialStatus(); refreshSlang(); loadSlangConfig(); loadSecurity(); refreshSimPrompt(); refreshDshModel(); refreshSilence(); refreshUsage(); refreshUsageChart(); refreshUsageRecent();

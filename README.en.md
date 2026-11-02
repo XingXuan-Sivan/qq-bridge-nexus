@@ -126,7 +126,7 @@ qq-bridge-enhanced/            # the cloned folder is named dsh-qq
   interface-platform/        # the interface platform (own package.json, tests and state/)
   src/                       # bridge core, MCP servers, control center (src/launcher/), feature modules (scheduler/, silence-schedule.js, role-refresh.js, …)
   public/                    # control center and bridge console web pages
-  dsh/agent-presets/         # DSH agent preset templates; plugins/ holds the generated DSH bundles
+  dsh/agent-presets/         # DSH agent preset templates; dsh-bundles/ holds the generated DSH bundles
   roles/                     # persona cards
   scripts/                   # setup, tests and helper scripts
   docs/                      # documentation (index: docs/README.md; folder map: docs/FOLDER_MAP.md)

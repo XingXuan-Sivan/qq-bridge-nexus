@@ -1,0 +1,240 @@
+// 插件内核回归（docs/PLUGIN_KERNEL.md §13）。
+//
+// 目标不是覆盖每一行，而是钉住四类**只在集成时才会炸**的契约：
+//   1. 清单/配置的坏输入只降级、不阻断桥接启动；
+//   2. 钩子超时与抛错被隔离，主链拿到的是「没有这个插件」而不是异常；
+//   3. 人格 provider 的 resolve 必须同步，且能被 bridge 的注入点直接消费；
+//   4. 关闭流程先 dispose、再 onShutdown、最后写停机审计。
+//
+// 全部离线：插件夹具写在临时目录，状态与审计也落在临时目录，不碰仓库 state/。
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { validateManifest, resolveMainPath } from '../src/plugins/manifest.mjs';
+import { normalizeConfig, defaultConfig } from '../src/plugins/config.mjs';
+import { createAuditLog } from '../src/plugins/audit.mjs';
+import { createPluginKernel } from '../src/plugins/kernel.mjs';
+
+const DEMO_INDEX = `
+export function activate(ctx) {
+  ctx.persona.register({
+    id: 'demo-persona',
+    async refresh() {},
+    resolve(key) {
+      return key === 'group:123'
+        ? { name: '星苒', text: '这是人格卡正文', fingerprint: 'fp-1' }
+        : null;
+    },
+  });
+  return {
+    hooks: {
+      onInbound: (payload) => { ctx.state.write('inbound', { key: payload.key, text: payload.text }); },
+      onPromptBuild: (payload) => ({ prependText: 'PRE:' + payload.mode, appendText: 'APP' }),
+      onAfterSend: (payload) => { ctx.state.write('sent', payload); },
+      onShutdown: () => { ctx.state.write('shutdown', { ok: true }); },
+    },
+    dispose: () => { ctx.state.write('disposed', { ok: true }); },
+  };
+}
+`;
+
+const SLOW_INDEX = `
+export function activate() {
+  return {
+    hooks: {
+      onInbound: () => new Promise(() => {}),
+    },
+  };
+}
+`;
+
+const UNDECLARED_INDEX = `
+export function activate() {
+  return {
+    hooks: {
+      onInbound: () => {},
+    },
+  };
+}
+`;
+
+function manifest(overrides = {}) {
+  return {
+    id: 'demo',
+    name: 'Demo',
+    version: '1.0.0',
+    main: 'index.mjs',
+    apiVersion: 1,
+    permissions: ['state', 'persona:provide'],
+    hooks: ['onInbound', 'onPromptBuild', 'onAfterSend', 'onShutdown'],
+    description: '测试插件',
+    ...overrides,
+  };
+}
+
+function makeTempRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-kernel-'));
+  const pluginsDir = path.join(root, 'plugins');
+  fs.mkdirSync(pluginsDir, { recursive: true });
+  const stateDir = path.join(root, 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  return { root, pluginsDir, stateDir };
+}
+
+function writePlugin(pluginsDir, id, indexSource, overrides = {}) {
+  const dir = path.join(pluginsDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify(manifest({ id, ...overrides }), null, 2));
+  if (indexSource) fs.writeFileSync(path.join(dir, 'index.mjs'), indexSource);
+  return dir;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('清单校验：id 必须等于目录名，权限与钩子必须在白名单内', () => {
+  const ok = validateManifest(manifest(), 'demo');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.manifest.id, 'demo');
+
+  const mismatch = validateManifest(manifest({ id: 'other' }), 'demo');
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.errors.join('；'), /id/);
+
+  const badPermission = validateManifest(manifest({ permissions: ['root'] }), 'demo');
+  assert.equal(badPermission.ok, false);
+  assert.match(badPermission.errors.join('；'), /未知权限|permissions/);
+
+  const badHook = validateManifest(manifest({ hooks: ['onEverything'] }), 'demo');
+  assert.equal(badHook.ok, false);
+
+  const badVersion = validateManifest(manifest({ version: '1.0' }), 'demo');
+  assert.equal(badVersion.ok, false);
+});
+
+test('清单校验：入口路径不允许跳出插件目录', () => {
+  const dir = path.join(os.tmpdir(), 'plugin-path-check');
+  assert.throws(() => resolveMainPath(dir, '../escape.mjs'), /越界|目录/);
+  assert.equal(resolveMainPath(dir, 'index.mjs'), path.join(dir, 'index.mjs'));
+});
+
+test('配置：缺省即默认值，越界只回落而不是报错', () => {
+  const defaults = normalizeConfig(null);
+  assert.deepEqual(defaults.config, defaultConfig());
+
+  const { config, warnings } = normalizeConfig({
+    dir: '../outside',
+    limits: { hookTimeoutMs: 1, maxPlugins: 999, maxPromptAppendChars: -5 },
+    audit: { keep: 99 },
+    plugins: { demo: { enabled: false, config: { a: 1 } }, 'Bad_Id': {} },
+  });
+  assert.equal(config.dir, 'plugins');
+  assert.equal(config.limits.hookTimeoutMs, 2000);
+  assert.equal(config.limits.maxPlugins, 32);
+  assert.equal(config.limits.maxPromptAppendChars, 4000);
+  assert.equal(config.audit.keep, 3);
+  assert.equal(config.plugins.demo.enabled, false);
+  assert.deepEqual(config.plugins.demo.config, { a: 1 });
+  assert.equal(config.plugins.Bad_Id, undefined);
+  assert.ok(warnings.length >= 5);
+});
+
+test('审计：超过 maxBytes 轮转到 .1，旧文件内容不丢', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-audit-'));
+  const file = path.join(dir, 'audit.jsonl');
+  const audit = createAuditLog({ file, maxBytes: 260, keep: 3, enabled: true, log: () => {} });
+  for (let i = 0; i < 5; i += 1) audit.append('hook', { i, pad: 'x'.repeat(60) });
+  assert.ok(fs.existsSync(file));
+  // 每行约 110 字节：260 字节 ≈ 两行，5 条会触发至少一次轮转；老内容落在 .1/.2/.3 之一。
+  const rotated = ['.1', '.2', '.3']
+    .map((suffix) => `${file}${suffix}`)
+    .filter((candidate) => fs.existsSync(candidate))
+    .map((candidate) => fs.readFileSync(candidate, 'utf8'))
+    .join('\n');
+  assert.match(rotated, /"i":0/);
+  assert.match(rotated, /"i":2/);
+});
+
+test('内核：加载/禁用/坏清单的状态与人格 provider', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'demo', DEMO_INDEX);
+  writePlugin(pluginsDir, 'off', DEMO_INDEX, { permissions: [], hooks: [] });
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({
+    plugins: { off: { enabled: false } },
+  }, null, 2));
+  // 坏清单：id 与目录名不一致
+  const badDir = path.join(pluginsDir, 'bad');
+  fs.mkdirSync(badDir, { recursive: true });
+  fs.writeFileSync(path.join(badDir, 'plugin.json'), JSON.stringify(manifest({ id: 'not-bad', hooks: [] })));
+
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  const status = kernel.status();
+  const byId = Object.fromEntries(status.plugins.map((entry) => [entry.id, entry]));
+  assert.equal(byId.demo.status, 'active');
+  assert.deepEqual(byId.demo.hooks.sort(), ['onAfterSend', 'onInbound', 'onPromptBuild', 'onShutdown']);
+  assert.equal(byId.off.status, 'disabled');
+  assert.equal(byId.bad.status, 'invalid');
+  assert.match(byId.bad.error, /id/);
+
+  assert.equal(kernel.personaResolve('group:123').name, '星苒');
+  assert.equal(kernel.personaResolve('group:999'), null);
+  assert.equal(kernel.status().persona.plugin, 'demo');
+
+  const additions = await kernel.promptAdditions({ key: 'group:123', mode: 'reserved2', text: '原始提示词' });
+  assert.equal(additions.prependText, 'PRE:reserved2');
+  assert.equal(additions.appendText, 'APP');
+
+  kernel.notify('onInbound', { key: 'group:123', text: '你好' });
+  await sleep(120);
+  const inbound = JSON.parse(fs.readFileSync(path.join(stateDir, 'plugins', 'demo', 'inbound.json'), 'utf8'));
+  assert.deepEqual(inbound, { key: 'group:123', text: '你好' });
+
+  await kernel.shutdown();
+  const after = kernel.status();
+  assert.equal(after.plugins.find((entry) => entry.id === 'demo').status, 'stopped');
+  assert.ok(fs.existsSync(path.join(stateDir, 'plugins', 'demo', 'disposed.json')));
+  assert.ok(fs.existsSync(path.join(stateDir, 'plugins', 'demo', 'shutdown.json')));
+
+  const auditLines = fs.readFileSync(path.join(stateDir, 'plugin-audit.jsonl'), 'utf8').trim().split('\n');
+  assert.ok(auditLines.some((line) => line.includes('"activate"')));
+  assert.ok(auditLines.some((line) => line.includes('"deactivate"')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('内核：钩子超时被隔离，且不阻塞 notify 调用方', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'slow', SLOW_INDEX, { permissions: [], hooks: ['onInbound'] });
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ limits: { hookTimeoutMs: 120 } }, null, 2));
+
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  const startedAt = Date.now();
+  kernel.notify('onInbound', { text: 'x' });
+  assert.ok(Date.now() - startedAt < 50, 'notify 必须是即发即忘');
+
+  await sleep(400);
+  const entry = kernel.status().plugins.find((plugin) => plugin.id === 'slow');
+  assert.equal(entry.counters.hookErrors, 1);
+  assert.match(entry.error, /超时/);
+  const auditText = fs.readFileSync(path.join(stateDir, 'plugin-audit.jsonl'), 'utf8');
+  assert.match(auditText, /"timeout"/);
+  await kernel.shutdown();
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('内核：未在清单声明的钩子被忽略（防止插件绕过声明偷偷接主链）', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'sneaky', UNDECLARED_INDEX, { permissions: [], hooks: [] });
+  const logs = [];
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: (line) => logs.push(line) });
+  await kernel.init();
+  const entry = kernel.status().plugins.find((plugin) => plugin.id === 'sneaky');
+  assert.equal(entry.status, 'active');
+  assert.deepEqual(entry.hooks, []);
+  assert.ok(logs.some((line) => line.includes('未在清单声明')));
+  await kernel.shutdown();
+  fs.rmSync(root, { recursive: true, force: true });
+});

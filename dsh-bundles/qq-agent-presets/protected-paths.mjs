@@ -16,7 +16,7 @@ function real(p) {
   try { return fs.realpathSync(p) } catch { return path.resolve(p) }
 }
 
-// 本文件在 <仓库>/plugins/qq-agent-presets/ 下（DSH 通过 junction 引用，realpath 还原到仓库）。
+// 本文件在 <仓库>/dsh-bundles/qq-agent-presets/ 下（DSH 通过 junction 引用，realpath 还原到仓库）。
 const bundleDir = real(path.dirname(fileURLToPath(import.meta.url)))
 const repoRoot = path.resolve(bundleDir, '..', '..')
 const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')

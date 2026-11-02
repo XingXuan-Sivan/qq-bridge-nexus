@@ -130,7 +130,7 @@ QQ 消息 ──► SnowLuma / NapCat（OneBot v11 WS，可经接口平台）─
     ⚠️ 它会把**搜索关键词发给 Bing**、并按模型决定抓取公网 URL；**黑话学习默认开启**，会拿群聊里提取的词条去搜。
     数据出机清单见 [LICENSE](LICENSE) 的「数据出机清单」，不需要就关掉黑话自动研究（`slang.autoResearch`）。
 - **会话模型**：每个 QQ 会话（私聊/群）对应一个独立的 DSH 会话，统一归组到「QQ 聊天」工作区（不再散落未分组）；映射持久化在 `state/sessions.json`
-- **性格定制**：QQ 会话默认使用 `qq-chat` agent preset，`reserved2` 使用 `qq-chat-v2`。DSH 0.1.7 起 preset 不再是 `~/.dsh/.agent-presets/<名>/` 目录，而是 `plugins/qq-agent-presets/` bundle 生成并插入 profile 的一条 `@deepseek-ai/dsh-agent-preset` 行（重启 DSH 后生效）；人格与默认 DSH 一致（coding agent），仅附加 QQ 场景规则；**角色扮演**是可选机制——由控制台或管理端设置 `state/current-role.json` 注入（群友无法更改）
+- **性格定制**：QQ 会话默认使用 `qq-chat` agent preset，`reserved2` 使用 `qq-chat-v2`。DSH 0.1.7 起 preset 不再是 `~/.dsh/.agent-presets/<名>/` 目录，而是 `dsh-bundles/qq-agent-presets/` bundle 生成并插入 profile 的一条 `@deepseek-ai/dsh-agent-preset` 行（重启 DSH 后生效）；人格与默认 DSH 一致（coding agent），仅附加 QQ 场景规则；**角色扮演**是可选机制——由控制台或管理端设置 `state/current-role.json` 注入（群友无法更改）
 - **本地控制台**：桥接自带 Web 控制台 `http://127.0.0.1:3100`——左侧按操作任务分为「运行总览 / 会话与审批 / 人格与角色 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 令牌与花费 / 访问与安全 / 调试与运维 / 工具参考」十一个页面，右上角搜索框可跨页定位任意功能项；支持**浅色 / 深色双主题**（顶栏一键切换，未选择时跟随系统）；切换运行模式（chat / closed-agent / reserved / reserved2）、设置角色、静默开关（含定时静默时间段）、查看活动日志、修改管理员/控制台令牌，全部即时生效；访问需要令牌（`config.json` 的 `consoleToken`，未配置时自动生成并打印在启动日志；控制台内可手动修改或重新生成）
   - **令牌与花费看板**：实时显示 AI 的 token 消耗与折算金额（元），可下钻到**每个群 / 每个好友 / 每一轮对话**（轮次、步数、缓存命中/未命中输入、输出、命中率、花费、峰谷时段），并有**按时间的消耗走势图**（24 小时 / 3 天 / 7 天 / 30 天，柱子按高峰/空闲着色，一眼看出什么时候烧得凶、哪几个小时是 2 倍价）。累计总量取自 DSH 的 `tokenUsage` 投影（精确，含桥接启动前的历史），逐轮明细由 `assistant/message` 的 `usage` 折叠而来；金额按 DeepSeek 官方价目表折算并区分**高峰 / 空闲时段**（高峰单价为空闲的 2 倍，已内置中国法定节假日）。详见 [docs/guides/TOKEN_USAGE_CONSOLE.md](docs/guides/TOKEN_USAGE_CONSOLE.md)
   - **人格（角色扮演）管理**：列表点选即可载入查看/编辑提示词，支持新建、保存修改、改名（自动重命名文件）、另存为副本、删除；超过注入上限或含一代专用指令会实时提示；切换或保存当前人格时可选二代仿真里「下次唤醒时重新读卡」或「立即」生效
@@ -317,12 +317,16 @@ qq-bridge-enhanced/      # 克隆下来的目录名是 dsh-qq
     （design/ research/ audits/ 是本地开发文档，不随仓库发布）
   audio/                # 语音库（自己建，不入库）：把准备好的音频放这里，AI 可作 QQ 语音发出（用法见 docs/guides/VOICE.md）
   dsh/agent-presets/    # qq-chat / qq-chat-v2 的 DSH agent preset 模板
-  plugins/qq-mode-console  # DSH 插件：注册 qq-mode 设置命名空间（仅 host 半，UI 卡片未实现）
-  plugins/qq-agent-presets # DSH preset bundle（setup-dsh.mjs 装进 DSH）
+  dsh-bundles/          # 给 DSH 加载的 bundle（与桥接插件无关，见 docs/FOLDER_MAP.md 的命名边界）
+    qq-mode-console     # 注册 qq-mode 设置命名空间（仅 host 半，UI 卡片未实现）
+    qq-agent-presets    # 预设 bundle（setup-dsh.mjs 装进 DSH）
+  plugins/              # 桥接运行时插件目录（用户插件放这里；示例 plugins/soulkit-persona）
+  plugins.json          # 插件内核的本机配置（不入库；模板见 plugins.example.json）
   interface-platform/   # 接口平台：桥接与 QQ 后端之间的统一接入层
   roles/                # 人格（角色卡）
   src/
-    bridge.js           # 主程序（只负责接线；新功能都是 src/ 下的独立模块，如 scheduler/、silence-schedule.js、role-refresh.js、mode-handover.js）
+    bridge.js           # 主程序（只负责接线；新功能都是 src/ 下的独立模块）
+    plugins/            # 插件内核：清单/配置/审计/权限/人格 provider（docs/PLUGIN_KERNEL.md）
     launcher/           # 控制中心
     dsh-client.js       # Node 版 DSH API 客户端（WS 下行）
     md-to-plain.js      # Markdown → QQ 纯文本

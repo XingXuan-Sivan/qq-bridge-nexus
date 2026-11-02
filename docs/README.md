@@ -9,6 +9,15 @@
 
 ---
 
+## 根目录 —— 全局约定与设计
+
+| 文档 | 一句话说明 | 状态 |
+| --- | --- | --- |
+| [FOLDER_MAP.md](FOLDER_MAP.md) | 目录结构、`scripts/` 命名约定，以及 `dsh-bundles/`（给 DSH）与 `plugins/`（桥接插件）的命名边界 | ✅ |
+| [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) | 桥接插件内核（v1.2.0）：四个钩子、manifest、`plugins.json`、host-api 权限、人格 provider 契约、审计、控制台接口与 P1 验收 | ✅ 与当前实现同步（2026-11-02） |
+
+---
+
 ## guides/ —— 面向使用者 / 运维
 
 | 文档 | 一句话说明 | 状态 |

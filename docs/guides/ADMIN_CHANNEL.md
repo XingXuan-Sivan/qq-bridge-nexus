@@ -27,7 +27,7 @@
 | **L3** 高权限 Agent | closed-agent | **qq-agent-full**（同上；**审批闸门**：除只读外每次调用都审批，含写文件） | **`qq-full-ask`**（danger-full-access + ask，由 setup-dsh 注入） | 确认码 + **TOTP** |
 | ~~完全访问免审批~~ | — | — | `danger-full-access`（approval: never） | **不存在，任何入口都不允许** |
 
-为什么 L2/L3 需要桥接自己的审批闸门（`plugins/qq-agent-presets/qq-approval-gate.mjs`）：rc.2 的审批**只在工具请求越过当前沙箱时**才触发 ——
+为什么 L2/L3 需要桥接自己的审批闸门（`dsh-bundles/qq-agent-presets/qq-approval-gate.mjs`）：rc.2 的审批**只在工具请求越过当前沙箱时**才触发 ——
 workspace-write 下工作区内的命令直接执行；danger-full-access 下没有可越过的边界，DSH 自己**永远不会**弹审批。
 闸门挂在 `tools/pre-execute` 上返回 `{kind:'ask'}`，走 DSH 自己的审批通道（→ 桥接转发到 QQ）。DSH 默认的 standard preset
 还带子代理（rc.2 把子代理的审批策略固定为 never），所以 L2/L3 不再使用它；只有显式设置 `admin.allowCustomAgentPreset=true`

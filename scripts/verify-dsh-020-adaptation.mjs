@@ -96,7 +96,7 @@ for (const p of ['qq-chat', 'qq-chat-v2']) {
 }
 
 // 守卫脚本必须是 fail-closed 的：非法工具名要被拒绝，而不是放行（权威实现只有一份）。
-const canonicalGuardPath = path.join(ROOT, 'plugins', 'qq-agent-presets', 'qq-tool-restrict.mjs');
+const canonicalGuardPath = path.join(ROOT, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs');
 const guard = fs.readFileSync(canonicalGuardPath, 'utf8');
 // 断言只看**可执行代码**：守卫的注释里会写「cordis_define/… 在 0.1.7 已被删除」做历史说明，
 // 直接扫原文会把这段说明误判成「还在使用旧工具名」（实测误报）。必须**先剥块注释**
@@ -111,7 +111,7 @@ check('守卫：不额外放行 web_search/web_fetch', !/'(?:web_search|web_fetc
 check('守卫：拒绝 0.1.7 已删除的 cordis 旧工具名（避免静默失效）', !/cordis_(?:define|undefine|run|stop)/.test(guardCode));
 
 // 0.2.0 工具面重新对账的结果（扫描器与守卫必须一致）。
-// 三类必须覆盖，来源见 plugins/qq-agent-presets/qq-tool-restrict.mjs 的长注释：
+// 三类必须覆盖，来源见 dsh-bundles/qq-agent-presets/qq-tool-restrict.mjs 的长注释：
 //   ① 全局层默认启用、仿真会话真的会继承的 MCP 资源工具
 //   ② 派生 agent / 执行外部代码
 //   ③ 插件装载权（= 任意代码执行）与无人值守的自我调度
@@ -189,7 +189,7 @@ check('群聊模式不再重试「无 preset」建会话', /strictPreset \? \[tr
 // 复发，这里把「所有对外自称的版本号必须等于 package.json」固定下来。
 const pkgJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const lockJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'plugins/qq-mode-console/package.json'), 'utf8'));
+const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'dsh-bundles/qq-mode-console/package.json'), 'utf8'));
 check('package-lock.json 顶层 version 与 package.json 一致', lockJson.version === pkgJson.version, `lock=${lockJson.version} pkg=${pkgJson.version}`);
 check('package-lock.json packages[""] version 与 package.json 一致', lockJson.packages?.['']?.version === pkgJson.version, `lock=${lockJson.packages?.['']?.version}`);
 check('qq-mode-console 插件版本与主包一致', pluginPkg.version === pkgJson.version, `plugin=${pluginPkg.version}`);

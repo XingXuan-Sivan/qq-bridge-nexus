@@ -25,7 +25,7 @@ function fixture(name, patch = '') {
   // setup-dsh.mjs 直接从仓库源生成 bundle patch，生成器必须一起进夹具。
   fs.copyFileSync(path.join(root, 'scripts/build-agent-preset-patches.mjs'), path.join(repo, 'scripts/build-agent-preset-patches.mjs'));
   fs.cpSync(path.join(root, 'dsh'), path.join(repo, 'dsh'), { recursive: true });
-  fs.cpSync(path.join(root, 'plugins'), path.join(repo, 'plugins'), { recursive: true });
+  fs.cpSync(path.join(root, 'dsh-bundles'), path.join(repo, 'dsh-bundles'), { recursive: true });
   fs.cpSync(parserRoot, path.join(repo, 'node_modules/js-yaml'), { recursive: true });
   fs.mkdirSync(path.join(home, 'profiles/web'), { recursive: true });
   const patchFile = path.join(home, 'profiles/web/cordis.patch.yml');

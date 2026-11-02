@@ -7,6 +7,8 @@ node_modules/
 state/
 interface-platform/state/
 config.json
+# 插件内核的本机配置（启用哪些插件、各自的 config 可能含本机地址与服务名），与 config.json 同属不入库
+plugins.json
 *.log
 *.bak
 *.bak-*

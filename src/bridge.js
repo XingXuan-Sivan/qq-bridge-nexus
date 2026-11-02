@@ -111,6 +111,8 @@ import {
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
 import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
+// 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
+import { createPluginKernel } from './plugins/kernel.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -120,6 +122,9 @@ const STATE_FILE = path.join(STATE_DIR, 'sessions.json');
 const BRIDGE_VERSION = (() => {
   try { return String(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version ?? 'unknown'); } catch { return 'unknown'; }
 })();
+// 插件内核实例：main() 里创建；初始化失败保持 null，主链按「没有插件」继续跑。
+// 放在模块级是为了让 SIGINT/SIGTERM 的退出钩子也能拿到它做 dispose。
+let plugins = null;
 const ROLE_STATE_FILE = path.join(STATE_DIR, 'current-role.json');
 const SLANG_FILE = path.join(STATE_DIR, 'slang.json');
 const SLANG_SESSION_FILE = path.join(STATE_DIR, 'slang-session.json');
@@ -1526,6 +1531,24 @@ async function main() {
   hardenStateDirAcl();
   acquireLock();
   loadState();
+
+  // 插件内核（docs/PLUGIN_KERNEL.md §5/§12）：插件出问题只影响它自己，绝不挡住桥接启动。
+  try {
+    plugins = await createPluginKernel({
+      rootDir: ROOT,
+      stateDir: STATE_DIR,
+      log,
+      deps: {
+        sendToQQ: (key, msg) => sendToQQ(key, msg),
+        hasSession: (key) => Object.prototype.hasOwnProperty.call(state.sessions ?? {}, key),
+        fetch: globalThis.fetch,
+      },
+    });
+    await plugins.init();
+  } catch (error) {
+    plugins = null;
+    log(`⚠️ 插件内核初始化失败，已跳过：${error?.message ?? error}`);
+  }
 
   // ── 群聊黑话/网络用语学习（slang） ──────────────────────────────────────
   let slangEntries = [];
@@ -4533,6 +4556,16 @@ async function main() {
             snowluma: snowlumaHealthSnapshot(),
             activity: readActivityTail(100)
           });
+          return;
+        }
+        // 插件状态只读视图：只回 id/name/version/status/hooks 等公开字段，不含插件配置。
+        if (req.method === 'GET' && url.pathname === '/api/plugins') {
+          sendJson(plugins ? plugins.status() : { enabled: false, plugins: [] });
+          return;
+        }
+        // P1 不支持热重载：明确告知需要重启，不做「改了一半」的伪重载。
+        if (req.method === 'POST' && url.pathname === '/api/plugins/reload') {
+          sendJson({ ok: false, restartRequired: true, message: '插件变更需重启桥接后生效' }, 409);
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/presets') {
@@ -8841,10 +8874,13 @@ async function main() {
           assertSendAllowed();
           if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
           else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          // 插件只能看到实际发出去的那一段（已做 CQ 转义与令牌脱敏），用于落盘/统计类插件。
+          plugins?.notify('onAfterSend', { key, text: part, ok: true });
         })
         .catch((error) => {
           lastSendFailed.set(key, true);
           log(`QQ 发送失败 (${key}):`, error?.message ?? error);
+          plugins?.notify('onAfterSend', { key, text: part, ok: false, error: String(error?.message ?? error) });
         })
         .then(() => sleep(cfg.sendDelayMs));
     }
@@ -10915,7 +10951,19 @@ async function main() {
         promptText += `\n\n【本次消息快照】\n${JSON.stringify(wakeSnapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
       }
     }
-    const modelText = withSlangContext(withHandover(key, promptText), { slang: blockPlan?.slang });
+    let modelText = withSlangContext(withHandover(key, promptText), { slang: blockPlan?.slang });
+    if (plugins) {
+      // 插件只做前后缀补充，合并与总长截断由内核负责（plugins.json 的 maxPromptAppendChars）。
+      const additions = await plugins.promptAdditions({
+        key,
+        sessionId,
+        mode: currentMode,
+        text: modelText,
+        persona: plugins.personaResolve(key)?.name ?? null,
+      });
+      if (additions.prependText) modelText = `${additions.prependText}\n\n${modelText}`;
+      if (additions.appendText) modelText = `${modelText}\n\n${additions.appendText}`;
+    }
     let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(opts.media) && opts.media.length > 0) {
       const imageParts = await resolveMediaList(opts.media);
@@ -11316,6 +11364,9 @@ async function main() {
   }
 
   function currentRoleHintV2(key) {
+    // 人格 provider 优先：有插件提供人格卡就用它的正文，否则完全回落到 roles/*.md 的既有逻辑。
+    const provided = plugins?.personaResolve(key);
+    if (provided?.text) return provided.text;
     // 先按 〔二代〕/〔一代〕 标记筛小节；下面的逐行过滤只是给「没标记的老卡片」兜底。
     const raw = roleHintForMode('v2', key);
     if (!raw) return '';
@@ -12056,7 +12107,7 @@ async function main() {
   }
 
   function buildWakePromptV2Core(key, reason, blockPlan = null) {
-    const roleName = roleNameForKey(key);
+    const roleName = plugins?.personaResolve(key)?.name || roleNameForKey(key);
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
@@ -12142,7 +12193,7 @@ async function main() {
   }
 
   function buildWakeReminderPromptV2(key) {
-    const roleName = roleNameForKey(key);
+    const roleName = plugins?.personaResolve(key)?.name || roleNameForKey(key);
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const identityLine = selfIdentityTextV2();
     const st = getSocialV2State(key);
@@ -12776,6 +12827,16 @@ async function main() {
     const quoteTargetIsSelf = await isQuoteTargetSelf(event.message ?? [], kind, id, event.self_id, resolveReply);
     if (!isSessionAllowedInCurrentMode(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
+    // 插件钩子：只观察已经通过模式与空文本过滤的消息文本（不含引用原文），补收消息带 backfill 标记。
+    plugins?.notify('onInbound', {
+      key,
+      kind,
+      userId: String(event.user_id ?? ''),
+      groupId: kind === 'group' ? String(id) : null,
+      text: plainContent,
+      at: Date.now(),
+      backfill: Boolean(backfill),
+    });
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
     // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截
     if (kind === 'private' && isOwner && plainContent && !plainContent.startsWith('/')) recordOwnerTranscript(key, 'owner', plainContent);
@@ -14179,16 +14240,32 @@ async function main() {
   await pumpMux();
 }
 
+// 退出前给插件一次收尾机会（dispose/onShutdown），但最多等 2.5 秒：
+// 插件卡住时宁可丢掉审计最后一条，也不能让 Ctrl+C 挂死或让 start.bat 重启循环卡在退出上。
+function finishExit(code) {
+  try { saveState(); } catch {}
+  releaseLock();
+  process.exit(code);
+}
+function shutdownThenExit(code) {
+  if (!plugins) return finishExit(code);
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    finishExit(code);
+  };
+  setTimeout(once, 2500);
+  Promise.resolve(plugins.shutdown())
+    .catch((error) => log('插件收尾失败:', error?.message ?? error))
+    .finally(once);
+}
 process.on('SIGINT', () => {
   log('退出中…');
-  saveState();
-  releaseLock();
-  process.exit(0);
+  shutdownThenExit(0);
 });
 process.on('SIGTERM', () => {
-  saveState();
-  releaseLock();
-  process.exit(0);
+  shutdownThenExit(0);
 });
 process.on('unhandledRejection', (error) => {
   // 打出 stack：只记 message 的话，「偶发一次」和「已经坏了六小时」看起来一模一样。

@@ -11,7 +11,7 @@ import yaml from 'js-yaml';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const presetDir = path.join(root, 'dsh', 'agent-presets', 'qq-agent-readonly');
-const guardUrl = pathToFileURL(path.join(root, 'plugins', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
+const guardUrl = pathToFileURL(path.join(root, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
 
 function flatten(rows) {
   const out = [];
@@ -71,8 +71,8 @@ test('桥接的 L1 映射指向这个 preset，L3 不映射到免审批预设', 
 });
 
 // ── L2/L3 运维 preset 的审批闸门与凭据保护（独立安全审查后新增）──────────────────
-const gateUrl = pathToFileURL(path.join(root, 'plugins', 'qq-agent-presets', 'qq-approval-gate.mjs')).href;
-const ppUrl = pathToFileURL(path.join(root, 'plugins', 'qq-agent-presets', 'protected-paths.mjs')).href;
+const gateUrl = pathToFileURL(path.join(root, 'dsh-bundles', 'qq-agent-presets', 'qq-approval-gate.mjs')).href;
+const ppUrl = pathToFileURL(path.join(root, 'dsh-bundles', 'qq-agent-presets', 'protected-paths.mjs')).href;
 
 test('审批闸门：L2 执行命令要审批、工作区写入放行；L3 除只读外全部要审批；派生类直接拒绝', async () => {
   const { decide } = await import(gateUrl);

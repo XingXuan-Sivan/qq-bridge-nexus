@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PLUGIN_DIR = path.join(ROOT, 'plugins', 'qq-mode-console');
+const PLUGIN_DIR = path.join(ROOT, 'dsh-bundles', 'qq-mode-console');
 const NS = 'qq-mode';
 
 const mod = await import(pathToFileURL(path.join(PLUGIN_DIR, 'lib', 'index.js')).href);

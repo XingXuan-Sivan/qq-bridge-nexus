@@ -1,5 +1,5 @@
 // 钉住 DSH 0.1.7 preset 装配的「防漂移」契约（纯离线，不需要 DSH 在跑）：
-//   1. bundle patch（plugins/qq-agent-presets/presets/*.patch.yml）与仓库权威源
+//   1. bundle patch（dsh-bundles/qq-agent-presets/presets/*.patch.yml）与仓库权威源
 //      （dsh/agent-presets/<preset>/{preset.yml,agent.cordis.yml}）逐字一致；
 //   2. patch 的形状符合新机制：insert 一条 @deepseek-ai/dsh-agent-preset 行，
 //      config 里带 id/name/description/order/plugins；
@@ -94,7 +94,7 @@ console.log('## 4. bundle 声明与安全边界');
   const canonicalMod = await import(pathToFileURL(canonical).href);
   for (const name of PRESETS) {
     const shim = path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'qq-tool-restrict.mjs');
-    ok(/^export \* from '\.\.\/\.\.\/\.\.\/plugins\/qq-agent-presets\/qq-tool-restrict\.mjs'$/m.test(read(shim).trim()),
+    ok(/^export \* from '\.\.\/\.\.\/\.\.\/dsh-bundles\/qq-agent-presets\/qq-tool-restrict\.mjs'$/m.test(read(shim).trim()),
       `${name}/qq-tool-restrict.mjs 是指向唯一实现的 re-export 壳`);
     const shimMod = await import(pathToFileURL(shim).href);
     assert.equal(shimMod.apply, canonicalMod.apply, `${name}: 壳与实现在同一模块实例上`);

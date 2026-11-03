@@ -436,23 +436,27 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
 
   function status() {
     const personaStatus = persona.status();
+    // 没有 provider 时 persona 直接为 null：否则控制台会看到一个只有缓存统计、没有 id 的「半个人格来源」。
+    const personaInfo = personaStatus.provider
+      ? {
+          ...personaStatus.provider,
+          keys: personaStatus.keys,
+          cards: personaStatus.cards,
+          stale: personaStatus.stale,
+          degraded: personaStatus.degraded,
+          lastError: personaStatus.lastError,
+          lastErrorAt: personaStatus.lastErrorAt,
+          lastRefreshAt: personaStatus.lastRefreshAt,
+          failures: personaStatus.failures,
+        }
+      : null;
     return {
       enabled: config.enabled,
       dir: config.dir,
       limits: { ...config.limits },
       audit: { enabled: config.audit.enabled, file: 'state/plugin-audit.jsonl', maxBytes: config.audit.maxBytes, keep: config.audit.keep },
       // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
-      persona: {
-        ...(personaStatus.provider ?? {}),
-        keys: personaStatus.keys,
-        cards: personaStatus.cards,
-        stale: personaStatus.stale,
-        degraded: personaStatus.degraded,
-        lastError: personaStatus.lastError,
-        lastErrorAt: personaStatus.lastErrorAt,
-        lastRefreshAt: personaStatus.lastRefreshAt,
-        failures: personaStatus.failures,
-      },
+      persona: personaInfo,
       plugins: entries.map(summarize),
     };
   }

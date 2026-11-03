@@ -2134,13 +2134,21 @@ button:active:not(:disabled) {
     </section>
     <section id="section-plugins" data-page="plugins" class="card span-all">
       <h2>桥接插件</h2>
-      <div class="meta">插件只在桥接启动时加载一次：改 <code>plugins.json</code> 或插件代码后需重启桥接生效（P1 不做热重载）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
+      <div class="meta">可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
       <div class="row" style="margin-top:8px">
         <button id="pluginsRefresh">刷新</button>
+        <button id="pluginsReloadAll">全部重载</button>
         <span class="meta" id="pluginsMeta">加载中…</span>
       </div>
       <div id="pluginsList" style="margin-top:8px">加载中…</div>
     </section>
+    <div class="modal-overlay" id="pluginDetailOverlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1" style="max-width:720px">
+        <h3 id="pluginDetailTitle">插件详情</h3>
+        <div class="meta" id="pluginDetailBody" style="max-height:60vh;overflow:auto;white-space:pre-wrap"></div>
+        <div class="row"><button id="pluginDetailClose">关闭</button></div>
+      </div>
+    </div>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
       <div class="meta" id="socialStatus">加载中…</div>
@@ -5875,6 +5883,63 @@ const PLUGIN_STATUS_LABELS = {
   failed: ['加载失败', 'pill r'],
   stopped: ['已停止', 'pill']
 };
+const PLUGIN_ACTION_LABELS = { enable: '启用', disable: '停用', reload: '重载' };
+
+async function runPluginAction(id, action, button) {
+  const label = PLUGIN_ACTION_LABELS[action] || action;
+  if (button) button.disabled = true;
+  try {
+    const data = await api(`/api/plugins/${encodeURIComponent(id)}/${action}`, 'POST');
+    if (!data?.ok) throw new Error(data?.error || '未知错误');
+    showConsoleToast(`${id} 已${label}`);
+  } catch (error) {
+    showConsoleToast(`${id} ${label}失败：${error?.message || '未知错误'}`);
+  } finally {
+    if (button) button.disabled = false;
+  }
+  refreshPlugins().catch(() => {});
+}
+
+async function openPluginDetail(id) {
+  const body = document.getElementById('pluginDetailBody');
+  const overlay = document.getElementById('pluginDetailOverlay');
+  if (!body || !overlay) return;
+  body.textContent = '加载中…';
+  overlay.classList.add('open');
+  try {
+    const data = await api(`/api/plugins/${encodeURIComponent(id)}`);
+    const plugin = data?.plugin;
+    if (!plugin) throw new Error('插件不存在');
+    const audit = Array.isArray(plugin.audit) ? plugin.audit.slice(-12) : [];
+    const lines = [
+      `ID：${plugin.id}    状态：${plugin.status}`,
+      `名称：${plugin.name}    版本：${plugin.version || '—'}`,
+      `权限：${(plugin.permissions || []).join(', ') || '—'}`,
+      `钩子：${(plugin.hooks || []).join(', ') || '—'}`,
+      `入口：${plugin.source?.dir || '—'} / ${plugin.source?.main || '—'}`,
+      `调用 ${plugin.counters?.hookCalls ?? 0} 次 · 失败 ${plugin.counters?.hookErrors ?? 0} 次 · 重载 ${plugin.counters?.reloads ?? 0} 次`,
+      plugin.updatedAt ? `最近变更：${plugin.updatedAt}` : '',
+      plugin.error ? `最近错误：${plugin.error}` : '',
+      '',
+      '最近审计：',
+      ...audit.map((item) => {
+        const fields = Object.entries(item)
+          .filter(([key]) => key !== 'ts' && key !== 'event')
+          .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+          .join(' ');
+        return `  ${item.ts || ''} ${item.event || ''} ${fields}`.trimEnd();
+      }),
+    ].filter((line) => line !== '');
+    body.textContent = lines.join('\n');
+  } catch (error) {
+    body.textContent = `读取失败：${error?.message || '未知错误'}`;
+  }
+}
+
+function closePluginDetail() {
+  document.getElementById('pluginDetailOverlay')?.classList.remove('open');
+}
+
 async function refreshPlugins() {
   const meta = document.getElementById('pluginsMeta');
   const list = document.getElementById('pluginsList');
@@ -5894,10 +5959,14 @@ async function refreshPlugins() {
       const counters = plugin.counters || {};
       const recent = counters.lastHookAt ? ` · 最近 ${esc(counters.lastHookAt)}` : '';
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
+      const toggle = plugin.status === 'active'
+        ? `<button data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
+        : `<button data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       return `<div class="card" style="margin-bottom:8px">
         <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="pill">${esc(plugin.id)}</span><span class="pill">${esc(plugin.version || '—')}</span><span class="${cls}">${esc(label)}</span></div>
         <div class="meta">钩子：${esc(hooks)} · 调用 ${Number(counters.hookCalls) || 0} 次 · 失败 ${Number(counters.hookErrors) || 0} 次${recent}</div>
         ${error}
+        <div class="row" style="margin-top:6px">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button></div>
       </div>`;
     }).join('');
   } catch (error) {
@@ -5905,9 +5974,38 @@ async function refreshPlugins() {
     list.innerHTML = `<div class="meta err">读取失败：${esc(error?.message || '未知错误')}</div>`;
   }
 }
+
+document.getElementById('pluginsList').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-plugin-action]');
+  if (!button) return;
+  const { pluginAction, pluginId } = button.dataset;
+  if (pluginAction === 'detail') {
+    openPluginDetail(pluginId).catch(() => {});
+    return;
+  }
+  runPluginAction(pluginId, pluginAction, button);
+});
 document.getElementById('pluginsRefresh').addEventListener('click', () => {
   refreshPlugins();
   showConsoleToast('插件状态已刷新');
+});
+document.getElementById('pluginsReloadAll').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const data = await api('/api/plugins/reload', 'POST');
+    const failed = (data?.results || []).filter((item) => !item.ok);
+    showConsoleToast(failed.length ? `重载完成，${failed.length} 个失败` : '全部插件已重载');
+  } catch (error) {
+    showConsoleToast(`全部重载失败：${error?.message || '未知错误'}`);
+  } finally {
+    button.disabled = false;
+  }
+  refreshPlugins().catch(() => {});
+});
+document.getElementById('pluginDetailClose').addEventListener('click', closePluginDetail);
+document.getElementById('pluginDetailOverlay').addEventListener('click', (event) => {
+  if (event.target.id === 'pluginDetailOverlay') closePluginDetail();
 });
 
 document.getElementById('usageRefresh').addEventListener('click', () => {

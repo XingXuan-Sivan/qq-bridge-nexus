@@ -246,3 +246,84 @@ test('内核：未在清单声明的钩子被忽略（防止插件绕过声明�
   await kernel.shutdown();
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+const NEXT_INDEX = `
+export function activate(ctx) {
+  return {
+    hooks: {
+      onInbound: (payload) => { ctx.state.write('inbound', { key: payload.key, text: 'v2:' + payload.text }); },
+    },
+    dispose: () => { ctx.state.write('disposed', { ok: true }); },
+  };
+}
+`;
+
+const BROKEN_INDEX = `
+export function activate() {
+  throw new Error('boom');
+}
+`;
+
+test('管理动作：disable / enable / reload / detail，重载失败保留旧实例', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'demo', DEMO_INDEX);
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+
+  const stateFile = (name) => path.join(stateDir, 'plugins', 'demo', `${name}.json`);
+
+  const detail = kernel.detail('demo');
+  assert.equal(detail.manifest.id, 'demo');
+  assert.deepEqual([...detail.permissions].sort(), ['persona:provide', 'state']);
+  assert.ok(Array.isArray(detail.audit));
+  assert.equal(kernel.detail('missing'), null);
+
+  // 停用：钩子不再调用，provider 也不再解析
+  assert.equal((await kernel.disable('demo')).ok, true);
+  assert.equal(kernel.status().plugins.find((p) => p.id === 'demo').status, 'disabled');
+  kernel.notify('onInbound', { key: 'g', text: 'disabled' });
+  await sleep(80);
+  assert.equal(fs.existsSync(stateFile('inbound')), false);
+  assert.equal(kernel.personaResolve('group:123'), null);
+
+  // 启用：从磁盘重新加载
+  assert.equal((await kernel.enable('demo')).ok, true);
+  assert.equal(kernel.status().plugins.find((p) => p.id === 'demo').status, 'active');
+
+  // 重载：换一份实现，验证读到新版本、新行为
+  await sleep(20);
+  fs.writeFileSync(path.join(pluginsDir, 'demo', 'index.mjs'), NEXT_INDEX);
+  fs.writeFileSync(path.join(pluginsDir, 'demo', 'plugin.json'), JSON.stringify(manifest({ version: '1.1.0' }), null, 2));
+  const reloaded = await kernel.reload('demo');
+  assert.equal(reloaded.ok, true);
+  assert.equal(reloaded.plugin.version, '1.1.0');
+  kernel.notify('onInbound', { key: 'g', text: 'hello' });
+  await sleep(120);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile('inbound'), 'utf8')), { key: 'g', text: 'v2:hello' });
+
+  // 重载失败：旧实例继续跑，错误可见
+  await sleep(20);
+  fs.writeFileSync(path.join(pluginsDir, 'demo', 'index.mjs'), BROKEN_INDEX);
+  const failed = await kernel.reload('demo');
+  assert.equal(failed.ok, false);
+  assert.match(failed.error, /boom/);
+  const entry = kernel.status().plugins.find((p) => p.id === 'demo');
+  assert.equal(entry.status, 'active');
+  assert.match(entry.error, /boom/);
+  kernel.notify('onInbound', { key: 'g', text: 'still' });
+  await sleep(120);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stateFile('inbound'), 'utf8')), { key: 'g', text: 'v2:still' });
+
+  // 不存在的插件
+  assert.equal((await kernel.reload('nope')).ok, false);
+  assert.equal((await kernel.enable('nope')).ok, false);
+
+  const auditText = fs.readFileSync(path.join(stateDir, 'plugin-audit.jsonl'), 'utf8');
+  assert.match(auditText, /"disable"/);
+  assert.match(auditText, /"enable"/);
+  assert.match(auditText, /"reload"/);
+  assert.match(auditText, /"reload-failed"/);
+
+  await kernel.shutdown();
+  fs.rmSync(root, { recursive: true, force: true });
+});

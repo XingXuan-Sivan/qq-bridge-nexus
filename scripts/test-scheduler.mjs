@@ -298,7 +298,9 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.ok(nav.indexOf('data-view="slang"') < nav.indexOf('data-view="scheduler"') && nav.indexOf('data-view="scheduler"') < nav.indexOf('<div class="nav-label">管理</div>'), '位置在黑话词库下面、「管理」分组之前');
   assert.match(html, /scheduler: \['定时任务'/);
   assert.match(html, /<section id="section-scheduler" data-page="scheduler"/);
-  for (const id of ['schedEnabled', 'schedTimezone', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory']) assert.ok(html.includes(`id="${id}"`), id);
+  for (const id of ['schedEnabled', 'schedTimezone', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory', 'schedPluginKindRow', 'schedPluginKind', 'schedPayloadJson']) assert.ok(html.includes(`id="${id}"`), id);
+  assert.match(html, /taskTypes/, '任务类型来自 /api/scheduler 的 taskTypes');
+  assert.match(html, /renderSchedPluginKinds\(\)/, '编辑器会按注册类型重建下拉');
   assert.match(html, /api\('\/api\/scheduler\/preview', 'POST'/);
   assert.match(html, /<option value="cron">高级：cron 表达式<\/option>/, '重复方式里有「高级」');
   assert.match(html, /<select id="schedTaskTz"><\/select>/, '任务时区是下拉');

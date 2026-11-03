@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateManifest, resolveMainPath, KNOWN_HOOKS, PLUGIN_ID_RE } from './manifest.mjs';
-import { loadConfig, PLUGIN_CONFIG_FILE } from './config.mjs';
+import { loadConfig, normalizeConfig, serializeConfig, writeConfigFile, PLUGIN_CONFIG_FILE, LIMIT_SPECS } from './config.mjs';
 import { createAuditLog } from './audit.mjs';
 import { createPersonaRegistry } from './persona.mjs';
 import { createPromptBlockRegistry } from './prompt-blocks.mjs';
@@ -21,6 +21,10 @@ const AUDIT_TAIL_BYTES = 64 * 1024;
 const AUDIT_TAIL_LINES = 200;
 // 入站替换文本上限：防止插件把一条短消息换成一大段，把后面的处理撑坏。
 const INBOUND_TEXT_MAX = 4000;
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 function withTimeout(promise, timeoutMs, label) {
   let timer;
@@ -653,6 +657,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       dir: config.dir,
       watch: config.watch,
       watching: Boolean(watcher),
+      filters: { inbound: config.filters.inbound },
+      install: { enabled: config.install.enabled, maxBytes: config.install.maxBytes },
       limits: { ...config.limits },
       audit: { enabled: config.audit.enabled, file: 'state/plugin-audit.jsonl', maxBytes: config.audit.maxBytes, keep: config.audit.keep },
       // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
@@ -882,6 +888,50 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     /** 卸载插件：目录进 state/_trash，实例被拆掉。 */
     uninstall(id) {
       return withLock(() => doUninstall(String(id)));
+    },
+
+    /**
+     * 控制台改配置：只接受白名单字段（watch / filters.inbound / limits / install.enabled /
+     * persona.provider / plugins.<id>.enabled），校验失败整份不落盘。
+     * 生效边界：watch、filters、limits、install 立即生效；persona.provider 与插件 enabled 需重启。
+     */
+    async updateSettings(patch = {}) {
+      if (!isPlainObject(patch)) return { ok: false, error: '请求体必须是对象' };
+      const raw = serializeConfig(config);
+      if (patch.watch !== undefined) raw.watch = patch.watch;
+      if (isPlainObject(patch.filters) && patch.filters.inbound !== undefined) raw.filters.inbound = patch.filters.inbound;
+      if (isPlainObject(patch.limits)) {
+        for (const key of Object.keys(LIMIT_SPECS)) {
+          if (patch.limits[key] !== undefined) raw.limits[key] = patch.limits[key];
+        }
+      }
+      if (isPlainObject(patch.install) && patch.install.enabled !== undefined) raw.install.enabled = patch.install.enabled;
+      if (isPlainObject(patch.persona) && patch.persona.provider !== undefined) raw.persona.provider = patch.persona.provider;
+      if (isPlainObject(patch.plugins)) {
+        for (const [id, entry] of Object.entries(patch.plugins)) {
+          if (!isPlainObject(entry) || entry.enabled === undefined) continue;
+          raw.plugins[id] = { ...(raw.plugins[id] ?? { config: {} }), enabled: entry.enabled };
+        }
+      }
+
+      const { config: next, warnings } = normalizeConfig(raw);
+      if (warnings.length) return { ok: false, error: warnings.join('；'), warnings };
+      const file = path.join(rootDir, PLUGIN_CONFIG_FILE);
+      try {
+        writeConfigFile(file, next);
+      } catch (error) {
+        return { ok: false, error: `写入 ${PLUGIN_CONFIG_FILE} 失败：${error?.message ?? error}` };
+      }
+
+      const watchChanged = next.watch !== config.watch;
+      Object.assign(config, next);
+      if (watchChanged) {
+        if (config.watch) startWatching();
+        else stopWatching();
+      }
+      const restartRequired = Boolean(patch.persona || patch.plugins);
+      audit.append('settings', { detail: Object.keys(patch).join(',') });
+      return { ok: true, config: serializeConfig(config), restartRequired, warnings: [] };
     },
 
     config,

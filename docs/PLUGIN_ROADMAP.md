@@ -2,7 +2,7 @@
 
 > 用途：把「接下来做什么、为什么这么做、什么明确不做」固定在仓库里，避免实现跑着跑着偏离规划。
 > 规则：**先改这份文档，再改代码**；任何阶段的范围变化，都要在这里留下记录。
-> 最后更新：2026-11-03
+> 最后更新：2026-11-04
 
 相关文档：
 
@@ -21,6 +21,7 @@
 | 写穿 | 不做 | 桥接只读 provider，切换人格仍走 `/role` 与控制台，避免两套写入口 |
 | provider 数量 | 同一时刻只启用一个（`persona.provider`） | 多 provider 竞争在 P1 没有明确的产品语义，先留白 |
 | 插件进程 | 与桥接同进程 | 独立进程要处理 RPC、生命周期、日志与权限，收益不抵成本 |
+| 界面暴露 | 每个新能力先判断是否上界面 | 会改变对外行为或安全边界的必须有开关并写清影响；纯调参收进「高级」；结构性、调错代价高的保持文件、面板只读 |
 
 ---
 
@@ -276,6 +277,16 @@
 
 - 现状：`qq_*` 工具写死在 DSH preset 补丁（[dsh/agent-presets/](../dsh/agent-presets/)），改一次要重启 DSH。
 - 结论：需要 DSH 侧支持运行时更新工具表；在确认之前不做，避免做出「注册了但模型看不到」的假功能。
+
+### 8.6 配置面板（✅ 2026-11-04）
+
+- 做什么：把「只能改文件」的高频配置搬进控制台，写回仍走 JSON + 原子写 + 审计，不做第二套存储。
+- 上界面（可改）：
+  - 内置注入块 `core-stickers` / `core-digest` 的 `enabled` 与 `maxChars`（写 `config.json`，`PATCH /api/config/promptBlocks`，立即生效）。
+  - `filters.inbound`、`watch`、`limits.hookTimeoutMs`、`limits.maxPromptAppendChars`、`install.enabled`（写 `plugins.json`，`PATCH /api/plugins/settings`，立即生效）。
+  - 插件级持久化启用（详情弹窗写 `plugins.<id>.enabled`，重启后生效）。
+- 保持只读或不暴露：`audit.*`、`persona.cache.*`（详情里可见状态，但不给一键关）、`persona.provider`（等有第二个 provider 再做下拉）、插件自由 `config`（manifest 没有 `configSchema` 前不做通用表单）、`role.maxInjectChars`（人格页显示即可）。
+- 验收：`scripts/test-plugin-kernel.mjs` 增「设置接口：越界拒绝、白名单写回、watch 即时生效、未知字段忽略」（16/16）；两个 PATCH 都要求 JSON 与控制台令牌，写操作记审计 `settings`。
 
 ---
 

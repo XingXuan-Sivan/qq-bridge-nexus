@@ -15,6 +15,7 @@ const LIMIT_SPECS = Object.freeze({
   maxPlugins: { min: 1, max: 128, def: 32 },
   maxPromptAppendChars: { min: 0, max: 20000, def: 4000 },
 });
+export { LIMIT_SPECS };
 
 const AUDIT_SPECS = Object.freeze({
   maxBytes: { min: 64 * 1024, max: 50 * 1024 * 1024, def: 5 * 1024 * 1024 },
@@ -205,4 +206,30 @@ export function loadConfig(file) {
     return { ...normalizeConfig(null), error: `plugins.json 解析失败，已用默认配置：${error?.message ?? error}` };
   }
   return normalizeConfig(raw);
+}
+
+/** 把规范化后的配置折回「可写回文件」的形状：字段稳定、不丢插件的 config。 */
+export function serializeConfig(config) {
+  const plugins = {};
+  for (const [id, entry] of Object.entries(config.plugins ?? {})) {
+    plugins[id] = { enabled: entry.enabled !== false, config: structuredClone(entry.config ?? {}) };
+  }
+  return {
+    enabled: config.enabled,
+    dir: config.dir,
+    watch: config.watch,
+    limits: { ...config.limits },
+    audit: { ...config.audit },
+    install: { ...config.install },
+    filters: { ...config.filters },
+    persona: { provider: config.persona.provider, cache: { ...config.persona.cache } },
+    plugins,
+  };
+}
+
+/** 原子写：先写临时文件再 rename，避免控制台改一半被读到。 */
+export function writeConfigFile(file, config) {
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(serializeConfig(config), null, 2)}\n`, 'utf8');
+  fs.renameSync(tmp, file);
 }

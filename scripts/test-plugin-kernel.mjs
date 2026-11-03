@@ -568,3 +568,42 @@ test('入站过滤：默认关不生效、开关打开后可丢可改、无权�
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('设置接口：白名单字段校验、写回 plugins.json、watch 即时生效', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'demo', DEMO_INDEX);
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    // 越界值会被 normalizeConfig 降级并产生 warning：整份拒绝，不落盘。
+    const rejected = await kernel.updateSettings({ limits: { hookTimeoutMs: 999999 } });
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error, /hookTimeoutMs/);
+    assert.equal(fs.existsSync(path.join(root, 'plugins.json')), false);
+
+    const ok = await kernel.updateSettings({
+      watch: true,
+      filters: { inbound: true },
+      limits: { hookTimeoutMs: 1500 },
+      plugins: { demo: { enabled: false } },
+    });
+    assert.equal(ok.ok, true);
+    assert.equal(ok.restartRequired, true);
+    const file = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
+    assert.equal(file.watch, true);
+    assert.equal(file.filters.inbound, true);
+    assert.equal(file.limits.hookTimeoutMs, 1500);
+    assert.equal(file.plugins.demo.enabled, false);
+    assert.equal(kernel.status().watch, true);
+    assert.equal(kernel.status().watching, true);
+
+    // 不在白名单里的字段直接忽略：audit 不能被界面改掉。
+    const ignored = await kernel.updateSettings({ nope: 1, audit: { enabled: false } });
+    assert.equal(ignored.ok, true);
+    const file2 = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
+    assert.equal(file2.audit.enabled, true);
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

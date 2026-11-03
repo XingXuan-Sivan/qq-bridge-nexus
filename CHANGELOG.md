@@ -99,6 +99,15 @@
 - 测试：`test-plugin-kernel.mjs` 增至 15 个用例（默认关不生效、开启后可丢可改、无权限动作被忽略）。
 - 文档：`PLUGIN_KERNEL.md` §4 / §6.1 / §7 / §10 / §13 / §14、`PLUGIN_ROADMAP.md` §8.2 同步；`plugins.example.json` 增 `filters`。
 
+### 新增：控制台配置面板（P5）
+- 内置注入块：`core-stickers` / `core-digest` 的开关与字符上限进界面，保存写 `config.json`（`PATCH /api/config/promptBlocks`），**立即生效**；关掉后模型当轮就看不到该段。
+- 运行设置：`filters.inbound`、`watch`、`limits.hookTimeoutMs`、`limits.maxPromptAppendChars`、`install.enabled` 进界面，保存写 `plugins.json`（`PATCH /api/plugins/settings`），除需要重启的项外立即生效。
+- 插件详情弹窗可把插件启用状态写回 `plugins.json`（`plugins.<id>.enabled`），重启后保持；卡片上的启用/停用仍只改运行态。
+- 写配置统一走「规范化校验 → 原子写 → 审计 `settings` → 返回 `restartRequired`」；越界值整份拒绝，不会写出半份配置。
+- 只读保留：`audit.*`、`persona.cache.*`、`persona.provider`（等有第二个 provider 再做下拉）、插件自由 `config`。
+- 测试：`test-plugin-kernel.mjs` 增至 16 个用例（越界拒绝、白名单写回、watch 即时生效、未知字段忽略）。
+- 文档：`PLUGIN_KERNEL.md` §11、`PLUGIN_ROADMAP.md` §8.6 与「界面暴露」决策。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

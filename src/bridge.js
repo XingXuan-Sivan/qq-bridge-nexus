@@ -1565,7 +1565,9 @@ async function main() {
   // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
   // 插件块受 plugins.json 的 maxPromptAppendChars（4000）约束，内置段落沿用现有长度，不能互相挤占。
   const corePromptBlocks = createPromptBlockRegistry({ log, maxTotalChars: 200000 });
-  {
+  // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
+  const registerCoreBlocks = () => {
+    corePromptBlocks.unregisterPlugin('core');
     const coreBlockConf = (id) => (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[id] : null) || {};
     const registerCoreBlock = (id, priority, render) => {
       const conf = coreBlockConf(id);
@@ -1584,7 +1586,8 @@ async function main() {
       return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
     });
     registerCoreBlock('core-digest', 200, ({ memoryText }) => memoryText || '');
-  }
+  };
+  registerCoreBlocks();
   try {
     plugins = await createPluginKernel({
       rootDir: ROOT,
@@ -4671,8 +4674,24 @@ async function main() {
         // 插件状态只读视图：只回 id/name/version/status/hooks 等公开字段，不含插件配置。
         if (req.method === 'GET' && url.pathname === '/api/plugins') {
           const pluginStatus = plugins ? plugins.status() : { enabled: false, plugins: [] };
+          const coreStatus = corePromptBlocks.status();
           // 内置段落的块化状态一起回：控制台要显示「这段现在占多少字、有没有被关掉」。
-          sendJson({ ...pluginStatus, coreBlocks: corePromptBlocks.status() });
+          // catalog 独立于注册表：被关掉的块不在 blocks 里，但控制台仍要能把它打开。
+          const coreBlockCatalog = [
+            { id: 'core-stickers', label: '表情包策略' },
+            { id: 'core-digest', label: '记忆摘要' },
+          ].map((item) => {
+            const conf = (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[item.id] : null) || {};
+            const live = coreStatus.blocks.find((block) => block.id === item.id);
+            return {
+              ...item,
+              enabled: conf.enabled !== false,
+              maxChars: Number.isInteger(Number(conf.maxChars)) && Number(conf.maxChars) > 0 ? Number(conf.maxChars) : null,
+              registered: Boolean(live),
+              calls: live?.calls ?? 0,
+            };
+          });
+          sendJson({ ...pluginStatus, coreBlocks: { ...coreStatus, catalog: coreBlockCatalog } });
           return;
         }
         // 插件安装（P2b）：JSON {path} 装服务器本地目录，application/zip 装上传包。
@@ -4704,6 +4723,45 @@ async function main() {
           if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
           const result = await plugins.reloadAll();
           sendJson({ ok: result.ok, results: result.results });
+          return;
+        }
+        // 插件运行设置（写 plugins.json）：只接受白名单字段，校验失败整份不落盘。
+        if (req.method === 'PATCH' && url.pathname === '/api/plugins/settings') {
+          if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
+          try {
+            const patch = await readBody();
+            const result = await plugins.updateSettings(patch);
+            sendJson(result, result.ok ? 200 : 400);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+          }
+          return;
+        }
+        // 内置注入块开关（写 config.json）：与插件配置分开存，独立校验、独立原子写。
+        if (req.method === 'PATCH' && url.pathname === '/api/config/promptBlocks') {
+          try {
+            const body = await readBody();
+            const incoming = body?.promptBlocks && typeof body.promptBlocks === 'object' ? body.promptBlocks : {};
+            const file = path.join(ROOT, 'config.json');
+            const raw = readJsonSafe(file, {}, true);
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.json 格式错误');
+            const merged = { ...(raw.promptBlocks && typeof raw.promptBlocks === 'object' ? raw.promptBlocks : {}) };
+            for (const [id, value] of Object.entries(incoming)) {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+              const next = { ...(merged[id] ?? {}) };
+              if (typeof value.enabled === 'boolean') next.enabled = value.enabled;
+              if (value.maxChars === null) delete next.maxChars;
+              else if (value.maxChars !== undefined) next.maxChars = value.maxChars;
+              merged[id] = next;
+            }
+            const normalized = normalizePromptBlocks(merged);
+            cfg.promptBlocks = normalized;
+            registerCoreBlocks();
+            atomicWriteJson(file, { ...raw, promptBlocks: normalized });
+            sendJson({ ok: true, promptBlocks: normalized, coreBlocks: corePromptBlocks.status() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+          }
           return;
         }
         const pluginAction = url.pathname.match(/^\/api\/plugins\/([a-z][a-z0-9-]{1,39})(?:\/(enable|disable|reload))?$/);

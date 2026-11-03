@@ -404,15 +404,20 @@ ctx.persona.register({
 - 页面内容：启用状态与插件目录、人格 provider 来源、每个插件的 id/名称/版本/状态/hooks/调用与失败次数/最近错误；每张卡片带「启用/停用」「重载」「详情」「卸载」。
 - 「安装插件」折叠区：上传 zip 或填服务器本地目录；安装即执行代码，页面上有明确提示。
 - 「详情」弹窗显示：清单（权限/钩子/入口）、配置、计数（调用/失败/重载）、最近变更、最近错误、该插件最近 20 条审计。
-- 页面明确提示：启用/停用只改本次运行，改配置或永久生效仍需重启桥接（P2c 才会做文件监听）。
+- 「内置注入块」折叠区：`core-stickers` / `core-digest` 的开关与字符上限；保存写 `config.json`，**立即生效**。
+- 「运行设置」折叠区：`filters.inbound`、`watch`、高级里的 `limits.hookTimeoutMs` / `limits.maxPromptAppendChars`、`install.enabled`；保存写 `plugins.json`，除 `persona.provider` 外都**立即生效**。
+- 「详情」弹窗底部可把该插件写回 `plugins.json`（`plugins.<id>.enabled`），重启后保持；卡片上的启用/停用仍只改运行态。
+- 页面明确提示：启用/停用只改本次运行；写配置的开关保存后立即生效，但 `persona.provider` 与插件启用状态需重启。
 - 接口：
-  - `GET /api/plugins` → `{ enabled, dir, limits, audit, persona: { id, plugin, ... } | null, plugins: [{ id, name, version, status, hooks, error, updatedAt, counters: { hookCalls, hookErrors, lastHookAt, lastErrorAt, reloads } }] }`（没有 provider 生效时 `persona` 为 `null`）
+  - `GET /api/plugins` → `{ enabled, dir, watch, watching, filters: { inbound }, install: { enabled, maxBytes }, limits, audit, persona: { id, plugin, ... } | null, plugins: [...], coreBlocks: { total, maxTotalChars, blocks, catalog: [{ id, label, enabled, maxChars, registered, calls }] } }`（没有 provider 生效时 `persona` 为 `null`）
   - `GET /api/plugins/:id` → `{ ok, plugin: { ...插件摘要, manifest, permissions, apiVersion, config, source: { dir, main }, audit: [最近 20 条] } }`
   - `POST /api/plugins/:id/reload` → `{ ok, plugin }`；失败 `{ ok: false, error, plugin }`（旧实例继续跑）
   - `POST /api/plugins/:id/enable` / `disable` → `{ ok, plugin }`
   - `POST /api/plugins/reload` → `{ ok, results: [{ id, ok, error }] }`
   - `POST /api/plugins/install` → 目录安装收 `{ path }`（JSON），zip 安装收原始 body；成功 `{ ok, plugin }`，失败 `{ ok: false, error }`
   - `DELETE /api/plugins/:id` → `{ ok, id, trash }`（`trash` 为相对路径；失败 `{ ok: false, error }`）
+  - `PATCH /api/plugins/settings` → body 只认 `watch`、`filters.inbound`、`limits.{hookTimeoutMs,maxPromptAppendChars}`、`install.enabled`、`persona.provider`、`plugins.<id>.enabled`；其余字段忽略；校验失败整份不落盘，返回 `{ ok: false, error }`；成功 `{ ok, config, restartRequired, warnings }`
+  - `PATCH /api/config/promptBlocks` → body `{ promptBlocks: { <id>: { enabled?, maxChars? } } }`；`maxChars: null` 表示恢复默认；成功 `{ ok, promptBlocks, coreBlocks }`
 - 读取需要控制台令牌；这些接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
 - 所有写接口要求 `Content-Type: application/json`（控制台的 `api()` 已自动带），否则返回 415；例外是插件 zip 上传（`application/zip`）与插件卸载的 `DELETE`（无请求体），Origin 校验对两者同样生效。
 

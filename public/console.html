@@ -2240,6 +2240,35 @@ button:active:not(:disabled) {
       </div>
       <div id="pluginsList" style="margin-top:8px">加载中…</div>
       <details class="settings-group" style="margin-top:10px">
+        <summary>内置注入块</summary>
+        <div class="meta">这两段直接进每次唤醒的 prompt：关掉后模型当轮看不到对应内容，立即生效；上限按字符截断，清空表示用默认。</div>
+        <div id="promptBlockRows" style="margin-top:8px;display:grid;gap:10px">加载中…</div>
+        <div class="row" style="margin-top:8px">
+          <button id="promptBlockSave">保存注入块</button>
+          <span class="meta" id="promptBlockMsg"></span>
+        </div>
+      </details>
+      <details class="settings-group" style="margin-top:10px" id="pluginRuntimeGroup">
+        <summary>运行设置</summary>
+        <div class="meta">入站过滤打开后，申请了 <code>inbound:filter</code> 的插件可以丢弃或改写消息，改完立即生效；文件监听只影响开发时的自动重载。</div>
+        <div class="row" style="margin-top:8px">
+          <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginFilterInbound"> 入站过滤</label>
+          <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginWatch"> 文件监听自动重载</label>
+        </div>
+        <details style="margin-top:8px">
+          <summary class="meta">高级</summary>
+          <div class="row" style="margin-top:8px">
+            <label class="field">钩子超时(ms)<input type="number" id="pluginHookTimeout" min="100" max="10000" step="100" style="width:120px"></label>
+            <label class="field">插件注入上限(字符)<input type="number" id="pluginAppendLimit" min="0" max="20000" step="100" style="width:140px"></label>
+            <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginInstallEnabled"> 允许安装</label>
+          </div>
+        </details>
+        <div class="row" style="margin-top:8px">
+          <button id="pluginSettingsSave">保存运行设置</button>
+          <span class="meta" id="pluginSettingsMsg"></span>
+        </div>
+      </details>
+      <details class="settings-group" style="margin-top:10px">
         <summary>安装插件</summary>
         <div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
         <div class="row" style="margin-top:8px">
@@ -2257,6 +2286,11 @@ button:active:not(:disabled) {
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1" style="max-width:720px">
         <h3 id="pluginDetailTitle">插件详情</h3>
         <div class="meta" id="pluginDetailBody" style="max-height:60vh;overflow:auto;white-space:pre-wrap"></div>
+        <div class="row" id="pluginPersistRow" style="margin-top:8px">
+          <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
+          <button id="pluginPersistSave">保存</button>
+          <span class="meta" id="pluginPersistMsg"></span>
+        </div>
         <div class="row"><button id="pluginDetailClose">关闭</button></div>
       </div>
     </div>
@@ -6065,6 +6099,8 @@ async function runPluginAction(id, action, button) {
   refreshPlugins().catch(() => {});
 }
 
+let pluginDetailId = null;
+
 async function openPluginDetail(id) {
   const body = document.getElementById('pluginDetailBody');
   const overlay = document.getElementById('pluginDetailOverlay');
@@ -6098,6 +6134,11 @@ async function openPluginDetail(id) {
       }),
     ].filter((line) => line !== '');
     body.textContent = lines.join('\n');
+    pluginDetailId = plugin.id;
+    const persist = document.getElementById('pluginPersistEnabled');
+    if (persist) persist.checked = plugin.config?.enabled !== false;
+    const persistMsg = document.getElementById('pluginPersistMsg');
+    if (persistMsg) persistMsg.textContent = '';
   } catch (error) {
     body.textContent = `读取失败：${error?.message || '未知错误'}`;
   }
@@ -6158,6 +6199,7 @@ async function refreshPlugins() {
     const coreBlocks = Array.isArray(data?.coreBlocks?.blocks) ? data.coreBlocks.blocks : [];
     const coreText = coreBlocks.length ? ` · 内置注入块：${coreBlocks.map((block) => `${block.id}（上限 ${block.maxChars} 字）`).join('、')}` : '';
     meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}${coreText}`;
+    renderPluginSettings(data);
     if (!plugins.length) {
       list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;
@@ -6189,6 +6231,98 @@ async function refreshPlugins() {
   } catch (error) {
     meta.textContent = '';
     list.innerHTML = `<div class="meta err">读取失败：${esc(error?.message || '未知错误')}</div>`;
+  }
+}
+
+// 把 /api/plugins 的配置节填进「内置注入块」「运行设置」两块表单；
+// 正在编辑的输入框不覆盖，避免 15 秒自动刷新把用户刚敲的数字冲掉。
+function renderPluginSettings(data) {
+  const rows = document.getElementById('promptBlockRows');
+  const catalog = Array.isArray(data?.coreBlocks?.catalog) ? data.coreBlocks.catalog : [];
+  if (rows && !document.activeElement?.closest('#promptBlockRows')) {
+    rows.innerHTML = catalog.length
+      ? catalog.map((item) => `
+        <div class="row" style="align-items:center;gap:12px">
+          <label class="field" style="display:flex;align-items:center;gap:6px;min-width:180px">
+            <input type="checkbox" data-core-enabled="${esc(item.id)}" ${item.enabled ? 'checked' : ''}> ${esc(item.label)}
+          </label>
+          <label class="field">上限 <input type="number" data-core-max="${esc(item.id)}" min="1" max="100000" step="100" style="width:130px" value="${item.maxChars ?? ''}" placeholder="默认"></label>
+          <span class="meta">${item.registered ? `已注册 · 调用 ${Number(item.calls) || 0} 次` : '已关闭'}</span>
+        </div>`).join('')
+      : '<div class="meta">没有可配置的内置块。</div>';
+  }
+
+  const group = document.getElementById('pluginRuntimeGroup');
+  if (group && !document.activeElement?.closest('#pluginRuntimeGroup')) {
+    const filter = document.getElementById('pluginFilterInbound');
+    const watch = document.getElementById('pluginWatch');
+    const timeout = document.getElementById('pluginHookTimeout');
+    const append = document.getElementById('pluginAppendLimit');
+    const install = document.getElementById('pluginInstallEnabled');
+    if (filter) filter.checked = data?.filters?.inbound === true;
+    if (watch) watch.checked = data?.watch === true;
+    if (timeout) timeout.value = data?.limits?.hookTimeoutMs ?? '';
+    if (append) append.value = data?.limits?.maxPromptAppendChars ?? '';
+    if (install) install.checked = data?.install?.enabled !== false;
+  }
+}
+
+async function savePromptBlockSettings() {
+  const msg = document.getElementById('promptBlockMsg');
+  const promptBlocks = {};
+  document.querySelectorAll('[data-core-enabled]').forEach((input) => {
+    const id = input.dataset.coreEnabled;
+    const maxInput = document.querySelector(`[data-core-max="${CSS.escape(id)}"]`);
+    const raw = maxInput?.value?.trim() ?? '';
+    promptBlocks[id] = { enabled: input.checked, maxChars: raw === '' ? null : Number(raw) };
+  });
+  if (!Object.keys(promptBlocks).length) { if (msg) msg.textContent = '没有可保存的块'; return; }
+  if (msg) msg.textContent = '保存中…';
+  try {
+    await api('/api/config/promptBlocks', 'PATCH', { promptBlocks });
+    if (msg) msg.textContent = '已保存，立即生效';
+    showConsoleToast('内置注入块设置已保存');
+    refreshPlugins().catch(() => {});
+  } catch (error) {
+    if (msg) msg.textContent = `保存失败：${error?.message || '未知错误'}`;
+  }
+}
+
+async function savePluginRuntimeSettings() {
+  const msg = document.getElementById('pluginSettingsMsg');
+  if (msg) msg.textContent = '保存中…';
+  const patch = {
+    filters: { inbound: document.getElementById('pluginFilterInbound')?.checked === true },
+    watch: document.getElementById('pluginWatch')?.checked === true,
+    install: { enabled: document.getElementById('pluginInstallEnabled')?.checked === true },
+  };
+  // 空输入不发：内核把 0 当越界并拒绝整份保存，留空应该表示「不改」。
+  const timeoutRaw = document.getElementById('pluginHookTimeout')?.value?.trim() ?? '';
+  const appendRaw = document.getElementById('pluginAppendLimit')?.value?.trim() ?? '';
+  patch.limits = {};
+  if (timeoutRaw !== '') patch.limits.hookTimeoutMs = Number(timeoutRaw);
+  if (appendRaw !== '') patch.limits.maxPromptAppendChars = Number(appendRaw);
+  try {
+    const data = await api('/api/plugins/settings', 'PATCH', patch);
+    if (msg) msg.textContent = data?.restartRequired ? '已保存，部分设置需重启后生效' : '已保存，立即生效';
+    showConsoleToast('运行设置已保存');
+    refreshPlugins().catch(() => {});
+  } catch (error) {
+    if (msg) msg.textContent = `保存失败：${error?.message || '未知错误'}`;
+  }
+}
+
+async function savePluginPersistEnabled() {
+  if (!pluginDetailId) return;
+  const msg = document.getElementById('pluginPersistMsg');
+  const enabled = document.getElementById('pluginPersistEnabled')?.checked === true;
+  if (msg) msg.textContent = '保存中…';
+  try {
+    const data = await api('/api/plugins/settings', 'PATCH', { plugins: { [pluginDetailId]: { enabled } } });
+    if (msg) msg.textContent = data?.restartRequired ? '已写入 plugins.json，重启后生效' : '已保存';
+    showConsoleToast('插件配置已写入 plugins.json');
+  } catch (error) {
+    if (msg) msg.textContent = `保存失败：${error?.message || '未知错误'}`;
   }
 }
 
@@ -6226,6 +6360,9 @@ document.getElementById('pluginDetailOverlay').addEventListener('click', (event)
 });
 document.getElementById('pluginInstallZipBtn').addEventListener('click', () => { installPluginFromZip().catch(() => {}); });
 document.getElementById('pluginInstallPathBtn').addEventListener('click', () => { installPluginFromPath().catch(() => {}); });
+document.getElementById('promptBlockSave').addEventListener('click', () => { savePromptBlockSettings().catch(() => {}); });
+document.getElementById('pluginSettingsSave').addEventListener('click', () => { savePluginRuntimeSettings().catch(() => {}); });
+document.getElementById('pluginPersistSave').addEventListener('click', () => { savePluginPersistEnabled().catch(() => {}); });
 
 document.getElementById('usageRefresh').addEventListener('click', () => {
   refreshUsage();

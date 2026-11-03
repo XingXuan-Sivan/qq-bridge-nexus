@@ -5,6 +5,10 @@
 
 ## 未发布
 
+### 重构：管理行为页迁到 pages/behaviors.js（2026-11-04）
+- 命令注册表表格（按 group 折叠）、筛选/搜索防抖、组行展开，以及 DSH 会话命令与 Agent 工具两张只读表整段搬到 `public/console/js/pages/behaviors.js`，导出 `initBehaviorsPage()`；`app.js` 只留调用。
+- 回归：无头 Edge 实测「注册表 5 条内置 + 0 条插件；显示 5 条」、2 个分组 7 行，无 JS 异常。
+
 ### 重构：技能页与 MCP 页迁到 pages/（2026-11-04）
 - 新增 `public/console/js/pages/skills.js`、`pages/mcp.js`，各自导出 `initSkillsPage()` / `initMcpPage()`，自绑刷新按钮、自注册 `onPageRefresh`、自管 30 秒轮询与首次加载；`app.js` 只保留 `initXxxPage()` 调用。
 - `simpleTable(columns, rows)` 从 `app.js` 移到 `ui.js` 导出（返回 HTML 字符串，与返回节点的 `renderTable` 并存），行为页与两个新模块共用。

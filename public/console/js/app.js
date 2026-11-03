@@ -6,6 +6,7 @@ import { consolePages, getCurrentPage, initRouter, onPageRefresh, setConsolePage
 import { initPluginsPage } from './pages/plugins.js';
 import { initSkillsPage } from './pages/skills.js';
 import { initMcpPage } from './pages/mcp.js';
+import { initBehaviorsPage } from './pages/behaviors.js';
 
 bootstrapConsoleToken();
 
@@ -2191,7 +2192,6 @@ onPageRefresh('persona', () => {
   refreshRoleAssignments().catch(() => {});
   refreshPersonaSources().catch(() => {});
 });
-onPageRefresh('behaviors', () => refreshBehaviors().catch(() => {}));
 // 直接打开 #scheduler 时路由器可能先于定时任务那段脚本执行：推到下一个宏任务再刷新。
 onPageRefresh('scheduler', () => setTimeout(() => refreshScheduler(), 0));
 function updateOverview(status, modeLabel) {
@@ -3254,108 +3254,9 @@ setInterval(() => { if (getCurrentPage() === 'usage') loadCompactConfig(); }, 60
 // 停在人格页时，每 15 秒同步一次「按会话设置人格」（QQ 里发了 /role、新群建了会话都能看到；没保存的选择会保留）
 setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
 setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
-setInterval(() => { if (getCurrentPage() === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
 document.getElementById('personaSourceRefresh')?.addEventListener('click', () => refreshPersonaSources().catch(() => {}));
 
 // 「扩展」下的三个只读页：技能 / MCP / 管理行为。数据都来自只读接口，页面不做任何写操作。
-const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
-const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
-
-function behaviorGroupName(entry) {
-  if (entry.group) return entry.group;
-  return entry.source === 'plugin' ? `插件 ${entry.pluginId || '未命名'}` : '其他';
-}
-
-// 命令按 group 聚成指令组；组行可折叠，子行缩进——层级完全由注册时的 group 派生，不手工维护。
-function behaviorTable(rows) {
-  const groups = new Map();
-  for (const entry of rows) {
-    const name = behaviorGroupName(entry);
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(entry);
-  }
-  const head = '<thead><tr><th style="width:200px">指令</th><th style="width:92px">类型</th>'
-    + '<th style="width:118px">所属</th><th>描述</th><th style="width:84px">权限</th>'
-    + '<th style="width:84px">状态</th><th style="width:70px">操作</th></tr></thead>';
-  const body = [...groups.entries()].map(([name, items], index) => {
-    const open = index === 0;
-    const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(name)}">`
-      + `<td colspan="7"><span class="caret">▸</span> ${esc(name)} <span class="meta">${items.length} 条</span></td></tr>`;
-    const childRows = items.map((entry) => {
-      const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
-      const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
-      const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
-      const action = entry.source === 'plugin'
-        ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
-        : '<span class="meta">—</span>';
-      const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
-      return `<tr class="group-child${open ? '' : ' hidden'}" data-group="${esc(name)}">`
-        + `<td><code>${esc(entry.name)}</code>${aliases}</td>`
-        + `<td>${migrated}</td><td>${esc(source)}</td>`
-        + `<td>${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span></td>`
-        + `<td>${esc(BEHAVIOR_PERMISSION_LABEL[entry.permission] || entry.permission)}</td>`
-        + `<td>${status}</td><td>${action}</td></tr>`;
-    }).join('');
-    return groupRow + childRows;
-  }).join('');
-  return `<table>${head}<tbody>${body}</tbody></table>`;
-}
-
-async function refreshBehaviors() {
-  const meta = document.getElementById('behaviorsMeta');
-  const bridgeBox = document.getElementById('behaviorsBridge');
-  const empty = document.getElementById('behaviorsEmpty');
-  const dshBox = document.getElementById('behaviorsDsh');
-  const toolsBox = document.getElementById('behaviorsTools');
-  if (!meta || !bridgeBox) return;
-  try {
-    const data = await api('/api/commands');
-    const filter = document.getElementById('behaviorsFilter').value;
-    const permission = document.getElementById('behaviorsPermission').value;
-    const keyword = (document.getElementById('behaviorsSearch').value || '').trim().toLowerCase();
-    const all = [...(data.bridge?.builtin ?? []), ...(data.bridge?.plugin ?? [])];
-    const rows = all.filter((entry) => {
-      if (filter !== 'all' && entry.source !== filter) return false;
-      if (permission && entry.permission !== permission) return false;
-      if (!keyword) return true;
-      return [entry.name, entry.help, ...(entry.aliases ?? [])].join(' ').toLowerCase().includes(keyword);
-    });
-    meta.textContent = `注册表 ${data.bridge?.builtin?.length ?? 0} 条内置 + ${data.bridge?.plugin?.length ?? 0} 条插件；显示 ${rows.length} 条`;
-    bridgeBox.hidden = rows.length === 0;
-    empty.hidden = rows.length !== 0;
-    empty.textContent = '没有匹配的命令，换个筛选或关键词试试。';
-    bridgeBox.innerHTML = rows.length ? behaviorTable(rows) : '';
-    dshBox.innerHTML = (data.dsh ?? []).length
-      ? simpleTable([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
-      : '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
-    toolsBox.innerHTML = (data.tools ?? []).length
-      ? simpleTable([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
-        (data.tools ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.source), esc(item.managed)]))
-      : '<div class="meta">没有已登记的 Agent 工具。</div>';
-  } catch (error) {
-    meta.textContent = '';
-    bridgeBox.hidden = true;
-    bridgeBox.innerHTML = '';
-    empty.hidden = false;
-    empty.textContent = `读取失败：${error?.message || '未知错误'}`;
-  }
-}
-document.getElementById('behaviorsRefresh')?.addEventListener('click', () => refreshBehaviors().catch(() => {}));
-document.getElementById('behaviorsFilter')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
-document.getElementById('behaviorsPermission')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
-let behaviorsSearchTimer = null;
-document.getElementById('behaviorsSearch')?.addEventListener('input', () => {
-  clearTimeout(behaviorsSearchTimer);
-  behaviorsSearchTimer = setTimeout(() => refreshBehaviors().catch(() => {}), 180);
-});
-document.getElementById('behaviorsBridge')?.addEventListener('click', (event) => {
-  const row = event.target.closest?.('tr.group-row');
-  if (!row) return;
-  row.classList.toggle('open');
-  const name = row.dataset.group;
-  document.querySelectorAll(`#behaviorsBridge tr.group-child[data-group="${CSS.escape(name)}"]`)
-    .forEach((child) => child.classList.toggle('hidden'));
-});
 refresh(); refreshRoles(); refreshWhitelist(); refreshSessions(); refreshPending(); refreshPresets(); loadSocialForm(); loadV2Config(); refreshV2Activity(); loadV2ToolLog(); loadV2SessionOptions(); refreshSocialStatus(); refreshSlang(); loadSlangConfig(); loadSecurity(); refreshSimPrompt(); refreshDshModel(); refreshSilence(); refreshUsage(); refreshUsageChart(); refreshUsageRecent();
 setInterval(() => { refresh(); refreshSessions(); refreshPending(); refreshSocialStatus(); refreshSlang(); }, 3000);
 // 用量看板只在本页可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
@@ -3389,5 +3290,6 @@ setInterval(() => { if (getCurrentPage() !== 'usage') return; refreshUsage(); re
 initPluginsPage();
 initSkillsPage();
 initMcpPage();
+initBehaviorsPage();
 // 所有页面模块就绪后再接管路由（首屏恢复也在这里）。
 initRouter();

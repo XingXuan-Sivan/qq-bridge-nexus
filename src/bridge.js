@@ -4473,7 +4473,13 @@ async function main() {
       // /api/restart、/api/workspace/reset、/api/role 等破坏性接口。
       if (req.method !== 'GET') {
         const ctype = String(req.headers['content-type'] ?? '');
-        if (!ctype.toLowerCase().includes('application/json')) {
+        // 两个例外：插件 zip 上传走 application/zip，插件卸载是不带请求体的 DELETE。
+        // 其余写接口仍然只收 application/json；Origin 校验对所有写操作一视同仁。
+        const pluginUpload = url.pathname === '/api/plugins/install'
+          && /^application\/(zip|octet-stream)\b/i.test(ctype);
+        const pluginDelete = req.method === 'DELETE'
+          && /^\/api\/plugins\/[a-z][a-z0-9-]{1,39}$/.test(url.pathname);
+        if (!ctype.toLowerCase().includes('application/json') && !pluginUpload && !pluginDelete) {
           sendJson({ ok: false, error: '请求必须是 application/json' }, 415);
           return;
         }

@@ -132,6 +132,7 @@
 - `init()` 现在跳过 `.` 开头的目录；否则安装中途崩掉留下的 `.staging-*` 会被当成插件扫描（清单缺失 → `invalid` 噪声）。
 - 卸载顺序是「先移目录，再 dispose」：移不动就整体失败、运行实例不受影响；反过来会出现「目录没了、插件还在跑」的半状态。
 - 测试 `scripts/test-plugin-install.mjs` 全程用临时目录，不碰仓库 `plugins/`；已登记 `test-audit.mjs`。
+- 联调时补了两处**通用**修正：① 控制台的 CSRF 守卫原先要求所有非 GET 都带 `application/json`，把 zip 上传和 `DELETE` 一起挡了——现在只对 `/api/plugins/install` 的 `application/zip|octet-stream` 与 `/api/plugins/:id` 的 DELETE 例外，Origin 校验不变；② 内核读 `plugin.json` 时剥掉 UTF-8 BOM，否则记事本存过的清单会报「不是合法 JSON」。
 
 ---
 

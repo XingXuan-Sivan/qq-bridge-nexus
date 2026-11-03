@@ -191,6 +191,20 @@ test('zip 安装：解压后超过 maxBytes 被拒绝', async () => {
   }
 });
 
+test('目录安装：plugin.json 带 BOM 也能装（Windows 编辑器常见）', async () => {
+  const root = makeRoot();
+  const source = writeSource(root, 'bomdemo');
+  fs.writeFileSync(path.join(source, 'plugin.json'), '\uFEFF' + fs.readFileSync(path.join(source, 'plugin.json'), 'utf8'));
+  const kernel = await bootKernel(root);
+  try {
+    const result = await kernel.install({ kind: 'dir', source });
+    assert.equal(result.ok, true, result.error);
+    assert.equal(kernel.status().plugins.find((p) => p.id === 'bomdemo')?.status, 'active');
+  } finally {
+    await kernel.shutdown();
+  }
+});
+
 test('卸载：先 dispose，目录移到 state/_trash，不硬删', async () => {
   const root = makeRoot();
   const source = writeSource(root, 'gone');

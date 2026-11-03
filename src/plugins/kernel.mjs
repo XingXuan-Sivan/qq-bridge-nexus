@@ -8,11 +8,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { validateManifest, resolveMainPath, KNOWN_HOOKS } from './manifest.mjs';
+import { validateManifest, resolveMainPath, KNOWN_HOOKS, PLUGIN_ID_RE } from './manifest.mjs';
 import { loadConfig, PLUGIN_CONFIG_FILE } from './config.mjs';
 import { createAuditLog } from './audit.mjs';
 import { createPersonaRegistry } from './persona.mjs';
 import { createHostApi } from './host-api.mjs';
+import { stageFromDirectory, stageFromZip, discardStaging, moveDirToTrash } from './install.mjs';
 
 const DISPOSE_TIMEOUT_MS = 2000;
 const AUDIT_TAIL_BYTES = 64 * 1024;
@@ -337,7 +338,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     let names;
     try {
       names = fs.readdirSync(pluginRoot(), { withFileTypes: true })
-        .filter((dirent) => dirent.isDirectory())
+        // 跳过暂存目录（.staging-*）：安装中途崩掉时残留的目录不能被当成插件扫描。
+        .filter((dirent) => dirent.isDirectory() && !dirent.name.startsWith('.'))
         .map((dirent) => dirent.name)
         .sort();
     } catch (error) {
@@ -504,6 +506,96 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return { ok: true, plugin: summarize(entry) };
   }
 
+  /** 安装：暂存 → 读清单 → 校验 → 原子改名到 plugins/<id> → 加载；任何一步失败都回滚。 */
+  async function doInstall({ kind, source }) {
+    if (!config.enabled) return { ok: false, error: '插件内核已在 plugins.json 中禁用' };
+    if (!config.install.enabled) return { ok: false, error: '安装已在 plugins.json 中关闭（install.enabled=false）' };
+
+    let staged;
+    try {
+      staged = kind === 'zip'
+        ? stageFromZip({ pluginsDir: pluginRoot(), buffer: source, maxBytes: config.install.maxBytes })
+        : stageFromDirectory({ pluginsDir: pluginRoot(), sourcePath: source, maxBytes: config.install.maxBytes });
+    } catch (error) {
+      const message = error?.message ?? String(error);
+      audit.append('install-failed', { plugin: null, error: message });
+      logLine(`⚠️ [plugins] 安装失败：${message}`);
+      return { ok: false, error: message };
+    }
+
+    let installedId = null;
+    try {
+      let raw;
+      try {
+        raw = JSON.parse(fs.readFileSync(path.join(staged.dir, 'plugin.json'), 'utf8'));
+      } catch (error) {
+        throw new Error(`plugin.json 不可读：${error?.message ?? error}`);
+      }
+      const id = typeof raw?.id === 'string' ? raw.id.trim() : '';
+      if (!PLUGIN_ID_RE.test(id)) throw new Error(`plugin.json 的 id 不合法：${id || '(空)'}`);
+      const checked = validateManifest(raw, id);
+      if (!checked.ok) throw new Error(`清单校验失败：${checked.errors.join('；')}`);
+      const target = path.join(pluginRoot(), id);
+      if (fs.existsSync(target)) throw new Error(`插件 "${id}" 已存在`);
+
+      fs.renameSync(staged.dir, target);
+      installedId = id;
+      const desc = await buildInstance(id);
+      if (!desc.ok) throw new Error(`加载失败：${desc.error}`);
+
+      const entry = createEntry(id);
+      commit(entry, desc);
+      indexEntry(entry);
+      audit.append('install', { plugin: id, version: entry.version, kind });
+      logLine(`[plugins] 已安装 ${id}@${entry.version}`);
+      return { ok: true, plugin: summarize(entry) };
+    } catch (error) {
+      const message = error?.message ?? String(error);
+      if (installedId) {
+        try {
+          moveDirToTrash({ pluginsDir: pluginRoot(), trashRoot: path.join(stateDir, '_trash'), id: installedId });
+        } catch (rollbackError) {
+          logLine(`⚠️ [plugins] 回滚 ${installedId} 失败：${rollbackError?.message ?? rollbackError}`);
+        }
+      }
+      audit.append('install-failed', { plugin: installedId, error: message });
+      logLine(`⚠️ [plugins] 安装失败：${message}`);
+      return { ok: false, error: message };
+    } finally {
+      discardStaging(staged.staging);
+    }
+  }
+
+  /** 卸载：先把目录移到 state/_trash（不硬删），失败则不动运行中的实例。 */
+  async function doUninstall(id) {
+    if (!PLUGIN_ID_RE.test(id)) return { ok: false, error: `非法插件 id：${id}` };
+    const entry = entryById.get(id);
+    const dir = path.join(pluginRoot(), id);
+    if (!entry && !fs.existsSync(dir)) return { ok: false, error: `插件不存在: ${id}` };
+
+    let trashPath = null;
+    if (fs.existsSync(dir)) {
+      try {
+        trashPath = moveDirToTrash({ pluginsDir: pluginRoot(), trashRoot: path.join(stateDir, '_trash'), id });
+      } catch (error) {
+        const message = `移动插件目录失败：${error?.message ?? error}`;
+        audit.append('uninstall-failed', { plugin: id, error: message });
+        return { ok: false, error: message };
+      }
+    }
+    if (entry) {
+      await disposeEntry(entry);
+      const index = entries.indexOf(entry);
+      if (index >= 0) entries.splice(index, 1);
+      entryById.delete(id);
+    }
+    runtimeEnabled.delete(id);
+    const relativeTrash = trashPath ? path.relative(rootDir, trashPath) : null;
+    audit.append('uninstall', { plugin: id, detail: relativeTrash });
+    logLine(`[plugins] 已卸载 ${id}${relativeTrash ? `（移到 ${relativeTrash}）` : ''}`);
+    return { ok: true, id, trash: relativeTrash };
+  }
+
   async function shutdown() {
     // 先发 onShutdown 再拆实例：钩子还挂在索引上，插件才能在退出前做最后一次清理。
     await callHook('onShutdown', {});
@@ -576,6 +668,16 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
         audit.append('disable', { plugin: key });
         return { ok: true, plugin: summarize(existing) };
       });
+    },
+
+    /** 安装插件：kind='dir' 传本地目录，kind='zip' 传 Buffer。 */
+    install({ kind = 'dir', source } = {}) {
+      return withLock(() => doInstall({ kind, source }));
+    },
+
+    /** 卸载插件：目录进 state/_trash，实例被拆掉。 */
+    uninstall(id) {
+      return withLock(() => doUninstall(String(id)));
     },
 
     config,

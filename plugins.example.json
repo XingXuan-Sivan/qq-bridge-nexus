@@ -11,6 +11,10 @@
     "maxBytes": 5242880,
     "keep": 3
   },
+  "install": {
+    "enabled": true,
+    "maxBytes": 5242880
+  },
   "persona": {
     "provider": "soulkit",
     "cache": {

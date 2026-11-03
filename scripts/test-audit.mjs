@@ -83,6 +83,8 @@ const tests = [
   'test-persona-resolve.mjs',
   // soulkit 人格适配器：协议三态、标题行剥离、ETag、坏响应抛错。
   'test-soulkit-persona.mjs',
+  // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
+  'test-plugin-install.mjs',
   // preset 源与 bundle patch 不漂移（v0.3.0 起多了 qq-agent-readonly，一并钉住）。
   'test-agent-preset-patches.mjs',
   // v0.4.0 控制中心：目录识别、数据迁移、鉴权、子进程管理、固定命令集与 L6（只由用户点击启停 SnowLuma）。

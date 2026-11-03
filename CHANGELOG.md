@@ -23,6 +23,15 @@
 - 测试：`test-plugin-kernel` 增至 8 个用例（停用后钩子不再执行、启用恢复、重载读到新版本、坏插件重载失败保留旧实例、detail 字段与审计）。
 - 文档：`PLUGIN_KERNEL.md` §5.1 / §10 / §11 / §12 / §13 / §14 同步；`PLUGIN_ROADMAP.md` §4 补「实施记录与偏差」。
 
+### 新增：插件安装与卸载（P2b）
+- `POST /api/plugins/install`：`{ path }` 从服务器本地目录安装，`application/zip` 直接上传安装包；都先复制/解压到 `plugins/.staging-*`，校验清单后原子改名到 `plugins/<id>`，激活失败回滚进 `state/_trash`。
+- `DELETE /api/plugins/:id`：卸载先把目录移到 `state/_trash/plugins-<id>-<时间戳>`（不硬删），再 dispose 并从索引移除；移不动则整体失败、运行实例不受影响。
+- 零依赖 zip 解析 `src/plugins/zip.mjs`：拒绝路径穿越、加密、分卷、zip64、非 deflate/store、解压后超限；`src/plugins/install.mjs` 再查符号链接与目录树总大小。
+- `plugins.json` 新增 `install: { enabled, maxBytes }`（默认 5MB）；`init()` 跳过 `.` 开头目录，残留暂存目录不会被当成插件。
+- 控制台插件页新增「安装插件」折叠区（zip 上传 / 本地目录）与卡片上的「卸载」按钮。
+- 测试：新增 `test-plugin-install.mjs`（目录/zip 安装、坏清单回滚、穿越与超限拒绝、卸载进 `_trash`），已接入 `test:audit`。
+- 文档：`PLUGIN_KERNEL.md` §4 / §5.2 / §10–§14 同步；`PLUGIN_ROADMAP.md` §5 标完成并补「实施记录与偏差」。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

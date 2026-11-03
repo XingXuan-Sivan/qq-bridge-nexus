@@ -2141,6 +2141,19 @@ button:active:not(:disabled) {
         <span class="meta" id="pluginsMeta">加载中…</span>
       </div>
       <div id="pluginsList" style="margin-top:8px">加载中…</div>
+      <details class="settings-group" style="margin-top:10px">
+        <summary>安装插件</summary>
+        <div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
+        <div class="row" style="margin-top:8px">
+          <input type="file" id="pluginInstallZip" accept=".zip,application/zip" style="flex:1;min-width:220px">
+          <button id="pluginInstallZipBtn">上传安装</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="pluginInstallPath" placeholder="服务器本地目录，例如 D:\dev\my-plugin" style="flex:1;min-width:240px">
+          <button id="pluginInstallPathBtn">从目录安装</button>
+        </div>
+        <div class="meta" id="pluginInstallMsg"></div>
+      </details>
     </section>
     <div class="modal-overlay" id="pluginDetailOverlay">
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1" style="max-width:720px">
@@ -5883,13 +5896,16 @@ const PLUGIN_STATUS_LABELS = {
   failed: ['加载失败', 'pill r'],
   stopped: ['已停止', 'pill']
 };
-const PLUGIN_ACTION_LABELS = { enable: '启用', disable: '停用', reload: '重载' };
+const PLUGIN_ACTION_LABELS = { enable: '启用', disable: '停用', reload: '重载', uninstall: '卸载' };
 
 async function runPluginAction(id, action, button) {
   const label = PLUGIN_ACTION_LABELS[action] || action;
+  if (action === 'uninstall' && !window.confirm(`卸载 ${id}？目录会移到 state/_trash，不会硬删。`)) return;
   if (button) button.disabled = true;
   try {
-    const data = await api(`/api/plugins/${encodeURIComponent(id)}/${action}`, 'POST');
+    const data = action === 'uninstall'
+      ? await api(`/api/plugins/${encodeURIComponent(id)}`, 'DELETE')
+      : await api(`/api/plugins/${encodeURIComponent(id)}/${action}`, 'POST');
     if (!data?.ok) throw new Error(data?.error || '未知错误');
     showConsoleToast(`${id} 已${label}`);
   } catch (error) {
@@ -5940,6 +5956,46 @@ function closePluginDetail() {
   document.getElementById('pluginDetailOverlay')?.classList.remove('open');
 }
 
+async function installPluginFromZip() {
+  const input = document.getElementById('pluginInstallZip');
+  const msg = document.getElementById('pluginInstallMsg');
+  const file = input?.files?.[0];
+  if (!file) { if (msg) msg.textContent = '先选择一个 zip 文件'; return; }
+  if (msg) msg.textContent = `正在上传 ${file.name}…`;
+  try {
+    const headers = { 'content-type': 'application/zip' };
+    const token = localStorage.getItem('consoleToken');
+    if (token) headers['x-console-token'] = token;
+    const res = await fetch('/api/plugins/install', { method: 'POST', headers, body: file });
+    const data = await res.json();
+    if (!data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    if (msg) msg.textContent = `已安装 ${data.plugin.id}@${data.plugin.version || '?'}`;
+    if (input) input.value = '';
+    showConsoleToast(`已安装 ${data.plugin.id}`);
+    refreshPlugins().catch(() => {});
+  } catch (error) {
+    if (msg) msg.textContent = `安装失败：${error?.message || '未知错误'}`;
+  }
+}
+
+async function installPluginFromPath() {
+  const input = document.getElementById('pluginInstallPath');
+  const msg = document.getElementById('pluginInstallMsg');
+  const dir = String(input?.value || '').trim();
+  if (!dir) { if (msg) msg.textContent = '先填服务器本地目录'; return; }
+  if (msg) msg.textContent = `正在安装 ${dir}…`;
+  try {
+    const data = await api('/api/plugins/install', 'POST', { path: dir });
+    if (!data?.ok) throw new Error(data?.error || '未知错误');
+    if (msg) msg.textContent = `已安装 ${data.plugin.id}@${data.plugin.version || '?'}`;
+    if (input) input.value = '';
+    showConsoleToast(`已安装 ${data.plugin.id}`);
+    refreshPlugins().catch(() => {});
+  } catch (error) {
+    if (msg) msg.textContent = `安装失败：${error?.message || '未知错误'}`;
+  }
+}
+
 async function refreshPlugins() {
   const meta = document.getElementById('pluginsMeta');
   const list = document.getElementById('pluginsList');
@@ -5966,7 +6022,7 @@ async function refreshPlugins() {
         <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="pill">${esc(plugin.id)}</span><span class="pill">${esc(plugin.version || '—')}</span><span class="${cls}">${esc(label)}</span></div>
         <div class="meta">钩子：${esc(hooks)} · 调用 ${Number(counters.hookCalls) || 0} 次 · 失败 ${Number(counters.hookErrors) || 0} 次${recent}</div>
         ${error}
-        <div class="row" style="margin-top:6px">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button></div>
+        <div class="row" style="margin-top:6px">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
       </div>`;
     }).join('');
   } catch (error) {
@@ -6007,6 +6063,8 @@ document.getElementById('pluginDetailClose').addEventListener('click', closePlug
 document.getElementById('pluginDetailOverlay').addEventListener('click', (event) => {
   if (event.target.id === 'pluginDetailOverlay') closePluginDetail();
 });
+document.getElementById('pluginInstallZipBtn').addEventListener('click', () => { installPluginFromZip().catch(() => {}); });
+document.getElementById('pluginInstallPathBtn').addEventListener('click', () => { installPluginFromPath().catch(() => {}); });
 
 document.getElementById('usageRefresh').addEventListener('click', () => {
   refreshUsage();

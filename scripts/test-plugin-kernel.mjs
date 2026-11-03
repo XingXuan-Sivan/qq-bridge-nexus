@@ -388,6 +388,48 @@ export function activate(ctx) {
   }
 });
 
+test('注入块（P4）：按 priority 排序、按块截断、超总预算整块跳过，停用后不再注入', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ limits: { maxPromptAppendChars: 10 } }, null, 2));
+  const blockIndex = `
+export function activate(ctx) {
+  ctx.prompt.registerBlock({ id: 'alpha', priority: 10, maxChars: 5, render: () => 'AAAAAA' });
+  ctx.prompt.registerBlock({ id: 'beta', priority: 20, render: () => 'BBBBB' });
+  ctx.prompt.registerBlock({ id: 'gamma', priority: 30, render: () => 'CCCCCC' });
+  ctx.prompt.registerBlock({ id: 'boom', priority: 40, render: () => { throw new Error('nope'); } });
+  return {};
+}
+`;
+  writePlugin(pluginsDir, 'blocktap', blockIndex, { permissions: ['prompt:provide'], hooks: [] });
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    const entry = kernel.status().plugins.find((item) => item.id === 'blocktap');
+    assert.deepEqual(entry.blocks, ['alpha', 'beta', 'gamma', 'boom']);
+    assert.equal(kernel.status().promptBlocks.total, 4);
+
+    const rendered = await kernel.promptBlocks({ key: 'group:1' });
+    assert.equal(rendered.text, 'AAAAA\n\nBBBBB', '先按 priority 排序，再逐块限额');
+    assert.equal(rendered.chars, 10);
+    const byId = Object.fromEntries(rendered.blocks.map((item) => [item.id, item.status]));
+    assert.equal(byId.alpha, 'truncated');
+    assert.equal(byId.beta, 'injected');
+    assert.equal(byId.gamma, 'budget', '超出总预算的块整块跳过，不截半句');
+    assert.equal(byId.boom, 'error', '单块抛错不影响其它块');
+
+    assert.equal((await kernel.disable('blocktap')).ok, true);
+    const afterDisable = await kernel.promptBlocks({ key: 'group:1' });
+    assert.equal(afterDisable.text, '', '停用后旧块必须消失');
+    assert.equal(kernel.status().promptBlocks.total, 0);
+
+    assert.equal((await kernel.enable('blocktap')).ok, true);
+    assert.equal((await kernel.promptBlocks({ key: 'group:1' })).chars, 10, '启用后恢复');
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('文件监听（P2c）：开启后 watching 为真，改入口文件会在 5 秒内重载该插件', async () => {
   const { root, pluginsDir, stateDir } = makeTempRoot();
   fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ watch: true }, null, 2));

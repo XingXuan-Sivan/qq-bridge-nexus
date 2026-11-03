@@ -12,6 +12,7 @@ import { validateManifest, resolveMainPath, KNOWN_HOOKS, PLUGIN_ID_RE } from './
 import { loadConfig, PLUGIN_CONFIG_FILE } from './config.mjs';
 import { createAuditLog } from './audit.mjs';
 import { createPersonaRegistry } from './persona.mjs';
+import { createPromptBlockRegistry } from './prompt-blocks.mjs';
 import { createHostApi } from './host-api.mjs';
 import { stageFromDirectory, stageFromZip, discardStaging, moveDirToTrash } from './install.mjs';
 
@@ -85,6 +86,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     minRefreshGapMs: config.persona.cache.minRefreshGapMs,
     staleMaxMs: config.persona.cache.staleMaxMs,
     now: deps.now,
+  });
+  // 具名注入块：总预算与 promptAdditions 共用 limits.maxPromptAppendChars，避免两个口子各算一套。
+  const promptBlockRegistry = createPromptBlockRegistry({
+    log: logLine,
+    maxTotalChars: config.limits.maxPromptAppendChars,
   });
 
   const entries = [];
@@ -213,9 +219,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       entry.dispose = null;
     }
     persona.unregister(entry.id);
-    // 命令按 pluginId 批量注销：卸载/停用/重载后旧命令不能继续响应。
+    // 命令与注入块按 pluginId 批量注销：卸载/停用/重载后旧内容不能继续进 prompt。
     deps.commandRegistry?.unregisterPlugin?.(entry.id);
+    promptBlockRegistry.unregisterPlugin(entry.id);
     entry.commands = [];
+    entry.blocks = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
     entry.updatedAt = isoNow();
@@ -271,7 +279,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -281,6 +289,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       log: logLine,
       deps: {
         registerPersona: (provider, pluginId) => pending.personas.push({ provider, pluginId }),
+        registerPromptBlock: (definition, pluginId) => {
+          pending.blocks.push({ definition, pluginId });
+          return true;
+        },
         unregisterPersona: (pluginId) => persona.unregister(pluginId),
         registerPluginCommand: (definition, pluginId) => {
           pending.commands.push({ definition, pluginId });
@@ -320,7 +332,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -332,6 +344,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     entry.error = null;
     entry.hooks = [];
     entry.commands = [];
+    entry.blocks = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -353,6 +366,13 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
           if (registered) entry.commands.push(definition.name);
         } catch (error) {
           logLine(`⚠️ [plugins] ${entry.id} 注册命令 ${definition?.name ?? '?'} 失败：${error?.message ?? error}`);
+        }
+      }
+      for (const { definition, pluginId } of desc.blocks ?? []) {
+        try {
+          if (promptBlockRegistry.register(definition, pluginId)) entry.blocks.push(definition.id);
+        } catch (error) {
+          logLine(`⚠️ [plugins] ${entry.id} 注册注入块 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
         }
       }
       audit.append('activate', { plugin: entry.id, version: entry.version });
@@ -392,6 +412,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       error: entry.error,
       hooks: [...entry.hooks],
       commands: [...entry.commands],
+      blocks: [...(entry.blocks ?? [])],
       updatedAt: entry.updatedAt,
       counters: { ...entry.stats },
     };
@@ -526,6 +547,14 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return persona.resolve(key);
   }
 
+  /**
+   * 渲染插件注册的具名注入块（P4）。与 promptAdditions 的区别：这里是「内容」，
+   * 按 priority 排序、按块限额、按总预算跳块；返回的 blocks 报告给控制台看占比。
+   */
+  function promptBlocks(context = {}) {
+    return promptBlockRegistry.render(context);
+  }
+
   /** 唤醒时把人格卡刷新一次（异步、有超时、失败保留旧缓存）。 */
   function personaWarm(key, options) {
     return persona.warm(key, options);
@@ -556,6 +585,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       audit: { enabled: config.audit.enabled, file: 'state/plugin-audit.jsonl', maxBytes: config.audit.maxBytes, keep: config.audit.keep },
       // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
       persona: personaInfo,
+      promptBlocks: promptBlockRegistry.status(),
       plugins: entries.map(summarize),
     };
   }
@@ -709,6 +739,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     init,
     notify,
     promptAdditions,
+    promptBlocks,
     personaResolve,
     personaWarm,
     status,

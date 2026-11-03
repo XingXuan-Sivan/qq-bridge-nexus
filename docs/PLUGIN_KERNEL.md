@@ -191,6 +191,29 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 - 监听不可用（平台不支持 `recursive`、目录不可读、`watcher` 抛错）→ **降级为只手动重载**，日志一行，不影响桥接启动。
 - 为什么默认关：开发时方便，生产上「保存到一半」会触发半成品重载；宁可手动点一次。
 
+### 5.4 具名注入块（P4）
+
+`ctx.prompt.registerBlock(def)` 注册一段**有名字、有优先级、有块级上限**的 prompt 内容，用来替代「所有插件共用一条 append 管道」的写法。
+
+```js
+ctx.prompt.registerBlock({
+  id: 'memory-recent',      // 必填，^[a-z][a-z0-9-]{1,39}$，同一插件内唯一
+  priority: 100,            // 可选，默认 100，小的先渲染
+  maxChars: 800,            // 可选，默认取总预算
+  async render(ctx) {       // 必填，返回字符串；空串 = 本轮不注入
+    return `【最近记忆】\n${await load()}`;
+  },
+});
+```
+
+- 注册同样在 `commit` 阶段入表：activate 抛错、清单非法、重载失败都不会留下半截块；停用 / 卸载 / 重载时按 pluginId 批量注销。
+- 渲染发生在 `deliverPromptNow` 组装完人格与钩子前后缀之后；文本用空行接到末尾。
+- 排序：`priority` 升序，同优先级按 `id` 升序（稳定，不依赖插件加载顺序）。
+- 限额：单块超过 `maxChars` 截断并在报告里记 `truncated`；所有块合计超过 `limits.maxPromptAppendChars` 时**整块跳过**（记 `budget`），不会出现半句话。
+- 单块 `render` 抛错只跳过该块（记 `error`），不影响其它块与主链路。
+- `status().promptBlocks` 返回 `{ total, maxTotalChars, renders, injected, skipped, blocks: [...] }`，控制台插件详情能看到每个块的状态；`/api/plugins` 的条目带 `blocks`（注册的 id 列表）。
+- 与 `onPromptBuild` 的分工：钩子适合「改别人的文本、加前后缀」，注入块适合「稳定贡献一段有归属的内容」；两者共用同一个总预算。
+
 ---
 
 ## 6. 钩子契约
@@ -251,6 +274,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 | `ctx.persona.register(provider)` | `persona:provide` | 注册人格 provider（§8），同时只能有一个生效 |
 | `ctx.persona.unregister()` | `persona:provide` | 注销自己注册的 provider |
 | `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
+| `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
@@ -273,6 +297,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 | `send:qq` | 主动发 QQ 消息 | 高（可能骚扰） |
 | `net:http` | 出站 HTTP | 中（数据外发） |
 | `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
+| `prompt:provide` | 注册具名注入块 | 中（影响 AI 每轮看到的内容；有块级与总预算上限） |
 
 规则：
 
@@ -387,6 +412,7 @@ ctx.persona.register({
 - P2a：运行期启用/停用/重载/详情（见 §5.1 / §11），控制台操作按钮与详情弹窗。
 - P2b：本地目录 / zip 安装、卸载进 `state/_trash`、控制台安装区与「卸载」按钮（见 §5.2）。
 - P2c：`watch: true` 时按文件变更自动重载对应插件（见 §5.3）；默认关闭。
+- P4：具名注入块 `ctx.prompt.registerBlock`（见 §5.4），注册随 `commit` 入表、停用按 pluginId 注销，按 priority 排序、块级限额、超总预算整块跳过。
 
 **明确不做（避免半成品）**：
 
@@ -409,4 +435,5 @@ ctx.persona.register({
 6. P2a：停用后钩子不再被调用、provider 不再解析；启用后恢复；重载读到新代码与新版本；重载一个 `activate` 抛错的插件 → 旧实例仍在、错误可见。
 7. P2b：目录安装成功即激活、重复安装被拒；坏清单不残留目录与暂存；zip 里 `../`、超限、多个根都被拒；卸载把目录移进 `state/_trash` 且运行实例先被 dispose。
 8. P2c：默认 `watch:false`；设 `true` 后改 `plugins/<id>/index.mjs` 会在 5 秒内重载该插件（`counters.reloads` 增长），改 `plugins.json` 本身不会触发热生效；监听不可用时桥接照常启动。
-9. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+9. P4：两个插件各注册一个块 → prompt 末尾按 priority 顺序出现；单块超 `maxChars` 被截断、合计超总预算的块整块跳过；停用其中一个 → 它的块立即消失；`onPromptBuild` 的旧用法不受影响。
+10. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

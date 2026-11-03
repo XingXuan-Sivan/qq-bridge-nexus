@@ -307,6 +307,7 @@ undefined                      // 不干预
 | `ctx.persona.unregister()` | `persona:provide` | 注销自己注册的 provider |
 | `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
+| `ctx.scheduler.registerTaskType(def)` | `task-type:provide` | 注册一种定时任务类型（见 §8.1）；任务存在 `state/scheduler.json`，重启后仍在 |
 | `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
@@ -330,6 +331,7 @@ undefined                      // 不干预
 | `net:http` | 出站 HTTP | 中（数据外发） |
 | `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
 | `prompt:provide` | 注册具名注入块 | 中（影响 AI 每轮看到的内容；有块级与总预算上限） |
+| `task-type:provide` | 注册定时任务类型 | 中（到点会真的发消息；走现有白名单、限额、免打扰与模式判定） |
 | `inbound:filter` | 入站丢消息/改文字 | 高（丢消息不留痕、改文字会影响命令判定；默认 `filters.inbound=false` 时不生效） |
 
 规则：
@@ -337,6 +339,40 @@ undefined                      // 不干预
 - 清单申请了但代码没用：允许（权限是上界，不是必须）。
 - 代码用了但清单没申请：`ctx` 上根本没有该属性，调用即 `TypeError`。
 - 权限变更必须改清单并重启桥接；内核不做热更新（P1 明确不做）。
+
+### 8.1 定时任务类型（`task-type:provide`）
+
+插件可以让「定时任务」里出现自己的类型，比如「每周一抓一次周报发给我」。桥接只负责**到点、发去哪儿、限额、免打扰**，具体做什么由插件实现。
+
+```js
+ctx.scheduler.registerTaskType({
+  id: 'weekly-digest',          // 小写 + 连字符，和插件 id 同一套规则
+  label: '周报摘要',             // 控制台下拉里显示的名字
+  description: '把最近 7 天群聊做成摘要', // 可选，一句话说明
+  // 可选：把用户填的表单（任意 JSON）规范成要存进任务的 payload；抛错即拒绝保存。
+  validate(input) {
+    const week = String(input?.payload?.week ?? '').trim();
+    if (!week) throw new Error('要填哪一周');
+    return { week };
+  },
+  // 必填：每个发送对象调用一次；返回 { status: 'sent' | 'skipped' | 'failed', reason? }。
+  async run(task, context) {
+    // task.payload 是上面 validate 的返回值；task.targets / task.schedule 也可读
+    // context: { target, manual, scheduledAt, whenText, log }
+    await context.log(`跑 ${task.id} 给 ${context.target}`);
+    return { status: 'sent' };
+  },
+});
+```
+
+约束与行为：
+
+- 同一 id 只保留**先注册**的那个：后注册的插件只记日志（不覆盖、不报错）。
+- 任务保存时调用 `validate`；它返回的值就是 `payload`，必须可 JSON 序列化（建议对象）。
+- 到点执行时每个 target 调一次 `run`，单次超时 60 秒；抛错记 `failed`，任务**不自动停用**，下次照常。
+- 停用/卸载/重载插件时按 pluginId 注销类型：已存在的任务**保留在文件里**（不会删），执行时返回 `failed`（原因「任务类型未注册」），控制台里的类型名显示为空。
+- 类型未注册时不能新建这类任务（`未知任务类型「x」`），编辑已有任务时也一样。
+- 执行仍受既有约束：会话在当前模式下可用、定时静默策略、每日条数/间隔限额、白名单。
 
 ---
 
@@ -454,6 +490,7 @@ ctx.persona.register({
 - P4：具名注入块 `ctx.prompt.registerBlock`（见 §5.4），注册随 `commit` 入表、停用按 pluginId 注销，按 priority 排序、块级限额、超总预算整块跳过；内置段 `core-stickers` / `core-digest` 已走同一注册表（单独预算）。
 - 出站装饰：`onReplyDecorate` 链式改写/取消模型回复的某一段（见 §6.3），装饰失败或超时一律回落原文。
 - 入站过滤：`filters.inbound: true` 时 `onInbound` 可返回 `{ drop }` / `{ text }`（见 §6.1），需 `inbound:filter` 权限；默认关闭，关闭时返回值全部忽略。
+- 定时任务类型：`ctx.scheduler.registerTaskType`（见 §8.1），需 `task-type:provide`；类型按 pluginId 注销，任务本身留在 `state/scheduler.json`。
 
 **明确不做（避免半成品）**：
 
@@ -479,4 +516,5 @@ ctx.persona.register({
 9. P4：两个插件各注册一个块 → prompt 末尾按 priority 顺序出现；单块超 `maxChars` 被截断、合计超总预算的块整块跳过；停用其中一个 → 它的块立即消失；`onPromptBuild` 的旧用法不受影响。
 10. 出站装饰：两个插件链式改写 → 后一个看到前一个的结果；`{ drop: true }` 取消该段；装饰抛错或超时 → 原文照发；停用后链自动缩短。
 11. 入站过滤：默认 `filters.inbound:false` 时插件返回 `{ drop }` 不生效、消息照常处理；打开后同一条消息被丢弃/改写；没申请 `inbound:filter` 的插件动作被忽略并记 `inbound-denied`；替换文本超 4000 字被忽略。
-12. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块/出站装饰/入站过滤）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+12. 定时任务类型：插件注册后控制台「定时任务」的内容区出现该类型；保存时 `validate` 抛错会被拦下；到点每个 target 调一次 `run`，超 60 秒或抛错记 `failed` 且任务不停用；停用插件后类型消失、已有任务仍在文件里、编辑这类任务被拒（`未知任务类型`）。
+13. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块/出站装饰/入站过滤/任务类型）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）、`test-scheduler.mjs`（时区/规则/引擎/命令/桥接/控制台/插件任务类型）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

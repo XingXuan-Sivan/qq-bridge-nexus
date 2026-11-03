@@ -98,6 +98,9 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     log: logLine,
     maxTotalChars: config.limits.maxPromptAppendChars,
   });
+  // 定时任务类型：id → { id, label, description, validate, run, pluginId }。
+  // 只允许插件注册；同一 id 先到先得，重复注册记日志并忽略，避免两个插件抢同一个类型。
+  const taskTypeIndex = new Map();
 
   const entries = [];
   const entryById = new Map();
@@ -214,6 +217,48 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     persona.register(provider, pluginId);
   }
 
+  /** 校验并登记一个插件任务类型；返回规范化后的定义，失败返回 null（只记日志不抛，避免拖垮 activate）。 */
+  function commitTaskType(definition, pluginId) {
+    const id = String(definition?.id ?? '');
+    const label = String(definition?.label ?? '').trim();
+    if (!PLUGIN_ID_RE.test(id)) {
+      logLine(`⚠️ [plugins] ${pluginId} 注册任务类型失败：id「${id}」不合法（小写字母开头，1–40 位）`);
+      return null;
+    }
+    if (!label || label.length > 40) {
+      logLine(`⚠️ [plugins] ${pluginId} 注册任务类型 ${id} 失败：label 必填且不超过 40 字`);
+      return null;
+    }
+    if (typeof definition?.run !== 'function') {
+      logLine(`⚠️ [plugins] ${pluginId} 注册任务类型 ${id} 失败：缺少 run(task, ctx)`);
+      return null;
+    }
+    if (taskTypeIndex.has(id)) {
+      logLine(`⚠️ [plugins] 任务类型 ${id} 已被 ${taskTypeIndex.get(id).pluginId} 注册，忽略 ${pluginId} 的重复注册`);
+      return null;
+    }
+    if (definition.validate !== undefined && typeof definition.validate !== 'function') {
+      logLine(`⚠️ [plugins] ${pluginId} 注册任务类型 ${id} 失败：validate 必须是函数`);
+      return null;
+    }
+    const entry = {
+      id,
+      label,
+      description: String(definition.description ?? '').slice(0, 200),
+      validate: typeof definition.validate === 'function' ? definition.validate : null,
+      run: definition.run,
+      pluginId,
+    };
+    taskTypeIndex.set(id, entry);
+    return entry;
+  }
+
+  function unregisterTaskTypes(pluginId) {
+    for (const [id, entry] of taskTypeIndex) {
+      if (entry.pluginId === pluginId) taskTypeIndex.delete(id);
+    }
+  }
+
   async function disposeEntry(entry) {
     removeHookEntries(entry.id);
     if (entry.dispose) {
@@ -228,8 +273,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     // 命令与注入块按 pluginId 批量注销：卸载/停用/重载后旧内容不能继续进 prompt。
     deps.commandRegistry?.unregisterPlugin?.(entry.id);
     promptBlockRegistry.unregisterPlugin(entry.id);
+    unregisterTaskTypes(entry.id);
     entry.commands = [];
     entry.blocks = [];
+    entry.taskTypes = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
     entry.updatedAt = isoNow();
@@ -285,7 +332,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [], blocks: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -300,6 +347,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
           return true;
         },
         unregisterPersona: (pluginId) => persona.unregister(pluginId),
+        registerTaskType: (definition, pluginId) => {
+          pending.taskTypes.push({ definition, pluginId });
+          return true;
+        },
         registerPluginCommand: (definition, pluginId) => {
           pending.commands.push({ definition, pluginId });
           return true;
@@ -338,7 +389,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -351,6 +402,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     entry.hooks = [];
     entry.commands = [];
     entry.blocks = [];
+    entry.taskTypes = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -380,6 +432,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
         } catch (error) {
           logLine(`⚠️ [plugins] ${entry.id} 注册注入块 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
         }
+      }
+      for (const { definition, pluginId } of desc.taskTypes ?? []) {
+        const registered = commitTaskType(definition, pluginId);
+        if (registered) entry.taskTypes.push(registered.id);
       }
       audit.append('activate', { plugin: entry.id, version: entry.version });
       logLine(`[plugins] 已加载 ${entry.id}@${entry.version}${entry.hooks.length ? `（${entry.hooks.join('/')}）` : ''}`);
@@ -419,6 +475,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       hooks: [...entry.hooks],
       commands: [...entry.commands],
       blocks: [...(entry.blocks ?? [])],
+      taskTypes: [...(entry.taskTypes ?? [])],
       updatedAt: entry.updatedAt,
       counters: { ...entry.stats },
     };
@@ -636,6 +693,43 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return persona.warm(key, options);
   }
 
+  /** 已注册的插件任务类型（控制台建任务时用）。 */
+  function taskTypes() {
+    return [...taskTypeIndex.values()].map(({ id, label, description, pluginId }) => ({ id, label, description, pluginId }));
+  }
+
+  function hasTaskType(id) {
+    return taskTypeIndex.has(String(id));
+  }
+
+  /**
+   * 校验插件任务类型的输入并返回要存进任务的 payload。
+   * 插件可以不给 validate：那就默认接受 `payload` 原样（必须是 JSON 可序列化对象，由调用方限制大小）。
+   */
+  function validateTaskType(id, input) {
+    const entry = taskTypeIndex.get(String(id));
+    if (!entry) throw new Error(`未知任务类型：${id}`);
+    if (!entry.validate) {
+      const payload = input?.payload ?? null;
+      if (payload != null && (typeof payload !== 'object' || Array.isArray(payload))) {
+        throw new Error('这个任务类型的 payload 必须是对象');
+      }
+      return payload;
+    }
+    const payload = entry.validate(input ?? {});
+    if (payload != null && (typeof payload !== 'object' || Array.isArray(payload))) {
+      throw new Error(`任务类型 ${id} 的 validate 必须返回对象或 null`);
+    }
+    return payload ?? null;
+  }
+
+  /** 执行一个插件任务（每个发送对象调用一次）；抛错由调度器记 failed。 */
+  async function runTaskType(id, task, context = {}) {
+    const entry = taskTypeIndex.get(String(id));
+    if (!entry) throw new Error(`任务类型 ${id} 未注册（插件可能未启用）`);
+    return entry.run(task, { ...context, log: logLine });
+  }
+
   function status() {
     const personaStatus = persona.status();
     // 没有 provider 时 persona 直接为 null：否则控制台会看到一个只有缓存统计、没有 id 的「半个人格来源」。
@@ -664,6 +758,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
       persona: personaInfo,
       promptBlocks: promptBlockRegistry.status(),
+      taskTypes: taskTypes(),
       plugins: entries.map(summarize),
     };
   }
@@ -822,6 +917,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     filterInbound,
     personaResolve,
     personaWarm,
+    taskTypes,
+    hasTaskType,
+    validateTaskType,
+    runTaskType,
     status,
     detail,
     shutdown,

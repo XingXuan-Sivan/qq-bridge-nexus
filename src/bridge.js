@@ -3159,9 +3159,24 @@ async function main() {
     if (!allowed(m[1], Number(m[2]), cfg)) return `${key} 不在白名单里（allow.${m[1] === 'group' ? 'groups' : 'private'}），不能作为定时任务的发送对象`;
     return null;
   }
-  async function deliverScheduled(task, target, { manual }) {
+  async function deliverScheduled(task, target, { manual, scheduledAt }) {
     const tz = task.timezone || scheduler.snapshot().settings.timezone;
     const whenText = describeInstant(Date.now(), tz);
+    // 插件任务类型：交给插件自己执行，桥接只负责限额、免打扰与会话可用性判断。
+    if (task.kind !== 'text' && task.kind !== 'ai') {
+      if (!plugins?.hasTaskType(task.kind)) return { status: 'failed', reason: `任务类型「${task.kind}」未注册（插件未启用或已卸载）` };
+      if (!isSessionAllowedInCurrentMode(target)) return { status: 'skipped', reason: `当前模式（${currentMode}）下这个会话暂停` };
+      try {
+        const r = await withTimeout(
+          plugins.runTaskType(task.kind, { ...task, target }, { target, manual, scheduledAt, whenText }),
+          60000,
+          `plugin task ${task.kind}`,
+        );
+        return { status: r?.status ?? 'sent', reason: r?.reason ?? '' };
+      } catch (error) {
+        return { status: 'failed', reason: String(error?.message ?? error) };
+      }
+    }
     if (task.kind === 'text') {
       if (SENSITIVE_RE.test(task.text)) return { status: 'failed', reason: '内容疑似含路径 / 凭据，已拦截' };
       if (target === schedulerOwnerKey()) {
@@ -3196,6 +3211,12 @@ async function main() {
     validateTarget: schedulerTargetError,
     ownerKey: schedulerOwnerKey,
     holidays: CN_HOLIDAYS,
+    // 插件任务类型：内核负责注册表与校验，调度器只管问「有没有」「怎么校验」。
+    taskKinds: {
+      has: (kind) => Boolean(plugins?.hasTaskType(kind)),
+      validate: (kind, input) => plugins.validateTaskType(kind, input),
+      label: (kind) => plugins?.taskTypes?.().find((t) => t.id === kind)?.label ?? null,
+    },
     log: (m) => log(m),
     audit: (event, detail) => { try { ext.audit.append(event, detail); } catch {} },
     sensitive: (t) => SENSITIVE_RE.test(String(t ?? '')),
@@ -3370,7 +3391,7 @@ async function main() {
         case 'list': return formatTaskList(scheduler.listTasks());
         case 'add': {
           const t = scheduler.createTask({ ...cmd.task, targets: [owner] }, { source: 'owner-command' });
-          return `✅ 已登记 #${t.id}：${t.scheduleText} → ${t.kind === 'ai' ? '叫 AI：' + t.instruction : '文字：' + t.text}${t.nextRunText ? `\n下次：${t.nextRunText}` : ''}\n发 /remind del ${t.id} 可删除。`;
+          return `✅ 已登记 #${t.id}：${t.scheduleText} → ${t.kind === 'ai' ? '叫 AI：' + t.instruction : (t.kind === 'text' ? '文字：' + t.text : '插件任务：' + (t.kindLabel || t.kind))}${t.nextRunText ? `\n下次：${t.nextRunText}` : ''}\n发 /remind del ${t.id} 可删除。`;
         }
         case 'delete': { const t = scheduler.deleteTask(cmd.id, { source: 'owner-command' }); return `🗑 已删除 #${t.id}「${t.name}」`; }
         case 'enable': { const t = scheduler.setEnabled(cmd.id, true, { source: 'owner-command' }); return `▶️ 已启用 #${t.id}「${t.name}」${t.nextRunText ? `，下次 ${t.nextRunText}` : ''}`; }
@@ -5678,7 +5699,7 @@ async function main() {
               const targets = [{ key: schedulerOwnerKey(), label: '管理员私聊', kind: 'owner' }];
               for (const id of listOf('private')) if (`private:${id}` !== schedulerOwnerKey()) targets.push({ key: `private:${id}`, label: `好友 ${id}`, kind: 'private' });
               for (const id of listOf('group')) targets.push({ key: `group:${id}`, label: `群 ${id}`, kind: 'group' });
-              sendJson({ ok: true, ...snap, targets, writable: scheduler.isWritable(), mode: currentMode });
+              sendJson({ ok: true, ...snap, targets, taskTypes: plugins?.taskTypes() ?? [], writable: scheduler.isWritable(), mode: currentMode });
               return;
             }
             const body = req.method === 'GET' ? {} : await readBody();

@@ -2987,6 +2987,11 @@ button:active:not(:disabled) {
           <label class="sched-chip" style="margin:0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
           <label class="sched-chip" style="margin:0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
         </div>
+        <div class="row" id="schedPluginKindRow" style="margin-top:8px;display:none">
+          <label class="field" style="flex:1 1 240px">插件任务类型<select id="schedPluginKind"></select></label>
+          <span class="meta" style="margin:0">由插件注册；payload 见插件说明</span>
+        </div>
+        <textarea id="schedPayloadJson" rows="3" style="width:100%;margin-top:8px;display:none" placeholder='{"payload": {"week": "周一"}}'></textarea>
         <textarea id="schedContent" rows="3" style="width:100%;margin-top:8px" placeholder="早上好"></textarea>
         <div class="meta" id="schedPreview">接下来：—</div>
         <div class="row" style="margin-top:10px">
@@ -6513,15 +6518,16 @@ function renderScheduler() {
   schedEl('schedQuietStart').value = st.limits.quietStart;
   schedEl('schedQuietEnd').value = st.limits.quietEnd;
   schedEl('schedCount').textContent = `${r.tasks.length} / ${st.limits.maxTasks}`;
+  renderSchedPluginKinds();
   const targetLabel = (k) => (r.targets.find((t) => t.key === k)?.label) || k;
   schedEl('schedList').innerHTML = r.tasks.length ? `<table class="sched-table"><tr><th>启用</th><th>任务</th><th>时间</th><th>发给</th><th>上次</th><th>操作</th></tr>${r.tasks.map((t) => {
-    const badges = [t.kind === 'ai' ? '<span class="pill b">AI 来说</span>' : '<span class="pill">固定文字</span>',
+    const badges = [t.kindLabel ? `<span class="pill b">${esc(t.kindLabel)}</span>` : (t.kind === 'ai' ? '<span class="pill b">AI 来说</span>' : '<span class="pill">固定文字</span>'),
       `<span class="pill">来源：${esc({ console: '控制台', 'owner-command': '管理员命令', 'owner-chat-ai': '私聊 AI' }[t.createdBy] || t.createdBy)}</span>`,
       t.pendingConfirm ? '<span class="pill r">待你确认</span>' : ''].join(' ');
     const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta" style="margin:2px 0 0">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
     return `<tr>
       <td><input type="checkbox" data-sched-toggle="${t.id}" ${t.enabled ? 'checked' : ''} aria-label="启用 #${t.id}"></td>
-      <td><b>#${t.id} ${esc(t.name)}</b><div style="margin-top:4px">${badges}</div><div class="meta" style="margin:4px 0 0">${esc(t.kind === 'ai' ? t.instruction : t.text)}</div></td>
+      <td><b>#${t.id} ${esc(t.name)}</b><div style="margin-top:4px">${badges}</div><div class="meta" style="margin:4px 0 0">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div></td>
       <td>${esc(t.scheduleText)}<div class="meta" style="margin:2px 0 0">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div></td>
       <td>${t.targets.map((k) => `<span class="sched-chip" style="cursor:default">${esc(targetLabel(k))}</span>`).join('')}</td>
       <td>${last}</td>
@@ -6594,6 +6600,16 @@ function readSchedFields(type) {
   return s;
 }
 
+function schedPluginKinds() { return schedState?.taskTypes || []; }
+
+function schedSyncKindUi() {
+  const plugin = schedEl('schedPluginKind')?.value || '';
+  const custom = Boolean(plugin);
+  document.querySelectorAll('input[name="schedKind"]').forEach((r) => { r.disabled = custom; });
+  schedEl('schedPayloadJson').style.display = custom ? '' : 'none';
+  schedEl('schedContent').style.display = custom ? 'none' : '';
+}
+
 function schedPayload() {
   const type = schedEl('schedType').value;
   const schedule = readSchedFields(type);
@@ -6601,8 +6617,16 @@ function schedPayload() {
   if (schedEl('schedEndDate').value.trim()) schedule.endDate = schedEl('schedEndDate').value.trim();
   schedule.excludeDates = schedSplit(schedEl('schedExclude').value);
   schedule.excludeHolidays = schedEl('schedSkipHolidays').checked;
-  const kind = document.querySelector('input[name="schedKind"]:checked')?.value || 'text';
+  const pluginKind = schedEl('schedPluginKind')?.value || '';
+  const kind = pluginKind || document.querySelector('input[name="schedKind"]:checked')?.value || 'text';
   const content = schedEl('schedContent').value.trim();
+  let payload = null;
+  if (pluginKind) {
+    const raw = schedEl('schedPayloadJson').value.trim();
+    if (raw) {
+      try { payload = JSON.parse(raw); } catch { schedMsg('schedEditorMsg', '❌ payload 不是合法 JSON', false); return null; }
+    }
+  }
   return {
     name: schedEl('schedName').value.trim(),
     timezone: schedEl('schedTaskTz').value.trim() || null,
@@ -6612,8 +6636,19 @@ function schedPayload() {
     runDuringSilence: schedEl('schedSilence').value === 'run',
     targets: [...document.querySelectorAll('[data-sched-target]')].filter((c) => c.checked).map((c) => c.dataset.schedTarget),
     kind,
-    ...(kind === 'ai' ? { instruction: content } : { text: content }),
+    ...(pluginKind ? { payload } : (kind === 'ai' ? { instruction: content } : { text: content })),
   };
+}
+
+function renderSchedPluginKinds() {
+  const kinds = schedPluginKinds();
+  const row = schedEl('schedPluginKindRow');
+  const select = schedEl('schedPluginKind');
+  if (!row || !select) return;
+  row.style.display = kinds.length ? '' : 'none';
+  const current = select.value;
+  select.innerHTML = `<option value="">— 用上面的固定文字 / AI —</option>${kinds.map((k) => `<option value="${esc(k.id)}">${esc(k.label)}${k.pluginId ? `（${esc(k.pluginId)}）` : ''}</option>`).join('')}`;
+  if (kinds.some((k) => k.id === current)) select.value = current;
 }
 
 function renderSchedTargets(selected) {
@@ -6643,8 +6678,13 @@ function openSchedEditor(task = null) {
   renderSchedTargets(task?.targets || (owner ? [owner] : []));
   const kind = task?.kind || 'text';
   document.querySelectorAll('input[name="schedKind"]').forEach((r) => { r.checked = r.value === kind; });
-  schedEl('schedContent').value = task ? (task.kind === 'ai' ? task.instruction : task.text) : '';
+  const isPluginKind = !['text', 'ai'].includes(kind);
+  renderSchedPluginKinds();
+  schedEl('schedPluginKind').value = isPluginKind ? kind : '';
+  schedEl('schedPayloadJson').value = isPluginKind ? JSON.stringify(task?.payload ?? {}, null, 2) : '';
+  schedEl('schedContent').value = task ? (task.kind === 'ai' ? task.instruction : (task.kind === 'text' ? task.text : '')) : '';
   schedEl('schedContent').placeholder = kind === 'ai' ? '随便跟我聊一句，或者发个可爱的表情包' : '早上好';
+  schedSyncKindUi();
   schedMsg('schedEditorMsg', '');
   schedEl('schedEditor').scrollIntoView({ block: 'nearest' });
   schedPreview();
@@ -6654,6 +6694,12 @@ function schedPreview() {
   clearTimeout(schedPreviewTimer);
   schedPreviewTimer = setTimeout(async () => {
     const p = schedPayload();
+    if (!p) return;
+    if (!['text', 'ai'].includes(p.kind)) {
+      schedEl('schedPreview').textContent = '插件任务：到点由插件执行，这里只校验时间规则';
+      schedEl('schedPreview').className = 'meta';
+      return;
+    }
     const r = await api('/api/scheduler/preview', 'POST', { schedule: p.schedule, timezone: p.timezone, count: 5, kind: p.kind, targets: p.targets, runDuringSilence: p.runDuringSilence });
     schedEl('schedPreview').textContent = r.ok
       ? `${r.scheduleText}。接下来：${r.next.length ? r.next.map((x) => x.text + (x.silenced ? `（处在定时静默「${x.silenced}」里，会跳过）` : '')).join('、') : '没有了（时间已过或规则不会再触发）'}`
@@ -6666,12 +6712,14 @@ schedEl('schedType').addEventListener('change', () => { schedEl('schedFields').i
 schedEl('schedEditor').addEventListener('input', (e) => { if (e.target.id !== 'schedContent' && e.target.id !== 'schedName') schedPreview(); });
 schedEl('schedEditor').addEventListener('change', (e) => {
   if (e.target.name === 'schedKind') schedEl('schedContent').placeholder = e.target.value === 'ai' ? '随便跟我聊一句，或者发个可爱的表情包' : '早上好';
+  if (e.target.id === 'schedPluginKind') schedSyncKindUi();
   if (e.target.id !== 'schedContent' && e.target.id !== 'schedName') schedPreview();
 });
 schedEl('schedNew').addEventListener('click', () => openSchedEditor(null));
 schedEl('schedCancel').addEventListener('click', () => { schedEl('schedEditor').hidden = true; schedEditingId = null; });
 schedEl('schedSave').addEventListener('click', async () => {
   const payload = schedPayload();
+  if (!payload) return;
   const r = schedEditingId == null
     ? await api('/api/scheduler/tasks', 'POST', payload)
     : await api(`/api/scheduler/tasks/${schedEditingId}`, 'PATCH', payload);

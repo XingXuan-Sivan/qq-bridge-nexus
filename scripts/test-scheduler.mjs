@@ -309,3 +309,64 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   const tzInit = html.indexOf("document.getElementById('schedTimezone').innerHTML = schedTzOptionsHtml(false);");
   assert.ok(tzInit > 0 && tzInit < html.indexOf('const schedEl = (id)'), '时区下拉初始化不依赖 schedEl');
 });
+
+test('⑦ 插件任务类型：payload 校验、写盘、重建后仍在，未注册时拒绝', () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'scheduler.json');
+  const kinds = {
+    has: (k) => k === 'pig-latin',
+    validate: (k, input) => {
+      const text = String(input?.payload?.text ?? '').trim();
+      if (!text) throw new Error('text 必填');
+      return { text };
+    },
+    label: (k) => (k === 'pig-latin' ? '倒着念' : null),
+  };
+  const make = (taskKinds) => {
+    const sch = createScheduler({
+      file,
+      now: () => at('2026-11-04T01:00:00Z'),
+      deliver: async () => ({ status: 'sent' }),
+      validateTarget: () => null,
+      ownerKey: () => 'private:123',
+      holidays: [],
+      taskKinds,
+    });
+    sch.load();
+    return sch;
+  };
+
+  const sch = make(kinds);
+  const task = sch.createTask(
+    { kind: 'pig-latin', payload: { text: ' abc ' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] },
+    { source: 'console' },
+  );
+  assert.equal(task.kind, 'pig-latin');
+  assert.deepEqual(task.payload, { text: 'abc' });
+  assert.equal(task.kindLabel, '倒着念');
+  assert.throws(
+    () => sch.createTask({ kind: 'pig-latin', payload: { text: '' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    /text 必填/,
+  );
+  assert.throws(
+    () => sch.createTask({ kind: 'nope', schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    /未知任务类型/,
+  );
+
+  // 重启（同一个文件、插件仍注册）：任务与 payload 都还在。
+  const again = make(kinds);
+  const restored = again.snapshot().tasks.find((t) => t.id === task.id);
+  assert.equal(restored.kind, 'pig-latin');
+  assert.deepEqual(restored.payload, { text: 'abc' });
+  assert.equal(restored.kindLabel, '倒着念');
+
+  // 插件没启用：任务保留在文件里，但类型校验会拒绝新建；读取时 kindLabel 为 null。
+  const missing = make({ has: () => false, validate: () => { throw new Error('不该被调用'); }, label: () => null });
+  const kept = missing.snapshot().tasks.find((t) => t.id === task.id);
+  assert.equal(kept.kind, 'pig-latin');
+  assert.equal(kept.kindLabel, null);
+  assert.throws(
+    () => missing.createTask({ kind: 'pig-latin', payload: { text: 'x' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    /未知任务类型/,
+  );
+});

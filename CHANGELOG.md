@@ -108,6 +108,14 @@
 - 测试：`test-plugin-kernel.mjs` 增至 16 个用例（越界拒绝、白名单写回、watch 即时生效、未知字段忽略）。
 - 文档：`PLUGIN_KERNEL.md` §11、`PLUGIN_ROADMAP.md` §8.6 与「界面暴露」决策。
 
+### 新增：定时任务类型插件化（P8）
+- 插件可用 `ctx.scheduler.registerTaskType({ id, label, description?, validate?, run })` 注册自己的定时任务类型（权限 `task-type:provide`）；桥接仍负责到点、发给谁、限额、免打扰与模式判定。
+- 任务保存时调用插件的 `validate` 规范化 `payload`；到点每个发送对象调一次 `run`，单次 60 秒超时，抛错记 `failed` 但任务不停用。
+- 类型按 pluginId 注销：停用/卸载/重载插件后类型消失，已存在的任务保留在 `state/scheduler.json`（执行时返回失败并说明「任务类型未注册」），重建任务被拒绝。
+- 控制台「定时任务」：内容区多一个「插件任务类型」下拉（只在有注册类型时出现）与 payload JSON 文本域；列表徽章显示插件给的 `label`，预览显示 payload。
+- 测试：`test-plugin-kernel.mjs` 增至 17 个用例（注册/校验/执行/停用注销/重复 id 只保留先注册）；`test-scheduler.mjs` 增至 7 个用例（payload 校验、写盘、重建后仍在、未注册时拒绝）。
+- 文档：`PLUGIN_KERNEL.md` §7 / §8 / §8.1 / §13 / §14，`PLUGIN_ROADMAP.md` §8.3 标完成。
+
 ### 改进：控制台间距与列表组件统一
 - 折叠面板内距修复：新增的「内置注入块 / 运行设置 / 安装插件」补上 `.settings-content`，与已有面板一致；内层「高级」用 `.settings-sub`，不再继承外层摘要的背景与箭头。
 - 列表统一：人格卡与插件卡共用 `.tile-list` + `.tile`（`gap:10px`、内距 `13px 15px`），插件卡不再用 26px 内距的 `.card` + 22px 的 `.grid` 网格。

@@ -97,6 +97,13 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     };
   }
 
+  if (granted.has('task-type:provide')) {
+    // 定时任务类型：注册后控制台能选到，执行时由内核把任务交给插件的 run()。
+    ctx.scheduler = {
+      registerTaskType: (definition) => deps.registerTaskType(definition, id),
+    };
+  }
+
   if (granted.has('send:qq')) {
     ctx.qq = {
       async send(key, text) {

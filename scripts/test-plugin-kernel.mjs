@@ -607,3 +607,60 @@ test('设置接口：白名单字段校验、写回 plugins.json、watch 即时�
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+const TASK_INDEX = `
+export function activate(ctx) {
+  ctx.scheduler.registerTaskType({
+    id: 'pig-latin',
+    label: '倒着念',
+    description: '把 payload.text 倒过来发（测试用）',
+    validate(input) {
+      const text = String(input?.payload?.text ?? '').trim();
+      if (!text) throw new Error('text 必填');
+      return { text };
+    },
+    async run(task, context) {
+      ctx.state.write('last-run', { text: task.payload.text, target: context.target, when: context.whenText ?? null });
+      return { status: 'sent', reason: 'ok' };
+    },
+  });
+  return {};
+}
+`;
+
+test('定时任务类型（P8）：注册、校验、执行、停用后消失，重复 id 被忽略', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'tasktap', TASK_INDEX, { permissions: ['state', 'task-type:provide'], hooks: [] });
+  writePlugin(pluginsDir, 'taskcopy', TASK_INDEX, { permissions: ['state', 'task-type:provide'], hooks: [] });
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    // 两个插件注册同一个 id：只保留先注册的，后一个只记日志。
+    const types = kernel.status().taskTypes;
+    assert.equal(types.length, 1);
+    assert.equal(types[0].id, 'pig-latin');
+    assert.equal(types[0].label, '倒着念');
+    assert.equal(types[0].pluginId, 'taskcopy');
+    assert.equal(kernel.hasTaskType('pig-latin'), true);
+
+    assert.deepEqual(kernel.validateTaskType('pig-latin', { payload: { text: ' abc ' } }), { text: 'abc' });
+    assert.throws(() => kernel.validateTaskType('pig-latin', { payload: { text: '' } }), /text 必填/);
+    assert.throws(() => kernel.validateTaskType('nope', {}), /未知任务类型/);
+
+    const result = await kernel.runTaskType('pig-latin', { id: 1, kind: 'pig-latin', payload: { text: 'abc' }, target: 'group:1' }, { target: 'group:1', whenText: '今天' });
+    assert.equal(result.status, 'sent');
+    const saved = JSON.parse(fs.readFileSync(path.join(stateDir, 'plugins', 'taskcopy', 'last-run.json'), 'utf8'));
+    assert.deepEqual(saved, { text: 'abc', target: 'group:1', when: '今天' });
+
+    await kernel.disable('taskcopy');
+    assert.equal(kernel.hasTaskType('pig-latin'), false);
+    assert.equal(kernel.status().taskTypes.length, 0);
+    await assert.rejects(() => kernel.runTaskType('pig-latin', { kind: 'pig-latin' }, {}), /未注册/);
+
+    await kernel.enable('taskcopy');
+    assert.equal(kernel.hasTaskType('pig-latin'), true);
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

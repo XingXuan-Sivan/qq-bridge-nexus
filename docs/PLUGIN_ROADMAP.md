@@ -317,7 +317,7 @@
 - `js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`——页面不再各写一份 `innerHTML` 模板。
 - `js/router.js`：`consolePages` 页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；数据刷新改成页面用 `onPageRefresh(page, fn)` 注册回调，路由器不再反向依赖页面模块。
 - `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
-- 待办：`pages/*.js`（12 个页面；插件、技能、MCP 已迁，工具参考页是纯静态）、`js/store.js`（跨页共享状态）、CSS 拆 `tokens/layout/components/pages`、CSP 去 `unsafe-inline`。
+- 待办：`pages/*.js`（12 个页面；插件、技能、MCP、管理行为已迁，工具参考页是纯静态）、`js/store.js`（跨页共享状态）、CSS 拆 `tokens/layout/components/pages`、CSP 去 `unsafe-inline`。
 - 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。
 
 **目标结构（A：原生 ESM + 微型运行时，零构建）**

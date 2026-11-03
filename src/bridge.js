@@ -13228,8 +13228,8 @@ async function main() {
     };
     // textContent 带引用对象信息，供 DSH 判断“这句话在对谁说”；
     // plainContent 只保留当前消息自己的文字，用于命令/指向性判断，避免被引用原文干扰。
-    const textContent = await segmentsToText(event.message ?? [], { resolveAtName, resolveReply });
-    const plainContent = await segmentsToText(event.message ?? [], { resolveAtName, includeReply: false });
+    let textContent = await segmentsToText(event.message ?? [], { resolveAtName, resolveReply });
+    let plainContent = await segmentsToText(event.message ?? [], { resolveAtName, includeReply: false });
     const mediaList = extractMediaFromSegments(event.message ?? []);
     const messageRef = String(event.message_id ?? event.msg_id ?? event.message_seq ?? '');
     const seqRef = event.message_seq != null ? String(event.message_seq) : '';
@@ -13263,6 +13263,33 @@ async function main() {
       at: Date.now(),
       backfill: Boolean(backfill),
     });
+    // 插件入站过滤：默认 filters.inbound=false，关着时这一步是空操作；只观察的插件不受影响。
+    // 只有申请了 inbound:filter 的插件能返回 { drop } / { text }，见 docs/PLUGIN_KERNEL.md §6.2。
+    if (plugins) {
+      try {
+        const filtered = await plugins.filterInbound({
+          key,
+          kind,
+          userId: String(event.user_id ?? ''),
+          groupId: kind === 'group' ? String(id) : null,
+          text: plainContent,
+          textContent,
+          at: Date.now(),
+          backfill: Boolean(backfill),
+        });
+        if (filtered?.dropped) {
+          appendActivity(`${key} 入站消息被插件忽略：${filtered.changedBy ?? 'filter'}`);
+          log(`入站消息被插件 ${filtered.changedBy ?? 'filter'} 丢弃：${key}`);
+          return;
+        }
+        if (typeof filtered?.text === 'string' && filtered.text !== plainContent) {
+          plainContent = filtered.text;
+          textContent = filtered.text;
+        }
+      } catch (error) {
+        log(`⚠️ 入站过滤失败，已按原文继续：${error?.message ?? error}`);
+      }
+    }
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
     // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截
     if (kind === 'private' && isOwner && plainContent && !plainContent.startsWith('/')) recordOwnerTranscript(key, 'owner', plainContent);

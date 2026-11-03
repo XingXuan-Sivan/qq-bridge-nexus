@@ -28,7 +28,7 @@ v1.1.2 的桥接把「入站 → 组 prompt → 调 DSH → 发 QQ」写在 `src
 
 | 钩子 | 挂载点（v1.1.2 行号） | 说明 |
 | --- | --- | --- |
-| `onInbound` | `handleIncoming()`（`src/bridge.js:12694`）入口 | 私聊/群聊/断线补收都经过这里，只观察，不改消息 |
+| `onInbound` | `handleIncoming()`（`src/bridge.js:12694`）入口 | 私聊/群聊/断线补收都经过这里；默认只观察，`filters.inbound=true` 且插件有 `inbound:filter` 时可丢/改 |
 | `onPromptBuild` | `deliverPromptNow()` 的 `modelText` 组装处（`src/bridge.js:10918`） | 可向本轮 prompt 前/后追加文本 |
 | `onReplyDecorate` | `auditAndSend()` → `sendToQQ()` 的逐段发送前（`src/bridge.js:9099`） | 只对模型回复；可改写或取消某一段，失败一律回落原文 |
 | `onAfterSend` | `sendToQQ()`（`src/bridge.js:8832`）成功发出之后 | 观察发送结果 |
@@ -109,6 +109,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
   },
   "audit": { "enabled": true, "maxBytes": 5242880, "keep": 3 },
   "install": { "enabled": true, "maxBytes": 5242880 },
+  "filters": { "inbound": false },
   "persona": {
     "provider": "soulkit",
     "cache": { "ttlMs": 300000, "minRefreshGapMs": 30000, "staleMaxMs": 86400000 }
@@ -129,6 +130,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 - `persona.provider`：只启用这一个 provider（多个插件都声明 `persona:provide` 时其余被忽略）；`null`/缺省 = 第一个注册成功的生效。
 - `persona.cache` 是**内核**的缓存策略，不是 provider 的字段：`ttlMs` 多久算新鲜、`minRefreshGapMs` 两次尝试的最小间隔、`staleMaxMs` 旧卡最多用多久（超过就回落本地卡）。
 - `install.enabled: false` 时 `POST /api/plugins/install` 一律拒绝；`install.maxBytes` 同时限制上传包与解压后总量（默认 5MB，1MB–50MB）。
+- `filters.inbound: false`（默认）时 `onInbound` 只观察，任何返回值都被忽略；打开后只有声明 `inbound:filter` 的插件能丢消息或改文字（见 §6.1）。
 - 未知 `id` 只告警，不阻断启动（插件可能还没装）。
 - 所有数值有上限（`hookTimeoutMs` ≤ 10000、`maxPlugins` ≤ 128、`maxBytes` ≥ 64KB），越界取默认并告警。
 - 插件代码**不得**读写 `plugins.json`；需要持久化的东西走 `ctx.state`。
@@ -223,10 +225,23 @@ ctx.prompt.registerBlock({
 ### 6.1 `onInbound(payload)`
 
 ```js
-{ key, kind: 'private'|'group', userId, groupId, text, at, backfill: boolean }
+{ key, kind: 'private'|'group', userId, groupId, text, textContent, at, backfill: boolean }
 ```
 
-只读观察（P1）。返回值忽略。用途：预热缓存、统计、审计。
+`text` 是当前消息自己的文字（不含引用原文），`textContent` 带引用上下文，两者都已通过模式校验与空文本过滤。
+
+默认（`plugins.json` 里 `"filters": { "inbound": false }`）**只读观察**，返回值忽略。打开过滤后，声明了 `inbound:filter` 权限的插件可以返回：
+
+```js
+undefined                      // 不干预
+{ drop: true }                 // 整条消息丢弃：不记录、不唤醒、不走命令
+{ text: '替换后的正文' }        // 替换 text 与 textContent
+```
+
+- 多个插件按 id 顺序链式执行，前一个的 `text` 是后一个的输入；`drop` 直接短路，后面前插件不再执行。
+- 没申请 `inbound:filter` 的插件返回动作会被忽略（审计 `inbound-denied`），只观察不受影响。
+- 替换文本上限 4000 字，超了忽略并记审计；`drop` 发生在写入社交历史之前，消息不会留痕——只该用于垃圾消息/明确拦截。
+- 钩子抛错或超时：保留上一步结果，主链按当前文本继续。
 
 ### 6.2 `onPromptBuild(payload)`
 
@@ -315,6 +330,7 @@ ctx.prompt.registerBlock({
 | `net:http` | 出站 HTTP | 中（数据外发） |
 | `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
 | `prompt:provide` | 注册具名注入块 | 中（影响 AI 每轮看到的内容；有块级与总预算上限） |
+| `inbound:filter` | 入站丢消息/改文字 | 高（丢消息不留痕、改文字会影响命令判定；默认 `filters.inbound=false` 时不生效） |
 
 规则：
 
@@ -374,7 +390,8 @@ ctx.persona.register({
 ## 10. 审计
 
 - 文件：`state/plugin-audit.jsonl`，一行一个 JSON。
-- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, error, timeout, deactivate, enable, disable, enable-failed, reload, reload-failed, install, install-failed, uninstall, uninstall-failed}`。
+- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, error, timeout, deactivate, enable, disable, enable-failed, reload, reload-failed, install, install-failed, uninstall, uninstall-failed, inbound-denied}`。
+- `inbound-denied`：插件返回了入站动作但没有 `inbound:filter`，或替换文本超长——动作被忽略，原消息继续。
 - 轮转：超过 `audit.maxBytes`（默认 5MB）时 rename 为 `.1`…`.N`（保留 `keep` 份），当前文件清空。
 - `audit.enabled: false` 时只写日志，不落盘。
 - 钩子成功调用**不逐条**记审计（噪声），只记 `activate/error/timeout`；批量统计见 `/api/plugins` 的计数。
@@ -431,6 +448,7 @@ ctx.persona.register({
 - P2c：`watch: true` 时按文件变更自动重载对应插件（见 §5.3）；默认关闭。
 - P4：具名注入块 `ctx.prompt.registerBlock`（见 §5.4），注册随 `commit` 入表、停用按 pluginId 注销，按 priority 排序、块级限额、超总预算整块跳过；内置段 `core-stickers` / `core-digest` 已走同一注册表（单独预算）。
 - 出站装饰：`onReplyDecorate` 链式改写/取消模型回复的某一段（见 §6.3），装饰失败或超时一律回落原文。
+- 入站过滤：`filters.inbound: true` 时 `onInbound` 可返回 `{ drop }` / `{ text }`（见 §6.1），需 `inbound:filter` 权限；默认关闭，关闭时返回值全部忽略。
 
 **明确不做（避免半成品）**：
 
@@ -455,4 +473,5 @@ ctx.persona.register({
 8. P2c：默认 `watch:false`；设 `true` 后改 `plugins/<id>/index.mjs` 会在 5 秒内重载该插件（`counters.reloads` 增长），改 `plugins.json` 本身不会触发热生效；监听不可用时桥接照常启动。
 9. P4：两个插件各注册一个块 → prompt 末尾按 priority 顺序出现；单块超 `maxChars` 被截断、合计超总预算的块整块跳过；停用其中一个 → 它的块立即消失；`onPromptBuild` 的旧用法不受影响。
 10. 出站装饰：两个插件链式改写 → 后一个看到前一个的结果；`{ drop: true }` 取消该段；装饰抛错或超时 → 原文照发；停用后链自动缩短。
-11. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块/出站装饰）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+11. 入站过滤：默认 `filters.inbound:false` 时插件返回 `{ drop }` 不生效、消息照常处理；打开后同一条消息被丢弃/改写；没申请 `inbound:filter` 的插件动作被忽略并记 `inbound-denied`；替换文本超 4000 字被忽略。
+12. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块/出站装饰/入站过滤）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

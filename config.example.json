@@ -12,6 +12,10 @@
   "role": {
     "maxInjectChars": 8000
   },
+  "promptBlocks": {
+    "core-stickers": { "enabled": true },
+    "core-digest": { "enabled": true }
+  },
   "snowluma": {
     "wsUrl": "ws://127.0.0.1:3001",
     "httpUrl": "http://127.0.0.1:3000",

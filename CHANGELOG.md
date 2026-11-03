@@ -67,6 +67,14 @@
 - 测试：`test-console-static` 通过；两段内联脚本语法检查通过。
 - 文档：`PLUGIN_ROADMAP.md` §3 P3d 标完成、§7.5 补「实施记录与偏差」。
 
+### 新增：内置段落块化（贴纸 + 记忆摘要）
+- 内置的「表情包策略」与「此刻状态（记忆摘要）」不再写死在 wake prompt 里，改为 `core-stickers` / `core-digest` 两个具名块，走与插件块相同的排序、限额、错误隔离语义。
+- `config.json` 新增 `promptBlocks`：`{ "core-digest": { "enabled": false } }` 可整段关掉，`maxChars` 可单独收紧；配错（类型不对、超范围）只回落默认，不影响启动。
+- 与插件块**分账**：插件块仍受 `plugins.json` 的 `limits.maxPromptAppendChars`（默认 4000）约束，内置段落用自己的预算（200000），互不挤占；`/api/plugins` 的 `coreBlocks` 返回两块的上限与调用次数，插件页 meta 直接显示。
+- 迁移前后用 bridgeHarness 抓 `replyCheck` / `timeout` / `bootstrap` 三种唤醒的 prompt 全文比对，**逐字一致**（只差随机会话令牌）。
+- 测试：新增 `test-core-prompt-blocks.mjs`（默认注入、关掉后整段消失、`maxChars` 收紧后变短但不整段消失、关表情块不影响记忆段）。
+- 文档：`PLUGIN_KERNEL.md` §5.4 增「内置段也用同一注册表（分预算）」；`config.example.json` 增 `promptBlocks`；`PLUGIN_ROADMAP.md` P4 实施记录补迁移与偏差。
+
 ### 新增：具名注入块（P4）
 - 新权限位 `prompt:provide`，插件可在 `activate(ctx)` 里 `ctx.prompt.registerBlock({ id, priority, maxChars, render })`，把「最近记忆」「贴纸策略」这类内容作为独立块注入 prompt，而不是挤在一条 append 管道里。
 - 注册随 `commit` 入表：`activate` 抛错、清单非法、重载失败都不会留下半截块；停用 / 卸载 / 重载按 `pluginId` 批量注销，旧块不会继续进 prompt。

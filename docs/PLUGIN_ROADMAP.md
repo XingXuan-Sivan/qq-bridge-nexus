@@ -210,6 +210,9 @@
 - 总预算超限时整块跳过（记 `budget`），不截半句；单块超 `maxChars` 才截断（记 `truncated`）。这条是有意的：块是「一段完整内容」，半句话比没有更糟。
 - `status().promptBlocks` 平铺在 `/api/plugins` 响应里；插件条目带 `blocks`（注册的 id 列表），控制台详情可据此显示。
 - 没有新增审计事件：块渲染失败只写日志与 `lastError`，不写 `plugin-audit.jsonl`（它记的是生命周期，不是每轮渲染）。
+- 内置段落也已迁移（2026-11-03）：贴纸参考 `core-stickers`、记忆摘要 `core-digest` 走 bridge 自建的第二个注册表（`maxTotalChars` 200000，与插件块分账）；配置在 `config.json` 的 `promptBlocks`，默认开启。`/api/plugins` 的 `coreBlocks` 返回这两块的上限与调用次数，插件页 meta 直接显示。
+- 迁移验收：用 bridgeHarness 抓 `buildWakePromptV2` 三种 reason（replyCheck / timeout / bootstrap）的全文，迁移前后**逐字一致**（只差每次随机会话令牌）；`scripts/test-core-prompt-blocks.mjs` 守住「关掉后整段消失、`maxChars` 收紧后变短但不整段消失」。
+- 偏差：块 id 正则只允许 `[a-z][a-z0-9-]`，原计划的 `core.stickers` / `core.digest` 带点被注册表拒绝（记忆段整段消失 637 字才发现），改为连字符 id；`config.json` 的 `promptBlocks` 原样未知键会被 `loadConfig` 丢弃，已补 `normalizePromptBlocks` 白名单（只接受 `enabled` 布尔与 1–100000 的 `maxChars`）。
 
 ### 7.5 「扩展」四页 UI 精修（P3d）
 

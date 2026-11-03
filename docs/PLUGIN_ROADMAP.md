@@ -43,9 +43,11 @@
 | P2a | 插件启用/停用、重载、详情页 | ✅ 已完成（2026-11-03） | 1 天 |
 | P2b | 本地目录安装/卸载（含 zip） | ✅ 已完成（2026-11-03） | 1 天 |
 | P2c | 文件监听自动重载（默认关） | ✅ 已完成（2026-11-03） | 半天 |
-| P2 同期 | 命令注册 + 具名注入块 | 待开始 | 1 天 |
-| P3 | 出站装饰、入站过滤链、定时任务类型、插件面板 | 候选 | 各 0.5–1 天 |
-| P3+ | Agent 工具注册、MCP 清单、Skills | 需先验证 | 未知 |
+| P3a | 命令注册表（内置命令收口）+ 「扩展」四页 + 管理行为只读页 | ✅ 已完成（2026-11-03） | 1–1.5 天 |
+| P3b | 插件注册命令（`ctx.commands.register`） | 待开始 | 1 天 |
+| P3c | 技能 / MCP 只读清单（真管理需 DSH 接口） | 待验证 | 1–2 天 |
+| P4 | 具名注入块、出站装饰、入站过滤链、定时任务类型 | 候选 | 各 0.5–1 天 |
+| P5 | Agent 工具注册 | 需先验证 | 未知 |
 
 排序原则：**先让插件「能管」，再让插件「能干活」，最后才碰主链与 DSH 侧**。
 
@@ -155,21 +157,42 @@
 
 ---
 
-## 7. P2 同期：命令注册与具名注入块
+## 7. P3：命令注册表、「扩展」入口与管理行为
 
-### 7.1 命令注册
+### 7.1 命令注册表（P3a，✅ 已完成 2026-11-03）
 
-- 做什么：插件可注册命令，带 `name` / `aliases` / `scope`（private/group/all）/ `ownerOnly` / `help` / `handler(ctx, args)`。
-- 怎么做：在 [src/bridge.js](../src/bridge.js) 的命令分发表上加一层「插件命令表」，命中后先做权限判定（复用 `parseOwnerCommandForGuard` 的 owner 判定），再调用 handler；命令冲突时内置命令优先，插件之间按 plugin id 排序并告警。
-- 代价：低。风险：插件命令可能冒充内置命令——规则是**内置命令永远优先**，插件不能覆盖。
-- 验收：注册 `/hello` → 群里可用；`/role` 仍走内置；ownerOnly 命令对非 owner 静默。
+- 做什么：内置命令收进唯一真源 `src/commands/registry.mjs`；`handleIncoming` 的 `/` 分支先走注册表，未迁移的条目回退旧 if 链。
+- 怎么做：entry 形状见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §2；先迁 `/status`（纯读）、`/role`（带参数与前缀）、`/reset`（大量内部状态）三种形态，其余命令先登记元数据 `migrated:false`；**迁一个删一个**，旧链不长期保留。
+- 代价：中——`/reset` 触及 40 多个内存 Map，必须整段搬走而不是复制一份；用 `test-integration-v030` 与新增 registry 单测兜底。
+- 验收：三个命令行为与现在逐字一致；`/api/commands` 能列出全部内置命令并标出未迁移项。
+- 实施记录与偏差：
+  - `/reset` 的整段清理搬进 `commandReset(ctx)`，旧内联块删除；`commandStatus` / `commandRole` 同样整段搬运，没有复制。
+  - 注册表新增「元数据条目」形态（无 handler）：`/silent`、`/active` 先登记，`dispatch` 返回 `handled:false` 让调用方回退旧链——比先删旧链再补 handler 安全。
+  - `scripts/audit-bridge-harness.mjs` 的 VM 必须注入真实 `createCommandRegistry`（纯内存、无 IO），否则 `/role`、`/reset` 在集成测试里会走空实现。
+  - 三个命令的行为靠 `test-integration-v030`（31 条）与 `test-command-registry.mjs`（10 条）共同兜底，注册表单测不启动桥接。
 
-### 7.2 具名注入块
+### 7.2 「扩展」四页与管理行为（P3a）
+
+- 做什么：nav 新增「扩展」一级，四个 tab：插件 / 技能 / MCP / 管理行为；管理行为页展示桥接命令、DSH 会话命令、桥接 MCP 工具三组，带来源列。
+- 怎么做：复用 `data-view` / `data-page` / `consolePages`；`GET /api/commands` 提供数据；技能列 DSH skills 目录，MCP 列桥接 server 与工具，都只读；状态列不放假开关。
+- 代价：低-中（前端为主）。风险：`console.html` 继续变大——本次只在 section 内分块，不拆文件。
+- 验收：四页可切换；管理行为里每条命令有来源、权限、帮助；DSH 侧条目标注「由 DSH 管理」。
+- 实施记录与偏差：技能页扫 `DSH_HOME/skills` 与仓库 `skills/`，只读 `SKILL.md` 的 frontmatter；MCP 页只列桥接自带的三个 stdio server，DSH 侧的 `mcpServers` 配置不在这里猜；管理行为页的 DSH 命令/工具是静态清单（桥接实际只调用 `/compact`、`/permission`，只提供 `web_search`、`web_fetch`、`snowluma_status`），页面明确标注只读，不做假开关。
+
+### 7.3 插件注册命令（P3b）
+
+- 做什么：`ctx.commands.register({ name, aliases, scope, permission, help, handler })`；manifest 静态声明 `commands`，启动时查冲突。
+- 怎么做：注册表新增 `source:'plugin'` 与 `pluginId`；新增插件权限位 `commands`，未申请时 `ctx.commands` 为 `undefined`；内置永远优先，插件间按 pluginId 字典序、冲突告警不覆盖。
+- 代价：低。风险：插件命令冒充内置——规则是内置不能覆盖，插件之间先注册者保留。
+- 验收：注册 `/hello` 群内可用；`/role` 仍走内置；`owner` 命令对非 owner 静默；未申请权限的插件拿不到 `ctx.commands`。
+
+### 7.4 具名注入块（P4）
 
 - 做什么：`ctx.prompt.registerBlock({ id, priority, maxChars, render(ctx) })`，让记忆、贴纸、日程、关系各占一块，可单独开关与限额。
 - 怎么做：现有 `promptAdditions` 保留为兼容层，内部改为调用块注册表；`state/prompt-blocks.json` 已有跟踪能力，扩展成「按 block id 记录注入与跳过」。
 - 代价：低。风险：块多了会稀释人格——用 `maxPromptAppendChars` 总上限兜底，并在控制台显示每块占比。
 - 验收：注入两块，顺序与限额符合声明；关掉一块后 prompt 里不再出现。
+
 
 ---
 

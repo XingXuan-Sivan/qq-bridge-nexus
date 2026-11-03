@@ -41,6 +41,14 @@
 - 测试：`test-plugin-kernel.mjs` 增至 11 个用例（路径映射、配置默认与非法值、开启后 5 秒内自动重载）。
 - 文档：`PLUGIN_KERNEL.md` §4 / §5.3 / §12–§14 同步；`PLUGIN_ROADMAP.md` §3 标完成、§6 补「实施记录与偏差」；`plugins.example.json` 增 `watch`。
 
+### 新增：命令注册表与「扩展」四页（P3a）
+- 新增 `src/commands/registry.mjs`：内置命令按「最长主名优先、别名指向同一条目、内置先注册者保留」匹配；条目分「已迁移」（带 handler，由注册表执行）与「旧链」（只有元数据，回退原来的 `if` 分支），迁移是逐条进行的。
+- 首批迁移 `/reset`（别名 `/new`）、`/status`、`/role`；`/silent`、`/active` 先登记元数据，行为仍走旧链。权限沿用原来的 owner 守卫，scope 区分全部会话 / 仅群聊 / 仅私聊。
+- 控制台导航新增「扩展」一级：插件（原有页）、技能、MCP、管理行为。技能页只读扫描 `DSH_HOME/skills` 与仓库 `skills/` 下的 `SKILL.md`；MCP 页只读列出桥接自带的三个 stdio server；管理行为页按来源展示命令与迁移状态，并只读列出 DSH 会话命令与 Agent 工具。
+- 接口：`GET /api/commands`（桥接内置/插件/DSH 命令/工具，三个来源分开返回）、`GET /api/extensions`（技能清单与 MCP server 清单）。
+- 测试：新增 `test-command-registry.mjs`（10 个用例：匹配、别名、元数据回退、权限与 scope、抛错兜底、冲突规则、按插件注销），已接入 `test:audit`；`scripts/audit-bridge-harness.mjs` 注入真实注册表，命令迁移后的行为在 VM 里也能验证。
+- 文档：新增 `docs/COMMAND_REGISTRY.md`（三来源能力矩阵、entry 形状、匹配/权限规则、页面布局、明确不做、P3b 预留）；`PLUGIN_ROADMAP.md` §3 / §7 同步。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

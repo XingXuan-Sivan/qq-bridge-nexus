@@ -61,8 +61,7 @@ export function renderTable({ columns, rows, empty = '暂无数据' }) {
   return table;
 }
 
-/** 卡片列表（与人格页/插件页共用 .tile-list + .tile 的间距与内距）。 */
-export function renderTileList(items) {
+/** 卡片列表（与人格页/插件页共用 .tile-list + .tile 的间距与内距）。 */export function renderTileList(items) {
   const list = document.createElement('div');
   list.className = 'tile-list';
   for (const item of items) {
@@ -89,4 +88,16 @@ export function renderTileList(items) {
     list.append(tile);
   }
   return list;
+}
+
+/**
+ * 生成一张静态表格的 HTML 字符串（单元格已经是 HTML 片段，调用方自己 esc）。
+ * 与 renderTable 的区别：这个返回字符串、可直接塞 innerHTML；renderTable 返回节点。
+ * @param {Array<{label:string, width?:string}>} columns
+ * @param {Array<Array<string>>} rows
+ */
+export function simpleTable(columns, rows) {
+  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` style="width:${column.width}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+  return `<table>${head}<tbody>${body}</tbody></table>`;
 }

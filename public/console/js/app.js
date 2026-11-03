@@ -1,9 +1,11 @@
 // 页面入口：装配各个模块，再启动首屏。所有「能力」都在 ./api.js、./ui.js、./router.js 里，
 // 这个文件只负责把数据、页面、事件接起来。
 import { api, bootstrapConsoleToken } from './api.js';
-import { esc, showConsoleToast } from './ui.js';
+import { esc, showConsoleToast, simpleTable } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, onPageRefresh, setConsolePage, setSearchCloser } from './router.js';
 import { initPluginsPage } from './pages/plugins.js';
+import { initSkillsPage } from './pages/skills.js';
+import { initMcpPage } from './pages/mcp.js';
 
 bootstrapConsoleToken();
 
@@ -2189,8 +2191,6 @@ onPageRefresh('persona', () => {
   refreshRoleAssignments().catch(() => {});
   refreshPersonaSources().catch(() => {});
 });
-onPageRefresh('skills', () => refreshSkills().catch(() => {}));
-onPageRefresh('mcp', () => refreshMcp().catch(() => {}));
 onPageRefresh('behaviors', () => refreshBehaviors().catch(() => {}));
 // 直接打开 #scheduler 时路由器可能先于定时任务那段脚本执行：推到下一个宏任务再刷新。
 onPageRefresh('scheduler', () => setTimeout(() => refreshScheduler(), 0));
@@ -3254,8 +3254,6 @@ setInterval(() => { if (getCurrentPage() === 'usage') loadCompactConfig(); }, 60
 // 停在人格页时，每 15 秒同步一次「按会话设置人格」（QQ 里发了 /role、新群建了会话都能看到；没保存的选择会保留）
 setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
 setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
-setInterval(() => { if (getCurrentPage() === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);
-setInterval(() => { if (getCurrentPage() === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);
 setInterval(() => { if (getCurrentPage() === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
 document.getElementById('personaSourceRefresh')?.addEventListener('click', () => refreshPersonaSources().catch(() => {}));
 
@@ -3303,12 +3301,6 @@ function behaviorTable(rows) {
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
 
-function simpleTable(columns, rows) {
-  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` style="width:${column.width}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
-  const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
-  return `<table>${head}<tbody>${body}</tbody></table>`;
-}
-
 async function refreshBehaviors() {
   const meta = document.getElementById('behaviorsMeta');
   const bridgeBox = document.getElementById('behaviorsBridge');
@@ -3348,36 +3340,6 @@ async function refreshBehaviors() {
     empty.textContent = `读取失败：${error?.message || '未知错误'}`;
   }
 }
-async function refreshSkills() {
-  const meta = document.getElementById('skillsMeta');
-  const list = document.getElementById('skillsList');
-  try {
-    const data = await api('/api/extensions');
-    const skills = data.skills ?? [];
-    meta.textContent = skills.length ? `共 ${skills.length} 个技能包` : '没有找到 SKILL.md（DSH_HOME/skills 或仓库 skills/ 下）';
-    list.innerHTML = skills.length
-      ? `<div class="tool-log-table">${simpleTable([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
-        skills.map(skill => [`<strong>${esc(skill.name)}</strong>`, esc(skill.description || '（没有 description）'), `<code>${esc(skill.path)}</code>`]))}</div>`
-      : '<div class="meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
-  } catch (error) {
-    meta.textContent = `读取失败：${error.message}`;
-  }
-}
-async function refreshMcp() {
-  const meta = document.getElementById('mcpMeta');
-  const list = document.getElementById('mcpList');
-  try {
-    const data = await api('/api/extensions');
-    const servers = data.mcp ?? [];
-    meta.textContent = servers.length ? `桥接自带 ${servers.length} 个 MCP server` : '没有登记 MCP server';
-    list.innerHTML = servers.length
-      ? `<div class="tool-log-table">${simpleTable([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
-        servers.map(server => [`<strong>${esc(server.name)}</strong>`, esc(server.note || ''), `<code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}`]))}</div>`
-      : '<div class="meta">没有登记 MCP server。</div>';
-  } catch (error) {
-    meta.textContent = `读取失败：${error.message}`;
-  }
-}
 document.getElementById('behaviorsRefresh')?.addEventListener('click', () => refreshBehaviors().catch(() => {}));
 document.getElementById('behaviorsFilter')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
 document.getElementById('behaviorsPermission')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
@@ -3394,10 +3356,6 @@ document.getElementById('behaviorsBridge')?.addEventListener('click', (event) =>
   document.querySelectorAll(`#behaviorsBridge tr.group-child[data-group="${CSS.escape(name)}"]`)
     .forEach((child) => child.classList.toggle('hidden'));
 });
-document.getElementById('skillsRefresh')?.addEventListener('click', () => refreshSkills().catch(() => {}));
-document.getElementById('mcpRefresh')?.addEventListener('click', () => refreshMcp().catch(() => {}));
-
-
 refresh(); refreshRoles(); refreshWhitelist(); refreshSessions(); refreshPending(); refreshPresets(); loadSocialForm(); loadV2Config(); refreshV2Activity(); loadV2ToolLog(); loadV2SessionOptions(); refreshSocialStatus(); refreshSlang(); loadSlangConfig(); loadSecurity(); refreshSimPrompt(); refreshDshModel(); refreshSilence(); refreshUsage(); refreshUsageChart(); refreshUsageRecent();
 setInterval(() => { refresh(); refreshSessions(); refreshPending(); refreshSocialStatus(); refreshSlang(); }, 3000);
 // 用量看板只在本页可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
@@ -3429,5 +3387,7 @@ setInterval(() => { if (getCurrentPage() !== 'usage') return; refreshUsage(); re
 })();
 
 initPluginsPage();
+initSkillsPage();
+initMcpPage();
 // 所有页面模块就绪后再接管路由（首屏恢复也在这里）。
 initRouter();

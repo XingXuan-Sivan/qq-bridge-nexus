@@ -4579,9 +4579,33 @@ async function main() {
           sendJson(plugins ? plugins.status() : { enabled: false, plugins: [] });
           return;
         }
-        // P1 不支持热重载：明确告知需要重启，不做「改了一半」的伪重载。
+        // 插件管理（P2a）：只改运行态，不写 plugins.json；配置改动仍需重启（或等文件监听）。
         if (req.method === 'POST' && url.pathname === '/api/plugins/reload') {
-          sendJson({ ok: false, restartRequired: true, message: '插件变更需重启桥接后生效' }, 409);
+          if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
+          const result = await plugins.reloadAll();
+          sendJson({ ok: result.ok, results: result.results });
+          return;
+        }
+        const pluginAction = url.pathname.match(/^\/api\/plugins\/([a-z][a-z0-9-]{1,39})(?:\/(enable|disable|reload))?$/);
+        if (pluginAction) {
+          const [, pluginId, action] = pluginAction;
+          if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
+          if (req.method === 'GET' && !action) {
+            const detail = plugins.detail(pluginId);
+            if (!detail) { sendJson({ ok: false, error: '插件不存在' }, 404); return; }
+            sendJson({ ok: true, plugin: detail });
+            return;
+          }
+          if (req.method === 'POST' && action) {
+            const result = action === 'enable'
+              ? await plugins.enable(pluginId)
+              : action === 'disable'
+                ? await plugins.disable(pluginId)
+                : await plugins.reload(pluginId);
+            sendJson(result, result.ok ? 200 : 400);
+            return;
+          }
+          sendJson({ ok: false, error: '不支持的方法' }, 405);
           return;
         }
         // 人格来源只读视图：每个会话实际落在哪一层（会话覆盖 / provider / 全局）。不返回卡片正文。

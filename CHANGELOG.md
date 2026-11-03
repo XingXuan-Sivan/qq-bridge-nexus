@@ -11,9 +11,17 @@
 - 人格 provider 契约 `persona-provider/1`：按会话取卡、ETag/304、未绑定返回 `none`；缓存与降级（TTL 5 分钟、最小刷新 30 秒、旧卡最多用 24 小时、单飞、持久化 `state/persona-cache.json`）由内核统一负责。
 - 三层解析 `src/persona-resolve.mjs`：会话覆盖（`/role`、控制台按会话设置；`off` 硬覆盖）→ 外部 provider → 全局本地卡；`currentRoleHintV2` / `currentRoleFingerprintV2` / 唤醒提示词 / `qq_get_prompt` 都改走这一处。
 - 第一个 provider 插件 `plugins/soulkit-persona`：`GET /api/persona/card?platform=qq&key=…`，剥掉 `【人格卡：…】` 标题行，失败保留旧卡；soulkit 不在线时按解析链回落本地角色卡。
-- 控制台：「桥接插件」只读页（`/api/plugins`）、「人格来源（只读）」页（`/api/persona/sources`）；`role.maxInjectChars` 默认 6000 → 8000（soulkit 卡片约 6.5k 字符）。
+- 控制台：「桥接插件」页（`/api/plugins`）、「人格来源（只读）」页（`/api/persona/sources`）；`role.maxInjectChars` 默认 6000 → 8000（soulkit 卡片约 6.5k 字符）。
 - 测试：`test-plugin-kernel`、`test-soulkit-persona`、`test-persona-resolve`，均已接入 `test:audit`。
 - 文档：新增 `docs/PLUGIN_KERNEL.md`、`docs/PERSONA_PROVIDER.md`、`docs/PLUGIN_ROADMAP.md`（后续路线与明确不做）。
+
+### 新增：插件运行期管理（P2a）
+- 内核支持 `reload(id)` / `reloadAll()` / `enable(id)` / `disable(id)` / `detail(id)`：重载先构建新实例（钩子与 persona 暂存），成功后才拆旧实例，失败保留旧实例继续跑；管理动作串行执行。
+- 重载用 `?v=<mtime>` 绕开 ESM 缓存；`shutdown` 改为先发 `onShutdown` 再 `dispose`，插件能拿到退出钩子。
+- 控制台插件页：每张卡片加「启用/停用」「重载」「详情」，另有「全部重载」；详情弹窗展示清单、权限、钩子、入口、计数、最近变更/错误与该插件最近 20 条审计。
+- 接口：`GET /api/plugins/:id`、`POST /api/plugins/:id/{enable,disable,reload}`、`POST /api/plugins/reload`；启用/停用只改进程内状态，重启后以 `plugins.json` 为准。
+- 测试：`test-plugin-kernel` 增至 8 个用例（停用后钩子不再执行、启用恢复、重载读到新版本、坏插件重载失败保留旧实例、detail 字段与审计）。
+- 文档：`PLUGIN_KERNEL.md` §5.1 / §10 / §11 / §12 / §13 / §14 同步；`PLUGIN_ROADMAP.md` §4 补「实施记录与偏差」。
 
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。

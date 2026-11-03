@@ -40,7 +40,7 @@
 
 | 阶段 | 内容 | 状态 | 预估 |
 | --- | --- | --- | --- |
-| P2a | 插件启用/停用、重载、详情页 | 待开始 | 1 天 |
+| P2a | 插件启用/停用、重载、详情页 | ✅ 已完成（2026-11-03） | 1 天 |
 | P2b | 本地目录安装/卸载（含 zip） | 待开始 | 1 天 |
 | P2c | 文件监听自动重载（默认关） | 待开始 | 半天 |
 | P2 同期 | 命令注册 + 具名注入块 | 待开始 | 1 天 |
@@ -83,6 +83,18 @@
 2. 重载一个坏插件 → 旧实例仍在跑，错误可见。
 3. 重载后 `persona` 注册表仍只有一份，不出现重复 provider。
 4. 所有操作写 `state/plugin-audit.jsonl`。
+
+### 实施记录与偏差（2026-11-03）
+
+实现中发现、且已写进代码/文档的几点，后续阶段不要再踩：
+
+- **ESM 缓存**：`import()` 同一 URL 只会执行一次，重载必须用 `pathToFileURL(main).href + '?v=' + stat.mtimeMs` 绕开缓存（`?v=` 用 mtime 而不是时间戳，避免同一文件重复加载）。
+- **重载必须 staging**：新实例的钩子与 persona provider 在 `activate` 成功前不能进全局索引。第一版直接在 `activate` 里注册，结果坏插件的 `activate` 抛错时已经把旧 provider 顶掉；现在 `buildInstance` 收 `pending`，`commit` 才生效。
+- **`shutdown` 顺序**：先 `callHook('onShutdown')` 再 `disposeEntry()`。反过来会把钩子表先拆掉，插件拿不到退出钩子（测试里 `shutdown.json` 没写出就是这么发现的）。
+- **`detail` 的审计要按插件过滤**：审计文件是全局追加的，直接取尾部 20 条会混进别的插件；现在过滤 `item.plugin === id` 后再取末 20 条。
+- **运行态 ≠ 配置**：enable/disable 只写内存 `runtimeEnabled`，不写 `plugins.json`；重启后以配置为准。页面必须说清「临时生效」，否则用户会以为改了配置。
+- **控制台刷新函数必须 async**：`refreshPlugins()` 里有 `await api(...)`，漏 `async` 会让整个脚本块语法错误（浏览器直接整页不执行）。
+- 测试追加用 PowerShell `Add-Content` 会带 BOM，本项目统一用 node 脚本追加并检查 `BOM count 0`。
 
 ---
 

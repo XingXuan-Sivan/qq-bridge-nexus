@@ -137,16 +137,32 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 读取 plugins.json
   → 扫描 plugins/<id>/plugin.json（按 id 排序，稳定）
   → 校验清单 + 权限 + main 存在
-  → import(main)
+  → import(main)            // 每次加载带 ?v=<mtime>，绕过 ESM 缓存
   → activate(ctx)  // 返回 { hooks?, dispose? }
-  → 注册钩子（只允许清单声明的）
+  → 注册钩子（只允许清单声明的）+ 注册 persona provider
   → 运行中：钩子分发（每个钩子独立超时 + try/catch）
-  → 退出：dispose()（超时 2s）→ onShutdown 钩子
+  → 退出：onShutdown 钩子 → dispose()（超时 2s）
 ```
 
-- `activate` 抛错 → 该插件 `failed`，记审计，不重试（重启桥接再试），不影响其它插件。
+- `activate` 抛错 → 该插件 `failed`，记审计，不重试（重启桥接或手动重载再试），不影响其它插件。
 - 钩子抛错/超时 → 记审计 + 日志一行；该次调用视为无返回，**主链继续**。
 - 插件之间不共享状态；相同钩子按清单 id 字典序执行，前一个的返回值不传给后一个（避免隐式耦合）。
+
+### 5.1 运行期管理（P2a）
+
+| 动作 | 接口 | 语义 |
+| --- | --- | --- |
+| 停用 | `POST /api/plugins/:id/disable` | 拆掉钩子、注销 provider、调 `dispose()`；进程内生效，**不写 `plugins.json`** |
+| 启用 | `POST /api/plugins/:id/enable` | 从磁盘重新加载并激活；同样只改进程内状态 |
+| 重载 | `POST /api/plugins/:id/reload` | 先构建新实例（钩子与 provider 暂存），成功后才拆旧实例并提交 |
+| 全部重载 | `POST /api/plugins/reload` | 按 id 顺序逐个重载，单个失败不影响其它 |
+
+- 重载失败时**旧实例继续运行**，错误记在 `status().plugins[].error` 与审计 `reload-failed`；不会出现「重载一半、插件没了」。
+- 新实例的钩子与 provider 在 `activate` 成功前不进入全局索引，因此失败的新实例不会顶掉正在工作的旧 provider。
+- 管理动作串行执行（内核内部一把锁），避免并发 reload 把钩子索引写乱。
+- 「启用/停用」重启后回到 `plugins.json` 的决定；要永久生效请改配置（P2c 会做文件监听）。
+- 停用/重载时正在执行的钩子可能仍在飞：分发前对状态做了快照并检查 `active`，被停用的插件不会再被新调用。
+
 
 ---
 
@@ -287,7 +303,7 @@ ctx.persona.register({
 ## 10. 审计
 
 - 文件：`state/plugin-audit.jsonl`，一行一个 JSON。
-- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, hook, error, timeout, deactivate}`。
+- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, error, timeout, deactivate, enable, disable, reload, reload-failed, enable-failed}`。
 - 轮转：超过 `audit.maxBytes`（默认 5MB）时 rename 为 `.1`…`.N`（保留 `keep` 份），当前文件清空。
 - `audit.enabled: false` 时只写日志，不落盘。
 - 钩子成功调用**不逐条**记审计（噪声），只记 `activate/error/timeout`；批量统计见 `/api/plugins` 的计数。
@@ -297,11 +313,16 @@ ctx.persona.register({
 ## 11. 控制台
 
 - 导航新增一项「桥接插件」（`data-view="plugins"`，`section-plugins`），位于「人格与角色」之后。
-- 页面内容（P1 只读）：启用状态与插件目录、人格 provider 来源、每个插件的 id/名称/版本/状态/hooks/调用与失败次数/最近错误。**不做启停开关**：P1 没有写配置的接口，开关会变成「点了但没生效」的假按钮；启停请改 `plugins.json` 后重启桥接，页面明确提示这一点。
+- 页面内容：启用状态与插件目录、人格 provider 来源、每个插件的 id/名称/版本/状态/hooks/调用与失败次数/最近错误；每张卡片带「启用/停用」「重载」「详情」。
+- 「详情」弹窗显示：清单（权限/钩子/入口）、配置、计数（调用/失败/重载）、最近变更、最近错误、该插件最近 20 条审计。
+- 页面明确提示：启用/停用只改本次运行，改配置或永久生效仍需重启桥接（P2c 才会做文件监听）。
 - 接口：
-  - `GET /api/plugins` → `{ enabled, dir, limits, audit, persona: { id, plugin } | null, plugins: [{ id, name, version, status, hooks, error, counters: { hookCalls, hookErrors, lastHookAt, lastErrorAt } }] }`
-  - `POST /api/plugins/reload`（P1 只返回 `{ ok: false, restartRequired: true }` + 409，不做热重载）
-- 读取需要控制台令牌；两个接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
+  - `GET /api/plugins` → `{ enabled, dir, limits, audit, persona: { id, plugin } | null, plugins: [{ id, name, version, status, hooks, error, updatedAt, counters: { hookCalls, hookErrors, lastHookAt, lastErrorAt, reloads } }] }`
+  - `GET /api/plugins/:id` → `{ ok, plugin: { ...插件摘要, manifest, permissions, apiVersion, config, source: { dir, main }, audit: [最近 20 条] } }`
+  - `POST /api/plugins/:id/reload` → `{ ok, plugin }`；失败 `{ ok: false, error, plugin }`（旧实例继续跑）
+  - `POST /api/plugins/:id/enable` / `disable` → `{ ok, plugin }`
+  - `POST /api/plugins/reload` → `{ ok, results: [{ id, ok, error }] }`
+- 读取需要控制台令牌；这些接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
 
 ---
 
@@ -315,23 +336,22 @@ ctx.persona.register({
 | 钩子超时 | 记 `timeout`，主链继续（超时的 Promise 不取消，但结果丢弃） |
 | prompt 追加超长 | 截断到 `maxPromptAppendChars`，日志一行 |
 | 插件数超 `maxPlugins` | 按 id 排序截断，日志告警 |
+| 重载失败 | 旧实例继续跑，错误记 `reload-failed`；新实例的钩子/provider 未提交，不会污染注册表 |
+| 停用 | 拆钩子 + 注销 provider + `dispose()`；正在飞的钩子调用结果仍会被丢弃（状态快照在调用前） |
+| 管理动作并发 | 内核串行执行，后到的动作排队，不会写乱钩子索引 |
 
 ---
 
-## 13. P1 范围（本次实现）与明确不做
+## 13. 已实现范围与明确不做
 
-**做**：
+**已实现**：
 
-- 内核：发现、校验、配置、钩子、权限、审计、人格注册表。
-- 接线：`onInbound`（`handleIncoming` 入口）、`onPromptBuild`（`deliverPromptNow` 的 `modelText` 处）、`onAfterSend`（`sendToQQ` 成功处）。
-- 人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`。
-- 第一个插件：`soulkit-persona`。
-- 控制台一页 + 两个接口。
-- 单测：清单校验、配置默认值/越界、钩子隔离与超时、provider 回落、审计轮转。
+- P1：内核（发现、校验、配置、钩子、权限、审计、人格注册表）；`onInbound` / `onPromptBuild` / `onAfterSend` 接线；人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`；第一个插件 `soulkit-persona`；控制台只读页。
+- P2a：运行期启用/停用/重载/详情（见 §5.1 / §11），控制台操作按钮与详情弹窗。
 
-**不做（P1 明确不做，避免半成品）**：
+**明确不做（避免半成品）**：
 
-- 热重载/热更新（改 `plugins.json` 需重启）。
+- 改 `plugins.json` 自动生效（P2c 文件监听）、安装/卸载（P2b）。
 - 插件市场、下载、签名。
 - 插件访问 MCP 工具或 DSH 内部对象。
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
@@ -348,4 +368,5 @@ ctx.persona.register({
 3. 钩子抛错或卡死 → 消息照常处理，审计有 `error`/`timeout` 记录。
 4. 启用 `soulkit-persona` 且 soulkit 在线 → 唤醒 prompt 里的人格来自 soulkit，`【当前角色】` 名字一致；soulkit 离线 → 回落 `roles/*.md`，不报错。
 5. 未申请 `send:qq` 的插件拿不到 `ctx.qq`。
-6. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+6. P2a：停用后钩子不再被调用、provider 不再解析；启用后恢复；重载读到新代码与新版本；重载一个 `activate` 抛错的插件 → 旧实例仍在、错误可见。
+7. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

@@ -28,6 +28,11 @@ const PERSONA_SPECS = Object.freeze({
   staleMaxMs: { min: 60 * 60 * 1000, max: 7 * 24 * 60 * 60 * 1000, def: 24 * 60 * 60 * 1000 },
 });
 
+// 安装即执行代码，所以这是唯一一个「默认关掉也能接受」的开关；默认开着是为了本地开发顺手。
+const INSTALL_SPECS = Object.freeze({
+  maxBytes: { min: 1024 * 1024, max: 50 * 1024 * 1024, def: 5 * 1024 * 1024 },
+});
+
 export function defaultConfig() {
   return {
     enabled: true,
@@ -50,6 +55,11 @@ export function defaultConfig() {
         minRefreshGapMs: PERSONA_SPECS.minRefreshGapMs.def,
         staleMaxMs: PERSONA_SPECS.staleMaxMs.def,
       },
+    },
+    // 安装/卸载是「往桥接里放代码」的管理入口：只对控制台令牌开放，每次操作写审计。
+    install: {
+      enabled: true,
+      maxBytes: INSTALL_SPECS.maxBytes.def,
     },
     plugins: {},
   };
@@ -154,6 +164,13 @@ export function normalizeConfig(raw) {
   for (const [key, spec] of Object.entries(PERSONA_SPECS)) {
     config.persona.cache[key] = clampInteger(rawCache[key], spec, `persona.cache.${key}`, warnings);
   }
+
+  const rawInstall = isPlainObject(raw.install) ? raw.install : {};
+  if (rawInstall.enabled !== undefined) {
+    if (typeof rawInstall.enabled === 'boolean') config.install.enabled = rawInstall.enabled;
+    else warnings.push('install.enabled 必须是布尔值，已按 true 处理');
+  }
+  config.install.maxBytes = clampInteger(rawInstall.maxBytes, INSTALL_SPECS.maxBytes, 'install.maxBytes', warnings);
 
   return { config, warnings };
 }

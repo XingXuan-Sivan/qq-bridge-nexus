@@ -4333,6 +4333,46 @@ async function main() {
         req.on('error', () => fail(400, '请求体读取失败'));
         req.on('aborted', () => fail(400, '请求体读取中断'));
       });
+      // 安装 zip 需要原始字节：与 readBody 分开，避免把二进制当 JSON 解析。
+      const readRawBody = (limitBytes) => new Promise((resolve, reject) => {
+        const chunks = [];
+        let total = 0;
+        let settled = false;
+        let timer = null;
+        const fail = (status, message) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          const error = new Error(message);
+          error.statusCode = status;
+          reject(error);
+        };
+        const declared = Number(req.headers['content-length']);
+        if (Number.isFinite(declared) && declared > limitBytes) {
+          fail(413, `请求体过大（上限 ${Math.round(limitBytes / 1024 / 1024)}MB）`);
+          return;
+        }
+        timer = setTimeout(() => fail(400, '请求体读取超时'), 30000);
+        req.on('data', (chunk) => {
+          if (settled) return;
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          total += buf.length;
+          if (total > limitBytes) {
+            req.pause();
+            fail(413, `请求体过大（上限 ${Math.round(limitBytes / 1024 / 1024)}MB）`);
+            return;
+          }
+          chunks.push(buf);
+        });
+        req.on('end', () => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          resolve(Buffer.concat(chunks));
+        });
+        req.on('error', () => fail(400, '请求体读取失败'));
+        req.on('aborted', () => fail(400, '请求体读取中断'));
+      });
       // 浏览器会自动请求 /favicon.ico，且**不带控制台令牌**。若让它落到下面的鉴权分支，
       // 每次打开控制台都会在 DevTools 里留一条 401 噪音（离线预览 fixture 早已用 204 处理，
       // 真实服务端此前与自己的 fixture 行为不一致）。这里在任何鉴权之前直接 204 收掉。
@@ -4579,6 +4619,30 @@ async function main() {
           sendJson(plugins ? plugins.status() : { enabled: false, plugins: [] });
           return;
         }
+        // 插件安装（P2b）：JSON {path} 装服务器本地目录，application/zip 装上传包。
+        if (req.method === 'POST' && url.pathname === '/api/plugins/install') {
+          if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
+          const type = String(req.headers['content-type'] ?? '').toLowerCase();
+          try {
+            if (type.startsWith('application/json')) {
+              const body = await readBody();
+              const result = await plugins.install({ kind: 'dir', source: body.path });
+              sendJson(result, result.ok ? 200 : 400);
+              return;
+            }
+            if (type.startsWith('application/zip') || type.startsWith('application/octet-stream')) {
+              const maxBytes = plugins.config?.install?.maxBytes ?? 5 * 1024 * 1024;
+              const buffer = await readRawBody(maxBytes);
+              const result = await plugins.install({ kind: 'zip', source: buffer });
+              sendJson(result, result.ok ? 200 : 400);
+              return;
+            }
+            sendJson({ ok: false, error: '安装请求需要 application/json（本地目录）或 application/zip（上传）' }, 415);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, error?.statusCode ?? 400);
+          }
+          return;
+        }
         // 插件管理（P2a）：只改运行态，不写 plugins.json；配置改动仍需重启（或等文件监听）。
         if (req.method === 'POST' && url.pathname === '/api/plugins/reload') {
           if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
@@ -4594,6 +4658,11 @@ async function main() {
             const detail = plugins.detail(pluginId);
             if (!detail) { sendJson({ ok: false, error: '插件不存在' }, 404); return; }
             sendJson({ ok: true, plugin: detail });
+            return;
+          }
+          if (req.method === 'DELETE' && !action) {
+            const result = await plugins.uninstall(pluginId);
+            sendJson(result, result.ok ? 200 : 400);
             return;
           }
           if (req.method === 'POST' && action) {

@@ -106,6 +106,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
     "maxPromptAppendChars": 4000
   },
   "audit": { "enabled": true, "maxBytes": 5242880, "keep": 3 },
+  "install": { "enabled": true, "maxBytes": 5242880 },
   "persona": {
     "provider": "soulkit",
     "cache": { "ttlMs": 300000, "minRefreshGapMs": 30000, "staleMaxMs": 86400000 }
@@ -125,6 +126,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 - `plugins.<id>.enabled: false` 只停这一个；`config` 原样交给插件，内核不解释字段。
 - `persona.provider`：只启用这一个 provider（多个插件都声明 `persona:provide` 时其余被忽略）；`null`/缺省 = 第一个注册成功的生效。
 - `persona.cache` 是**内核**的缓存策略，不是 provider 的字段：`ttlMs` 多久算新鲜、`minRefreshGapMs` 两次尝试的最小间隔、`staleMaxMs` 旧卡最多用多久（超过就回落本地卡）。
+- `install.enabled: false` 时 `POST /api/plugins/install` 一律拒绝；`install.maxBytes` 同时限制上传包与解压后总量（默认 5MB，1MB–50MB）。
 - 未知 `id` 只告警，不阻断启动（插件可能还没装）。
 - 所有数值有上限（`hookTimeoutMs` ≤ 10000、`maxPlugins` ≤ 128、`maxBytes` ≥ 64KB），越界取默认并告警。
 - 插件代码**不得**读写 `plugins.json`；需要持久化的东西走 `ctx.state`。
@@ -163,6 +165,19 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 - 「启用/停用」重启后回到 `plugins.json` 的决定；要永久生效请改配置（P2c 会做文件监听）。
 - 停用/重载时正在执行的钩子可能仍在飞：分发前对状态做了快照并检查 `active`，被停用的插件不会再被新调用。
 
+### 5.2 安装与卸载（P2b）
+
+| 动作 | 接口 | 语义 |
+| --- | --- | --- |
+| 从目录安装 | `POST /api/plugins/install` + `{ "path": "D:\\dev\\my-plugin" }` | 复制到 `plugins/.staging-*/plugin`，校验清单后原子改名到 `plugins/<id>` |
+| 从 zip 安装 | `POST /api/plugins/install` + `Content-Type: application/zip`（body 为原始字节） | 解压到暂存，要求**恰好一个**含 `plugin.json` 的根，再走同一套校验 |
+| 卸载 | `DELETE /api/plugins/:id` | 先把目录移到 `state/_trash/plugins-<id>-<时间戳>/`，再 dispose 并从索引移除；不硬删 |
+
+- 安装成功即激活（走 `buildInstance`）；激活失败会把刚放进 `plugins/` 的目录移进 `_trash` 回滚，不留半装状态。
+- 清单不合法、id 非法、目标已存在 → 拒绝，且暂存目录在 `finally` 里清掉。
+- 拒绝：绝对路径、`..` 段、符号链接（源目录与解压产物都查）、zip 路径穿越、超过 `install.maxBytes`、非 deflate/store 的压缩方法、加密/分卷/zip64。
+- 安装**就是执行代码**：接口只对控制台令牌（owner）开放，每次 install/uninstall 都写审计；不做签名与来源校验（明确不做，见 §13）。
+- `.staging-*` 目录不会被 `init()` 扫描，进程在安装中途崩掉也不会被当成插件加载。
 
 ---
 
@@ -303,7 +318,7 @@ ctx.persona.register({
 ## 10. 审计
 
 - 文件：`state/plugin-audit.jsonl`，一行一个 JSON。
-- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, error, timeout, deactivate, enable, disable, reload, reload-failed, enable-failed}`。
+- 字段：`{ ts, plugin, event, detail?, durationMs?, error? }`；`event ∈ {activate, error, timeout, deactivate, enable, disable, enable-failed, reload, reload-failed, install, install-failed, uninstall, uninstall-failed}`。
 - 轮转：超过 `audit.maxBytes`（默认 5MB）时 rename 为 `.1`…`.N`（保留 `keep` 份），当前文件清空。
 - `audit.enabled: false` 时只写日志，不落盘。
 - 钩子成功调用**不逐条**记审计（噪声），只记 `activate/error/timeout`；批量统计见 `/api/plugins` 的计数。
@@ -313,7 +328,8 @@ ctx.persona.register({
 ## 11. 控制台
 
 - 导航新增一项「桥接插件」（`data-view="plugins"`，`section-plugins`），位于「人格与角色」之后。
-- 页面内容：启用状态与插件目录、人格 provider 来源、每个插件的 id/名称/版本/状态/hooks/调用与失败次数/最近错误；每张卡片带「启用/停用」「重载」「详情」。
+- 页面内容：启用状态与插件目录、人格 provider 来源、每个插件的 id/名称/版本/状态/hooks/调用与失败次数/最近错误；每张卡片带「启用/停用」「重载」「详情」「卸载」。
+- 「安装插件」折叠区：上传 zip 或填服务器本地目录；安装即执行代码，页面上有明确提示。
 - 「详情」弹窗显示：清单（权限/钩子/入口）、配置、计数（调用/失败/重载）、最近变更、最近错误、该插件最近 20 条审计。
 - 页面明确提示：启用/停用只改本次运行，改配置或永久生效仍需重启桥接（P2c 才会做文件监听）。
 - 接口：
@@ -322,6 +338,8 @@ ctx.persona.register({
   - `POST /api/plugins/:id/reload` → `{ ok, plugin }`；失败 `{ ok: false, error, plugin }`（旧实例继续跑）
   - `POST /api/plugins/:id/enable` / `disable` → `{ ok, plugin }`
   - `POST /api/plugins/reload` → `{ ok, results: [{ id, ok, error }] }`
+  - `POST /api/plugins/install` → 目录安装收 `{ path }`（JSON），zip 安装收原始 body；成功 `{ ok, plugin }`，失败 `{ ok: false, error }`
+  - `DELETE /api/plugins/:id` → `{ ok, id, trash }`（`trash` 为相对路径；失败 `{ ok: false, error }`）
 - 读取需要控制台令牌；这些接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
 - 所有 POST 管理接口要求 `Content-Type: application/json`（控制台的 `api()` 已自动带），否则返回 415。
 
@@ -340,6 +358,9 @@ ctx.persona.register({
 | 重载失败 | 旧实例继续跑，错误记 `reload-failed`；新实例的钩子/provider 未提交，不会污染注册表 |
 | 停用 | 拆钩子 + 注销 provider + `dispose()`；正在飞的钩子调用结果仍会被丢弃（状态快照在调用前） |
 | 管理动作并发 | 内核串行执行，后到的动作排队，不会写乱钩子索引 |
+| 安装失败（清单/加载） | 刚放进 `plugins/` 的目录移进 `state/_trash` 回滚；暂存目录在 `finally` 清掉；记 `install-failed` |
+| 安装/卸载期间进程崩溃 | 残留 `.staging-*` 不被 `init()` 扫描；已提交的安装目录若清单坏了也只是 `invalid`，不影响其它插件 |
+| 卸载失败（目录移不走） | 返回错误且**不** dispose 运行实例，记 `uninstall-failed`，避免「目录还在、插件却没了」 |
 
 ---
 
@@ -349,11 +370,12 @@ ctx.persona.register({
 
 - P1：内核（发现、校验、配置、钩子、权限、审计、人格注册表）；`onInbound` / `onPromptBuild` / `onAfterSend` 接线；人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`；第一个插件 `soulkit-persona`；控制台只读页。
 - P2a：运行期启用/停用/重载/详情（见 §5.1 / §11），控制台操作按钮与详情弹窗。
+- P2b：本地目录 / zip 安装、卸载进 `state/_trash`、控制台安装区与「卸载」按钮（见 §5.2）。
 
 **明确不做（避免半成品）**：
 
-- 改 `plugins.json` 自动生效（P2c 文件监听）、安装/卸载（P2b）。
-- 插件市场、下载、签名。
+- 改 `plugins.json` 自动生效（P2c 文件监听）。
+- 插件市场、下载、签名、来源校验。
 - 插件访问 MCP 工具或 DSH 内部对象。
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
 - 事件总线式的任意钩子（只认 §6 四个名字）。
@@ -370,4 +392,5 @@ ctx.persona.register({
 4. 启用 `soulkit-persona` 且 soulkit 在线 → 唤醒 prompt 里的人格来自 soulkit，`【当前角色】` 名字一致；soulkit 离线 → 回落 `roles/*.md`，不报错。
 5. 未申请 `send:qq` 的插件拿不到 `ctx.qq`。
 6. P2a：停用后钩子不再被调用、provider 不再解析；启用后恢复；重载读到新代码与新版本；重载一个 `activate` 抛错的插件 → 旧实例仍在、错误可见。
-7. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+7. P2b：目录安装成功即激活、重复安装被拒；坏清单不残留目录与暂存；zip 里 `../`、超限、多个根都被拒；卸载把目录移进 `state/_trash` 且运行实例先被 dispose。
+8. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

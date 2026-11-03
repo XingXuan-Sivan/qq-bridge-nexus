@@ -317,12 +317,13 @@ ctx.persona.register({
 - 「详情」弹窗显示：清单（权限/钩子/入口）、配置、计数（调用/失败/重载）、最近变更、最近错误、该插件最近 20 条审计。
 - 页面明确提示：启用/停用只改本次运行，改配置或永久生效仍需重启桥接（P2c 才会做文件监听）。
 - 接口：
-  - `GET /api/plugins` → `{ enabled, dir, limits, audit, persona: { id, plugin } | null, plugins: [{ id, name, version, status, hooks, error, updatedAt, counters: { hookCalls, hookErrors, lastHookAt, lastErrorAt, reloads } }] }`
+  - `GET /api/plugins` → `{ enabled, dir, limits, audit, persona: { id, plugin, ... } | null, plugins: [{ id, name, version, status, hooks, error, updatedAt, counters: { hookCalls, hookErrors, lastHookAt, lastErrorAt, reloads } }] }`（没有 provider 生效时 `persona` 为 `null`）
   - `GET /api/plugins/:id` → `{ ok, plugin: { ...插件摘要, manifest, permissions, apiVersion, config, source: { dir, main }, audit: [最近 20 条] } }`
   - `POST /api/plugins/:id/reload` → `{ ok, plugin }`；失败 `{ ok: false, error, plugin }`（旧实例继续跑）
   - `POST /api/plugins/:id/enable` / `disable` → `{ ok, plugin }`
   - `POST /api/plugins/reload` → `{ ok, results: [{ id, ok, error }] }`
 - 读取需要控制台令牌；这些接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
+- 所有 POST 管理接口要求 `Content-Type: application/json`（控制台的 `api()` 已自动带），否则返回 415。
 
 ---
 

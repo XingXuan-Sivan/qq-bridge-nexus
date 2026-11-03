@@ -6,7 +6,7 @@ import path from 'node:path';
 
 export const API_VERSION = 1;
 
-export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'send:qq', 'net:http']);
+export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'send:qq', 'net:http', 'commands']);
 
 export const KNOWN_HOOKS = Object.freeze(['onInbound', 'onPromptBuild', 'onAfterSend', 'onShutdown']);
 

@@ -161,6 +161,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       error: null,
       manifest: null,
       hooks: [],
+      commands: [],
       dispose: null,
       config: config.plugins[id]?.config ?? {},
       updatedAt: null,
@@ -212,6 +213,9 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       entry.dispose = null;
     }
     persona.unregister(entry.id);
+    // 命令按 pluginId 批量注销：卸载/停用/重载后旧命令不能继续响应。
+    deps.commandRegistry?.unregisterPlugin?.(entry.id);
+    entry.commands = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
     entry.updatedAt = isoNow();
@@ -267,7 +271,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [] };
+    const pending = { hooks: [], personas: [], commands: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -278,6 +282,10 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       deps: {
         registerPersona: (provider, pluginId) => pending.personas.push({ provider, pluginId }),
         unregisterPersona: (pluginId) => persona.unregister(pluginId),
+        registerPluginCommand: (definition, pluginId) => {
+          pending.commands.push({ definition, pluginId });
+          return true;
+        },
         sendToQQ: deps.sendToQQ,
         hasSession: deps.hasSession,
         fetch: deps.fetch,
@@ -312,7 +320,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -323,6 +331,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     entry.status = desc.status;
     entry.error = null;
     entry.hooks = [];
+    entry.commands = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -332,6 +341,20 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
         entry.hooks.push(name);
       }
       for (const { provider, pluginId } of desc.personas) commitPersona(provider, pluginId);
+      for (const { definition, pluginId } of desc.commands ?? []) {
+        try {
+          // 插件不强制写 id：用 pluginId:name 兜底，既唯一又能在审计里看出归属。
+          const registered = deps.commandRegistry?.register?.({
+            ...definition,
+            id: definition.id ?? `${pluginId}:${definition.name}`,
+            source: 'plugin',
+            pluginId,
+          });
+          if (registered) entry.commands.push(definition.name);
+        } catch (error) {
+          logLine(`⚠️ [plugins] ${entry.id} 注册命令 ${definition?.name ?? '?'} 失败：${error?.message ?? error}`);
+        }
+      }
       audit.append('activate', { plugin: entry.id, version: entry.version });
       logLine(`[plugins] 已加载 ${entry.id}@${entry.version}${entry.hooks.length ? `（${entry.hooks.join('/')}）` : ''}`);
     } else {
@@ -366,6 +389,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       status: entry.status,
       error: entry.error,
       hooks: [...entry.hooks],
+      commands: [...entry.commands],
       updatedAt: entry.updatedAt,
       counters: { ...entry.stats },
     };

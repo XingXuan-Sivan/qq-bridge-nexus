@@ -10,6 +10,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { DEFAULT_ROLES_DIR, listDefaultRoles, readDefaultRole, defaultRoleStatus, restoreDefaultRole, ROLE_BACKUP_KEEP } from '../src/default-roles.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const GROUP = 'group:456';
 
@@ -125,7 +126,7 @@ test('② 端到端：控制台恢复默认人格', async () => {
 });
 
 test('③ 控制台：人格页有「恢复默认人格」', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   assert.match(html, /<summary>恢复默认人格<\/summary>/);
   assert.match(html, /id="roleDefaultsList"/);
   assert.match(html, /\/api\/roles\/restore-default/);

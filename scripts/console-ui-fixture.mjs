@@ -456,8 +456,15 @@ async function handleFixtureScheduler(req, method, path, json, requests) {
 }
 
 export async function startConsoleFixture({ port = 0, original = false, htmlPath, logWrites = false } = {}) {
-  const file = htmlPath || resolve(projectRoot, original ? 'scripts/fixtures/console.before.html' : 'public/console.html');
+  const file = htmlPath || resolve(projectRoot, original ? 'scripts/fixtures/console.before.html' : 'public/console/index.html');
   await readFile(file); // Fail early rather than displaying a broken preview.
+  // 拆分后控制台的样式/脚本是独立文件：预览也要按真实路径提供，否则页面只剩空壳。
+  const assets = new Map();
+  if (!htmlPath && !original) {
+    const dir = resolve(projectRoot, 'public/console');
+    assets.set('/console/css/app.css', { body: await readFile(resolve(dir, 'css/app.css')), type: 'text/css; charset=utf-8' });
+    assets.set('/console/js/app.js', { body: await readFile(resolve(dir, 'js/app.js')), type: 'text/javascript; charset=utf-8' });
+  }
   const state = makeFixtureState();
   const requests = [];
   const unknownRequests = [];
@@ -470,10 +477,16 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       res.end(JSON.stringify(value));
     };
     try {
-      if (method === 'GET' && ['/', '/console', '/console.html'].includes(path)) {
+      if (method === 'GET' && ['/', '/console', '/console/'].includes(path)) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
           'content-security-policy': "connect-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'" });
         res.end(await readFile(file));
+        return;
+      }
+      if (method === 'GET' && assets.has(path)) {
+        const asset = assets.get(path);
+        res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'no-store' });
+        res.end(asset.body);
         return;
       }
       if (path === '/favicon.ico') { res.writeHead(204); res.end(); return; }

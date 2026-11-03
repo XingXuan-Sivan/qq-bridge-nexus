@@ -18,6 +18,7 @@ import {
 import { resolvePriceTable } from '../src/model-prices.js';
 import { zonedParts } from '../src/scheduler/time.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const at = (iso) => Date.parse(iso);
 const BJ = 'Asia/Shanghai';
@@ -183,7 +184,7 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
 });
 
 test('③ 控制台：静默开关卡片里有定时静默面板；任务表单有「静默时段内」选项', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-silent"'), html.indexOf('</section>', html.indexOf('<section id="section-silent"')));
   for (const id of ['silentOn', 'silentOff', 'silenceStatePill', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(sec.includes(`id="${id}"`), id);
   for (const opt of ['recordMessages', 'catchUpOnEnd', 'pauseAiTasks', 'includeOwnerPrivate']) assert.ok(sec.includes(`data-silence-opt="${opt}"`), opt);

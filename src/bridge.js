@@ -28,6 +28,7 @@ import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } fro
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 // HTTP 边界（docs/HTTP_BOUNDARY.md）：安全响应头集中一处，静态资源守卫在 src/http/static.mjs。
 import { SECURITY_HEADERS } from './http/security.mjs';
+import { resolveStaticPath, serveStaticFile } from './http/static.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import {
   createSlowFetchCache,
@@ -4462,6 +4463,13 @@ async function main() {
         sendJson({ ok: false, error: `Host 头不被允许（${hostHeader || '缺失'}）：控制台只接受本机回环访问` }, 403);
         return;
       }
+      // 控制台静态资源（样式/脚本/图标）不含数据，浏览器加载页面时也不会带令牌头：
+      // 放在鉴权之前，否则拆分后的 /console/js/app.js 会被 401 挡掉、页面只剩空壳。
+      // 只放行资源子目录；页面本身（/ 与 /console/）仍走下面的令牌校验。
+      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts)\//.test(url.pathname)) {
+        serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
+        return;
+      }
       // 控制台鉴权：所有请求需带 x-console-token 或 ?token=
       // 定长比较：`!==` 会在第一个不同的字符处短路，理论上可被本机进程用响应时延逐字节试探。
       // 令牌是 192 bit 随机值且只监听回环，所以这是纵深防御而非在野漏洞。
@@ -4631,13 +4639,21 @@ async function main() {
             return;
           }
         }
-        if (req.method === 'GET' && url.pathname === '/') {
-          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
-          try {
-            res.end(fs.readFileSync(path.join(ROOT, 'public', 'console.html'), 'utf8'));
-          } catch {
-            res.end('控制台页面缺失：qq-bridge/public/console.html');
+        if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/console/' || url.pathname === '/console')) {
+          // 控制台页面在 public/console/ 下（样式/脚本独立文件），首页直接给 index.html。
+          // 路径守卫与 404 语义见 docs/HTTP_BOUNDARY.md。
+          const resolved = resolveStaticPath(path.join(ROOT, 'public', 'console'), '/', { prefix: '/' });
+          if (!resolved.ok) {
+            res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+            res.end('控制台页面缺失：public/console/index.html');
+            return;
           }
+          serveStaticFile(res, resolved);
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/console/') {
+          // 带斜杠的 /console/ 与 '/' 同义：都返回控制台页面（鉴权已在上方完成）。
+          serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), '/', { prefix: '/' }));
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/status') {

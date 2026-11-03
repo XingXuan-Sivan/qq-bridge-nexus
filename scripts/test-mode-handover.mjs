@@ -16,6 +16,7 @@ import {
   buildOwnerHandover, buildGroupResumeNote, modeLabel,
 } from '../src/mode-handover.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const OWNER = 123;
 const GROUP = 456;
@@ -280,7 +281,7 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
       await h.ext.controller.panic();
     });
   }
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   assert.match(html, /data-v2-tool="handoverMemory"/, '二代工具开关里有这一项');
   assert.match(html, /data-v2-tool="schedule"/, '定时任务工具也有开关');
 });

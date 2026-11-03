@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 // 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
 import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
 
+import { readConsoleSource } from './console-source.mjs';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const html = fs.readFileSync(path.join(ROOT, 'public', 'console.html'), 'utf8');
+const html = readConsoleSource(ROOT);
 
 let bad = 0;
 const ok = (cond, name, extra = '') => {

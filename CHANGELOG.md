@@ -5,6 +5,12 @@
 
 ## 未发布
 
+### 重构：控制台拆成「骨架 + 样式 + 逻辑」三件套（2026-11-04）
+- `public/console.html`（372 KB 单文件）拆为 `public/console/index.html`（结构）、`css/app.css`、`js/app.js`（ES module，零构建）；原文件已删除。
+- 服务端新增控制台静态路由：只放行 `^/console/(css|js|img|fonts)/`，且**排在令牌校验之前**（浏览器取资源不带令牌头，放在后面会 401 白屏）；页面 `/`、`/console/` 仍需令牌，穿越/符号链接/白名单外扩展名一律 404。
+- 测试适配：新增 `scripts/console-source.mjs`（`consoleSourcePaths` / `readConsoleSource`），14 个读取旧 HTML 的用例改用它；`scripts/console-ui-fixture.mjs` 预读并分发 `/console/css/app.css`、`/console/js/app.js`。
+- 验证：无头 Edge 实测样式/脚本均 200、无控制台异常，深链与刷新保页、点击进页刷新、未知 hash 回落全部保持；`npm run test:audit` 77/80（失败仍为三项既有问题）。
+
 ### 修复：控制台刷新回首页、面包屑不可点、搜索候选被遮挡（2026-11-04）
 - 刷新保页：当前页写入 `sessionStorage['qqb-console-page']`，首屏按「hash → sessionStorage → overview」三层恢复；补 `popstate` 监听；未知 hash 回落并 `replaceState` 纠正地址栏，同时提示一次。
 - 面包屑可点：分组由 `#mainNav` 的 `.nav-label` 推导（不再维护第二份页面父子表），`renderBreadcrumb()` 生成 `<a href="#组内首页">`，当前页保留 `aria-current="page"`。

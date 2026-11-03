@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { normalizeCompactConfig, inputTokensOf, decideCompact, COMPACT_DEFAULTS, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX } from '../src/auto-compact.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const GROUP = 'group:456';
 const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
@@ -169,7 +170,7 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
 });
 
 test('⑤ 控制台：令牌与花费页有「上下文压缩」卡片', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-compact"'), html.indexOf('</section>', html.indexOf('<section id="section-compact"')));
   assert.match(sec, /data-page="usage"/);
   for (const v of ['early', 'dsh']) assert.ok(sec.includes(`name="compactMode" value="${v}"`), v);

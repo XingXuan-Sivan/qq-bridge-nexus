@@ -440,7 +440,7 @@ try {
     await navigate('persona');
     const created = '回归人格A';
     const renamed = '回归人格B';
-    const namesInList = () => page.locator('#roleList .persona-item strong').allTextContents();
+    const namesInList = () => page.locator('#roleList .tile strong').allTextContents();
     await page.locator('#newRoleName').fill(created);
     await page.locator('#newRoleContent').fill('# 回归人格A\n\n- 性格：用于回归测试');
     const [createRes] = await Promise.all([
@@ -448,9 +448,9 @@ try {
       page.locator('#roleCreate').click(),
     ]);
     assert.equal(createRes.status(), 200);
-    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .persona-item strong')].some((el) => el.textContent === n), created);
+    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
     // 点列表载入编辑：内容回填 + 按钮切到「保存修改」
-    await page.locator('#roleList .persona-item').filter({ hasText: created }).first().click();
+    await page.locator('#roleList .tile').filter({ hasText: created }).first().click();
     await page.waitForFunction((n) => document.getElementById('newRoleName').value === n, created);
     assert.match(await page.locator('#newRoleContent').inputValue(), /用于回归测试/);
     assert.equal((await page.locator('#roleCreate').textContent()).trim(), '保存修改');
@@ -464,7 +464,7 @@ try {
     // 重命名（编辑模式改名后再保存 = 先 rename 再 update），等列表真正刷新
     await page.locator('#newRoleName').fill(renamed);
     await page.locator('#roleCreate').click();
-    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .persona-item strong')].some((el) => el.textContent === n), renamed);
+    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), renamed);
     assert.match(await page.locator('#roleCreateMsg').textContent(), new RegExp(`已保存「${renamed}」`));
     assert.ok((await namesInList()).includes(renamed), '重命名后列表应出现新名字');
     assert.ok(!(await namesInList()).includes(created), '重命名后旧名字应消失');
@@ -474,7 +474,7 @@ try {
       page.locator('#roleDelete').click(),
     ]);
     assert.equal(deleteRes.status(), 200);
-    await page.waitForFunction((n) => ![...document.querySelectorAll('#roleList .persona-item strong')].some((el) => el.textContent === n), renamed);
+    await page.waitForFunction((n) => ![...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), renamed);
     assert.match(await page.locator('#roleCreateMsg').textContent(), /已删除/);
   });
 
@@ -516,7 +516,7 @@ try {
 
   if (!original) await test('人格注入上限可调，且随模式筛选后统计', async () => {
     await navigate('persona');
-    await page.waitForFunction(() => document.querySelectorAll('#roleList .persona-item').length > 0);
+    await page.waitForFunction(() => document.querySelectorAll('#roleList .tile').length > 0);
     const before = await page.locator('#roleInjectMax').inputValue();
     assert.equal(Number(before), 6000, '默认上限应为 6000');
     await page.locator('#roleInjectMax').fill('8000');

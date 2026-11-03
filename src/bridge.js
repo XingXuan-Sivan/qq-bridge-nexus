@@ -9096,20 +9096,37 @@ async function main() {
   // 更新 lastAiReplyAt / 活跃调度，实际群里什么都没收到，而且只有一行滚动日志能看出问题。
   const lastSendFailed = new Map(); // key -> true（下一次成功即清除）
 
-  function sendToQQ(key, msg) {
+  function sendToQQ(key, msg, opts = {}) {
     const assertSendAllowed = captureSendGuard(key);
     const safeMsg = redactKnownTokensOnly(msg);
     const [kind, id] = key.split(':');
     const parts = splitForQQ(safeMsg);
     lastSendFailed.delete(key);
-    for (const part of parts) {
+    parts.forEach((part, index) => {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
-          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          let outgoing = part;
+          // 出站装饰只作用于模型回复（auditAndSend 显式传 decorate），确认语/系统通知不受影响。
+          if (opts.decorate && plugins) {
+            try {
+              const decorated = await plugins.decorateReply({ key, text: part, partIndex: index, totalParts: parts.length });
+              if (decorated?.dropped) return;
+              if (typeof decorated?.text === 'string') outgoing = decorated.text;
+              // 装饰后的文本可能引入敏感内容：按原审计口径再挡一次，不能借装饰绕过。
+              if (outgoing !== part && shouldAuditKey(key) && SENSITIVE_RE.test(outgoing)) {
+                log(`⚠️ 装饰后的回复被安全策略拦截 (${key})`);
+                return;
+              }
+            } catch (error) {
+              log(`⚠️ 出站装饰失败，按原文发送：${error?.message ?? error}`);
+            }
+          }
+          if (!outgoing) return;
+          if (kind === 'private') await withTimeout(bot.sendPrivateMessage(Number(id), text(escapeCqText(outgoing))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
+          else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(outgoing))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
           // 插件只能看到实际发出去的那一段（已做 CQ 转义与令牌脱敏），用于落盘/统计类插件。
-          plugins?.notify('onAfterSend', { key, text: part, ok: true });
+          plugins?.notify('onAfterSend', { key, text: outgoing, ok: true });
         })
         .catch((error) => {
           lastSendFailed.set(key, true);
@@ -9117,7 +9134,7 @@ async function main() {
           plugins?.notify('onAfterSend', { key, text: part, ok: false, error: String(error?.message ?? error) });
         })
         .then(() => sleep(cfg.sendDelayMs));
-    }
+    });
     return sendChain;
   }
 
@@ -9904,7 +9921,8 @@ async function main() {
   }
 
   // 统一出站消息：先完整文本审计，再发送。返回是否真的发出。
-  async function auditAndSend(key, text) {
+  // 模型回复传 { decorate: true }，允许插件在发送前改写/取消（系统通知不装饰）。
+  async function auditAndSend(key, text, opts = {}) {
     const hasKnownToken = [...KNOWN_AGENT_TOKENS].some((t) => t && String(text ?? '').includes(t));
     if (shouldAuditKey(key) && (SENSITIVE_RE.test(text) || hasKnownToken)) {
       log(`⚠️ 回复被安全策略拦截 (${key})，疑似包含敏感信息${hasKnownToken ? '（含会话令牌）' : ''}`);
@@ -9914,7 +9932,7 @@ async function main() {
       }
       return false;
     }
-    await sendToQQ(key, text);
+    await sendToQQ(key, text, opts);
     recordOwnerTranscript(key, 'ai', text);
     return true;
   }
@@ -11248,7 +11266,7 @@ async function main() {
     }
     if (accepted.result.value.command?.text && !opts.silent && currentMode !== 'reserved2') {
       if (opts.farewell) social.exitingSessions.delete(sessionId);
-      await auditAndSend(key, mdToPlain(accepted.result.value.command.text));
+      await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
     } else if (accepted.result.value.command?.text && opts.silent && opts.farewell) {
       social.exitingSessions.delete(sessionId);
     }
@@ -13516,7 +13534,7 @@ async function main() {
     }
     if (accepted.result.value.command) {
       // 斜杠命令直接有结果，不走模型
-      if (accepted.result.value.command.text) await auditAndSend(key, mdToPlain(accepted.result.value.command.text));
+      if (accepted.result.value.command.text) await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
       return;
     }
     if (cfg.ackMessage && currentMode !== 'reserved2') await sendToQQ(key, cfg.ackMessage);

@@ -30,6 +30,7 @@ v1.1.2 的桥接把「入站 → 组 prompt → 调 DSH → 发 QQ」写在 `src
 | --- | --- | --- |
 | `onInbound` | `handleIncoming()`（`src/bridge.js:12694`）入口 | 私聊/群聊/断线补收都经过这里，只观察，不改消息 |
 | `onPromptBuild` | `deliverPromptNow()` 的 `modelText` 组装处（`src/bridge.js:10918`） | 可向本轮 prompt 前/后追加文本 |
+| `onReplyDecorate` | `auditAndSend()` → `sendToQQ()` 的逐段发送前（`src/bridge.js:9099`） | 只对模型回复；可改写或取消某一段，失败一律回落原文 |
 | `onAfterSend` | `sendToQQ()`（`src/bridge.js:8832`）成功发出之后 | 观察发送结果 |
 | `onShutdown` | 进程退出前 | 释放资源 |
 
@@ -247,7 +248,22 @@ ctx.prompt.registerBlock({
 - 多个插件都追加时，按 id 顺序：prepend 依次前插，append 依次后接。
 - 不允许修改 `text` 本身（要改写就自己返回新块，别偷偷替换别人的内容）。
 
-### 6.3 `onAfterSend(payload)`
+### 6.3 `onReplyDecorate(payload)`
+
+```js
+{ key, text, partIndex, totalParts }
+```
+
+发送前逐段调用（只对模型回复生效，确认语/系统通知不装饰）。返回值：
+
+- 字符串：替换这一段；
+- `{ text }`：同上，便于以后加字段；
+- `{ drop: true }`：取消这一段（其余段照发）；
+- `undefined` / `null`：不改。
+
+按插件 id 顺序**链式**执行，后一个拿到前一个改过的 `text`。任何一步抛错或超时都保留上一步的结果（最差是原文），装饰失败不会让消息发不出去；装饰后的文本仍会再过一次敏感信息审计，不能借装饰绕过。
+
+### 6.4 `onAfterSend(payload)`
 
 ```js
 { key, text, ok: boolean, error?: string }
@@ -255,7 +271,7 @@ ctx.prompt.registerBlock({
 
 只读观察。用途：记账、失败告警、触发后续动作（后续动作也要走 host-api）。
 
-### 6.4 `onShutdown()`
+### 6.5 `onShutdown()`
 
 无参数，同步或异步均可，超时 2s。
 
@@ -409,18 +425,19 @@ ctx.persona.register({
 
 **已实现**：
 
-- P1：内核（发现、校验、配置、钩子、权限、审计、人格注册表）；`onInbound` / `onPromptBuild` / `onAfterSend` 接线；人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`；第一个插件 `soulkit-persona`；控制台只读页。
+- P1：内核（发现、校验、配置、钩子、权限、审计、人格注册表）；`onInbound` / `onPromptBuild` / `onReplyDecorate` / `onAfterSend` 接线；人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`；第一个插件 `soulkit-persona`；控制台只读页。
 - P2a：运行期启用/停用/重载/详情（见 §5.1 / §11），控制台操作按钮与详情弹窗。
 - P2b：本地目录 / zip 安装、卸载进 `state/_trash`、控制台安装区与「卸载」按钮（见 §5.2）。
 - P2c：`watch: true` 时按文件变更自动重载对应插件（见 §5.3）；默认关闭。
-- P4：具名注入块 `ctx.prompt.registerBlock`（见 §5.4），注册随 `commit` 入表、停用按 pluginId 注销，按 priority 排序、块级限额、超总预算整块跳过。
+- P4：具名注入块 `ctx.prompt.registerBlock`（见 §5.4），注册随 `commit` 入表、停用按 pluginId 注销，按 priority 排序、块级限额、超总预算整块跳过；内置段 `core-stickers` / `core-digest` 已走同一注册表（单独预算）。
+- 出站装饰：`onReplyDecorate` 链式改写/取消模型回复的某一段（见 §6.3），装饰失败或超时一律回落原文。
 
 **明确不做（避免半成品）**：
 
 - 插件市场、下载、签名、来源校验。
 - 插件访问 MCP 工具或 DSH 内部对象。
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
-- 事件总线式的任意钩子（只认 §6 四个名字）。
+- 事件总线式的任意钩子（只认 §6 五个名字）。
 
 > P2 及以后的规划（启停/重载、安装卸载、命令注册、注入块、MCP/Skills 门槛）见 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md)。本文件只描述**已经实现**的能力；路线图里的条目在落地前不会写进这里。
 
@@ -437,4 +454,5 @@ ctx.persona.register({
 7. P2b：目录安装成功即激活、重复安装被拒；坏清单不残留目录与暂存；zip 里 `../`、超限、多个根都被拒；卸载把目录移进 `state/_trash` 且运行实例先被 dispose。
 8. P2c：默认 `watch:false`；设 `true` 后改 `plugins/<id>/index.mjs` 会在 5 秒内重载该插件（`counters.reloads` 增长），改 `plugins.json` 本身不会触发热生效；监听不可用时桥接照常启动。
 9. P4：两个插件各注册一个块 → prompt 末尾按 priority 顺序出现；单块超 `maxChars` 被截断、合计超总预算的块整块跳过；停用其中一个 → 它的块立即消失；`onPromptBuild` 的旧用法不受影响。
-10. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+10. 出站装饰：两个插件链式改写 → 后一个看到前一个的结果；`{ drop: true }` 取消该段；装饰抛错或超时 → 原文照发；停用后链自动缩短。
+11. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听/命令/注入块/出站装饰）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

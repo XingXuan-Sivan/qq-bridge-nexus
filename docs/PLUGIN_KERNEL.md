@@ -100,6 +100,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 {
   "enabled": true,
   "dir": "plugins",
+  "watch": false,
   "limits": {
     "hookTimeoutMs": 2000,
     "maxPlugins": 32,
@@ -178,6 +179,17 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 - 拒绝：绝对路径、`..` 段、符号链接（源目录与解压产物都查）、zip 路径穿越、超过 `install.maxBytes`、非 deflate/store 的压缩方法、加密/分卷/zip64。
 - 安装**就是执行代码**：接口只对控制台令牌（owner）开放，每次 install/uninstall 都写审计；不做签名与来源校验（明确不做，见 §13）。
 - `.staging-*` 目录不会被 `init()` 扫描，进程在安装中途崩掉也不会被当成插件加载。
+
+### 5.3 文件监听自动重载（P2c）
+
+`plugins.json` 的 `"watch": true` 时，内核用 `fs.watch(plugins/, { recursive: true })` 监听插件目录，**默认关闭**。
+
+- 只重载「变更文件所属的那一个插件」：路径按 `plugins/<id>/...` 解析成 id，其余插件不受影响。
+- 同一插件 500ms 内的多次事件合并成一次重载（编辑器保存经常连发好几个事件）。
+- 只重载 `active` 的插件；`disabled` / `invalid` 不动，避免删目录或半成品把状态刷成 `reload-failed`。
+- 重载走与手动 `POST /api/plugins/:id/reload` 完全相同的 staging 流程：失败保留旧实例，审计记 `reload-failed`。
+- 监听不可用（平台不支持 `recursive`、目录不可读、`watcher` 抛错）→ **降级为只手动重载**，日志一行，不影响桥接启动。
+- 为什么默认关：开发时方便，生产上「保存到一半」会触发半成品重载；宁可手动点一次。
 
 ---
 
@@ -361,6 +373,7 @@ ctx.persona.register({
 | 安装失败（清单/加载） | 刚放进 `plugins/` 的目录移进 `state/_trash` 回滚；暂存目录在 `finally` 清掉；记 `install-failed` |
 | 安装/卸载期间进程崩溃 | 残留 `.staging-*` 不被 `init()` 扫描；已提交的安装目录若清单坏了也只是 `invalid`，不影响其它插件 |
 | 卸载失败（目录移不走） | 返回错误且**不** dispose 运行实例，记 `uninstall-failed`，避免「目录还在、插件却没了」 |
+| 文件监听不可用 | `fs.watch` 抛错或 `watcher` 发 error → 停止监听、日志一行，后续只手动重载；不影响桥接启动 |
 
 ---
 
@@ -371,10 +384,10 @@ ctx.persona.register({
 - P1：内核（发现、校验、配置、钩子、权限、审计、人格注册表）；`onInbound` / `onPromptBuild` / `onAfterSend` 接线；人格 provider 生效于 `currentRoleHintV2` + `buildWakePromptV2Core`；第一个插件 `soulkit-persona`；控制台只读页。
 - P2a：运行期启用/停用/重载/详情（见 §5.1 / §11），控制台操作按钮与详情弹窗。
 - P2b：本地目录 / zip 安装、卸载进 `state/_trash`、控制台安装区与「卸载」按钮（见 §5.2）。
+- P2c：`watch: true` 时按文件变更自动重载对应插件（见 §5.3）；默认关闭。
 
 **明确不做（避免半成品）**：
 
-- 改 `plugins.json` 自动生效（P2c 文件监听）。
 - 插件市场、下载、签名、来源校验。
 - 插件访问 MCP 工具或 DSH 内部对象。
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
@@ -393,4 +406,5 @@ ctx.persona.register({
 5. 未申请 `send:qq` 的插件拿不到 `ctx.qq`。
 6. P2a：停用后钩子不再被调用、provider 不再解析；启用后恢复；重载读到新代码与新版本；重载一个 `activate` 抛错的插件 → 旧实例仍在、错误可见。
 7. P2b：目录安装成功即激活、重复安装被拒；坏清单不残留目录与暂存；zip 里 `../`、超限、多个根都被拒；卸载把目录移进 `state/_trash` 且运行实例先被 dispose。
-8. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。
+8. P2c：默认 `watch:false`；设 `true` 后改 `plugins/<id>/index.mjs` 会在 5 秒内重载该插件（`counters.reloads` 增长），改 `plugins.json` 本身不会触发热生效；监听不可用时桥接照常启动。
+9. `npm run test:audit` 通过；`test-plugin-kernel.mjs`（清单/配置/超时/关闭/启停重载/监听）、`test-plugin-install.mjs`（安装/回滚/穿越/卸载）与 `test-soulkit-persona.mjs`（拉卡/缓存/回落/TTL）全绿。

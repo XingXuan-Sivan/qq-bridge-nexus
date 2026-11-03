@@ -45,6 +45,18 @@ function readJsonFile(file) {
 }
 
 /**
+ * 把监听事件的绝对路径翻译成插件 id；不在 plugins/ 下或不是合法 id 的一律忽略。
+ * 提成顶层函数是为了单测能直接覆盖路径边界（不依赖 fs.watch 的平台行为）。
+ */
+export function pluginIdFromPath(pluginDir, filePath) {
+  const relative = path.relative(pluginDir, filePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  const [top] = relative.split(path.sep);
+  if (!top || top.startsWith('.') || !PLUGIN_ID_RE.test(top)) return null;
+  return top;
+}
+
+/**
  * @param {object} options
  * @param {string} options.rootDir   仓库根目录（plugins.json 与插件目录都在这里）
  * @param {string} options.stateDir  桥接 state 目录
@@ -85,6 +97,53 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
 
   function pluginRoot() {
     return path.join(rootDir, config.dir);
+  }
+
+  // ── 文件监听（P2c）─────────────────────────────────────────────
+  // 默认关。开启后只重载「变更文件所属的那一个插件」，其余插件不受影响；
+  // 同一个插件 500ms 内的多次事件合并成一次重载（编辑器保存经常连发好几个）。
+  const WATCH_DEBOUNCE_MS = 500;
+  let watcher = null;
+  const watchTimers = new Map();
+
+  /** 把监听事件的绝对路径翻译成插件 id；不在 plugins/ 下或不是合法 id 的一律忽略。 */
+  function pluginIdForEvent(filePath) {
+    return pluginIdFromPath(pluginRoot(), filePath);
+  }
+
+  function stopWatching() {
+    for (const timer of watchTimers.values()) clearTimeout(timer);
+    watchTimers.clear();
+    if (!watcher) return;
+    try { watcher.close(); } catch { /* 关不掉也不影响退出 */ }
+    watcher = null;
+  }
+
+  function startWatching() {
+    if (!config.watch || watcher) return;
+    try {
+      watcher = fs.watch(pluginRoot(), { recursive: true }, (_event, filename) => {
+        const id = pluginIdForEvent(path.join(pluginRoot(), String(filename ?? '')));
+        if (!id) return;
+        const existing = watchTimers.get(id);
+        if (existing) clearTimeout(existing);
+        watchTimers.set(id, setTimeout(() => {
+          watchTimers.delete(id);
+          const entry = entryById.get(id);
+          // 已卸载/停用/本身坏掉的插件不自动重载：避免「删目录」把 failed 状态反复刷成 reload-failed。
+          if (!entry || entry.status === 'disabled' || entry.status === 'invalid') return;
+          withLock(() => doReload(id)).catch((error) => logLine(`⚠️ [plugins] 监听重载 ${id} 失败：${error?.message ?? error}`));
+        }, WATCH_DEBOUNCE_MS));
+      });
+      watcher.on('error', (error) => {
+        logLine(`⚠️ [plugins] 文件监听出错，已停止（后续只能手动重载）：${error?.message ?? error}`);
+        stopWatching();
+      });
+      logLine(`[plugins] 文件监听已开启（${config.dir}，默认关，仅开发时建议开）`);
+    } catch (error) {
+      watcher = null;
+      logLine(`⚠️ [plugins] 文件监听不可用，已降级为手动重载：${error?.message ?? error}`);
+    }
   }
 
   function withLock(fn) {
@@ -367,6 +426,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     for (const name of names) {
       await loadOne(name);
     }
+    startWatching();
   }
 
   /** 分发一个钩子；每个钩子独立超时 + 捕获，返回各插件的结果（失败的不返回）。 */
@@ -464,6 +524,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return {
       enabled: config.enabled,
       dir: config.dir,
+      watch: config.watch,
+      watching: Boolean(watcher),
       limits: { ...config.limits },
       audit: { enabled: config.audit.enabled, file: 'state/plugin-audit.jsonl', maxBytes: config.audit.maxBytes, keep: config.audit.keep },
       // provider 的基本信息平铺在 persona 下（控制台不用再往下挖一层），但不再保留一份嵌套副本。
@@ -606,7 +668,9 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
   }
 
   async function shutdown() {
-    // 先发 onShutdown 再拆实例：钩子还挂在索引上，插件才能在退出前做最后一次清理。
+    // 先停监听：退出过程中触发的文件事件不应该再排队重载。
+    stopWatching();
+    // 再发 onShutdown、拆实例：钩子还挂在索引上，插件才能在退出前做最后一次清理。
     await callHook('onShutdown', {});
     for (const entry of entries) {
       if (entry.status !== 'active') continue;

@@ -1,6 +1,7 @@
 {
   "enabled": true,
   "dir": "plugins",
+  "watch": false,
   "limits": {
     "hookTimeoutMs": 2000,
     "maxPlugins": 32,

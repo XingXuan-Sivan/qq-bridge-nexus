@@ -16,7 +16,7 @@ import test from 'node:test';
 import { validateManifest, resolveMainPath } from '../src/plugins/manifest.mjs';
 import { normalizeConfig, defaultConfig } from '../src/plugins/config.mjs';
 import { createAuditLog } from '../src/plugins/audit.mjs';
-import { createPluginKernel } from '../src/plugins/kernel.mjs';
+import { createPluginKernel, pluginIdFromPath } from '../src/plugins/kernel.mjs';
 
 const DEMO_INDEX = `
 export function activate(ctx) {
@@ -326,4 +326,53 @@ test('管理动作：disable / enable / reload / detail，重载失败保留旧�
 
   await kernel.shutdown();
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('文件监听：路径到插件 id 只认 plugins/<id>/… 下的变更', () => {
+  const dir = path.join(os.tmpdir(), 'plugin-watch-map');
+  assert.equal(pluginIdFromPath(dir, path.join(dir, 'demo', 'index.mjs')), 'demo');
+  assert.equal(pluginIdFromPath(dir, path.join(dir, '.staging-x', 'plugin', 'plugin.json')), null);
+  assert.equal(pluginIdFromPath(dir, path.join(dir, '..', 'evil.mjs')), null);
+  assert.equal(pluginIdFromPath(dir, path.join(dir, 'Bad_Id', 'x.mjs')), null);
+  assert.equal(pluginIdFromPath(dir, dir), null);
+});
+
+test('配置：watch 只接受布尔值，默认关闭', () => {
+  assert.equal(defaultConfig().watch, false);
+  const on = normalizeConfig({ watch: true });
+  assert.equal(on.config.watch, true);
+  assert.equal(on.warnings.length, 0);
+
+  const bad = normalizeConfig({ watch: 'yes' });
+  assert.equal(bad.config.watch, false);
+  assert.match(bad.warnings.join('；'), /watch/);
+});
+
+test('文件监听（P2c）：开启后 watching 为真，改入口文件会在 5 秒内重载该插件', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ watch: true }, null, 2));
+  writePlugin(pluginsDir, 'watchme', DEMO_INDEX);
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    assert.equal(kernel.status().watch, true);
+    assert.equal(kernel.status().watching, true);
+    assert.equal(kernel.status().plugins.find((entry) => entry.id === 'watchme').counters.reloads, 0);
+
+    // 20ms 后再写：避免与首次 import 落在同一毫秒，导致 ?v=<mtime> 命中同一缓存。
+    await sleep(20);
+    fs.writeFileSync(path.join(pluginsDir, 'watchme', 'index.mjs'), DEMO_INDEX.replace('PRE:', 'PRE2:'));
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const reloads = kernel.status().plugins.find((entry) => entry.id === 'watchme')?.counters.reloads ?? 0;
+      if (reloads >= 1) break;
+      await sleep(100);
+    }
+    const entry = kernel.status().plugins.find((item) => item.id === 'watchme');
+    assert.ok(entry.counters.reloads >= 1, '改文件后应自动重载，实际 reloads=' + entry.counters.reloads);
+    assert.equal(entry.status, 'active');
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

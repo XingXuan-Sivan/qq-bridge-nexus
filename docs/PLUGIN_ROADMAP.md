@@ -42,7 +42,7 @@
 | --- | --- | --- | --- |
 | P2a | 插件启用/停用、重载、详情页 | ✅ 已完成（2026-11-03） | 1 天 |
 | P2b | 本地目录安装/卸载（含 zip） | ✅ 已完成（2026-11-03） | 1 天 |
-| P2c | 文件监听自动重载（默认关） | 待开始 | 半天 |
+| P2c | 文件监听自动重载（默认关） | ✅ 已完成（2026-11-03） | 半天 |
 | P2 同期 | 命令注册 + 具名注入块 | 待开始 | 1 天 |
 | P3 | 出站装饰、入站过滤链、定时任务类型、插件面板 | 候选 | 各 0.5–1 天 |
 | P3+ | Agent 工具注册、MCP 清单、Skills | 需先验证 | 未知 |
@@ -143,6 +143,15 @@
 - 对应 AstrBot 的 `ASTRBOT_RELOAD=1`（`astrbot/core/star/star_manager.py` 的 `_watch_plugins_changes`），但只做单层目录，不做递归深度限制之外的复杂过滤。
 
 风险：Windows 上 `fs.watch` recursive 在部分文件系统上不稳定，失败时降级为「不监听 + 日志一行」。
+
+### 实施记录与偏差（2026-11-03）
+
+- `pluginIdFromPath` 提成 `src/plugins/kernel.mjs` 的顶层导出：路径映射是纯函数，放闭包里既不好单测，也容易在 `pluginRoot()` 变化时漂移。
+- 监听事件可能连发（编辑器保存一次触发 change + rename），按 id 去抖 500ms，合并成一次重载。
+- 只重载 `active` 插件：`disabled`/`invalid` 不动，避免「删目录」把 failed 状态反复刷成 `reload-failed`。
+- `shutdown()` 第一步先 `stopWatching()`：退出过程中触发的文件事件不应该再排队重载。
+- 监听不可用（平台不支持 recursive、权限、`watcher` error）一律降级为手动，不影响桥接启动；日志只留一行。
+- 已知边界：`plugins.json` 本身不在监听范围内——改配置（含 `watch` 本身）仍需重启，这一点与 §12 的「不做热生效」一致。
 
 ---
 

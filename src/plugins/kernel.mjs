@@ -477,41 +477,73 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
   }
 
   /** 分发一个钩子；每个钩子独立超时 + 捕获，返回各插件的结果（失败的不返回）。 */
+  /** 调用单个插件的钩子：超时与异常在这里收口，调用方只关心返回值。 */
+  async function invokeHook(hookName, id, handler, payload) {
+    const entry = entryById.get(id);
+    if (!entry || entry.status !== 'active') return { ok: false, skipped: true };
+    entry.stats.hookCalls += 1;
+    entry.stats.lastHookAt = isoNow();
+    const startedAt = Date.now();
+    try {
+      const value = await withTimeout(
+        Promise.resolve().then(() => handler(payload)),
+        config.limits.hookTimeoutMs,
+        `${id}.${hookName}`,
+      );
+      return { ok: true, value };
+    } catch (error) {
+      const timedOut = error?.code === 'PLUGIN_HOOK_TIMEOUT';
+      const message = `${hookName}: ${error?.message ?? error}`;
+      if (entry) {
+        entry.stats.hookErrors += 1;
+        entry.stats.lastErrorAt = isoNow();
+        entry.error = message;
+      }
+      audit.append(timedOut ? 'timeout' : 'error', {
+        plugin: id,
+        hook: hookName,
+        durationMs: Date.now() - startedAt,
+        error: error?.message ?? String(error),
+      });
+      logLine(`⚠️ [plugins] ${id}.${hookName} ${timedOut ? '超时' : '失败'}：${error?.message ?? error}`);
+      return { ok: false, error };
+    }
+  }
+
   async function callHook(hookName, payload) {
     // 快照：管理动作可能在分发过程中改 hookIndex，直接遍历会漏掉或重复调用。
     const list = [...(hookIndex.get(hookName) ?? [])];
     const results = [];
     for (const { id, handler } of list) {
-      const entry = entryById.get(id);
-      if (!entry || entry.status !== 'active') continue;
-      entry.stats.hookCalls += 1;
-      entry.stats.lastHookAt = isoNow();
-      const startedAt = Date.now();
-      try {
-        const value = await withTimeout(
-          Promise.resolve().then(() => handler(payload)),
-          config.limits.hookTimeoutMs,
-          `${id}.${hookName}`,
-        );
-        if (value !== undefined) results.push({ id, value });
-      } catch (error) {
-        const timedOut = error?.code === 'PLUGIN_HOOK_TIMEOUT';
-        const message = `${hookName}: ${error?.message ?? error}`;
-        if (entry) {
-          entry.stats.hookErrors += 1;
-          entry.stats.lastErrorAt = isoNow();
-          entry.error = message;
-        }
-        audit.append(timedOut ? 'timeout' : 'error', {
-          plugin: id,
-          hook: hookName,
-          durationMs: Date.now() - startedAt,
-          error: error?.message ?? String(error),
-        });
-        logLine(`⚠️ [plugins] ${id}.${hookName} ${timedOut ? '超时' : '失败'}：${error?.message ?? error}`);
-      }
+      const result = await invokeHook(hookName, id, handler, payload);
+      if (result.ok && result.value !== undefined) results.push({ id, value: result.value });
     }
     return results;
+  }
+
+  /**
+   * 出站装饰：按注册顺序链式执行，后一个插件拿到前一个改过的文本。
+   * 任何一步抛错/超时都保留上一步的结果（最差是原文）——装饰失败绝不能让消息发不出去。
+   * 返回值 { text, dropped, changedBy }；`dropped` 表示这一段不发了。
+   */
+  async function decorateReply(payload) {
+    const list = [...(hookIndex.get('onReplyDecorate') ?? [])];
+    let text = String(payload?.text ?? '');
+    let dropped = false;
+    let changedBy = null;
+    for (const { id, handler } of list) {
+      const result = await invokeHook('onReplyDecorate', id, handler, { ...payload, text });
+      if (!result.ok || result.value === undefined || result.value === null) continue;
+      const value = result.value;
+      if (typeof value === 'string') {
+        if (value !== text) { text = value; changedBy = id; }
+        continue;
+      }
+      if (typeof value !== 'object') continue;
+      if (value.drop === true) { dropped = true; changedBy = id; break; }
+      if (typeof value.text === 'string' && value.text !== text) { text = value.text; changedBy = id; }
+    }
+    return { text, dropped, changedBy };
   }
 
   /** 观察型钩子：不等待、不向主链抛错。 */
@@ -740,6 +772,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     notify,
     promptAdditions,
     promptBlocks,
+    decorateReply,
     personaResolve,
     personaWarm,
     status,

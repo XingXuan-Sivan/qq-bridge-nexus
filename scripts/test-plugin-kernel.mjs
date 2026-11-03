@@ -458,3 +458,56 @@ test('文件监听（P2c）：开启后 watching 为真，改入口文件会在 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+const DECORATE_A = `
+export function activate() {
+  return { hooks: { onReplyDecorate: ({ text }) => ({ text: text + ' 🐳' }) } };
+}
+`;
+
+const DECORATE_B = `
+export function activate() {
+  return {
+    hooks: {
+      onReplyDecorate: ({ text }) => (text.includes('删掉我') ? { drop: true } : text.toUpperCase()),
+    },
+  };
+}
+`;
+
+const DECORATE_BOOM = `
+export function activate() {
+  return { hooks: { onReplyDecorate: () => { throw new Error('decorate boom'); } } };
+}
+`;
+
+test('出站装饰：链式改写、drop 取消、抛错保留上一步结果', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  const hooks = { permissions: [], hooks: ['onReplyDecorate'] };
+  writePlugin(pluginsDir, 'deco-a', DECORATE_A, hooks);
+  writePlugin(pluginsDir, 'deco-b', DECORATE_B, hooks);
+  writePlugin(pluginsDir, 'deco-boom', DECORATE_BOOM, hooks);
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    // 按 id 顺序链式执行：a 追加 → b 大写 → boom 抛错但不回滚前面的结果。
+    const chained = await kernel.decorateReply({ key: 'group:1', text: 'hi', partIndex: 0, totalParts: 1 });
+    assert.equal(chained.dropped, false);
+    assert.equal(chained.text, 'HI 🐳');
+    assert.equal(chained.changedBy, 'deco-b');
+    const boom = kernel.status().plugins.find((entry) => entry.id === 'deco-boom');
+    assert.equal(boom.counters.hookErrors, 1);
+
+    const dropped = await kernel.decorateReply({ key: 'group:1', text: '请删掉我', partIndex: 0, totalParts: 1 });
+    assert.equal(dropped.dropped, true);
+
+    // 停用中间那个：装饰链只剩 a，说明链是按实时 active 集合走的。
+    kernel.disable('deco-b');
+    const onlyA = await kernel.decorateReply({ key: 'group:1', text: 'hi', partIndex: 0, totalParts: 1 });
+    assert.equal(onlyA.text, 'hi 🐳');
+    assert.equal(onlyA.changedBy, 'deco-a');
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

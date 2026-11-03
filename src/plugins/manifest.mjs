@@ -8,7 +8,7 @@ export const API_VERSION = 1;
 
 export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'prompt:provide', 'send:qq', 'net:http', 'commands']);
 
-export const KNOWN_HOOKS = Object.freeze(['onInbound', 'onPromptBuild', 'onAfterSend', 'onShutdown']);
+export const KNOWN_HOOKS = Object.freeze(['onInbound', 'onPromptBuild', 'onReplyDecorate', 'onAfterSend', 'onShutdown']);
 
 // id 同时是目录名与审计里的标识，限制得窄一点：避免大小写不敏感文件系统上的歧义。
 export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;

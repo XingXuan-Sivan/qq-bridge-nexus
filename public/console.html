@@ -118,6 +118,31 @@ body {
   font-size:14px;
   line-height:1.65
 }
+/* 全局滚动条：细、圆角、悬停加深（Chromium / Firefox 各一套） */
+* {
+  scrollbar-width:thin;
+  scrollbar-color:rgba(148,163,184,.38) transparent
+}
+::-webkit-scrollbar {
+  width:9px;
+  height:9px
+}
+::-webkit-scrollbar-track {
+  background:transparent
+}
+::-webkit-scrollbar-thumb {
+  background:rgba(148,163,184,.38);
+  border-radius:999px;
+  border:2px solid transparent;
+  background-clip:content-box
+}
+::-webkit-scrollbar-thumb:hover {
+  background:rgba(148,163,184,.6);
+  background-clip:content-box
+}
+::-webkit-scrollbar-corner {
+  background:transparent
+}
 button,input,textarea,select {
   font:inherit
 }
@@ -304,14 +329,26 @@ button.planned {
   min-width:0
 }
 .topbar {
+  position:sticky;
+  top:0;
+  z-index:15;
   height:76px;
   border-bottom:1px solid var(--card-border);
   background:var(--topbar-bg);
+  backdrop-filter:blur(12px);
   display:flex;
   align-items:center;
   justify-content:space-between;
   padding:0 40px;
   gap:16px
+}
+.topbar .title-line {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--text-secondary);
+  font-size:13px;
+  font-weight:500
 }
 .breadcrumb {
   font-size:12px;
@@ -1918,31 +1955,13 @@ button:active:not(:disabled) {
   color:var(--muted-soft);
   background:none
 }
-/* 扩展页：插件卡片与管理行为表格（复用既有 --line / --surface-sunken / .pill / .tag 变量，不另起一套配色） */
-.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.plugin-card { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--card-border); border-radius: 12px; background: var(--surface-sunken); }
-.plugin-avatar { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 17px; font-weight: 600; letter-spacing: .5px; }
-.plugin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-.plugin-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.plugin-title strong { font-size: 14px; }
-.plugin-desc { font-size: 12px; line-height: 1.55; color: var(--muted); }
-.plugin-meta { display: flex; gap: 5px; flex-wrap: wrap; }
-.plugin-meta .tag { font-size: 11px; }
-.plugin-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
-.plugin-actions button { padding: 3px 8px; font-size: 12px; }
-.plugin-empty { padding: 18px; border: 1px dashed var(--card-border); border-radius: 12px; }
-.ext-table { margin-top: 10px; overflow: auto; border: 1px solid var(--card-border); border-radius: 10px; }
-.ext-table table { margin-top: 0; min-width: 820px; }
-.ext-table th { font-size: 11px; letter-spacing: .02em; }
-.ext-table td { font-size: 12px; vertical-align: middle; }
-.ext-table tr.group-row { cursor: pointer; user-select: none; background: var(--surface-sunken); }
-.ext-table tr.group-row td { font-size: 12px; color: var(--text-secondary); padding-top: 7px; padding-bottom: 7px; }
-.ext-table .caret { display: inline-block; width: 14px; color: var(--muted); transition: transform .15s ease; }
-.ext-table tr.group-row.open .caret { transform: rotate(90deg); }
-.ext-table tr.group-child.hidden { display: none; }
-.ext-table tr.group-child td:first-child { padding-left: 30px; }
-.ext-table tr.group-child:hover td { background: var(--surface-sunken); }
-.ext-table .linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; }
+/* 管理行为：表格容器与单元格全部复用框架的 .tool-log-table / table / .pill，这里只补分组行的展开状态 */
+.tool-log-table tr.group-row { cursor:pointer; user-select:none; background:var(--surface-sunken); }
+.tool-log-table tr.group-row td { color:var(--text-secondary); }
+.tool-log-table .caret { display:inline-block; width:14px; color:var(--muted); transition:transform .15s ease; }
+.tool-log-table tr.group-row.open .caret { transform:rotate(90deg); }
+.tool-log-table tr.group-child.hidden { display:none; }
+.tool-log-table tr.group-child td:first-child { padding-left:28px; }
 </style>
 </head>
 <body>
@@ -2228,12 +2247,12 @@ button:active:not(:disabled) {
         <input id="behaviorsSearch" placeholder="搜索命令或说明…" style="max-width:240px">
         <span class="meta" id="behaviorsMeta">加载中…</span>
       </div>
-      <div id="behaviorsBridge" class="ext-table" hidden></div>
-      <div id="behaviorsEmpty" class="plugin-empty meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
+      <div id="behaviorsBridge" class="tool-log-table" hidden></div>
+      <div id="behaviorsEmpty" class="meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
       <h3 style="margin-top:18px">DSH 会话命令 <span class="meta">只读</span></h3>
-      <div id="behaviorsDsh" class="ext-table">加载中…</div>
+      <div id="behaviorsDsh" class="tool-log-table">加载中…</div>
       <h3 style="margin-top:18px">Agent 工具 <span class="meta">只读</span></h3>
-      <div id="behaviorsTools" class="ext-table">加载中…</div>
+      <div id="behaviorsTools" class="tool-log-table">加载中…</div>
     </section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
@@ -6086,36 +6105,30 @@ async function refreshPlugins() {
     const personaSource = data?.persona?.plugin ? `插件 ${data.persona.plugin}` : 'roles/*.md';
     meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}`;
     if (!plugins.length) {
-      list.innerHTML = '<div class="plugin-empty meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
+      list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;
     }
-    const avatarColors = ['#5b8def', '#8a6cf6', '#d9709a', '#3fa98a', '#c9893d', '#4aa3c8'];
-    list.innerHTML = `<div class="plugin-grid">${plugins.map((plugin, index) => {
+    list.innerHTML = `<div class="grid">${plugins.map((plugin) => {
       const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
       const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
       const commands = (plugin.commands || []).length;
-      const permissions = (plugin.permissions || []).map((permission) => `<span class="tag">${esc(permission)}</span>`).join('');
+      const permissions = (plugin.permissions || []).map((permission) => `<span class="pill">${esc(permission)}</span>`).join('');
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
       const toggle = plugin.status === 'active'
-        ? `<button data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
-        : `<button data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
-      const letter = String(plugin.name || plugin.id || '?').trim().charAt(0).toUpperCase();
-      const color = avatarColors[index % avatarColors.length];
+        ? `<button class="small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
+        : `<button class="small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       const failures = Number(counters.hookErrors) || 0;
-      return `<div class="plugin-card">
-        <div class="plugin-avatar" style="background:${color}">${esc(letter)}</div>
-        <div class="plugin-main">
-          <div class="plugin-title"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="tag">v${esc(plugin.version || '—')}</span></div>
-          <div class="plugin-desc">${esc(plugin.description || '这个插件没有写说明。')}</div>
-          <div class="plugin-meta">
-            <span class="tag">${esc(plugin.id)}</span>${permissions}
-            <span class="tag">钩子 ${esc(hooks)}</span>${commands ? `<span class="tag">命令 ${commands}</span>` : ''}
-            <span class="tag">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="tag" style="color:#c0392b">失败 ${failures}</span>` : ''}
-          </div>
-          ${error}
-          <div class="plugin-actions">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
+      return `<div class="card">
+        <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="pill b">v${esc(plugin.version || '—')}</span></div>
+        <div class="meta">${esc(plugin.description || '这个插件没有写说明。')}</div>
+        <div class="row" style="margin-top:10px">
+          <span class="pill">${esc(plugin.id)}</span>${permissions}
+          <span class="pill">钩子 ${esc(hooks)}</span>${commands ? `<span class="pill">命令 ${commands}</span>` : ''}
+          <span class="pill">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="pill r">失败 ${failures}</span>` : ''}
         </div>
+        ${error}
+        <div class="row" style="margin-top:14px">${toggle}<button class="small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
       </div>`;
     }).join('')}</div>`;
   } catch (error) {
@@ -6124,7 +6137,7 @@ async function refreshPlugins() {
   }
 }
 
-document.getElementById('pluginsList').addEventListener('click', (event) => {
+document.addEventListener('click', (event) => {
   const button = event.target.closest('[data-plugin-action]');
   if (!button) return;
   const { pluginAction, pluginId } = button.dataset;
@@ -6656,11 +6669,11 @@ function behaviorTable(rows) {
     const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(name)}">`
       + `<td colspan="7"><span class="caret">▸</span> ${esc(name)} <span class="meta">${items.length} 条</span></td></tr>`;
     const childRows = items.map((entry) => {
-      const migrated = entry.migrated ? '<span class="tag active">注册表</span>' : '<span class="tag">旧链</span>';
+      const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
       const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
       const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
       const action = entry.source === 'plugin'
-        ? `<button class="linkish" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
+        ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
         : '<span class="meta">—</span>';
       const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
       return `<tr class="group-child${open ? '' : ' hidden'}" data-group="${esc(name)}">`
@@ -6707,11 +6720,11 @@ async function refreshBehaviors() {
     bridgeBox.innerHTML = rows.length ? behaviorTable(rows) : '';
     dshBox.innerHTML = (data.dsh ?? []).length
       ? simpleTable([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
-      : '<div class="plugin-empty meta">桥接没有记录到会调用的 DSH 命令。</div>';
+      : '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
     toolsBox.innerHTML = (data.tools ?? []).length
       ? simpleTable([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
         (data.tools ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.source), esc(item.managed)]))
-      : '<div class="plugin-empty meta">没有已登记的 Agent 工具。</div>';
+      : '<div class="meta">没有已登记的 Agent 工具。</div>';
   } catch (error) {
     meta.textContent = '';
     bridgeBox.hidden = true;
@@ -6728,9 +6741,9 @@ async function refreshSkills() {
     const skills = data.skills ?? [];
     meta.textContent = skills.length ? `共 ${skills.length} 个技能包` : '没有找到 SKILL.md（DSH_HOME/skills 或仓库 skills/ 下）';
     list.innerHTML = skills.length
-      ? `<div class="ext-table">${simpleTable([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
+      ? `<div class="tool-log-table">${simpleTable([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
         skills.map(skill => [`<strong>${esc(skill.name)}</strong>`, esc(skill.description || '（没有 description）'), `<code>${esc(skill.path)}</code>`]))}</div>`
-      : '<div class="plugin-empty meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
+      : '<div class="meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
   } catch (error) {
     meta.textContent = `读取失败：${error.message}`;
   }
@@ -6743,9 +6756,9 @@ async function refreshMcp() {
     const servers = data.mcp ?? [];
     meta.textContent = servers.length ? `桥接自带 ${servers.length} 个 MCP server` : '没有登记 MCP server';
     list.innerHTML = servers.length
-      ? `<div class="ext-table">${simpleTable([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
+      ? `<div class="tool-log-table">${simpleTable([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
         servers.map(server => [`<strong>${esc(server.name)}</strong>`, esc(server.note || ''), `<code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}`]))}</div>`
-      : '<div class="plugin-empty meta">没有登记 MCP server。</div>';
+      : '<div class="meta">没有登记 MCP server。</div>';
   } catch (error) {
     meta.textContent = `读取失败：${error.message}`;
   }

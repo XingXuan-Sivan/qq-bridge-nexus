@@ -1,34 +1,11 @@
-(function () {
-  // 如果通过 ?token= 进入（控制台启用鉴权时根路径会重定向带 token），存到 localStorage
-  const qs = new URLSearchParams(location.search);
-  const token = qs.get('token');
-  try { sessionStorage.removeItem('consoleTokenTried'); } catch {} // 页面已通过鉴权：清掉 401 页的自动重试标记
-  if (token) {
-    localStorage.setItem('consoleToken', token);
-    history.replaceState({}, '', location.pathname + location.hash);
-  }
-})();
+// 页面入口：装配各个模块，再启动首屏。所有「能力」都在 ./api.js、./ui.js、./router.js 里，
+// 这个文件只负责把数据、页面、事件接起来。
+import { api, bootstrapConsoleToken } from './api.js';
+import { esc, showConsoleToast } from './ui.js';
+import { consolePages, getCurrentPage, initRouter, onPageRefresh, setConsolePage, setSearchCloser } from './router.js';
 
-async function api(path, method, body, _retried = 0) {
-  const headers = body ? {'content-type':'application/json'} : {};
-  const token = localStorage.getItem('consoleToken');
-  if (token) headers['x-console-token'] = token;
-  const res = await fetch(path, { method: method || 'GET', headers, body: body ? JSON.stringify(body) : undefined });
-  if (res.status === 401) {
-    if (_retried >= 2) {
-      localStorage.removeItem('consoleToken');
-      throw new Error('未授权');
-    }
-    const t = prompt('请输入控制台访问令牌：');
-    if (t) {
-      localStorage.setItem('consoleToken', t.trim());
-      return api(path, method, body, _retried + 1);
-    }
-    localStorage.removeItem('consoleToken');
-    throw new Error('未授权');
-  }
-  return res.json();
-}
+bootstrapConsoleToken();
+
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;
 function renderStickerDescribe(r) {
@@ -56,7 +33,6 @@ document.addEventListener('click', async (e) => {
 });
 setTimeout(refreshStickerDescribe, 800);
 
-function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 // 上游静默时长的人话渲染：只用于 SnowLuma 健康提示（秒 / 分钟 / 小时）。
 function fmtAgoMs(ms) {
   if (ms === null || ms === undefined || ms === '') return '未知';
@@ -2205,128 +2181,19 @@ async function changeConsoleToken(generate) {
 document.getElementById('consoleTokenSave').addEventListener('click', () => changeConsoleToken(false));
 document.getElementById('consoleTokenRandom').addEventListener('click', () => changeConsoleToken(true));
 
-// Presentation layer: keep every existing control mounted so drafts and API contracts survive navigation.
-const consolePages = {
-  overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
-  sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
-  persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
-  plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
-  skills: ['技能', '让 AI 知道，自己会什么。', '只读查看 DSH 与仓库里可用的 SKILL.md 技能包，启停与安装交给 DSH 自己管。'],
-  mcp: ['MCP', '把外部能力，接成标准接口。', '只读查看桥接自带的 MCP server；DSH 侧的 MCP 配置不在这里改。'],
-  behaviors: ['管理行为', '命令与工具，一处看清。', '按注册表查看桥接命令（含迁移状态），并只读列出 DSH 会话命令与 Agent 工具。'],
-  'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
-  'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
-  slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
-  scheduler: ['定时任务', '到点的事，交给桥接记着。', '按时区和规则定时发消息，或叫 AI 到点来说；可以发给管理员私聊、白名单好友和群。'],
-  usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
-  access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
-  operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
-  reference: ['工具参考', '每一种能力，都清晰可见。', '查看桥接提供给 DSH 的 MCP 工具与用途。']
-};
-let currentConsolePage = 'overview';
-let toastTimer;
-function showConsoleToast(message) {
-  const toast = document.getElementById('consoleToast');
-  toast.textContent = message;
-  toast.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.hidden = true; }, 4200);
-}
-const PAGE_STORAGE_KEY = 'qqb-console-page';
-// 导航分组从 DOM 推导，避免「页面表加了一页、面包屑忘了改」这种漂移。
-const consolePageGroups = (() => {
-  const groups = [];
-  const byPage = {};
-  let current = null;
-  document.querySelectorAll('#mainNav > *').forEach(el => {
-    if (el.classList.contains('nav-label')) {
-      current = { label: el.textContent.trim(), pages: [] };
-      groups.push(current);
-    } else if (current && el.dataset && el.dataset.view) {
-      current.pages.push(el.dataset.view);
-      byPage[el.dataset.view] = current.label;
-    }
-  });
-  const firstPageOf = (label) => groups.find(group => group.label === label)?.pages[0] ?? 'overview';
-  return { groups, byPage, firstPageOf };
-})();
-function readStoredPage() {
-  try { return sessionStorage.getItem(PAGE_STORAGE_KEY); } catch { return null; }
-}
-function rememberPage(page) {
-  try { sessionStorage.setItem(PAGE_STORAGE_KEY, page); } catch { /* 隐私模式下写不进去，刷新回首页可接受 */ }
-}
-function renderBreadcrumb(page) {
-  const breadcrumb = document.querySelector('.breadcrumb');
-  if (!breadcrumb) return;
-  const group = consolePageGroups.byPage[page] ?? '工作空间';
-  const link = document.createElement('a');
-  link.className = 'crumb-link';
-  link.href = '#' + consolePageGroups.firstPageOf(group);
-  link.textContent = group;
-  const separator = document.createElement('span');
-  separator.className = 'crumb-sep';
-  separator.setAttribute('aria-hidden', 'true');
-  separator.textContent = '/';
-  const current = document.createElement('span');
-  current.className = 'crumb-current';
-  current.setAttribute('aria-current', 'page');
-  current.textContent = consolePages[page][0];
-  breadcrumb.replaceChildren(link, separator, current);
-}
-function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true } = {}) {
-  if (!Object.hasOwn(consolePages, page)) page = 'overview';
-  currentConsolePage = page;
-  if (persist) rememberPage(page);
-  document.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== page; });
-  document.querySelectorAll('#mainNav [data-view]').forEach(button => {
-    const selected = button.dataset.view === page;
-    button.classList.toggle('active', selected);
-    if (selected) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
-  });
-  renderBreadcrumb(page);
-  document.getElementById('pageTitle').textContent = consolePages[page][1];
-  document.getElementById('pageDescription').textContent = consolePages[page][2];
-  document.title = consolePages[page][0] + ' · QQ 桥接控制台';
-  if (updateHash && location.hash !== '#' + page) history.pushState({}, '', '#' + page);
-  closeConsoleSearch();
-  // 语音库按需加载：进入二代仿真页时才探测（避免每次开控制台都压网关）。
-  if (page === 'social-v2' && typeof loadVoiceLibrary === 'function') loadVoiceLibrary();
-  // 人格页：每次进入都重新读一次各会话用哪张卡（全局人格可能在别处改过、新会话可能刚建好）
-  if (page === 'persona' && typeof refreshRoleAssignments === 'function') setTimeout(() => { refreshRoleAssignments().catch(() => {}); refreshPersonaSources().catch(() => {}); }, 0);
-  if (page === 'plugins') setTimeout(() => { refreshPlugins().catch(() => {}); }, 0);
-  if (page === 'skills') setTimeout(() => { refreshSkills().catch(() => {}); }, 0);
-  if (page === 'mcp') setTimeout(() => { refreshMcp().catch(() => {}); }, 0);
-  if (page === 'behaviors') setTimeout(() => { refreshBehaviors().catch(() => {}); }, 0);
-  // 直接打开 #scheduler 时这里先于定时任务那段脚本执行：推迟到脚本跑完再刷新（否则会碰到还没初始化的变量）
-  if (page === 'scheduler' && typeof refreshScheduler === 'function') setTimeout(() => refreshScheduler(), 0);
-  if (focus) {
-    document.getElementById('mainContent').focus({ preventScroll: true });
-    document.getElementById(target || 'mainContent')?.scrollIntoView({ block: 'start', behavior: 'instant' });
-  }
-}
-document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
-  setConsolePage(button.dataset.view, { focus: true, target: button.dataset.target });
-}));
-window.addEventListener('hashchange', () => {
-  const page = location.hash.slice(1);
-  if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }
-  if (Object.hasOwn(consolePages, page)) { setConsolePage(page, { updateHash: false }); return; }
-  // 未知 hash：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
-  setConsolePage(readStoredPage() ?? 'overview', { updateHash: false });
-  history.replaceState({}, '', '#' + currentConsolePage);
+// 页面被切进来时要做什么：路由器只负责切页，具体刷新由各页面在这里注册。
+onPageRefresh('social-v2', () => { if (typeof loadVoiceLibrary === 'function') loadVoiceLibrary(); });
+onPageRefresh('persona', () => {
+  // 每次进入都重读一次：全局人格可能在别处改过、新会话可能刚建好。
+  refreshRoleAssignments().catch(() => {});
+  refreshPersonaSources().catch(() => {});
 });
-// 前进/后退时 hash 也会变，hashchange 已覆盖；这里兜住「只改了 history.state」的情况。
-window.addEventListener('popstate', () => {
-  const page = location.hash.slice(1);
-  if (Object.hasOwn(consolePages, page)) setConsolePage(page, { updateHash: false });
-});
-document.querySelector('.skip-link').addEventListener('click', event => {
-  event.preventDefault();
-  document.getElementById('mainContent').focus();
-  document.getElementById('mainContent').scrollIntoView({ block: 'start', behavior: 'instant' });
-});
+onPageRefresh('plugins', () => refreshPlugins().catch(() => {}));
+onPageRefresh('skills', () => refreshSkills().catch(() => {}));
+onPageRefresh('mcp', () => refreshMcp().catch(() => {}));
+onPageRefresh('behaviors', () => refreshBehaviors().catch(() => {}));
+// 直接打开 #scheduler 时路由器可能先于定时任务那段脚本执行：推到下一个宏任务再刷新。
+onPageRefresh('scheduler', () => setTimeout(() => refreshScheduler(), 0));
 function updateOverview(status, modeLabel) {
   const connection = document.getElementById('statusText');
   connection.textContent = status.dshReady ? 'DSH 已连接' : 'DSH 未连接';
@@ -2416,6 +2283,7 @@ document.querySelectorAll('section[data-page]').forEach(section => {
   });
 });
 function closeConsoleSearch() { searchResults.hidden = true; searchInput.setAttribute('aria-expanded','false'); }
+setSearchCloser(closeConsoleSearch);
 searchInput.addEventListener('input', () => {
   const query = searchInput.value.trim().toLowerCase();
   searchResults.replaceChildren();
@@ -3200,19 +3068,7 @@ document.getElementById('usageClear').addEventListener('click', async () => {
   refreshUsageRecent();
 });
 
-// 首屏：hash（深链/分享）→ sessionStorage（同标签页刷新）→ overview（B1）。
-// 刷新时浏览器可能丢掉 fragment，所以不能只读 hash。
-{
-  const hashPage = location.hash.slice(1);
-  const storedPage = readStoredPage();
-  const initialPage = Object.hasOwn(consolePages, hashPage) ? hashPage
-    : Object.hasOwn(consolePages, storedPage ?? '') ? storedPage
-      : 'overview';
-  const badHash = hashPage && !Object.hasOwn(consolePages, hashPage);
-  setConsolePage(initialPage, { updateHash:false });
-  if (location.hash.slice(1) !== initialPage) history.replaceState({}, '', '#' + initialPage);
-  if (badHash) showConsoleToast('没有这个页面，已回到上次停留的位置');
-}
+// 首屏恢复在 router.js 的 initRouter() 里（文件末尾统一调用）。
 
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────
@@ -3636,7 +3492,7 @@ silEl('silenceSave').addEventListener('click', async () => {
   silEl('silenceMsg').className = r.ok ? 'meta ok' : 'meta err';
   if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }
 });
-setInterval(() => { if (currentConsolePage === 'overview') refreshSilence(); }, 60_000);
+setInterval(() => { if (getCurrentPage() === 'overview') refreshSilence(); }, 60_000);
 // ── 发言上限（二代 socialV2.send.maxSendPerMinute / maxSendPerHour）────────────
 async function loadSendLimit() {
   const r = await api('/api/socialV2/config');
@@ -3686,14 +3542,14 @@ document.getElementById('compactSave').addEventListener('click', async () => {
 });
 document.getElementById('compactWan').addEventListener('focus', () => { const e = document.querySelector('input[name="compactMode"][value="early"]'); if (e) e.checked = true; });
 loadCompactConfig();
-setInterval(() => { if (currentConsolePage === 'usage') loadCompactConfig(); }, 60_000);
+setInterval(() => { if (getCurrentPage() === 'usage') loadCompactConfig(); }, 60_000);
 // 停在人格页时，每 15 秒同步一次「按会话设置人格」（QQ 里发了 /role、新群建了会话都能看到；没保存的选择会保留）
-setInterval(() => { if (currentConsolePage === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
-setInterval(() => { if (currentConsolePage === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
-setInterval(() => { if (currentConsolePage === 'plugins' && !document.hidden) refreshPlugins().catch(() => {}); }, 15_000);
-setInterval(() => { if (currentConsolePage === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);
-setInterval(() => { if (currentConsolePage === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);
-setInterval(() => { if (currentConsolePage === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
+setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
+setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
+setInterval(() => { if (getCurrentPage() === 'plugins' && !document.hidden) refreshPlugins().catch(() => {}); }, 15_000);
+setInterval(() => { if (getCurrentPage() === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);
+setInterval(() => { if (getCurrentPage() === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);
+setInterval(() => { if (getCurrentPage() === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
 refreshPlugins();
 document.getElementById('personaSourceRefresh')?.addEventListener('click', () => refreshPersonaSources().catch(() => {}));
 
@@ -3839,7 +3695,7 @@ document.getElementById('mcpRefresh')?.addEventListener('click', () => refreshMc
 refresh(); refreshRoles(); refreshWhitelist(); refreshSessions(); refreshPending(); refreshPresets(); loadSocialForm(); loadV2Config(); refreshV2Activity(); loadV2ToolLog(); loadV2SessionOptions(); refreshSocialStatus(); refreshSlang(); loadSlangConfig(); loadSecurity(); refreshSimPrompt(); refreshDshModel(); refreshSilence(); refreshUsage(); refreshUsageChart(); refreshUsageRecent();
 setInterval(() => { refresh(); refreshSessions(); refreshPending(); refreshSocialStatus(); refreshSlang(); }, 3000);
 // 用量看板只在本页可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
-setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); refreshUsageChart(); refreshUsageRecent(); }, 3000);
+setInterval(() => { if (getCurrentPage() !== 'usage') return; refreshUsage(); refreshUsageChart(); refreshUsageRecent(); }, 3000);
 // 主题切换（纯前端，不发任何请求；选择写入 localStorage，未选择时跟随系统）
 (function () {
   var root = document.documentElement;
@@ -3865,3 +3721,6 @@ setInterval(() => { if (currentConsolePage !== 'usage') return; refreshUsage(); 
     if (!stored()) apply(event.matches ? 'dark' : 'light', false);
   });
 })();
+
+// 所有页面模块就绪后再接管路由（首屏恢复也在这里）。
+initRouter();

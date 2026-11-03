@@ -341,7 +341,7 @@ ctx.persona.register({
   - `POST /api/plugins/install` → 目录安装收 `{ path }`（JSON），zip 安装收原始 body；成功 `{ ok, plugin }`，失败 `{ ok: false, error }`
   - `DELETE /api/plugins/:id` → `{ ok, id, trash }`（`trash` 为相对路径；失败 `{ ok: false, error }`）
 - 读取需要控制台令牌；这些接口都不在 agent token 白名单里，QQ 会话内的 AI 调不到。
-- 所有 POST 管理接口要求 `Content-Type: application/json`（控制台的 `api()` 已自动带），否则返回 415。
+- 所有写接口要求 `Content-Type: application/json`（控制台的 `api()` 已自动带），否则返回 415；例外是插件 zip 上传（`application/zip`）与插件卸载的 `DELETE`（无请求体），Origin 校验对两者同样生效。
 
 ---
 

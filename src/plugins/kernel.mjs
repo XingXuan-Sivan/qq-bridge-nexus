@@ -36,6 +36,15 @@ function isoNow() {
 }
 
 /**
+ * Windows 记事本等编辑器会给 JSON 加 BOM，`JSON.parse` 会把 BOM 当成非法字符。
+ * 插件清单是用户手写的，读的时候统一剥掉，避免「文件看着没错但插件装不上」。
+ */
+function readJsonFile(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+}
+
+/**
  * @param {object} options
  * @param {string} options.rootDir   仓库根目录（plugins.json 与插件目录都在这里）
  * @param {string} options.stateDir  桥接 state 目录
@@ -160,7 +169,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
 
     let raw;
     try {
-      raw = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      raw = readJsonFile(manifestFile);
     } catch (error) {
       return { ok: false, error: `读取 plugin.json 失败: ${error?.message ?? error}` };
     }
@@ -527,7 +536,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     try {
       let raw;
       try {
-        raw = JSON.parse(fs.readFileSync(path.join(staged.dir, 'plugin.json'), 'utf8'));
+        raw = readJsonFile(path.join(staged.dir, 'plugin.json'));
       } catch (error) {
         throw new Error(`plugin.json 不可读：${error?.message ?? error}`);
       }

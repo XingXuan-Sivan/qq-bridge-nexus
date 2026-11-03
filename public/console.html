@@ -6081,6 +6081,8 @@ async function openPluginDetail(id) {
       `名称：${plugin.name}    版本：${plugin.version || '—'}`,
       `权限：${(plugin.permissions || []).join(', ') || '—'}`,
       `钩子：${(plugin.hooks || []).join(', ') || '—'}`,
+      `命令：${(plugin.commands || []).join(', ') || '—'}`,
+      `注入块：${(plugin.blocks || []).join(', ') || '—'}`,,
       `入口：${plugin.source?.dir || '—'} / ${plugin.source?.main || '—'}`,
       `调用 ${plugin.counters?.hookCalls ?? 0} 次 · 失败 ${plugin.counters?.hookErrors ?? 0} 次 · 重载 ${plugin.counters?.reloads ?? 0} 次`,
       plugin.updatedAt ? `最近变更：${plugin.updatedAt}` : '',
@@ -6163,6 +6165,7 @@ async function refreshPlugins() {
       const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
       const commands = (plugin.commands || []).length;
+      const blocks = (plugin.blocks || []).length;
       const permissions = (plugin.permissions || []).map((permission) => `<span class="pill">${esc(permission)}</span>`).join('');
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
       const toggle = plugin.status === 'active'
@@ -6174,7 +6177,7 @@ async function refreshPlugins() {
         <div class="meta">${esc(plugin.description || '这个插件没有写说明。')}</div>
         <div class="row" style="margin-top:10px">
           <span class="pill">${esc(plugin.id)}</span>${permissions}
-          <span class="pill">钩子 ${esc(hooks)}</span>${commands ? `<span class="pill">命令 ${commands}</span>` : ''}
+          <span class="pill">钩子 ${esc(hooks)}</span>${commands ? `<span class="pill">命令 ${commands}</span>` : ''}${blocks ? `<span class="pill">注入块 ${blocks}</span>` : ''}
           <span class="pill">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="pill r">失败 ${failures}</span>` : ''}
         </div>
         ${error}

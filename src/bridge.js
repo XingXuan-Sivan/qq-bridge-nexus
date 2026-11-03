@@ -11156,6 +11156,20 @@ async function main() {
       if (additions.prependText) modelText = `${additions.prependText}\n\n${modelText}`;
       if (additions.appendText) modelText = `${modelText}\n\n${additions.appendText}`;
     }
+    if (plugins) {
+      // 具名注入块（P4）：按 priority 排序、按块限额，超过总预算的块整块跳过。
+      try {
+        const injected = await plugins.promptBlocks({
+          key,
+          sessionId,
+          mode: currentMode,
+          persona: currentRoleName(key),
+        });
+        if (injected?.text) modelText = `${modelText}\n\n${injected.text}`;
+      } catch (error) {
+        log(`⚠️ 插件注入块渲染失败，本轮跳过：${error?.message ?? error}`);
+      }
+    }
     let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(opts.media) && opts.media.length > 0) {
       const imageParts = await resolveMediaList(opts.media);

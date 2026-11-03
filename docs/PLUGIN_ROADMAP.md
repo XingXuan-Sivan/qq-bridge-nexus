@@ -47,7 +47,7 @@
 | P3b | 插件注册命令（`ctx.commands.register`） | ✅ 已完成（2026-11-03） | 1 天 |
 | P3c | 技能 / MCP 只读清单（真管理需 DSH 接口） | 待验证 | 1–2 天 |
 | P3d | 「扩展」四页 UI 精修：管理行为表格化 + 命令分组层级、插件卡片重做、与既有控制台视觉统一 | ✅ 已完成（2026-11-03） | 0.5 天 |
-| P4 | 具名注入块、出站装饰、入站过滤链、定时任务类型 | 候选 | 各 0.5–1 天 |
+| P4 | 具名注入块（✅ 已于 2026-11-03 完成）；出站装饰、入站过滤链、定时任务类型 | 部分完成 | 各 0.5–1 天 |
 | P5 | Agent 工具注册 | 需先验证 | 未知 |
 
 排序原则：**先让插件「能管」，再让插件「能干活」，最后才碰主链与 DSH 侧**。
@@ -201,6 +201,15 @@
 - 怎么做：现有 `promptAdditions` 保留为兼容层，内部改为调用块注册表；`state/prompt-blocks.json` 已有跟踪能力，扩展成「按 block id 记录注入与跳过」。
 - 代价：低。风险：块多了会稀释人格——用 `maxPromptAppendChars` 总上限兜底，并在控制台显示每块占比。
 - 验收：注入两块，顺序与限额符合声明；关掉一块后 prompt 里不再出现。
+
+实施记录与偏差（✅ 已完成，2026-11-03）：
+
+- 新增 `src/plugins/prompt-blocks.mjs`：注册表负责排序、块级截断、总预算跳块与错误隔离；`render` 返回 `{ text, blocks, chars }`，`status()` 给控制台看每块的 `calls/failures/lastError/lastRunAt`。
+- 注册走 staging：插件在 `activate` 里调用 `ctx.prompt.registerBlock`，先入 `pending.blocks`，`commit` 成功才进表；`disposeEntry` 按 pluginId 注销，并清空 `entry.blocks`。
+- 与 `promptAdditions` 的关系：**没有**把旧接口改成兼容层内部调块（那样会把「前缀/后缀」语义硬塞进「块」），而是让两者并列、共用 `limits.maxPromptAppendChars` 这一份总预算；`deliverPromptNow` 先拼钩子前后缀，再接块文本。
+- 总预算超限时整块跳过（记 `budget`），不截半句；单块超 `maxChars` 才截断（记 `truncated`）。这条是有意的：块是「一段完整内容」，半句话比没有更糟。
+- `status().promptBlocks` 平铺在 `/api/plugins` 响应里；插件条目带 `blocks`（注册的 id 列表），控制台详情可据此显示。
+- 没有新增审计事件：块渲染失败只写日志与 `lastError`，不写 `plugin-audit.jsonl`（它记的是生命周期，不是每轮渲染）。
 
 ### 7.5 「扩展」四页 UI 精修（P3d）
 

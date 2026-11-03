@@ -90,6 +90,13 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     };
   }
 
+  if (granted.has('prompt:provide')) {
+    // 具名注入块：与 persona 一样，注册先进 staging，activate 成功后才入表。
+    ctx.prompt = {
+      registerBlock: (definition) => deps.registerPromptBlock(definition, id),
+    };
+  }
+
   if (granted.has('send:qq')) {
     ctx.qq = {
       async send(key, text) {

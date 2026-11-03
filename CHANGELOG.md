@@ -67,6 +67,15 @@
 - 测试：`test-console-static` 通过；两段内联脚本语法检查通过。
 - 文档：`PLUGIN_ROADMAP.md` §3 P3d 标完成、§7.5 补「实施记录与偏差」。
 
+### 新增：具名注入块（P4）
+- 新权限位 `prompt:provide`，插件可在 `activate(ctx)` 里 `ctx.prompt.registerBlock({ id, priority, maxChars, render })`，把「最近记忆」「贴纸策略」这类内容作为独立块注入 prompt，而不是挤在一条 append 管道里。
+- 注册随 `commit` 入表：`activate` 抛错、清单非法、重载失败都不会留下半截块；停用 / 卸载 / 重载按 `pluginId` 批量注销，旧块不会继续进 prompt。
+- 渲染按 `priority` 升序（同优先级按 id），单块超 `maxChars` 截断（`truncated`），合计超 `limits.maxPromptAppendChars` 的块整块跳过（`budget`），单块抛错只跳过该块（`error`）。
+- `status().promptBlocks` 与 `/api/plugins` 的 `blocks` 字段暴露每块的状态，控制台插件详情可见。
+- 与 `onPromptBuild` 分工：钩子改文本/加前后缀，注入块稳定贡献一段内容；两者共用同一总预算，`promptAdditions` 语义不变。
+- 测试：`test-plugin-kernel.mjs` 增至 13 个用例（顺序、截断、预算跳块、抛错隔离、停用消失、启用恢复）。
+- 文档：`PLUGIN_KERNEL.md` 新增 §5.4、§7/§8 增 `prompt:provide`、§13/§14 同步；`PLUGIN_ROADMAP.md` P4 标「部分完成」并补实施记录。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

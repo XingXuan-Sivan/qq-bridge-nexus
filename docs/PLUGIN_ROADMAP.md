@@ -215,7 +215,8 @@
 - 表格用 `<table>` + 组行 `<tr class="group-row">` / 子行 `<tr class="group-child">`；首组默认展开，点组行折叠；搜索按 name/help/aliases 过滤，权限与来源是下拉，三者叠加。
 - 首版自造了 `.plugin-*` / `.ext-table` 一套样式，被用户指出「界面简陋、应复用框架组件」后全部删除：表格容器改用 `.tool-log-table`，卡片改用 `.grid` + `.card` + `.row` / `.meta`，标签一律用 `.pill`（`.tag` 是 8×18 的大号点击胶囊，放表格与卡片里会撑高行、挤压列），组行展开状态只留 6 条 `.tool-log-table tr.group-row` 相关样式。
 - 控制台没有 `--line` 变量（旧平铺行用它导致分隔线不显示），统一改用 `--card-border`。
-- 顶栏 `.topbar` 改 `position:sticky; top:0`（含 `.title-line`），页面内容滚动时面包屑与状态不消失；侧栏本就 `fixed`。滚动条改成全局细样式（`scrollbar-width:thin` + 9px webkit thumb），不再逐容器写。
+- 外壳改成标准三容器布局：`body` 是固定高度的网格（`grid-template-columns:var(--sidebar-w) minmax(0,1fr)`、`grid-template-rows:var(--topbar-h) minmax(0,1fr)`、`height:100dvh`、`overflow:hidden`），`aside` 占左列两行，右侧 `.workspace` 自己再分 `header` + `main` 两行，`main` 是唯一滚动容器。不再用「侧栏 fixed + workspace 左偏移 + topbar sticky」那套并列机制；两处媒体查询只改 `--sidebar-w` / `--topbar-h`。
+- 滚动条：全局细样式（`scrollbar-width:thin` + 9px webkit thumb），去掉上下箭头（`::-webkit-scrollbar-button{display:none}`），默认透明、悬停容器才显形；`overflow-y:auto` 保证只在该滚的时候出现。
 - 插件卡片：`.grid` 两列、`.card` 内标题行 + 描述 + 标签行 + 按钮行（`button.small`），无自造头像；`/api/plugins` 因此补了 `description` 与 `permissions` 两个字段。
 - 技能页与 MCP 页同步使用 `.tool-log-table` 表格（技能：名称/说明/路径；MCP：服务器/说明/入口与工具），空态统一 `.meta`。
 - 「详情」这类跨区域按钮的点击委托从 `#pluginsList` 提到 `document`，否则管理行为表里的按钮点不到。

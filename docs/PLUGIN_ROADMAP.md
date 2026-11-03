@@ -261,11 +261,12 @@
 - 实现口径：默认关；关着时完全不调用过滤逻辑，行为与没有插件时一致；`drop` 发生在写社交历史之前（消息不留痕）；替换文本上限 4000 字；无权限动作被忽略并记审计 `inbound-denied`。
 - 验收：`scripts/test-plugin-kernel.mjs` 增「默认关不生效、开启后可丢可改、无权限动作被忽略」用例（15/15）。
 
-### 8.3 定时任务类型
+### 8.3 定时任务类型（✅ 2026-11-04）
 
 - 做什么：插件注册 task kind + runner，进入 [src/scheduler/engine.js](../src/scheduler/engine.js)。
+- 落地：权限 `task-type:provide`，`ctx.scheduler.registerTaskType({ id, label, description?, validate?, run })`；内核 `taskTypeIndex` 按 pluginId 注销，调度器通过 `taskKinds` 适配器只问「有没有 / 怎么校验 / 叫什么」；控制台编辑器加「插件任务类型」下拉 + payload JSON，列表用 `kindLabel` 与 payload 预览。
 - 代价：中——要处理持久化、恢复、时区。
-- 验收：自定义类型的任务重启后仍在。
+- 验收：自定义类型的任务重启后仍在（`test-scheduler.mjs` ⑦：写入 `state/scheduler.json`、重建调度器后 kind/payload/label 都在；未注册时拒绝新建、已有任务保留）。
 
 ### 8.4 插件控制台面板
 

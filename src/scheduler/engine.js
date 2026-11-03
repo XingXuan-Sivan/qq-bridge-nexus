@@ -95,7 +95,7 @@ export function inQuietHours(ms, limits, tz) {
  *   sensitive?: (text) => boolean,
  * }} deps
  */
-export function createScheduler({ file, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false }) {
+export function createScheduler({ file, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false, taskKinds = null }) {
   const holidaySet = new Set(holidays);
   let data = { version: 1, settings: normalizeSettings(), tasks: [], history: [], counters: {}, nextId: 1 };
   let timer = null;
@@ -178,7 +178,9 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
     const name = String(input.name ?? existing?.name ?? '').trim().slice(0, 40);
     out.name = name || '未命名任务';
     const kind = String(input.kind ?? existing?.kind ?? 'text');
-    if (!['text', 'ai'].includes(kind)) throw new Error('内容类型只能是 text（固定文字）或 ai（叫 AI 来说）');
+    const builtinKind = kind === 'text' || kind === 'ai';
+    // 插件任务类型：只有插件注册过才允许，payload 交给插件的 validate 规范化。
+    if (!builtinKind && !taskKinds?.has?.(kind)) throw new Error(`未知任务类型「${kind}」（插件未启用或名字不对）`);
     out.kind = kind;
     const text = String(input.text ?? existing?.text ?? '').trim();
     const instruction = String(input.instruction ?? existing?.instruction ?? '').trim();
@@ -186,10 +188,12 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       if (!text) throw new Error('固定文字任务要填要发的内容');
       if (text.length > L.maxTextChars) throw new Error(`文字最多 ${L.maxTextChars} 字`);
       if (sensitive(text)) throw new Error('内容疑似含路径 / 凭据，不能登记');
-    } else {
+    } else if (kind === 'ai') {
       if (!instruction) throw new Error('「叫 AI 来说」的任务要写清楚让 AI 做什么');
       if (instruction.length > L.maxInstructionChars) throw new Error(`给 AI 的说明最多 ${L.maxInstructionChars} 字`);
       if (sensitive(instruction)) throw new Error('说明疑似含路径 / 凭据，不能登记');
+    } else {
+      out.payload = taskKinds.validate(kind, input);
     }
     out.text = kind === 'text' ? text : '';
     out.instruction = kind === 'ai' ? instruction : '';
@@ -237,6 +241,7 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
     const shown = task.nextScheduledAt ?? task.nextRunAt;
     return {
       ...task,
+      kindLabel: taskKinds?.label?.(task.kind) ?? null,
       scheduleText: describeSchedule(task.schedule),
       nextRunText: shown ? `${describeInstant(shown, tzOf(task))}${jittered ? `（前后 ${jitterMin} 分钟内）` : ''}${task.enabled ? '' : '，已暂停'}` : null,
     };

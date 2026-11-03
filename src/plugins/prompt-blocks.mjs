@@ -111,6 +111,38 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     return { text: parts.join('\n\n'), blocks: report, chars: total };
   }
 
+  /**
+   * 渲染单个块（同步）。给内置段落的块化用：`buildWakePromptV2Core` 是同步函数，
+   * 而内置 render 只做字符串拼装，没有异步需求。返回 Promise 的 render 会被判为失败，
+   * 避免「偷偷异步」导致文本悄悄变成空串。
+   */
+  function renderBlockSync(id, context = {}) {
+    const block = blocks.get(id);
+    if (!block) return { id, status: 'missing', text: '', chars: 0 };
+    let text = '';
+    block.calls += 1;
+    block.lastRunAt = new Date(now()).toISOString();
+    try {
+      const value = block.render(context);
+      if (value && typeof value.then === 'function') throw new Error('同步渲染不接受 Promise 返回值');
+      text = toText(value);
+    } catch (error) {
+      block.failures += 1;
+      block.lastError = String(error?.message ?? error).slice(0, 300);
+      return { id, pluginId: block.pluginId, status: 'error', text: '', chars: 0 };
+    }
+    if (!text.trim()) return { id, pluginId: block.pluginId, status: 'empty', text: '', chars: 0 };
+    const clipped = text.length > block.maxChars ? text.slice(0, block.maxChars) : text;
+    stats.injected += 1;
+    return {
+      id,
+      pluginId: block.pluginId,
+      status: clipped.length < text.length ? 'truncated' : 'injected',
+      text: clipped,
+      chars: clipped.length,
+    };
+  }
+
   function status() {
     return {
       total: blocks.size,
@@ -124,5 +156,5 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     };
   }
 
-  return { register, unregisterPlugin, list, render, status };
+  return { register, unregisterPlugin, list, render, renderBlockSync, status };
 }

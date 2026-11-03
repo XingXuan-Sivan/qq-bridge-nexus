@@ -213,6 +213,7 @@ ctx.prompt.registerBlock({
 - 单块 `render` 抛错只跳过该块（记 `error`），不影响其它块与主链路。
 - `status().promptBlocks` 返回 `{ total, maxTotalChars, renders, injected, skipped, blocks: [...] }`，控制台插件详情能看到每个块的状态；`/api/plugins` 的条目带 `blocks`（注册的 id 列表）。
 - 与 `onPromptBuild` 的分工：钩子适合「改别人的文本、加前后缀」，注入块适合「稳定贡献一段有归属的内容」；两者共用同一个总预算。
+- 内置段落也用同一套语义：贴纸参考（`core-stickers`）与记忆摘要（`core-digest`）已迁到 bridge 自建的注册表，可用 `config.json` 的 `promptBlocks` 单独关闭或收紧限额（`{ "core-digest": { "enabled": false } }`）。**它与插件块分账**：插件块仍受 `plugins.json` 的 `limits.maxPromptAppendChars` 约束，内置段落维持原有长度，避免互挤；`/api/plugins` 的 `coreBlocks` 返回这两块的上限与调用次数。
 
 ---
 

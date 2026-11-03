@@ -39,6 +39,7 @@ import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
 // 人格三层解析是纯函数模块（不读盘、不联网），直接用真实现：夹具要验证它读到的本地卡是否正确。
 import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
+import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
 import * as voiceLib from '../src/send-voice-lib.js';
 import * as presetPrompt from '../src/preset-prompt.js';
@@ -215,6 +216,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 命令注册表用真实现（纯内存、无 IO），命令迁移后的行为才能在 VM 里验证。
     createPersonaResolver,
     createCommandRegistry,
+createPromptBlockRegistry,
     createPluginKernel: async () => ({
       init: async () => {},
       notify: () => {},

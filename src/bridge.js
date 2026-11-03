@@ -113,6 +113,8 @@ import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, proce
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
+// 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
+import { createPromptBlockRegistry } from './plugins/prompt-blocks.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
@@ -725,6 +727,20 @@ function normalizeIdList(value) {
 }
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
+function normalizePromptBlocks(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [id, value] of Object.entries(raw)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const conf = {};
+    if (typeof value.enabled === 'boolean') conf.enabled = value.enabled;
+    const maxChars = Number(value.maxChars);
+    if (Number.isInteger(maxChars) && maxChars > 0 && maxChars <= 100000) conf.maxChars = maxChars;
+    out[id] = conf;
+  }
+  return out;
+}
+
 function loadConfig() {
   const p = path.join(ROOT, 'config.json');
   const file = readJsonSafe(p, null, true);
@@ -824,6 +840,8 @@ function loadConfig() {
       longGapMaxMs: 5000,             // 长间隔上限（当前控制台保存值）
       ...(file.social ?? {})
     },
+    // 内置段落的块化（P4）：按块 id 配 enabled / maxChars。只有显式 false 才关闭，配错一律回落默认。
+    promptBlocks: normalizePromptBlocks(file.promptBlocks),
     socialV2: {
       enabled: true,
       autoReplyCheckMs: 30000,
@@ -1542,6 +1560,31 @@ async function main() {
   // 插件内核（docs/PLUGIN_KERNEL.md §5/§12）：插件出问题只影响它自己，绝不挡住桥接启动。
   // 命令注册表先于插件内核创建：插件在 activate 里就可能注册命令，内核需要拿到同一个实例。
   const commandRegistry = createCommandRegistry({ log });
+
+  // 内置段落的块化（P4 迁移第一批：贴纸 + 记忆摘要）。
+  // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
+  // 插件块受 plugins.json 的 maxPromptAppendChars（4000）约束，内置段落沿用现有长度，不能互相挤占。
+  const corePromptBlocks = createPromptBlockRegistry({ log, maxTotalChars: 200000 });
+  {
+    const coreBlockConf = (id) => (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[id] : null) || {};
+    const registerCoreBlock = (id, priority, render) => {
+      const conf = coreBlockConf(id);
+      if (conf.enabled === false) return;
+      const maxChars = Number(conf.maxChars);
+      corePromptBlocks.register({
+        id,
+        priority,
+        ...(Number.isInteger(maxChars) && maxChars > 0 ? { maxChars } : {}),
+        render,
+      }, 'core');
+    };
+    registerCoreBlock('core-stickers', 100, ({ stickerFull, blockPlan }) => {
+      if (!stickerFull) return '';
+      // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；blockPlan 为空（测试、旧调用方）时照旧完整给。
+      return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
+    });
+    registerCoreBlock('core-digest', 200, ({ memoryText }) => memoryText || '');
+  }
   try {
     plugins = await createPluginKernel({
       rootDir: ROOT,
@@ -4627,7 +4670,9 @@ async function main() {
         }
         // 插件状态只读视图：只回 id/name/version/status/hooks 等公开字段，不含插件配置。
         if (req.method === 'GET' && url.pathname === '/api/plugins') {
-          sendJson(plugins ? plugins.status() : { enabled: false, plugins: [] });
+          const pluginStatus = plugins ? plugins.status() : { enabled: false, plugins: [] };
+          // 内置段落的块化状态一起回：控制台要显示「这段现在占多少字、有没有被关掉」。
+          sendJson({ ...pluginStatus, coreBlocks: corePromptBlocks.status() });
           return;
         }
         // 插件安装（P2b）：JSON {path} 装服务器本地目录，application/zip 装上传包。
@@ -12347,8 +12392,9 @@ async function main() {
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
-    const memoryText = formatMemoryV2(st);
-    const memoryLine = memoryText ? `${memoryText}\n\n` : '';
+    // 记忆摘要（内置块 core.digest）：块关掉时整段消失，maxChars 可单独收紧。
+    const digestBlock = corePromptBlocks.renderBlockSync('core-digest', { key, reason, memoryText: formatMemoryV2(st) });
+    const memoryLine = digestBlock.text ? `${digestBlock.text}\n\n` : '';
     // v0.3.0 在场人物：只注入本轮未读/最近消息里出现的人，并在注入时按共享策略过滤可见范围。
     const presentIds = [...(st.unread || []), ...(st.recentMessages || []).slice(-6)].filter((m) => m && !m.isSelf).map((m) => m.userId).filter(Boolean);
     const peopleText = ext.peopleBlockFor(key, presentIds);
@@ -12361,7 +12407,9 @@ async function main() {
     const stickerCfg = cfg.socialV2?.sticker ?? {};
     const stickerFull = stickerBlockTextV2();
     // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；没有计划（测试、旧调用方）时照旧完整给
-    const stickerLine = !stickerFull ? '' : (blockPlan?.sticker && !blockPlan.sticker.full ? `${BLOCK_REFS.sticker}\n\n` : `${stickerFull}\n\n`);
+    // 表情参考（内置块 core.stickers）：是否只给一行由 blockPlan 决定，块可单独关掉。
+    const stickerBlock = corePromptBlocks.renderBlockSync('core-stickers', { key, reason, stickerFull, blockPlan });
+    const stickerLine = stickerBlock.text ? `${stickerBlock.text}\n\n` : '';
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
     const proactiveLine = '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
     const replyTiming = replyTimingV2(st);

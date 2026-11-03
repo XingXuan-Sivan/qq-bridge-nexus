@@ -85,6 +85,7 @@ const tests = [
   'test-soulkit-persona.mjs',
   // 命令注册表（P3a）：最长匹配、别名、元数据回退、权限/scope、冲突保留先注册者。
   'test-command-registry.mjs',
+  'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',
   // preset 源与 bundle patch 不漂移（v0.3.0 起多了 qq-agent-readonly，一并钉住）。

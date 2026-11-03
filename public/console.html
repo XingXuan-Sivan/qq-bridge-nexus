@@ -6155,7 +6155,9 @@ async function refreshPlugins() {
     const data = await api('/api/plugins');
     const plugins = Array.isArray(data?.plugins) ? data.plugins : [];
     const personaSource = data?.persona?.plugin ? `插件 ${data.persona.plugin}` : 'roles/*.md';
-    meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}`;
+    const coreBlocks = Array.isArray(data?.coreBlocks?.blocks) ? data.coreBlocks.blocks : [];
+    const coreText = coreBlocks.length ? ` · 内置注入块：${coreBlocks.map((block) => `${block.id}（上限 ${block.maxChars} 字）`).join('、')}` : '';
+    meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}${coreText}`;
     if (!plugins.length) {
       list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;

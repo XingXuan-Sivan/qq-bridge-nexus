@@ -386,6 +386,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       id: entry.id,
       name: entry.name,
       version: entry.version,
+      description: entry.manifest?.description ?? '',
+      permissions: [...(entry.manifest?.permissions ?? [])],
       status: entry.status,
       error: entry.error,
       hooks: [...entry.hooks],

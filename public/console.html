@@ -1918,6 +1918,31 @@ button:active:not(:disabled) {
   color:var(--muted-soft);
   background:none
 }
+/* 扩展页：插件卡片与管理行为表格（复用既有 --line / --surface-sunken / .pill / .tag 变量，不另起一套配色） */
+.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.plugin-card { display: flex; gap: 12px; padding: 14px; border: 1px solid var(--card-border); border-radius: 12px; background: var(--surface-sunken); }
+.plugin-avatar { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 17px; font-weight: 600; letter-spacing: .5px; }
+.plugin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.plugin-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.plugin-title strong { font-size: 14px; }
+.plugin-desc { font-size: 12px; line-height: 1.55; color: var(--muted); }
+.plugin-meta { display: flex; gap: 5px; flex-wrap: wrap; }
+.plugin-meta .tag { font-size: 11px; }
+.plugin-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.plugin-actions button { padding: 3px 8px; font-size: 12px; }
+.plugin-empty { padding: 18px; border: 1px dashed var(--card-border); border-radius: 12px; }
+.ext-table { margin-top: 10px; overflow: auto; border: 1px solid var(--card-border); border-radius: 10px; }
+.ext-table table { margin-top: 0; min-width: 820px; }
+.ext-table th { font-size: 11px; letter-spacing: .02em; }
+.ext-table td { font-size: 12px; vertical-align: middle; }
+.ext-table tr.group-row { cursor: pointer; user-select: none; background: var(--surface-sunken); }
+.ext-table tr.group-row td { font-size: 12px; color: var(--text-secondary); padding-top: 7px; padding-bottom: 7px; }
+.ext-table .caret { display: inline-block; width: 14px; color: var(--muted); transition: transform .15s ease; }
+.ext-table tr.group-row.open .caret { transform: rotate(90deg); }
+.ext-table tr.group-child.hidden { display: none; }
+.ext-table tr.group-child td:first-child { padding-left: 30px; }
+.ext-table tr.group-child:hover td { background: var(--surface-sunken); }
+.ext-table .linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -2186,21 +2211,29 @@ button:active:not(:disabled) {
     </section>
     <section id="section-behaviors" data-page="behaviors" class="card span-all">
       <h2>管理行为</h2>
-      <div class="meta">桥接命令按注册表展示：<strong>已迁移</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支（P3a 只收 <code>/reset</code>、<code>/status</code>、<code>/role</code>）。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
-      <div class="row" style="margin-top:8px">
+      <div class="meta">桥接命令按注册表展示：<strong>注册表</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
+      <div class="row" style="margin-top:10px">
         <button id="behaviorsRefresh">刷新</button>
         <select id="behaviorsFilter" style="width:auto">
           <option value="all">全部来源</option>
           <option value="bridge">仅内置</option>
           <option value="plugin">仅插件</option>
         </select>
+        <select id="behaviorsPermission" style="width:auto">
+          <option value="">全部权限</option>
+          <option value="owner">owner</option>
+          <option value="admin">admin</option>
+          <option value="all">所有人</option>
+        </select>
+        <input id="behaviorsSearch" placeholder="搜索命令或说明…" style="max-width:240px">
         <span class="meta" id="behaviorsMeta">加载中…</span>
       </div>
-      <div id="behaviorsBridge" style="margin-top:8px">加载中…</div>
-      <h3 style="margin-top:16px">DSH 会话命令（只读）</h3>
-      <div id="behaviorsDsh" class="meta">加载中…</div>
-      <h3 style="margin-top:16px">Agent 工具（只读）</h3>
-      <div id="behaviorsTools" class="meta">加载中…</div>
+      <div id="behaviorsBridge" class="ext-table" hidden></div>
+      <div id="behaviorsEmpty" class="plugin-empty meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
+      <h3 style="margin-top:18px">DSH 会话命令 <span class="meta">只读</span></h3>
+      <div id="behaviorsDsh" class="ext-table">加载中…</div>
+      <h3 style="margin-top:18px">Agent 工具 <span class="meta">只读</span></h3>
+      <div id="behaviorsTools" class="ext-table">加载中…</div>
     </section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
@@ -6053,25 +6086,38 @@ async function refreshPlugins() {
     const personaSource = data?.persona?.plugin ? `插件 ${data.persona.plugin}` : 'roles/*.md';
     meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}`;
     if (!plugins.length) {
-      list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接。</div>';
+      list.innerHTML = '<div class="plugin-empty meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;
     }
-    list.innerHTML = plugins.map((plugin) => {
+    const avatarColors = ['#5b8def', '#8a6cf6', '#d9709a', '#3fa98a', '#c9893d', '#4aa3c8'];
+    list.innerHTML = `<div class="plugin-grid">${plugins.map((plugin, index) => {
       const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
-      const hooks = (plugin.hooks || []).join(' / ') || '—';
+      const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
-      const recent = counters.lastHookAt ? ` · 最近 ${esc(counters.lastHookAt)}` : '';
+      const commands = (plugin.commands || []).length;
+      const permissions = (plugin.permissions || []).map((permission) => `<span class="tag">${esc(permission)}</span>`).join('');
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
       const toggle = plugin.status === 'active'
         ? `<button data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
         : `<button data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
-      return `<div class="card" style="margin-bottom:8px">
-        <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="pill">${esc(plugin.id)}</span><span class="pill">${esc(plugin.version || '—')}</span><span class="${cls}">${esc(label)}</span></div>
-        <div class="meta">钩子：${esc(hooks)} · 调用 ${Number(counters.hookCalls) || 0} 次 · 失败 ${Number(counters.hookErrors) || 0} 次${recent}</div>
-        ${error}
-        <div class="row" style="margin-top:6px">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
+      const letter = String(plugin.name || plugin.id || '?').trim().charAt(0).toUpperCase();
+      const color = avatarColors[index % avatarColors.length];
+      const failures = Number(counters.hookErrors) || 0;
+      return `<div class="plugin-card">
+        <div class="plugin-avatar" style="background:${color}">${esc(letter)}</div>
+        <div class="plugin-main">
+          <div class="plugin-title"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="tag">v${esc(plugin.version || '—')}</span></div>
+          <div class="plugin-desc">${esc(plugin.description || '这个插件没有写说明。')}</div>
+          <div class="plugin-meta">
+            <span class="tag">${esc(plugin.id)}</span>${permissions}
+            <span class="tag">钩子 ${esc(hooks)}</span>${commands ? `<span class="tag">命令 ${commands}</span>` : ''}
+            <span class="tag">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="tag" style="color:#c0392b">失败 ${failures}</span>` : ''}
+          </div>
+          ${error}
+          <div class="plugin-actions">${toggle}<button data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
+        </div>
       </div>`;
-    }).join('');
+    }).join('')}</div>`;
   } catch (error) {
     meta.textContent = '';
     list.innerHTML = `<div class="meta err">读取失败：${esc(error?.message || '未知错误')}</div>`;
@@ -6586,45 +6632,92 @@ refreshPlugins();
 document.getElementById('personaSourceRefresh')?.addEventListener('click', () => refreshPersonaSources().catch(() => {}));
 
 // 「扩展」下的三个只读页：技能 / MCP / 管理行为。数据都来自只读接口，页面不做任何写操作。
-function behaviorRow(entry) {
-  const migrate = entry.migrated ? '<span class="meta ok">注册表</span>' : '<span class="meta">旧链</span>';
-  const aliases = (entry.aliases ?? []).join('、');
-  const scope = entry.scope === 'all' ? '全部会话' : entry.scope === 'group' ? '仅群聊' : '仅私聊';
-  const source = entry.source === 'plugin' ? `插件 ${entry.pluginId ?? ''}` : '内置';
-  return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">`
-    + `<strong>${esc(entry.name)}</strong> ${migrate} <span class="meta">${esc(source)} · ${esc(scope)} · ${esc(entry.permission)}</span>`
-    + `<div class="meta">${esc(entry.help || '（没有说明）')}${aliases ? ` · 别名 ${esc(aliases)}` : ''}</div></div>`;
+const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
+const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
+
+function behaviorGroupName(entry) {
+  if (entry.group) return entry.group;
+  return entry.source === 'plugin' ? `插件 ${entry.pluginId || '未命名'}` : '其他';
 }
+
+// 命令按 group 聚成指令组；组行可折叠，子行缩进——层级完全由注册时的 group 派生，不手工维护。
+function behaviorTable(rows) {
+  const groups = new Map();
+  for (const entry of rows) {
+    const name = behaviorGroupName(entry);
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(entry);
+  }
+  const head = '<thead><tr><th style="width:200px">指令</th><th style="width:92px">类型</th>'
+    + '<th style="width:118px">所属</th><th>描述</th><th style="width:84px">权限</th>'
+    + '<th style="width:84px">状态</th><th style="width:70px">操作</th></tr></thead>';
+  const body = [...groups.entries()].map(([name, items], index) => {
+    const open = index === 0;
+    const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(name)}">`
+      + `<td colspan="7"><span class="caret">▸</span> ${esc(name)} <span class="meta">${items.length} 条</span></td></tr>`;
+    const childRows = items.map((entry) => {
+      const migrated = entry.migrated ? '<span class="tag active">注册表</span>' : '<span class="tag">旧链</span>';
+      const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
+      const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
+      const action = entry.source === 'plugin'
+        ? `<button class="linkish" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
+        : '<span class="meta">—</span>';
+      const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
+      return `<tr class="group-child${open ? '' : ' hidden'}" data-group="${esc(name)}">`
+        + `<td><code>${esc(entry.name)}</code>${aliases}</td>`
+        + `<td>${migrated}</td><td>${esc(source)}</td>`
+        + `<td>${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span></td>`
+        + `<td>${esc(BEHAVIOR_PERMISSION_LABEL[entry.permission] || entry.permission)}</td>`
+        + `<td>${status}</td><td>${action}</td></tr>`;
+    }).join('');
+    return groupRow + childRows;
+  }).join('');
+  return `<table>${head}<tbody>${body}</tbody></table>`;
+}
+
+function simpleTable(columns, rows) {
+  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` style="width:${column.width}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+  return `<table>${head}<tbody>${body}</tbody></table>`;
+}
+
 async function refreshBehaviors() {
   const meta = document.getElementById('behaviorsMeta');
   const bridgeBox = document.getElementById('behaviorsBridge');
+  const empty = document.getElementById('behaviorsEmpty');
   const dshBox = document.getElementById('behaviorsDsh');
   const toolsBox = document.getElementById('behaviorsTools');
+  if (!meta || !bridgeBox) return;
   try {
     const data = await api('/api/commands');
     const filter = document.getElementById('behaviorsFilter').value;
+    const permission = document.getElementById('behaviorsPermission').value;
+    const keyword = (document.getElementById('behaviorsSearch').value || '').trim().toLowerCase();
     const all = [...(data.bridge?.builtin ?? []), ...(data.bridge?.plugin ?? [])];
-    const rows = filter === 'all' ? all : all.filter(entry => entry.source === filter);
+    const rows = all.filter((entry) => {
+      if (filter !== 'all' && entry.source !== filter) return false;
+      if (permission && entry.permission !== permission) return false;
+      if (!keyword) return true;
+      return [entry.name, entry.help, ...(entry.aliases ?? [])].join(' ').toLowerCase().includes(keyword);
+    });
     meta.textContent = `注册表 ${data.bridge?.builtin?.length ?? 0} 条内置 + ${data.bridge?.plugin?.length ?? 0} 条插件；显示 ${rows.length} 条`;
-    bridgeBox.innerHTML = rows.length ? rows.map(behaviorRow).join('') : '<div class="meta">没有匹配的命令。</div>';
-    dshBox.textContent = '';
-    for (const item of data.dsh ?? []) {
-      const line = document.createElement('div');
-      line.style.padding = '4px 0';
-      line.innerHTML = `<code>${esc(item.name)}</code> <span class="meta">${esc(item.note ?? '')}</span>`;
-      dshBox.appendChild(line);
-    }
-    if (!(data.dsh ?? []).length) dshBox.innerHTML = '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
-    toolsBox.textContent = '';
-    for (const item of data.tools ?? []) {
-      const line = document.createElement('div');
-      line.style.padding = '4px 0';
-      line.innerHTML = `<code>${esc(item.name)}</code> <span class="meta">${esc(item.source)} · ${esc(item.managed)}</span>`;
-      toolsBox.appendChild(line);
-    }
-    if (!(data.tools ?? []).length) toolsBox.innerHTML = '<div class="meta">没有已登记的 Agent 工具。</div>';
+    bridgeBox.hidden = rows.length === 0;
+    empty.hidden = rows.length !== 0;
+    empty.textContent = '没有匹配的命令，换个筛选或关键词试试。';
+    bridgeBox.innerHTML = rows.length ? behaviorTable(rows) : '';
+    dshBox.innerHTML = (data.dsh ?? []).length
+      ? simpleTable([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
+      : '<div class="plugin-empty meta">桥接没有记录到会调用的 DSH 命令。</div>';
+    toolsBox.innerHTML = (data.tools ?? []).length
+      ? simpleTable([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
+        (data.tools ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.source), esc(item.managed)]))
+      : '<div class="plugin-empty meta">没有已登记的 Agent 工具。</div>';
   } catch (error) {
-    meta.textContent = `读取失败：${error.message}`;
+    meta.textContent = '';
+    bridgeBox.hidden = true;
+    bridgeBox.innerHTML = '';
+    empty.hidden = false;
+    empty.textContent = `读取失败：${error?.message || '未知错误'}`;
   }
 }
 async function refreshSkills() {
@@ -6635,10 +6728,9 @@ async function refreshSkills() {
     const skills = data.skills ?? [];
     meta.textContent = skills.length ? `共 ${skills.length} 个技能包` : '没有找到 SKILL.md（DSH_HOME/skills 或仓库 skills/ 下）';
     list.innerHTML = skills.length
-      ? skills.map(skill => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${esc(skill.name)}</strong>`
-        + `<div class="meta">${esc(skill.description || '（没有 description）')}</div>`
-        + `<div class="meta"><code>${esc(skill.path)}</code></div></div>`).join('')
-      : '<div class="meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
+      ? `<div class="ext-table">${simpleTable([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
+        skills.map(skill => [`<strong>${esc(skill.name)}</strong>`, esc(skill.description || '（没有 description）'), `<code>${esc(skill.path)}</code>`]))}</div>`
+      : '<div class="plugin-empty meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
   } catch (error) {
     meta.textContent = `读取失败：${error.message}`;
   }
@@ -6651,16 +6743,29 @@ async function refreshMcp() {
     const servers = data.mcp ?? [];
     meta.textContent = servers.length ? `桥接自带 ${servers.length} 个 MCP server` : '没有登记 MCP server';
     list.innerHTML = servers.length
-      ? servers.map(server => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${esc(server.name)}</strong>`
-        + `<div class="meta">${esc(server.note || '')}</div>`
-        + `<div class="meta"><code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}</div></div>`).join('')
-      : '<div class="meta">没有登记 MCP server。</div>';
+      ? `<div class="ext-table">${simpleTable([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
+        servers.map(server => [`<strong>${esc(server.name)}</strong>`, esc(server.note || ''), `<code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}`]))}</div>`
+      : '<div class="plugin-empty meta">没有登记 MCP server。</div>';
   } catch (error) {
     meta.textContent = `读取失败：${error.message}`;
   }
 }
 document.getElementById('behaviorsRefresh')?.addEventListener('click', () => refreshBehaviors().catch(() => {}));
 document.getElementById('behaviorsFilter')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
+document.getElementById('behaviorsPermission')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
+let behaviorsSearchTimer = null;
+document.getElementById('behaviorsSearch')?.addEventListener('input', () => {
+  clearTimeout(behaviorsSearchTimer);
+  behaviorsSearchTimer = setTimeout(() => refreshBehaviors().catch(() => {}), 180);
+});
+document.getElementById('behaviorsBridge')?.addEventListener('click', (event) => {
+  const row = event.target.closest?.('tr.group-row');
+  if (!row) return;
+  row.classList.toggle('open');
+  const name = row.dataset.group;
+  document.querySelectorAll(`#behaviorsBridge tr.group-child[data-group="${CSS.escape(name)}"]`)
+    .forEach((child) => child.classList.toggle('hidden'));
+});
 document.getElementById('skillsRefresh')?.addEventListener('click', () => refreshSkills().catch(() => {}));
 document.getElementById('mcpRefresh')?.addEventListener('click', () => refreshMcp().catch(() => {}));
 

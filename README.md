@@ -306,12 +306,15 @@ npm run self-test
 ## 目录结构
 
 ```
-qq-bridge-enhanced/      # 克隆下来的目录名是 dsh-qq
+qq-bridge-nexus/       # fork 后的仓库目录名（上游仓库名为 dsh-qq）
   config.example.json   # 配置模板（脱敏占位符；真实 config.json 不入库）
   README.md / README.en.md / RULES.md   # 根目录只留这三个文档，其余全在 docs/
   docs/
     README.md           # 文档索引（每篇一句话 + 是否仍然有效）
     FOLDER_MAP.md       # 目录结构与 scripts/ 命名约定
+    PLUGIN_KERNEL.md    # 插件内核：钩子、清单、配置、权限、人格 provider（已实现部分）
+    PERSONA_PROVIDER.md # 人格三层解析与 persona-provider/1 契约
+    PLUGIN_ROADMAP.md   # 插件与扩展的后续路线；规划变化先改这里再写代码
     guides/             # 面向使用者/运维的说明（配置、部署、管理通道、定时任务、定时静默、语音、令牌看板……完整列表见 docs/README.md）
     release/            # 发布说明与发布流程
     （design/ research/ audits/ 是本地开发文档，不随仓库发布）

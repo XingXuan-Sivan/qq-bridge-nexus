@@ -1,6 +1,6 @@
 # CHANGELOG
 
-本仓库（qq-bridge-enhanced）基于上游 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`。
+本仓库（qq-bridge-nexus，基于上游 fork）基于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) `v0.2.0-r3`，随后同步到 [h-D-ACE/dsh-qq](https://github.com/h-D-ACE/dsh-qq) `v1.1.2`。
 上游更早的版本历史见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) 与上游 Release 页面。
 
 ## 未发布
@@ -13,7 +13,7 @@
 - 第一个 provider 插件 `plugins/soulkit-persona`：`GET /api/persona/card?platform=qq&key=…`，剥掉 `【人格卡：…】` 标题行，失败保留旧卡；soulkit 不在线时按解析链回落本地角色卡。
 - 控制台：「桥接插件」只读页（`/api/plugins`）、「人格来源（只读）」页（`/api/persona/sources`）；`role.maxInjectChars` 默认 6000 → 8000（soulkit 卡片约 6.5k 字符）。
 - 测试：`test-plugin-kernel`、`test-soulkit-persona`、`test-persona-resolve`，均已接入 `test:audit`。
-- 文档：新增 `docs/PLUGIN_KERNEL.md`、`docs/PERSONA_PROVIDER.md`。
+- 文档：新增 `docs/PLUGIN_KERNEL.md`、`docs/PERSONA_PROVIDER.md`、`docs/PLUGIN_ROADMAP.md`（后续路线与明确不做）。
 
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
@@ -22,6 +22,7 @@
 - 新测试 `scripts/test-dsh-auth-hint.mjs`（已接入 `test:audit`）。
 
 ### 文档
+- 新增 `docs/PLUGIN_ROADMAP.md`：把 P2a（启停/重载/详情）、P2b（安装/卸载）、P2c（文件监听）、P2 同期的命令注册与具名注入块、P3 候选、MCP/Skills 的开工门槛，以及「明确不做」固定成文；约定规划变化先改这份文档再写代码。
 - `DSH_SETUP.md`「常见问题」重写「DSH 一直 401」一条：原因、`DSH_HOME` 的设法（Windows / macOS / Linux）、要重跑 `setup-dsh.mjs`、自己验证时要用 POST（GET 得到 404 是正常的）；`DSH_DEPLOYMENT.md` 排查表同步。
 - DSH 桌面版 0.2.1-rc.3 复核：不需要改代码，记录见 [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md)「附：DSH 0.2.1-rc.3 复核」。
 

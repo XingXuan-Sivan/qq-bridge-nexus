@@ -19,6 +19,7 @@ import { createScheduler, normalizeSettings, inQuietHours, DEFAULT_LIMITS } from
 import { parseRemindCommand, formatTaskList } from '../src/scheduler/commands.js';
 import { createScheduledNoteStore, scheduledPromptBlock } from '../src/scheduler/notes.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const BJ = 'Asia/Shanghai';
 const at = (iso) => Date.parse(iso);
@@ -293,7 +294,7 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
 });
 
 test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务，页面与接口接上', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   const nav = html.slice(html.indexOf('<nav id="mainNav">'), html.indexOf('</nav>'));
   assert.ok(nav.indexOf('data-view="slang"') < nav.indexOf('data-view="scheduler"') && nav.indexOf('data-view="scheduler"') < nav.indexOf('<div class="nav-label">管理</div>'), '位置在黑话词库下面、「管理」分组之前');
   assert.match(html, /scheduler: \['定时任务'/);

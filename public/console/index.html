@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>QQ 桥接控制台</title>
+<script>
+// 主题引导：须在样式表之前执行，避免首屏闪一下浅色。
+(function () {
+  var theme;
+  try {
+    var saved = localStorage.getItem('qq-console-theme');
+    theme = saved === 'dark' || saved === 'light' ? saved : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  } catch (error) {
+    theme = 'light';
+  }
+  document.documentElement.dataset.theme = theme;
+})();
+</script>
+<link rel="stylesheet" href="/console/css/app.css">
+</head>
+<body>
+  <div class="bg-decor" aria-hidden="true"></div>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
+  <aside class="sidebar" aria-label="控制台导航">
+    <a href="#overview" class="brand"><span class="brand-mark" aria-hidden="true">q<span>↗</span></span><span>QQ Bridge<small>DeepSeek Harness 控制台</small></span></a>
+    <nav id="mainNav">
+      <div class="nav-label">工作空间</div>
+      <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
+      <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
+      <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>
+      <div class="nav-label">扩展</div>
+      <button data-view="plugins" class="nav-item"><span class="nav-icon" aria-hidden="true">⧉</span>插件</button>
+      <button data-view="skills" class="nav-item"><span class="nav-icon" aria-hidden="true">✦</span>技能</button>
+      <button data-view="mcp" class="nav-item"><span class="nav-icon" aria-hidden="true">⇄</span>MCP</button>
+      <button data-view="behaviors" class="nav-item"><span class="nav-icon" aria-hidden="true">⌥</span>管理行为</button>
+      <div class="nav-label">聊天行为</div>
+      <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>二代仿真<span class="nav-note">V2</span></button>
+      <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
+      <button data-view="slang" class="nav-item"><span class="nav-icon" aria-hidden="true">▤</span>黑话词库</button>
+      <button data-view="scheduler" class="nav-item"><span class="nav-icon" aria-hidden="true">◷</span>定时任务</button>
+      <div class="nav-label">管理</div>
+      <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true">◧</span>令牌与花费</button>
+      <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true">⊙</span>访问与安全</button>
+      <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
+      <button data-view="reference" class="nav-item"><span class="nav-icon" aria-hidden="true">ⓘ</span>工具参考</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>QQ ↔ DeepSeek Harness</small></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="breadcrumb"><a class="crumb-link" href="#overview">工作空间</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-current" aria-current="page">运行总览</span></div>
+      <div class="topbar-actions"><span class="status-badge" id="statusText" role="status">正在连接…</span><button id="themeToggle" class="icon-button" type="button" aria-label="切换深色模式" aria-pressed="false" title="切换深色 / 浅色主题">☾</button><button id="refreshConsole" class="icon-button" aria-label="刷新控制台状态" title="刷新状态">↻</button></div>
+    </header>
+    <main id="mainContent" tabindex="-1">
+      <div class="page-heading"><div><div class="eyebrow">QQ BRIDGE / CONSOLE</div><h1 id="pageTitle">让每一次连接，都自然发生。</h1><p id="pageDescription">掌握桥接状态，轻松管理你的 QQ 智能伙伴。</p></div>
+        <div class="search-wrap"><label class="sr-only" for="consoleSearch">搜索功能或参数</label><input id="consoleSearch" type="search" placeholder="搜索功能或参数…" autocomplete="off" aria-controls="searchResults" aria-expanded="false"><div id="searchResults" class="search-results" hidden></div></div>
+      </div>
+      <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
+      <div id="overviewSummary" class="overview-summary span-all" data-page="overview">
+        <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
+        <div class="metric"><span>SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
+        <div class="metric"><span>当前运行模式</span><strong id="metricMode">—</strong><small id="metricRole">正在读取角色</small></div>
+        <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
+        <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
+      </div>
+      <div class="grid">
+        <section id="section-mode" data-page="overview" class="card span-all">
+      <h2>运行模式</h2>
+      <div class="mode-row" id="modeRow">
+        <button data-mode="chat" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>聊天模式</strong><small>白名单内，随时对话</small></button>
+        <button data-mode="closed-agent" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>封闭 Agent</strong><small>仅管理员私聊，L1/L2/L3 分级</small></button>
+        <button data-mode="reserved" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>一代仿真</strong><small>按策略自然参与群聊</small></button>
+        <button data-mode="reserved2" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>二代仿真</strong><small>自主阅读、发言与潜水</small></button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label style="flex:1;margin:0">封闭 Agent 自选 DSH 预设（仅 admin.allowCustomAgentPreset=true 时对 L2/L3 生效，且没有审批闸门）</label>
+        <select id="closedPreset" style="max-width:260px"><option value="">（DSH 默认 preset）</option></select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label style="flex:1;margin:0">封闭 Agent 权限级别</label>
+        <select id="closedLevel" style="max-width:260px">
+          <option value="L1">L1 本地只读（只读工具白名单）</option>
+          <option value="L2" selected>L2 工作区读写（危险操作需审批）</option>
+          <option value="L3">L3 高权限（需 TOTP 动态码 + 每次审批）</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="meta" id="adminStatus" style="flex:1">管理通道状态读取中…</span>
+        <button type="button" id="adminPanic" class="danger">紧急关闭（回到安全模式）</button>
+      </div>
+      <div class="meta">切换后即时保存。仿真参数可在左侧对应页面调整；封闭 Agent 仅允许管理员私聊。v0.3.0 起所有模式变更都会私聊通知管理员，并写入 state/admin/audit.jsonl；高权限闲置超时自动回落。</div>
+    </section>
+<section id="section-sessions" data-page="sessions" class="card span-all">
+      <h2>会话映射</h2>
+      <div id="sessionList">加载中…</div>
+    </section>
+<section id="section-pending" data-page="sessions" class="card span-all">
+      <h2>挂起审批 / 提问</h2>
+      <div id="pendingList">加载中…</div>
+    </section>
+<section id="section-activity" data-page="overview" class="card">
+      <h2>活动日志（最近 100 条）</h2>
+      <pre id="activity">（空）</pre>
+    </section>
+<section id="section-persona" data-page="persona" class="card span-all">
+      <h2>人格与角色</h2>
+      <div class="meta">当前人格：<span id="roleText">-</span> ｜ 状态：<span id="roleModeText">-</span></div>
+
+      <div class="layer-note">
+        <strong>两层提示词的分工</strong>
+        <ol>
+          <li><b>仿真提示词</b>（预设内置）：AI 怎么调工具、怎么参与群聊 —— <i>行为与协议</i>。</li>
+          <li><b>人格提示词</b>（本页编辑）：AI 是谁、什么性格、怎么说话 —— <i>人设与语气</i>。</li>
+        </ol>
+        <p>每条消息发给 AI 时，按 <code>仿真提示词 → 人格提示词 → 本轮消息</code> 的顺序拼装。人格层保存即生效；仿真层需重启 DSH。</p>
+      </div>
+
+      <h3>人格列表 <span class="meta" id="roleListHint"></span></h3>
+      <div id="roleList" class="tile-list">加载中…</div>
+
+      <details class="settings-group" open>
+        <summary>编辑人格提示词</summary>
+        <div class="settings-content">
+          <div class="meta" id="roleEditorMeta">当前是「新建」模式：填好名称与内容后点「新建人格」。</div>
+          <div class="row">
+            <label style="flex:0 0 auto">注入上限（字符）</label>
+            <input type="number" id="roleInjectMax" min="1000" max="20000" step="500" style="flex:0 1 140px">
+            <button id="roleInjectMaxSave" class="small">保存上限</button>
+            <span class="meta" id="roleInjectMaxMsg">每条约 4~6k token 的成本护栏；按模式筛完小节后才截断。</span>
+          </div>
+          <label>人格名（中文 / 字母 / 数字 / 横线）</label>
+          <input type="text" id="newRoleName" placeholder="如：猫娘">
+          <label>人格提示词（Markdown）</label>
+          <textarea id="newRoleContent" class="role-editor" placeholder="- 性格：…&#10;- 说话风格：…&#10;- 背景设定：…"></textarea>
+          <div class="row" style="margin-top:8px">
+            <button id="roleCreate">新建人格</button>
+            <button id="roleDuplicate">另存为副本</button>
+            <button id="roleDelete" class="danger">删除</button>
+            <button id="roleFormReset">清空表单</button>
+            <span class="meta" id="roleCreateMsg"></span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px">
+            <span class="meta" style="margin:0">保存当前启用的人格后，二代仿真里：</span>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleSaveApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleSaveApply" value="immediate"> 立即生效（现在就唤醒各会话读新卡）</label>
+          </div>
+          <div class="meta">只对正在启用的人格起作用；编辑其它人格时这里不影响任何会话。和下面「切换当前启用的人格」的选项各管各的按钮，两处都点也只会让每个会话读一次（已经读到新卡的会话自动跳过）。</div>
+          <div class="meta err" id="roleEditorWarnings"></div>
+        </div>
+      </details>
+
+      <details class="settings-group">
+        <summary>切换当前启用的人格</summary>
+        <div class="settings-content">
+          <div class="row" style="margin-top:10px">
+            <div class="role-combo">
+              <input type="text" id="roleInput" placeholder="选择已有角色或输入新角色名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="roleSuggest">
+            </div>
+            <button id="roleSet">设置</button>
+            <button id="roleClear">清除</button>
+          </div>
+          <!-- 放在行外、占正常文档流：外层折叠面板 overflow:hidden，浮层式下拉会被裁掉；在流内展开时面板跟着变高 -->
+          <ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+            <span class="meta" style="margin:0">二代仿真里生效方式：</span>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleApply" value="immediate"> 立即切换（现在就唤醒各会话读新卡）</label>
+          </div>
+          <div class="meta">二代仿真的会话只在建立时读一次完整角色卡；切换、清除或修改当前人格后，桥接会把新卡直接写进各会话下一次的唤醒提示里，记忆和群规则都不动。选「立即」会马上给还没读到新卡的会话各唤醒一次（多花一点 token；定时静默中的会话等静默结束）。聊天模式 / 一代仿真每条消息都带角色卡，切换本来就立即生效。</div>
+          <div class="meta" id="roleApplyResult" hidden></div>
+          <div class="meta">清空当前人格后，AI 只按「仿真提示词」行动，不扮演任何角色。</div>
+        </div>
+      </details>
+
+      <details class="settings-group" id="roleAssignGroup">
+        <summary>按会话设置人格</summary>
+        <div class="settings-content">
+          <div class="meta">给某个群或私聊单独换一张卡，或者让它不挂角色卡；没单独设置的会话用上面「当前启用的人格」。人格正文还是 <code>roles/</code> 里的同一份文件。管理员在 QQ 里发 <code>/role 名字</code>、<code>/role off</code>、<code>/role default</code> 也只改发命令的那个会话。</div>
+          <div id="roleAssignList" style="margin-top:8px">加载中…</div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="roleAssignKey" placeholder="group:群号 或 private:QQ号" style="flex:0 1 220px" autocomplete="off">
+            <select id="roleAssignNewUse" style="flex:0 1 220px"></select>
+            <button id="roleAssignAdd" class="small">添加</button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+            <span class="meta" style="margin:0">保存后二代仿真里：</span>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleAssignApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
+            <label class="sched-chip" style="margin:0;white-space:nowrap"><input type="radio" name="roleAssignApply" value="immediate"> 立即切换（现在就唤醒这个会话读新卡）</label>
+          </div>
+          <div class="meta">改了下拉框要点这一行的「保存」才生效，没保存的会标「未保存」。列表停在这一页时每 15 秒自动更新（新建的会话、QQ 里 <code>/role</code> 的改动都会出现）。生效方式只看这里这一组，和上面「切换当前启用的人格」的选项各管各的；选「立即」也只唤醒保存的那一个会话（卡没变就不唤醒，定时静默中的等静默结束）。聊天模式 / 一代仿真每条消息都带角色卡，下一条消息就用新卡。QQ 里发 <code>/role</code> 一律是下次唤醒时读卡。</div>
+          <div class="meta" id="roleAssignMsg"></div>
+        </div>
+      </details>
+
+      <details class="settings-group">
+        <summary>人格来源（只读）</summary>
+        <div class="settings-content">
+          <div class="meta">每一层实际用的是哪张卡：<b>会话</b>（<code>/role 名字</code> 或本页按会话指定）→ <b>外部</b>（人格 provider 插件，例如 soulkit）→ <b>全局</b>（上面「当前启用的人格」）。<code>off</code> 的会话不挂卡，也不会被 provider 接管。这张表只读，改哪层请用上面两处。</div>
+          <div class="row" style="margin-top:8px">
+            <button id="personaSourceRefresh" class="small">刷新</button>
+            <span class="meta" id="personaSourceMeta" style="margin:0"></span>
+          </div>
+          <div id="personaSourceList" style="margin-top:8px">加载中…</div>
+        </div>
+      </details>
+
+      <details class="settings-group">
+        <summary>恢复默认人格</summary>
+        <div class="settings-content">
+          <div class="meta">把发布包自带的原版角色卡放回来：误删了、或者改乱了想重来时用。改过的那份会先备份到 <code>state/role-backups/</code>，不会直接丢掉。</div>
+          <div id="roleDefaultsList" class="role-defaults" style="margin-top:8px">加载中…</div>
+          <div class="meta">恢复的是当前启用的人格时，按上面「保存当前启用的人格后」选的方式让各会话读到原版。恢复不会自动切换人格；被删掉的人格恢复后，需要的话在「切换当前启用的人格」里选它。</div>
+          <div class="meta" id="roleDefaultsMsg"></div>
+        </div>
+      </details>
+
+      <h3 class="layer-heading">仿真提示词（预设内置）<span class="meta" id="simPromptStatus">加载中…</span></h3>
+      <div class="row" style="margin-bottom:8px">
+        <label style="flex:0 0 auto">仿真代次</label>
+        <select id="simPromptPreset" style="flex:0 1 280px">
+          <option value="qq-chat-v2">二代仿真（reserved2 · qq-chat-v2）</option>
+          <option value="qq-chat">一代仿真（reserved · qq-chat）</option>
+        </select>
+        <span class="meta">两代机制不同（一代空格分条 / 二代一切皆工具），提示词各自独立。</span>
+      </div>
+      <div class="meta" id="simPromptWarnings"></div>
+      <textarea id="simPromptText" class="code-area" spellcheck="false" readonly></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="simPromptEdit">编辑</button>
+        <button id="simPromptSave" disabled>保存并同步到 DSH</button>
+        <button id="simPromptRestore">还原上次备份</button>
+        <button id="simPromptCancel" disabled>取消编辑</button>
+        <span class="meta" id="simPromptMsg"></span>
+      </div>
+      <div class="meta" id="simPromptRestart"></div>
+    </section>
+    <section id="section-plugins" data-page="plugins" class="card span-all">
+      <h2>桥接插件</h2>
+      <div class="meta">可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="pluginsRefresh">刷新</button>
+        <button id="pluginsReloadAll">全部重载</button>
+        <span class="meta" id="pluginsMeta">加载中…</span>
+      </div>
+      <div id="pluginsList" class="tile-list">加载中…</div>
+      <details class="settings-group">
+        <summary>内置注入块</summary>
+        <div class="settings-content">
+          <div class="meta">这两段直接进每次唤醒的 prompt：关掉后模型当轮看不到对应内容，立即生效；上限按字符截断，清空表示用默认。</div>
+          <div id="promptBlockRows" style="margin-top:8px;display:grid;gap:10px">加载中…</div>
+          <div class="row" style="margin-top:8px">
+            <button id="promptBlockSave">保存注入块</button>
+            <span class="meta" id="promptBlockMsg"></span>
+          </div>
+        </div>
+      </details>
+      <details class="settings-group" id="pluginRuntimeGroup">
+        <summary>运行设置</summary>
+        <div class="settings-content">
+          <div class="meta">入站过滤打开后，申请了 <code>inbound:filter</code> 的插件可以丢弃或改写消息，改完立即生效；文件监听只影响开发时的自动重载。</div>
+          <div class="row check-row" style="margin-top:8px">
+            <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginFilterInbound"> 入站过滤</label>
+            <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginWatch"> 文件监听自动重载</label>
+          </div>
+          <details class="settings-sub" style="margin-top:8px">
+            <summary class="meta">高级</summary>
+            <div class="settings-content">
+              <div class="row check-row" style="margin-top:8px">
+                <label class="field">钩子超时(ms)<input type="number" id="pluginHookTimeout" min="100" max="10000" step="100" style="width:120px"></label>
+                <label class="field">插件注入上限(字符)<input type="number" id="pluginAppendLimit" min="0" max="20000" step="100" style="width:140px"></label>
+                <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginInstallEnabled"> 允许安装</label>
+              </div>
+            </div>
+          </details>
+          <div class="row" style="margin-top:8px">
+            <button id="pluginSettingsSave">保存运行设置</button>
+            <span class="meta" id="pluginSettingsMsg"></span>
+          </div>
+        </div>
+      </details>
+      <details class="settings-group">
+        <summary>安装插件</summary>
+        <div class="settings-content">
+          <div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
+          <div class="row" style="margin-top:8px">
+            <input type="file" id="pluginInstallZip" accept=".zip,application/zip" style="flex:1;min-width:220px">
+            <button id="pluginInstallZipBtn">上传安装</button>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="pluginInstallPath" placeholder="服务器本地目录，例如 D:\dev\my-plugin" style="flex:1;min-width:240px">
+            <button id="pluginInstallPathBtn">从目录安装</button>
+          </div>
+          <div class="meta" id="pluginInstallMsg"></div>
+        </div>
+      </details>
+    </section>
+    <div class="modal-overlay" id="pluginDetailOverlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1" style="max-width:720px">
+        <h3 id="pluginDetailTitle">插件详情</h3>
+        <div class="meta" id="pluginDetailBody" style="max-height:60vh;overflow:auto;white-space:pre-wrap"></div>
+        <div class="row" id="pluginPersistRow" style="margin-top:8px">
+          <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
+          <button id="pluginPersistSave">保存</button>
+          <span class="meta" id="pluginPersistMsg"></span>
+        </div>
+        <div class="row"><button id="pluginDetailClose">关闭</button></div>
+      </div>
+    </div>
+    <section id="section-skills" data-page="skills" class="card span-all">
+      <h2>技能</h2>
+      <div class="meta">只读清单：扫 <code>DSH_HOME/skills</code> 与仓库 <code>skills/</code> 下含 <code>SKILL.md</code> 的目录，读取 frontmatter 的 name / description。技能的启用与安装由 DSH 自身管理，这里不改配置、不代装。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="skillsRefresh">刷新</button>
+        <span class="meta" id="skillsMeta">加载中…</span>
+      </div>
+      <div id="skillsList">加载中…</div>
+    </section>
+    <section id="section-mcp" data-page="mcp" class="card span-all">
+      <h2>MCP</h2>
+      <div class="meta">只读清单：这些是桥接仓库自带的 MCP server（stdio），由 DSH 侧配置加载。这里不启停、不新增——DSH 运行时增删 MCP 的接口尚未验证，见 <code>docs/PLUGIN_ROADMAP.md</code> §9。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="mcpRefresh">刷新</button>
+        <span class="meta" id="mcpMeta">加载中…</span>
+      </div>
+      <div id="mcpList">加载中…</div>
+    </section>
+    <section id="section-behaviors" data-page="behaviors" class="card span-all">
+      <h2>管理行为</h2>
+      <div class="meta">桥接命令按注册表展示：<strong>注册表</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="behaviorsRefresh">刷新</button>
+        <select id="behaviorsFilter" style="width:auto">
+          <option value="all">全部来源</option>
+          <option value="bridge">仅内置</option>
+          <option value="plugin">仅插件</option>
+        </select>
+        <select id="behaviorsPermission" style="width:auto">
+          <option value="">全部权限</option>
+          <option value="owner">owner</option>
+          <option value="admin">admin</option>
+          <option value="all">所有人</option>
+        </select>
+        <input id="behaviorsSearch" placeholder="搜索命令或说明…" style="max-width:240px">
+        <span class="meta" id="behaviorsMeta">加载中…</span>
+      </div>
+      <div id="behaviorsBridge" class="tool-log-table" hidden></div>
+      <div id="behaviorsEmpty" class="meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
+      <h3 style="margin-top:18px">DSH 会话命令 <span class="meta">只读</span></h3>
+      <div id="behaviorsDsh" class="tool-log-table">加载中…</div>
+      <h3 style="margin-top:18px">Agent 工具 <span class="meta">只读</span></h3>
+      <div id="behaviorsTools" class="tool-log-table">加载中…</div>
+    </section>
+<section id="section-social-v1" data-page="social-v1" class="card span-all">
+      <h2>一代仿真模式（reserved）</h2>
+      <div class="meta" id="socialStatus">加载中…</div>
+
+      <div class="row" style="margin-top:10px">
+        <label style="flex:1">普通消息触发概率（观望期）</label><input type="number" id="sTrigger" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">活跃检测间隔（秒）</label>
+        <input type="number" id="sCheckMin" min="5" style="width:70px"> ~
+        <input type="number" id="sCheckMax" min="5" style="width:70px">
+      </div>
+      <div class="row">
+        <label style="flex:1">活跃回复延迟（秒）</label>
+        <input type="number" id="sActiveDelayMin" min="0" style="width:70px"> ~
+        <input type="number" id="sActiveDelayMax" min="0" style="width:70px">
+      </div>
+      <details class="settings-group"><summary>群聊活跃超时主动退出</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">启用</label><input type="checkbox" id="sActiveDurationEnabled" style="width:auto">
+      </div>
+      <div class="row">
+        <label style="flex:1">活跃最长持续时间（分）</label>
+        <input type="number" id="sActiveDurationMin" min="1" style="width:70px"> ~
+        <input type="number" id="sActiveDurationMax" min="1" style="width:70px">
+      </div>
+      <div class="meta">从进入群聊活跃那一刻起随机取一个时长；到点后即使群里还在聊，也会提示 AI 说一句收尾话并回到观望。私聊不自动退场。</div>
+
+      <div class="row">
+        <label style="flex:1">冷场窗口（分）</label><input type="number" id="sIdleWindow" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">冷场试探概率</label><input type="number" id="sIdleRetry" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">试探等待窗口（分）</label><input type="number" id="sIdleWait" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">普通消息沉默概率</label><input type="number" id="sSkipProb" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">抬杠时退让概率</label><input type="number" id="sSurrenderProb" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">附带上下文条数</label><input type="number" id="sContextWindow" min="1" max="100" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">单条消息长度上限（字）</label><input type="number" id="sMaxChars" min="1" style="width:80px">
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>分条发送（按空格分句）</summary><div class="settings-content">
+      <div class="meta" style="margin-bottom:8px">AI 用空格表示“分成下一条消息”；中英文/数字之间的空格也会被当成分条信号，不想分条就不要加空格、用标点连接。单条只做安全长度上限，不再限制条数。</div>
+      <div class="row">
+        <label style="flex:1">启用分条发送</label><input type="checkbox" id="sBurstEnabled" style="width:auto">
+      </div>
+      <div class="row">
+        <label style="flex:1">条间间隔（毫秒）</label>
+        <input type="number" id="sBurstIntervalMin" min="0" style="width:70px"> ~
+        <input type="number" id="sBurstIntervalMax" min="0" style="width:70px">
+      </div>
+      <div class="row">
+        <label style="flex:1">长间隔概率</label><input type="number" id="sLongGapProb" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">长间隔范围（毫秒）</label>
+        <input type="number" id="sLongGapMin" min="0" style="width:70px"> ~
+        <input type="number" id="sLongGapMax" min="0" style="width:70px">
+      </div>
+      <label>必回关键词（逗号分隔）</label>
+      <input type="text" id="sKeywords" placeholder="deepseek, 在吗">
+
+      </div></details>
+<details class="settings-group"><summary>主动开话题（观望期第三种触发）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">启用主动开话题</label><input type="checkbox" id="sProactiveEnabled" style="width:auto">
+      </div>
+      <div class="row">
+        <label style="flex:1">群安静多久判定（分）</label><input type="number" id="sProactiveIdle" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">判定间隔（分）</label>
+        <input type="number" id="sProactiveCheckMin" min="1" style="width:70px"> ~
+        <input type="number" id="sProactiveCheckMax" min="1" style="width:70px">
+      </div>
+      <div class="row">
+        <label style="flex:1">判定成功概率</label><input type="number" id="sProactiveProb" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+
+</div></details>
+<div class="save-bar">      <div class="row" style="margin-top:10px">
+        <button id="socialSave">保存社交配置</button>
+        <button id="socialFlush">立刻投喂摘要</button>
+        <span class="meta" id="socialMsg"></span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <select id="sStateKey" style="flex:1"><option value="">选择会话</option></select>
+        <button id="sStateActive" class="small">设为活跃</button>
+        <button id="sStateIdle" class="small">设为观望</button>
+      </div>
+      <div class="meta">一代仿真模式状态机：观望期按“明确点名 / 小概率”触发进入活跃；活跃期每 10~20 秒批量查看新消息并回应；群聊活跃超过随机上限会主动提示 AI 收尾退场；冷场后大概率回观望、小概率让 AI 试探一句。可手动强制切换状态。</div>
+    </div></section>
+<section id="section-social-v2" data-page="social-v2" class="card span-all">
+      <h2>二代仿真模式（reserved2）控制台</h2>
+      <div class="meta">配置保存后写入 config.json 并热更新；工具开关决定 AI 能调用哪些工具。已接入开关的工具在<b>重启 DSH 后</b>会从工具清单里彻底消失（少一份 schema 就少一份每次请求的 token）；发送类等跨模式共用的工具只在调用时被桥接拒绝，清单不变。</div>
+
+      <div class="row" style="margin-top:10px">
+        <label style="flex:1">启用二代模式</label><input type="checkbox" id="v2Enabled" style="width:auto">
+        <label style="flex:1">agentPreset</label><input type="text" id="v2AgentPreset" placeholder="qq-chat-v2" style="max-width:200px">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label style="flex:1">提供推荐值给 AI</label><input type="checkbox" id="v2ProvideRecommendations" style="width:auto">
+        <span class="meta" style="flex:2">关闭后 qq_get_prompt 不再返回推荐值，AI 完全自主判断。</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="v2PauseBtn" class="danger">暂停二代 AI</button>
+        <button id="v2ResumeBtn">恢复二代 AI</button>
+        <button id="v2ResetBtn" class="danger">重置二代状态</button>
+        <button id="v2ConfigSaveTop" style="font-weight:bold;padding:6px 14px">保存当前参数</button>
+        <span class="meta" id="v2ActivityStatus">读取中…</span>
+      </div>
+
+      <details class="settings-group"><summary>工具开关（关闭后 AI 不再拿到该工具；需重启 DSH 刷新工具清单，重启前仅调用时拒绝）</summary><div class="settings-content">
+      <div class="v2-tool-list" id="v2Tools">
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getPrompt"> <span><b>qq_get_prompt</b><span class="meta">查看角色卡、推荐值、可用工具、当前唤醒配置</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getUnread"> <span><b>qq_get_unread_messages</b><span class="meta">查看未读消息，不自动标记已读</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getRecent"> <span><b>qq_get_recent_messages</b><span class="meta">查看最近消息，支持 offset 扩大范围</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="socialState"> <span><b>qq_social_state</b><span class="meta">查看当前 WakeConfig、未读数、上次唤醒原因等</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendGroup"> <span><b>qq_send_group_message</b><span class="meta">向指定群发送一条纯文本消息</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendPrivate"> <span><b>qq_send_private_message</b><span class="meta">向指定好友发送一条纯文本消息</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="reply"> <span><b>qq_reply</b><span class="meta">引用/回复某条群消息并发送文本</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendBurst"> <span><b>qq_send_burst</b><span class="meta">按数组分多条发送，桥接自动加真人化间隔</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendMessage"> <span><b>qq_send_message</b><span class="meta">统一发送：一条/多条/引用/自定义或按字数计算间隔</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendPoke"> <span><b>qq_send_poke</b><span class="meta">发送 QQ 拍一拍（群聊传 targetUserId，私聊可省）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="waitMessages"> <span><b>qq_wait_for_messages</b><span class="meta">短暂等待新消息，有新消息立即返回或超时返回</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="feedback"> <span><b>qq_report_feedback</b><span class="meta">向控制台反馈 AI 遇到的问题/困惑</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getMyRecent"> <span><b>qq_get_my_recent_messages</b><span class="meta">查看自己最近发过的消息，避免重复</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getMessageDetail"> <span><b>qq_get_message_detail</b><span class="meta">按 message_id 查看单条消息完整内容</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getImages"> <span><b>qq_get_message_images</b><span class="meta">查看消息中的图片/表情内容</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getForwardMsg"> <span><b>qq_get_forward_msg</b><span class="meta">查看当前会话收到的合并转发消息内容</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getActiveMembers"> <span><b>qq_get_active_members</b><span class="meta">查看最近活跃成员列表</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="setWakeConfig"> <span><b>qq_set_wake_config</b><span class="meta">设置唤醒/潜水条件：无限期、有限时间、@/名字/关键词/概率等</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="markRead"> <span><b>qq_mark_read</b><span class="meta">标记当前未读为已读（看过但决定不回复）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="memory"> <span><b>qq_memory_append / qq_memory_query</b><span class="meta">轻量记忆：话题/想说的话/群友印象</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="slangQuery"> <span><b>qq_slang_query</b><span class="meta">查询已确认黑话/梗/网络表达</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="slangSubmit"> <span><b>qq_slang_submit</b><span class="meta">AI 提交陌生词/黑话给管理员筛选</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="listStickers"> <span><b>qq_list_stickers</b><span class="meta">查看/搜索 QQ 收藏表情（含备注和本地笔记）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getStickerImage"> <span><b>qq_get_sticker_image</b><span class="meta">看图理解没有备注的收藏表情</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendSticker"> <span><b>qq_send_sticker</b><span class="meta">发送收藏表情（一条消息只能一张，不能带文字）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="collectSticker"> <span><b>qq_collect_sticker</b><span class="meta">AI 偶尔收藏别人发的表情并写简短备注</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="personProfile"> <span><b>qq_get_person / qq_note_person</b><span class="meta">按 QQ 号查看/记录人物档案（按共享策略过滤可见范围）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="requestMode"> <span><b>qq_request_mode_change</b><span class="meta">只在管理员私聊里登记模式切换申请；不能执行、不能确认</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="crossGroup"> <span><b>qq_cross_group_query</b><span class="meta">跨群受控查询（还需 crossGroup.enabled 与链接授权）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="ownerGroupAccess"> <span><b>qq_owner_peek_group / qq_owner_group_rule</b><span class="meta">管理员私聊里只读查看白名单群的消息和记忆，并给群设定长期规则（由桥接写进群会话记忆、每次唤醒注入；默认关闭，改动后需重启 DSH）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="ownerRelay"> <span><b>qq_ask_group_session</b><span class="meta">管理员私聊里托付某个白名单群的会话去群里说话（默认关闭；由群会话自己组织语言发言，改动后需重启 DSH）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="getSelfImage"> <span><b>qq_get_self_image</b><span class="meta">查看自己的默认 Q 版形象图片</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="stickerNote"> <span><b>qq_sticker_note</b><span class="meta">给表情记录本地含义/标签/用法</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="setStickerRemark"> <span><b>qq_set_sticker_remark</b><span class="meta">修改 QQ 官方表情备注（默认禁用，慎用）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="sendVoice"> <span><b>qq_send_voice / qq_list_voices</b><span class="meta">发送语音条（只能发语音库里的音频；偶然而为的强表达）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="webImage"> <span><b>qq_search_images / qq_preview_image / qq_send_web_image</b><span class="meta">搜图并发送（默认关）：只在管理员私聊里用，「找一张 xxx 的图发我」；必须先看图再发，搜索词会发给 Bing；改后重启 DSH 才会出现在工具列表</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="schedule"> <span><b>qq_schedule_create / list / update / delete</b><span class="meta">定时任务：只在管理员私聊里能用，AI 替你登记提醒、到点由桥接执行；默认只能发给你，登记后桥接另发确认（详见「定时任务」页面）</span></span></label>
+        <label class="v2-tool-item"><input type="checkbox" data-v2-tool="handoverMemory"> <span><b>切到 agent 时带上私聊长期记忆</b><span class="meta">不是工具：切到 agent L1～L3 时，把二代仿真里 AI 在管理员私聊记下的话题、想说的话、印象一并交接给 agent（只取管理员私聊的，不含任何群；已脱敏）。关掉后只交接最近的私聊往来</span></span></label>
+      </div>
+      <div class="meta" style="margin-top:6px">二代黑话学习：AI 可用 <code>qq_slang_submit</code> 提交陌生词，也可由桥接自动提取；管理员在「黑话词库」页面筛选确认后，词条会自动写入黑话提示词并注入 <code>qq_get_prompt</code> 与后续唤醒。</div>
+
+      </div></details>
+<details class="settings-group"><summary>语音库与语音发送（调试）</summary><div class="settings-content">
+      <div class="meta" style="margin-bottom:8px">
+        语音库目录：<code>qq-bridge/audio/</code>（改 <code>socialV2.voice.dir</code> 可换）。把音频文件丢进去即可被 AI 用 <code>qq_send_voice</code> 发出；
+        本面板用于调试与试发 —— 试发走的是与 AI 通道相同的解析/校验/限流路径（<code>/api/voice/send</code>），只是由你在控制台触发。
+      </div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center">
+        <button id="voiceRefreshBtn" type="button" class="btn-secondary">刷新语音库</button>
+        <label style="flex:0 0 auto">发送目标</label>
+        <input type="text" id="voiceSendTarget" placeholder="group:100005" style="width:190px">
+        <label style="flex:0 0 auto"><input type="checkbox" id="voiceSendDryRun" style="width:auto"> 只校验不发送</label>
+        <button id="voiceSendBtn" type="button">试发选中语音</button>
+        <span id="voiceMsg" class="meta"></span>
+      </div>
+      <div id="voiceList" class="meta" style="margin-top:8px">点「刷新语音库」加载…</div>
+      <div class="meta" style="margin-top:6px">
+        上限：时长 <code>maxSeconds</code>、体积 <code>maxBytes</code>、频率 <code>maxPerMinute</code>/<code>maxPerHour</code>（见下方配置区）。
+        命令行等价工具：<code>node scripts/send-voice.mjs list-voice</code>（经桥接）或 <code>node voice-cli.mjs</code>（独立工具，在上级 <code>voice-tool/</code> 里直连 SnowLuma）。
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>唤醒推荐值（仅参考，AI 可不遵守）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">默认模式</label>
+        <select id="v2WakeDefaultMode" style="width:120px"><option value="diving">潜水</option><option value="active">活跃</option></select>
+        <label style="flex:1">默认下一次唤醒：无限期（永久）</label><input type="checkbox" id="v2RecDefaultInfinite" style="width:auto">
+      </div>
+      <div class="row">
+        <label style="flex:1">推荐潜水时长（分）</label>
+        <input type="number" id="v2RecSleepMin" min="1" style="width:80px"> ~
+        <input type="number" id="v2RecSleepMax" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">推荐普通消息概率</label><input type="number" id="v2RecProb" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">推荐关键词（逗号分隔）</label><input type="text" id="v2RecKeywords" placeholder="小鲸鱼, DeepSeek" style="flex:1">
+      </div>
+      <div class="row">
+        <label style="flex:1">推荐 @ 唤醒</label><input type="checkbox" id="v2RecAt" style="width:auto">
+        <label style="flex:1">推荐名字唤醒</label><input type="checkbox" id="v2RecName" style="width:auto">
+        <label style="flex:1">推荐提问唤醒</label><input type="checkbox" id="v2RecQuestion" style="width:auto">
+        <label style="flex:1">推荐拍一拍唤醒</label><input type="checkbox" id="v2RecPoke" style="width:auto">
+      </div>
+      <label>唤醒推荐提示（给 AI 看的文字）</label>
+      <textarea id="v2WakeHint" rows="2" placeholder="例如：如果你在潜水，推荐 5~120 分钟、普通消息概率 0.05…"></textarea>
+
+      </div></details>
+<details class="settings-group"><summary>唤醒硬限制</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">最小潜水（秒）</label><input type="number" id="v2SleepMinMs" min="0" style="width:90px">
+        <label style="flex:1">最大潜水（秒，0=不限）</label><input type="number" id="v2SleepMaxMs" min="0" style="width:90px">
+      </div>
+      <div class="row">
+        <label style="flex:1">每分钟最多唤醒</label><input type="number" id="v2MaxWakeMin" min="0" style="width:90px">
+        <label style="flex:1">每小时最多唤醒</label><input type="number" id="v2MaxWakeHour" min="0" style="width:90px">
+      </div>
+      <div class="row">
+        <label style="flex:1">合并窗口（毫秒）</label><input type="number" id="v2BatchWindowMs" min="1000" step="500" style="width:100px">
+        <label style="flex:1">无行动兜底次数</label><input type="number" id="v2NoActionLimit" min="1" style="width:80px">
+        <label style="flex:1">唤醒收尾提醒次数</label><input type="number" id="v2MaxWakeConfigReminders" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">启用沉睡前强制等待</label><input type="checkbox" id="v2PreSleepWaitEnabled" style="width:auto">
+        <label style="flex:1">沉睡前强制等待（分）</label><input type="number" id="v2PreSleepWaitMin" min="0" step="1" style="width:80px">
+        <span class="meta" style="flex:2">AI 设置潜水/下一次唤醒前，默认必须先等够这个观察窗口；0 表示不限制。</span>
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>发送限制</summary><div class="settings-content">
+      <div class="meta" style="margin-bottom:8px">二代不再按空格自动拆条；AI 要分多条必须显式传数组或用 qq_send_burst。</div>
+      <div class="row">
+        <label style="flex:1">允许多条发送</label><input type="checkbox" id="v2BurstEnabled" style="width:auto">
+        <label style="flex:1">单次最多条数</label><input type="number" id="v2BurstMax" min="1" style="width:70px">
+      </div>
+      <div class="row">
+        <label style="flex:1">条间间隔（毫秒）</label>
+        <input type="number" id="v2BurstMin" min="0" style="width:80px"> ~
+        <input type="number" id="v2BurstMaxMs" min="0" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">长间隔概率</label><input type="number" id="v2LongGapProb" step="0.05" min="0" max="1" style="width:80px">
+        <label style="flex:1">长间隔范围（毫秒）</label>
+        <input type="number" id="v2LongGapMin" min="0" style="width:80px"> ~
+        <input type="number" id="v2LongGapMax" min="0" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">每分钟最多发送</label><input type="number" id="v2MaxSendMin" min="0" style="width:80px">
+        <label style="flex:1">每小时最多发送</label><input type="number" id="v2MaxSendHour" min="0" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">单条最大字符</label><input type="number" id="v2MaxMsgChars" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">最大条间隔（毫秒，防止过长）</label><input type="number" id="v2MaxGapMs" min="100" style="width:90px">
+        <label style="flex:1">按字数基础间隔（毫秒）</label><input type="number" id="v2GapBaseMs" min="0" style="width:80px">
+        <label style="flex:1">每字追加（毫秒）</label><input type="number" id="v2GapPerCharMs" min="0" style="width:80px">
+      </div>
+      <label>发送推荐提示（给 AI 看的文字）</label>
+      <textarea id="v2SendHint" rows="2" placeholder="例如：普通闲聊建议一次 1~3 条，条间 1~3 秒…"></textarea>
+
+      </div></details>
+<details class="settings-group"><summary>等待工具参数（qq_wait_for_messages）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">默认等待（毫秒）</label><input type="number" id="v2WaitDefaultMs" min="100" style="width:90px">
+        <label style="flex:1">最小等待（毫秒）</label><input type="number" id="v2WaitMinMs" min="100" style="width:90px">
+        <label style="flex:1">最大等待（毫秒）</label><input type="number" id="v2WaitMaxMs" min="100" style="width:90px">
+      </div>
+      <div class="row">
+        <label style="flex:1">默认静默窗口（毫秒）</label><input type="number" id="v2WaitDefaultQuietMs" min="0" style="width:90px">
+        <label style="flex:1">收到新消息后最小静默（毫秒）</label><input type="number" id="v2MinQuietAfterNewMs" min="0" style="width:90px">
+        <span class="meta" style="flex:2">收到新消息后至少再等这么久（默认 10000ms=10 秒），防止抢话。</span>
+      </div>
+      <div class="row">
+        <label style="flex:1">回复检查延迟（秒）</label><input type="number" id="v2AutoReplyCheckSec" min="1" style="width:90px">
+        <span class="meta" style="flex:2">回复检查是 AI 发消息后回来检查是否有人回复的延迟。</span>
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>主动机会参数（proactive：群安静时 AI 主动冒泡）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">启用主动机会</label><input type="checkbox" id="v2ProactiveEnabled" style="width:auto">
+        <label style="flex:1">检查间隔（分）</label>
+        <input type="number" id="v2ProactiveIntervalMin" min="1" style="width:80px"> ~
+        <input type="number" id="v2ProactiveIntervalMax" min="1" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">安静阈值（分）</label><input type="number" id="v2ProactiveIdleThreshold" min="1" style="width:80px">
+        <label style="flex:1">触发概率</label><input type="number" id="v2ProactiveProbability" step="0.05" min="0" max="1" style="width:80px">
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>表情包参数（sticker：QQ 收藏表情体系）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">启用表情包体系</label><input type="checkbox" id="v2StickerEnabled" style="width:auto">
+        <label style="flex:1">同步缓存 TTL（秒）</label><input type="number" id="v2StickerSyncTtlSec" min="1" style="width:90px">
+        <label style="flex:1">列表最大返回数</label><input type="number" id="v2StickerMaxList" min="1" max="500" style="width:90px">
+      </div>
+      <div class="row">
+        <label style="flex:1">提示中列出常用表情数</label><input type="number" id="v2StickerPromptMax" min="1" max="30" style="width:90px">
+        <label style="flex:1">在 prompt/唤醒里附带表情摘要</label><input type="checkbox" id="v2StickerIncludePrompt" style="width:auto">
+        <span class="meta" style="flex:2">关闭后 AI 仍可主动调用 qq_list_stickers，只是不主动喂到上下文。</span>
+      </div>
+      <div class="row">
+        <label style="flex:1">AI 收藏表情</label><input type="checkbox" id="v2StickerCollectEnabled" style="width:auto">
+        <label style="flex:1">每分钟最多收藏</label><input type="number" id="v2StickerCollectPerMin" min="0" style="width:80px">
+        <label style="flex:1">每小时最多收藏</label><input type="number" id="v2StickerCollectPerHour" min="0" style="width:80px">
+      </div>
+      <div class="row">
+        <label style="flex:1">收藏备注最大字数</label><input type="number" id="v2StickerCollectRemarkMax" min="1" max="50" style="width:80px">
+        <span class="meta" style="flex:2">AI 收藏别人表情时写的简短备注长度上限。</span>
+      </div>
+      <div class="row" style="margin-top:12px;align-items:center;gap:12px;flex-wrap:wrap">
+        <button id="stickerDescribeBtn" type="button">让 AI 看图补表情说明</button>
+        <span class="meta" id="stickerDescribeStatus">加载中…</span>
+      </div>
+      <div class="meta">没有说明的表情，AI 不知道图里是什么，平时就很少用。点一下：桥接用一个不挂本地工具的专用会话，逐批把图发给当前模型看（每次最多 20 张，需要能看图的模型），
+        写下「是什么 / 标签 / 什么时候用」存进本地表情库（不改 QQ 账号里的官方备注）。偏凶或带粗口的表情会打上「偏凶 / 粗口」标签并标「慎用」。每张图都会花一点 token。</div>
+
+      </div></details>
+<details class="settings-group"><summary>上下文参数（recent / unread / contextWindow）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">最近消息上限</label><input type="number" id="v2ContextRecentLimit" min="1" style="width:80px">
+        <label style="flex:1">未读上限</label><input type="number" id="v2ContextUnreadLimit" min="1" style="width:80px">
+        <label style="flex:1">上下文窗口</label><input type="number" id="v2ContextWindow" min="1" style="width:80px">
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>反馈工具参数（qq_report_feedback）</summary><div class="settings-content">
+      <div class="row">
+        <label style="flex:1">反馈最大长度</label><input type="number" id="v2FeedbackMaxLength" min="1" style="width:90px">
+        <label style="flex:1">错误级通知 owner</label><input type="checkbox" id="v2FeedbackNotifyOwner" style="width:auto">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="v2FeedbackLoad" class="small">加载 AI 反馈</button>
+        <button id="v2FeedbackClear" class="small danger">清空 AI 反馈</button>
+        <span class="meta" id="v2FeedbackMsg"></span>
+      </div>
+      <pre id="v2FeedbackOutput">（空）</pre>
+
+      </div></details>
+<details class="settings-group"><summary>工具调用日志（AI 调用了什么工具、参数、成功/失败）</summary><div class="settings-content">
+      <div class="row">
+        <button id="v2ToolLogLoad" class="small">加载工具日志</button>
+        <button id="v2ToolLogClear" class="small danger">清空工具日志</button>
+        <span class="meta" id="v2ToolLogMsg"></span>
+      </div>
+      <div id="v2ToolLogOutput" class="tool-log-table">（空）</div>
+
+      </div></details>
+<details class="settings-group"><summary>轻量记忆（activeTopics / pendingThoughts / memberImpressions）</summary><div class="settings-content">
+      <div class="row">
+        <input type="text" id="v2MemoryKey" placeholder="group:123456789" style="flex:1">
+        <button id="v2MemoryLoad" class="small">加载记忆</button>
+        <button id="v2MemoryClearAll" class="small danger">清空全部</button>
+        <span class="meta" id="v2MemoryMsg"></span>
+      </div>
+      <div id="v2MemoryOutput" class="tool-log-table">（空）</div>
+
+      </div></details>
+<details class="settings-group"><summary>唤醒状态（AI 当前设置的下一次唤醒条件/倒计时）</summary><div class="settings-content">
+      <div class="row">
+        <input type="text" id="v2WakeKey" placeholder="group:123456789" style="flex:1">
+        <button id="v2WakeStatusLoad" class="small">查看唤醒状态</button>
+        <span class="meta" id="v2WakeStatusMsg"></span>
+      </div>
+      <div id="v2WakeStatusOutput" class="tool-log-table">（空）</div>
+
+</div></details>
+<details class="settings-group"><summary>初始提示词（预写某个群/私聊的环境，只在 AI 首次唤醒时看一次）</summary><div class="settings-content">
+      <div class="meta" style="margin-bottom:8px">
+        在这里提前告诉 AI「这个群是什么圈子、什么氛围、聊什么、有什么忌讳」。AI 只在<b>该会话的第一次唤醒</b>时收到一次，
+        之后不会重复注入（那时它已经在会话上下文里了）；AI 读不到也改不了这份设置。
+        如果 AI 已经在这个会话里首次唤醒过，需要重置该会话（「会话映射」里重置，或「重置二代状态」）后，下一次首次唤醒才会带上它。
+        留空保存等于删除；只写环境背景，别写指令式的要求（那是人格卡/仿真提示词的事）。
+      </div>
+      <div class="row">
+        <input type="text" id="v2InitPromptKey" placeholder="group:123456789（可从「白名单会话快速选择」带过来）" style="flex:1" aria-label="初始提示词的会话 key">
+        <button id="v2InitPromptLoad" class="small">加载</button>
+        <button id="v2InitPromptSave" class="small">保存</button>
+        <button id="v2InitPromptClear" class="small danger">删除</button>
+        <span class="meta" id="v2InitPromptMsg"></span>
+      </div>
+      <textarea id="v2InitPromptText" rows="5" aria-label="初始提示词正文" placeholder="例如：这是一个偏技术的闲聊群，群友喜欢玩梗、聊模型和本地部署；氛围轻松，别长篇大论，遇到配置问题直接给结论。"></textarea>
+      <div class="meta">
+        当前 <span id="v2InitPromptCount">0</span> / <span id="v2InitPromptMax">2000</span> 字符（上限可在 config.json 的
+        <code>socialV2.initialPromptMaxChars</code> 调整）。
+      </div>
+      <div id="v2InitPromptList" class="tool-log-table">（点「加载」且 key 留空时，列出所有已设置的会话）</div>
+
+</div></details>
+<details class="settings-group"><summary>白名单会话快速选择</summary><div class="settings-content">
+      <div class="row">
+        <select id="v2SessionSelect" style="flex:1"><option value="">选择白名单群/私聊…</option></select>
+        <button id="v2SessionRefresh" class="small">刷新</button>
+      </div>
+
+      </div></details>
+<details class="settings-group"><summary>会话状态查看</summary><div class="settings-content">
+      <div class="row">
+        <input type="text" id="v2StateKey" placeholder="group:123456789" style="flex:1">
+        <button id="v2StateView" class="small">查看</button>
+        <button id="v2ForceWake" class="small">立即唤醒</button>
+        <button id="v2StatesList" class="small">列出全部会话状态</button>
+      </div>
+      <pre id="v2StateOutput">（空）</pre>
+      <pre id="v2AllStatesOutput" style="margin-top:6px">（全部会话状态：空）</pre>
+    </div></details>
+<div class="save-bar">      <div class="row" style="margin-top:10px">
+        <button id="v2ConfigSave" style="font-weight:bold;padding:8px 16px">保存当前参数（写入 config.json）</button>
+        <span class="meta" id="v2ConfigMsg"></span>
+      </div>
+      <div class="meta" style="margin-top:4px">修改上面任意推荐/默认参数后，必须点这个按钮才会持久化；保存后会自动应用到仍使用默认唤醒配置的会话，重启后仍然保留。</div>
+
+      </div></section>
+<section id="section-slang" data-page="slang" class="card span-all">
+      <h2>群聊黑话 / 网络用语库</h2>
+      <div class="meta">DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；确认后的词条会写入“黑话提示词”，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。</div>
+
+      <div class="slang-tabs">
+        <button class="slang-tab active" data-slang-tab="candidate" title="还没有含义 / 用法 / 示例的候选">候选词-待研究 <span class="meta" id="slangCountPending"></span></button>
+        <button class="slang-tab" data-slang-tab="researched" title="已有含义 / 用法 / 示例（研究结果或手填），等你确认或拒绝">候选词-已研究 <span class="meta" id="slangCountResearched"></span></button>
+        <button class="slang-tab" data-slang-tab="confirmed">已确认</button>
+        <button class="slang-tab" data-slang-tab="rejected">已拒绝</button>
+      </div>
+      <span class="meta" id="slangMsg"></span>
+
+      <!-- 候选词面板 -->
+      <div class="slang-panel active" id="slangPanelCandidate">
+        <div class="row" style="margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangCandidateSelectAll"> 全选</label>
+          <button id="slangBatchResearch" class="small">批量送 DSH 深度研究</button>
+          <button id="slangBatchConfirm" class="small">批量确认（有含义）</button>
+          <button id="slangBatchReject" class="small">批量拒绝</button>
+          <button id="slangBatchDeleteCand" class="small danger">批量删除候选</button>
+          <button id="slangExtract" class="small">立即提取候选</button>
+          <button id="slangResearch" class="small">研究全部候选</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="slangSearchCand" placeholder="搜索词条 / 草稿含义 / 语境证据" style="flex:1">
+          <select id="slangLimitCand" style="width:110px">
+            <option value="50">每页 50</option>
+            <option value="100" selected>每页 100</option>
+            <option value="200">每页 200</option>
+            <option value="500">每页 500</option>
+          </select>
+        </div>
+        <div class="slang-scroll" id="slangCandidateList">加载中…</div>
+      </div>
+
+      <!-- 已确认面板 -->
+      <div class="slang-panel" id="slangPanelConfirmed">
+        <div class="row" style="margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangConfirmedSelectAll"> 全选</label>
+          <button id="slangBatchDeleteConfirmed" class="small danger">批量删除已确认</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="slangSearchConfirmed" placeholder="搜索词条 / 含义 / 用法 / 示例 / 来源" style="flex:1">
+          <select id="slangLimitConfirmed" style="width:110px">
+            <option value="50">每页 50</option>
+            <option value="100" selected>每页 100</option>
+            <option value="200">每页 200</option>
+            <option value="500">每页 500</option>
+          </select>
+        </div>
+        <div class="slang-scroll" id="slangConfirmedList">加载中…</div>
+      </div>
+
+      <!-- 已拒绝面板 -->
+      <div class="slang-panel" id="slangPanelRejected">
+        <div class="row" style="margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangRejectedSelectAll"> 全选</label>
+          <button id="slangBatchRestore" class="small">恢复为候选</button>
+          <button id="slangBatchDeleteRejected" class="small danger">批量删除已拒绝</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input type="text" id="slangSearchRejected" placeholder="搜索词条 / 拒绝原因" style="flex:1">
+          <select id="slangLimitRejected" style="width:110px">
+            <option value="50">每页 50</option>
+            <option value="100" selected>每页 100</option>
+            <option value="200">每页 200</option>
+            <option value="500">每页 500</option>
+          </select>
+        </div>
+        <div class="slang-scroll" id="slangRejectedList">加载中…</div>
+      </div>
+
+      <div class="divider"></div>
+      <div class="meta" style="margin-bottom:6px">手动添加黑话</div>
+      <div class="row">
+        <input type="text" id="slangContent" placeholder="词条，如：绝绝子" style="flex:1">
+        <input type="text" id="slangMeaning" placeholder="含义，如：很好、很棒" style="flex:1">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <input type="text" id="slangUsage" placeholder="用法（可选）" style="flex:1">
+        <input type="text" id="slangExample" placeholder="示例（可选）" style="flex:1">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="slangAdd" class="small">添加入库（确认）</button>
+      </div>
+      <details style="margin-top:10px">
+        <summary class="meta">黑话系统参数（可调）</summary>
+        <div class="row">
+          <label style="flex:1">启用黑话学习</label><input type="checkbox" id="slangEnabled" style="width:auto">
+        </div>
+        <div class="row">
+          <label style="flex:1">触发提取最少消息数</label><input type="number" id="slangExtractMin" min="1" style="width:90px">
+        </div>
+        <div class="row">
+          <label style="flex:1">提取冷却（毫秒）</label><input type="number" id="slangCooldown" min="0" step="1000" style="width:110px">
+        </div>
+        <div class="row">
+          <label style="flex:1">研究触发阈值（逗号分隔）</label><input type="text" id="slangThresholds" placeholder="2,4,8" style="width:120px">
+        </div>
+        <div class="row">
+          <label style="flex:1">注入最大条数</label><input type="number" id="slangInjectMax" min="1" max="30" style="width:90px">
+        </div>
+        <div class="row">
+          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="qq-chat" style="width:120px">
+        </div>
+        <div class="row">
+          <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习" style="width:120px">
+        </div>
+        <div class="row">
+          <label style="flex:1">自动联网研究</label><input type="checkbox" id="slangAutoResearch" style="width:auto">
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="slangConfigSave" class="small">保存黑话参数</button>
+          <span class="meta" id="slangConfigMsg"></span>
+        </div>
+      </details>
+    </section>
+<section id="section-scheduler" data-page="scheduler" class="card span-all">
+      <h2>定时任务</h2>
+      <div class="row">
+        <label class="sched-chip" style="margin:0"><input type="checkbox" id="schedEnabled"> 启用定时任务</label>
+        <span id="schedStatePill" class="pill">—</span>
+        <span class="meta" style="margin:0">默认时区</span>
+        <select id="schedTimezone" style="flex:0 1 320px" aria-label="默认时区"></select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label class="sched-chip" style="margin:0"><input type="checkbox" id="schedAllowAiPrivate"> 允许 AI 在管理员私聊里登记任务</label>
+        <label class="sched-chip" style="margin:0"><input type="checkbox" id="schedAllowAiGroup"> 允许 AI 登记发往群 / 其他好友的任务（登记后先暂停，需你确认）</label>
+        <button id="schedSettingsSave" class="small">保存</button>
+        <span class="meta" id="schedSettingsMsg" style="margin:0"></span>
+      </div>
+      <div class="meta">总开关和安全限制只能在这里或管理员命令里改，AI 改不了。时间一律按任务的时区计算，和这台电脑的时区无关。</div>
+
+      <h3 style="margin-top:22px">安全限制</h3>
+      <div class="sched-limits" id="schedLimits"></div>
+      <div class="row" style="margin-top:10px">
+        <label class="sched-chip" style="margin:0"><input type="checkbox" id="schedQuietEnabled"> 定时任务免打扰（只拦定时任务发往群的消息，不影响 AI 平时被 @ 时回复）</label>
+        <input type="text" id="schedQuietStart" style="flex:0 1 80px" placeholder="00:00"> 到 <input type="text" id="schedQuietEnd" style="flex:0 1 80px" placeholder="07:00">
+        <button id="schedLimitsSave" class="small">保存限制</button>
+        <button id="schedLimitsReset" class="small">恢复默认</button>
+        <span class="meta" id="schedLimitsMsg" style="margin:0"></span>
+      </div>
+
+      <div class="row" style="margin-top:22px;justify-content:space-between">
+        <h3 style="margin:0">任务列表 <span class="meta" id="schedCount"></span></h3>
+        <button id="schedNew" class="small">＋ 新建任务</button>
+      </div>
+      <div id="schedList" style="overflow:auto"></div>
+
+      <div class="sched-editor" id="schedEditor" hidden>
+        <h3 id="schedEditorTitle" style="margin-top:0">新建任务</h3>
+        <div class="grid" style="gap:12px">
+          <div><label for="schedName">名称</label><input type="text" id="schedName" placeholder="早安"></div>
+          <div><label for="schedTaskTz">时区</label><select id="schedTaskTz"></select></div>
+        </div>
+        <label for="schedType">重复方式</label>
+        <select id="schedType">
+          <option value="once">一次性</option>
+          <option value="daily">每天</option>
+          <option value="weekly">每周</option>
+          <option value="workdays">工作日（周一至周五，跳过法定节假日）</option>
+          <option value="monthly">每月几号</option>
+          <option value="monthlyWeekday">每月第几个周几</option>
+          <option value="yearly">每年</option>
+          <option value="dates">特殊日期</option>
+          <option value="everyNDays">每隔 N 天</option>
+          <option value="interval">每隔 N 分钟</option>
+          <option value="dailyRandom">每天随机几次</option>
+          <option value="monthlyRandom">每月随机几次</option>
+          <option value="cron">高级：cron 表达式</option>
+        </select>
+        <div class="sched-fields" id="schedFields"></div>
+        <div class="grid" style="gap:12px">
+          <div><label>有效期（可选）</label><div class="row"><input type="text" id="schedStartDate" placeholder="开始 YYYY-MM-DD" style="flex:1 1 120px"><input type="text" id="schedEndDate" placeholder="结束 YYYY-MM-DD" style="flex:1 1 120px"></div></div>
+          <div><label for="schedMaxRuns">共执行几次后停止（可选）</label><input type="number" id="schedMaxRuns" min="1" placeholder="不限"></div>
+        </div>
+        <div class="grid" style="gap:12px">
+          <div><label for="schedExclude">排除日期（可选，逗号分隔）</label><input type="text" id="schedExclude" placeholder="2026-12-25, 2027-01-01"></div>
+          <div><label>其它</label><div class="row"><label class="sched-chip" style="margin:0"><input type="checkbox" id="schedSkipHolidays"> 跳过法定节假日</label>
+            <select id="schedSilence" style="flex:1 1 160px" title="只对「叫 AI 来说」有效；固定文字在定时静默里照发"><option value="skip">定时静默时段内：跳过这次</option><option value="run">定时静默时段内：照常执行</option></select>
+            <select id="schedMissed" style="flex:1 1 160px"><option value="grace">错过了：补发时间内补发，否则跳过</option><option value="skip">错过了：直接跳过</option></select></div></div>
+        </div>
+        <label>发给谁（可多选）</label>
+        <div id="schedTargets"></div>
+        <label>内容</label>
+        <div class="row">
+          <label class="sched-chip" style="margin:0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
+          <label class="sched-chip" style="margin:0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
+        </div>
+        <div class="row" id="schedPluginKindRow" style="margin-top:8px;display:none">
+          <label class="field" style="flex:1 1 240px">插件任务类型<select id="schedPluginKind"></select></label>
+          <span class="meta" style="margin:0">由插件注册；payload 见插件说明</span>
+        </div>
+        <textarea id="schedPayloadJson" rows="3" style="width:100%;margin-top:8px;display:none" placeholder='{"payload": {"week": "周一"}}'></textarea>
+        <textarea id="schedContent" rows="3" style="width:100%;margin-top:8px" placeholder="早上好"></textarea>
+        <div class="meta" id="schedPreview">接下来：—</div>
+        <div class="row" style="margin-top:10px">
+          <button id="schedSave">保存任务</button>
+          <button id="schedCancel" class="small">取消</button>
+          <span class="meta" id="schedEditorMsg" style="margin:0"></span>
+        </div>
+      </div>
+
+      <h3 style="margin-top:22px">执行记录 <span class="meta">最近 100 条</span></h3>
+      <div class="sched-history" id="schedHistory"><div>暂无</div></div>
+      <div class="meta">管理员私聊里也可以用 <code>/remind</code> 管理（发 <code>/remind</code> 看用法）；在二代仿真里也可以直接跟 AI 说「每天六点给我发个早安」，AI 登记后桥接会另发一条确认给你。</div>
+    </section>
+<section id="section-reference" data-page="reference" class="card span-all">
+      <h2>DSH 侧 MCP 工具</h2>
+      <div class="meta">由 qq-bridge 的 MCP server 提供给 DSH agent；修改后需重启 DSH 才会刷新工具 schema。</div>
+      <table>
+        <tr><th>工具</th><th>说明</th></tr>
+        <tr><td>qq_status</td><td>登录状态（只读）</td></tr>
+        <tr><td>qq_list_groups</td><td>群列表（只返回白名单群）</td></tr>
+        <tr><td>qq_get_group_members</td><td>群成员（只读，群号必须白名单）</td></tr>
+        <tr><td>qq_get_group_history</td><td>群历史（只读，含 message_id，可作引用目标）</td></tr>
+        <tr><td>qq_send_group_message</td><td>发群消息；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
+        <tr><td>qq_reply</td><td>专用“引用/回复”：在群里引用某条消息并发送文本</td></tr>
+        <tr><td>qq_send_private_message</td><td>发私聊；可选 <code>replyToMessageId</code> 引用/回复</td></tr>
+        <tr><td>qq_slang_query</td><td>查询已确认黑话/梗/网络表达（只读）</td></tr>
+        <tr><td>qq_slang_submit</td><td>AI 提交陌生词/黑话给管理员筛选</td></tr>
+      </table>
+      <div class="meta" style="margin-top:10px">二代仿真模式工具：qq_get_prompt / qq_get_unread_messages / qq_get_recent_messages / qq_social_state / qq_send_burst / qq_send_message / qq_wait_for_messages / qq_set_wake_config / qq_mark_read / qq_memory_* / qq_slang_query / qq_slang_submit 等。</div>
+    </section>
+<section id="section-whitelist" data-page="access" class="card span-all">
+      <h2>白名单 / 管理员</h2>
+      <label>允许的群号（逗号分隔）</label>
+      <input type="text" id="wlGroups" placeholder="123456789, 123456">
+      <label>允许的私聊 QQ（逗号分隔）</label>
+      <input type="text" id="wlPrivate" placeholder="123456789">
+      <label>管理员 QQ（ownerQQ，最高权限）</label>
+      <input type="text" id="ownerQQ" placeholder="123456789">
+      <div class="meta">管理员是唯一可执行管理命令/审批/closed-agent 的 QQ；可留空清除（清除后无管理员，fail-closed）。</div>
+      <label>拒绝的群号（黑名单，逗号分隔）</label>
+      <input type="text" id="dnGroups" placeholder="">
+      <label>拒绝的私聊 QQ（黑名单，逗号分隔）</label>
+      <input type="text" id="dnPrivate" placeholder="">
+      <div class="row" style="margin-top:10px">
+        <button id="wlSave">保存白名单</button>
+        <span class="meta">保存后立即生效并写入 config.json</span>
+      </div>
+    </section>
+<section id="section-sendlimit" data-page="overview" class="card span-all">
+      <h2 data-note="保存后立即生效">发言上限</h2>
+      <div class="meta">二代仿真里每个群 / 私聊 AI 最多能发多少条，防止刷屏和账号风控。超过上限时 AI 这次的话不会发出去（表现为「AI 不说话了」）；填 0 表示不限。</div>
+      <div class="row" style="margin-top:10px">
+        <label style="flex:0 0 auto">每分钟最多</label><input type="number" id="sendLimitMin" min="0" max="999" style="width:80px"><span class="meta" style="margin:0">条</span>
+        <label style="flex:0 0 auto;margin-left:16px">每小时最多</label><input type="number" id="sendLimitHour" min="0" max="9999" style="width:80px"><span class="meta" style="margin:0">条</span>
+      </div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <span class="meta" style="margin:0" id="sendLimitHits">最近 24 小时没有被拦过</span>
+        <div class="row"><span class="meta" style="margin:0" id="sendLimitMsg"></span><button id="sendLimitSave">保存发言上限</button></div>
+      </div>
+    </section>
+<section id="section-silent" data-page="overview" class="card span-all">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">静默开关</h2>
+        <span id="silenceStatePill" class="pill">—</span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="silentOn">开启静默</button>
+        <button id="silentOff">恢复正常</button>
+        <span class="meta" style="margin:0">手动开关优先：手动开启后一直静默；定时静默期间点「恢复正常」= 这一段临时恢复，下一段照常。</span>
+      </div>
+      <div class="meta">静默时群友消息不投递 agent，仅管理员可对话。</div>
+
+      <div class="silence-block">
+        <div class="row" style="justify-content:space-between">
+          <div class="row">
+            <label class="sched-chip" style="margin:0"><input type="checkbox" id="silenceEnabled"> <b>定时静默</b></label>
+            <span class="meta" style="margin:0">按时间段自动静默，用来避开高峰价、省 token</span>
+          </div>
+          <div class="row"><span class="meta" style="margin:0">时区</span><select id="silenceTz" style="flex:0 1 320px" aria-label="定时静默的时区"></select></div>
+        </div>
+        <div id="silenceRanges" style="margin-top:8px"></div>
+        <div class="row" style="margin-top:8px">
+          <button id="silenceAdd" class="small">＋ 添加时间段</button>
+          <button id="silencePeak" class="small">一键填入 DeepSeek 高峰时段</button>
+          <span class="meta" style="margin:0" id="silencePeakNote">高峰：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</span>
+        </div>
+        <div class="silence-options">
+          <div style="font-weight:500">静默期间</div>
+          <div class="meta" style="margin:4px 0 0">AI 的唤醒</div>
+          <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="stop"> 全部停止（被 @、主动冒泡、睡醒、回复检查都不唤醒）——最省 token<span class="meta">原来的手动静默只拦发送，AI 仍会被定时唤醒去思考；这一档连唤醒一起停</span></label>
+          <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="direct"> 只在被 @ 或私聊时唤醒<span class="meta">有人 @ AI、引用回复 AI 或私聊 AI 时，这个群 / 私聊照常放行 10 分钟（能接着聊几句）；主动冒泡、睡醒等其余唤醒照样停，大头的花费照样省下</span></label>
+          <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="normal"> 照常唤醒，只拦往外发<span class="meta">AI 照样思考、照样花钱，只是说的话不发出去</span></label>
+          <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="recordMessages"> 群消息照样记下（不唤醒 AI），恢复后 AI 能补看这段时间说了什么</label>
+          <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="catchUpOnEnd"> 静默期间有人 @ / 叫名字 / 提问 / 拍一拍 AI，结束时补一次唤醒</label>
+          <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="pauseAiTasks"> 定时任务里「叫 AI 来说」的也暂停（任务里可以单独设「照常执行」）；固定文字照发</label>
+          <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="includeOwnerPrivate"> 管理员私聊也一起静默（默认不勾：你随时能和 AI 私聊）</label>
+        </div>
+        <div class="row" style="margin-top:12px;justify-content:space-between">
+          <span class="meta" style="margin:0" id="silenceUpcoming">—</span>
+          <div class="row"><span class="meta" style="margin:0" id="silenceMsg"></span><button id="silenceSave">保存定时静默</button></div>
+        </div>
+      </div>
+    </section>
+<section id="section-dsh" data-page="overview" class="card span-all">
+      <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
+      <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
+      <div class="row dsh-model-row" style="margin-top:10px">
+        <label style="flex:0 0 auto">提供方</label>
+        <select id="dshProviderSelect" style="flex:0 1 220px"></select>
+        <label style="flex:0 0 auto">模型</label>
+        <select id="dshModelSelect" style="flex:0 1 260px"></select>
+      </div>
+      <div class="row dsh-model-row" style="margin-top:8px">
+        <label style="flex:0 0 auto">思考强度</label>
+        <select id="dshEffortSelect" style="flex:0 1 220px"></select>
+        <label style="flex:0 0 auto" title="DSH 的模型目录不说明模型能不能看图：自动 = 只有核实过的模型才把图片交给它，其余把图片改成文字占位">看图能力</label>
+        <select id="dshVisionSelect" style="flex:0 1 220px">
+          <option value="auto">自动（未知的按不能看图）</option>
+          <option value="yes">能看图</option>
+          <option value="no">不能看图</option>
+        </select>
+        <button id="dshEffortSave">保存</button>
+        <button id="dshCatalogRefresh" class="small" title="重新读取 DSH 的模型目录">刷新目录</button>
+        <span class="meta" id="dshEffortMsg"></span>
+      </div>
+      <div id="dshModelNotices"></div>
+      <div class="meta" id="dshEffortNote"></div>
+      <div class="meta" id="dshEffortSideEffect"></div>
+    </section>
+<section id="section-security" data-page="access" class="card">
+      <h2>安全拦截通知</h2>
+      <div class="row">
+        <label style="flex:1">拦截时在群里发提示</label><input type="checkbox" id="secInterceptNotify" style="width:auto">
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="secSave" class="small">保存安全设置</button>
+        <span class="meta" id="secMsg"></span>
+      </div>
+      <div class="meta">开启：回复被安全拦截时会在群里提示；关闭：直接沉默，只在日志/活动记录里留下记录。</div>
+      <div id="stateDirWarn" style="display:none;margin-top:10px;padding:8px 10px;border-left:3px solid var(--warn,#d08700);background:rgba(208,135,0,.08)">
+        <b>⚠️ state/ 目录权限未收紧</b>
+        <div class="meta" style="margin:4px 0">Windows 上改文件权限需要管理员身份，本次启动没能收紧 <code id="stateDirPath"></code>。它里面的控制台令牌、SnowLuma 令牌、各会话令牌与 QQ 聊天记录，本机任何已登录用户都可能读到。</div>
+        <div class="meta">两种做法：① 用<b>管理员身份</b>打开终端执行下面这条命令（一次即可，可复制）；② 或者<b>用管理员身份重启桥接</b>，让它自己收紧。做完点下面的按钮复检。</div>
+        <pre id="stateDirCmd" style="user-select:all;overflow:auto;margin:4px 0;padding:6px;background:rgba(127,127,127,.12);border-radius:4px"></pre>
+        <button id="stateDirReharden" class="small">重新检测</button>
+        <span class="meta" id="stateDirMsg"></span>
+      </div>
+      <div id="snowlumaWarn" style="display:none;margin-top:10px;padding:8px 10px;border-left:3px solid var(--warn,#d08700);background:rgba(208,135,0,.08)">
+        <b>⚠️ QQ 网关连着，但收不到 QQ 的数据</b>
+        <div class="meta" style="margin:4px 0" id="snowlumaWarnHint"></div>
+        <div class="meta" id="snowlumaWarnDiag">最近一个上游事件包：<b id="snowlumaWarnPkt">unknown</b>；SnowLuma 自评接收链路 good=<b id="snowlumaWarnGood">unknown</b>。</div>
+        <div class="meta" style="margin:4px 0">这是 <b>SnowLuma 自己那边</b>的问题：它的 <code>[Hook]</code> 没能从 QQ 客户端取到数据，所以桥接的 WebSocket 连上了却始终没有内容可收。桥接没有原生 / 注入组件，也不改 SnowLuma，一条上游事件包都不会替你凭空造出来。</div>
+        <div class="meta">排查：打开 SnowLuma 的 <code>logs/snowluma-*.log</code>，搜 <code>[Hook]</code>，看有没有 <code>receive path stale</code> / <code>process enumeration timed out</code> 这类行；顺带考虑<b>升级 SnowLuma</b>（新版运行时对 hook 的兜底更好）。桥接这边不用重启。</div>
+      </div>
+    </section>
+<section id="section-token" data-page="access" class="card">
+      <h2>控制台访问令牌</h2>
+      <div class="meta">用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌。修改后当前页面会自动使用新令牌。</div>
+      <input type="password" id="consoleTokenInput" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password">
+      <div class="row" style="margin-top:8px">
+        <button id="consoleTokenSave" class="small">保存令牌</button>
+        <button id="consoleTokenRandom" class="small">生成随机令牌</button>
+        <span class="meta" id="consoleTokenMsg"></span>
+      </div>
+    </section>
+<section id="section-test-send" data-page="operations" class="card">
+      <h2>测试发送</h2>
+      <div class="row">
+        <select id="tsKind" style="width:100px">
+          <option value="group">群</option>
+          <option value="private">私聊</option>
+        </select>
+        <input type="text" id="tsId" placeholder="群号 / QQ 号" style="width:140px">
+      </div>
+      <label>消息内容</label>
+      <textarea id="tsMsg" placeholder="这是一条测试消息"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="tsSend">发送测试</button>
+        <span class="meta" id="tsMsg2"></span>
+      </div>
+      <div class="meta">目标必须在白名单内，否则拒绝。</div>
+    </section>
+<section id="section-maintenance" data-page="operations" class="card">
+      <h2>桥接控制</h2>
+      <div class="row">
+        <button id="restartBtn" class="danger">重启桥接</button>
+        <span class="meta" id="restartMsg"></span>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="clearWsBtn" class="danger">清空 QQ 聊天工作区</button>
+        <span class="meta" id="clearWsMsg"></span>
+      </div>
+      <div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。</div>
+    </section>
+<section id="section-notify" data-page="operations" class="card span-all">
+      <h2>后台控制端引导</h2>
+      <div class="meta">直接向指定 QQ 会话的 DSH agent 投递一条“后台控制端提醒”，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>
+      <div class="row" style="margin-top:10px">
+        <select id="aiNotifyKind" style="width:110px">
+          <option value="group">群</option>
+          <option value="private">私聊</option>
+        </select>
+        <input type="text" id="aiNotifyId" placeholder="群号 / QQ 号" style="width:180px">
+      </div>
+      <label>提醒内容（发给 DSH agent 的引导/提醒）</label>
+      <textarea id="aiNotifyMessage" placeholder="例如：接下来群里聊到某个话题时，你可以更主动一点；或：先潜水，等我叫你。"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="aiNotifySend">发送到 DSH</button>
+        <span class="meta" id="aiNotifyMsg"></span>
+      </div>
+    </section>
+<section id="section-usage" data-page="usage" class="card span-all">
+      <h2 data-note="每 3 秒自动同步">令牌与花费</h2>
+      <div class="meta">数据来源是 DSH 会话事件里的 provider usage。<b>累计总量</b>取 <code>tokenUsage</code> 投影（整条会话日志的权威累计，含桥接启动前的历史）；<b>逐轮明细</b>由 <code>assistant/message</code> 的 usage 折叠而来，能追溯到多深取决于会话开场快照带回的历史条数。金额按 DeepSeek 官方价目表折算，区分高峰 / 空闲时段（高峰单价为空闲的 2 倍）。</div>
+      <div class="overview-summary" id="usageSummary">
+        <div class="metric"><span>总花费</span><strong id="metricUsageCost">—</strong><small id="metricUsageCostHint">读取中…</small></div>
+        <div class="metric"><span>累计 token</span><strong id="metricUsageTokens">—</strong><small id="metricUsageTokensHint">输入 / 输出</small></div>
+        <div class="metric"><span>缓存命中率</span><strong id="metricUsageHitRate">—</strong><small id="metricUsageHitHint">命中输入 ÷ 总输入</small></div>
+        <div class="metric"><span>平均每轮</span><strong id="metricUsagePerTurn">—</strong><small id="metricUsagePerTurnHint">按已归属回合</small></div>
+      </div>
+      <div class="row usage-controls">
+        <button id="usageRefresh" class="small">刷新</button>
+        <button id="usageClear" class="small danger">清空账本</button>
+        <span class="meta" id="usageMsg">读取中…</span>
+      </div>
+      <h3 class="usage-h3">消耗走势</h3>
+      <div class="row usage-chart-controls" id="usageChartControls">
+        <span class="meta">时间范围</span>
+        <button class="tag active" data-usage-hours="24">近 24 小时</button>
+        <button class="tag" data-usage-hours="72">近 3 天</button>
+        <button class="tag" data-usage-hours="168">近 7 天</button>
+        <button class="tag" data-usage-hours="720">近 30 天</button>
+        <span class="meta">纵轴</span>
+        <button class="tag active" data-usage-metric="cost">花费</button>
+        <button class="tag" data-usage-metric="tokens">token</button>
+      </div>
+      <div class="usage-chart-head">
+        <strong id="usageChartTotal">—</strong>
+        <span class="meta" id="usageChartHint">读取中…</span>
+      </div>
+      <div class="usage-chart" id="usageChart">加载中…</div>
+      <div class="usage-legend">
+        <span><i class="off"></i>空闲时段</span>
+        <span><i class="peak"></i>高峰时段（单价 ×2）</span>
+        <span><i class="mixed"></i>跨时段</span>
+      </div>
+      <div class="meta" id="usageChartNote" style="margin-top:6px"></div>
+      <h3 class="usage-h3">按会话（群 / 私聊）</h3>
+      <div class="tool-log-table" id="usageConversations">加载中…</div>
+      <h3 class="usage-h3">逐轮花费 <span class="meta" id="usageTurnScope">—</span></h3>
+      <div class="row usage-controls">
+        <label class="sr-only" for="usageKeySelect">选择要查看逐轮明细的会话</label>
+        <select id="usageKeySelect"></select>
+        <button id="usageTurnsLoad" class="small">加载逐轮明细</button>
+      </div>
+      <div class="tool-log-table" id="usageTurns">选择会话后加载逐轮明细…</div>
+      <details class="settings-group"><summary>最近调用流水（实时，最新 40 条）</summary><div class="settings-content">
+      <div class="tool-log-table" id="usageRecent">（空）</div>
+      </div></details>
+      <details class="settings-group"><summary>当前生效的价目表</summary><div class="settings-content">
+      <div id="usagePrices" class="meta">读取中…</div>
+      </div></details>
+    </section>
+<section id="section-compact" data-page="usage" class="card span-all">
+      <h2 data-note="保存后下一轮结束时生效">上下文压缩</h2>
+      <div class="meta">QQ 会话一直不重建，历史越攒越长；每一步模型都要把整段历史重读一遍，读得越多越贵。压缩会把较早的历史换成一段摘要，最近约 15 万 token 原样保留；人际关系、群档案、黑话表、表情说明都存在桥接自己这边，不受影响。</div>
+      <div style="margin-top:10px">
+        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="early"> 提前压缩：上一步读到 <input type="number" id="compactWan" min="5" max="80" step="1" style="width:70px" aria-label="压缩阈值（万 token）"> 万 token 时压缩</label>
+        <div class="meta" style="margin:2px 0 8px 26px">默认 30 万。数字越小越省钱，很早以前的聊天细节也越早变成摘要；可以填 5～80。每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。</div>
+        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩（约 80 万 token 时）</label>
+        <div class="meta" style="margin:2px 0 0 26px">deepseek-flash 的上下文窗口是 100 万，DSH 在窗口的 80% 左右自己压缩；保留细节最多，但每一步读得最多、最贵。</div>
+      </div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <span class="meta" style="margin:0" id="compactSessions">—</span>
+        <div class="row"><span class="meta" style="margin:0" id="compactMsg"></span><button id="compactSave">保存压缩设置</button></div>
+      </div>
+    </section>
+      </div>
+      <div class="overview-footnote" data-page="overview"><span id="accessSummary">正在读取访问范围…</span><button class="text-button" data-view="access">管理访问范围 →</button></div>
+      <footer class="page-footer"><span>QQ Bridge · 连接日常，保持自主</span><span id="lastUpdated">等待首次同步</span></footer>
+    </main>
+  </div>
+      <div class="modal-overlay" id="slangModalOverlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="slangModalTitle" tabindex="-1">
+        <h3 id="slangModalTitle">确认黑话</h3>
+        <div class="meta" id="slangModalContent" style="margin-bottom:6px"></div>
+        <div class="meta slang-guess" id="slangModalGuess" style="display:none;margin-bottom:6px"></div>
+        <label>含义 *</label>
+        <input type="text" id="slangModalMeaning" placeholder="必须填写，确认后才会注入 AI 上下文">
+        <label>用法（可选）</label>
+        <input type="text" id="slangModalUsage" placeholder="使用场景 / 语气">
+        <label>示例（可选）</label>
+        <input type="text" id="slangModalExample" placeholder="自然短句示例">
+        <label>风险/慎用说明（可选）</label>
+        <input type="text" id="slangModalRisk" placeholder="敏感 / 慎用风险">
+        <label>参考来源（可选，每行一个 URL）</label>
+        <textarea id="slangModalSources" rows="3" placeholder="https://..."></textarea>
+        <div class="row">
+          <button id="slangModalDirectConfirm" class="small">直接确认（转正）</button>
+          <button id="slangModalSendResearch" class="small">送 DSH 深度研究</button>
+          <button id="slangModalCancel" class="small">取消</button>
+        </div>
+      </div>
+    </div>
+
+
+  <div class="toast" id="consoleToast" role="status" hidden></div>
+  <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>
+
+<script type="module" src="/console/js/app.js"></script>
+</body>
+</html>

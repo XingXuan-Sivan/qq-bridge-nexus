@@ -1,14 +1,15 @@
 // 黑话库页面：「候选词-待研究 / 候选词-已研究」分栏的离线测试（不需要浏览器）。
-// 直接从 public/console.html 取出分栏判定函数，用假数据验证；分栏只是页面视图，数据仍是 status=candidate。
+// 直接从 public/console/js/app.js 取出分栏判定函数，用假数据验证；分栏只是页面视图，数据仍是 status=candidate。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { readConsoleSource } from './console-source.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const html = fs.readFileSync(path.join(root, 'public', 'console.html'), 'utf8');
+const html = readConsoleSource(root);
 
 function extractFn(name) {
   const start = html.indexOf(`function ${name}(`);

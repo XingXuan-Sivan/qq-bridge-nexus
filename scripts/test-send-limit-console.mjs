@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const GROUP = 'group:456';
 const CONSOLE = { 'x-console-token': 'fixture-console-token' };
@@ -58,7 +59,7 @@ test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了�
 });
 
 test('② 控制台：总览页有「发言上限」卡片', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-sendlimit"'), html.indexOf('</section>', html.indexOf('<section id="section-sendlimit"')));
   assert.match(sec, /data-page="overview"/);
   for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitSave', 'sendLimitHits']) assert.ok(sec.includes(`id="${id}"`), id);

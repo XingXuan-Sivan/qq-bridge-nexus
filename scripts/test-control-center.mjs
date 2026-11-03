@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec, migrationWarning, snowlumaDataSummary } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
+import { readConsoleSource } from './console-source.mjs';
 // 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
 process.env.QQ_BRIDGE_NAPCAT_HOME ||= path.join(os.tmpdir(), 'qq-bridge-test-no-napcat');
 
@@ -304,7 +305,7 @@ test('桥接控制台 401 页：先用本机已存的令牌自动试一次，失
   assert.match(line, /consoleTokenTried/, '有防循环标记');
   assert.match(line, /manual/, '手动入口跳过自动尝试');
   assert.match(line, /prompt\(/, '仍保留手动输入');
-  const page = fs.readFileSync(path.join(root, 'public', 'console.html'), 'utf8');
+  const page = readConsoleSource(root);
   assert.ok(page.includes("sessionStorage.removeItem('consoleTokenTried')"), '鉴权成功后清掉标记');
 });
 

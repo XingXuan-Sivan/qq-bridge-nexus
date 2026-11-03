@@ -17,6 +17,7 @@ import {
   roleNameFor, roleSourceFor, withRoleForKey, renameRoleEverywhere, removeRoleEverywhere, roleInUse, roleAssignments,
 } from '../src/role-per-key.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { readConsoleSource } from './console-source.mjs';
 
 const GROUP = 'group:456';
 const OWNER = 'private:123';
@@ -308,7 +309,7 @@ test('④ QQ 命令 /role 只改当前会话', async () => {
 });
 
 test('⑤ 控制台：人格页有「按会话设置人格」', () => {
-  const html = fs.readFileSync(new URL('../public/console.html', import.meta.url), 'utf8');
+  const html = readConsoleSource();
   const i = html.indexOf('<details class="settings-group" id="roleAssignGroup">');
   assert.ok(i > html.indexOf('<section id="section-persona"'), '在人格与角色页里');
   const sec = html.slice(i, html.indexOf('</details>', i));

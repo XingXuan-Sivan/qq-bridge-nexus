@@ -33,8 +33,10 @@
 
 ### 现状
 
-- 目前只有 `GET /` 直接返回 `public/console.html`（`src/bridge.js:4639-4646`），没有通用静态目录。
-- 引入 `public/console/` 分层后（见 `PLUGIN_ROADMAP.md` §8.7），**必须在同一次提交里**加入上面的守卫与用例，不允许「先跑起来再补」。
+- 控制台已是分层目录：`public/console/index.html`（结构）、`public/console/css/app.css`、`public/console/js/app.js`；`GET /` 与 `GET /console/` 返回 index（失败 404「控制台页面缺失」）。
+- 静态资源只放行 `^/console/(css|js|img|fonts)/` 这四个子目录，且**排在令牌校验之前**——浏览器取 `<link>`/`<script>` 不会带 `x-console-token`，放在鉴权之后页面会白屏（实测：拆分后不前置时 `/console/js/app.js` 返回 401）。页面本身（`/`、`/console/`）仍要求令牌。
+- 守卫实现：`src/http/static.mjs` 的 `resolveStaticPath` / `serveStaticFile` / `sendNotFound`；用例 `scripts/test-http-boundary.mjs`（7 pass / 1 skip，符号链接用例在无权限环境自动跳过）。
+- 新增静态目录（例如将来的 `public/console/img/`）只需在 `resolveStaticPath` 的调用里登记前缀，不要另写一套校验。
 
 ---
 
@@ -76,7 +78,7 @@ const SECURITY_HEADERS = {
 };
 ```
 
-`unsafe-inline` 是因为控制台当前是**单个 372 KB 的 HTML**，样式和脚本全内联（`public/console.html`，7097 行）。
+控制台已拆成 `public/console/index.html` + `css/app.css` + `js/app.js`，但 `unsafe-inline` 仍在：`index.html` 里还有一小段内联的主题脚本（防首屏闪白）和若干内联 `style="..."` 属性。下一步是把主题脚本改成外部 module、内联样式收敛成 class，然后才能去掉 `unsafe-inline`。
 
 ### 目标（前端分层完成后）
 

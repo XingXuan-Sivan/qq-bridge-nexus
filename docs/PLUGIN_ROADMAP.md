@@ -293,9 +293,16 @@
 - 保持只读或不暴露：`audit.*`、`persona.cache.*`（详情里可见状态，但不给一键关）、`persona.provider`（等有第二个 provider 再做下拉）、插件自由 `config`（manifest 没有 `configSchema` 前不做通用表单）、`role.maxInjectChars`（人格页显示即可）。
 - 验收：`scripts/test-plugin-kernel.mjs` 增「设置接口：越界拒绝、白名单写回、watch 即时生效、未知字段忽略」（16/16）；两个 PATCH 都要求 JSON 与控制台令牌，写操作记审计 `settings`。
 
-### 8.7 控制台前端规范化与路由修复（进行中）
+### 8.7 控制台前端规范化与路由修复（进行中：第一阶段已落地）
 
-背景：前端目前是 `public/console.html`（372 KB / 7097 行，样式与脚本全内联）加 `control-center.html`（97 KB），没有组件层；路由只靠 hash，刷新会回落首页，面包屑是纯文本，搜索候选被卡片遮挡。用户要求「框架依赖保持现状」下的规范化，并明确要求**先把 HTTP 边界写进文档**（已完成：[HTTP_BOUNDARY.md](HTTP_BOUNDARY.md)）。
+背景：前端原来是 `public/console.html`（372 KB / 7097 行，样式与脚本全内联）加 `control-center.html`（97 KB），没有组件层；路由只靠 hash，刷新会回落首页，面包屑是纯文本，搜索候选被卡片遮挡。用户要求「框架依赖保持现状」下的规范化，并明确要求**先把 HTTP 边界写进文档**（已完成：[HTTP_BOUNDARY.md](HTTP_BOUNDARY.md)）。
+
+**第一阶段（✅ 2026-11-04）：目录拆分 + 静态路由**
+- `public/console/index.html`（结构，82 KB）/ `css/app.css`（41 KB）/ `js/app.js`（ES module，212 KB），原 `public/console.html` 已删除；`js/app.js` 目前仍是单个 module，模块化拆分留在下一阶段。
+- 服务端：`src/http/static.mjs` 守卫 + `/^\/console\/(?:css|js|img|fonts)\//` 静态路由**排在令牌校验之前**（否则浏览器取 `app.js` 得到 401、页面白屏），页面本身仍鉴权。
+- 测试：新增 `scripts/console-source.mjs`（`consoleSourcePaths` / `readConsoleSource` 拼接三件套），14 个读旧 HTML 的测试改用它；`scripts/console-ui-fixture.mjs` 预读 css/js 并按 `text/css`、`text/javascript` 返回。
+- 验证：无头 Edge 实测 CSS/JS 均 200（42 KB / 234 KB），无控制台异常；深链 `#scheduler`、点击进页后刷新、未知 hash 回落均保持；`test:audit` 77/80（仍为三项既有失败）。
+
 
 **先修的三个 bug**
 
@@ -305,7 +312,7 @@
 | B2 | 顶栏「工作空间 / 页面名」不可点 | 两段都是 `<span>`，`consolePages` 没有父子关系 | ✅ 已修：分组从 `#mainNav` 的 `.nav-label` 推导，`renderBreadcrumb()` 渲染可点父级（`<a href="#组内首页">`） |
 | B3 | 搜索候选被卡片盖住 | `.search-results` 在 `.page-heading` 内，而该元素带 `transform`，候选框被锁在它的层叠上下文里 | ✅ 已修：候选框挂到 `document.body` + `position:fixed`，位置按输入框 `getBoundingClientRect()` 计算，滚动/缩放跟随 |
 
-**分层方案（A：原生 ESM + 微型运行时，零构建）**
+**分层方案（A：原生 ESM + 微型运行时，零构建）— 第二阶段目标**
 
 ```
 public/console/
@@ -322,7 +329,7 @@ public/console/
 
 **明确不做**：引入 React/Vue/Svelte 等运行时；引入 bundler/构建产物目录；把插件 UI 塞进宿主文档（插件 UI 走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
 
-**代价与风险**：`console.html` 从一个文件变成约 20 个文件，迁移期需要一次「双跑」窗口；`test-console-static.mjs`/`test-console-ui.mjs` 现在断言 HTML 字符串与 DOM 选择器，需要同步改成断言模块/渲染结果。
+**代价与风险**：控制台从一个大 HTML 变成骨架 + 样式 + 逻辑三件套（第二阶段再拆成约 20 个模块），迁移期需要一次「双跑」窗口；`test-console-static.mjs`/`test-console-ui.mjs` 断言 HTML 字符串与 DOM 选择器，第一阶段已用 `scripts/console-source.mjs` 兼容，第二阶段拆模块后需要改成断言模块/渲染结果。
 
 **验收**：B1–B3 各有回归用例；`npm run test:console-static` 全过；逐页截图与人格页对齐；CSP 响应头无 `unsafe-inline`。
 

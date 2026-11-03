@@ -37,6 +37,8 @@ export function defaultConfig() {
   return {
     enabled: true,
     dir: 'plugins',
+    // 文件监听默认关：开发时开、生产关，避免「保存到一半」触发半成品重载（P2c）。
+    watch: false,
     limits: {
       hookTimeoutMs: LIMIT_SPECS.hookTimeoutMs.def,
       maxPlugins: LIMIT_SPECS.maxPlugins.def,
@@ -171,6 +173,11 @@ export function normalizeConfig(raw) {
     else warnings.push('install.enabled 必须是布尔值，已按 true 处理');
   }
   config.install.maxBytes = clampInteger(rawInstall.maxBytes, INSTALL_SPECS.maxBytes, 'install.maxBytes', warnings);
+
+  if (raw.watch !== undefined) {
+    if (typeof raw.watch === 'boolean') config.watch = raw.watch;
+    else warnings.push('watch 必须是布尔值，已按 false 处理');
+  }
 
   return { config, warnings };
 }

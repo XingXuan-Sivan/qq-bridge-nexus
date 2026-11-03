@@ -33,6 +33,14 @@
 - 文档：`PLUGIN_KERNEL.md` §4 / §5.2 / §10–§14 同步；`PLUGIN_ROADMAP.md` §5 标完成并补「实施记录与偏差」。
 - 顺带修正：控制台 CSRF 守卫对插件 zip 上传与插件 DELETE 放行（其余写接口仍只收 JSON）；内核读 `plugin.json` 时剥 UTF-8 BOM（Windows 编辑器常带）。
 
+### 新增：插件文件监听自动重载（P2c）
+- `plugins.json` 新增 `watch`（默认 `false`）：开启后 `fs.watch(plugins/, { recursive: true })` 监听变更，按 `plugins/<id>/…` 只重载变更文件所属的那一个插件，500ms 去抖合并连发事件。
+- 只重载 `active` 插件（`disabled`/`invalid` 不动），走与手动重载相同的 staging 流程；失败保留旧实例并记 `reload-failed`。
+- 监听不可用（平台不支持 recursive、权限、watcher 报错）自动降级为「只手动重载」，日志一行，不影响桥接启动；`shutdown()` 先停监听再拆实例。
+- `plugins.json` 本身仍不监听：改配置（含 `watch`）需要重启，与「不做配置热生效」的边界一致。
+- 测试：`test-plugin-kernel.mjs` 增至 11 个用例（路径映射、配置默认与非法值、开启后 5 秒内自动重载）。
+- 文档：`PLUGIN_KERNEL.md` §4 / §5.3 / §12–§14 同步；`PLUGIN_ROADMAP.md` §3 标完成、§6 补「实施记录与偏差」；`plugins.example.json` 增 `watch`。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

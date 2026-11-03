@@ -343,3 +343,4 @@
 2. 实现完成后同步 [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md)（接口/配置/契约）与 [PERSONA_PROVIDER.md](PERSONA_PROVIDER.md)（若涉及人格）。
 3. 每个阶段结束跑 `npm run test:audit`，新增测试登记到 `scripts/test-audit.mjs`。
 4. 文档里不写未实现的能力；「计划中」必须标阶段，不能写成「已支持」。
+5. 控制台折叠面板统一 `<details class="settings-group"><summary>…</summary><div class="settings-content">…</div></details>`：内容必须包在 `.settings-content` 里，否则没有内距、会贴着边框；内层小折叠用 `<details class="settings-sub">`，别再手写 padding。

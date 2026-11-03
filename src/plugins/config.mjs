@@ -63,6 +63,10 @@ export function defaultConfig() {
       enabled: true,
       maxBytes: INSTALL_SPECS.maxBytes.def,
     },
+    // 入站过滤默认关：打开后插件才能丢消息或改文字，默认行为保持逐字节不变（P4 入站过滤链）。
+    filters: {
+      inbound: false,
+    },
     plugins: {},
   };
 }
@@ -177,6 +181,12 @@ export function normalizeConfig(raw) {
   if (raw.watch !== undefined) {
     if (typeof raw.watch === 'boolean') config.watch = raw.watch;
     else warnings.push('watch 必须是布尔值，已按 false 处理');
+  }
+
+  const rawFilters = isPlainObject(raw.filters) ? raw.filters : {};
+  if (rawFilters.inbound !== undefined) {
+    if (typeof rawFilters.inbound === 'boolean') config.filters.inbound = rawFilters.inbound;
+    else warnings.push('filters.inbound 必须是布尔值，已按 false 处理');
   }
 
   return { config, warnings };

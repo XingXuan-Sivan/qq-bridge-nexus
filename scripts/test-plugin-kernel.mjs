@@ -511,3 +511,60 @@ test('出站装饰：链式改写、drop 取消、抛错保留上一步结果', 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+const FILTER_DROP = `
+export function activate() {
+  return { hooks: { onInbound: ({ text }) => (text.includes('广告') ? { drop: true } : undefined) } };
+}
+`;
+
+const FILTER_REWRITE = `
+export function activate() {
+  return { hooks: { onInbound: ({ text }) => (text.includes('坏词') ? { text: text.replace('坏词', '***') } : undefined) } };
+}
+`;
+
+const FILTER_NOPERM = `
+export function activate() {
+  return { hooks: { onInbound: ({ text }) => (text.includes('敏感词') ? { text: text.replace('敏感词', '***') } : undefined) } };
+}
+`;
+
+test('入站过滤：默认关不生效、开关打开后可丢可改、无权限动作被忽略', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  const withPerm = { permissions: ['inbound:filter'], hooks: ['onInbound'] };
+  writePlugin(pluginsDir, 'filter-drop', FILTER_DROP, withPerm);
+  writePlugin(pluginsDir, 'filter-rewrite', FILTER_REWRITE, withPerm);
+  writePlugin(pluginsDir, 'filter-noperm', FILTER_NOPERM, { permissions: [], hooks: ['onInbound'] });
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    // 默认 filters.inbound=false：钩子不参与过滤，返回值原样。
+    const off = await kernel.filterInbound({ key: 'group:1', text: '这是广告' });
+    assert.equal(off.dropped, false);
+    assert.equal(off.text, null);
+  } finally {
+    await kernel.shutdown();
+  }
+
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ filters: { inbound: true } }, null, 2));
+  const kernel2 = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel2.init();
+  try {
+    const dropped = await kernel2.filterInbound({ key: 'group:1', text: '这是广告' });
+    assert.equal(dropped.dropped, true);
+    assert.equal(dropped.changedBy, 'filter-drop');
+
+    const rewritten = await kernel2.filterInbound({ key: 'group:1', text: '这句有坏词' });
+    assert.equal(rewritten.dropped, false);
+    assert.equal(rewritten.text, '这句有***');
+    assert.equal(rewritten.changedBy, 'filter-rewrite');
+
+    // filter-noperm 没有 inbound:filter：它想改的文字必须被忽略，原文继续。
+    const plain = await kernel2.filterInbound({ key: 'group:1', text: '含敏感词的消息' });
+    assert.equal(plain.text, null);
+  } finally {
+    await kernel2.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

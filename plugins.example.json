@@ -16,6 +16,9 @@
     "enabled": true,
     "maxBytes": 5242880
   },
+  "filters": {
+    "inbound": false
+  },
   "persona": {
     "provider": "soulkit",
     "cache": {

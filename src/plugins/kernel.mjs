@@ -19,6 +19,8 @@ import { stageFromDirectory, stageFromZip, discardStaging, moveDirToTrash } from
 const DISPOSE_TIMEOUT_MS = 2000;
 const AUDIT_TAIL_BYTES = 64 * 1024;
 const AUDIT_TAIL_LINES = 200;
+// 入站替换文本上限：防止插件把一条短消息换成一大段，把后面的处理撑坏。
+const INBOUND_TEXT_MAX = 4000;
 
 function withTimeout(promise, timeoutMs, label) {
   let timer;
@@ -546,6 +548,44 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return { text, dropped, changedBy };
   }
 
+  /**
+   * 入站过滤：`{ drop:true }` 丢掉整条消息，`{ text }` 替换正文。
+   * 只有申请了 `inbound:filter` 的插件允许返回这两种动作；只观察的插件不受影响。
+   * `filters.inbound` 默认 false —— 关着时完全不调用钩子，行为与没有插件时一致。
+   */
+  async function filterInbound(payload) {
+    if (!config.filters?.inbound) return { dropped: false, text: null, changedBy: null };
+    const list = [...(hookIndex.get('onInbound') ?? [])];
+    let text = typeof payload?.text === 'string' ? payload.text : '';
+    let changedBy = null;
+    for (const { id, handler } of list) {
+      const entry = entryById.get(id);
+      const permissions = entry?.manifest?.permissions ?? [];
+      const allowed = Array.isArray(permissions) && permissions.includes('inbound:filter');
+      const result = await invokeHook('onInbound', id, handler, { ...payload, text });
+      if (!result.ok || result.value === undefined || result.value === null) continue;
+      const value = result.value;
+      if (typeof value !== 'object') continue;
+      const wantsDrop = value.drop === true;
+      const wantsText = typeof value.text === 'string' && value.text !== text;
+      if (!wantsDrop && !wantsText) continue;
+      if (!allowed) {
+        audit.append('inbound-denied', { plugin: id, reason: '缺少 inbound:filter 权限' });
+        logLine(`⚠️ [plugins] ${id} 返回了入站过滤动作，但未申请 inbound:filter，已忽略`);
+        continue;
+      }
+      if (wantsText && value.text.length > INBOUND_TEXT_MAX) {
+        audit.append('inbound-denied', { plugin: id, reason: `替换文本超过 ${INBOUND_TEXT_MAX} 字` });
+        logLine(`⚠️ [plugins] ${id} 的入站替换文本超过 ${INBOUND_TEXT_MAX} 字，已忽略`);
+        continue;
+      }
+      if (wantsDrop) return { dropped: true, text, changedBy: id };
+      text = value.text;
+      changedBy = id;
+    }
+    return { dropped: false, text: changedBy ? text : null, changedBy };
+  }
+
   /** 观察型钩子：不等待、不向主链抛错。 */
   function notify(hookName, payload) {
     if (!(hookIndex.get(hookName)?.length)) return;
@@ -773,6 +813,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     promptAdditions,
     promptBlocks,
     decorateReply,
+    filterInbound,
     personaResolve,
     personaWarm,
     status,

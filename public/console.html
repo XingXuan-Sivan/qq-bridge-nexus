@@ -1930,7 +1930,11 @@ button:active:not(:disabled) {
       <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
       <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
       <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>
-<button data-view="plugins" class="nav-item"><span class="nav-icon" aria-hidden="true">⧉</span>桥接插件</button>
+      <div class="nav-label">扩展</div>
+      <button data-view="plugins" class="nav-item"><span class="nav-icon" aria-hidden="true">⧉</span>插件</button>
+      <button data-view="skills" class="nav-item"><span class="nav-icon" aria-hidden="true">✦</span>技能</button>
+      <button data-view="mcp" class="nav-item"><span class="nav-icon" aria-hidden="true">⇄</span>MCP</button>
+      <button data-view="behaviors" class="nav-item"><span class="nav-icon" aria-hidden="true">⌥</span>管理行为</button>
       <div class="nav-label">聊天行为</div>
       <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>二代仿真<span class="nav-note">V2</span></button>
       <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
@@ -2162,6 +2166,42 @@ button:active:not(:disabled) {
         <div class="row"><button id="pluginDetailClose">关闭</button></div>
       </div>
     </div>
+    <section id="section-skills" data-page="skills" class="card span-all">
+      <h2>技能</h2>
+      <div class="meta">只读清单：扫 <code>DSH_HOME/skills</code> 与仓库 <code>skills/</code> 下含 <code>SKILL.md</code> 的目录，读取 frontmatter 的 name / description。技能的启用与安装由 DSH 自身管理，这里不改配置、不代装。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="skillsRefresh">刷新</button>
+        <span class="meta" id="skillsMeta">加载中…</span>
+      </div>
+      <div id="skillsList" style="margin-top:8px">加载中…</div>
+    </section>
+    <section id="section-mcp" data-page="mcp" class="card span-all">
+      <h2>MCP</h2>
+      <div class="meta">只读清单：这些是桥接仓库自带的 MCP server（stdio），由 DSH 侧配置加载。这里不启停、不新增——DSH 运行时增删 MCP 的接口尚未验证，见 <code>docs/PLUGIN_ROADMAP.md</code> §9。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="mcpRefresh">刷新</button>
+        <span class="meta" id="mcpMeta">加载中…</span>
+      </div>
+      <div id="mcpList" style="margin-top:8px">加载中…</div>
+    </section>
+    <section id="section-behaviors" data-page="behaviors" class="card span-all">
+      <h2>管理行为</h2>
+      <div class="meta">桥接命令按注册表展示：<strong>已迁移</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支（P3a 只收 <code>/reset</code>、<code>/status</code>、<code>/role</code>）。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="behaviorsRefresh">刷新</button>
+        <select id="behaviorsFilter" style="width:auto">
+          <option value="all">全部来源</option>
+          <option value="bridge">仅内置</option>
+          <option value="plugin">仅插件</option>
+        </select>
+        <span class="meta" id="behaviorsMeta">加载中…</span>
+      </div>
+      <div id="behaviorsBridge" style="margin-top:8px">加载中…</div>
+      <h3 style="margin-top:16px">DSH 会话命令（只读）</h3>
+      <div id="behaviorsDsh" class="meta">加载中…</div>
+      <h3 style="margin-top:16px">Agent 工具（只读）</h3>
+      <div id="behaviorsTools" class="meta">加载中…</div>
+    </section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
       <div class="meta" id="socialStatus">加载中…</div>
@@ -5293,7 +5333,10 @@ const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
-  plugins: ['桥接插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；改配置或代码后重启桥接生效。'],
+  plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
+  skills: ['技能', '让 AI 知道，自己会什么。', '只读查看 DSH 与仓库里可用的 SKILL.md 技能包，启停与安装交给 DSH 自己管。'],
+  mcp: ['MCP', '把外部能力，接成标准接口。', '只读查看桥接自带的 MCP server；DSH 侧的 MCP 配置不在这里改。'],
+  behaviors: ['管理行为', '命令与工具，一处看清。', '按注册表查看桥接命令（含迁移状态），并只读列出 DSH 会话命令与 Agent 工具。'],
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
@@ -5332,6 +5375,10 @@ function setConsolePage(page, { updateHash = true, focus = false, target = '' } 
   if (page === 'social-v2' && typeof loadVoiceLibrary === 'function') loadVoiceLibrary();
   // 人格页：每次进入都重新读一次各会话用哪张卡（全局人格可能在别处改过、新会话可能刚建好）
   if (page === 'persona' && typeof refreshRoleAssignments === 'function') setTimeout(() => { refreshRoleAssignments().catch(() => {}); refreshPersonaSources().catch(() => {}); }, 0);
+  if (page === 'plugins') setTimeout(() => { refreshPlugins().catch(() => {}); }, 0);
+  if (page === 'skills') setTimeout(() => { refreshSkills().catch(() => {}); }, 0);
+  if (page === 'mcp') setTimeout(() => { refreshMcp().catch(() => {}); }, 0);
+  if (page === 'behaviors') setTimeout(() => { refreshBehaviors().catch(() => {}); }, 0);
   // 直接打开 #scheduler 时这里先于定时任务那段脚本执行：推迟到脚本跑完再刷新（否则会碰到还没初始化的变量）
   if (page === 'scheduler' && typeof refreshScheduler === 'function') setTimeout(() => refreshScheduler(), 0);
   if (focus) {
@@ -6532,8 +6579,90 @@ setInterval(() => { if (currentConsolePage === 'usage') loadCompactConfig(); }, 
 setInterval(() => { if (currentConsolePage === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
 setInterval(() => { if (currentConsolePage === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
 setInterval(() => { if (currentConsolePage === 'plugins' && !document.hidden) refreshPlugins().catch(() => {}); }, 15_000);
+setInterval(() => { if (currentConsolePage === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);
+setInterval(() => { if (currentConsolePage === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);
+setInterval(() => { if (currentConsolePage === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
 refreshPlugins();
 document.getElementById('personaSourceRefresh')?.addEventListener('click', () => refreshPersonaSources().catch(() => {}));
+
+// 「扩展」下的三个只读页：技能 / MCP / 管理行为。数据都来自只读接口，页面不做任何写操作。
+function behaviorRow(entry) {
+  const migrate = entry.migrated ? '<span class="meta ok">注册表</span>' : '<span class="meta">旧链</span>';
+  const aliases = (entry.aliases ?? []).join('、');
+  const scope = entry.scope === 'all' ? '全部会话' : entry.scope === 'group' ? '仅群聊' : '仅私聊';
+  const source = entry.source === 'plugin' ? `插件 ${entry.pluginId ?? ''}` : '内置';
+  return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">`
+    + `<strong>${esc(entry.name)}</strong> ${migrate} <span class="meta">${esc(source)} · ${esc(scope)} · ${esc(entry.permission)}</span>`
+    + `<div class="meta">${esc(entry.help || '（没有说明）')}${aliases ? ` · 别名 ${esc(aliases)}` : ''}</div></div>`;
+}
+async function refreshBehaviors() {
+  const meta = document.getElementById('behaviorsMeta');
+  const bridgeBox = document.getElementById('behaviorsBridge');
+  const dshBox = document.getElementById('behaviorsDsh');
+  const toolsBox = document.getElementById('behaviorsTools');
+  try {
+    const data = await api('/api/commands');
+    const filter = document.getElementById('behaviorsFilter').value;
+    const all = [...(data.bridge?.builtin ?? []), ...(data.bridge?.plugin ?? [])];
+    const rows = filter === 'all' ? all : all.filter(entry => entry.source === filter);
+    meta.textContent = `注册表 ${data.bridge?.builtin?.length ?? 0} 条内置 + ${data.bridge?.plugin?.length ?? 0} 条插件；显示 ${rows.length} 条`;
+    bridgeBox.innerHTML = rows.length ? rows.map(behaviorRow).join('') : '<div class="meta">没有匹配的命令。</div>';
+    dshBox.textContent = '';
+    for (const item of data.dsh ?? []) {
+      const line = document.createElement('div');
+      line.style.padding = '4px 0';
+      line.innerHTML = `<code>${esc(item.name)}</code> <span class="meta">${esc(item.note ?? '')}</span>`;
+      dshBox.appendChild(line);
+    }
+    if (!(data.dsh ?? []).length) dshBox.innerHTML = '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
+    toolsBox.textContent = '';
+    for (const item of data.tools ?? []) {
+      const line = document.createElement('div');
+      line.style.padding = '4px 0';
+      line.innerHTML = `<code>${esc(item.name)}</code> <span class="meta">${esc(item.source)} · ${esc(item.managed)}</span>`;
+      toolsBox.appendChild(line);
+    }
+    if (!(data.tools ?? []).length) toolsBox.innerHTML = '<div class="meta">没有已登记的 Agent 工具。</div>';
+  } catch (error) {
+    meta.textContent = `读取失败：${error.message}`;
+  }
+}
+async function refreshSkills() {
+  const meta = document.getElementById('skillsMeta');
+  const list = document.getElementById('skillsList');
+  try {
+    const data = await api('/api/extensions');
+    const skills = data.skills ?? [];
+    meta.textContent = skills.length ? `共 ${skills.length} 个技能包` : '没有找到 SKILL.md（DSH_HOME/skills 或仓库 skills/ 下）';
+    list.innerHTML = skills.length
+      ? skills.map(skill => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${esc(skill.name)}</strong>`
+        + `<div class="meta">${esc(skill.description || '（没有 description）')}</div>`
+        + `<div class="meta"><code>${esc(skill.path)}</code></div></div>`).join('')
+      : '<div class="meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
+  } catch (error) {
+    meta.textContent = `读取失败：${error.message}`;
+  }
+}
+async function refreshMcp() {
+  const meta = document.getElementById('mcpMeta');
+  const list = document.getElementById('mcpList');
+  try {
+    const data = await api('/api/extensions');
+    const servers = data.mcp ?? [];
+    meta.textContent = servers.length ? `桥接自带 ${servers.length} 个 MCP server` : '没有登记 MCP server';
+    list.innerHTML = servers.length
+      ? servers.map(server => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><strong>${esc(server.name)}</strong>`
+        + `<div class="meta">${esc(server.note || '')}</div>`
+        + `<div class="meta"><code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}</div></div>`).join('')
+      : '<div class="meta">没有登记 MCP server。</div>';
+  } catch (error) {
+    meta.textContent = `读取失败：${error.message}`;
+  }
+}
+document.getElementById('behaviorsRefresh')?.addEventListener('click', () => refreshBehaviors().catch(() => {}));
+document.getElementById('behaviorsFilter')?.addEventListener('change', () => refreshBehaviors().catch(() => {}));
+document.getElementById('skillsRefresh')?.addEventListener('click', () => refreshSkills().catch(() => {}));
+document.getElementById('mcpRefresh')?.addEventListener('click', () => refreshMcp().catch(() => {}));
 
 
 refresh(); refreshRoles(); refreshWhitelist(); refreshSessions(); refreshPending(); refreshPresets(); loadSocialForm(); loadV2Config(); refreshV2Activity(); loadV2ToolLog(); loadV2SessionOptions(); refreshSocialStatus(); refreshSlang(); loadSlangConfig(); loadSecurity(); refreshSimPrompt(); refreshDshModel(); refreshSilence(); refreshUsage(); refreshUsageChart(); refreshUsageRecent();

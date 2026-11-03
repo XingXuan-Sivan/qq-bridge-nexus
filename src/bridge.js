@@ -113,6 +113,8 @@ import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, proce
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
+// 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
+import { createCommandRegistry } from './commands/registry.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -4700,6 +4702,56 @@ async function main() {
             };
           });
           sendJson({ ok: true, provider: plugins?.status()?.persona?.id ?? null, rows });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/commands') {
+          // 三个来源分开返回，页面自己标来源；桥接不假装能管 DSH 的命令与工具（见 docs/COMMAND_REGISTRY.md）。
+          const entries = commandRegistry.list();
+          const bridgeBuiltin = entries.filter((entry) => entry.source === 'bridge');
+          const bridgePlugins = entries.filter((entry) => entry.source === 'plugin');
+          sendJson({
+            ok: true,
+            bridge: { builtin: bridgeBuiltin, plugin: bridgePlugins },
+            dsh: [
+              { name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' },
+              { name: '/permission', note: 'closed-agent 会话钉权限预设时调用，由 DSH 执行' },
+            ],
+            tools: [
+              { name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' },
+              { name: 'web_fetch', source: 'src/mcp-web-search-safe.js', managed: 'dsh' },
+              { name: 'snowluma_status', source: 'src/mcp-host-server.js', managed: 'dsh' },
+            ],
+          });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/extensions') {
+          // 技能与 MCP 的只读清单：技能扫 DSH 的 skills 目录（认 SKILL.md frontmatter），
+          // MCP 只列桥接自己维护的 server；DSH 侧的 MCP 配置不在这里猜。
+          const home = process.env.DSH_HOME || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.dsh') : null);
+          const skillRoots = [home ? path.join(home, 'skills') : null, path.join(ROOT, 'skills')].filter(Boolean);
+          const skills = [];
+          for (const root of skillRoots) {
+            let entries = [];
+            try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
+            for (const entry of entries) {
+              if (!entry.isDirectory()) continue;
+              const dir = path.join(root, entry.name);
+              let head = '';
+              try { head = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8').slice(0, 600); } catch { continue; }
+              const field = (raw) => String(raw ?? '').trim().replace(/^["']|["']$/g, '');
+              skills.push({
+                name: field(head.match(/^name:\s*(.+)$/m)?.[1]) || entry.name,
+                description: field(head.match(/^description:\s*(.+)$/m)?.[1]),
+                path: dir,
+              });
+            }
+          }
+          const mcp = [
+            { name: 'snowluma-host', file: 'src/mcp-host-server.js', tools: ['snowluma_status'], note: 'SnowLuma 网关状态，只读' },
+            { name: 'web-search-safe', file: 'src/mcp-web-search-safe.js', tools: ['web_search', 'web_fetch'], note: '只读联网，禁内网地址' },
+            { name: 'snowluma-safe', file: 'src/mcp-snowluma-safe.js', tools: [], note: '安全版 SnowLuma 工具集；工具名以 DSH 侧为准' },
+          ];
+          sendJson({ ok: true, skills, mcp });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/presets') {
@@ -12909,6 +12961,131 @@ async function main() {
     return `已在群 ${gid} 发送。`;
   }
 
+  // ── 命令注册表（docs/COMMAND_REGISTRY.md）───────────────────────────────
+  // 内置命令的元数据与 handler 收口在这里。没挂 handler 的条目只用于展示，
+  // dispatch 会返回 handled:false，继续走 handleIncoming 里的旧 if 链；迁一个删一个。
+  const commandRegistry = createCommandRegistry({ log });
+
+  async function commandReset(ctx) {
+    const { key } = ctx;
+    const old = state.sessions[key];
+    if (!old) return { ok: true, note: 'no-session' };
+    sessionEpoch++;
+    delete state.sessions[key];
+    modelAppliedSessions.delete(old);
+    delete state.sessionPolicies[key];
+    reverse.delete(old);
+    collectors.delete(old);
+    sendToolSucceededSessions.delete(old);
+    pendingSendToolCalls.delete(old);
+    v2TurnStartAt.delete(old);
+    turnLeaseNoted.delete(old);
+    toolCallNames.delete(old);
+    social.silentTurns.delete(old);
+    social.exitingSessions.delete(old);
+    const pe = pending.get(key);
+    if (pe) {
+      clearTimeout(pe.timer);
+      cancelPendingEntry(pe).catch(() => {});
+    }
+    pending.delete(key);
+    for (const e of ext.approvals.removeKey(key)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
+    ext.approvals.forgetSession(old);
+    queued.delete(key);
+    queuedHintAt.delete(key);
+    sessionPromises.delete(key);
+    drainPromptQueue(key, '会话已重置');
+    social.recentMessages.delete(key);
+    messageMediaStore.delete(key);
+    social.pendingSummaries.delete(key);
+    social.states.delete(key);
+    social.silentContext.delete(key);
+    slangWindows.delete(key);
+    slangExtractionCooldowns.delete(key);
+    slangSubmitTimes.delete(key);
+    cancelSocialTimers(key);
+    clearSocialV2Timers(key);
+    pendingWakeKeys.delete(key);
+    wakeConfigUpdatedKeys.delete(key);
+    markReadCalledKeys.delete(key);
+    wakeConfigMissCount.delete(key);
+    forgetAgentToken(key);
+    socialV2.conversations.delete(key);
+    seenForwardIds.delete(key);
+    // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
+    // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
+    forgetConversationCaches(key);
+    discardDormantForReset(key);
+    saveSocialV2State();
+    saveState();
+    // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
+    try { await withTimeout(api.stopSessionWork(old), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
+    catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
+    try { await withTimeout(api.workspace.archiveSession({ sessionId: old }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
+    await sendToQQ(key, '已重置会话，下次消息将开新上下文');
+    return { ok: true };
+  }
+
+  async function commandStatus(ctx) {
+    const rs = readRoleState();
+    await sendToQQ(ctx.key, `会话 ${state.sessions[ctx.key] ?? '未创建'}；白名单 ${allowed(ctx.kind, ctx.id, ctx.cfg) ? '通过' : '拦截'}；角色 ${roleNameFor(rs, ctx.key) ?? '无'}${roleSourceFor(rs, ctx.key) === 'global' ? '' : '（本会话单独设置）'}；模式 ${rs.mode}`);
+    return { ok: true };
+  }
+
+  // /role 只对当前所在的会话生效（在群里发切本群，私聊发切这个私聊）；全局默认人格在控制台改。
+  //   /role 名字    本会话用这张卡
+  //   /role off     本会话不挂角色卡（clear 同义）
+  //   /role default 本会话回到全局默认
+  //   /role         看本会话现在用哪张卡
+  // 只有管理员能走到这里（上游 !isOwner 已 return）；改完下一次唤醒生效，二代会话会在唤醒提示里收到新卡。
+  async function commandRole(ctx) {
+    const { key } = ctx;
+    const arg = String(ctx.arg ?? '').trim();
+    const rs = readRoleState();
+    const globalText = rs.role ? `全局默认是「${rs.role}」` : '全局默认不挂角色卡';
+    if (!arg) {
+      const src = roleSourceFor(rs, key);
+      const now = roleNameFor(rs, key);
+      const nowText = src === 'off' ? '本会话不挂角色卡（单独设置）' : src === 'key' ? `本会话单独用「${now}」` : `本会话跟随全局默认（${rs.role ? `「${rs.role}」` : '不挂角色卡'}）`;
+      await sendToQQ(key, `${nowText}。用法：/role 名字（本会话换卡）、/role off（本会话不挂卡）、/role default（回到全局默认）。全局默认在控制台改。`);
+    } else if (arg === 'off' || arg === 'clear') {
+      writeRoleStateFull(withRoleForKey(rs, key, 'off'));
+      log(`管理员命令：${key} 不挂角色卡`);
+      await sendToQQ(key, `已关闭本会话的角色卡，只影响这里（${globalText}）。`);
+    } else if (arg === 'default') {
+      writeRoleStateFull(withRoleForKey(rs, key, 'default'));
+      log(`管理员命令：${key} 回到全局默认人格`);
+      await sendToQQ(key, `本会话已回到全局默认（${globalText}）。`);
+    } else {
+      const name = sanitizeRoleName(arg);
+      const roleFile = name ? resolveRoleFile(ROLES_DIR, name) : null;
+      if (!roleFile || !fs.existsSync(roleFile)) {
+        await sendToQQ(key, `角色「${name || arg}」不存在。角色文件放 qq-bridge/roles/ 目录。`);
+      } else {
+        writeRoleStateFull(withRoleForKey(rs, key, 'role', name));
+        log(`管理员命令：${key} 切换角色为 ${name}`);
+        await sendToQQ(key, `本会话已切换角色：${name}，只影响这里（${globalText}）。`);
+      }
+    }
+    return { ok: true };
+  }
+
+  commandRegistry.register({
+    id: 'reset', name: '/reset', aliases: ['/new'], scope: 'all', permission: 'owner',
+    group: '会话', help: '重置本会话上下文，下次消息开新会话', handler: commandReset,
+  });
+  commandRegistry.register({
+    id: 'status', name: '/status', scope: 'all', permission: 'owner',
+    group: '会话', help: '查看本会话的会话、白名单、角色与模式', handler: commandStatus,
+  });
+  commandRegistry.register({
+    id: 'role', name: '/role', scope: 'all', permission: 'owner',
+    group: '人格', help: '查看/切换本会话的人格卡（off 不挂卡，default 回全局）', handler: commandRole,
+  });
+  // 元数据先登记、handler 仍在旧 if 链里的命令：dispatch 会回退，管理行为页能看见它们。
+  commandRegistry.register({ id: 'silent', name: '/silent', aliases: ['/quiet'], scope: 'all', permission: 'owner', group: '会话', help: '进入静默模式：群友消息不再回复' });
+  commandRegistry.register({ id: 'active', name: '/active', aliases: ['/speak'], scope: 'all', permission: 'owner', group: '会话', help: '退出静默模式' });
+
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
     const key = convKey(kind, id);
     // 补收（src/backfill.js）：断线期间错过、恢复后从历史接口拉回来的消息。只当聊天内容记下：
@@ -13082,106 +13259,14 @@ async function main() {
           return;
         }
       }
-      if (plainContent === '/reset' || plainContent === '/new') {
-        const old = state.sessions[key];
-        if (old) {
-          sessionEpoch++;
-          delete state.sessions[key];
-          modelAppliedSessions.delete(old);
-          delete state.sessionPolicies[key];
-          reverse.delete(old);
-          collectors.delete(old);
-          sendToolSucceededSessions.delete(old);
-          pendingSendToolCalls.delete(old);
-          v2TurnStartAt.delete(old);
-          turnLeaseNoted.delete(old);
-          toolCallNames.delete(old);
-          social.silentTurns.delete(old);
-          social.exitingSessions.delete(old);
-          const pe = pending.get(key);
-          if (pe) {
-            clearTimeout(pe.timer);
-            cancelPendingEntry(pe).catch(() => {});
-          }
-          pending.delete(key);
-          for (const e of ext.approvals.removeKey(key)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
-          ext.approvals.forgetSession(old);
-          queued.delete(key);
-          queuedHintAt.delete(key);
-          sessionPromises.delete(key);
-          drainPromptQueue(key, '会话已重置');
-          social.recentMessages.delete(key);
-          messageMediaStore.delete(key);
-          social.pendingSummaries.delete(key);
-          social.states.delete(key);
-          social.silentContext.delete(key);
-          slangWindows.delete(key);
-          slangExtractionCooldowns.delete(key);
-          slangSubmitTimes.delete(key);
-          cancelSocialTimers(key);
-          clearSocialV2Timers(key);
-          pendingWakeKeys.delete(key);
-          wakeConfigUpdatedKeys.delete(key);
-          markReadCalledKeys.delete(key);
-          wakeConfigMissCount.delete(key);
-          forgetAgentToken(key);
-          socialV2.conversations.delete(key);
-          seenForwardIds.delete(key);
-          // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
-          // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
-          forgetConversationCaches(key);
-          discardDormantForReset(key);
-          saveSocialV2State();
-          saveState();
-          // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
-          try { await withTimeout(api.stopSessionWork(old), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
-          catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-          try { await withTimeout(api.workspace.archiveSession({ sessionId: old }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
-          await sendToQQ(key, '已重置会话，下次消息将开新上下文');
+      const dispatched = await commandRegistry.dispatch(plainContent, { key, kind, id, cfg, isOwner });
+      if (dispatched.handled) {
+        if (dispatched.denied) {
+          await sendToQQ(key, dispatched.reason === 'scope' ? '这条命令不适用于当前会话类型。' : '管理命令仅管理员可用。');
         }
         return;
       }
-      if (plainContent === '/status') {
-        const rs = readRoleState();
-        await sendToQQ(key, `会话 ${state.sessions[key] ?? '未创建'}；白名单 ${allowed(kind, id, cfg) ? '通过' : '拦截'}；角色 ${roleNameFor(rs, key) ?? '无'}${roleSourceFor(rs, key) === 'global' ? '' : '（本会话单独设置）'}；模式 ${rs.mode}`);
-        return;
-      }
-      // /role 只对当前所在的会话生效（在群里发切本群，私聊发切这个私聊）；全局默认人格在控制台改。
-      //   /role 名字    本会话用这张卡
-      //   /role off     本会话不挂角色卡（clear 同义）
-      //   /role default 本会话回到全局默认
-      //   /role         看本会话现在用哪张卡
-      // 只有管理员能走到这里（上面 !isOwner 已经 return）；改完下一次唤醒生效，二代会话会在唤醒提示里收到新卡。
-      if (plainContent === '/role' || plainContent.startsWith('/role ')) {
-        const arg = plainContent.slice(5).trim();
-        const rs = readRoleState();
-        const globalText = rs.role ? `全局默认是「${rs.role}」` : '全局默认不挂角色卡';
-        if (!arg) {
-          const src = roleSourceFor(rs, key);
-          const now = roleNameFor(rs, key);
-          const nowText = src === 'off' ? '本会话不挂角色卡（单独设置）' : src === 'key' ? `本会话单独用「${now}」` : `本会话跟随全局默认（${rs.role ? `「${rs.role}」` : '不挂角色卡'}）`;
-          await sendToQQ(key, `${nowText}。用法：/role 名字（本会话换卡）、/role off（本会话不挂卡）、/role default（回到全局默认）。全局默认在控制台改。`);
-        } else if (arg === 'off' || arg === 'clear') {
-          writeRoleStateFull(withRoleForKey(rs, key, 'off'));
-          log(`管理员命令：${key} 不挂角色卡`);
-          await sendToQQ(key, `已关闭本会话的角色卡，只影响这里（${globalText}）。`);
-        } else if (arg === 'default') {
-          writeRoleStateFull(withRoleForKey(rs, key, 'default'));
-          log(`管理员命令：${key} 回到全局默认人格`);
-          await sendToQQ(key, `本会话已回到全局默认（${globalText}）。`);
-        } else {
-          const name = sanitizeRoleName(arg);
-          const roleFile = name ? resolveRoleFile(ROLES_DIR, name) : null;
-          if (!roleFile || !fs.existsSync(roleFile)) {
-            await sendToQQ(key, `角色「${name || arg}」不存在。角色文件放 qq-bridge/roles/ 目录。`);
-          } else {
-            writeRoleStateFull(withRoleForKey(rs, key, 'role', name));
-            log(`管理员命令：${key} 切换角色为 ${name}`);
-            await sendToQQ(key, `本会话已切换角色：${name}，只影响这里（${globalText}）。`);
-          }
-        }
-        return;
-      }
+
       if (plainContent === '/silent' || plainContent === '/quiet') {
         writeRoleState(roleState.role, 'silent');
         await sendToQQ(key, '已进入静默模式：群友消息不再回复，仅管理员可对话。');

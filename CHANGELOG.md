@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 重构：插件页迁到 pages/plugins.js（2026-11-04）
+- 「桥接插件」页（加载状态、启停/重载/卸载、安装、运行设置、详情弹窗）整段从 `app.js` 搬到 `public/console/js/pages/plugins.js`，导出 `initPluginsPage()` 自己绑事件、注册 `onPageRefresh('plugins')`、做首次加载与 15 秒轮询。
+- 页面模块新增 import 了 `esc`；缺这一条时 `refreshPlugins()` 的 Promise 会被 `.catch(() => {})` 吞掉，页面停在「加载中…」且控制台无报错（无头 Edge 实测复现并修复）。
+- 回归：插件页 meta/卡片/4 个操作按钮渲染正常，详情弹窗可开可关；`test:audit` 77/80（三项既有失败不变）。
+
 ### 重构：控制台拆出 api / ui / router 三个公共模块（2026-11-04）
 - `public/console/js/api.js`：`?token=` 引导与 `api()` 的 401 重试集中到一处。
 - `public/console/js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`。

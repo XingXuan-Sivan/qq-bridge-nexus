@@ -393,6 +393,16 @@ button.planned {
 .breadcrumb span:last-child {
   color:var(--text-secondary)
 }
+.crumb-link {
+  color:inherit;
+  text-decoration:none;
+  border-radius:6px;
+  cursor:pointer
+}
+.crumb-link:hover,
+.crumb-link:focus-visible {
+  color:var(--accent)
+}
 .topbar-actions {
   display:flex;
   align-items:center;
@@ -473,9 +483,11 @@ h1 {
   font-size:12px
 }
 .search-results {
-  position:absolute;
-  right:0;
-  top:48px;
+  /* 候选框会由 JS 挂到 body 上并改 fixed：`.page-heading` 有 transform，
+     留在原地会被困在它的层叠上下文里，永远盖不过后面的卡片。 */
+  position:fixed;
+  left:0;
+  top:0;
   width:360px;
   max-width:80vw;
   max-height:420px;
@@ -485,7 +497,7 @@ h1 {
   padding:7px;
   border-radius:12px;
   box-shadow:var(--shadow-pop);
-  z-index:50
+  z-index:1200
 }
 .search-results button {
   display:block;
@@ -2076,7 +2088,7 @@ button:active:not(:disabled) {
   </aside>
   <div class="workspace">
     <header class="topbar">
-      <div class="breadcrumb">工作空间<span>/</span><span id="breadcrumbPage">运行总览</span></div>
+      <div class="breadcrumb"><a class="crumb-link" href="#overview">工作空间</a><span class="crumb-sep" aria-hidden="true">/</span><span class="crumb-current" aria-current="page">运行总览</span></div>
       <div class="topbar-actions"><span class="status-badge" id="statusText" role="status">正在连接…</span><button id="themeToggle" class="icon-button" type="button" aria-label="切换深色模式" aria-pressed="false" title="切换深色 / 浅色主题">☾</button><button id="refreshConsole" class="icon-button" aria-label="刷新控制台状态" title="刷新状态">↻</button></div>
     </header>
     <main id="mainContent" tabindex="-1">
@@ -5536,9 +5548,52 @@ function showConsoleToast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toast.hidden = true; }, 4200);
 }
-function setConsolePage(page, { updateHash = true, focus = false, target = '' } = {}) {
+const PAGE_STORAGE_KEY = 'qqb-console-page';
+// 导航分组从 DOM 推导，避免「页面表加了一页、面包屑忘了改」这种漂移。
+const consolePageGroups = (() => {
+  const groups = [];
+  const byPage = {};
+  let current = null;
+  document.querySelectorAll('#mainNav > *').forEach(el => {
+    if (el.classList.contains('nav-label')) {
+      current = { label: el.textContent.trim(), pages: [] };
+      groups.push(current);
+    } else if (current && el.dataset && el.dataset.view) {
+      current.pages.push(el.dataset.view);
+      byPage[el.dataset.view] = current.label;
+    }
+  });
+  const firstPageOf = (label) => groups.find(group => group.label === label)?.pages[0] ?? 'overview';
+  return { groups, byPage, firstPageOf };
+})();
+function readStoredPage() {
+  try { return sessionStorage.getItem(PAGE_STORAGE_KEY); } catch { return null; }
+}
+function rememberPage(page) {
+  try { sessionStorage.setItem(PAGE_STORAGE_KEY, page); } catch { /* 隐私模式下写不进去，刷新回首页可接受 */ }
+}
+function renderBreadcrumb(page) {
+  const breadcrumb = document.querySelector('.breadcrumb');
+  if (!breadcrumb) return;
+  const group = consolePageGroups.byPage[page] ?? '工作空间';
+  const link = document.createElement('a');
+  link.className = 'crumb-link';
+  link.href = '#' + consolePageGroups.firstPageOf(group);
+  link.textContent = group;
+  const separator = document.createElement('span');
+  separator.className = 'crumb-sep';
+  separator.setAttribute('aria-hidden', 'true');
+  separator.textContent = '/';
+  const current = document.createElement('span');
+  current.className = 'crumb-current';
+  current.setAttribute('aria-current', 'page');
+  current.textContent = consolePages[page][0];
+  breadcrumb.replaceChildren(link, separator, current);
+}
+function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true } = {}) {
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   currentConsolePage = page;
+  if (persist) rememberPage(page);
   document.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== page; });
   document.querySelectorAll('#mainNav [data-view]').forEach(button => {
     const selected = button.dataset.view === page;
@@ -5546,7 +5601,7 @@ function setConsolePage(page, { updateHash = true, focus = false, target = '' } 
     if (selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
-  document.getElementById('breadcrumbPage').textContent = consolePages[page][0];
+  renderBreadcrumb(page);
   document.getElementById('pageTitle').textContent = consolePages[page][1];
   document.getElementById('pageDescription').textContent = consolePages[page][2];
   document.title = consolePages[page][0] + ' · QQ 桥接控制台';
@@ -5572,7 +5627,16 @@ document.querySelectorAll('[data-view]').forEach(button => button.addEventListen
 }));
 window.addEventListener('hashchange', () => {
   const page = location.hash.slice(1);
-  if (Object.hasOwn(consolePages, page) || !page) setConsolePage(page, { updateHash: false });
+  if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }
+  if (Object.hasOwn(consolePages, page)) { setConsolePage(page, { updateHash: false }); return; }
+  // 未知 hash：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
+  setConsolePage(readStoredPage() ?? 'overview', { updateHash: false });
+  history.replaceState({}, '', '#' + currentConsolePage);
+});
+// 前进/后退时 hash 也会变，hashchange 已覆盖；这里兜住「只改了 history.state」的情况。
+window.addEventListener('popstate', () => {
+  const page = location.hash.slice(1);
+  if (Object.hasOwn(consolePages, page)) setConsolePage(page, { updateHash: false });
 });
 document.querySelector('.skip-link').addEventListener('click', event => {
   event.preventDefault();
@@ -5646,6 +5710,18 @@ document.getElementById('section-activity').querySelector('h2').dataset.note = '
 
 const searchInput = document.getElementById('consoleSearch');
 const searchResults = document.getElementById('searchResults');
+// 候选框挂到 body：`.page-heading` 带 transform，会把候选框锁在它的层叠上下文里（B3）。
+if (searchResults && searchResults.parentElement !== document.body) document.body.appendChild(searchResults);
+function positionConsoleSearch() {
+  if (!searchResults || searchResults.hidden) return;
+  const rect = searchInput.getBoundingClientRect();
+  const width = Math.min(360, window.innerWidth - 24);
+  searchResults.style.width = `${width}px`;
+  searchResults.style.left = `${Math.max(12, Math.min(rect.right - width, window.innerWidth - width - 12))}px`;
+  searchResults.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 80)}px`;
+}
+window.addEventListener('resize', positionConsoleSearch);
+document.addEventListener('scroll', positionConsoleSearch, true);
 const featureIndex = [];
 document.querySelectorAll('section[data-page]').forEach(section => {
   const page = section.dataset.page;
@@ -5685,12 +5761,13 @@ searchInput.addEventListener('input', () => {
   });
   searchResults.hidden = false;
   searchInput.setAttribute('aria-expanded','true');
+  positionConsoleSearch();
 });
 searchInput.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeConsoleSearch();
   if ((event.key === 'ArrowDown' || event.key === 'Enter') && !searchResults.hidden) { event.preventDefault(); searchResults.querySelector('button')?.focus(); }
 });
-document.addEventListener('click', event => { if (!event.target.closest('.search-wrap')) closeConsoleSearch(); });
+document.addEventListener('click', event => { if (!event.target.closest('.search-wrap') && !searchResults.contains(event.target)) closeConsoleSearch(); });
 searchResults.addEventListener('keydown', event => { if (event.key === 'Escape') { closeConsoleSearch(); searchInput.focus(); } });
 
 // Keyboard support for the existing editor dialog without replacing its save flow.
@@ -6439,7 +6516,19 @@ document.getElementById('usageClear').addEventListener('click', async () => {
   refreshUsageRecent();
 });
 
-setConsolePage(location.hash.slice(1), { updateHash:false });
+// 首屏：hash（深链/分享）→ sessionStorage（同标签页刷新）→ overview（B1）。
+// 刷新时浏览器可能丢掉 fragment，所以不能只读 hash。
+{
+  const hashPage = location.hash.slice(1);
+  const storedPage = readStoredPage();
+  const initialPage = Object.hasOwn(consolePages, hashPage) ? hashPage
+    : Object.hasOwn(consolePages, storedPage ?? '') ? storedPage
+      : 'overview';
+  const badHash = hashPage && !Object.hasOwn(consolePages, hashPage);
+  setConsolePage(initialPage, { updateHash:false });
+  if (location.hash.slice(1) !== initialPage) history.replaceState({}, '', '#' + initialPage);
+  if (badHash) showConsoleToast('没有这个页面，已回到上次停留的位置');
+}
 
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────

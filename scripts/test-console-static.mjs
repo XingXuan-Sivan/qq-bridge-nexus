@@ -91,5 +91,14 @@ const fixture = fs.readFileSync(path.join(ROOT, 'scripts', 'console-ui-fixture.m
 ok(fixture.includes("case '/api/socialV2/voices'"), 'fixture mock 了 /api/socialV2/voices');
 ok(fixture.includes("case '/api/voice/send'"), 'fixture mock 了 /api/voice/send');
 
+console.log('## 路由与面包屑（B1–B3）');
+ok(/PAGE_STORAGE_KEY/.test(html) && /sessionStorage\.getItem\(PAGE_STORAGE_KEY\)/.test(html) && /sessionStorage\.setItem\(PAGE_STORAGE_KEY/.test(html), '当前页写入 sessionStorage（刷新兜底）');
+ok(/const hashPage = location\.hash\.slice\(1\)/.test(html) && /readStoredPage\(\)/.test(html), '首屏三层恢复：hash → sessionStorage → overview');
+ok(/addEventListener\('hashchange'/.test(html) && /addEventListener\('popstate'/.test(html), 'hashchange 与 popstate 都监听');
+ok(/function renderBreadcrumb\(page\)/.test(html) && /class="crumb-link"/.test(html) && /href="#overview"/.test(html), '面包屑父级是可点的链接');
+ok(!/id="breadcrumbPage"/.test(html), '旧的纯文本面包屑 id 已移除');
+ok(/function positionConsoleSearch\(\)/.test(html) && /document\.body\.appendChild\(searchResults\)/.test(html), '搜索候选挂到 body（脱离 page-heading 层叠上下文）');
+ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选改为 fixed 定位');
+
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

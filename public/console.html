@@ -238,8 +238,7 @@ button.planned {
   display:flex;
   flex-direction:column;
   z-index:20;
-  overflow-y:auto;
-  overscroll-behavior:contain
+  overflow:hidden
 }
 .brand {
   display:flex;
@@ -332,7 +331,15 @@ button.planned {
   padding-top:20px;
   font-size:12px;
   color:var(--text-secondary);
-  margin-top:auto
+  margin-top:auto;
+  flex:0 0 auto
+}
+/* 侧栏内部再分三段：品牌固定、导航列表自己滚、底部固定 */
+#mainNav {
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  overscroll-behavior:contain
 }
 .sidebar-bottom small {
   display:block;
@@ -1325,6 +1332,7 @@ tr:last-child td {
     display:flex;
     gap:5px;
     overflow-x:auto;
+    overflow-y:visible;
     padding-bottom:6px
   }
   .nav-label,.sidebar-bottom,.nav-icon,.nav-note,.nav-count {

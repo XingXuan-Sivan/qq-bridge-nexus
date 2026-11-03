@@ -20,6 +20,9 @@
 </script>
 <style>
 :root {
+  /* 外壳尺寸：侧栏与顶栏是独立容器，媒体查询只改变量，不再改两处布局 */
+  --sidebar-w:234px;
+  --topbar-h:76px;
   /* 基础面 */
   --bg:#f7f8fb;
   --surface:#fff;
@@ -116,12 +119,22 @@ body {
   color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
   font-size:14px;
-  line-height:1.65
+  line-height:1.65;
+  /* 标准后台外壳：aside / header / main 三个独立容器，只有 main 内部滚动 */
+  display:grid;
+  grid-template-columns:var(--sidebar-w) minmax(0,1fr);
+  grid-template-rows:var(--topbar-h) minmax(0,1fr);
+  height:100vh;
+  height:100dvh;
+  overflow:hidden
 }
-/* 全局滚动条：细、圆角、悬停加深（Chromium / Firefox 各一套） */
+/* 全局滚动条：细、圆角、悬停才显形；不画上下箭头（Firefox 用 scrollbar-color，Chromium 用 ::-webkit-scrollbar） */
 * {
   scrollbar-width:thin;
-  scrollbar-color:rgba(148,163,184,.38) transparent
+  scrollbar-color:transparent transparent
+}
+:hover {
+  scrollbar-color:rgba(148,163,184,.42) transparent
 }
 ::-webkit-scrollbar {
   width:9px;
@@ -130,14 +143,24 @@ body {
 ::-webkit-scrollbar-track {
   background:transparent
 }
+::-webkit-scrollbar-button {
+  display:none;
+  width:0;
+  height:0
+}
 ::-webkit-scrollbar-thumb {
-  background:rgba(148,163,184,.38);
+  background:transparent;
   border-radius:999px;
   border:2px solid transparent;
   background-clip:content-box
 }
+:hover::-webkit-scrollbar-thumb {
+  background:rgba(148,163,184,.42);
+  border:2px solid transparent;
+  background-clip:content-box
+}
 ::-webkit-scrollbar-thumb:hover {
-  background:rgba(148,163,184,.6);
+  background:rgba(148,163,184,.62);
   background-clip:content-box
 }
 ::-webkit-scrollbar-corner {
@@ -206,16 +229,17 @@ button.planned {
   color:var(--muted)
 }
 .sidebar {
-  position:fixed;
-  inset:0 auto 0 0;
-  width:234px;
+  grid-column:1;
+  grid-row:1 / span 2;
+  min-height:0;
   background:var(--surface);
   border-right:1px solid var(--card-border);
   padding:32px 18px 20px;
   display:flex;
   flex-direction:column;
   z-index:20;
-  overflow-y:auto
+  overflow-y:auto;
+  overscroll-behavior:contain
 }
 .brand {
   display:flex;
@@ -325,14 +349,16 @@ button.planned {
   margin-right:8px
 }
 .workspace {
-  margin-left:234px;
-  min-width:0
+  grid-column:2;
+  grid-row:1 / span 2;
+  display:grid;
+  grid-template-rows:var(--topbar-h) minmax(0,1fr);
+  min-width:0;
+  min-height:0;
+  overflow:hidden
 }
 .topbar {
-  position:sticky;
-  top:0;
   z-index:15;
-  height:76px;
   border-bottom:1px solid var(--card-border);
   background:var(--topbar-bg);
   backdrop-filter:blur(12px);
@@ -395,9 +421,13 @@ button.planned {
   color:var(--icon)
 }
 main {
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scroll-padding-top:20px;
   padding:38px 40px 20px;
   max-width:1514px;
-  margin:auto
+  width:100%;
+  margin:0 auto
 }
 .page-heading {
   display:flex;
@@ -1213,13 +1243,12 @@ tr:last-child td {
   }
 }
 @media(max-width:1180px) {
+  body {
+    grid-template-columns:210px minmax(0,1fr)
+  }
   .sidebar {
-    width:210px;
     padding-left:12px;
     padding-right:12px
-  }
-  .workspace {
-    margin-left:210px
   }
   .topbar {
     padding:0 26px
@@ -1264,9 +1293,18 @@ tr:last-child td {
   }
 }
 @media(max-width:760px) {
+  :root {
+    --topbar-h:54px
+  }
+  body {
+    grid-template-columns:1fr;
+    grid-template-rows:auto minmax(0,1fr)
+  }
   .sidebar {
-    position:relative;
-    width:100%;
+    position:static;
+    grid-column:1;
+    grid-row:1;
+    height:auto;
     padding:18px 16px 8px;
     border-right:0;
     border-bottom:1px solid var(--card-border);
@@ -1300,10 +1338,10 @@ tr:last-child td {
     margin:0
   }
   .workspace {
-    margin-left:0
+    grid-column:1;
+    grid-row:2
   }
   .topbar {
-    height:54px;
     padding:0 20px
   }
   .breadcrumb {

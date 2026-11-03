@@ -73,8 +73,11 @@
 - 在桥接侧启停 agent 工具：执行方在 DSH，改配置通常要重启。
 - 命令自然语言触发：与「不打断群聊」的边界冲突。
 
-## 8. P3b 预留
+## 8. 插件命令（P3b，已实现 2026-11-03）
 
-- `ctx.commands.register(entry)`，插件命令 `source:'plugin'`。
-- manifest 静态声明 `commands: [{ name, aliases, scope, permission, help }]`，启动时就能查冲突。
-- 新增插件权限位 `commands`，未申请时 `ctx.commands` 为 `undefined`。
+- `ctx.commands.register({ id?, name, aliases?, scope?, permission?, help?, handler })`，需要清单申请 `commands` 权限；未申请时 `ctx.commands` 为 `undefined`。
+- 插件命令 `source:'plugin'`、`pluginId` 由内核代填；`id` 未写时用 `<pluginId>:<name>` 兜底。
+- 注册在 `commit`（activate 成功）时才进注册表：activate 抛错、清单不合法、重载失败都不会留下半截命令。
+- 卸载 / 停用 / 重载时内核按 `pluginId` 批量注销，插件不需要自己清理；`detail` 与 `/api/commands` 都能看到 `commands` 列表。
+- 冲突规则不变：内置永远优先；插件之间先注册者保留，失败的一条只告警、不覆盖，也不阻断其它命令。
+- 未做：manifest 里静态声明 `commands` 以便启动前校验冲突（运行时冲突已经有告警，静态声明留到有第二个插件时再评估）。

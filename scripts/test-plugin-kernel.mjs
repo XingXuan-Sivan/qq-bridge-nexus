@@ -348,6 +348,46 @@ test('配置：watch 只接受布尔值，默认关闭', () => {
   assert.match(bad.warnings.join('；'), /watch/);
 });
 
+test('插件命令（P3b）：注册的命令可派发，停用后按 pluginId 注销，启用后恢复', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  const { createCommandRegistry } = await import('../src/commands/registry.mjs');
+  const registry = createCommandRegistry({ log: () => {} });
+  const commandIndex = `
+export function activate(ctx) {
+  ctx.commands.register({
+    name: '/hello',
+    aliases: ['/hi'],
+    scope: 'all',
+    permission: 'all',
+    help: '插件命令测试',
+    handler: async (call) => ({ echoed: call.arg }),
+  });
+  return {};
+}
+`;
+  writePlugin(pluginsDir, 'cmdtap', commandIndex, { permissions: ['commands'], hooks: [] });
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {}, deps: { commandRegistry: registry } });
+  await kernel.init();
+  try {
+    const entry = kernel.status().plugins.find((item) => item.id === 'cmdtap');
+    assert.deepEqual(entry.commands, ['/hello']);
+
+    const hit = await registry.dispatch('/hi 世界', { key: 'group:1', kind: 'group' });
+    assert.equal(hit.handled, true);
+    assert.equal(hit.result.echoed, '世界');
+
+    assert.equal((await kernel.disable('cmdtap')).ok, true);
+    assert.equal(registry.match('/hello'), null, '停用后插件命令必须消失');
+    assert.equal((await registry.dispatch('/hello', { key: 'group:1', kind: 'group' })).handled, false);
+
+    assert.equal((await kernel.enable('cmdtap')).ok, true);
+    assert.ok(registry.match('/hello'), '启用后命令恢复');
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('文件监听（P2c）：开启后 watching 为真，改入口文件会在 5 秒内重载该插件', async () => {
   const { root, pluginsDir, stateDir } = makeTempRoot();
   fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ watch: true }, null, 2));

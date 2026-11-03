@@ -49,6 +49,14 @@
 - 测试：新增 `test-command-registry.mjs`（10 个用例：匹配、别名、元数据回退、权限与 scope、抛错兜底、冲突规则、按插件注销），已接入 `test:audit`；`scripts/audit-bridge-harness.mjs` 注入真实注册表，命令迁移后的行为在 VM 里也能验证。
 - 文档：新增 `docs/COMMAND_REGISTRY.md`（三来源能力矩阵、entry 形状、匹配/权限规则、页面布局、明确不做、P3b 预留）；`PLUGIN_ROADMAP.md` §3 / §7 同步。
 
+### 新增：插件注册命令（P3b）
+- 新增权限位 `commands`，插件可在 `activate(ctx)` 里调用 `ctx.commands.register({ name, aliases, scope, permission, help, handler })`；未申请权限时 `ctx.commands` 为 `undefined`。
+- 注册在 `commit` 阶段入表：activate 抛错、清单非法、重载失败都不会留下半截命令；命令 id 缺省用 `<pluginId>:<name>` 兜底。
+- 停用 / 卸载 / 重载时内核按 `pluginId` 批量注销；冲突仍只告警、内置命令永远优先。
+- `detail` 与 `/api/commands` 会列出插件命令，管理行为页能看到来源为「插件」的条目。
+- 测试：`test-plugin-kernel.mjs` 增至 12 个用例（注册、派发、停用后消失、启用后恢复）。
+- 文档：`PLUGIN_KERNEL.md` §7/§8 增 `ctx.commands` 与 `commands` 权限；`COMMAND_REGISTRY.md` §8 改为「已实现」；`PLUGIN_ROADMAP.md` P3b 标完成并补实施记录。
+
 ### 改进：DSH 401 时说清楚原因（来自 issue）
 - 反馈：桥接读的 DSH 数据目录（默认 `~/.dsh`）和 DSH 实际用的不一致时，所有请求 401、事件流「本次收到 0 帧」，日志却提示「多半是事件流协议/版本不匹配」，把人引到了错误方向。
 - 新模块 `src/dsh-auth-hint.js`：探活遇到 401 时（包括启动后从没连上过的情况）在日志里说明读的是哪个凭据文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录，以及怎么改；10 分钟提示一次，恢复后重置。路径里的用户目录显示成 `~`，不读、不输出密钥内容。

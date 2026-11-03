@@ -36,7 +36,7 @@ function assertSafeUrl(rawUrl) {
  * @param {object} options.config
  * @param {string} options.stateDir      桥接的 state 根目录
  * @param {(message: string) => void} options.log
- * @param {object} options.deps          { registerPersona, unregisterPersona, sendToQQ, hasSession, fetch, now, random }
+ * @param {object} options.deps          { registerPersona, unregisterPersona, registerPluginCommand, sendToQQ, hasSession, fetch, now, random }
  */
 export function createHostApi({ id, version, permissions, config, stateDir, log, deps }) {
   const granted = new Set(permissions);
@@ -79,6 +79,14 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     ctx.persona = {
       register: (provider) => deps.registerPersona(provider, id),
       unregister: () => deps.unregisterPersona(id),
+    };
+  }
+
+  if (granted.has('commands')) {
+    // 插件命令统一打上来源与 pluginId：内置永远优先，插件之间按 pluginId 字典序；
+    // 卸载/重载时内核按 pluginId 批量注销，插件不需要自己清。
+    ctx.commands = {
+      register: (definition) => deps.registerPluginCommand(definition, id),
     };
   }
 

@@ -250,6 +250,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 | `ctx.state.write(name, value)` | `state` | 原子写（临时文件 + rename），值必须可 JSON 序列化 |
 | `ctx.persona.register(provider)` | `persona:provide` | 注册人格 provider（§8），同时只能有一个生效 |
 | `ctx.persona.unregister()` | `persona:provide` | 注销自己注册的 provider |
+| `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
@@ -271,6 +272,7 @@ plugins.json             # 插件配置（独立文件，与 config.json 并列�
 | `persona:provide` | 提供人格卡 | 中（影响 AI 说话方式） |
 | `send:qq` | 主动发 QQ 消息 | 高（可能骚扰） |
 | `net:http` | 出站 HTTP | 中（数据外发） |
+| `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
 
 规则：
 

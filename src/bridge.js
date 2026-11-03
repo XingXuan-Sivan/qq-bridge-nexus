@@ -1540,12 +1540,15 @@ async function main() {
   loadState();
 
   // 插件内核（docs/PLUGIN_KERNEL.md §5/§12）：插件出问题只影响它自己，绝不挡住桥接启动。
+  // 命令注册表先于插件内核创建：插件在 activate 里就可能注册命令，内核需要拿到同一个实例。
+  const commandRegistry = createCommandRegistry({ log });
   try {
     plugins = await createPluginKernel({
       rootDir: ROOT,
       stateDir: STATE_DIR,
       log,
       deps: {
+        commandRegistry,
         sendToQQ: (key, msg) => sendToQQ(key, msg),
         hasSession: (key) => Object.prototype.hasOwnProperty.call(state.sessions ?? {}, key),
         fetch: globalThis.fetch,
@@ -12962,9 +12965,8 @@ async function main() {
   }
 
   // ── 命令注册表（docs/COMMAND_REGISTRY.md）───────────────────────────────
-  // 内置命令的元数据与 handler 收口在这里。没挂 handler 的条目只用于展示，
-  // dispatch 会返回 handled:false，继续走 handleIncoming 里的旧 if 链；迁一个删一个。
-  const commandRegistry = createCommandRegistry({ log });
+  // 实例在插件内核之前创建（见 main 开头）；这里只放内置命令的元数据与 handler。
+  // 没挂 handler 的条目只用于展示，dispatch 会返回 handled:false，继续走 handleIncoming 里的旧 if 链；迁一个删一个。
 
   async function commandReset(ctx) {
     const { key } = ctx;

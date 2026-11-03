@@ -337,6 +337,8 @@ ctx.persona.register({
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
 - 事件总线式的任意钩子（只认 §6 四个名字）。
 
+> P2 及以后的规划（启停/重载、安装卸载、命令注册、注入块、MCP/Skills 门槛）见 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md)。本文件只描述**已经实现**的能力；路线图里的条目在落地前不会写进这里。
+
 ---
 
 ## 14. 验收

@@ -16,6 +16,7 @@
 | [FOLDER_MAP.md](FOLDER_MAP.md) | 目录结构、`scripts/` 命名约定，以及 `dsh-bundles/`（给 DSH）与 `plugins/`（桥接插件）的命名边界 | ✅ |
 | [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) | 桥接插件内核（v1.2.0）：四个钩子、manifest、`plugins.json`、host-api 权限、人格 provider 契约、审计、控制台接口与 P1 验收 | ✅ 与当前实现同步（2026-11-02） |
 | [PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) | 人格三层解析（会话覆盖 → 外部 provider → 全局本地卡）、`persona-provider/1` 契约、缓存与降级、控制台只读来源页 | ✅ 与当前实现同步（2026-11-02） |
+| [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) | 插件与扩展的后续路线（P2a 启停/重载、P2b 安装、P2c 监听、命令注册与注入块、MCP/Skills 门槛、明确不做） | 📋 规划中（2026-11-03），实现前先改这里 |
 
 ---
 

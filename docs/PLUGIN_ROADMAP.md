@@ -22,6 +22,8 @@
 | provider 数量 | 同一时刻只启用一个（`persona.provider`） | 多 provider 竞争在 P1 没有明确的产品语义，先留白 |
 | 插件进程 | 与桥接同进程 | 独立进程要处理 RPC、生命周期、日志与权限，收益不抵成本 |
 | 界面暴露 | 每个新能力先判断是否上界面 | 会改变对外行为或安全边界的必须有开关并写清影响；纯调参收进「高级」；结构性、调错代价高的保持文件、面板只读 |
+| 前端框架 | 不引入运行时框架、不引入构建步骤 | 控制台由 Node 直出静态文件、部署形态是「一个文件夹 + `node src/bridge.js`」；上构建会推翻现有 HTML/DOM 断言测试，也会把插件 UI 契约绑死在框架上。规范化走原生 ESM 分层 + 微型运行时（§8.7） |
+| 后端分层 | 不重写 `bridge.js`，按接缝逐步抽，入口路径不变 | 14.7k 行里 HTTP/业务/上游三层混在一起，重写无法 review 与回归；抽层每步保持 `test-integration-v030` 全绿（§8.8） |
 
 ---
 
@@ -50,6 +52,8 @@
 | P3d | 「扩展」四页 UI 精修：管理行为表格化 + 命令分组层级、插件卡片重做、与既有控制台视觉统一 | ✅ 已完成（2026-11-03） | 0.5 天 |
 | P4 | 具名注入块（✅ 2026-11-03）；出站装饰（✅ 2026-11-03）；入站过滤链（✅ 2026-11-03）；定时任务类型 | 部分完成 | 各 0.5–1 天 |
 | P5 | Agent 工具注册 | 需先验证 | 未知 |
+| P6 | 控制台前端分层 + 路由/面包屑/搜索层级修复（§8.7） | 🚧 进行中（2026-11-04） | 2–3 天 |
+| P7 | `bridge.js` 按接缝抽层，第一步 HTTP 层（§8.8） | 🚧 进行中（2026-11-04） | 逐步，先 1 天 |
 
 排序原则：**先让插件「能管」，再让插件「能干活」，最后才碰主链与 DSH 侧**。
 
@@ -288,6 +292,59 @@
   - 插件级持久化启用（详情弹窗写 `plugins.<id>.enabled`，重启后生效）。
 - 保持只读或不暴露：`audit.*`、`persona.cache.*`（详情里可见状态，但不给一键关）、`persona.provider`（等有第二个 provider 再做下拉）、插件自由 `config`（manifest 没有 `configSchema` 前不做通用表单）、`role.maxInjectChars`（人格页显示即可）。
 - 验收：`scripts/test-plugin-kernel.mjs` 增「设置接口：越界拒绝、白名单写回、watch 即时生效、未知字段忽略」（16/16）；两个 PATCH 都要求 JSON 与控制台令牌，写操作记审计 `settings`。
+
+### 8.7 控制台前端规范化与路由修复（进行中）
+
+背景：前端目前是 `public/console.html`（372 KB / 7097 行，样式与脚本全内联）加 `control-center.html`（97 KB），没有组件层；路由只靠 hash，刷新会回落首页，面包屑是纯文本，搜索候选被卡片遮挡。用户要求「框架依赖保持现状」下的规范化，并明确要求**先把 HTTP 边界写进文档**（已完成：[HTTP_BOUNDARY.md](HTTP_BOUNDARY.md)）。
+
+**先修的三个 bug**
+
+| 编号 | 现象 | 根因 | 状态 |
+| --- | --- | --- | --- |
+| B1 | 任意页面刷新都回「运行总览」 | 初始化只读 `location.hash`，只监听 `hashchange`，hash 在 reload 后丢失时无兜底 | ✅ 已修：`sessionStorage['qqb-console-page']` + 三层恢复 + `popstate` + 未知 hash 回落并提示 |
+| B2 | 顶栏「工作空间 / 页面名」不可点 | 两段都是 `<span>`，`consolePages` 没有父子关系 | ✅ 已修：分组从 `#mainNav` 的 `.nav-label` 推导，`renderBreadcrumb()` 渲染可点父级（`<a href="#组内首页">`） |
+| B3 | 搜索候选被卡片盖住 | `.search-results` 在 `.page-heading` 内，而该元素带 `transform`，候选框被锁在它的层叠上下文里 | ✅ 已修：候选框挂到 `document.body` + `position:fixed`，位置按输入框 `getBoundingClientRect()` 计算，滚动/缩放跟随 |
+
+**分层方案（A：原生 ESM + 微型运行时，零构建）**
+
+```
+public/console/
+  index.html            只留骨架：aside / header / main
+  css/{tokens,layout,components,pages}.css
+  js/{router,api,components,store}.js
+  js/pages/{overview,sessions,persona,plugins,skills,mcp,behaviors,scheduler,usage,access,operations,reference}.js
+```
+
+- `definePage(name, { title, parent, mount, refresh })` 注册页面，`setConsolePage` 只做「切换 + 落 URL + 记 sessionStorage」；
+- 组件：`renderTable({columns, rows})`、`renderTileList()`、`openModal()`、`toast()`、`renderBreadcrumb()`，替换现在散落的 `innerHTML` 拼接；
+- 样式只走 CSS 变量与既有类名（`.tile-list`/`.tile`、`.settings-group`/`.settings-content`），禁止 JS 拼布局；
+- 服务端加 `GET /console/*` 静态路由（带 [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) §1 的穿越守卫），同时把 CSP 的 `unsafe-inline` 收敛到 `'self'`。
+
+**明确不做**：引入 React/Vue/Svelte 等运行时；引入 bundler/构建产物目录；把插件 UI 塞进宿主文档（插件 UI 走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
+
+**代价与风险**：`console.html` 从一个文件变成约 20 个文件，迁移期需要一次「双跑」窗口；`test-console-static.mjs`/`test-console-ui.mjs` 现在断言 HTML 字符串与 DOM 选择器，需要同步改成断言模块/渲染结果。
+
+**验收**：B1–B3 各有回归用例；`npm run test:console-static` 全过；逐页截图与人格页对齐；CSP 响应头无 `unsafe-inline`。
+
+### 8.8 `bridge.js` 按接缝抽层（进行中）
+
+现状：`src/bridge.js` 14.7k 行，HTTP 路由、业务规则、上游适配混在一个请求处理函数体里。**不重写**，按接缝逐步抽，每步一个提交、每次保持 `test-integration-v030` 全绿。
+
+| 步骤 | 抽什么 | 落到哪 | 风险 |
+| --- | --- | --- | --- |
+| 1 | 路由表、`sendJson/sendFile`、鉴权中间件、404 语义、静态资源守卫、CSP | `src/http/{router,respond,auth,static}.mjs` | 低（纯搬迁 + 集中边界） |
+| 2 | 命令分发与 `/remind` 等内置命令 | `src/commands/*` | 低 |
+| 3 | 会话/模式状态（`state.sessions`、模式闸门、审批） | `src/session/*` | 中 |
+| 4 | 上游适配（DSH / SnowLuma / MCP host） | `src/upstream/*` | 中 |
+
+约定：
+
+- **入口不动**：`package.json` 的 `start` 仍是 `node src/bridge.js`，`src/bridge.js` 保留为组装根（读配置 → 建依赖 → 注册路由 → 启动），最终收敛到 500 行量级；
+- 每一抽都必须「行为零变化」，只搬代码不改语义；语义要改的另开提交；
+- 抽完 HTTP 层后新增 `scripts/test-http-boundary.mjs`（穿越、符号链接、未启用 404、未知端点 404），并入 `test:audit`。
+
+**验收**：`test-integration-v030` 31/31 不减；`test:audit` 不差于 76/79；`src/bridge.js` 行数逐阶段下降并在 CHANGELOG 记录。
+
 
 ---
 

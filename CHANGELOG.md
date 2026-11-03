@@ -5,6 +5,17 @@
 
 ## 未发布
 
+### 修复：控制台刷新回首页、面包屑不可点、搜索候选被遮挡（2026-11-04）
+- 刷新保页：当前页写入 `sessionStorage['qqb-console-page']`，首屏按「hash → sessionStorage → overview」三层恢复；补 `popstate` 监听；未知 hash 回落并 `replaceState` 纠正地址栏，同时提示一次。
+- 面包屑可点：分组由 `#mainNav` 的 `.nav-label` 推导（不再维护第二份页面父子表），`renderBreadcrumb()` 生成 `<a href="#组内首页">`，当前页保留 `aria-current="page"`。
+- 搜索候选：`#searchResults` 改挂到 `document.body` 并 `position:fixed`，位置按输入框 `getBoundingClientRect()` 计算——原来它被 `.page-heading` 的 `transform` 锁在层叠上下文里，永远盖不过后面的卡片。
+- 新增 `src/http/security.mjs`（安全响应头单一来源）、`src/http/static.mjs`（静态资源守卫：解码一次、拒绝 `..`/盘符/ADS/反斜杠/符号链接/白名单外扩展名、失败统一 404）与 `scripts/test-http-boundary.mjs`（8 项，含真实符号链接用例，无权限环境自动跳过）；`src/bridge.js` 的 `SECURITY_HEADERS` 改为从模块导入。
+- `scripts/test-console-static.mjs` 增加 7 条路由/面包屑/候选框断言，防止三个 bug 回归。
+
+### 新增：HTTP 边界文档与控制台规范化路线（2026-11-04）
+- 新增 `docs/HTTP_BOUNDARY.md`：静态资源路径穿越守卫（`path.resolve` + `path.relative` + 拒绝清单 + 符号链接）、「未启用 = 404」「先鉴权后存在性」的语义表、CSP 与安全响应头现状与收敛目标、刷新/深链的三层恢复顺序、插件 UI 的 iframe 沙箱与样式隔离约定、验收清单。
+- `docs/PLUGIN_ROADMAP.md` 新增 §8.7（控制台前端分层 A 方案 + B1 刷新保页 / B2 面包屑可点 / B3 搜索层级）、§8.8（`bridge.js` 按接缝抽层，第一步 HTTP 层，入口路径不变），并把「不引前端框架」「不重写 bridge.js」写进已拍板决策。
+
 ### 新增：桥接插件内核与人格 provider（v1.2.0）
 - `plugins/` 成为桥接运行时插件目录，内核在 `src/plugins/`（`manifest` / `config` / `audit` / `persona` / `host-api` / `kernel`）；原先给 DSH 加载的两个 bundle 改名到 `dsh-bundles/`，避免「插件」一词指两样东西。
 - 四个钩子：`onInbound` / `onPromptBuild` / `onAfterSend` / `onShutdown`；钩子超时（默认 2s）与异常只记审计，不阻断消息主链；`plugins.json` 独立配置（不入库，模板 `plugins.example.json`）。

@@ -234,7 +234,7 @@ button.planned {
   min-height:0;
   background:var(--surface);
   border-right:1px solid var(--card-border);
-  padding:32px 18px 20px;
+  padding:18px 0 20px;
   display:flex;
   flex-direction:column;
   z-index:20;
@@ -244,7 +244,7 @@ button.planned {
   display:flex;
   align-items:center;
   gap:11px;
-  padding:0 10px 24px;
+  padding:0 18px 24px;
   color:var(--text-strong);
   font-size:21px;
   letter-spacing:-.6px;
@@ -280,8 +280,8 @@ button.planned {
   color:var(--muted-soft);
   margin:22px 14px 8px
 }
-.sidebar>.nav-label {
-  margin-top:10px
+#mainNav>.nav-label:first-child {
+  margin-top:6px
 }
 .nav-item {
   border:0;
@@ -327,7 +327,7 @@ button.planned {
 }
 .sidebar-bottom {
   border-top:1px solid var(--card-border);
-  margin:30px 10px 0;
+  margin:30px 18px 0;
   padding-top:20px;
   font-size:12px;
   color:var(--text-secondary);
@@ -338,6 +338,7 @@ button.planned {
 #mainNav {
   flex:1 1 auto;
   min-height:0;
+  padding:0 18px;
   overflow-y:auto;
   overscroll-behavior:contain
 }
@@ -1318,6 +1319,9 @@ tr:last-child td {
     overflow:visible;
     display:block
   }
+  #mainNav {
+    padding:0 4px 6px
+  }
   .brand {
     padding:0 4px 14px;
     font-size:20px
@@ -2015,8 +2019,8 @@ button:active:not(:disabled) {
   <a class="skip-link" href="#mainContent">跳到主要内容</a>
   <aside class="sidebar" aria-label="控制台导航">
     <a href="#overview" class="brand"><span class="brand-mark" aria-hidden="true">q<span>↗</span></span><span>QQ Bridge<small>DeepSeek Harness 控制台</small></span></a>
-    <div class="nav-label">工作空间</div>
     <nav id="mainNav">
+      <div class="nav-label">工作空间</div>
       <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
       <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount">—</span></button>
       <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>

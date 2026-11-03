@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Offline console preview. No production modules, credentials, state, or network clients are loaded. */
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { roleCharStats, roleSectionReport } from '../src/role-card.js';
@@ -463,7 +463,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
   if (!htmlPath && !original) {
     const dir = resolve(projectRoot, 'public/console');
     assets.set('/console/css/app.css', { body: await readFile(resolve(dir, 'css/app.css')), type: 'text/css; charset=utf-8' });
-    assets.set('/console/js/app.js', { body: await readFile(resolve(dir, 'js/app.js')), type: 'text/javascript; charset=utf-8' });
+    // js/ 下的模块逐个提供：入口 app.js 会 import ./api.js、./ui.js、./router.js。
+    for (const name of await readdir(resolve(dir, 'js'))) {
+      if (!name.endsWith('.js')) continue;
+      assets.set(`/console/js/${name}`, { body: await readFile(resolve(dir, 'js', name)), type: 'text/javascript; charset=utf-8' });
+    }
   }
   const state = makeFixtureState();
   const requests = [];

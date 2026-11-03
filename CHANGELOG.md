@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：控制台拆出 api / ui / router 三个公共模块（2026-11-04）
+- `public/console/js/api.js`：`?token=` 引导与 `api()` 的 401 重试集中到一处。
+- `public/console/js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`。
+- `public/console/js/router.js`：页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；页面数据刷新改为 `onPageRefresh(page, fn)` 注册，路由器不再反向依赖页面代码。
+- `public/console/js/app.js` 只留装配（import + 建页面 + 绑事件 + 末尾 `initRouter()`）；`console-source.mjs` 与 `console-ui-fixture.mjs` 改为读取/分发整个 `js/` 目录，测试仍能一次读到全部源码。
+- 回归：`test-scheduler`、`test-role-per-key` 的路由接线断言改为匹配 `onPageRefresh(...)` 与 `getCurrentPage()`；无头 Edge 实测 5 个资源全 200、路由/刷新/面包屑/搜索层级正常、无 JS 异常。
+
 ### 重构：控制台拆成「骨架 + 样式 + 逻辑」三件套（2026-11-04）
 - `public/console.html`（372 KB 单文件）拆为 `public/console/index.html`（结构）、`css/app.css`、`js/app.js`（ES module，零构建）；原文件已删除。
 - 服务端新增控制台静态路由：只放行 `^/console/(css|js|img|fonts)/`，且**排在令牌校验之前**（浏览器取资源不带令牌头，放在后面会 401 白屏）；页面 `/`、`/console/` 仍需令牌，穿越/符号链接/白名单外扩展名一律 404。

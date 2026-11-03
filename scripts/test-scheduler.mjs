@@ -307,7 +307,7 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.match(html, /<select id="schedTaskTz"><\/select>/, '任务时区是下拉');
   assert.match(html, /timeZoneName: 'shortOffset'/, '时区后面带 UTC 偏移');
   assert.match(html, /Intl\.supportedValuesOf\('timeZone'\)/, '列出全部时区');
-  assert.match(html, /if \(page === 'scheduler' && typeof refreshScheduler === 'function'\) setTimeout\(\(\) => refreshScheduler\(\), 0\);/, '直接打开 #scheduler 时推迟到脚本跑完再刷新');
+  assert.match(html, /onPageRefresh\('scheduler', \(\) => setTimeout\(\(\) => refreshScheduler\(\), 0\)\);/, '直接打开 #scheduler 时推迟到脚本跑完再刷新');
   // 时区下拉的初始化在 schedEl 定义之前，不能用 schedEl（否则整段脚本报错）
   const tzInit = html.indexOf("document.getElementById('schedTimezone').innerHTML = schedTzOptionsHtml(false);");
   assert.ok(tzInit > 0 && tzInit < html.indexOf('const schedEl = (id)'), '时区下拉初始化不依赖 schedEl');

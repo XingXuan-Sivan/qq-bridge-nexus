@@ -312,7 +312,14 @@
 | B2 | 顶栏「工作空间 / 页面名」不可点 | 两段都是 `<span>`，`consolePages` 没有父子关系 | ✅ 已修：分组从 `#mainNav` 的 `.nav-label` 推导，`renderBreadcrumb()` 渲染可点父级（`<a href="#组内首页">`） |
 | B3 | 搜索候选被卡片盖住 | `.search-results` 在 `.page-heading` 内，而该元素带 `transform`，候选框被锁在它的层叠上下文里 | ✅ 已修：候选框挂到 `document.body` + `position:fixed`，位置按输入框 `getBoundingClientRect()` 计算，滚动/缩放跟随 |
 
-**分层方案（A：原生 ESM + 微型运行时，零构建）— 第二阶段目标**
+**第二阶段（进行中）：公共层先抽，pages 留到最后**
+- `js/api.js`：令牌引导（`?token=` → localStorage）与 `api()` 的统一 401 重试。
+- `js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`——页面不再各写一份 `innerHTML` 模板。
+- `js/router.js`：`consolePages` 页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；数据刷新改成页面用 `onPageRefresh(page, fn)` 注册回调，路由器不再反向依赖页面模块。
+- `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
+- 待办：`pages/*.js`（12 个页面）、`js/store.js`（跨页共享状态）、CSS 拆 `tokens/layout/components/pages`、CSP 去 `unsafe-inline`。
+
+**目标结构（A：原生 ESM + 微型运行时，零构建）**
 
 ```
 public/console/

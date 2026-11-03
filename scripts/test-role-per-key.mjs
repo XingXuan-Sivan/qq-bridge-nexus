@@ -316,8 +316,8 @@ test('⑤ 控制台：人格页有「按会话设置人格」', () => {
   for (const id of ['roleAssignList', 'roleAssignKey', 'roleAssignNewUse', 'roleAssignAdd', 'roleAssignMsg']) assert.ok(sec.includes(`id="${id}"`), id);
   assert.match(html, /api\('\/api\/roles\/assign', 'POST'/);
   assert.match(html, /renderRoleAssignments\(r\)/, '刷新人格列表时一起刷新');
-  assert.match(html, /page === 'persona' && typeof refreshRoleAssignments === 'function'/, '进入人格页自动刷新');
-  assert.match(html, /currentConsolePage === 'persona' && !document\.hidden\) refreshRoleAssignments\(\)/, '停在人格页定时刷新');
+  assert.match(html, /onPageRefresh\('persona', \(\) => \{/, '进入人格页自动刷新（路由回调）');
+  assert.match(html, /getCurrentPage\(\) === 'persona' && !document\.hidden\) refreshRoleAssignments\(\)/, '停在人格页定时刷新');
   assert.match(html, /box\.contains\(document\.activeElement\)\) return/, '正在操作下拉框时不打断');
   assert.match(html, /const roleAssignDirty = new Map\(\)/, '没保存的选择单独记着');
   assert.match(html, /textContent = '未保存'/, '标出未保存');

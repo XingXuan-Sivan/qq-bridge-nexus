@@ -344,3 +344,4 @@
 3. 每个阶段结束跑 `npm run test:audit`，新增测试登记到 `scripts/test-audit.mjs`。
 4. 文档里不写未实现的能力；「计划中」必须标阶段，不能写成「已支持」。
 5. 控制台折叠面板统一 `<details class="settings-group"><summary>…</summary><div class="settings-content">…</div></details>`：内容必须包在 `.settings-content` 里，否则没有内距、会贴着边框；内层小折叠用 `<details class="settings-sub">`，别再手写 padding。
+6. 控制台列表与工具栏统一：卡片列表用 `.tile-list` + `.tile`（人格卡与插件卡同一套间距，`gap:10px`、`margin:10px 0 4px`、tile 内距 `13px 15px`）；表格列表用 `.tool-log-table`（自带 `margin-top:12px`），外层不要再叠加内联 `margin-top`；h2 下与列表前的工具栏行用 `class="row" style="margin-top:8px"`。新增页面先对照人格页的间距，不要自造网格或 padding。

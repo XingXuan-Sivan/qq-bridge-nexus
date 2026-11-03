@@ -1701,13 +1701,14 @@ tr:last-child td {
   border-radius:5px;
   padding:1px 6px
 }
-.persona-list {
+/* 通用 tile 列表：人格卡、插件卡共用同一套间距，避免各页自造网格 */
+.tile-list {
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(min(230px,100%),1fr));
+  grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr));
   gap:10px;
   margin:10px 0 4px
 }
-.persona-item {
+.tile {
   display:flex;
   flex-direction:column;
   gap:5px;
@@ -1718,26 +1719,26 @@ tr:last-child td {
   border:1px solid var(--border-chip);
   background:var(--surface-subtle)
 }
-.persona-item:hover {
+.tile:hover {
   border-color:var(--accent-border-hover);
   background:var(--surface-hover)
 }
-.persona-item.active {
+.tile.active {
   border-color:var(--accent-border-active);
   background:var(--accent-soft-bg)
 }
-.persona-item-head {
+.tile-head {
   display:flex;
   align-items:center;
   gap:8px;
   flex-wrap:wrap
 }
-.persona-item-head strong {
+.tile-head strong {
   font-size:13px;
   color:var(--text-strong);
   font-weight:600
 }
-.persona-item small {
+.tile small {
   font-size:11px;
   color:var(--muted-soft);
   overflow-wrap:anywhere
@@ -2143,7 +2144,7 @@ button:active:not(:disabled) {
       </div>
 
       <h3>人格列表 <span class="meta" id="roleListHint"></span></h3>
-      <div id="roleList" class="persona-list">加载中…</div>
+      <div id="roleList" class="tile-list">加载中…</div>
 
       <details class="settings-group" open>
         <summary>编辑人格提示词</summary>
@@ -2269,8 +2270,8 @@ button:active:not(:disabled) {
         <button id="pluginsReloadAll">全部重载</button>
         <span class="meta" id="pluginsMeta">加载中…</span>
       </div>
-      <div id="pluginsList" style="margin-top:8px">加载中…</div>
-      <details class="settings-group" style="margin-top:10px">
+      <div id="pluginsList" class="tile-list">加载中…</div>
+      <details class="settings-group">
         <summary>内置注入块</summary>
         <div class="settings-content">
           <div class="meta">这两段直接进每次唤醒的 prompt：关掉后模型当轮看不到对应内容，立即生效；上限按字符截断，清空表示用默认。</div>
@@ -2281,7 +2282,7 @@ button:active:not(:disabled) {
           </div>
         </div>
       </details>
-      <details class="settings-group" style="margin-top:10px" id="pluginRuntimeGroup">
+      <details class="settings-group" id="pluginRuntimeGroup">
         <summary>运行设置</summary>
         <div class="settings-content">
           <div class="meta">入站过滤打开后，申请了 <code>inbound:filter</code> 的插件可以丢弃或改写消息，改完立即生效；文件监听只影响开发时的自动重载。</div>
@@ -2305,7 +2306,7 @@ button:active:not(:disabled) {
           </div>
         </div>
       </details>
-      <details class="settings-group" style="margin-top:10px">
+      <details class="settings-group">
         <summary>安装插件</summary>
         <div class="settings-content">
           <div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
@@ -2340,7 +2341,7 @@ button:active:not(:disabled) {
         <button id="skillsRefresh">刷新</button>
         <span class="meta" id="skillsMeta">加载中…</span>
       </div>
-      <div id="skillsList" style="margin-top:8px">加载中…</div>
+      <div id="skillsList">加载中…</div>
     </section>
     <section id="section-mcp" data-page="mcp" class="card span-all">
       <h2>MCP</h2>
@@ -2349,12 +2350,12 @@ button:active:not(:disabled) {
         <button id="mcpRefresh">刷新</button>
         <span class="meta" id="mcpMeta">加载中…</span>
       </div>
-      <div id="mcpList" style="margin-top:8px">加载中…</div>
+      <div id="mcpList">加载中…</div>
     </section>
     <section id="section-behaviors" data-page="behaviors" class="card span-all">
       <h2>管理行为</h2>
       <div class="meta">桥接命令按注册表展示：<strong>注册表</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
-      <div class="row" style="margin-top:10px">
+      <div class="row" style="margin-top:8px">
         <button id="behaviorsRefresh">刷新</button>
         <select id="behaviorsFilter" style="width:auto">
           <option value="all">全部来源</option>
@@ -3717,10 +3718,10 @@ async function refreshRoles() {
     for (const role of roleCache) {
       const item = document.createElement('button');
       item.type = 'button';
-      item.className = 'persona-item' + (role.name === r.current ? ' active' : '');
+      item.className = 'tile' + (role.name === r.current ? ' active' : '');
       item.setAttribute('aria-pressed', String(role.name === r.current));
       const head = document.createElement('span');
-      head.className = 'persona-item-head';
+      head.className = 'tile-head';
       const title = document.createElement('strong');
       title.textContent = role.name;
       head.appendChild(title);
@@ -6243,7 +6244,7 @@ async function refreshPlugins() {
       list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;
     }
-    list.innerHTML = `<div class="grid">${plugins.map((plugin) => {
+    list.innerHTML = `<div class="tile-list">${plugins.map((plugin) => {
       const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
       const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
@@ -6255,16 +6256,16 @@ async function refreshPlugins() {
         ? `<button class="small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
         : `<button class="small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       const failures = Number(counters.hookErrors) || 0;
-      return `<div class="card">
-        <div class="row"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="pill b">v${esc(plugin.version || '—')}</span></div>
+      return `<div class="tile">
+        <div class="tile-head"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="pill b">v${esc(plugin.version || '—')}</span></div>
         <div class="meta">${esc(plugin.description || '这个插件没有写说明。')}</div>
-        <div class="row" style="margin-top:10px">
+        <div class="row">
           <span class="pill">${esc(plugin.id)}</span>${permissions}
           <span class="pill">钩子 ${esc(hooks)}</span>${commands ? `<span class="pill">命令 ${commands}</span>` : ''}${blocks ? `<span class="pill">注入块 ${blocks}</span>` : ''}
           <span class="pill">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="pill r">失败 ${failures}</span>` : ''}
         </div>
         ${error}
-        <div class="row" style="margin-top:14px">${toggle}<button class="small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
+        <div class="row">${toggle}<button class="small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
       </div>`;
     }).join('')}</div>`;
   } catch (error) {

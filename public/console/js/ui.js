@@ -1,6 +1,6 @@
 // 控制台通用小部件：toast、表格、空态。页面代码不再各写一份 innerHTML 模板。
 //
-// 约定：只生成 DOM 结构，不拼样式字符串；样式集中在 css/app.css，通过既有类名生效。
+// 约定：只生成 DOM 结构，不拼样式字符串；样式集中在 css/{base,layout,components}.css，通过既有类名生效。
 
 let toastTimer = null;
 

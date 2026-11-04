@@ -462,7 +462,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
   const assets = new Map();
   if (!htmlPath && !original) {
     const dir = resolve(projectRoot, 'public/console');
-    assets.set('/console/css/app.css', { body: await readFile(resolve(dir, 'css/app.css')), type: 'text/css; charset=utf-8' });
+    for (const name of ['tokens.css', 'base.css', 'layout.css', 'components.css']) {
+      assets.set(`/console/css/${name}`, { body: await readFile(resolve(dir, 'css', name)), type: 'text/css; charset=utf-8' });
+    }
     // js/ 下的模块逐个提供：入口 app.js 会 import ./api.js、./ui.js、./router.js。
     for (const name of await readdir(resolve(dir, 'js'))) {
       if (!name.endsWith('.js')) continue;

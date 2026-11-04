@@ -298,7 +298,7 @@
 背景：前端原来是 `public/console.html`（372 KB / 7097 行，样式与脚本全内联）加 `control-center.html`（97 KB），没有组件层；路由只靠 hash，刷新会回落首页，面包屑是纯文本，搜索候选被卡片遮挡。用户要求「框架依赖保持现状」下的规范化，并明确要求**先把 HTTP 边界写进文档**（已完成：[HTTP_BOUNDARY.md](HTTP_BOUNDARY.md)）。
 
 **第一阶段（✅ 2026-11-04）：目录拆分 + 静态路由**
-- `public/console/index.html`（结构，82 KB）/ `css/app.css`（41 KB）/ `js/app.js`（ES module，212 KB），原 `public/console.html` 已删除；`js/app.js` 目前仍是单个 module，模块化拆分留在下一阶段。
+- `public/console/index.html`（结构，125 行骨架）/ `css/`（`tokens` + `base` + `layout` + `components` 四件，按序加载）/ `js/`（公用模块 + `pages/<id>/page.js`），原 `public/console.html` 与后续的 `css/app.css` 均已删除。
 - 服务端：`src/http/static.mjs` 守卫 + `/^\/console\/(?:css|js|img|fonts)\//` 静态路由**排在令牌校验之前**（否则浏览器取 `app.js` 得到 401、页面白屏），页面本身仍鉴权。
 - 测试：新增 `scripts/console-source.mjs`（`consoleSourcePaths` / `readConsoleSource` 拼接三件套），14 个读旧 HTML 的测试改用它；`scripts/console-ui-fixture.mjs` 预读 css/js 并按 `text/css`、`text/javascript` 返回。
 - 验证：无头 Edge 实测 CSS/JS 均 200（42 KB / 234 KB），无控制台异常；深链 `#scheduler`、点击进页后刷新、未知 hash 回落均保持；`test:audit` 77/80（仍为三项既有失败）。
@@ -351,7 +351,8 @@ public/console/
     - 顺带修掉的隐患：`app.js` 的搜索索引原来在启动时用 `section.querySelector('h2')` 硬取标题，空 section 会抛 `TypeError` 并中断整个入口脚本的后续初始化；现在改为「按需重建 + 跳过空 section + 未注入的片段页用页面表标题兜底」，保证「没打开过的页也能搜到」。
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
-3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`，`index.html` 里先于 `app.css` 加载）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，`app.css` 不再出现 `#section-*` 选择器。剩下的第二步：把剩余的 `app.css`（约 1800 行）按 `base/layout/components` 再分文件，407 处内联宽度改工具类后再动 CSP。
+3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，公用样式里不再出现 `#section-*` 选择器。
+   - 第二步（✅ 2026-11-04）：`app.css`（1810 行）按**连续区间**拆成 `css/base.css`（重置、排版、滚动条、按钮与表单基线，123 行）、`css/layout.css`（三容器外壳、侧栏、顶栏、主区、页面标题与指标条，343 行）、`css/components.css`（网格、卡片、表格、表单、弹窗、主题与各页细节，1357 行），`index.html` 按 `tokens → base → layout → components` 依次 `<link>`。拆分脚本先校验「三件按序拼接 === 原文件（逐字节）」再落盘，因此级联顺序与拆分前完全一致；实测样式规则总数 296 条不变、概览页关键几何不变（模式卡 `y=484 / w=1086`）。**仍未做**：407 处内联 `style="width:…"` 改工具类——它是 CSP 去掉 `unsafe-inline` 的前置条件。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04，同日晚些按反馈改版：图标不画背景块，直接复用侧栏品牌标记的字形——`<text>q</text>` + `<text>↗</text>`，与侧栏同一套字体栈与字重，颜色走 `@media (prefers-color-scheme)` 跟随系统深浅色；控制中心 `public/control-center/favicon.svg` 与它**逐字节相同**，两处图标只有一个来源；`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、508 字节；静态测试 8 条断言兜住「同形、无背景、跟随主题、两处一致」）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
 5. `3.5 控制中心`（✅ 2026-11-04）：`public/control-center.html` 已按**B 档**拆成 `public/control-center/{index.html,app.css,app.js}`，**不并入** `pages/`；控制中心样式独立（`tokens.css` 共享为后续项）。详见本节「3.5 启动器控制中心」。
 

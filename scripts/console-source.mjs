@@ -8,10 +8,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export function consoleSourcePaths(root = ROOT) {
   const dir = path.join(root, 'public', 'console');
+  const cssDir = path.join(dir, 'css');
   return {
     dir,
     index: path.join(dir, 'index.html'),
-    css: path.join(dir, 'css', 'app.css'),
+    cssDir,
+    // 样式按加载顺序列出：tokens → base → layout → components（3.3 第二步拆分后的四件）。
+    css: ['tokens.css', 'base.css', 'layout.css', 'components.css'].map((name) => path.join(cssDir, name)),
     jsDir: path.join(dir, 'js'),
     js: path.join(dir, 'js', 'app.js'),
     pagesDir: path.join(dir, 'pages'),
@@ -47,7 +50,7 @@ export function consolePageDirs(root = ROOT) {
     });
 }
 
-/** 拼接顺序：index.html → app.css → js/（app.js 优先）→ pages/<id>/{page.html,page.css,page.js}。 */
+/** 拼接顺序：index.html → css/{tokens,base,layout,components} → js/（app.js 优先）→ pages/<id>/{page.html,page.css,page.js}。 */
 export function readConsoleSource(root = ROOT) {
   const paths = consoleSourcePaths(root);
   const read = (file, label) => {
@@ -55,9 +58,10 @@ export function readConsoleSource(root = ROOT) {
       throw new Error(`控制台源码缺失：${label}（${file}）：${error?.message ?? error}`);
     }
   };
+  const styles = paths.css.map((file) => read(file, path.relative(paths.dir, file)));
   const scripts = consoleScriptPaths(root).map((file) => read(file, path.basename(file)));
   const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js]
     .filter(Boolean)
     .map((file) => read(file, path.relative(paths.dir, file))));
-  return [read(paths.index, 'index.html'), read(paths.css, 'app.css'), ...scripts, ...pages].join('\n');
+  return [read(paths.index, 'index.html'), ...styles, ...scripts, ...pages].join('\n');
 }

@@ -66,38 +66,34 @@
 
 ## 3. CSP 与安全响应头
 
-### 现状（2026-11-04）
+### 现状（2026-11-05：已收紧，无 `unsafe-inline`）
 
 ```js
-const SECURITY_HEADERS = {
+// src/http/security.mjs
+export const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
 ```
 
-控制台已拆成 `public/console/index.html` + `css/{tokens,base,layout,components,utilities}.css` + `js/*.js`。HTML 里的内联 `style` 已从 407 处降到 19 处（剩下的都是 JS 切 `display` 的元素，见 `docs/PLUGIN_ROADMAP.md` §8.7 的 3.3 第三步），但 `unsafe-inline` 仍不能去掉，还差两段：① `index.html` 里那一小段内联主题脚本（防首屏闪白）；② JS 拼模板里的内联 `style`（表格列宽、动态行）与 26 处 `el.style.display`。下一步是把主题脚本改成外部 module、表格列宽改 CSS 类或 `<col>`、显隐改 `hidden` 属性，然后才能去掉 `unsafe-inline`。
+控制台已彻底外置：`public/console/index.html` 只留骨架与 `<link>`，样式在 `css/{tokens,base,layout,components,utilities}.css`，脚本在 `js/*.js` 与 `pages/<id>/page.js`。收敛路径（`docs/PLUGIN_ROADMAP.md` §8.7 的 3.3）：
 
-### 目标（前端分层完成后）
+1. 407 处内联 `style` → 57 个工具类（`utilities.css`），HTML 与页面模块里现在 **0 处内联 style**；
+2. 表格列宽由 `style="width:Npx"` 改成 `data-w="N"`，`components.css` 按 `th[data-w]` 给宽度；
+3. `el.style.display` 全部改成 `hidden` 属性（`base.css` 有 `[hidden]{display:none!important}` 兜底）；
+4. 内联主题脚本抽成 `js/theme-boot.js`（仍是同步 `<script src>`，放样式表之前防闪白）；
+5. 动态尺寸（搜索候选定位、用量进度条宽度）走 **CSSOM**（`el.style.width = …`），CSP 的 `style-src` 不拦 CSSOM 写入——这是「不用 `unsafe-inline` 也能动态排版」的正规路径。
 
-```
-default-src 'self';
-script-src 'self';
-style-src 'self';
-img-src 'self' data:;
-font-src 'self';
-connect-src 'self';
-frame-ancestors 'none';
-base-uri 'none';
-form-action 'self';
-object-src 'none'
-```
+回归门禁：`scripts/test-http-boundary.mjs` 断言 CSP 不含 `unsafe-inline`；`scripts/test-console-static.mjs` 断言 HTML/页面模块 0 处内联 style、index 无内联 `<script>`/`<style>`，并把每个控制台模块复制成 `.mjs` 交给 `node --check` 做语法校验。
 
-- 迁移期允许「先外链、后删 `unsafe-inline`」两步走，但**不允许长期停留在 `unsafe-inline`**；
-- 任何新页面不得新增内联 `onclick=` / `<style>` 块；老代码迁移时按页替换；
-- 控制台不加载任何第三方 CDN 资源（离线可用的前提）。
+### 约定
+
+- 任何新页面不得新增内联 `onclick=` / `style=` / `<style>` 块；需要动态尺寸时用 CSSOM 或工具类；
+- 控制台不加载任何第三方 CDN 资源（离线可用的前提）；
+- 改 CSP 必须同时跑 `test-http-boundary` 与 `test-console-static`，并在浏览器里确认没有 `securitypolicyviolation`。
 
 ### 为什么必须 `frame-ancestors 'none'` + `X-Frame-Options: DENY`
 

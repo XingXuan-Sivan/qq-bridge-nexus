@@ -110,13 +110,13 @@ function renderSlangPanel() {
   const q = getSlangSearch();
   const filtered = q ? list.filter((e) => slangSearchFields(e).includes(q)) : list;
   if (!filtered.length) {
-    box.innerHTML = '<div class="meta" style="padding:8px">' + (list.length ? '没有符合条件的词条' : (tab === 'researched' ? '暂无已研究的候选：送 DSH 深度研究、或在「编辑」里填写含义后会出现在这里' : status === 'candidate' ? '暂无待研究的候选，等 DSH 自动提取、AI 提交或手动添加' : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条')) + '</div>';
+    box.innerHTML = '<div class="meta u-p-8">' + (list.length ? '没有符合条件的词条' : (tab === 'researched' ? '暂无已研究的候选：送 DSH 深度研究、或在「编辑」里填写含义后会出现在这里' : status === 'candidate' ? '暂无待研究的候选，等 DSH 自动提取、AI 提交或手动添加' : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条')) + '</div>';
     updateSlangSelectAll(status);
     return;
   }
   const limit = getSlangLimit();
   const shown = filtered.slice(0, limit);
-  let html = `<div class="meta" style="padding:6px 8px">共 ${filtered.length} 条，显示 ${shown.length} 条（可滚动查找）</div>`;
+  let html = `<div class="meta u-p-6-8">共 ${filtered.length} 条，显示 ${shown.length} 条（可滚动查找）</div>`;
   html += '<table><tr><th>选择</th><th>词条</th><th>次数</th><th>来源</th><th>含义 / 用法 / 示例</th><th>参考来源</th><th>语境证据</th><th>操作</th></tr>';
   for (const e of shown) {
     const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
@@ -208,7 +208,7 @@ function openSlangModal(id, mode, { adoptGuess = false } = {}) {
   const guessBox = document.getElementById('slangModalGuess');
   const guessHtml = !e.meaning ? slangGuessHtml(e) : '';
   guessBox.innerHTML = guessHtml ? guessHtml + '<br>' + (adoptGuess ? '已把推测填进空着的栏位：请核对、修改后再保存（推测不一定对）。' : '可以参考它填写含义。') : '';
-  guessBox.style.display = guessHtml ? '' : 'none';
+  guessBox.hidden = !guessHtml;
   if (adoptGuess && guessHtml) {
     // 只填空着的栏位，不覆盖管理员已经写的内容
     for (const [field, inputId] of [['meaning', 'slangModalMeaning'], ['usage', 'slangModalUsage'], ['example', 'slangModalExample']]) {
@@ -217,7 +217,7 @@ function openSlangModal(id, mode, { adoptGuess = false } = {}) {
     }
   }
   document.getElementById('slangModalDirectConfirm').textContent = mode === 'confirm' ? '直接确认（转正）' : '保存修改';
-  document.getElementById('slangModalSendResearch').style.display = mode === 'confirm' && e.status === 'candidate' ? '' : 'none';
+  document.getElementById('slangModalSendResearch').hidden = !(mode === 'confirm' && e.status === 'candidate');
   document.getElementById('slangModalOverlay').classList.add('open');
 }
 function closeSlangModal() {

@@ -31,7 +31,8 @@ export function renderTable({ columns, rows, empty = '暂无数据' }) {
   for (const column of columns) {
     const th = document.createElement('th');
     th.textContent = column.label;
-    if (column.width) th.style.width = column.width;
+    // 列宽走 data-w 属性（见 components.css 的 th[data-w]），不写内联 style——CSP 会拦 style 属性。
+    if (column.width) th.dataset.w = String(column.width).replace('px', '');
     headRow.append(th);
   }
   thead.append(headRow);
@@ -97,7 +98,7 @@ export function renderTable({ columns, rows, empty = '暂无数据' }) {
  * @param {Array<Array<string>>} rows
  */
 export function simpleTable(columns, rows) {
-  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` style="width:${column.width}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
   const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }

@@ -50,7 +50,7 @@ async function loadVoiceLibrary(force) {
         // v.name / v.error / v.detail 来自语音库的文件名与探测结果，属于**外部数据**：
         // 语音库目录里放一个名为 `x<img src=x onerror=...>.mp3` 的文件即可注入脚本
         // （CSP 允许 unsafe-inline，拦不住内联事件处理器）。所有插值都必须过 esc()。
-        return '<label style="display:block;margin:2px 0">'
+        return '<label class="u-block-my-2">'
           + '<input type="radio" name="voicePick" value="' + i + '"' + (i === 0 ? ' checked' : '') + '> '
           + '<code>' + esc(v.name) + '</code> ' + (bad ? '❌ ' + esc(v.error || '不可用') : esc(v.detail || ''))
           + '</label>';
@@ -381,19 +381,19 @@ function renderV2Memory(data) {
   const topics = Array.isArray(raw.activeTopics) ? raw.activeTopics : [];
   const thoughts = Array.isArray(raw.pendingThoughts) ? raw.pendingThoughts : [];
   const impressions = raw.memberImpressions && typeof raw.memberImpressions === 'object' ? raw.memberImpressions : {};
-  let html = '<div style="padding:8px">';
+  let html = '<div class="u-p-8">';
   html += '<div class="memory-section"><b>进行中的话题</b> <button class="small" data-action="clear" data-cat="activeTopic">清空</button>';
   if (!topics.length) html += '<div class="meta">（空）</div>';
   for (const t of topics) {
     const text = esc(String(t?.text || ''));
     const extra = t?.pendingQuestion ? `；待追问：${esc(String(t.pendingQuestion))}` : '';
-    html += `<div style="margin:4px 0">📌 ${text}${extra} <button class="small" data-action="edit" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">编辑</button> <button class="small" data-action="remove" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
+    html += `<div class="u-my-4">📌 ${text}${extra} <button class="small" data-action="edit" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">编辑</button> <button class="small" data-action="remove" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
   }
   html += '</div>';
   html += '<div class="memory-section"><b>你想说但还没说的</b> <button class="small" data-action="clear" data-cat="pendingThought">清空</button>';
   if (!thoughts.length) html += '<div class="meta">（空）</div>';
   for (const t of thoughts) {
-    html += `<div style="margin:4px 0">💭 ${esc(String(t?.text || ''))}${t?.motivation ? `（${esc(String(t.motivation))}）` : ''} <button class="small" data-action="edit" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">编辑</button> <button class="small" data-action="remove" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
+    html += `<div class="u-my-4">💭 ${esc(String(t?.text || ''))}${t?.motivation ? `（${esc(String(t.motivation))}）` : ''} <button class="small" data-action="edit" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">编辑</button> <button class="small" data-action="remove" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
   }
   html += '</div>';
   html += '<div class="memory-section"><b>对群友的印象</b> <button class="small" data-action="clear" data-cat="memberImpression">清空</button>';
@@ -402,7 +402,7 @@ function renderV2Memory(data) {
   for (const name of names) {
     const im = impressions[name] || {};
     const traits = Array.isArray(im.traits) ? im.traits : [];
-    html += `<div style="margin:4px 0">👤 ${esc(name)}：${traits.length ? esc(traits.join('、')) : '暂无记录'}（互动 ${Number(im.interactionCount) || 0} 次） <button class="small" data-action="edit" data-cat="memberImpression" data-target="${esc(name)}" data-traits="${esc(traits.join(', '))}">编辑</button> <button class="small" data-action="remove" data-cat="memberImpression" data-target="${esc(name)}">删除</button></div>`;
+    html += `<div class="u-my-4">👤 ${esc(name)}：${traits.length ? esc(traits.join('、')) : '暂无记录'}（互动 ${Number(im.interactionCount) || 0} 次） <button class="small" data-action="edit" data-cat="memberImpression" data-target="${esc(name)}" data-traits="${esc(traits.join(', '))}">编辑</button> <button class="small" data-action="remove" data-cat="memberImpression" data-target="${esc(name)}">删除</button></div>`;
   }
   html += '</div></div>';
   box.innerHTML = html;
@@ -472,7 +472,7 @@ function formatWakeStatus(r) {
     lines.push(`<div><b>上次发言：</b>${ago} 分钟前</div>`);
   }
   lines.push(`<div><b>未读：</b>${Number(r.unreadCount) || 0} 条</div>`);
-  return '<div style="padding:8px">' + lines.join('') + '</div>';
+  return '<div class="u-p-8">' + lines.join('') + '</div>';
 }
 function loadV2WakeStatus() {
   const key = document.getElementById('v2WakeKey').value.trim();
@@ -514,7 +514,7 @@ function renderV2InitPromptEntries(entries) {
   if (!Array.isArray(entries) || !entries.length) { box.textContent = '（还没有任何会话设置初始提示词）'; return; }
   box.innerHTML = entries.map((e) => {
     const when = Number(e.updatedAt) > 0 ? new Date(Number(e.updatedAt)).toLocaleString() : '未知时间';
-    return `<div style="margin:3px 0"><code>${esc(e.key)}</code> · ${Number(e.chars) || 0} 字符 · ${esc(when)} <button class="small" data-init-prompt-key="${esc(e.key)}">编辑</button></div>`;
+    return `<div class="u-my-3"><code>${esc(e.key)}</code> · ${Number(e.chars) || 0} 字符 · ${esc(when)} <button class="small" data-init-prompt-key="${esc(e.key)}">编辑</button></div>`;
   }).join('');
 }
 async function loadV2InitialPrompt() {

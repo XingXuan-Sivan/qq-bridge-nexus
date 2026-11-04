@@ -178,10 +178,15 @@ function usageTime(ms) {
   if (!ms) return '—';
   try { return new Date(ms).toLocaleString('zh-CN', { hour12: false }); } catch (error) { return '—'; }
 }
+function applyUsageBarWidths(root) {
+  root.querySelectorAll('.usage-bar-fill[data-pct]').forEach((el) => {
+    el.style.width = `${el.dataset.pct}%`;
+  });
+}
 function usageBar(share) {
   const ratio = Math.max(0, Math.min(1, Number(share) || 0));
   const width = Math.max(2, Math.round(ratio * 100));
-  return `<span class="usage-bar-wrap"><span class="usage-bar-track"><span class="usage-bar-fill" style="width:${width}%"></span></span><span class="meta">${(ratio * 100).toFixed(1)}%</span></span>`;
+  return `<span class="usage-bar-wrap"><span class="usage-bar-track"><span class="usage-bar-fill" data-pct="${width}"></span></span><span class="meta">${(ratio * 100).toFixed(1)}%</span></span>`;
 }
 function usageTierTag(tier) {
   if (tier === 'peak') return '<span class="pill r usage-tier">高峰</span>';
@@ -238,12 +243,13 @@ function renderUsageConversations(r) {
   html += '</table>';
   const totals = r.totals || {};
   if (Number(totals.unattributedCost) > 0) {
-    html += `<div class="meta" style="padding:8px 10px">其中 ${usageMoney(totals.unattributedCost, sym)} 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>`;
+    html += `<div class="meta u-p-8-10">其中 ${usageMoney(totals.unattributedCost, sym)} 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>`;
   }
   if (totals.estimated) {
-    html += '<div class="meta" style="padding:8px 10px">⚠️ 有模型未登记在价目表里，这部分按 <code>deepseek-flash</code> 兜底价估算，可在 <code>config.json</code> 的 <code>pricing.models</code> 补充。</div>';
+    html += '<div class="meta u-p-8-10">⚠️ 有模型未登记在价目表里，这部分按 <code>deepseek-flash</code> 兜底价估算，可在 <code>config.json</code> 的 <code>pricing.models</code> 补充。</div>';
   }
   box.innerHTML = html;
+  applyUsageBarWidths(box);
   box.querySelectorAll('[data-usage-key]').forEach(btn => btn.addEventListener('click', () => {
     usageSelectedKey = btn.dataset.usageKey;
     box.querySelectorAll('[data-usage-key]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.usageKey === usageSelectedKey)));
@@ -311,7 +317,7 @@ function renderUsagePrices(pt) {
   if (!pt || !pt.models) { box.textContent = '（价目表不可用）'; return; }
   const sym = pt.symbol || '¥';
   const tier = pt.nowTier;
-  let html = `<div style="margin-bottom:6px">价目表版本 <code>${esc(pt.version)}</code> ｜ 高峰时段为北京时间的 2 倍价（周一至周五 9:00-12:00、14:00-18:00，法定节假日除外，已内置 ${esc(pt.holidayCount)} 天假期）</div>`;
+  let html = `<div class="u-mb-6">价目表版本 <code>${esc(pt.version)}</code> ｜ 高峰时段为北京时间的 2 倍价（周一至周五 9:00-12:00、14:00-18:00，法定节假日除外，已内置 ${esc(pt.holidayCount)} 天假期）</div>`;
   html += '<table><tr><th>模型</th><th class="num">缓存命中</th><th class="num">缓存未命中</th><th class="num">输出</th></tr>';
   for (const [name, m] of Object.entries(pt.models)) {
     // 单价与货币符号都可能来自 config.json 的 pricing 覆盖项（运维可写），
@@ -323,7 +329,7 @@ function renderUsagePrices(pt) {
       + `<td class="num">${price(m.off?.output)}</td></tr>`;
   }
   html += '</table>';
-  html += `<div class="meta" style="padding:8px 10px">上表为<b>空闲时段</b>单价（元 / 百万 token）。当前时刻属于 <b>${tier ? esc(tier.tierLabel) : '—'}</b>${tier?.estimated ? '，且价目表里没有 <code>' + esc(tier.model) + '</code>，按兜底价估算' : ''}。</div>`;
+  html += `<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（元 / 百万 token）。当前时刻属于 <b>${tier ? esc(tier.tierLabel) : '—'}</b>${tier?.estimated ? '，且价目表里没有 <code>' + esc(tier.model) + '</code>，按兜底价估算' : ''}。</div>`;
   box.innerHTML = html;
 }
 

@@ -1,6 +1,8 @@
 // 控制台静态校验：在无法跑 Playwright 的环境里，替代性地检查 HTML/JS 结构契约。
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
 import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
@@ -43,10 +45,29 @@ ok(/api\('\/api\/voice\/send'/.test(html), '面板调用 /api/voice/send');
 ok(/typeof loadVoiceLibrary === 'function'|async function loadVoiceLibrary/.test(html), 'loadVoiceLibrary 已定义');
 
 console.log('## JS 语法');
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-const big = scripts.sort((a, b) => b.length - a.length)[0];
-try { new Function(big); ok(true, '主 script 语法可解析', `${big.length} 字符`); }
-catch (e) { ok(false, '主 script 语法', e.message); }
+// 控制台脚本已全部外置为 ES 模块，index 里不再有内联 <script>，
+// 所以这里直接把每个模块复制成 .mjs 后交给 node --check 解析（import/export 用 new Function 解析不了）。
+{
+  const jsDir = path.join(ROOT, 'public', 'console', 'js');
+  const moduleFiles = [];
+  const collect = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) collect(full);
+      else if (entry.name.endsWith('.js')) moduleFiles.push(full);
+    }
+  };
+  collect(jsDir);
+  let failing = '';
+  for (const file of moduleFiles) {
+    const temp = path.join(os.tmpdir(), `console-check-${path.basename(file, '.js')}-${process.pid}.mjs`);
+    fs.copyFileSync(file, temp);
+    const result = spawnSync(process.execPath, ['--check', temp], { encoding: 'utf8' });
+    fs.rmSync(temp, { force: true });
+    if (result.status !== 0) failing ||= `${path.relative(ROOT, file)}: ${(result.stderr || '').split('\n').slice(0, 2).join(' ')}`;
+  }
+  ok(!failing, '全部控制台模块语法可解析', failing || `${moduleFiles.length} 个文件`);
+}
 
 console.log('## 人格快捷选择（v0.4.1）');
 ok(/id="roleInput"[^>]*role="combobox"/.test(html) && /id="roleSuggest"[^>]*role="listbox"/.test(html), '切换人格输入框带下拉候选（combobox + listbox）');
@@ -154,16 +175,17 @@ ok(fs.existsSync(utilitiesPath), 'utilities.css 存在（内联样式的收口�
 const utilities = fs.existsSync(utilitiesPath) ? fs.readFileSync(utilitiesPath, 'utf8') : '';
 ok(/\.u-flex-1 \{/.test(utilities) && /\.u-w-80 \{/.test(utilities) && /\.u-mt-8 \{/.test(utilities),
   'utilities.css 提供 flex / 宽度 / 外边距三类工具类');
-// 内联 style 只剩「JS 会切 display」的少量元素；其余一律走工具类。
-const inlineTotal = (() => {
-  const files = [path.join(ROOT, 'public', 'console', 'index.html')];
-  for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
-    const file = path.join(ROOT, 'public', 'console', 'pages', id, 'page.html');
-    if (fs.existsSync(file)) files.push(file);
+// CSP 已去掉 'unsafe-inline'：HTML 与页面模块里都不允许再出现 style 属性（动态尺寸走 CSSOM）。
+const inlineFiles = [path.join(ROOT, 'public', 'console', 'index.html')];
+for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
+  const dir = path.join(ROOT, 'public', 'console', 'pages', id);
+  for (const name of ['page.html', 'page.js']) {
+    const file = path.join(dir, name);
+    if (fs.existsSync(file)) inlineFiles.push(file);
   }
-  return files.reduce((n, file) => n + (fs.readFileSync(file, 'utf8').match(/style="/g)?.length ?? 0), 0);
-})();
-ok(inlineTotal <= 20, `内联 style 已收敛（剩 ${inlineTotal} 处，都是 JS 切 display 的元素）`);
+}
+const inlineTotal = inlineFiles.reduce((n, file) => n + (fs.readFileSync(file, 'utf8').match(/\sstyle="/g)?.length ?? 0), 0);
+ok(inlineTotal === 0, `HTML / 页面模块里没有内联 style（剩 ${inlineTotal} 处）`);
 const inlineWidthInHtml = (() => {
   const files = [path.join(ROOT, 'public', 'console', 'index.html')];
   for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {

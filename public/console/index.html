@@ -6,19 +6,7 @@
 <meta name="color-scheme" content="light dark">
 <title>QQ 桥接控制台</title>
 <link rel="icon" href="/console/img/favicon.svg" type="image/svg+xml">
-<script>
-// 主题引导：须在样式表之前执行，避免首屏闪一下浅色。
-(function () {
-  var theme;
-  try {
-    var saved = localStorage.getItem('qq-console-theme');
-    theme = saved === 'dark' || saved === 'light' ? saved : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  } catch (error) {
-    theme = 'light';
-  }
-  document.documentElement.dataset.theme = theme;
-})();
-</script>
+<script src="/console/js/theme-boot.js"></script>
 <link rel="stylesheet" href="/console/css/tokens.css">
 <link rel="stylesheet" href="/console/css/base.css">
 <link rel="stylesheet" href="/console/css/layout.css">
@@ -100,7 +88,7 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="slangModalTitle" tabindex="-1">
         <h3 id="slangModalTitle">确认黑话</h3>
         <div class="meta u-mb-6" id="slangModalContent"></div>
-        <div class="meta slang-guess" id="slangModalGuess" style="display:none;margin-bottom:6px"></div>
+        <div class="meta slang-guess u-mb-6" id="slangModalGuess" hidden></div>
         <label>含义 *</label>
         <input type="text" id="slangModalMeaning" placeholder="必须填写，确认后才会注入 AI 上下文">
         <label>用法（可选）</label>

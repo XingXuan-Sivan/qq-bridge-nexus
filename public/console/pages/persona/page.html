@@ -35,7 +35,7 @@
       <button id="roleFormReset">清空表单</button>
       <span class="meta" id="roleCreateMsg"></span>
     </div>
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px">
+    <div class="u-row-8-wrap-mt-8">
       <span class="meta u-m-0">保存当前启用的人格后，二代仿真里：</span>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleSaveApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleSaveApply" value="immediate"> 立即生效（现在就唤醒各会话读新卡）</label>
@@ -57,7 +57,7 @@
     </div>
     <!-- 放在行外、占正常文档流：外层折叠面板 overflow:hidden，浮层式下拉会被裁掉；在流内展开时面板跟着变高 -->
     <ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+    <div class="u-row-8-wrap-mt-10">
       <span class="meta u-m-0">二代仿真里生效方式：</span>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleApply" value="immediate"> 立即切换（现在就唤醒各会话读新卡）</label>
@@ -78,7 +78,7 @@
       <select class="u-flex-basis-max-220" id="roleAssignNewUse"></select>
       <button id="roleAssignAdd" class="small">添加</button>
     </div>
-    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+    <div class="u-row-8-wrap-mt-10">
       <span class="meta u-m-0">保存后二代仿真里：</span>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleAssignApply" value="nextWake" checked> 下次唤醒时重新读卡</label>
       <label class="sched-chip u-m-0-nowrap"><input type="radio" name="roleAssignApply" value="immediate"> 立即切换（现在就唤醒这个会话读新卡）</label>

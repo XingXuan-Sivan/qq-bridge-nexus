@@ -10,7 +10,7 @@
         <summary>内置注入块</summary>
         <div class="settings-content">
           <div class="meta">这两段直接进每次唤醒的 prompt：关掉后模型当轮看不到对应内容，立即生效；上限按字符截断，清空表示用默认。</div>
-          <div id="promptBlockRows" style="margin-top:8px;display:grid;gap:10px">加载中…</div>
+          <div id="promptBlockRows" class="u-mt-8-grid">加载中…</div>
           <div class="row u-mt-8">
             <button id="promptBlockSave">保存注入块</button>
             <span class="meta" id="promptBlockMsg"></span>
@@ -22,8 +22,8 @@
         <div class="settings-content">
           <div class="meta">入站过滤打开后，申请了 <code>inbound:filter</code> 的插件可以丢弃或改写消息，改完立即生效；文件监听只影响开发时的自动重载。</div>
           <div class="row check-row u-mt-8">
-            <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginFilterInbound"> 入站过滤</label>
-            <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginWatch"> 文件监听自动重载</label>
+            <label class="field u-row-6"><input type="checkbox" id="pluginFilterInbound"> 入站过滤</label>
+            <label class="field u-row-6"><input type="checkbox" id="pluginWatch"> 文件监听自动重载</label>
           </div>
           <details class="settings-sub u-mt-8">
             <summary class="meta">高级</summary>
@@ -31,7 +31,7 @@
               <div class="row check-row u-mt-8">
                 <label class="field">钩子超时(ms)<input class="u-w-120" type="number" id="pluginHookTimeout" min="100" max="10000" step="100"></label>
                 <label class="field">插件注入上限(字符)<input class="u-w-140" type="number" id="pluginAppendLimit" min="0" max="20000" step="100"></label>
-                <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginInstallEnabled"> 允许安装</label>
+                <label class="field u-row-6"><input type="checkbox" id="pluginInstallEnabled"> 允许安装</label>
               </div>
             </div>
           </details>
@@ -60,9 +60,9 @@
     <div class="modal-overlay" id="pluginDetailOverlay">
       <div class="modal u-maxw-720" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
         <h3 id="pluginDetailTitle">插件详情</h3>
-        <div class="meta" id="pluginDetailBody" style="max-height:60vh;overflow:auto;white-space:pre-wrap"></div>
+        <div class="meta u-maxh-60vh-scroll" id="pluginDetailBody"></div>
         <div class="row u-mt-8" id="pluginPersistRow">
-          <label class="field" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
+          <label class="field u-row-6"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
           <button id="pluginPersistSave">保存</button>
           <span class="meta" id="pluginPersistMsg"></span>
         </div>

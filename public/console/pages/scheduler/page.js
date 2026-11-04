@@ -54,12 +54,12 @@ function renderScheduler() {
     const badges = [t.kindLabel ? `<span class="pill b">${esc(t.kindLabel)}</span>` : (t.kind === 'ai' ? '<span class="pill b">AI 来说</span>' : '<span class="pill">固定文字</span>'),
       `<span class="pill">来源：${esc({ console: '控制台', 'owner-command': '管理员命令', 'owner-chat-ai': '私聊 AI' }[t.createdBy] || t.createdBy)}</span>`,
       t.pendingConfirm ? '<span class="pill r">待你确认</span>' : ''].join(' ');
-    const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta" style="margin:2px 0 0">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
+    const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta u-mt-2">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
     return `<tr>
       <td><input type="checkbox" data-sched-toggle="${t.id}" ${t.enabled ? 'checked' : ''} aria-label="启用 #${t.id}"></td>
-      <td><b>#${t.id} ${esc(t.name)}</b><div style="margin-top:4px">${badges}</div><div class="meta" style="margin:4px 0 0">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div></td>
-      <td>${esc(t.scheduleText)}<div class="meta" style="margin:2px 0 0">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div></td>
-      <td>${t.targets.map((k) => `<span class="sched-chip" style="cursor:default">${esc(targetLabel(k))}</span>`).join('')}</td>
+      <td><b>#${t.id} ${esc(t.name)}</b><div class="u-mt-4">${badges}</div><div class="meta u-mt-4">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div></td>
+      <td>${esc(t.scheduleText)}<div class="meta u-mt-2">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div></td>
+      <td>${t.targets.map((k) => `<span class="sched-chip u-cursor-default">${esc(targetLabel(k))}</span>`).join('')}</td>
       <td>${last}</td>
       <td class="row"><button class="small" data-sched-run="${t.id}" title="立即执行一次（计入今天的限额）">试发</button><button class="small" data-sched-edit="${t.id}">编辑</button><button class="small danger" data-sched-del="${t.id}">删</button></td>
     </tr>`;
@@ -91,22 +91,22 @@ function renderScheduler() {
 function schedFieldsHtml(type, s = {}) {
   const v = (x, d = '') => esc(x ?? d);
   const times = (s.times || ['09:00']).join(', ');
-  const timesRow = `<div class="row"><span class="meta" style="margin:0">时间</span><input type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00" style="flex:1 1 200px"></div>`;
-  const windowRow = (w) => `<div class="row"><span class="meta" style="margin:0">时间段</span><input type="time" id="sf_w0" value="${v((w || [])[0], '09:00')}"> 到 <input type="time" id="sf_w1" value="${v((w || [])[1], '22:00')}"></div>`;
+  const timesRow = `<div class="row"><span class="meta u-m-0">时间</span><input class="u-flex-basis-200" type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00"></div>`;
+  const windowRow = (w) => `<div class="row"><span class="meta u-m-0">时间段</span><input type="time" id="sf_w0" value="${v((w || [])[0], '09:00')}"> 到 <input type="time" id="sf_w1" value="${v((w || [])[1], '22:00')}"></div>`;
   switch (type) {
-    case 'once': return `<div class="row"><span class="meta" style="margin:0">日期和时间</span><input type="date" id="sf_date" value="${v(s.date)}"><input type="time" id="sf_time" value="${v(s.time, '09:00')}"></div>`;
+    case 'once': return `<div class="row"><span class="meta u-m-0">日期和时间</span><input type="date" id="sf_date" value="${v(s.date)}"><input type="time" id="sf_time" value="${v(s.time, '09:00')}"></div>`;
     case 'daily': case 'workdays': return timesRow;
-    case 'weekly': return `<div class="row">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip" style="margin:0"><input type="checkbox" data-sf-wd="${d}" ${(s.weekdays || [1]).includes(d) ? 'checked' : ''}> 周${SCHED_WEEK[d]}</label>`).join('')}</div>${timesRow}`;
-    case 'monthly': return `<div class="row"><span class="meta" style="margin:0">几号</span><input type="text" id="sf_days" value="${v((s.days || [1]).join(', '))}" placeholder="1, 15, -1（-1 = 最后一天）" style="flex:1 1 200px"></div>${timesRow}`;
-    case 'monthlyWeekday': return `<div class="row"><span class="meta" style="margin:0">每月</span><select id="sf_nth">${[[1, '第 1 个'], [2, '第 2 个'], [3, '第 3 个'], [4, '第 4 个'], [5, '第 5 个'], [-1, '最后一个']].map(([n, l]) => `<option value="${n}" ${Number(s.nth ?? 1) === n ? 'selected' : ''}>${l}</option>`).join('')}</select><select id="sf_weekday">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}" ${Number(s.weekday ?? 6) === d ? 'selected' : ''}>周${SCHED_WEEK[d]}</option>`).join('')}</select></div>${timesRow}`;
-    case 'yearly': return `<div class="row"><span class="meta" style="margin:0">日期</span><input type="text" id="sf_dates" value="${v((s.dates || ['01-01']).join(', '))}" placeholder="10-21, 12-25（MM-DD）" style="flex:1 1 200px"></div>${timesRow}`;
-    case 'dates': return `<div class="meta">每行一条：YYYY-MM-DD HH:mm</div><textarea id="sf_items" rows="3" style="width:100%">${v((s.items || []).map((x) => `${x.date} ${x.time}`).join('\n'))}</textarea>`;
-    case 'everyNDays': return `<div class="row"><span class="meta" style="margin:0">从</span><input type="date" id="sf_start" value="${v(s.startDate)}"><span class="meta" style="margin:0">起，每</span><input type="number" id="sf_every" min="2" value="${v(s.every, 3)}" style="flex:0 1 80px"><span class="meta" style="margin:0">天</span></div>${timesRow}`;
-    case 'interval': return `<div class="row"><span class="meta" style="margin:0">每</span><input type="number" id="sf_everyMin" min="10" value="${v(s.everyMinutes, 240)}" style="flex:0 1 90px"><span class="meta" style="margin:0">分钟</span></div>${windowRow(s.window || ['08:00', '23:00'])}`;
-    case 'dailyRandom': return `<div class="row"><span class="meta" style="margin:0">每天</span><input type="number" id="sf_count" min="1" value="${v(s.count, 3)}" style="flex:0 1 80px"><span class="meta" style="margin:0">次，至少隔</span><input type="number" id="sf_gap" min="0" value="${v(s.minGapMin, 60)}" style="flex:0 1 80px"><span class="meta" style="margin:0">分钟</span></div>${windowRow(s.window)}`;
-    case 'cron': return `<div class="row"><span class="meta" style="margin:0">表达式</span><input type="text" id="sf_cron" value="${v(s.expr, '0 9 * * 1-5')}" placeholder="0 9 * * 1-5" style="flex:1 1 220px;font-family:var(--mono, monospace)"></div>
+    case 'weekly': return `<div class="row">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip u-m-0"><input type="checkbox" data-sf-wd="${d}" ${(s.weekdays || [1]).includes(d) ? 'checked' : ''}> 周${SCHED_WEEK[d]}</label>`).join('')}</div>${timesRow}`;
+    case 'monthly': return `<div class="row"><span class="meta u-m-0">几号</span><input class="u-flex-basis-200" type="text" id="sf_days" value="${v((s.days || [1]).join(', '))}" placeholder="1, 15, -1（-1 = 最后一天）"></div>${timesRow}`;
+    case 'monthlyWeekday': return `<div class="row"><span class="meta u-m-0">每月</span><select id="sf_nth">${[[1, '第 1 个'], [2, '第 2 个'], [3, '第 3 个'], [4, '第 4 个'], [5, '第 5 个'], [-1, '最后一个']].map(([n, l]) => `<option value="${n}" ${Number(s.nth ?? 1) === n ? 'selected' : ''}>${l}</option>`).join('')}</select><select id="sf_weekday">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}" ${Number(s.weekday ?? 6) === d ? 'selected' : ''}>周${SCHED_WEEK[d]}</option>`).join('')}</select></div>${timesRow}`;
+    case 'yearly': return `<div class="row"><span class="meta u-m-0">日期</span><input class="u-flex-basis-200" type="text" id="sf_dates" value="${v((s.dates || ['01-01']).join(', '))}" placeholder="10-21, 12-25（MM-DD）"></div>${timesRow}`;
+    case 'dates': return `<div class="meta">每行一条：YYYY-MM-DD HH:mm</div><textarea id="sf_items" rows="3" class="u-w-full">${v((s.items || []).map((x) => `${x.date} ${x.time}`).join('\n'))}</textarea>`;
+    case 'everyNDays': return `<div class="row"><span class="meta u-m-0">从</span><input type="date" id="sf_start" value="${v(s.startDate)}"><span class="meta u-m-0">起，每</span><input class="u-flex-basis-max-80" type="number" id="sf_every" min="2" value="${v(s.every, 3)}"><span class="meta u-m-0">天</span></div>${timesRow}`;
+    case 'interval': return `<div class="row"><span class="meta u-m-0">每</span><input class="u-flex-basis-max-90" type="number" id="sf_everyMin" min="10" value="${v(s.everyMinutes, 240)}"><span class="meta u-m-0">分钟</span></div>${windowRow(s.window || ['08:00', '23:00'])}`;
+    case 'dailyRandom': return `<div class="row"><span class="meta u-m-0">每天</span><input class="u-flex-basis-max-80" type="number" id="sf_count" min="1" value="${v(s.count, 3)}"><span class="meta u-m-0">次，至少隔</span><input class="u-flex-basis-max-80" type="number" id="sf_gap" min="0" value="${v(s.minGapMin, 60)}"><span class="meta u-m-0">分钟</span></div>${windowRow(s.window)}`;
+    case 'cron': return `<div class="row"><span class="meta u-m-0">表达式</span><input class="u-flex-basis-220-mono" type="text" id="sf_cron" value="${v(s.expr, '0 9 * * 1-5')}" placeholder="0 9 * * 1-5"></div>
       <div class="meta">5 段：分 时 日 月 周（周 0 和 7 都是周日，也可以写 MON-FRI）。例子：<code>0 9 * * 1-5</code> 工作日 9:00；<code>30 8 1 * *</code> 每月 1 号 8:30；<code>0 10,15 * * 6,0</code> 周末 10:00 和 15:00；<code>*/30 9-18 * * *</code> 9～18 点每半小时。日和周都限定时按「任一满足」。下面会实时显示接下来几次，写错会直接提示。cron 只能在控制台设置，AI 不能用。</div>`;
-    case 'monthlyRandom': return `<div class="row"><span class="meta" style="margin:0">每月</span><input type="number" id="sf_mcount" min="1" value="${v(s.count, 4)}" style="flex:0 1 80px"><span class="meta" style="margin:0">次，限</span><input type="number" id="sf_d0" min="1" max="31" value="${v((s.dayRange || [])[0], 1)}" style="flex:0 1 70px"><span class="meta" style="margin:0">～</span><input type="number" id="sf_d1" min="1" max="31" value="${v((s.dayRange || [])[1], 28)}" style="flex:0 1 70px"><span class="meta" style="margin:0">号</span></div>${windowRow(s.window)}`;
+    case 'monthlyRandom': return `<div class="row"><span class="meta u-m-0">每月</span><input class="u-flex-basis-max-80" type="number" id="sf_mcount" min="1" value="${v(s.count, 4)}"><span class="meta u-m-0">次，限</span><input class="u-flex-basis-max-70" type="number" id="sf_d0" min="1" max="31" value="${v((s.dayRange || [])[0], 1)}"><span class="meta u-m-0">～</span><input class="u-flex-basis-max-70" type="number" id="sf_d1" min="1" max="31" value="${v((s.dayRange || [])[1], 28)}"><span class="meta u-m-0">号</span></div>${windowRow(s.window)}`;
     default: return '';
   }
 }
@@ -136,8 +136,8 @@ function schedSyncKindUi() {
   const plugin = schedEl('schedPluginKind')?.value || '';
   const custom = Boolean(plugin);
   document.querySelectorAll('input[name="schedKind"]').forEach((r) => { r.disabled = custom; });
-  schedEl('schedPayloadJson').style.display = custom ? '' : 'none';
-  schedEl('schedContent').style.display = custom ? 'none' : '';
+  schedEl('schedPayloadJson').hidden = !custom;
+  schedEl('schedContent').hidden = custom;
 }
 
 function schedPayload() {
@@ -175,7 +175,7 @@ function renderSchedPluginKinds() {
   const row = schedEl('schedPluginKindRow');
   const select = schedEl('schedPluginKind');
   if (!row || !select) return;
-  row.style.display = kinds.length ? '' : 'none';
+  row.hidden = !kinds.length;
   const current = select.value;
   select.innerHTML = `<option value="">— 用上面的固定文字 / AI —</option>${kinds.map((k) => `<option value="${esc(k.id)}">${esc(k.label)}${k.pluginId ? `（${esc(k.pluginId)}）` : ''}</option>`).join('')}`;
   if (kinds.some((k) => k.id === current)) select.value = current;
@@ -183,7 +183,7 @@ function renderSchedPluginKinds() {
 
 function renderSchedTargets(selected) {
   const r = schedState;
-  schedEl('schedTargets').innerHTML = (r?.targets || []).map((t) => `<label class="sched-chip ${selected.includes(t.key) ? 'on' : ''}" style="margin:2px 4px 2px 0"><input type="checkbox" data-sched-target="${esc(t.key)}" ${selected.includes(t.key) ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')
+  schedEl('schedTargets').innerHTML = (r?.targets || []).map((t) => `<label class="sched-chip ${selected.includes(t.key) ? 'on' : ''} spaced"><input type="checkbox" data-sched-target="${esc(t.key)}" ${selected.includes(t.key) ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')
     || '<span class="meta">没有可选的发送对象（白名单为空，且没配 ownerQQ）</span>';
   schedEl('schedTargets').querySelectorAll('[data-sched-target]').forEach((c) => c.addEventListener('change', () => c.parentElement.classList.toggle('on', c.checked)));
 }

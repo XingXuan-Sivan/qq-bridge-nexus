@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：内置命令壳抽到 `src/commands/`（P7 第二步，2026-11-05）
+- 新增 `src/commands/builtin.mjs`（`createBuiltinCommands(deps)`，承载 `/reset` `/status` `/role` `/silent` `/active` 五条命令的定义、别名、权限、分组与文案）与 `src/commands/payload.mjs`（`buildCommandsPayload(registry)` 组装 `GET /api/commands` 的三段响应）。
+- `src/bridge.js` 删掉 `commandStatus`/`commandRole`、5 条内联 `commandRegistry.register({...})` 与 `/silent` `/active` 两段旧 `if` 分支；`/api/commands` 由 20 行字面量改成一次 `sendJson(buildCommandsPayload(commandRegistry))`。`commandReset(ctx)` 改名 `resetSession(key)` 留在原地（要收口 30 个内存态对象与 45 处调用，属于第 3 步会话层）。
+- `bridge.js` 14745 → 14686 行（净 −59），`commandReset`/`commandStatus`/`commandRole` 残留 0；入口、行为、文案不变。
+- 回归门禁：`scripts/test-command-registry.mjs` 扩到 17 条（新增 `makeBuiltinHarness` 假 deps，覆盖五条命令注册/别名、`/status` 文案、`/reset` 透传、`/role` 五种分支、`/silent` `/active` 改模式、payload 分组）；`scripts/audit-bridge-harness.mjs` 补 `createBuiltinCommands`/`buildCommandsPayload` 的 import 与 sandbox 条目（VM 夹具剥 import，漏了会 `ReferenceError`）。
+- 文档：`docs/COMMAND_REGISTRY.md` 新增 §9「代码位置」并把迁移状态改成「五条内置全部 `migrated:true`」；`docs/PLUGIN_ROADMAP.md` §8.8 标第 1、2 步完成、第 3 步（`resetSession` + 会话状态）列为 A′ 待做。
+
 ### 重构：控制台组件层（3.2，2026-11-05）
 - 新增 `public/console/js/components/`：`table.js` 的 `tableHtml(columns, rows)`（由 `ui.js` 的 `simpleTable` 迁出，列宽仍走 `data-w`）、`message.js` 的 `setMsg(target, text, kind)`（把「设文本 + 设 `meta ok|err`」收成一处，22 处调用点全部改用它）、`modal.js` 的 `openModal`/`closeModal`/`isModalOpen`/`wireModal`（统一 `.open` 类与 `aria-hidden`，Esc 与点遮罩关闭）。
 - 插件详情弹窗与黑话模态改走 `wireModal`：前者据此挂到 `document.body`（片段注入在 `.card` 里，`.card` 的 `backdrop-filter` 会给 `fixed` 造包含块，遮罩只盖住卡片）；后者自带 Esc 焦点环，传 `closeOnEscape: false` 避免双重关闭。

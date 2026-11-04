@@ -120,6 +120,9 @@ import { createPluginKernel } from './plugins/kernel.mjs';
 import { createPromptBlockRegistry } from './plugins/prompt-blocks.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
+// 内置命令的「壳」（元数据 + 参数解析 + 回执文案）与 /api/commands 的响应组装，见 docs/COMMAND_REGISTRY.md。
+import { createBuiltinCommands } from './commands/builtin.mjs';
+import { buildCommandsPayload } from './commands/payload.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -4843,23 +4846,8 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/commands') {
-          // 三个来源分开返回，页面自己标来源；桥接不假装能管 DSH 的命令与工具（见 docs/COMMAND_REGISTRY.md）。
-          const entries = commandRegistry.list();
-          const bridgeBuiltin = entries.filter((entry) => entry.source === 'bridge');
-          const bridgePlugins = entries.filter((entry) => entry.source === 'plugin');
-          sendJson({
-            ok: true,
-            bridge: { builtin: bridgeBuiltin, plugin: bridgePlugins },
-            dsh: [
-              { name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' },
-              { name: '/permission', note: 'closed-agent 会话钉权限预设时调用，由 DSH 执行' },
-            ],
-            tools: [
-              { name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' },
-              { name: 'web_fetch', source: 'src/mcp-web-search-safe.js', managed: 'dsh' },
-              { name: 'snowluma_status', source: 'src/mcp-host-server.js', managed: 'dsh' },
-            ],
-          });
+          // 三个来源分开返回，页面自己标来源；桥接不假装能管 DSH 的命令与工具。组装见 src/commands/payload.mjs。
+          sendJson(buildCommandsPayload(commandRegistry));
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/extensions') {
@@ -13135,11 +13123,9 @@ async function main() {
   }
 
   // ── 命令注册表（docs/COMMAND_REGISTRY.md）───────────────────────────────
-  // 实例在插件内核之前创建（见 main 开头）；这里只放内置命令的元数据与 handler。
-  // 没挂 handler 的条目只用于展示，dispatch 会返回 handled:false，继续走 handleIncoming 里的旧 if 链；迁一个删一个。
-
-  async function commandReset(ctx) {
-    const { key } = ctx;
+  // 命令的元数据、参数解析与回执文案在 src/commands/builtin.mjs；这里只提供它碰不到的东西：
+  // 会话重置的真实清理（resetSession，见下）与几处桥接内部状态。deps 里每个成员都必须是稳定的。
+  async function resetSession(key) {
     const old = state.sessions[key];
     if (!old) return { ok: true, note: 'no-session' };
     sessionEpoch++;
@@ -13198,65 +13184,28 @@ async function main() {
     return { ok: true };
   }
 
-  async function commandStatus(ctx) {
-    const rs = readRoleState();
-    await sendToQQ(ctx.key, `会话 ${state.sessions[ctx.key] ?? '未创建'}；白名单 ${allowed(ctx.kind, ctx.id, ctx.cfg) ? '通过' : '拦截'}；角色 ${roleNameFor(rs, ctx.key) ?? '无'}${roleSourceFor(rs, ctx.key) === 'global' ? '' : '（本会话单独设置）'}；模式 ${rs.mode}`);
-    return { ok: true };
-  }
-
-  // /role 只对当前所在的会话生效（在群里发切本群，私聊发切这个私聊）；全局默认人格在控制台改。
-  //   /role 名字    本会话用这张卡
-  //   /role off     本会话不挂角色卡（clear 同义）
-  //   /role default 本会话回到全局默认
-  //   /role         看本会话现在用哪张卡
-  // 只有管理员能走到这里（上游 !isOwner 已 return）；改完下一次唤醒生效，二代会话会在唤醒提示里收到新卡。
-  async function commandRole(ctx) {
-    const { key } = ctx;
-    const arg = String(ctx.arg ?? '').trim();
-    const rs = readRoleState();
-    const globalText = rs.role ? `全局默认是「${rs.role}」` : '全局默认不挂角色卡';
-    if (!arg) {
-      const src = roleSourceFor(rs, key);
-      const now = roleNameFor(rs, key);
-      const nowText = src === 'off' ? '本会话不挂角色卡（单独设置）' : src === 'key' ? `本会话单独用「${now}」` : `本会话跟随全局默认（${rs.role ? `「${rs.role}」` : '不挂角色卡'}）`;
-      await sendToQQ(key, `${nowText}。用法：/role 名字（本会话换卡）、/role off（本会话不挂卡）、/role default（回到全局默认）。全局默认在控制台改。`);
-    } else if (arg === 'off' || arg === 'clear') {
-      writeRoleStateFull(withRoleForKey(rs, key, 'off'));
-      log(`管理员命令：${key} 不挂角色卡`);
-      await sendToQQ(key, `已关闭本会话的角色卡，只影响这里（${globalText}）。`);
-    } else if (arg === 'default') {
-      writeRoleStateFull(withRoleForKey(rs, key, 'default'));
-      log(`管理员命令：${key} 回到全局默认人格`);
-      await sendToQQ(key, `本会话已回到全局默认（${globalText}）。`);
-    } else {
-      const name = sanitizeRoleName(arg);
-      const roleFile = name ? resolveRoleFile(ROLES_DIR, name) : null;
-      if (!roleFile || !fs.existsSync(roleFile)) {
-        await sendToQQ(key, `角色「${name || arg}」不存在。角色文件放 qq-bridge/roles/ 目录。`);
-      } else {
-        writeRoleStateFull(withRoleForKey(rs, key, 'role', name));
-        log(`管理员命令：${key} 切换角色为 ${name}`);
-        await sendToQQ(key, `本会话已切换角色：${name}，只影响这里（${globalText}）。`);
-      }
-    }
-    return { ok: true };
-  }
-
-  commandRegistry.register({
-    id: 'reset', name: '/reset', aliases: ['/new'], scope: 'all', permission: 'owner',
-    group: '会话', help: '重置本会话上下文，下次消息开新会话', handler: commandReset,
-  });
-  commandRegistry.register({
-    id: 'status', name: '/status', scope: 'all', permission: 'owner',
-    group: '会话', help: '查看本会话的会话、白名单、角色与模式', handler: commandStatus,
-  });
-  commandRegistry.register({
-    id: 'role', name: '/role', scope: 'all', permission: 'owner',
-    group: '人格', help: '查看/切换本会话的人格卡（off 不挂卡，default 回全局）', handler: commandRole,
-  });
-  // 元数据先登记、handler 仍在旧 if 链里的命令：dispatch 会回退，管理行为页能看见它们。
-  commandRegistry.register({ id: 'silent', name: '/silent', aliases: ['/quiet'], scope: 'all', permission: 'owner', group: '会话', help: '进入静默模式：群友消息不再回复' });
-  commandRegistry.register({ id: 'active', name: '/active', aliases: ['/speak'], scope: 'all', permission: 'owner', group: '会话', help: '退出静默模式' });
+  // 内置命令的「壳」在 src/commands/builtin.mjs（元数据 / 参数解析 / 回执文案），
+  // 这里只把它碰不到的东西注入进去：会话重置、白名单判定、角色状态读写。
+  const builtinCommandDeps = {
+    send: sendToQQ,
+    session: {
+      current: (key) => state.sessions[key] ?? null,
+      reset: resetSession,
+    },
+    acl: { allowed },
+    role: {
+      read: readRoleState,
+      writeFull: writeRoleStateFull,
+      withKeyFor: withRoleForKey,
+      nameFor: roleNameFor,
+      sourceFor: roleSourceFor,
+      sanitize: sanitizeRoleName,
+      exists: (name) => Boolean(name) && fs.existsSync(resolveRoleFile(ROLES_DIR, name)),
+      setGlobalMode: (mode) => writeRoleState(readRoleState().role, mode),
+    },
+    log,
+  };
+  for (const definition of createBuiltinCommands(builtinCommandDeps)) commandRegistry.register(definition);
 
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
     const key = convKey(kind, id);
@@ -13466,17 +13415,8 @@ async function main() {
         return;
       }
 
-      if (plainContent === '/silent' || plainContent === '/quiet') {
-        writeRoleState(roleState.role, 'silent');
-        await sendToQQ(key, '已进入静默模式：群友消息不再回复，仅管理员可对话。');
-        return;
-      }
-      if (plainContent === '/active' || plainContent === '/speak') {
-        writeRoleState(roleState.role, 'active');
-        await sendToQQ(key, '已退出静默模式，恢复正常回复。');
-        return;
-      }
-      // 其余 / 开头内容照常发给 DSH（DSH 的斜杠命令原样执行，如 /model）
+      // /silent 与 /active 已迁进命令注册表（src/commands/builtin.mjs），这里不再兜底；
+      // 未命中的 / 开头内容照常发给 DSH（DSH 的斜杠命令原样执行，如 /model）。
     }
 
     // 二代仿真模式（reserved2）：唤醒调度

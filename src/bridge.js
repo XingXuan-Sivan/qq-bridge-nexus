@@ -129,6 +129,7 @@ import { createSessionResetter } from './session/reset.mjs';
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from './session/mode-gate.mjs';
 // sessions.json 的读写与「损坏后不覆盖」不变量（P7 第三步续），见模块头。
 import { loadSessionState, saveSessionState } from './session/store.mjs';
+import { createSessionRegistry } from './session/registry.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -1181,6 +1182,8 @@ function loadConfig() {
 
 // ── 状态持久化（QQ 会话 ↔ DSH 会话映射） ─────────────────────────────────────
 let state = { sessions: {} };
+// 会话映射 + 策略指纹的唯一入口；传 getter 是因为 loadState() 会整体替换 state 对象。
+const sessions = createSessionRegistry(() => state);
 // sessions.json 读不动/读坏时必须**大声失败**，不能静默回落成空映射：
 // 那会让每个 QQ 会话都拿到一个全新的 DSH 会话（上下文全丢），而紧接着的
 // saveState() 会把这份空映射原子写回磁盘 —— 一次截断/占用/写满就变成永久丢失。
@@ -1577,7 +1580,7 @@ async function main() {
       deps: {
         commandRegistry,
         sendToQQ: (key, msg) => sendToQQ(key, msg),
-        hasSession: (key) => Object.prototype.hasOwnProperty.call(state.sessions ?? {}, key),
+        hasSession: (key) => sessions.has(key),
         fetch: globalThis.fetch,
       },
     });
@@ -2848,9 +2851,9 @@ async function main() {
   const markReadCalledKeys = new Set();
   const wakeConfigMissCount = new Map();
   const reverse = new Map(); // sessionId -> conv key
-  for (const [key, sessionId] of Object.entries(state.sessions)) reverse.set(sessionId, key);
+  for (const [key, sessionId] of sessions.entries()) reverse.set(sessionId, key);
   // 新版 DSH 事件流需要显式 follow；启动时为已持久化的 QQ 会话补上。
-  for (const sessionId of Object.values(state.sessions)) api.events.follow(sessionId);
+  for (const sessionId of sessions.ids()) api.events.follow(sessionId);
   const sessionPromises = new Map(); // key -> create promise（防并发重复创建）
   const promptQueues = new Map(); // key -> { queue: [], running: false }：每个 QQ 会话串行投递 DSH prompt，保证 turn 顺序
 
@@ -3102,7 +3105,7 @@ async function main() {
     if (fromMode === 'closed-agent' && (mode !== 'closed-agent' || rank(currentLevel) < rank(fromLevel))) {
       const ownerKey = `private:${String(cfg.ownerQQ ?? '')}`;
       for (const e of ext.approvals.removeKey(ownerKey)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
-      if (state.sessions[ownerKey]) retireSession(ownerKey);
+      if (sessions.get(ownerKey)) retireSession(ownerKey);
     }
     lastMode = mode;
     if (dshSynced) lastObservedDshMode = mode;
@@ -3228,7 +3231,7 @@ async function main() {
    * 会话正在跑回合时不压（DSH 也会拒绝）。返回 { ok, text } 或 { ok:false, error }。
    */
   async function compactConversation(key, reason) {
-    const sessionId = state.sessions[key];
+    const sessionId = sessions.get(key);
     if (!sessionId) return { ok: false, error: '这个会话还没有 DSH 会话' };
     if (isConversationBusyV2(key, getSocialV2State(key))) return { ok: false, error: '会话正忙，等这一轮结束再压缩' };
     try {
@@ -3283,7 +3286,7 @@ async function main() {
     const { idleDelayMs } = normalizeCompactConfig(config);
     const timer = setTimeout(async () => {
       compactTimers.delete(key);
-      if (state.sessions[key] !== sessionId || isConversationBusyV2(key, getSocialV2State(key))) return; // 换了会话或又忙起来了：下一轮结束再看
+      if (sessions.get(key) !== sessionId || isConversationBusyV2(key, getSocialV2State(key))) return; // 换了会话或又忙起来了：下一轮结束再看
       compactAttemptAt.set(key, Date.now());
       const r = await compactConversation(key, `自动：${d.reason}`);
       if (r.ok) sessionLastInput.delete(sessionId);
@@ -3573,8 +3576,8 @@ async function main() {
   }
 
   function isCurrentSession(key, sessionId) {
-    return isSessionAllowedInCurrentMode(key) && state.sessions[key] === sessionId
-      && state.sessionPolicies[key] === sessionPolicy(key);
+    return isSessionAllowedInCurrentMode(key) && sessions.get(key) === sessionId
+      && sessions.policyOf(key) === sessionPolicy(key);
   }
 
   /**
@@ -3615,15 +3618,14 @@ async function main() {
   }
 
   function retireSession(key, { hibernate = false } = {}) {
-    const sessionId = state.sessions[key];
+    const sessionId = sessions.get(key);
     // 休眠：只对从没挂过本地工具的聊天会话（非 closed-agent 建的）。高权限会话永远走归档。
-    const toDormant = hibernate && !!sessionId && isHibernatablePolicy(state.sessionPolicies[key]);
+    const toDormant = hibernate && !!sessionId && isHibernatablePolicy(sessions.policyOf(key));
     if (toDormant) {
       if (state.dormantSessions[key] && state.dormantSessions[key].sessionId !== sessionId) archiveDormantSession(key);
-      state.dormantSessions[key] = { sessionId, policy: state.sessionPolicies[key], dormantAt: Date.now() };
+      state.dormantSessions[key] = { sessionId, policy: sessions.policyOf(key), dormantAt: Date.now() };
     }
-    delete state.sessions[key];
-    delete state.sessionPolicies[key];
+    sessions.unbind(key);
     // 按 key 记账的内存态在**有映射和无映射时都要清**：一条被移出白名单、
     // 但从未成功建过会话的 key 同样会留下限流时间戳与失败标记。
     forgetConversationCaches(key);
@@ -3710,7 +3712,7 @@ async function main() {
     delete state.dormantSessions[key];
     // 休眠时保留了「已引导 / 已看过」；作废后下一个会话是全新的，要重新引导（当前已有新会话在用时不动它）
     const st = socialV2.conversations.get(key);
-    if (st && !state.sessions[key]) {
+    if (st && !sessions.get(key)) {
       resetConversationIntro(st);
       saveSocialV2State();
     }
@@ -3778,7 +3780,7 @@ async function main() {
     if (dshPresetIds.length === 0) return;
     // 进 closed-agent 时，聊天会话休眠而不是归档；回落后同一模式、同一 preset 原样复用（见 src/mode-handover.js）
     const hibernate = currentMode === 'closed-agent' && hibernateEnabled();
-    for (const [key, sessionId] of Object.entries(state.sessions)) {
+    for (const [key, sessionId] of sessions.entries()) {
       if (!isCurrentSession(key, sessionId)) retireSession(key, { hibernate });
     }
     pruneDormantSessions();
@@ -4069,7 +4071,7 @@ async function main() {
   }
   /** 补收的对象：当前模式允许的群和私聊（有会话或有二代状态的），管理员私聊总在里面。 */
   function backfillTargets() {
-    const keys = new Set([...Object.keys(state.sessions), ...socialV2.conversations.keys()]);
+    const keys = new Set([...sessions.keys(), ...socialV2.conversations.keys()]);
     if (cfg.ownerQQ) keys.add(`private:${String(cfg.ownerQQ)}`);
     return [...keys].filter((k) => /^(group|private):\d+$/.test(k) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
   }
@@ -4796,7 +4798,7 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/persona/sources') {
           const roleState = readRoleState();
           const keys = new Set([
-            ...Object.keys(state.sessions ?? {}),
+            ...sessions.keys(),
             ...Object.keys(roleState.byKey ?? {}),
           ]);
           const rows = [...keys].sort().map((key) => {
@@ -4891,7 +4893,7 @@ async function main() {
           const mode = normalizeApplyMode(apply);
           if (currentMode !== 'reserved2') return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
           if (mode !== 'immediate') {
-            const pending = roleRefresh.stale(state.sessions, (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k))).length;
+            const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k))).length;
             return { apply: mode, mode: currentMode, woke: 0, pending };
           }
           const r = refreshRoleNowV2(onlyKeys);
@@ -4918,7 +4920,7 @@ async function main() {
           return;
         }
         // 这张卡有没有会话在用（全局是它，或者有会话单独指定了它）：改它的内容时才需要让会话重新读卡
-        const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, Object.keys(state.sessions));
+        const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, sessions.keys());
         // 按会话设置人格卡（逻辑在 src/role-per-key.js）：use = default（跟全局）/ off（不挂卡）/ role（用 role 这张卡）
         if (req.method === 'POST' && url.pathname === '/api/roles/assign') {
           const body = await readBody();
@@ -4969,7 +4971,7 @@ async function main() {
             summaries,
             current: rs.role ?? null,
             // 按会话设置：已知会话（有 DSH 会话的 + 单独设置过的）各用哪张卡；missing = 引用的人格文件不存在
-            assignments: roleAssignments(rs, Object.keys(state.sessions), (n) => { const f = resolveRoleFile(ROLES_DIR, n); return !!f && fs.existsSync(f); }),
+            assignments: roleAssignments(rs, sessions.keys(), (n) => { const f = resolveRoleFile(ROLES_DIR, n); return !!f && fs.existsSync(f); }),
             limits: { nameMax: ROLE_NAME_MAX, contentMaxBytes: ROLE_CONTENT_MAX_BYTES, injectMaxChars: roleInjectMaxChars },
           });
           return;
@@ -5458,7 +5460,7 @@ async function main() {
         // ── 会话查看 ──────────────────────────────────────────────────────────
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           const list = [];
-          for (const [key, sessionId] of Object.entries(state.sessions)) {
+          for (const [key, sessionId] of sessions.entries()) {
             list.push({ key, sessionId, owner: key === `private:${String(cfg.ownerQQ ?? '')}` });
           }
           sendJson({ sessions: list });
@@ -5898,7 +5900,7 @@ async function main() {
             sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
             return;
           }
-          if (!state.sessions[key] && !allowed(kind, id, cfg)) {
+          if (!sessions.get(key) && !allowed(kind, id, cfg)) {
             sendJson({ ok: false, error: '该会话不在白名单内，且尚未创建' }, 403);
             return;
           }
@@ -6143,9 +6145,9 @@ async function main() {
           clearAllSocialV2Timers();
           drainAllPromptQueues('二代状态已重置');
           for (const key of [...socialV2.conversations.keys()]) {
-            const sid = state.sessions[key];
+            const sid = sessions.get(key);
             if (sid) {
-              delete state.sessions[key];
+              sessions.drop(key);
               // 与 retireSession / session-reset / workspace-reset 一致：先让 DSH 停下这个会话的活。
               // 少了这一步，DSH 会继续跑完在途/排队的 turn（token 照烧、副作用照做），
               // 而桥接这边已经把所有映射删掉 —— 输出被静默丢弃，agentToken 也已轮换（它的 MCP 发送全部 403）。
@@ -6162,7 +6164,7 @@ async function main() {
               // 订阅也要退掉，否则它会在每次重连时被重新 follow 并重发整份快照。
               api.events.forget?.(sid);
             }
-            delete state.sessionPolicies[key];
+            sessions.dropPolicy(key);
             forgetAgentToken(key);
             socialV2.conversations.delete(key);
             seenForwardIds.delete(key);
@@ -6217,8 +6219,8 @@ async function main() {
           const roleNameForPrompt = currentRoleName(key);
           const roleHintForPrompt = currentMode === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key);
           // AI 自己读了卡：记下这一版（只认带令牌的调用，控制台查看不算）
-          if (req.headers['x-agent-token'] && currentMode === 'reserved2' && state.sessions[key]) {
-            roleRefresh.markSeen(key, state.sessions[key], currentRoleFingerprintV2(key));
+          if (req.headers['x-agent-token'] && currentMode === 'reserved2' && sessions.get(key)) {
+            roleRefresh.markSeen(key, sessions.get(key), currentRoleFingerprintV2(key));
           }
           const toolMap = {
             getPrompt: 'qq_get_prompt',
@@ -8924,10 +8926,10 @@ async function main() {
         // 上下文压缩设置（逻辑在 src/auto-compact.js）：提前压缩的阈值，或者交给 DSH 自己压
         if (req.method === 'GET' && url.pathname === '/api/compact/config') {
           const c = normalizeCompactConfig(cfg.socialV2?.compact);
-          const sessions = Object.entries(state.sessions)
+          const rows = sessions.entries()
             .filter(([k, sid]) => /^(group|private):\d+$/.test(k) && sessionLastInput.has(sid))
             .map(([k, sid]) => ({ key: k, inputTokens: sessionLastInput.get(sid), lastAttemptAt: compactAttemptAt.get(k) ?? null }));
-          sendJson({ ok: true, mode: c.enabled ? 'early' : 'dsh', thresholdTokens: c.thresholdTokens, cooldownMinutes: c.cooldownMinutes, min: COMPACT_THRESHOLD_MIN, max: COMPACT_THRESHOLD_MAX, dshApprox: DSH_COMPACT_APPROX, sessions });
+          sendJson({ ok: true, mode: c.enabled ? 'early' : 'dsh', thresholdTokens: c.thresholdTokens, cooldownMinutes: c.cooldownMinutes, min: COMPACT_THRESHOLD_MIN, max: COMPACT_THRESHOLD_MAX, dshApprox: DSH_COMPACT_APPROX, sessions: rows });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/compact/config') {
@@ -8946,7 +8948,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/session/compact') {
           const body = await readBody();
           const key = String(body.key ?? '');
-          if (!key || !state.sessions[key]) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           const r = await compactConversation(key, '控制台手动');
           sendJson(r, r.ok ? 200 : 409);
           return;
@@ -8954,13 +8956,13 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/session/reset') {
           const body = await readBody();
           const key = String(body.key ?? '');
-          if (!key || !state.sessions[key]) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           sessionEpoch++;
-          const oldSessionId = state.sessions[key];
-          delete state.sessions[key];
+          const oldSessionId = sessions.get(key);
+          sessions.drop(key);
           modelAppliedSessions.delete(oldSessionId);
           // 权限元数据必须与映射一起删除，否则会永久残留在 sessions.json 里。
-          delete state.sessionPolicies[key];
+          sessions.dropPolicy(key);
           reverse.delete(oldSessionId);
           collectors.delete(oldSessionId);
           sendToolSucceededSessions.delete(oldSessionId);
@@ -9070,8 +9072,7 @@ async function main() {
           for (const key of Object.keys(state.dormantSessions)) archiveDormantSession(key, '工作区已清空');
           pendingHandover.clear();
           ownerTranscript.clear();
-          state.sessions = {};
-          state.sessionPolicies = {};
+          sessions.clearAll();
           reverse.clear();
           collectors.clear();
           sendToolSucceededSessions.clear();
@@ -9947,10 +9948,10 @@ async function main() {
   // 入队校验无法约束排队等待期间的权限变化，每条消息临近实际发送时再次校验。
   function captureSendGuard(key) {
     const policy = sessionPolicy(key);
-    const sessionId = state.sessions[key];
+    const sessionId = sessions.get(key);
     return () => {
       if (!isSessionAllowedInCurrentMode(key) || policy !== sessionPolicy(key)
-          || (sessionId && state.sessions[key] !== sessionId)) {
+          || (sessionId && sessions.get(key) !== sessionId)) {
         throw new Error('发送已取消：会话、模式或白名单已变化');
       }
     };
@@ -10023,7 +10024,7 @@ async function main() {
     const epoch = sessionEpoch;
     const policy = sessionPolicy(key);
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
-    const existing = state.sessions[key];
+    const existing = sessions.get(key);
     if (existing) {
       // reset/清空工作区期间旧映射可能尚未清理；发现代际不匹配必须丢弃旧会话，防止复活。
       if (!isCurrentSession(key, existing)) {
@@ -10054,8 +10055,8 @@ async function main() {
         if (decision === 'resume') {
           const sid = dormant.sessionId;
           delete state.dormantSessions[key];
-          state.sessions[key] = sid;
-          state.sessionPolicies[key] = policy;
+          sessions.bindSession(key, sid);
+          sessions.setPolicy(key, policy);
           reverse.set(sid, key);
           saveState();
           api.events.follow(sid);
@@ -10065,7 +10066,7 @@ async function main() {
             retireSession(key);
           } else {
             if (epoch !== sessionEpoch || !isCurrentSession(key, sid)) {
-              if (state.sessions[key] === sid) retireSession(key);
+              if (sessions.get(key) === sid) retireSession(key);
               throw new Error('会话恢复期间已重置或权限已变化');
             }
             pendingHandover.set(key, { resumed: true, dormantAt: dormant.dormantAt, from: { mode: 'closed-agent', level: lastAgentLevel }, to: { mode: currentMode, level: currentLevel } });
@@ -10156,13 +10157,13 @@ async function main() {
         try { await withTimeout(api.workspace.archiveSession({ sessionId }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
         throw new Error('会话创建期间已重置，丢弃新会话');
       }
-      state.sessions[key] = sessionId;
-      state.sessionPolicies[key] = policy;
+      sessions.bindSession(key, sessionId);
+      sessions.setPolicy(key, policy);
       reverse.set(sessionId, key);
       saveState();
       await ensureChatModel(sessionId);
       if (epoch !== sessionEpoch || !isCurrentSession(key, sessionId)) {
-        if (state.sessions[key] === sessionId) retireSession(key);
+        if (sessions.get(key) === sessionId) retireSession(key);
         throw new Error('会话创建期间已重置或权限已变化');
       }
       log(`新会话 ${key} -> ${sessionId}（模式 ${currentMode}，preset: ${modePreset(key, currentMode, cfg) ?? '默认'}）`);
@@ -10952,7 +10953,7 @@ async function main() {
       void (async () => {
         if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !api.commands?.execute) return;
         const key = `private:${String(cfg.ownerQQ ?? '')}`;
-        const sessionId = state.sessions[key];
+        const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
         if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
         let text = '';
@@ -11478,7 +11479,7 @@ async function main() {
           st.phase = 'idle';
           st.activeDeadlineAt = 0;
           st.activeExitAt = 0;
-          const sid = state.sessions[key];
+          const sid = sessions.get(key);
           if (sid) social.exitingSessions.delete(sid);
         }
       } else if (st.phase === 'probing' && now > st.probeDeadline) {
@@ -12392,7 +12393,7 @@ async function main() {
   /** 这次唤醒要不要带「角色卡已更新」块；要的话返回块文字，否则 ''。 */
   function roleRefreshBlockV2(key, reason) {
     if (reason === 'bootstrap') return '';
-    const sid = state.sessions[key];
+    const sid = sessions.get(key);
     if (!sid || !roleRefresh.needsRefresh(key, sid, currentRoleFingerprintV2(key))) return '';
     return buildRoleRefreshBlock({ name: currentRoleName(key), hint: currentRoleHintV2(key) });
   }
@@ -12404,7 +12405,7 @@ async function main() {
    */
   function refreshRoleNowV2(onlyKeys = null) {
     if (currentMode !== 'reserved2' || cfg.socialV2?.enabled === false || socialV2.paused) return { woke: [], skipped: 'notV2' };
-    const keys = roleRefresh.stale(state.sessions, (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k)));
+    const keys = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k)));
     const woke = [];
     for (const k of keys) {
       if (silence.config().options.stopWakes && scheduledSilenceFor(k)) continue;
@@ -12567,7 +12568,7 @@ async function main() {
       return;
     }
     // 「立即读卡」唤醒排队期间会话可能已经读到新卡（AI 自己调了 qq_get_prompt / 别的唤醒带上了），不用再叫
-    if (reason === 'roleRefresh' && !roleRefresh.needsRefresh(key, state.sessions[key], currentRoleFingerprintV2(key))) {
+    if (reason === 'roleRefresh' && !roleRefresh.needsRefresh(key, sessions.get(key), currentRoleFingerprintV2(key))) {
       log(`[reserved2] ${key} 已读到当前角色卡，跳过读卡唤醒`);
       return;
     }
@@ -12718,7 +12719,7 @@ async function main() {
 
   function busyBreakdownV2(key, st) {
     const q = promptQueues.get(key);
-    const sid = state.sessions[key];
+    const sid = sessions.get(key);
     const startedAt = sid ? v2TurnStartAt.get(sid) : null;
     return {
       busy: isConversationBusyV2(key, st),
@@ -12739,7 +12740,7 @@ async function main() {
     const q = promptQueues.get(key);
     if (q?.running) return 'promptRunning';
     if (q && q.queue.length > 0) return 'promptQueued';
-    const sid = state.sessions[key];
+    const sid = sessions.get(key);
     if (sid) {
       const startedAt = Number(v2TurnStartAt.get(sid));
       if (Number.isFinite(startedAt) && startedAt > 0 && Date.now() - startedAt < TURN_BUSY_LEASE_MS) return 'turn';
@@ -12752,7 +12753,7 @@ async function main() {
     if (pendingWakeKeys.has(key)) return true;
     const q = promptQueues.get(key);
     if (q && (q.running || q.queue.length > 0)) return true;
-    const sid = state.sessions[key];
+    const sid = sessions.get(key);
     if (!sid) return false;
     // 回合只按「起始时间 + 租约」判忙，**不再**只看 Map 里有没有键：
     //   · 有 collector 但没起始时间（杂散事件重建出来的）→ 无法证明还活着，不判忙；
@@ -13161,7 +13162,7 @@ async function main() {
   const builtinCommandDeps = {
     send: sendToQQ,
     session: {
-      current: (key) => state.sessions[key] ?? null,
+      current: (key) => sessions.get(key) ?? null,
       reset: resetSession,
     },
     acl: { allowed },

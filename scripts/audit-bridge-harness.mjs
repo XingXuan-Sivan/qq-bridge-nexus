@@ -46,6 +46,7 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 // bridge.js 以 `sessionAllowed` 的别名引用它，sandbox 里要用同名键。
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
+import { createSessionRegistry } from '../src/session/registry.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
@@ -237,6 +238,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // sessions.json 读写（P7 第三步续）：同样被 bridge.js import，夹具剥 import 后要补回。
     loadSessionState,
     saveSessionState,
+    createSessionRegistry,
 createPromptBlockRegistry,
     createPluginKernel: async () => ({
       init: async () => {},

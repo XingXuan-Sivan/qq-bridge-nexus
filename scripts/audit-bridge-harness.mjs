@@ -41,6 +41,8 @@ import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
 // 内置命令的壳与 /api/commands 组装：夹具剥掉 import，所以要在 sandbox 里补这两项（P7 抽层后新增）。
 import { createBuiltinCommands } from '../src/commands/builtin.mjs';
+// 命令层与会话重置都是真实现（纯内存 + 注入依赖），夹具剥掉 import 后要在这里补回同名符号。
+import { createSessionResetter } from '../src/session/reset.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
@@ -224,6 +226,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createCommandRegistry,
     createBuiltinCommands,
     buildCommandsPayload,
+    createSessionResetter,
 createPromptBlockRegistry,
     createPluginKernel: async () => ({
       init: async () => {},

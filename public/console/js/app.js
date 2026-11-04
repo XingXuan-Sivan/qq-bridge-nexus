@@ -319,38 +319,6 @@ document.getElementById('silentOff').addEventListener('click', async () => {
   if (r.resumedScheduled) showConsoleToast(`定时静默「${r.resumedScheduled.name}」这一段临时恢复，到 ${r.resumedScheduled.untilText}；下一段照常静默`);
   refresh(); refreshSilence();
 });
-document.getElementById('tsSend').addEventListener('click', async () => {
-  const r = await api('/api/test-send', 'POST', {
-    kind: document.getElementById('tsKind').value,
-    id: document.getElementById('tsId').value.trim(),
-    message: document.getElementById('tsMsg').value
-  });
-  document.getElementById('tsMsg2').textContent = r.ok ? ('✅ 已发送 message_id=' + r.message_id) : ('❌ ' + (r.error || '失败'));
-  document.getElementById('tsMsg2').className = r.ok ? 'meta ok' : 'meta err';
-});
-document.getElementById('restartBtn').addEventListener('click', async () => {
-  if (!confirm('确定重启桥接？')) return;
-  const r = await api('/api/restart', 'POST', {});
-  document.getElementById('restartMsg').textContent = r.message || '正在重启…';
-});
-document.getElementById('clearWsBtn').addEventListener('click', async () => {
-  if (!confirm('确定清空整个「QQ 聊天」工作区？\n将归档全部 QQ 会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
-  const r = await api('/api/workspace/reset', 'POST', {});
-  document.getElementById('clearWsMsg').textContent = r.ok ? (`✅ 已归档 ${r.archivedCount} 个会话，工作区已清空`) : ('❌ ' + (r.error || '失败'));
-  document.getElementById('clearWsMsg').className = r.ok ? 'meta ok' : 'meta err';
-  refreshSessions(); refresh();
-});
-document.getElementById('aiNotifySend').addEventListener('click', async () => {
-  const kind = document.getElementById('aiNotifyKind').value;
-  const id = document.getElementById('aiNotifyId').value.trim();
-  const message = document.getElementById('aiNotifyMessage').value.trim();
-  if (!id || !message) { alert('请填写群号/QQ 号和提醒内容'); return; }
-  const r = await api('/api/console/notify-ai', 'POST', { key: kind + ':' + id, message });
-  const msg = document.getElementById('aiNotifyMsg');
-  msg.textContent = r.ok ? ('✅ 已投递到 DSH：' + r.sessionId) : ('❌ ' + (r.error || '失败'));
-  msg.className = r.ok ? 'meta ok' : 'meta err';
-});
-
 // 直接打开 #scheduler 时路由器可能先于定时任务那段脚本执行：推到下一个宏任务再刷新。
 function updateOverview(status, modeLabel) {
   const connection = document.getElementById('statusText');

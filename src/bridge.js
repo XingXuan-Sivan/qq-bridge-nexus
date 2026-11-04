@@ -123,6 +123,8 @@ import { createCommandRegistry } from './commands/registry.mjs';
 // 内置命令的「壳」（元数据 + 参数解析 + 回执文案）与 /api/commands 的响应组装，见 docs/COMMAND_REGISTRY.md。
 import { createBuiltinCommands } from './commands/builtin.mjs';
 import { buildCommandsPayload } from './commands/payload.mjs';
+// 会话重置的清理序列（P7 第三步），deps 见 src/session/reset.mjs 的文件头。
+import { createSessionResetter } from './session/reset.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -13125,63 +13127,69 @@ async function main() {
   // ── 命令注册表（docs/COMMAND_REGISTRY.md）───────────────────────────────
   // 命令的元数据、参数解析与回执文案在 src/commands/builtin.mjs；这里只提供它碰不到的东西：
   // 会话重置的真实清理（resetSession，见下）与几处桥接内部状态。deps 里每个成员都必须是稳定的。
+  // 清理序列在 src/session/reset.mjs（可脱离 bridge 单测，新增缓存要在这里登记）。
+  // 惰性建 deps：首次重置时这些 Map / 函数早已初始化，避免模块顶部的 TDZ。
+  let resetSessionImpl = null;
   async function resetSession(key) {
-    const old = state.sessions[key];
-    if (!old) return { ok: true, note: 'no-session' };
-    sessionEpoch++;
-    delete state.sessions[key];
-    modelAppliedSessions.delete(old);
-    delete state.sessionPolicies[key];
-    reverse.delete(old);
-    collectors.delete(old);
-    sendToolSucceededSessions.delete(old);
-    pendingSendToolCalls.delete(old);
-    v2TurnStartAt.delete(old);
-    turnLeaseNoted.delete(old);
-    toolCallNames.delete(old);
-    social.silentTurns.delete(old);
-    social.exitingSessions.delete(old);
-    const pe = pending.get(key);
-    if (pe) {
-      clearTimeout(pe.timer);
-      cancelPendingEntry(pe).catch(() => {});
-    }
-    pending.delete(key);
-    for (const e of ext.approvals.removeKey(key)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
-    ext.approvals.forgetSession(old);
-    queued.delete(key);
-    queuedHintAt.delete(key);
-    sessionPromises.delete(key);
-    drainPromptQueue(key, '会话已重置');
-    social.recentMessages.delete(key);
-    messageMediaStore.delete(key);
-    social.pendingSummaries.delete(key);
-    social.states.delete(key);
-    social.silentContext.delete(key);
-    slangWindows.delete(key);
-    slangExtractionCooldowns.delete(key);
-    slangSubmitTimes.delete(key);
-    cancelSocialTimers(key);
-    clearSocialV2Timers(key);
-    pendingWakeKeys.delete(key);
-    wakeConfigUpdatedKeys.delete(key);
-    markReadCalledKeys.delete(key);
-    wakeConfigMissCount.delete(key);
-    forgetAgentToken(key);
-    socialV2.conversations.delete(key);
-    seenForwardIds.delete(key);
-    // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
-    // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
-    forgetConversationCaches(key);
-    discardDormantForReset(key);
-    saveSocialV2State();
-    saveState();
-    // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
-    try { await withTimeout(api.stopSessionWork(old), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
-    catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-    try { await withTimeout(api.workspace.archiveSession({ sessionId: old }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
-    await sendToQQ(key, '已重置会话，下次消息将开新上下文');
-    return { ok: true };
+    resetSessionImpl ??= createSessionResetter({
+      state,
+      bumpEpoch: () => { sessionEpoch++; },
+      bySessionId: {
+        modelAppliedSessions,
+        reverse,
+        collectors,
+        sendToolSucceededSessions,
+        pendingSendToolCalls,
+        v2TurnStartAt,
+        turnLeaseNoted,
+        toolCallNames,
+      },
+      pending,
+      cancelPendingEntry,
+      queued,
+      queuedHintAt,
+      sessionPromises,
+      drainPromptQueue,
+      approvals: ext.approvals,
+      social: {
+        silentTurns: social.silentTurns,
+        exitingSessions: social.exitingSessions,
+        recentMessages: social.recentMessages,
+        pendingSummaries: social.pendingSummaries,
+        states: social.states,
+        silentContext: social.silentContext,
+      },
+      socialV2,
+      slang: {
+        windows: slangWindows,
+        extractionCooldowns: slangExtractionCooldowns,
+        submitTimes: slangSubmitTimes,
+      },
+      wake: {
+        pending: pendingWakeKeys,
+        updated: wakeConfigUpdatedKeys,
+        markRead: markReadCalledKeys,
+        missCount: wakeConfigMissCount,
+      },
+      mediaStore: messageMediaStore,
+      seenForwardIds,
+      cancelSocialTimers,
+      clearSocialV2Timers,
+      forgetAgentToken,
+      forgetConversationCaches,
+      discardDormantForReset,
+      saveSocialV2State,
+      saveState,
+      send: sendToQQ,
+      api: {
+        stopSessionWork: (sessionId) => api.stopSessionWork(sessionId),
+        archiveSession: (args) => api.workspace.archiveSession(args),
+      },
+      withTimeout,
+      dshControlTimeoutMs: DSH_CONTROL_TIMEOUT_MS,
+      log,
+    });
+    return resetSessionImpl(key);
   }
 
   // 内置命令的「壳」在 src/commands/builtin.mjs（元数据 / 参数解析 / 回执文案），

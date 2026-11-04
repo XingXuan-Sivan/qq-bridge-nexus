@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：`/reset` 的清理序列搬到 `src/session/reset.mjs`（P7 第三步，2026-11-05）
+- 新增 `src/session/reset.mjs`：`createSessionResetter(deps)` 返回 `resetSession(key)`，承接原来写在 `bridge.js` 里的 58 行清理序列——删 `state.sessions`/策略、清 8 个按旧 sessionId 索引的 Map、`pending` 与 `ext.approvals`、提示队列、`messageMediaStore`、social/socialV2/slang 的按键缓存、四个 wake 集合、`seenForwardIds`，再落盘、停 DSH 侧工作、归档、回执。
+- 顺序按「先删挂账、再清内存、再落盘、最后网络调用与回执」固定下来，并写进文件头注释：反过来会在清理没做完时就让用户看到「已重置」。
+- `bridge.js` 只剩惰性拼 `deps` 的登记段（首次重置时才建，避免模块顶部的 TDZ）；`sessionEpoch` 通过 `bumpEpoch` 回调传入，模块不直接改这个变量。行数上这一步基本持平（−58 行逻辑、+64 行登记，`bridge.js` 14694 行），换来的是清理序列能脱离桥接单测。
+- 新增 `scripts/test-session-reset.mjs`（4 条）：`no-session` 直接返回且不动任何状态、全桶清理（逐 Map/Set 断言，少登记一个桶就会红）、落盘 < 停 DSH < 归档 < 回执的顺序、停止旧会话抛错时只记日志并继续归档回执。
+- 回归：`scripts/test-integration-v030.mjs` 31/31、`scripts/test-audit-bridge.mjs` 全 PASS（含「console reset drops the session policy and stops the retired DSH session」）。
+
 ### 重构：内置命令壳抽到 `src/commands/`（P7 第二步，2026-11-05）
 - 新增 `src/commands/builtin.mjs`（`createBuiltinCommands(deps)`，承载 `/reset` `/status` `/role` `/silent` `/active` 五条命令的定义、别名、权限、分组与文案）与 `src/commands/payload.mjs`（`buildCommandsPayload(registry)` 组装 `GET /api/commands` 的三段响应）。
 - `src/bridge.js` 删掉 `commandStatus`/`commandRole`、5 条内联 `commandRegistry.register({...})` 与 `/silent` `/active` 两段旧 `if` 分支；`/api/commands` 由 20 行字面量改成一次 `sendJson(buildCommandsPayload(commandRegistry))`。`commandReset(ctx)` 改名 `resetSession(key)` 留在原地（要收口 30 个内存态对象与 45 处调用，属于第 3 步会话层）。

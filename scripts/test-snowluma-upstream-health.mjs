@@ -25,6 +25,8 @@ import { readConsoleSource } from './console-source.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+// P7 第四步：健康判定与兜底轮询搬到了这个模块（bridge 只留接线与薄包装）。
+const healthModule = fs.readFileSync(path.join(ROOT, 'src', 'upstream', 'snowluma-health.mjs'), 'utf8');
 const consoleHtml = readConsoleSource();
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
@@ -114,8 +116,12 @@ test('good 取自心跳 status.good / get_status —— 绝不能取自 get_logi
   // 而 SDK **只校验 status/retcode 信封、不校验 data 载荷**，所以取错字段不会报错 ——
   // 它只会让 good 永远停在 null，把"权威信号"变成一条永不触发的死分支。
   // 本文件第一版就是这么写错的（health 代码的第一次实现整条 dead code），故立此断言。
-  assert.match(bridgeCode, /\/get_status/, '必须轮询 get_status 拿 online/good');
-  assert.match(bridgeCode, /body\.data\?\.good/, 'get_status 的 good 必须被读取');
+  // P7 第四步后，「怎么取 good」搬到了 src/upstream/snowluma-health.mjs；bridge 只保留心跳入口与薄包装。
+  // 两处都必须看：模块里是取值逻辑，bridge 里是接线（少任何一处，这条断言就形同虚设）。
+  assert.match(healthModule, /\/get_status/, '必须轮询 get_status 拿 online/good');
+  assert.match(healthModule, /body\.data\?\.good/, 'get_status 的 good 必须被读取');
+  assert.match(bridgeCode, /createSnowlumaHealth/, 'bridge 必须使用这个模块（而不是自己再写一份）');
+  assert.match(bridgeCode, /snowlumaHealth\.pollStatus\(/, 'bridge 的轮询必须转调模块');
   // 主信号：心跳里的 status.good（免费、30 秒一次、老运行时也有）
   assert.match(bridgeCode, /meta_event_type === 'heartbeat'/, '必须识别 meta_event/heartbeat');
   assert.match(bridgeCode, /event\.status\?\.good/, '必须从心跳载荷读 status.good（主信号）');
@@ -138,9 +144,10 @@ test('静默检测不得声称能判断 hook 死活（心跳是本地生成的�
   // 不经过 QQ 事件流水线。所以「没有事件包」只能证明 SnowLuma 进程/WS 卡住了，
   // **不能**证明它的 [Hook] 收不到 QQ 数据 —— 那个只能靠 status.good。
   // 措辞若写成"沉默=hook 死了"，运维会被引到错误的结论上。
-  const silentHint = bridgeCode.slice(
-    bridgeCode.indexOf('else if (silent)'),
-    bridgeCode.indexOf('else if (silent)') + 420,
+  // 静默分支的文案在 P7 第四步后搬到了 src/upstream/snowluma-health.mjs。
+  const silentHint = healthModule.slice(
+    healthModule.indexOf('else if (silent)'),
+    healthModule.indexOf('else if (silent)') + 420,
   );
   assert.ok(silentHint.length > 0, '应能定位静默分支的提示文案');
   assert.ok(

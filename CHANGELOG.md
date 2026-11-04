@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：SnowLuma 接收链路健康搬进 `src/upstream/snowluma-health.mjs`（P7 第四步，2026-11-05）
+- 健康状态机、快照文案与 `get_status` 兜底轮询从 `bridge.js` 搬出（−104 行 → +33 行接线），`bridge.js` 只喂心跳/状态事件、保留 `pollSnowlumaStatus()` / `startSnowlumaWatch()` 两个薄包装；日志、`fetch`、时钟、定时器、告警阈值全部注入，可用假时钟驱动。
+- 这一步真正收口的是**两个故障面不能混**：`good=false` 是 SnowLuma 自报 **[Hook] 收不到 QQ 数据**（消息进不来），长时间没有事件包只是**进程/WS 静默**（心跳由它自己无条件发，不代表 hook 死了）——排查方向完全不同，以前这两种情况共用一条 `degraded` 布尔与一段文案。
+- 新增 `scripts/test-upstream-snowluma-health.mjs`（10 条）：非布尔 good 忽略、两种 hint 互不串味、同时故障优先报「确认坏」、边沿告警只报一次、恢复只报一次、轮询成功/HTTP 非 ok/抛错三种路径、`startWatch` 只启动一次且 5s 首轮 + 30s/60s 两个定时器。
+- 既有 `scripts/test-snowluma-upstream-health.mjs` 同步改为**两侧断言**：取值逻辑看模块（`/get_status`、`body.data?.good`），接线看 bridge（`createSnowlumaHealth`、`snowlumaHealth.pollStatus`）——否则搬家后这条最重要的断言会静默失效。
+- 验证：新用例 10/10、既有用例 9/9、`test-integration-v030` 31/31、`test-audit-bridge` 全 PASS、全量 `test:audit` **82/85**（三项既有失败不变）。
+
 ### 重构：会话映射表收进 `src/session/registry.mjs`（P7 第三步收尾，2026-11-05）
 - `state.sessions` / `state.sessionPolicies` 的 46 处直接读写全部换成注册表方法：`get` / `policyOf` / `has` / `keys` / `ids` / `entries` / `raw` / `bindSession` / `setPolicy` / `drop` / `dropPolicy` / `unbind` / `isCurrent` / `clearAll`。
 - 收口的价值在两条此前只写在注释里的规则：**映射与策略指纹必须成对维护**（只写映射不写指纹 ⇒ `isCurrentSession()` 永远判旧、会话无限重建；只删映射不删指纹 ⇒ 下次同 id 会被误当新会话），现在由 `bindSession()` / `unbind()` 保证。

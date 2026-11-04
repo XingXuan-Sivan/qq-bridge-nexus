@@ -95,6 +95,8 @@ const tests = [
   'test-session-store.mjs',
   // 会话映射表（P7 第三步收尾）：映射与策略指纹成对维护、isCurrent 三条件、state 被替换后仍有效。
   'test-session-registry.mjs',
+  // 上游适配（P7 第四步）：SnowLuma「自报坏」与「静默」两个故障面、边沿告警、get_status 兜底轮询。
+  'test-upstream-snowluma-health.mjs',
   'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',

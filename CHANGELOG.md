@@ -5,6 +5,14 @@
 
 ## 未发布
 
+### 重构：会话映射表收进 `src/session/registry.mjs`（P7 第三步收尾，2026-11-05）
+- `state.sessions` / `state.sessionPolicies` 的 46 处直接读写全部换成注册表方法：`get` / `policyOf` / `has` / `keys` / `ids` / `entries` / `raw` / `bindSession` / `setPolicy` / `drop` / `dropPolicy` / `unbind` / `isCurrent` / `clearAll`。
+- 收口的价值在两条此前只写在注释里的规则：**映射与策略指纹必须成对维护**（只写映射不写指纹 ⇒ `isCurrentSession()` 永远判旧、会话无限重建；只删映射不删指纹 ⇒ 下次同 id 会被误当新会话），现在由 `bindSession()` / `unbind()` 保证。
+- 注册表接 `() => state` 的 getter 而非 state 对象——`loadState()` 会整体替换 `state`，闭包旧引用会过期；`scripts/test-session-registry.mjs` 7 条专门钉住这个回归。
+- `sessionPolicy()` 仍留在 `bridge.js`：它拼的是 `modePreset()` / `closedAgentPlan()` 的口径，属于模式层。
+- 迁移时踩到一个自引用坑：`/api/compact/config` 里局部变量就叫 `sessions`，被机械替换成 `const sessions = sessions.entries()` ⇒ TDZ `Cannot access 'sessions' before initialization`，`test-auto-compact` 立刻打红；局部变量改名 `rows` 修复。教训：批量替换前先查同名局部变量。
+- 验证：`test-session-registry` 7/7、`test-integration-v030` 31/31、全量 `test:audit` 除三项既有失败外无新增。
+
 ### 重构：`sessions.json` 读写搬到 `src/session/store.mjs`（P7 第三步续二，2026-11-05）
 - `loadSessionState()` / `saveSessionState()` 从 `bridge.js` 搬到 `src/session/store.mjs`，`loadState()` / `saveState()` 只剩两行调用；文件、原子写、日志、`normalizeDormant` 全部由调用方注入，模块内不读全局。
 - 这一步的真正目的是把两条安全不变量变成可离线验证的代码：**读失败或 JSON 损坏 ⇒ `writable:false`，此后任何一次保存都不得回写**（早期实现读到坏文件就当空状态，紧接着的原子写会把空映射永久落盘）；**老文件缺 `sessionPolicies` / `dormantSessions` 就地补齐**，不因少一个键把整份判成不可用。

@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createCommandRegistry } from '../src/commands/registry.mjs';
+import { createBuiltinCommands } from '../src/commands/builtin.mjs';
+import { buildCommandsPayload } from '../src/commands/payload.mjs';
 
 function makeRegistry() {
   const logs = [];
@@ -109,4 +111,134 @@ test('list 去掉 handler；unregisterPlugin 只删该插件的命令', () => {
   assert.equal(registry.get('a'), null);
   assert.ok(registry.get('b'));
   assert.ok(registry.get('c'));
+});
+
+// ── P7 第二步：内置命令的「壳」从 bridge.js 抽到 src/commands/builtin.mjs ──────────
+// 用假 deps 单测文案与状态写入，不需要起桥接、也不碰真实 state 目录。
+
+function makeBuiltinHarness(overrides = {}) {
+  const sent = [];
+  const writes = [];
+  const logs = [];
+  const harness = {
+    sent, writes, logs,
+    roleState: { role: '星苒', mode: 'active', byKey: {} },
+    sessionIds: { 'group:1': 'sess-1' },
+  };
+  const deps = {
+    send: async (key, text) => { sent.push({ key, text }); },
+    session: {
+      current: (key) => harness.sessionIds[key] ?? null,
+      reset: async (key) => { writes.push(['reset', key]); return { ok: true }; },
+    },
+    acl: { allowed: () => true },
+    role: {
+      read: () => harness.roleState,
+      writeFull: (next) => { harness.roleState = next; writes.push(['writeFull', next]); },
+      withKeyFor: (state, key, mode, name) => ({
+        ...state,
+        byKey: { ...state.byKey, [key]: name ? { mode, role: name } : { mode } },
+      }),
+      nameFor: (state, key) => {
+        const own = state.byKey?.[key];
+        if (own?.mode === 'off') return null;
+        if (own?.role) return own.role;
+        return state.role ?? null;
+      },
+      sourceFor: (state, key) => {
+        const own = state.byKey?.[key];
+        if (own?.mode === 'off') return 'off';
+        if (own?.role) return 'key';
+        return 'global';
+      },
+      sanitize: (name) => String(name ?? '').replace(/[^\w\u4e00-\u9fff-]/g, ''),
+      exists: (name) => name === '星苒' || name === '魅魔',
+      setGlobalMode: (mode) => { harness.roleState = { ...harness.roleState, mode }; writes.push(['mode', mode]); },
+    },
+    log: (line) => logs.push(line),
+    ...overrides,
+  };
+  const registry = createCommandRegistry({ log: (line) => logs.push(line) });
+  for (const definition of createBuiltinCommands(deps)) registry.register(definition);
+  const run = (text, ctx = {}) => registry.dispatch(text, { key: 'group:1', kind: 'group', id: '1', cfg: {}, isOwner: true, ...ctx });
+  return { registry, harness, run };
+}
+
+test('内置命令：五条都在注册表里，且都挂了 handler', () => {
+  const { registry } = makeBuiltinHarness();
+  const ids = registry.list().map((entry) => entry.id).sort();
+  assert.deepEqual(ids, ['active', 'reset', 'role', 'silent', 'status']);
+  assert.ok(registry.list().every((entry) => entry.migrated === true && entry.source === 'bridge'));
+  assert.equal(registry.match('/quiet').entry.id, 'silent');
+  assert.equal(registry.match('/speak').entry.id, 'active');
+});
+
+test('/status：回执里有会话、白名单、角色与模式', async () => {
+  const { harness, run } = makeBuiltinHarness();
+  const result = await run('/status');
+  assert.equal(result.handled, true);
+  assert.equal(harness.sent.length, 1);
+  assert.match(harness.sent[0].text, /会话 sess-1；白名单 通过；角色 星苒；模式 active/);
+});
+
+test('/status：会话不存在时显示「未创建」，白名单拦截时显示「拦截」', async () => {
+  const { harness, run } = makeBuiltinHarness({ acl: { allowed: () => false } });
+  await run('/status', { key: 'group:404' });
+  assert.match(harness.sent[0].text, /会话 未创建；白名单 拦截/);
+});
+
+test('/reset：调用 session.reset，并把它的结果透传出去', async () => {
+  const { harness, run } = makeBuiltinHarness();
+  await run('/reset');
+  assert.deepEqual(harness.writes, [['reset', 'group:1']]);
+  const empty = makeBuiltinHarness({ session: { current: () => null, reset: async () => ({ ok: true, note: 'no-session' }) } });
+  const result = await empty.run('/new');
+  assert.deepEqual(result.result, { ok: true, note: 'no-session' });
+});
+
+test('/role：查看、切换、off、default 与不存在的角色', async () => {
+  const { harness, run } = makeBuiltinHarness();
+
+  await run('/role');
+  assert.match(harness.sent.at(-1).text, /本会话跟随全局默认（「星苒」）/);
+
+  await run('/role 魅魔');
+  assert.equal(harness.roleState.byKey['group:1'].role, '魅魔');
+  assert.match(harness.sent.at(-1).text, /已切换角色：魅魔/);
+
+  await run('/role');
+  assert.match(harness.sent.at(-1).text, /本会话单独用「魅魔」/);
+
+  await run('/role off');
+  assert.equal(harness.roleState.byKey['group:1'].mode, 'off');
+  assert.match(harness.sent.at(-1).text, /已关闭本会话的角色卡/);
+
+  await run('/role default');
+  assert.equal(harness.roleState.byKey['group:1'].mode, 'default');
+  assert.match(harness.sent.at(-1).text, /已回到全局默认/);
+
+  await run('/role 不存在的角色');
+  assert.match(harness.sent.at(-1).text, /不存在。角色文件放 qq-bridge\/roles\/ 目录/);
+});
+
+test('/silent 与 /active：只改全局模式并回执', async () => {
+  const { harness, run } = makeBuiltinHarness();
+  await run('/silent');
+  assert.equal(harness.roleState.mode, 'silent');
+  assert.match(harness.sent.at(-1).text, /已进入静默模式/);
+  await run('/speak');
+  assert.equal(harness.roleState.mode, 'active');
+  assert.match(harness.sent.at(-1).text, /已退出静默模式/);
+});
+
+test('payload：按来源分组，DSH 命令与工具清单原样返回', () => {
+  const { registry } = makeBuiltinHarness();
+  registry.register({ id: 'demo', name: '/demo', source: 'plugin', pluginId: 'x', handler: async () => {} });
+  const payload = buildCommandsPayload(registry);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.bridge.builtin.length, 5);
+  assert.deepEqual(payload.bridge.plugin.map((entry) => entry.id), ['demo']);
+  assert.deepEqual(payload.dsh.map((entry) => entry.name), ['/compact', '/permission']);
+  assert.deepEqual(payload.tools.map((entry) => entry.name), ['web_search', 'web_fetch', 'snowluma_status']);
+  assert.equal('handler' in payload.bridge.builtin[0], false);
 });

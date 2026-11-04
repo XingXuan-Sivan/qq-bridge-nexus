@@ -1,4 +1,4 @@
-# 命令注册表（P3a / P3b）
+# 命令注册表（P3a / P3b / P7 第二步）
 
 桥接侧命令的统一真源。目标不是「所有能执行的东西都归这里管」——DSH 的会话命令与 agent 工具不由桥接执行，硬做开关只会骗人。这里只解决三件事：**能列出、能判定权限、能让插件注册**。
 
@@ -36,7 +36,7 @@
 - 同一段文本按 **最长主名** 命中（`/role` 不会抢 `/rolelist` 这类更长的命令）。
 - 命中顺序：内置 → 插件（按 pluginId 字典序）；冲突在注册时告警，**先注册者保留**，不静默覆盖。
 - 非 owner 发任何 `/` 命令，仍在桥接层统一回「管理命令仅管理员可用」，不进入注册表。
-- 迁移期：命中但 `migrated:false` 的条目返回 `{ handled:false }`，继续走旧 if 链；迁一个删一个，旧链不长期保留。
+- 迁移期：命中但 `migrated:false` 的条目返回 `{ handled:false }`，继续走旧 if 链；迁一个删一个，旧链不长期保留。P7 第二步之后五条内置命令全部 `migrated:true`，`migrated:false` 只为将来自愿只登记元数据的条目保留。
 - 不做正则匹配、不做自然语言触发（`/` 前缀是刻意的边界）。
 
 ## 4. 权限
@@ -90,3 +90,18 @@
 - 卸载 / 停用 / 重载时内核按 `pluginId` 批量注销，插件不需要自己清理；`detail` 与 `/api/commands` 都能看到 `commands` 列表。
 - 冲突规则不变：内置永远优先；插件之间先注册者保留，失败的一条只告警、不覆盖，也不阻断其它命令。
 - 未做：manifest 里静态声明 `commands` 以便启动前校验冲突（运行时冲突已经有告警，静态声明留到有第二个插件时再评估）。
+
+## 9. 代码位置（P7 第二步，2026-11-05）
+
+`bridge.js` 从 14745 行降到 14686 行，命令层拆成三个文件，职责不重叠：
+
+| 文件 | 职责 | 依赖 |
+| --- | --- | --- |
+| `src/commands/registry.mjs` | 注册表本体：校验、匹配、分发、权限/scope、冲突与注销 | 无（纯内存） |
+| `src/commands/builtin.mjs` | 五条内置命令的壳（`/reset` `/status` `/role` `/silent` `/active`）+ 文案 | 由 `deps` 注入 `send`/`session`/`acl`/`role`/`log` |
+| `src/commands/payload.mjs` | `GET /api/commands` 的响应组装（bridge 内置/插件 + DSH 命令 + agent 工具） | 只读注册表，不碰会话 |
+
+- 入口不变：`package.json` 的 `start` 仍是 `node src/bridge.js`，`bridge.js` 保留为组装根（建注册表、拼 `builtinCommandDeps`、注册、挂 `/api/commands`）。
+- `/reset` 的真实执行仍在 `bridge.js` 的 `resetSession(key)`：它要收口 30 个内存态对象与 45 处调用，属于 P7 第四步（会话层），不在第二步动。
+- `deps` 是刻意的窄口：内置命令拿不到 `cfg`、`stateDir`、`sessions` Map，只能通过注入的五个能力做事——这样单测可以直接给假实现，不需要起桥接进程。
+- 回归：`scripts/test-command-registry.mjs` 17 条（12 条注册表 + 5 条内置命令/payload）、`scripts/test-audit-bridge.mjs` 全 PASS、`scripts/test-integration-v030.mjs` 31/31。

@@ -123,23 +123,37 @@ ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html),
 // 整块搬迁用「哨兵」占位是最容易漏的方式：脚本替换完忘了回填，页面就会多出裸文本。
 ok(!/@@[A-Z][A-Z0-9_]*@@/.test(html), '控制台源码没有残留占位哨兵（@@SLOT@@ 之类）');
 
-console.log('## 样式分层（tokens / app / page）');
-const tokensPath = path.join(ROOT, 'public', 'console', 'css', 'tokens.css');
+console.log('## 样式分层（tokens / base / layout / components / page）');
+const cssDir = path.join(ROOT, 'public', 'console', 'css');
+const tokensPath = path.join(cssDir, 'tokens.css');
 ok(fs.existsSync(tokensPath), 'tokens.css 存在（设计令牌单独成层）');
 const tokens = fs.existsSync(tokensPath) ? fs.readFileSync(tokensPath, 'utf8') : '';
 ok(/^\/\* 设计令牌/.test(tokens.trim()) && /:root \{/.test(tokens), 'tokens.css 声明 :root 令牌');
 ok(/\[data-theme="dark"\] \{/.test(tokens), 'tokens.css 收口深色主题覆盖');
-const appCss = fs.existsSync(path.join(ROOT, 'public', 'console', 'css', 'app.css'))
-  ? fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'app.css'), 'utf8')
-  : '';
-ok(!/\[data-theme="dark"\] \{/.test(appCss) && !/^:root \{/m.test(appCss), 'app.css 不再持有令牌（只留布局与组件）');
-const tokensLink = html.indexOf('<link rel="stylesheet" href="/console/css/tokens.css">');
-const appLink = html.indexOf('<link rel="stylesheet" href="/console/css/app.css">');
-ok(tokensLink >= 0 && appLink > tokensLink, 'index.html 先加载 tokens.css 再加载 app.css');
+const layers = ['base.css', 'layout.css', 'components.css'];
+const layerText = {};
+for (const name of layers) {
+  const file = path.join(cssDir, name);
+  ok(fs.existsSync(file), `样式分层文件存在：css/${name}`);
+  layerText[name] = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+ok(!fs.existsSync(path.join(cssDir, 'app.css')), 'app.css 已删除（拆成 base/layout/components 三件）');
+ok(!/\[data-theme="dark"\] \{/.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css'])
+  && !/^:root \{/m.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css']),
+'三个分层文件都不持有设计令牌（令牌只在 tokens.css）');
+ok(/^\* \{\n\s+box-sizing:border-box/m.test(layerText['base.css']) && /^html \{/m.test(layerText['base.css']),
+  'base.css 承载盒模型重置与 html/body 基线');
+ok(/\.sidebar \{/.test(layerText['layout.css']) && /\.workspace \{/.test(layerText['layout.css']), 'layout.css 承载三容器外壳');
+ok(/\.card \{/.test(layerText['components.css']) && /\.modal-overlay \{/.test(layerText['components.css']), 'components.css 承载卡片与弹窗');
+const linkOrder = ['tokens.css', 'base.css', 'layout.css', 'components.css']
+  .map((name) => html.indexOf(`<link rel="stylesheet" href="/console/css/${name}">`));
+ok(linkOrder.every((at) => at >= 0) && linkOrder.every((at, i) => i === 0 || at > linkOrder[i - 1]),
+  'index.html 按 tokens → base → layout → components 的顺序加载样式');
 const overviewPageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'overview', 'page.css'), 'utf8');
 ok(/#section-silent \{/.test(overviewPageCss) && /@media \(max-width:760px\) \{/.test(overviewPageCss), '概览页私有规则（含窄屏覆盖）在 pages/overview/page.css');
 const usagePageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'usage', 'page.css'), 'utf8');
-ok(/#section-usage \.usage-chart/.test(usagePageCss) && !/#section-usage/.test(appCss), '用量页私有规则在 pages/usage/page.css，app.css 不再含页面选择器');
+ok(/#section-usage \.usage-chart/.test(usagePageCss) && !/#section-usage/.test(layerText['components.css']),
+  '用量页私有规则在 pages/usage/page.css，组件层不再含页面选择器');
 
 console.log('## 浏览器标签图标');
 const faviconPath = path.join(ROOT, 'public', 'console', 'img', 'favicon.svg');

@@ -20,7 +20,7 @@ node scripts/console-ui-fixture.mjs --original --port=4174
 node scripts/console-ui-fixture.mjs --html=path/to/console.html
 ```
 
-`--original` 读取 `scripts/fixtures/console.before.html`（改造前的原版，随仓库保留），仅用于对照预览；正常预览读取 `public/console/index.html`，并自动提供 `/console/css/app.css` 与 `/console/js/app.js` 两个资源。
+`--original` 读取 `scripts/fixtures/console.before.html`（改造前的原版，随仓库保留），仅用于对照预览；正常预览读取 `public/console/index.html`，并自动提供 `css/{tokens,base,layout,components}.css` 与 `js/*.js` 这些资源。
 
 ## 浏览器回归
 

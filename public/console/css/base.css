@@ -1,0 +1,123 @@
+/* 基础层：重置、排版、滚动条、按钮与表单基线（3.3 第二步：从 app.css 按连续区间拆出，加载顺序 base → layout → components） */
+* {
+  box-sizing:border-box
+}
+html {
+  scroll-behavior:smooth;
+  scroll-padding-top:90px
+}
+body {
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:14px;
+  line-height:1.65;
+  /* 标准后台外壳：aside / header / main 三个独立容器，只有 main 内部滚动 */
+  display:grid;
+  grid-template-columns:var(--sidebar-w) minmax(0,1fr);
+  grid-template-rows:var(--topbar-h) minmax(0,1fr);
+  height:100vh;
+  height:100dvh;
+  overflow:hidden
+}
+/* 全局滚动条：细、圆角、悬停才显形；不画上下箭头（Firefox 用 scrollbar-color，Chromium 用 ::-webkit-scrollbar） */
+* {
+  scrollbar-width:thin;
+  scrollbar-color:transparent transparent
+}
+:hover {
+  scrollbar-color:rgba(148,163,184,.42) transparent
+}
+::-webkit-scrollbar {
+  width:9px;
+  height:9px
+}
+::-webkit-scrollbar-track {
+  background:transparent
+}
+::-webkit-scrollbar-button {
+  display:none;
+  width:0;
+  height:0
+}
+::-webkit-scrollbar-thumb {
+  background:transparent;
+  border-radius:999px;
+  border:2px solid transparent;
+  background-clip:content-box
+}
+:hover::-webkit-scrollbar-thumb {
+  background:rgba(148,163,184,.42);
+  border:2px solid transparent;
+  background-clip:content-box
+}
+::-webkit-scrollbar-thumb:hover {
+  background:rgba(148,163,184,.62);
+  background-clip:content-box
+}
+::-webkit-scrollbar-corner {
+  background:transparent
+}
+button,input,textarea,select {
+  font:inherit
+}
+button,a,input,textarea,select,summary {
+  -webkit-tap-highlight-color:transparent
+}
+button {
+  cursor:pointer
+}
+button:disabled {
+  opacity:.5;
+  cursor:not-allowed
+}
+button,a,input,textarea,select,summary {
+  outline-offset:4px
+}
+:focus-visible {
+  outline:3px solid var(--focus-ring)
+}
+[hidden] {
+  display:none!important
+}
+a {
+  color:var(--accent);
+  text-decoration:none
+}
+p {
+  margin:0
+}
+button {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:9px;
+  color:var(--text);
+  padding:9px 15px;
+  transition:background .15s,border-color .15s,color .15s
+}
+button:hover {
+  background:var(--surface-hover);
+  border-color:var(--accent-border-soft-hover)
+}
+button.active,.primary {
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff
+}
+button.danger {
+  background:var(--danger);
+  border-color:var(--danger-border);
+  color:var(--err)
+}
+button.danger:hover {
+  background:var(--danger-hover-bg)
+}
+button.small {
+  font-size:12px;
+  padding:7px 11px
+}
+button.planned {
+  border-style:dashed;
+  color:var(--muted)
+}

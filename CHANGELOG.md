@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 重构：控制台样式再分三层（3.3 第二步，2026-11-04）
+- `public/console/css/app.css`（1810 行）按连续区间拆成三件：`base.css`（重置、排版、滚动条、按钮与表单基线，123 行）、`layout.css`（三容器外壳、侧栏、顶栏、主区、页面标题与指标条，343 行）、`components.css`（网格、卡片、表格、表单、弹窗、主题与各页细节，1357 行）；`index.html` 依次加载 `tokens → base → layout → components`，原 `app.css` 删除。
+- 拆分脚本先断言「三件按序拼接 === 原文件（逐字节）」再落盘，级联顺序与拆分前完全一致；实测样式规则总数 296 条、概览页几何（模式卡 `y=484 / w=1086`）、深浅色令牌值全部不变。
+- `scripts/console-source.mjs` 改为按顺序拼接四件样式；`console-ui-fixture.mjs` 逐个分发；`test-console-static` 的样式断言改为「三件存在、不含令牌、加载顺序正确、页面私有规则归属不变」。
+
 ### 重构：启动器控制中心拆成三件套（3.5，2026-11-04）
 - `public/control-center.html`（单文件 1280 行，样式与脚本全内联）拆为 `public/control-center/{index.html,app.css,app.js}`，并复制一份 `favicon.svg`；页面结构与行为不变，只把内联块换成 `<link>` 与 `<script src>`。
 - `src/launcher/control-center.mjs`：`PAGE_FILE` 指向目录内的 `index.html`，新增 `GET /control-center/*` 静态路由（复用 `src/http/static.mjs` 的 `resolveStaticPath` + `serveStaticFile`，前缀锁死、穿越 404）；其余路由、`#t=` 令牌、锁文件与 `/api/*` 逻辑不动。

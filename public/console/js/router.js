@@ -29,7 +29,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations']);
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -146,7 +146,11 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   if (refreshPage) setTimeout(() => { try { refreshPage(); } catch { /* 页面自己的错误自己记 */ } }, 0);
   if (focus) {
     document.getElementById('mainContent').focus({ preventScroll: true });
-    document.getElementById(target || 'mainContent')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    const targetId = target || 'mainContent';
+    const reveal = () => document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    // 目标可能在尚未注入的页面片段里（如概览指标卡跳 #section-pending）：等片段加载完再滚。
+    if (document.getElementById(targetId)) reveal();
+    else void hydratePage(page).then(reveal);
   }
 }
 

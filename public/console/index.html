@@ -92,14 +92,7 @@
       </div>
       <div class="meta">切换后即时保存。仿真参数可在左侧对应页面调整；封闭 Agent 仅允许管理员私聊。v0.3.0 起所有模式变更都会私聊通知管理员，并写入 state/admin/audit.jsonl；高权限闲置超时自动回落。</div>
     </section>
-<section id="section-sessions" data-page="sessions" class="card span-all">
-      <h2>会话映射</h2>
-      <div id="sessionList">加载中…</div>
-    </section>
-<section id="section-pending" data-page="sessions" class="card span-all">
-      <h2>挂起审批 / 提问</h2>
-      <div id="pendingList">加载中…</div>
-    </section>
+<section id="section-sessions" data-page="sessions" class="page-stack"><!-- 片段：pages/sessions/page.html（会话映射 / 挂起审批与提问） --></section>
 <section id="section-activity" data-page="overview" class="card">
       <h2>活动日志（最近 100 条）</h2>
       <pre id="activity">（空）</pre>

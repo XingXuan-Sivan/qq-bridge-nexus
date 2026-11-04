@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 // 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
 import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
 
-import { readConsoleSource } from './console-source.mjs';
+import { consolePageDirs, readConsoleSource } from './console-source.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = readConsoleSource(ROOT);
@@ -101,6 +101,25 @@ ok(/function renderBreadcrumb\(page\)/.test(html) && /class="crumb-link"/.test(h
 ok(!/id="breadcrumbPage"/.test(html), '旧的纯文本面包屑 id 已移除');
 ok(/function positionConsoleSearch\(\)/.test(html) && /document\.body\.appendChild\(searchResults\)/.test(html), '搜索候选挂到 body（脱离 page-heading 层叠上下文）');
 ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选改为 fixed 定位');
+
+console.log('## 页面片段（3.1 试点：技能 / MCP / 管理行为）');
+const pageDirs = consolePageDirs(ROOT);
+const pilotIds = ['skills', 'mcp', 'behaviors'];
+for (const id of pilotIds) {
+  const page = pageDirs.find((entry) => entry.id === id);
+  ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
+  const fragment = page?.html ? fs.readFileSync(page.html, 'utf8') : '';
+  ok(/<h2>/.test(fragment), `pages/${id}/page.html 自带标题`);
+  const module = page?.js ? fs.readFileSync(page.js, 'utf8') : '';
+  ok(/export function init\(/.test(module), `pages/${id}/page.js 导出 init()`);
+}
+for (const id of pilotIds) {
+  ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
+}
+ok(/const PAGE_FRAGMENTS = new Set\(\['skills', 'mcp', 'behaviors'\]\)/.test(html), '路由器登记了片段页');
+ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
+ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
+ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
 
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

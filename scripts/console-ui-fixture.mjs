@@ -468,6 +468,17 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       if (!name.endsWith('.js')) continue;
       assets.set(`/console/js/${name}`, { body: await readFile(resolve(dir, 'js', name)), type: 'text/javascript; charset=utf-8' });
     }
+    // 页面片段：pages/<id>/{page.html,page.css,page.js} 按浏览器真实请求路径提供。
+    for (const id of await readdir(resolve(dir, 'pages')).catch(() => [])) {
+      const pageDir = resolve(dir, 'pages', id);
+      for (const name of await readdir(pageDir).catch(() => [])) {
+        const type = name.endsWith('.html') ? 'text/html; charset=utf-8'
+          : name.endsWith('.css') ? 'text/css; charset=utf-8'
+            : name.endsWith('.js') ? 'text/javascript; charset=utf-8' : null;
+        if (!type) continue;
+        assets.set(`/console/pages/${id}/${name}`, { body: await readFile(resolve(pageDir, name)), type });
+      }
+    }
   }
   const state = makeFixtureState();
   const requests = [];

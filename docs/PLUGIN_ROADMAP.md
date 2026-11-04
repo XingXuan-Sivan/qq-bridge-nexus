@@ -344,14 +344,17 @@ public/console/
 - **组件契约**：需要 DOM 结构的（modal、field、table）导出返回节点的构造函数；纯展示的（pill、tile、空态）导出 HTML 字符串。样式与组件同目录（`app/ui/table.css`），由 `components.css` 汇总引入。
 - **样式纪律**：全局只有 `app/styles/`；页面私有样式禁止写全局选择器；禁止 JS 拼布局。现有 407 处内联 `style="width:…"` 收敛为宽度工具类（`.w-200` / `.w-118` 这类），分批清，不一次性大改。
 
-**第三阶段（待动工）：页面目录化 + favicon**
-1. `3.1 骨架化`：把 `index.html` 里 25 个 `<section data-page>` 按页搬进 `pages/<id>/page.html`，`index.html` 只留骨架；路由器从「切 section 显隐」改成「往 `#pageHost` 注入片段」。**先拿 skills / mcp / behaviors 三个只读页试点**，验证夹具与测试改动，再推其余页。
+**第三阶段（进行中：3.1 试点已完成）：页面目录化 + favicon**
+1. `3.1 骨架化`（✅ 2026-11-04 试点）：`skills` / `mcp` / `behaviors` 三页已搬进 `pages/<id>/{page.html,page.css,page.js}`，`index.html` 里对应的 `<section>` 只留空容器；路由器 `hydratePage(page)` 首次进入时 fetch 片段 → 注入 → 按需插 `page.css` → `import('./pages/<id>/page.js')` → 调 `init()`，失败只在该 section 显示占位、不影响其它页。`page.css` 先留占位（三页暂时完全复用公共样式）。其余 12 页仍留在 `index.html`，按同一约定逐页迁移（下一步：先搬纯静态的 `reference`，再搬大页）。
+   - 配套改动：`src/bridge.js` 静态路由放行 `/console/pages/`（仍在鉴权之前，否则片段取不到）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把 `pages/*/{page.html,page.css,page.js}` 拼进源码视图；`console-ui-fixture.mjs` 按真实路径提供片段与页面模块；`test-console-static.mjs` 增 16 条片段断言。
+   - 顺带修掉的隐患：`app.js` 的搜索索引原来在启动时用 `section.querySelector('h2')` 硬取标题，空 section 会抛 `TypeError` 并中断整个入口脚本的后续初始化；现在改为「按需重建 + 跳过空 section + 未注入的片段页用页面表标题兜底」，保证「没打开过的页也能搜到」。
+   - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
 3. `3.3 样式分家`：`app.css`（2036 行）拆 `tokens/base/layout` + 每页 `page.css`；内联宽度分批改工具类。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`；CSP 去掉 `unsafe-inline`（事件已全走委托，剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 改为拼接/分发 `pages/*/page.html` 与 `app/styles/*.css`。
 5. `3.5 控制中心`：`public/control-center.html` 按**B 档**独立目录化，**不并入** `pages/`；与 console 共享同一份 `app/styles/tokens.css`。详见本节「3.5 启动器控制中心」。
 
-- 测试与夹具影响：`console-source.mjs` 现在只拼 index + css + app.js + 模块，要扩成「骨架 + 各页片段 + 公用样式」；`test-console-static.mjs` 里针对单文件的字符串断言要改成读片段；`console-ui-fixture.mjs` 要按路径返回 `pages/<id>/page.html`。
+- 测试与夹具影响（已在 3.1 落地）：`console-source.mjs` 拼 index + css + js + `pages/*/{html,css,js}`；`console-ui-fixture.mjs` 按路径返回 `pages/<id>/page.{html,css,js}`；`test-console-static.mjs` 改为断言片段存在、index 对应 section 为空、路由器有 `hydratePage`。
 - **代价**：每页首次进入多 1 次片段请求（约 2–6 KB，浏览器缓存 + 内存 Map 兜底）；拆 15 页 + 2036 行 CSS 预计 6–8 个提交，每步保持 77/80 基线；迁移期页面结构会动，需逐页截图比对。
 - **明确不做**：引入 React/Vue/Svelte 运行时；引入 bundler 与构建产物目录；组件级 scoped CSS 编译；把插件 UI 塞进宿主文档（插件 UI 仍走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
 

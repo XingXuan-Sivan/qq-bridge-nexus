@@ -308,50 +308,10 @@
         <div class="row"><button id="pluginDetailClose">关闭</button></div>
       </div>
     </div>
-    <section id="section-skills" data-page="skills" class="card span-all">
-      <h2>技能</h2>
-      <div class="meta">只读清单：扫 <code>DSH_HOME/skills</code> 与仓库 <code>skills/</code> 下含 <code>SKILL.md</code> 的目录，读取 frontmatter 的 name / description。技能的启用与安装由 DSH 自身管理，这里不改配置、不代装。</div>
-      <div class="row" style="margin-top:8px">
-        <button id="skillsRefresh">刷新</button>
-        <span class="meta" id="skillsMeta">加载中…</span>
-      </div>
-      <div id="skillsList">加载中…</div>
-    </section>
-    <section id="section-mcp" data-page="mcp" class="card span-all">
-      <h2>MCP</h2>
-      <div class="meta">只读清单：这些是桥接仓库自带的 MCP server（stdio），由 DSH 侧配置加载。这里不启停、不新增——DSH 运行时增删 MCP 的接口尚未验证，见 <code>docs/PLUGIN_ROADMAP.md</code> §9。</div>
-      <div class="row" style="margin-top:8px">
-        <button id="mcpRefresh">刷新</button>
-        <span class="meta" id="mcpMeta">加载中…</span>
-      </div>
-      <div id="mcpList">加载中…</div>
-    </section>
-    <section id="section-behaviors" data-page="behaviors" class="card span-all">
-      <h2>管理行为</h2>
-      <div class="meta">桥接命令按注册表展示：<strong>注册表</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
-      <div class="row" style="margin-top:8px">
-        <button id="behaviorsRefresh">刷新</button>
-        <select id="behaviorsFilter" style="width:auto">
-          <option value="all">全部来源</option>
-          <option value="bridge">仅内置</option>
-          <option value="plugin">仅插件</option>
-        </select>
-        <select id="behaviorsPermission" style="width:auto">
-          <option value="">全部权限</option>
-          <option value="owner">owner</option>
-          <option value="admin">admin</option>
-          <option value="all">所有人</option>
-        </select>
-        <input id="behaviorsSearch" placeholder="搜索命令或说明…" style="max-width:240px">
-        <span class="meta" id="behaviorsMeta">加载中…</span>
-      </div>
-      <div id="behaviorsBridge" class="tool-log-table" hidden></div>
-      <div id="behaviorsEmpty" class="meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
-      <h3 style="margin-top:18px">DSH 会话命令 <span class="meta">只读</span></h3>
-      <div id="behaviorsDsh" class="tool-log-table">加载中…</div>
-      <h3 style="margin-top:18px">Agent 工具 <span class="meta">只读</span></h3>
-      <div id="behaviorsTools" class="tool-log-table">加载中…</div>
-    </section>
+    <!-- 页面片段由路由器按需注入（pages/<id>/page.html）：这里只留容器，不放内容。 -->
+    <section id="section-skills" data-page="skills" class="card span-all"></section>
+    <section id="section-mcp" data-page="mcp" class="card span-all"></section>
+    <section id="section-behaviors" data-page="behaviors" class="card span-all"></section>
 <section id="section-social-v1" data-page="social-v1" class="card span-all">
       <h2>一代仿真模式（reserved）</h2>
       <div class="meta" id="socialStatus">加载中…</div>

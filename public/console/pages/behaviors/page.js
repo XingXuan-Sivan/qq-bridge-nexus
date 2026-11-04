@@ -1,7 +1,9 @@
 // 管理行为页：桥接命令注册表（含迁移状态）+ 只读的 DSH 会话命令与 Agent 工具。
-import { api } from '../api.js';
-import { esc, simpleTable } from '../ui.js';
-import { getCurrentPage, onPageRefresh } from '../router.js';
+//
+// 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
+import { api } from '../../js/api.js';
+import { esc, simpleTable } from '../../js/ui.js';
+import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
 const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
@@ -86,7 +88,7 @@ async function refreshBehaviors() {
   }
 }
 
-export function initBehaviorsPage() {
+export function init() {
   document.getElementById('behaviorsRefresh')?.addEventListener('click', () => { refreshBehaviors().catch(() => {}); });
   document.getElementById('behaviorsFilter')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });
   document.getElementById('behaviorsPermission')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });

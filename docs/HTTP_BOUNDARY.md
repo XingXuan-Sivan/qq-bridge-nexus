@@ -34,7 +34,7 @@
 ### 现状
 
 - 控制台已是分层目录：`public/console/index.html`（结构）、`public/console/css/app.css`、`public/console/js/app.js`；`GET /` 与 `GET /console/` 返回 index（失败 404「控制台页面缺失」）。
-- 静态资源只放行 `^/console/(css|js|img|fonts)/` 这四个子目录，且**排在令牌校验之前**——浏览器取 `<link>`/`<script>` 不会带 `x-console-token`，放在鉴权之后页面会白屏（实测：拆分后不前置时 `/console/js/app.js` 返回 401）。页面本身（`/`、`/console/`）仍要求令牌。
+- 静态资源只放行 `^/console/(css|js|img|fonts|pages)/` 这五个子目录，且**排在令牌校验之前**——浏览器取 `<link>`/`<script>` 不会带 `x-console-token`，放在鉴权之后页面会白屏（实测：拆分后不前置时 `/console/js/app.js` 返回 401）。页面本身（`/`、`/console/`）仍要求令牌。`pages/` 是页面片段目录（`pages/<id>/page.html`、同目录 `page.css` 与页面模块 `page.js`），由路由器在进入该页时按需 fetch，扩展名仍受白名单约束（`.html/.css/.js`）。
 - 守卫实现：`src/http/static.mjs` 的 `resolveStaticPath` / `serveStaticFile` / `sendNotFound`；用例 `scripts/test-http-boundary.mjs`（7 pass / 1 skip，符号链接用例在无权限环境自动跳过）。
 - 新增静态目录（例如将来的 `public/console/img/`）只需在 `resolveStaticPath` 的调用里登记前缀，不要另写一套校验。
 

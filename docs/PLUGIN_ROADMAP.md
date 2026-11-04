@@ -345,7 +345,7 @@ public/console/
 - **样式纪律**：全局只有 `app/styles/`；页面私有样式禁止写全局选择器；禁止 JS 拼布局。现有 407 处内联 `style="width:…"` 收敛为宽度工具类（`.w-200` / `.w-118` 这类），分批清，不一次性大改。
 
 **第三阶段（进行中：3.1 试点已完成）：页面目录化 + favicon**
-1. `3.1 骨架化`（✅ 2026-11-04 试点）：`skills` / `mcp` / `behaviors` 三页已搬进 `pages/<id>/{page.html,page.css,page.js}`，`index.html` 里对应的 `<section>` 只留空容器；路由器 `hydratePage(page)` 首次进入时 fetch 片段 → 注入 → 按需插 `page.css` → `import('./pages/<id>/page.js')` → 调 `init()`，失败只在该 section 显示占位、不影响其它页。`page.css` 先留占位（三页暂时完全复用公共样式）。其余 12 页仍留在 `index.html`，按同一约定逐页迁移（下一步：先搬纯静态的 `reference`，再搬大页）。
+1. `3.1 骨架化`（✅ 2026-11-04 试点）：`skills` / `mcp` / `behaviors` 三页已搬进 `pages/<id>/{page.html,page.css,page.js}`，`index.html` 里对应的 `<section>` 只留空容器；路由器 `hydratePage(page)` 首次进入时 fetch 片段 → 注入 → 按需插 `page.css` → `import('./pages/<id>/page.js')` → 调 `init()`，失败只在该 section 显示占位、不影响其它页。`page.css` 先留占位（这几页暂时完全复用公共样式）。之后又搬了纯静态的 `reference`（工具参考）：无接口请求、无事件绑定，`page.js` 只有一行空 `init()`——保留这个空实现是为了让「每页模块都有 `init()`」没有例外。其余 11 页仍留在 `index.html`，按同一约定逐页迁移（下一步：先搬 `voice`、`access` 这类小页，再搬大页）。
    - 配套改动：`src/bridge.js` 静态路由放行 `/console/pages/`（仍在鉴权之前，否则片段取不到）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把 `pages/*/{page.html,page.css,page.js}` 拼进源码视图；`console-ui-fixture.mjs` 按真实路径提供片段与页面模块；`test-console-static.mjs` 增 16 条片段断言。
    - 顺带修掉的隐患：`app.js` 的搜索索引原来在启动时用 `section.querySelector('h2')` 硬取标题，空 section 会抛 `TypeError` 并中断整个入口脚本的后续初始化；现在改为「按需重建 + 跳过空 section + 未注入的片段页用页面表标题兜底」，保证「没打开过的页也能搜到」。
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。

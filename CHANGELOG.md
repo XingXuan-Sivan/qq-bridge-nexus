@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 重构：控制台样式分家（3.3 第一步，2026-11-04）
+- 新增 `public/console/css/tokens.css`：`:root` 设计令牌与 `[data-theme="dark"]` 覆盖单独成层，`index.html` 里先于 `app.css` 加载（同文件内的顺序语义保持原样）。
+- 页面私有样式回各自目录：`overview` 的三块网格占位、顺序与窄屏覆盖 → `pages/overview/page.css`；`usage` 的账本数字对齐、进度条、手写 SVG 图表与图例 → `pages/usage/page.css`；`app.css` 不再持有 `#section-*` 选择器。
+- `test-console-static` 增 7 条断言（tokens 文件与顺序、app.css 不持有令牌、两页私有规则归属），防止样式回流。
+
 ### 重构：控制台页面目录化（3.1：全部 15 页，2026-11-04）
 - 收尾：插件页也收进 `pages/plugins/`（`js/pages/plugins.js` 删除），控制台 15 个页面至此全部自包含；`js/` 只剩 `api.js` / `ui.js` / `router.js` / `timezone.js` / `app.js`（约 290 行，只做全局刷新、搜索、主题与入口装配）。
 - 新增 `public/console/img/favicon.svg`（32×32，深色圆角底 + 品牌蓝紫渐变 `q↗`），`index.html` 声明 `<link rel="icon" type="image/svg+xml">`；`/console/img/` 沿用鉴权前的静态放行，标签图标不再空白。

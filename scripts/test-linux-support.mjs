@@ -152,7 +152,7 @@ test('Linux 无窗口启动：systemd 用户服务（--no-open、崩溃重启、
 });
 
 test('控制中心页面：SnowLuma 在 Windows / Linux 上都可用（macOS 仍不列本机 SnowLuma）；Node 要求按发行包显示', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   assert.match(html, /const SNOW_OS = \['win32', 'linux'\];/);
   assert.ok(!html.includes("S?.os === 'win32' ? [LOCAL_SNOW]"), '本机 SnowLuma 占位项不再只看 Windows');
   assert.match(html, /\{ id: 'snowluma', name: 'SnowLuma', os: 'Windows \/ Linux' \}/);

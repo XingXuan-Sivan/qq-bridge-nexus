@@ -34,6 +34,8 @@ import { pickDialog } from './pick-dialog.mjs';
 // NapCat 是否已在别处运行：看它的 WebUI 端口（默认 6099，可在设置 napcatWebuiPort 改）
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
 import { resolveDshBaseUrl } from '../lib/dsh-endpoint.mjs';
+// 静态资源守卫与控制台共用一套：解码一次、拒绝穿越/盘符/符号链接/白名单外扩展名。
+import { resolveStaticPath, serveStaticFile } from '../http/static.mjs';
 
 const DEFAULT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 // 路径都按「项目根目录」计算；离线测试可以传入临时根目录（见 scripts/test-control-center.mjs）。
@@ -46,7 +48,7 @@ function setRoot(root) {
   TOKEN_FILE = path.join(STATE_DIR, 'control-center-token');
   LOCK_FILE = path.join(STATE_DIR, 'control-center.lock');
   LOG_DIR = path.join(STATE_DIR, 'logs');
-  PAGE_FILE = path.join(DEFAULT_ROOT, 'public', 'control-center.html');
+  PAGE_FILE = path.join(DEFAULT_ROOT, 'public', 'control-center', 'index.html');
   PLATFORM_ADMIN_TOKEN_FILE = path.join(STATE_DIR, 'platform-admin-token');
   LINK_BACKUP = path.join(STATE_DIR, 'platform-link-backup.json');
   VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return 'unknown'; } })();
@@ -589,8 +591,14 @@ export async function startControlCenter({ open = true, port: portOverride = nul
       if (!allowedHosts().includes(String(req.headers.host ?? '').toLowerCase())) return send(403, { ok: false, error: '只接受本机访问' });
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         let html;
-        try { html = fs.readFileSync(PAGE_FILE, 'utf8'); } catch { return send(500, '控制中心页面缺失：public/control-center.html', 'text/plain; charset=utf-8'); }
+        try { html = fs.readFileSync(PAGE_FILE, 'utf8'); } catch { return send(500, '控制中心页面缺失：public/control-center/index.html', 'text/plain; charset=utf-8'); }
         return send(200, html, 'text/html; charset=utf-8');
+      }
+      // 控制中心自己的静态资源（css / js / favicon）：只放行这一层目录，走与桥接控制台同一套路径守卫。
+      if (req.method === 'GET' && url.pathname.startsWith('/control-center/')) {
+        const resolved = resolveStaticPath(path.join(DEFAULT_ROOT, 'public', 'control-center'), url.pathname, { prefix: '/control-center/' });
+        if (!resolved.ok) return send(404, { ok: false, error: '不存在' });
+        return serveStaticFile(res, resolved);
       }
       if (req.method === 'GET' && url.pathname === '/favicon.ico') { res.writeHead(204, SEC); return res.end(); }
       if (!url.pathname.startsWith('/api/')) return send(404, { ok: false, error: '不存在' });

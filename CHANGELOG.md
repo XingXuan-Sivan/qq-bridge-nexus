@@ -5,7 +5,7 @@
 
 ## 未发布
 
-### 重构：控制台页面目录化（3.1：技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维，2026-11-04）
+### 重构：控制台页面目录化（3.1：技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批，2026-11-04）
 - `public/console/pages/<id>/` 成为页面自包含目录：`skills`、`mcp`、`behaviors`、`reference` 四页的 DOM 片段、私有样式、页面模块搬进各自目录；`index.html` 对应 `<section>` 只留空容器（页面不再是「全写死在 index 里」）。`reference` 是纯静态页，模块只导出空 `init()`，保持「每页都有 `init()`」的约定。
 - 路由器新增 `hydratePage(page)`：首次进入时 fetch `page.html` → 注入容器 → 按需插 `page.css` → 动态 `import()` 页面模块并调 `init()`；每页只加载一次，并发切页复用同一个 Promise；片段取不到时只在该 section 显示「页面加载失败（刷新重试）」，不影响其它页。
 - `src/bridge.js` 的静态路由前缀扩到 `/console/(css|js|img|fonts|pages)/`（仍在令牌校验之前）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把页面片段拼进源码视图；`scripts/console-ui-fixture.mjs` 按真实路径提供 `pages/<id>/page.{html,css,js}`。
@@ -18,6 +18,7 @@
 - `usage`（用量与花费）是第二个多卡片页：两张卡（令牌与花费 / 上下文压缩）一起搬进 `pages/usage/`，宿主改 `.page-stack` 后原 `section-compact` 从 index 消失。图表绘制（手写 SVG）、逐轮明细、清空账本、价目表与压缩模式单选随页面走，3 秒图表轮询与 60 秒压缩轮询都保留「仅本页可见时」的判断。
 - `persona`（人格与角色）搬进 `pages/persona/`：人格列表与编辑器、按会话设置人格、人格来源、恢复默认、仿真提示词整块（DOM / 逻辑 / 绑定 / 启动刷新）一起走。`filterRoleSuggestions` 从顶层 IIFE 改为 `init()` 内调用；全局 3 秒刷新不再跨页写页头，改由页内 `GET /api/status` 在进入页面与增删改后刷新。
 - `operations`（调试与运维）是第三个多卡片页：测试发送 / 桥接控制 / 后台控制端引导三张卡一起搬进 `pages/operations/`，宿主改 `.page-stack`；四个按钮绑定与校验文案随页面走，清空工作区不再直接调 `refreshSessions()`，由全局指标轮询和会话页进入时刷新。
+- `sessions`（会话与审批）搬进 `pages/sessions/`：会话映射 / 挂起审批与提问两张卡与 `refreshSessions` / `refreshPending`、清除上下文绑定、3 秒轮询一起走；跨页的 `#metricSessions` / `#metricPending` / `#pendingCount` 改为判空写入，会话页可见时由页面模块刷新、其它页由 `app.js` 的 `refreshSessionMetrics()` 补上，避免重复请求与空元素异常。
 - 修复搜索索引的启动期崩溃：原来在入口脚本里对每个 `section[data-page]` 直接取 `h2`，片段页为空时会抛 `TypeError` 并中断后续初始化（整页交互失效）；现改为按需重建、跳过空 section，并用页面表标题给未注入的页兜底，保证「没打开过也能搜到」。
 - `scripts/test-console-static.mjs` 增 16 条断言（页面目录三件套、index 容器为空、路由器注入、搜索索引兜底）。
 

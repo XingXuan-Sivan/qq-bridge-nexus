@@ -29,7 +29,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 迁移期只有三个只读页走这条路径，其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference']);
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

@@ -5,6 +5,12 @@
 
 ## 未发布
 
+### 重构：启动器控制中心拆成三件套（3.5，2026-11-04）
+- `public/control-center.html`（单文件 1280 行，样式与脚本全内联）拆为 `public/control-center/{index.html,app.css,app.js}`，并复制一份 `favicon.svg`；页面结构与行为不变，只把内联块换成 `<link>` 与 `<script src>`。
+- `src/launcher/control-center.mjs`：`PAGE_FILE` 指向目录内的 `index.html`，新增 `GET /control-center/*` 静态路由（复用 `src/http/static.mjs` 的 `resolveStaticPath` + `serveStaticFile`，前缀锁死、穿越 404）；其余路由、`#t=` 令牌、锁文件与 `/api/*` 逻辑不动。
+- 打包不受影响（`build-release.mjs` 用 `git ls-files` 收文件）；`test-control-center` / `test-napcat-manage` / `test-platform` / `test-linux-support` 的读取改为「index + app.js」拼接，原有断言全部保留。
+- 实测：`GET /` 200（25073 字节）、`app.css` 12287、`app.js` 60543、`favicon.svg` 915，`/control-center/../../state/console-token` 返回 404；无头 Edge 打开页面零异常、样式与主标签正常。
+
 ### 重构：控制台样式分家（3.3 第一步，2026-11-04）
 - 新增 `public/console/css/tokens.css`：`:root` 设计令牌与 `[data-theme="dark"]` 覆盖单独成层，`index.html` 里先于 `app.css` 加载（同文件内的顺序语义保持原样）。
 - 页面私有样式回各自目录：`overview` 的三块网格占位、顺序与窄屏覆盖 → `pages/overview/page.css`；`usage` 的账本数字对齐、进度条、手写 SVG 图表与图例 → `pages/usage/page.css`；`app.css` 不再持有 `#section-*` 选择器。

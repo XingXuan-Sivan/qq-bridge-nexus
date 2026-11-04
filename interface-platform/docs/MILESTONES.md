@@ -14,7 +14,7 @@
 | `src/mcp-snowluma-safe.js` | 读 `config.json` 的 `httpUrl + accessToken` 调 OneBot HTTP | 自动随配置走平台，无需改代码 |
 | `src/core/session-router.mjs` | 会话键只接受 `private:<数字>` / `group:<数字>` | M2 |
 | `src/social/people.js`、owner 权限 | QQ 号身份假设 | M2；按交接 §8.6 不跨平台合并身份 |
-| `src/launcher/control-center.mjs`、`public/control-center.html` | SnowLuma 专属卡片 | M1 改为顶部大标签；SnowLuma 卡片移入「接口平台 → 接入实例」 |
+| `src/launcher/control-center.mjs`、`public/control-center/` | SnowLuma 专属卡片 | M1 改为顶部大标签；SnowLuma 卡片移入「接口平台 → 接入实例」 |
 
 ### 桥接实际使用的 OneBot 面
 

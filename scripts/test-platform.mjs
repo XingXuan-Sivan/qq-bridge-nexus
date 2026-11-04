@@ -162,7 +162,7 @@ test('③ 桥接 viaPlatform：自愈只认平台端点，不扫描 SnowLuma 目
 });
 
 test('④ 控制中心页面契约：两个顶部大标签、切换不发请求、令牌不进 localStorage、SnowLuma 启停仍只在用户点击', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   assert.match(html, /role="tablist" aria-label="模块"/);
   assert.match(html, /id="tab-bridge"[^>]*aria-controls="panel-bridge"/);
   assert.match(html, /id="tab-platform"[^>]*aria-controls="panel-platform"/);

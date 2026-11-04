@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/control-center/favicon.svg" type="image/svg+xml">
+<title>qq-bridge 控制中心</title>
+<link rel="stylesheet" href="/control-center/app.css">
+</head>
+<body>
+<header>
+  <h1>项目控制中心</h1>
+  <span class="sub">qq-bridge 控制中心</span>
+  <span class="badge" id="verBadge">v—</span>
+  <span class="badge" id="modeBadge" title="当前运行模式与权限级别">模式 —</span>
+  <span class="badge" id="pendingBadge" title="待审批 / 待确认申请">待审批 0 · 待确认 0</span>
+  <span class="spacer"></span>
+  <span class="badge" id="overallBadge" title="总体状态">总体 —</span>
+  <button class="danger solid" id="panicBtn" title="立即回到安全模式（L0 群友模式），停止运维 Agent">紧急关闭</button>
+  <button class="ghost" id="exitBtn" title="先停止由控制中心启动的桥接、接口平台与 SnowLuma，再退出控制中心">退出控制中心</button>
+</header>
+
+<!-- 顶部大标签：切换只改变显示，不启停、不重连任何模块 -->
+<nav class="maintabs" role="tablist" aria-label="模块">
+  <button class="bigtab" role="tab" id="tab-bridge" aria-controls="panel-bridge" aria-selected="true" tabindex="0">
+    <span class="dot" id="tabBridgeDot"></span>桥接 <span class="st" id="tabBridgeSt">—</span><span class="alert" id="tabBridgeAlert" hidden></span>
+  </button>
+  <button class="bigtab" role="tab" id="tab-platform" aria-controls="panel-platform" aria-selected="false" tabindex="-1">
+    <span class="dot" id="tabPlatformDot"></span>接口平台 <span class="st" id="tabPlatformSt">—</span><span class="alert" id="tabPlatformAlert" hidden></span>
+  </button>
+</nav>
+<div id="banners"></div>
+
+<main>
+  <!-- ── 桥接 ─────────────────────────────────────────────── -->
+  <section class="tabpanel" id="panel-bridge" role="tabpanel" aria-labelledby="tab-bridge">
+    <section class="card tall" aria-labelledby="bridgeTitle">
+      <div class="card-head">
+        <span class="dot" id="bridgeDot"></span>
+        <h2 id="bridgeTitle">桥接</h2>
+        <span class="badge" id="bridgeState">未启动</span>
+        <span class="badge" id="bridgeRoute" title="桥接当前连接 QQ 的路径">路径 —</span>
+        <span class="grow"></span>
+        <button class="primary" id="bridgeStart">启动桥接</button>
+        <button id="consoleOpen" title="桥接控制台（模式、会话、人格、黑话、令牌花费等）：自动带上令牌打开">打开桥接控制台 ↗</button>
+        <a id="consoleManual" class="minor-link" href="#" target="_blank" rel="noopener" title="不自动带令牌，打开后在弹窗里手动输入桥接控制台令牌">手动输入令牌</a>
+        <button id="bridgeRestart">重启</button>
+        <button class="danger" id="bridgeStop">停止桥接</button>
+      </div>
+      <div class="toolbar">
+        <input type="search" id="bridgeFilter" placeholder="过滤日志…" aria-label="过滤桥接日志">
+        <label class="check"><input type="checkbox" id="bridgeErrors"> 只看错误</label>
+        <label class="check"><input type="checkbox" id="bridgePause"> 暂停滚动</label>
+        <label class="check" title="桥接异常退出后 5 秒自动重启"><input type="checkbox" id="bridgeAuto"> 崩溃自动重启</label>
+        <span class="grow"></span>
+        <button class="ghost" id="bridgeDownload">下载日志</button>
+        <button class="ghost" id="bridgeClear">清屏</button>
+      </div>
+      <div class="term" id="bridgeTerm" role="log" aria-live="polite"></div>
+      <form class="cmdline" id="cmdForm" autocomplete="off">
+        <span class="prompt">›</span>
+        <input type="text" id="cmdInput" placeholder="输入命令，例如 status、panic、mode reserved2；help 查看全部" aria-label="控制中心命令">
+        <button class="primary" type="submit">发送</button>
+      </form>
+    </section>
+  </section>
+
+  <!-- ── 接口平台 ─────────────────────────────────────────── -->
+  <section class="tabpanel" id="panel-platform" role="tabpanel" aria-labelledby="tab-platform" hidden>
+    <nav class="subtabs" role="tablist" aria-label="接口平台">
+      <button class="subtab" role="tab" id="ptab-overview" aria-controls="pview-overview" aria-selected="true" tabindex="0">概览</button>
+      <button class="subtab" role="tab" id="ptab-instances" aria-controls="pview-instances" aria-selected="false" tabindex="-1">接入实例</button>
+      <button class="subtab" role="tab" id="ptab-accounts" aria-controls="pview-accounts" aria-selected="false" tabindex="-1">账号</button>
+      <button class="subtab" role="tab" id="ptab-logs" aria-controls="pview-logs" aria-selected="false" tabindex="-1">日志<span class="alert" id="plLogAlert" hidden></span></button>
+      <button class="subtab" role="tab" id="ptab-settings" aria-controls="pview-settings" aria-selected="false" tabindex="-1">设置</button>
+    </nav>
+
+    <!-- 概览 -->
+    <div id="pview-overview" role="tabpanel" aria-labelledby="ptab-overview" style="display:flex;flex-direction:column;gap:14px">
+    <section aria-label="接入后端">
+      <div class="backends" id="backendCards"></div>
+      <p class="note" style="margin:8px 2px 0">点「开启」：确保接口平台在运行 → 启动该后端程序（能启动时）→ 在接口平台里建好并连接它的实例。各后端互相独立，可以同时开启；「关闭」只断开该后端，并停止由控制中心启动的那个程序。</p>
+    </section>
+    <div class="card">
+      <div class="card-head">
+        <span class="dot" id="plDot"></span>
+        <h2>接口平台核心</h2>
+        <span class="badge" id="plState">未启动</span>
+        <span class="grow"></span>
+        <button class="primary" id="plStart">启动接口平台</button>
+        <button id="plRestart">重启</button>
+        <button class="danger" id="plStop">停止接口平台</button>
+      </div>
+      <div class="tiles">
+        <div class="tile"><div class="k">核心状态</div><div class="v small" id="tCore">—</div></div>
+        <div class="tile"><div class="k">就绪账号</div><div class="v" id="tReady">—</div></div>
+        <div class="tile"><div class="k">异常实例</div><div class="v" id="tFaulty">—</div></div>
+        <div class="tile"><div class="k">最近接收</div><div class="v small" id="tRecv">—</div></div>
+        <div class="tile"><div class="k">最近发送</div><div class="v small" id="tSend">—</div></div>
+        <div class="tile"><div class="k">桥接路径</div><div class="v small" id="tLink">—</div></div>
+      </div>
+      <div class="actions">
+        <label class="check" title="接口平台异常退出后自动重启"><input type="checkbox" id="plAuto"> 崩溃自动重启</label>
+        <span class="note" id="plSupport"></span>
+      </div>
+    </div>
+    </div>
+
+    <!-- 接入实例：列表 + 详情 -->
+    <div id="pview-instances" role="tabpanel" aria-labelledby="ptab-instances" class="split" hidden>
+      <section class="card" aria-label="实例列表">
+        <div class="card-head"><h3>接入实例</h3><span class="grow"></span><button id="instAddBtn">添加</button></div>
+        <ul class="list" id="instList"></ul>
+        <div class="note" style="padding:8px 14px" id="instProvidersNote"></div>
+      </section>
+      <section class="card" aria-label="实例详情">
+        <div class="panel-sub" id="instAddPanel">
+          <h3>添加接入实例</h3>
+          <div class="form">
+            <label for="addId">实例 ID</label><input type="text" id="addId" placeholder="例如 snowluma-second">
+            <label for="addProvider">提供方</label><select id="addProvider"></select>
+            <label for="addMgmt">管理方式</label><select id="addMgmt"><option value="external">外部运行（只连接）</option><option value="remote">远程连接</option></select>
+            <label for="addWs">WS 地址</label><input type="text" id="addWs" placeholder="ws://127.0.0.1:3001">
+            <label for="addToken">令牌</label><input type="password" id="addToken" placeholder="WS accessToken（填了目录可留空）" autocomplete="off">
+            <label for="addHome">后端目录</label><input type="text" id="addHome" placeholder="可选：SnowLuma 目录或 NapCat 配置目录，按目录自动发现账号">
+          </div>
+          <div class="row" style="justify-content:flex-end"><button class="ghost" id="addCancel">取消</button><button class="primary" id="addGo">创建</button></div>
+        </div>
+        <div id="instEmpty" class="empty-state"><p>选择左侧的实例查看详情。</p></div>
+        <div id="instDetail" hidden>
+          <div class="card-head">
+            <span class="dot" id="idDot"></span>
+            <h2 id="idTitle">—</h2>
+            <span class="badge" id="idProvider">—</span>
+            <span class="badge" id="idMgmt">—</span>
+            <span class="grow"></span>
+            <button class="primary" id="idConnect">连接</button>
+            <button class="danger" id="idDisconnect">断开</button>
+          </div>
+          <p class="note" id="idLocalNote" style="padding:10px 14px;margin:0" hidden>这是本机程序（不是平台里的实例）：这里只能启停和设置程序本身。接口平台没运行、或平台里还没有对应实例时显示；启动接口平台并在「概览」里开启后端后，会列出平台里的实例。</p>
+          <div class="form platform-only">
+            <label for="idWs">WS 地址</label><input type="text" id="idWs">
+            <label for="idHome">后端目录</label><input type="text" id="idHome" placeholder="SnowLuma 目录 / NapCat 配置目录：填了就按目录发现账号（推荐），留空则用 WS 地址 + 令牌">
+            <label for="idToken">令牌</label><input type="password" id="idToken" autocomplete="off" placeholder="留空 = 不修改">
+          </div>
+          <div class="row platform-only" style="padding:0 14px 12px;justify-content:flex-end"><span class="note" id="idSaveNote"></span><button id="idSave">保存配置</button></div>
+          <div class="platform-only" style="padding:0 14px 12px">
+            <table aria-label="上游链路"><thead><tr><th>链路</th><th>账号</th><th>状态</th><th>原因</th><th>最近收包</th></tr></thead><tbody id="idLinks"></tbody></table>
+          </div>
+
+          <!-- SnowLuma 程序：只有用户亲手点击才启停（不经接口平台、不经桥接/AI） -->
+          <div id="snowSection">
+            <div class="card-head" style="border-top:1px solid var(--line)">
+              <span class="dot" id="snowDot"></span>
+              <h3 id="snowTitle">SnowLuma 程序（由你亲手启停）</h3>
+              <span class="badge" id="snowState">未选择目录</span>
+              <span class="grow"></span>
+              <button class="primary" id="snowStart" disabled>启动 SnowLuma</button>
+              <button class="danger" id="snowStop" disabled>停止 SnowLuma</button>
+            </div>
+            <div id="snowPick" class="empty-state">
+              <p>选择你自己下载并解压的 SnowLuma 目录（含 <code>launcher.bat</code>（Windows）或 <code>launcher.sh</code>（Linux）、<code>index.mjs</code> 的那一层）。SnowLuma 不会放进项目里，也不会被自动启动。选择后会同步给接口平台的 SnowLuma 实例。</p>
+              <div class="row">
+                <input type="text" id="snowDirInput" placeholder="例如 D:\SnowLuma-v2.0.3-win-x64 或 /opt/SnowLuma-v2.0.3-linux-x64" aria-label="SnowLuma 目录">
+                <button id="snowBrowse">浏览…</button>
+                <button class="primary" id="snowUse">使用这个目录</button>
+              </div>
+              <p class="note" id="snowPickMsg"></p>
+            </div>
+            <div id="snowReady" hidden>
+              <dl class="info">
+                <dt>版本</dt><dd id="snowVer">—</dd>
+                <dt>发行版</dt><dd id="snowEdition">—</dd>
+                <dt>目录</dt><dd id="snowDirText">—</dd>
+                <dt>已配置账号</dt><dd id="snowAccounts">—</dd>
+                <dt>WebUI</dt><dd id="snowWebui">—</dd>
+              </dl>
+              <div class="actions">
+                <button id="snowOpenWebui">打开 SnowLuma WebUI ↗</button>
+                <button id="snowCheck">检查更新</button>
+                <button id="snowUpdateHelper">更新助手</button>
+                <button class="ghost" id="snowChange">更换目录</button>
+              </div>
+              <div class="panel-sub" id="updatePanel">
+                <h3 id="updTitle">更新</h3>
+                <div id="updSummary" class="note"></div>
+                <details class="notes" id="updNotesWrap" hidden><summary>更新说明</summary><pre id="updNotes"></pre></details>
+                <ol>
+                  <li>点「打开下载页」，下载 <b id="updAsset">对应本机系统的完整版</b>，解压到一个<b>新的</b>文件夹（不要覆盖当前目录）。</li>
+                  <li>回到这里，先<b>停止 SnowLuma</b>，再选择新文件夹，点「迁移数据并切换」。</li>
+                  <li>迁移会先把当前目录的 <code>config/</code>、<code>data/</code> 备份到 <code>state/snowluma-backups/</code>，再复制到新目录；旧目录原样保留，确认没问题后再自行删除。</li>
+                </ol>
+                <p class="note">AI 的记忆、人物库、会话在桥接的 <code>state\</code> 和 DSH 里，聊天记录在 QQ 客户端里，更新 SnowLuma 不会影响它们。控制中心只搬你的数据，不下载、不安装 SnowLuma 的程序文件。</p>
+                <div class="row">
+                  <button id="updDownload">打开下载页 ↗</button>
+                  <input type="text" id="migrateDir" placeholder="新版本解压后的目录" aria-label="新版本目录">
+                  <button id="migrateBrowse">浏览…</button>
+                </div>
+                <div class="row">
+                  <label class="check"><input type="checkbox" id="migrateLogs"> 同时迁移 logs/</label>
+                  <span class="grow"></span>
+                  <button class="primary" id="migrateGo">迁移数据并切换</button>
+                </div>
+                <div id="migrateResult" class="note"></div>
+              </div>
+            </div>
+            <div class="toolbar">
+              <input type="search" id="snowFilter" placeholder="过滤 SnowLuma 日志…" aria-label="过滤 SnowLuma 日志">
+              <label class="check"><input type="checkbox" id="snowErrors"> 只看错误</label>
+              <label class="check"><input type="checkbox" id="snowPause"> 暂停滚动</label>
+              <span class="grow"></span>
+              <button class="ghost" id="snowDownload">下载日志</button>
+              <button class="ghost" id="snowClear">清屏</button>
+            </div>
+            <div class="term" id="snowTerm" role="log" aria-live="polite" style="max-height:360px"></div>
+          </div>
+
+          <!-- NapCat 程序：只有用户亲手点击才启停（不经接口平台、不经桥接/AI） -->
+          <div id="napSection" hidden>
+            <div class="card-head" style="border-top:1px solid var(--line)">
+              <span class="dot" id="napDot"></span>
+              <h3>NapCat 程序（由你亲手启停）</h3>
+              <span class="badge" id="napState">—</span>
+              <span class="grow"></span>
+              <button class="primary" id="napStart">启动 NapCat</button>
+              <button class="danger" id="napStop">停止 NapCat</button>
+            </div>
+            <p class="note" id="napNote" style="padding:8px 14px;margin:0"></p>
+            <div class="qr-panel" id="napQrPanel" hidden>
+              <img id="napQrImg" alt="NapCat 登录二维码" width="220" height="220">
+              <div>
+                <h3 style="margin:0 0 6px">用手机 QQ 扫码登录机器人账号</h3>
+                <p class="note" style="margin:0">二维码约 2 分钟过期，NapCat 会自动换新的，这里也会跟着刷新。登录成功后这块会自动消失。<br>
+                <span id="napQrTime"></span></p>
+              </div>
+            </div>
+            <dl class="info">
+              <dt>版本</dt><dd id="napVer">—</dd>
+              <dt id="napProgLabel">程序</dt><dd id="napProgText">—</dd>
+              <dt>NapCat 目录</dt><dd id="napHomeText">—</dd>
+            </dl>
+            <div class="actions">
+              <button id="napCheck">检查更新</button>
+              <button id="napOpenDownload">打开下载页 ↗</button>
+              <button class="ghost" id="napSetToggle">NapCat 设置</button>
+            </div>
+            <div class="panel-sub" id="napUpdatePanel">
+              <h3 id="napUpdTitle">更新</h3>
+              <div id="napUpdSummary" class="note"></div>
+              <details class="notes" id="napUpdNotesWrap" hidden><summary>更新说明</summary><pre id="napUpdNotes"></pre></details>
+              <p class="note">控制中心只提示新版本，不下载、不安装 NapCat。AI 的记忆和会话在桥接的 <code>state/</code> 与 DSH 里，更新 NapCat 不会影响它们。</p>
+            </div>
+            <div class="panel-sub" id="napSetPanel">
+              <h3>NapCat 设置</h3>
+              <p class="note">留空 = 用默认位置。改启动方式在下次启动 NapCat 时生效；改 NapCat 目录会同步给接口平台的 NapCat 实例。</p>
+              <div class="row" id="napQQAppRow">
+                <label for="napQQAppInput" style="min-width:110px">QQ.app</label>
+                <input type="text" id="napQQAppInput" placeholder="/Applications/QQ.app" aria-label="QQ.app 位置">
+                <button id="napQQAppBrowse">浏览…</button>
+              </div>
+              <div class="row" id="napCmdRow">
+                <label for="napCmdInput" style="min-width:110px">启动文件</label>
+                <input type="text" id="napCmdInput" placeholder="NapCat.Shell 里的 .bat / .exe" aria-label="NapCat 启动文件">
+                <button id="napCmdBrowse">浏览…</button>
+              </div>
+              <div class="row">
+                <label for="napHomeInput" style="min-width:110px">NapCat 目录</label>
+                <input type="text" id="napHomeInput" aria-label="NapCat 目录（含 config/onebot11_<QQ号>.json）">
+                <button id="napHomeBrowse">浏览…</button>
+              </div>
+              <div class="row">
+                <label for="napQuickInput" style="min-width:110px">快速登录 QQ 号</label>
+                <input type="text" id="napQuickInput" inputmode="numeric" placeholder="可选：机器人 QQ 号，启动时加 -q（NapCat 已设自动登录时不用填）" aria-label="快速登录 QQ 号">
+              </div>
+              <div class="row">
+                <span class="grow"></span>
+                <button class="ghost" id="napSetCancel">取消</button>
+                <button class="primary" id="napSetSave">保存</button>
+              </div>
+              <p class="note" id="napSetMsg"></p>
+            </div>
+            <div class="toolbar">
+              <input type="search" id="napFilter" placeholder="过滤 NapCat 日志…" aria-label="过滤 NapCat 日志">
+              <label class="check"><input type="checkbox" id="napErrors"> 只看错误</label>
+              <label class="check"><input type="checkbox" id="napPause"> 暂停滚动</label>
+              <span class="grow"></span>
+              <button class="ghost" id="napDownload">下载日志</button>
+              <button class="ghost" id="napClear">清屏</button>
+            </div>
+            <div class="term" id="napTerm" role="log" aria-live="polite" style="max-height:420px"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 账号 -->
+    <div id="pview-accounts" role="tabpanel" aria-labelledby="ptab-accounts" class="card" hidden>
+      <div class="card-head"><h2>账号</h2><span class="grow"></span><span class="note">健康阶梯：核心运行 → 后端可连接 → 账号已登录 → 收发就绪 → 桥接已启用</span></div>
+      <div style="padding:0 14px 12px;overflow:auto">
+        <table aria-label="账号"><thead><tr><th>账号</th><th>昵称</th><th>实例</th><th>健康</th><th>原因</th><th>桥接</th><th>收 / 发</th><th>最近收发</th></tr></thead><tbody id="acctRows"></tbody></table>
+        <p class="note" id="acctEmpty"></p>
+      </div>
+    </div>
+
+    <!-- 日志 -->
+    <div id="pview-logs" role="tabpanel" aria-labelledby="ptab-logs" class="card tall" hidden>
+      <div class="toolbar">
+        <select id="plScope" aria-label="日志来源"><option value="">全部来源</option><option value="core">核心</option><option value="compat">兼容入口</option></select>
+        <select id="plLevel" aria-label="最低级别"><option value="">全部级别</option><option value="info">信息及以上</option><option value="warn">警告及以上</option><option value="error">只看错误</option></select>
+        <input type="search" id="plFilter" placeholder="过滤日志…" aria-label="过滤接口平台日志">
+        <label class="check"><input type="checkbox" id="plPause"> 暂停滚动</label>
+        <span class="grow"></span>
+        <button class="ghost" id="plDownload">下载日志</button>
+        <button class="ghost" id="plClear" title="只清除显示，不删除日志文件">清屏</button>
+      </div>
+      <div class="term" id="plTerm" role="log" aria-live="polite"></div>
+    </div>
+
+    <!-- 设置 -->
+    <div id="pview-settings" role="tabpanel" aria-labelledby="ptab-settings" class="card" hidden>
+      <div class="card-head"><h2>桥接接入</h2><span class="badge" id="linkState">—</span><span class="grow"></span><button class="primary" id="linkOn">接入桥接</button><button id="linkOff">恢复直连</button></div>
+      <p class="note" style="padding:10px 14px;margin:0">「接入桥接」把桥接 <code>config.json</code> 的 SnowLuma 端点改为接口平台的 OneBot 兼容入口（原值备份在 <code>state\platform-link-backup.json</code>），重启桥接后生效。「恢复直连」按备份还原。两者都不会启停任何进程。</p>
+      <div class="card-head" style="border-top:1px solid var(--line)"><h2>平台信息</h2></div>
+      <dl class="info">
+        <dt>版本</dt><dd id="sVer">—</dd>
+        <dt>平台目录</dt><dd id="sData">—</dd>
+        <dt>监听端口</dt><dd id="sPort">—</dd>
+        <dt>OneBot 兼容入口</dt><dd id="sCompat">—</dd>
+        <dt>兼容入口目标账号</dt><dd id="sCompatAcct">—</dd>
+        <dt>恢复策略</dt><dd>通信断开自动重连（指数退避）；不自动重启后端、不自动重新登录 —— 三者分开处理</dd>
+        <dt>运行环境</dt><dd id="sEnv">—</dd>
+        <dt>支持范围</dt><dd id="sSupport">—</dd>
+      </dl>
+      <p class="note" style="padding:10px 14px;margin:0">兼容入口目标账号、恢复策略等平台配置在接口平台自己的 <code>interface-platform\state\platform.json</code>；控制中心不读写它。平台端口与目录是控制中心的设置（<code>state\control-center.json</code> 的 <code>platformPort</code> / <code>platformDir</code>），改后重启接口平台。令牌不会显示在页面上。</p>
+    </div>
+  </section>
+</main>
+
+<footer id="statusBar">
+  <span class="chip"><span class="dot" id="sbBridgeDot"></span><b>桥接</b><span id="sbBridge">—</span></span>
+  <span class="chip"><span class="dot" id="sbPlDot"></span><b>接口平台</b><span id="sbPl">—</span></span>
+  <span class="chip" title="经接口平台接入的 QQ 后端实例（NapCat / SnowLuma 等）；桥接直连时显示直连的 SnowLuma"><span class="dot" id="sbBackDot"></span><b>接入后端</b><span id="sbBack">—</span></span>
+  <span class="chip"><span class="dot" id="sbQQDot"></span><b>QQ</b><span id="sbQQ">—</span></span>
+  <span class="chip"><span class="dot" id="sbDshDot"></span><b>DSH</b><span id="sbDsh">—</span></span>
+  <span class="chip"><b>模式</b><span id="sbMode">—</span></span>
+  <span class="chip"><b>版本</b><span id="sbVers">—</span></span>
+</footer>
+
+<dialog id="confirmDlg">
+  <h3 id="dlgTitle">确认</h3>
+  <p id="dlgText"></p>
+  <div class="row"><button id="dlgCancel">取消</button><button class="danger solid" id="dlgOk">确定</button></div>
+</dialog>
+<div id="toast" aria-live="polite"></div>
+
+<script src="/control-center/app.js"></script>
+</body>
+</html>

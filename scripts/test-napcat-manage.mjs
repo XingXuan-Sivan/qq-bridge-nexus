@@ -142,7 +142,7 @@ test('控制中心：NapCat 设置经接口保存到 state/control-center.json�
 });
 
 test('页面：NapCat 区有版本、检查更新、下载页、设置（QQ.app / 启动文件 / 目录 + 浏览…）；浏览走 /api/pick 的固定用途', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   for (const id of ['napVer', 'napCheck', 'napOpenDownload', 'napSetPanel', 'napQQAppInput', 'napQQAppBrowse', 'napCmdInput', 'napCmdBrowse', 'napHomeInput', 'napHomeBrowse', 'napSetSave']) assert.ok(html.includes(`id="${id}"`), `缺少 #${id}`);
   for (const purpose of ['napcat-qqapp', 'napcat-command', 'napcat-home']) assert.ok(html.includes(`'${purpose}'`), `浏览用途 ${purpose}`);
   assert.ok(!/api\('\/api\/pick', \{[^}]*title/.test(html), '页面不传标题等任意参数');
@@ -196,7 +196,7 @@ test('控制中心：不在等扫码时二维码接口给 404，需要令牌；�
 });
 
 test('页面：NapCat 程序区始终找得到（本机占位项 + 开启卡上的跳转按钮）；等扫码时卡片提示并显示二维码', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   assert.match(html, /const LOCAL_NAP = \{ id: '本机 NapCat 程序', provider: 'napcat'/);
   assert.match(html, /function goToNapcat\(\)[\s\S]*mainTabs\.select\('tab-platform'\)[\s\S]*platformTabs\.select\('ptab-instances'\)/);
   assert.ok(html.includes('管理 NapCat 程序 →') && html.includes('查看登录二维码 →'));
@@ -236,7 +236,7 @@ function fakeDom() {
 }
 
 test('NapCat 日志：二维码以小图条目插入；新图来了旧图标成已过期；清屏照常；下载日志只写文字不写图片数据', async () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   const dom = fakeDom();
   const ctx = {
     document: dom.document, Blob: dom.Blob, URL: dom.URL, Date,
@@ -272,7 +272,7 @@ test('NapCat 日志：二维码以小图条目插入；新图来了旧图标成�
 });
 
 test('页面接线：拿到新二维码时同时更新顶部面板和日志小图，登录后 / 停止后把日志里的图标成过期', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   const fn = extractFn(html, 'renderNapQr');
   assert.match(fn, /\$\('napQrImg'\)\.src = url;[\s\S]*napLog\.addImage\(/);
   assert.match(fn, /napLog\.expireImages\('已过期，已换新二维码', q\.updatedAt\)/);

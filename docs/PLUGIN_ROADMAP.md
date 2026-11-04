@@ -353,7 +353,7 @@ public/console/
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
 3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`，`index.html` 里先于 `app.css` 加载）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，`app.css` 不再出现 `#section-*` 选择器。剩下的第二步：把剩余的 `app.css`（约 1800 行）按 `base/layout/components` 再分文件，407 处内联宽度改工具类后再动 CSP。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04：`public/console/img/favicon.svg` 为 32×32、深色圆角底 + 品牌蓝紫渐变 `q↗`，`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、915 字节；静态测试加 4 条断言兜住它不被误删）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
-5. `3.5 控制中心`：`public/control-center.html` 按**B 档**独立目录化，**不并入** `pages/`；与 console 共享同一份 `app/styles/tokens.css`。详见本节「3.5 启动器控制中心」。
+5. `3.5 控制中心`（✅ 2026-11-04）：`public/control-center.html` 已按**B 档**拆成 `public/control-center/{index.html,app.css,app.js}`，**不并入** `pages/`；控制中心样式独立（`tokens.css` 共享为后续项）。详见本节「3.5 启动器控制中心」。
 
 - 测试与夹具影响（已在 3.1 落地）：`console-source.mjs` 拼 index + css + js + `pages/*/{html,css,js}`；`console-ui-fixture.mjs` 按路径返回 `pages/<id>/page.{html,css,js}`；`test-console-static.mjs` 改为断言片段存在、index 对应 section 为空、路由器有 `hydratePage`。
 - **代价**：每页首次进入多 1 次片段请求（约 2–6 KB，浏览器缓存 + 内存 Map 兜底）；拆 15 页 + 2036 行 CSS 预计 6–8 个提交，每步保持 77/80 基线；迁移期页面结构会动，需逐页截图比对。
@@ -361,7 +361,7 @@ public/console/
 
 **3.5 启动器控制中心（B 档：独立目录化，不并入 console）**
 
-`public/control-center.html`（1280 行 / 97 KB，单个 `<style>` + 单个 `<script>`，0 个 `<link>`）是**启动器**页面，由 `src/launcher/control-center.mjs` 独立进程在 `127.0.0.1:3099` 托管（`PAGE_FILE` 见该文件 `:49`，`:592` 直接 `readFileSync`+`res.end`），用自己的 `state/control-center-token`（经地址 `#t=` 片段传给页面）与自己的 `state/control-center.json`/`.lock`。它负责启动/停止桥接、看四路日志、NapCat 扫码、SnowLuma 安装与迁移，因此**必须在桥接未运行或已崩溃时可用**。
+原 `public/control-center.html`（1280 行 / 97 KB，单个 `<style>` + 单个 `<script>`，0 个 `<link>`）是**启动器**页面，由 `src/launcher/control-center.mjs` 独立进程在 `127.0.0.1:3099` 托管（`PAGE_FILE` 见该文件 `:49`），用自己的 `state/control-center-token`（经地址 `#t=` 片段传给页面）与自己的 `state/control-center.json`/`.lock`。它负责启动/停止桥接、看四路日志、NapCat 扫码、SnowLuma 安装与迁移，因此**必须在桥接未运行或已崩溃时可用**。现已拆成 `public/control-center/{index.html,app.css,app.js}`（见下「已完成」）。
 
 - 不并入 `pages/` 的四条硬理由：① 可用性边界相反（console 以桥接在跑为前提）；② 令牌体系不同（`x-console-token` vs 控制中心令牌 + `#t=`）；③ 宿主不同（launcher 没有 `/console/*` 静态路由，并进去等于复制一份 `src/http/static.mjs` 守卫）；④ 打包与测试按单文件引用它（`build-{linux-service,mac-app,release}.mjs`；`test-control-center` / `test-napcat-manage` / `test-platform` / `test-linux-support` / `test-mac-app`）。
 - 目标结构（与 console 同一套目录约定，但独立托管）：
@@ -370,15 +370,15 @@ public/console/
     console/{index.html,favicon.svg,app/styles/tokens.css,pages/<id>/…}
     control-center/{index.html,app.css,app.js}   ← 原 control-center.html 拆三件
   ```
-  `tokens.css` 是唯一色板来源，两个页面都 `<link>` 它；控制中心其余样式留 `public/control-center/app.css`，不跨目录 import console 的页面/组件样式。
-- launcher 改动：把 `PAGE_FILE` 单文件直出改成「`/control-center/{index.html,app.css,app.js}` 三个白名单路径 + 复用 `resolveStaticPath`（前缀锁死 `/control-center/`）」，其余路由与令牌逻辑不动；缺文件时仍返回 `控制中心页面缺失` 文案。
-- 影响面清单（一次提交内改完）：
-  1. `src/launcher/control-center.mjs`：静态服务 + 缺文件兜底；
-  2. `scripts/build-linux-service.mjs`、`build-mac-app.mjs`、`build-release.mjs`：产物拷贝路径从单文件改为目录（3 处）；
-  3. `scripts/test-control-center.mjs`、`test-napcat-manage.mjs`、`test-platform.mjs`、`test-linux-support.mjs`、`test-mac-app.mjs`：断言目标文件改为 `public/control-center/index.html`（5 处）；
-  4. `docs/FOLDER_MAP.md`、`README.md`、`docs/guides/CONTROL_CENTER.md`：路径说明；
-  5. `CHANGELOG.md` 一条。
-- 验收：控制中心在桥接**停止**状态仍能打开并启动桥接；`#t=` 令牌、锁文件、设置读写不回归；`/api/*` 全量路由不回归；两个页面色板来自同一 `tokens.css`；`test:audit` 不低于当前基线（77/80）。
+  `tokens.css` 是唯一色板来源，两个页面最终都 `<link>` 它（控制中心目前仍用自带 `app.css`，色值对齐在后续项）；控制中心其余样式留 `public/control-center/app.css`，不跨目录 import console 的页面/组件样式。
+- launcher 改动（已完成）：`PAGE_FILE` 指向 `public/control-center/index.html`；新增 GET `/control-center/*` 静态路由，复用 `resolveStaticPath`（前缀锁死 `/control-center/`）与 `serveStaticFile`，穿越一律 404；其余路由与令牌逻辑不动；缺文件时返回「控制中心页面缺失：public/control-center/index.html」。
+- 影响面清单（实际落地）：
+  1. `src/launcher/control-center.mjs`：`PAGE_FILE` 改目录内 index + 静态服务 + 缺文件兜底；
+  2. 打包：`build-release.mjs` 用 `git ls-files` 收文件，新目录随提交自动进包，**无需改路径**；
+  3. 测试：`test-control-center` / `test-napcat-manage` / `test-platform` / `test-linux-support` 的读取改为「`index.html` + `'\n'` + `app.js`」拼接（保留对 DOM 与脚本的原有断言），共 8 处；
+  4. 文档：`docs/FOLDER_MAP.md`、本文件、`interface-platform/docs/MILESTONES.md`、`CHANGELOG.md`；
+  5. `CHANGELOG.md` 一条（见下）。
+- 验收（实测）：`GET /` 200 `text/html` 25073 字节；`/control-center/app.css` 200 12287；`/control-center/app.js` 200 60543；`/control-center/favicon.svg` 200 915；`/control-center/../../state/console-token` **404**；无头 Edge 打开页面（`#t=` 令牌）零异常，`app.css` 129 条规则生效、`#bridgeStart`/`#consoleOpen`/`#tab-platform` 均在；`test-napcat-manage` 13/13、`test-platform` 8/8、`test-linux-support` 9/9、`test-control-center` 20/21（失败项是改动前就存在的第 20 条 SnowLuma 迁移用例）。
 - 不做：把启动/修复能力搬进 console；给 launcher 引入构建步骤；把控制中心的 token 与 console token 合并。
 - **顺序**：放在 3.1–3.4 之后（3.5），因为「唯一色板 `tokens.css`」要等 3.3 样式分家落地后才存在。
 

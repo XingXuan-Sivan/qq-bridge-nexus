@@ -275,7 +275,7 @@ test('L6：AI 可达的代码里没有 SnowLuma 进程控制；控制中心不�
 });
 
 test('控制中心：「打开桥接控制台」在桥接卡片里（启动与重启之间），令牌只经鉴权的 POST 交给页面', async () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   const head = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
   assert.ok(!head.includes('打开桥接控制台'), '顶栏不再放这个按钮');
   const iStart = html.indexOf('id="bridgeStart"'); const iOpen = html.indexOf('id="consoleOpen"'); const iRestart = html.indexOf('id="bridgeRestart"');
@@ -374,7 +374,7 @@ test('控制中心：选择缺数据的新目录时先不切换、返回迁移�
 });
 
 test('页面：选择目录收到迁移提醒时，先建议「去迁移」（填好新目录、打开更新助手），不迁移要再确认一次才带 force 切换', () => {
-  const html = fs.readFileSync(path.join(root, 'public', 'control-center.html'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   const fn = html.slice(html.indexOf("$('snowUse').onclick"), html.indexOf("$('snowChange').onclick"));
   assert.match(fn, /if \(r\?\.needMigrate\)/);
   assert.match(fn, /'去迁移（推荐）'/);

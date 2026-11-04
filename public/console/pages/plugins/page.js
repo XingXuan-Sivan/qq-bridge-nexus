@@ -53,7 +53,7 @@ async function openPluginDetail(id) {
       `权限：${(plugin.permissions || []).join(', ') || '—'}`,
       `钩子：${(plugin.hooks || []).join(', ') || '—'}`,
       `命令：${(plugin.commands || []).join(', ') || '—'}`,
-      `注入块：${(plugin.blocks || []).join(', ') || '—'}`,,
+      `注入块：${(plugin.blocks || []).join(', ') || '—'}`,
       `入口：${plugin.source?.dir || '—'} / ${plugin.source?.main || '—'}`,
       `调用 ${plugin.counters?.hookCalls ?? 0} 次 · 失败 ${plugin.counters?.hookErrors ?? 0} 次 · 重载 ${plugin.counters?.reloads ?? 0} 次`,
       plugin.updatedAt ? `最近变更：${plugin.updatedAt}` : '',
@@ -263,6 +263,10 @@ async function savePluginPersistEnabled() {
 
 /** 绑定事件、注册刷新回调，并做首次加载。入口脚本启动时调一次。 */
 export function init() {
+  // 详情弹窗的遮罩必须挂在 body 上：片段注入在 .card 里，而 .card 有动画/滤镜，
+  // 会给 position:fixed 造出包含块，遮罩就只盖住卡片、盖不住整页。
+  const overlay = document.getElementById('pluginDetailOverlay');
+  if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-plugin-action]');
     if (!button) return;

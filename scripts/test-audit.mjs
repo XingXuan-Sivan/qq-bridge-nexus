@@ -89,6 +89,8 @@ const tests = [
   'test-command-registry.mjs',
   // 会话重置（P7 第三步）：逐桶清理、落盘/停 DSH/回执的顺序、停止失败不阻断归档。
   'test-session-reset.mjs',
+  // 会话准入闸门（P7 第三步）：白名单/deny 优先级、closed-agent 只放行 owner 私聊、key 形态校验。
+  'test-session-mode-gate.mjs',
   'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',

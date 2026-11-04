@@ -1,0 +1,66 @@
+<section id="section-usage-ledger" data-page="usage" class="card span-all">
+      <h2>令牌与花费</h2>
+      <div class="meta">数据来源是 DSH 会话事件里的 provider usage。<b>累计总量</b>取 <code>tokenUsage</code> 投影（整条会话日志的权威累计，含桥接启动前的历史）；<b>逐轮明细</b>由 <code>assistant/message</code> 的 usage 折叠而来，能追溯到多深取决于会话开场快照带回的历史条数。金额按 DeepSeek 官方价目表折算，区分高峰 / 空闲时段（高峰单价为空闲的 2 倍）。</div>
+      <div class="overview-summary" id="usageSummary">
+        <div class="metric"><span>总花费</span><strong id="metricUsageCost">—</strong><small id="metricUsageCostHint">读取中…</small></div>
+        <div class="metric"><span>累计 token</span><strong id="metricUsageTokens">—</strong><small id="metricUsageTokensHint">输入 / 输出</small></div>
+        <div class="metric"><span>缓存命中率</span><strong id="metricUsageHitRate">—</strong><small id="metricUsageHitHint">命中输入 ÷ 总输入</small></div>
+        <div class="metric"><span>平均每轮</span><strong id="metricUsagePerTurn">—</strong><small id="metricUsagePerTurnHint">按已归属回合</small></div>
+      </div>
+      <div class="row usage-controls">
+        <button id="usageRefresh" class="small">刷新</button>
+        <button id="usageClear" class="small danger">清空账本</button>
+        <span class="meta" id="usageMsg">读取中…</span>
+      </div>
+      <h3 class="usage-h3">消耗走势</h3>
+      <div class="row usage-chart-controls" id="usageChartControls">
+        <span class="meta">时间范围</span>
+        <button class="tag active" data-usage-hours="24">近 24 小时</button>
+        <button class="tag" data-usage-hours="72">近 3 天</button>
+        <button class="tag" data-usage-hours="168">近 7 天</button>
+        <button class="tag" data-usage-hours="720">近 30 天</button>
+        <span class="meta">纵轴</span>
+        <button class="tag active" data-usage-metric="cost">花费</button>
+        <button class="tag" data-usage-metric="tokens">token</button>
+      </div>
+      <div class="usage-chart-head">
+        <strong id="usageChartTotal">—</strong>
+        <span class="meta" id="usageChartHint">读取中…</span>
+      </div>
+      <div class="usage-chart" id="usageChart">加载中…</div>
+      <div class="usage-legend">
+        <span><i class="off"></i>空闲时段</span>
+        <span><i class="peak"></i>高峰时段（单价 ×2）</span>
+        <span><i class="mixed"></i>跨时段</span>
+      </div>
+      <div class="meta" id="usageChartNote" style="margin-top:6px"></div>
+      <h3 class="usage-h3">按会话（群 / 私聊）</h3>
+      <div class="tool-log-table" id="usageConversations">加载中…</div>
+      <h3 class="usage-h3">逐轮花费 <span class="meta" id="usageTurnScope">—</span></h3>
+      <div class="row usage-controls">
+        <label class="sr-only" for="usageKeySelect">选择要查看逐轮明细的会话</label>
+        <select id="usageKeySelect"></select>
+        <button id="usageTurnsLoad" class="small">加载逐轮明细</button>
+      </div>
+      <div class="tool-log-table" id="usageTurns">选择会话后加载逐轮明细…</div>
+      <details class="settings-group"><summary>最近调用流水（实时，最新 40 条）</summary><div class="settings-content">
+      <div class="tool-log-table" id="usageRecent">（空）</div>
+      </div></details>
+      <details class="settings-group"><summary>当前生效的价目表</summary><div class="settings-content">
+      <div id="usagePrices" class="meta">读取中…</div>
+      </div></details>
+    </section>
+<section id="section-compact" data-page="usage" class="card span-all">
+      <h2>上下文压缩</h2>
+      <div class="meta">QQ 会话一直不重建，历史越攒越长；每一步模型都要把整段历史重读一遍，读得越多越贵。压缩会把较早的历史换成一段摘要，最近约 15 万 token 原样保留；人际关系、群档案、黑话表、表情说明都存在桥接自己这边，不受影响。</div>
+      <div style="margin-top:10px">
+        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="early"> 提前压缩：上一步读到 <input type="number" id="compactWan" min="5" max="80" step="1" style="width:70px" aria-label="压缩阈值（万 token）"> 万 token 时压缩</label>
+        <div class="meta" style="margin:2px 0 8px 26px">默认 30 万。数字越小越省钱，很早以前的聊天细节也越早变成摘要；可以填 5～80。每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。</div>
+        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩（约 80 万 token 时）</label>
+        <div class="meta" style="margin:2px 0 0 26px">deepseek-flash 的上下文窗口是 100 万，DSH 在窗口的 80% 左右自己压缩；保留细节最多，但每一步读得最多、最贵。</div>
+      </div>
+      <div class="row" style="margin-top:10px;justify-content:space-between">
+        <span class="meta" style="margin:0" id="compactSessions">—</span>
+        <div class="row"><span class="meta" style="margin:0" id="compactMsg"></span><button id="compactSave">保存压缩设置</button></div>
+      </div>
+    </section>

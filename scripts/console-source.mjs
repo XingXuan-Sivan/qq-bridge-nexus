@@ -13,8 +13,8 @@ export function consoleSourcePaths(root = ROOT) {
     dir,
     index: path.join(dir, 'index.html'),
     cssDir,
-    // 样式按加载顺序列出：tokens → base → layout → components（3.3 第二步拆分后的四件）。
-    css: ['tokens.css', 'base.css', 'layout.css', 'components.css'].map((name) => path.join(cssDir, name)),
+    // 样式按加载顺序列出：tokens → base → layout → components → utilities。
+    css: ['tokens.css', 'base.css', 'layout.css', 'components.css', 'utilities.css'].map((name) => path.join(cssDir, name)),
     jsDir: path.join(dir, 'js'),
     js: path.join(dir, 'js', 'app.js'),
     pagesDir: path.join(dir, 'pages'),

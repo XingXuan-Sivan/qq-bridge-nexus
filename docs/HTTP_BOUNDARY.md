@@ -78,7 +78,7 @@ const SECURITY_HEADERS = {
 };
 ```
 
-控制台已拆成 `public/console/index.html` + `css/{tokens,base,layout,components}.css` + `js/*.js`，但 `unsafe-inline` 仍在：`index.html` 里还有一小段内联的主题脚本（防首屏闪白）和若干内联 `style="..."` 属性。下一步是把主题脚本改成外部 module、内联样式收敛成 class，然后才能去掉 `unsafe-inline`。
+控制台已拆成 `public/console/index.html` + `css/{tokens,base,layout,components,utilities}.css` + `js/*.js`。HTML 里的内联 `style` 已从 407 处降到 19 处（剩下的都是 JS 切 `display` 的元素，见 `docs/PLUGIN_ROADMAP.md` §8.7 的 3.3 第三步），但 `unsafe-inline` 仍不能去掉，还差两段：① `index.html` 里那一小段内联主题脚本（防首屏闪白）；② JS 拼模板里的内联 `style`（表格列宽、动态行）与 26 处 `el.style.display`。下一步是把主题脚本改成外部 module、表格列宽改 CSS 类或 `<col>`、显隐改 `hidden` 属性，然后才能去掉 `unsafe-inline`。
 
 ### 目标（前端分层完成后）
 

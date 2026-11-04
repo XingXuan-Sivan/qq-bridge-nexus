@@ -10,6 +10,12 @@
 - 拆分脚本先断言「三件按序拼接 === 原文件（逐字节）」再落盘，级联顺序与拆分前完全一致；实测样式规则总数 296 条、概览页几何（模式卡 `y=484 / w=1086`）、深浅色令牌值全部不变。
 - `scripts/console-source.mjs` 改为按顺序拼接四件样式；`console-ui-fixture.mjs` 逐个分发；`test-console-static` 的样式断言改为「三件存在、不含令牌、加载顺序正确、页面私有规则归属不变」。
 
+### 重构：内联样式收口到工具类（3.3 收尾，2026-11-04）
+- 新增 `public/console/css/utilities.css`（57 个工具类，最后加载）：把 HTML 里 407 处内联 `style` 中的 **388 处**换成 `.u-w-80` / `.u-flex-1` / `.u-mt-8` / `.u-m-0` / `.u-flex-basis-220` / `.u-between` 这一类工具类，覆盖 `index.html` 与 15 个 `pages/<id>/page.html`。
+- 只映射纯静态属性（宽度、flex、外边距、gap、文字对齐），不把主题色与组件样式塞进工具类；含 `display:` 的 19 处保持内联——这些元素由 JS 切 `display` 隐藏/展开，换类会和 `el.style.display` 打架。
+- 实测：`u-w-*` 宽度、`u-flex-1` 的 `flex-grow`、`u-mt-*` 外边距全部按预期生效；概览（模式卡 `y=484 / w=1086`）、插件、定时任务三页几何与转换前一致，零异常。`test-console-static` 增断言：工具类文件存在、加载顺序最后、HTML 内联宽度为 0、剩余内联 ≤20 处。
+- **CSP 还没到**：JS 拼的模板里仍有内联 `style`（`ui.js:100` 表格列宽、`pages/behaviors/page.js:24-26` 写死列宽、插件/黑话页动态行）与 26 处 `el.style.display`；下一步把这些也搬走，才能去掉 `style-src 'unsafe-inline'`。
+
 ### 重构：启动器控制中心拆成三件套（3.5，2026-11-04）
 - `public/control-center.html`（单文件 1280 行，样式与脚本全内联）拆为 `public/control-center/{index.html,app.css,app.js}`，并复制一份 `favicon.svg`；页面结构与行为不变，只把内联块换成 `<link>` 与 `<script src>`。
 - `src/launcher/control-center.mjs`：`PAGE_FILE` 指向目录内的 `index.html`，新增 `GET /control-center/*` 静态路由（复用 `src/http/static.mjs` 的 `resolveStaticPath` + `serveStaticFile`，前缀锁死、穿越 404）；其余路由、`#t=` 令牌、锁文件与 `/api/*` 逻辑不动。

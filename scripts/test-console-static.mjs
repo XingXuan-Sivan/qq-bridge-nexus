@@ -145,10 +145,34 @@ ok(/^\* \{\n\s+box-sizing:border-box/m.test(layerText['base.css']) && /^html \{/
   'base.css 承载盒模型重置与 html/body 基线');
 ok(/\.sidebar \{/.test(layerText['layout.css']) && /\.workspace \{/.test(layerText['layout.css']), 'layout.css 承载三容器外壳');
 ok(/\.card \{/.test(layerText['components.css']) && /\.modal-overlay \{/.test(layerText['components.css']), 'components.css 承载卡片与弹窗');
-const linkOrder = ['tokens.css', 'base.css', 'layout.css', 'components.css']
+const linkOrder = ['tokens.css', 'base.css', 'layout.css', 'components.css', 'utilities.css']
   .map((name) => html.indexOf(`<link rel="stylesheet" href="/console/css/${name}">`));
 ok(linkOrder.every((at) => at >= 0) && linkOrder.every((at, i) => i === 0 || at > linkOrder[i - 1]),
-  'index.html 按 tokens → base → layout → components 的顺序加载样式');
+  'index.html 按 tokens → base → layout → components → utilities 的顺序加载样式');
+const utilitiesPath = path.join(cssDir, 'utilities.css');
+ok(fs.existsSync(utilitiesPath), 'utilities.css 存在（内联样式的收口层）');
+const utilities = fs.existsSync(utilitiesPath) ? fs.readFileSync(utilitiesPath, 'utf8') : '';
+ok(/\.u-flex-1 \{/.test(utilities) && /\.u-w-80 \{/.test(utilities) && /\.u-mt-8 \{/.test(utilities),
+  'utilities.css 提供 flex / 宽度 / 外边距三类工具类');
+// 内联 style 只剩「JS 会切 display」的少量元素；其余一律走工具类。
+const inlineTotal = (() => {
+  const files = [path.join(ROOT, 'public', 'console', 'index.html')];
+  for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
+    const file = path.join(ROOT, 'public', 'console', 'pages', id, 'page.html');
+    if (fs.existsSync(file)) files.push(file);
+  }
+  return files.reduce((n, file) => n + (fs.readFileSync(file, 'utf8').match(/style="/g)?.length ?? 0), 0);
+})();
+ok(inlineTotal <= 20, `内联 style 已收敛（剩 ${inlineTotal} 处，都是 JS 切 display 的元素）`);
+const inlineWidthInHtml = (() => {
+  const files = [path.join(ROOT, 'public', 'console', 'index.html')];
+  for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
+    const file = path.join(ROOT, 'public', 'console', 'pages', id, 'page.html');
+    if (fs.existsSync(file)) files.push(file);
+  }
+  return files.reduce((n, file) => n + (fs.readFileSync(file, 'utf8').match(/style="[^"]*\bwidth:\d+px/g)?.length ?? 0), 0);
+})();
+ok(inlineWidthInHtml === 0, `HTML 里不再用内联 style 写固定宽度（剩 ${inlineWidthInHtml} 处）`);
 const overviewPageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'overview', 'page.css'), 'utf8');
 ok(/#section-silent \{/.test(overviewPageCss) && /@media \(max-width:760px\) \{/.test(overviewPageCss), '概览页私有规则（含窄屏覆盖）在 pages/overview/page.css');
 const usagePageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'usage', 'page.css'), 'utf8');

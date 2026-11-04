@@ -11,7 +11,7 @@
 
       <!-- 候选词面板 -->
       <div class="slang-panel active" id="slangPanelCandidate">
-        <div class="row" style="margin-top:8px">
+        <div class="row u-mt-8">
           <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangCandidateSelectAll"> 全选</label>
           <button id="slangBatchResearch" class="small">批量送 DSH 深度研究</button>
           <button id="slangBatchConfirm" class="small">批量确认（有含义）</button>
@@ -20,9 +20,9 @@
           <button id="slangExtract" class="small">立即提取候选</button>
           <button id="slangResearch" class="small">研究全部候选</button>
         </div>
-        <div class="row" style="margin-top:8px">
-          <input type="text" id="slangSearchCand" placeholder="搜索词条 / 草稿含义 / 语境证据" style="flex:1">
-          <select id="slangLimitCand" style="width:110px">
+        <div class="row u-mt-8">
+          <input class="u-flex-1" type="text" id="slangSearchCand" placeholder="搜索词条 / 草稿含义 / 语境证据">
+          <select class="u-w-110" id="slangLimitCand">
             <option value="50">每页 50</option>
             <option value="100" selected>每页 100</option>
             <option value="200">每页 200</option>
@@ -34,13 +34,13 @@
 
       <!-- 已确认面板 -->
       <div class="slang-panel" id="slangPanelConfirmed">
-        <div class="row" style="margin-top:8px">
+        <div class="row u-mt-8">
           <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangConfirmedSelectAll"> 全选</label>
           <button id="slangBatchDeleteConfirmed" class="small danger">批量删除已确认</button>
         </div>
-        <div class="row" style="margin-top:8px">
-          <input type="text" id="slangSearchConfirmed" placeholder="搜索词条 / 含义 / 用法 / 示例 / 来源" style="flex:1">
-          <select id="slangLimitConfirmed" style="width:110px">
+        <div class="row u-mt-8">
+          <input class="u-flex-1" type="text" id="slangSearchConfirmed" placeholder="搜索词条 / 含义 / 用法 / 示例 / 来源">
+          <select class="u-w-110" id="slangLimitConfirmed">
             <option value="50">每页 50</option>
             <option value="100" selected>每页 100</option>
             <option value="200">每页 200</option>
@@ -52,14 +52,14 @@
 
       <!-- 已拒绝面板 -->
       <div class="slang-panel" id="slangPanelRejected">
-        <div class="row" style="margin-top:8px">
+        <div class="row u-mt-8">
           <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="slangRejectedSelectAll"> 全选</label>
           <button id="slangBatchRestore" class="small">恢复为候选</button>
           <button id="slangBatchDeleteRejected" class="small danger">批量删除已拒绝</button>
         </div>
-        <div class="row" style="margin-top:8px">
-          <input type="text" id="slangSearchRejected" placeholder="搜索词条 / 拒绝原因" style="flex:1">
-          <select id="slangLimitRejected" style="width:110px">
+        <div class="row u-mt-8">
+          <input class="u-flex-1" type="text" id="slangSearchRejected" placeholder="搜索词条 / 拒绝原因">
+          <select class="u-w-110" id="slangLimitRejected">
             <option value="50">每页 50</option>
             <option value="100" selected>每页 100</option>
             <option value="200">每页 200</option>
@@ -70,45 +70,45 @@
       </div>
 
       <div class="divider"></div>
-      <div class="meta" style="margin-bottom:6px">手动添加黑话</div>
+      <div class="meta u-mb-6">手动添加黑话</div>
       <div class="row">
-        <input type="text" id="slangContent" placeholder="词条，如：绝绝子" style="flex:1">
-        <input type="text" id="slangMeaning" placeholder="含义，如：很好、很棒" style="flex:1">
+        <input class="u-flex-1" type="text" id="slangContent" placeholder="词条，如：绝绝子">
+        <input class="u-flex-1" type="text" id="slangMeaning" placeholder="含义，如：很好、很棒">
       </div>
-      <div class="row" style="margin-top:6px">
-        <input type="text" id="slangUsage" placeholder="用法（可选）" style="flex:1">
-        <input type="text" id="slangExample" placeholder="示例（可选）" style="flex:1">
+      <div class="row u-mt-6">
+        <input class="u-flex-1" type="text" id="slangUsage" placeholder="用法（可选）">
+        <input class="u-flex-1" type="text" id="slangExample" placeholder="示例（可选）">
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row u-mt-8">
         <button id="slangAdd" class="small">添加入库（确认）</button>
       </div>
-      <details style="margin-top:10px">
+      <details class="u-mt-10">
         <summary class="meta">黑话系统参数（可调）</summary>
         <div class="row">
-          <label style="flex:1">启用黑话学习</label><input type="checkbox" id="slangEnabled" style="width:auto">
+          <label class="u-flex-1">启用黑话学习</label><input class="u-w-auto" type="checkbox" id="slangEnabled">
         </div>
         <div class="row">
-          <label style="flex:1">触发提取最少消息数</label><input type="number" id="slangExtractMin" min="1" style="width:90px">
+          <label class="u-flex-1">触发提取最少消息数</label><input class="u-w-90" type="number" id="slangExtractMin" min="1">
         </div>
         <div class="row">
-          <label style="flex:1">提取冷却（毫秒）</label><input type="number" id="slangCooldown" min="0" step="1000" style="width:110px">
+          <label class="u-flex-1">提取冷却（毫秒）</label><input class="u-w-110" type="number" id="slangCooldown" min="0" step="1000">
         </div>
         <div class="row">
-          <label style="flex:1">研究触发阈值（逗号分隔）</label><input type="text" id="slangThresholds" placeholder="2,4,8" style="width:120px">
+          <label class="u-flex-1">研究触发阈值（逗号分隔）</label><input class="u-w-120" type="text" id="slangThresholds" placeholder="2,4,8">
         </div>
         <div class="row">
-          <label style="flex:1">注入最大条数</label><input type="number" id="slangInjectMax" min="1" max="30" style="width:90px">
+          <label class="u-flex-1">注入最大条数</label><input class="u-w-90" type="number" id="slangInjectMax" min="1" max="30">
         </div>
         <div class="row">
-          <label style="flex:1">学习会话 preset</label><input type="text" id="slangLearnerPreset" placeholder="qq-chat" style="width:120px">
+          <label class="u-flex-1">学习会话 preset</label><input class="u-w-120" type="text" id="slangLearnerPreset" placeholder="qq-chat">
         </div>
         <div class="row">
-          <label style="flex:1">学习工作区名</label><input type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习" style="width:120px">
+          <label class="u-flex-1">学习工作区名</label><input class="u-w-120" type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习">
         </div>
         <div class="row">
-          <label style="flex:1">自动联网研究</label><input type="checkbox" id="slangAutoResearch" style="width:auto">
+          <label class="u-flex-1">自动联网研究</label><input class="u-w-auto" type="checkbox" id="slangAutoResearch">
         </div>
-        <div class="row" style="margin-top:8px">
+        <div class="row u-mt-8">
           <button id="slangConfigSave" class="small">保存黑话参数</button>
           <span class="meta" id="slangConfigMsg"></span>
         </div>

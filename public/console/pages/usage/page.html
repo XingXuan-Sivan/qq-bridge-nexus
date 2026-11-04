@@ -33,7 +33,7 @@
         <span><i class="peak"></i>高峰时段（单价 ×2）</span>
         <span><i class="mixed"></i>跨时段</span>
       </div>
-      <div class="meta" id="usageChartNote" style="margin-top:6px"></div>
+      <div class="meta u-mt-6" id="usageChartNote"></div>
       <h3 class="usage-h3">按会话（群 / 私聊）</h3>
       <div class="tool-log-table" id="usageConversations">加载中…</div>
       <h3 class="usage-h3">逐轮花费 <span class="meta" id="usageTurnScope">—</span></h3>
@@ -53,14 +53,14 @@
 <section id="section-compact" data-page="usage" class="card span-all">
       <h2>上下文压缩</h2>
       <div class="meta">QQ 会话一直不重建，历史越攒越长；每一步模型都要把整段历史重读一遍，读得越多越贵。压缩会把较早的历史换成一段摘要，最近约 15 万 token 原样保留；人际关系、群档案、黑话表、表情说明都存在桥接自己这边，不受影响。</div>
-      <div style="margin-top:10px">
-        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="early"> 提前压缩：上一步读到 <input type="number" id="compactWan" min="5" max="80" step="1" style="width:70px" aria-label="压缩阈值（万 token）"> 万 token 时压缩</label>
-        <div class="meta" style="margin:2px 0 8px 26px">默认 30 万。数字越小越省钱，很早以前的聊天细节也越早变成摘要；可以填 5～80。每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。</div>
-        <label class="sched-chip" style="margin:0"><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩（约 80 万 token 时）</label>
-        <div class="meta" style="margin:2px 0 0 26px">deepseek-flash 的上下文窗口是 100 万，DSH 在窗口的 80% 左右自己压缩；保留细节最多，但每一步读得最多、最贵。</div>
+      <div class="u-mt-10">
+        <label class="sched-chip u-m-0"><input type="radio" name="compactMode" value="early"> 提前压缩：上一步读到 <input class="u-w-70" type="number" id="compactWan" min="5" max="80" step="1" aria-label="压缩阈值（万 token）"> 万 token 时压缩</label>
+        <div class="meta u-ml-indent">默认 30 万。数字越小越省钱，很早以前的聊天细节也越早变成摘要；可以填 5～80。每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。</div>
+        <label class="sched-chip u-m-0"><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩（约 80 万 token 时）</label>
+        <div class="meta u-ml-indent-tight">deepseek-flash 的上下文窗口是 100 万，DSH 在窗口的 80% 左右自己压缩；保留细节最多，但每一步读得最多、最贵。</div>
       </div>
-      <div class="row" style="margin-top:10px;justify-content:space-between">
-        <span class="meta" style="margin:0" id="compactSessions">—</span>
-        <div class="row"><span class="meta" style="margin:0" id="compactMsg"></span><button id="compactSave">保存压缩设置</button></div>
+      <div class="row u-mt-10-between">
+        <span class="meta u-m-0" id="compactSessions">—</span>
+        <div class="row"><span class="meta u-m-0" id="compactMsg"></span><button id="compactSave">保存压缩设置</button></div>
       </div>
     </section>

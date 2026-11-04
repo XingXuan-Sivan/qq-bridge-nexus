@@ -1,9 +1,9 @@
 // 插件页：加载状态、启停/重载/卸载、安装与运行设置、详情弹窗。
 //
-// 本页自己负责数据与事件：入口只要调一次 initPluginsPage()。
-import { api } from '../api.js';
-import { esc, showConsoleToast } from '../ui.js';
-import { getCurrentPage, onPageRefresh } from '../router.js';
+// 本页自己负责数据与事件：路由器注入片段后调一次 init()。
+import { api } from '../../js/api.js';
+import { esc, showConsoleToast } from '../../js/ui.js';
+import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 // ── 桥接插件 ────────────────────────────────────────────────────────────────
 // 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。
@@ -262,7 +262,7 @@ async function savePluginPersistEnabled() {
 }
 
 /** 绑定事件、注册刷新回调，并做首次加载。入口脚本启动时调一次。 */
-export function initPluginsPage() {
+export function init() {
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-plugin-action]');
     if (!button) return;

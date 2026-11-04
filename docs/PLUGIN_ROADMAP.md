@@ -318,7 +318,7 @@
 - `js/router.js`：`consolePages` 页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；数据刷新改成页面用 `onPageRefresh(page, fn)` 注册回调，路由器不再反向依赖页面模块。
 - `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
 - 待办（第三阶段，方案已定、未动工）：页面目录化 `pages/<id>/{page.html,page.css,page.js}`、公用层移到 `app/{core,ui,styles}`、favicon、CSP 去 `unsafe-inline`。详见本节「第三阶段」。
-- 第二阶段剩余：第三阶段已搬走 15 个页面（技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批 / 运行总览；插件页逻辑在 `js/pages/plugins.js`，DOM 仍静态保留），其余 0 个页面逻辑仍留在 `app.js`；`js/store.js`（跨页共享状态）暂不做，等有真实共享状态再加。
+- 第二阶段剩余：第三阶段已搬走 15 个页面（技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批 / 运行总览 / 插件），全部页面都在 `public/console/pages/<id>/`，`app.js` 只剩全局状态刷新、搜索、主题与入口装配（约 290 行）；`js/store.js`（跨页共享状态）暂不做，等有真实共享状态再加。
 - 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。**整块搬迁不要用 `@@SLOT@@` 之类的哨兵占位**：脚本替换完忘记回填，裸文本会直接挂在 `main` 下、在每一页都显示（访问与安全页迁移时踩过，2 行残留）；真要占位就用带本页 id 的注释，并让 `test-console-static` 的哨兵断言兜住。
 
 **目标结构（A：原生 ESM + 微运行时，零构建；页面与组件自包含）**

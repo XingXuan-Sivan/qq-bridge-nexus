@@ -34,6 +34,7 @@
 - 回归：无头 Edge 实测技能页「共 1 个技能包」1 行、MCP 页「桥接自带 3 个 MCP server」3 行，控制台无异常。
 
 ### 重构：插件页迁到 pages/plugins.js（2026-11-04）
+- 后续（同日）：插件页也收进自包含目录 `public/console/pages/plugins/`，`js/pages/plugins.js` 删除，`app.js` 不再静态 import 页面模块——控制台 15 个页面至此全部由路由器按需注入。
 - 「桥接插件」页（加载状态、启停/重载/卸载、安装、运行设置、详情弹窗）整段从 `app.js` 搬到 `public/console/js/pages/plugins.js`，导出 `initPluginsPage()` 自己绑事件、注册 `onPageRefresh('plugins')`、做首次加载与 15 秒轮询。
 - 页面模块新增 import 了 `esc`；缺这一条时 `refreshPlugins()` 的 Promise 会被 `.catch(() => {})` 吞掉，页面停在「加载中…」且控制台无报错（无头 Edge 实测复现并修复）。
 - 回归：插件页 meta/卡片/4 个操作按钮渲染正常，详情弹窗可开可关；`test:audit` 77/80（三项既有失败不变）。

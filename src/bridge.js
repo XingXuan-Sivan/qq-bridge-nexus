@@ -127,6 +127,8 @@ import { buildCommandsPayload } from './commands/payload.mjs';
 import { createSessionResetter } from './session/reset.mjs';
 // 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from './session/mode-gate.mjs';
+// sessions.json 的读写与「损坏后不覆盖」不变量（P7 第三步续），见模块头。
+import { loadSessionState, saveSessionState } from './session/store.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -1185,40 +1187,18 @@ let state = { sessions: {} };
 // 与表情库、黑话库一样走「只读不写」降级：保留原文件，等人来处理。
 let stateWritable = true;
 function loadState() {
-  let raw;
-  try {
-    raw = fs.readFileSync(STATE_FILE, 'utf8');
-  } catch (error) {
-    state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
-    if (error?.code !== 'ENOENT') {
-      stateWritable = false;
-      log(`⚠️ sessions.json 读取失败，已降级为「只读不写」（不会覆盖原文件）：${error?.message ?? error}`);
-    }
-    return;
-  }
-  let loaded = null;
-  if (raw.trim() !== '') {
-    try {
-      const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
-      loaded = JSON.parse(text);
-    } catch (error) {
-      state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
-      stateWritable = false;
-      log(`⚠️ sessions.json 内容损坏，已降级为「只读不写」（不会覆盖原文件，请先备份再修复）：${error?.message ?? error}`);
-      return;
-    }
-  }
-  if (loaded && loaded.sessions && typeof loaded.sessions === 'object') state = loaded;
-  else state = { sessions: {} };
-  if (!state.sessionPolicies || typeof state.sessionPolicies !== 'object' || Array.isArray(state.sessionPolicies)) state.sessionPolicies = {};
-  // 模式切换期间休眠的聊天会话（见 src/mode-handover.js）；脏数据丢弃
-  state.dormantSessions = normalizeDormant(state.dormantSessions);
+  const loaded = loadSessionState({
+    file: STATE_FILE,
+    readFile: (file) => fs.readFileSync(file, 'utf8'),
+    log,
+    normalizeDormant,
+  });
+  state = loaded.state;
+  stateWritable = loaded.writable;
 }
 function saveState() {
-  // 统一走原子写：固定 `.tmp` 名 + 无 mode 的手写版本会在外部进程（杀软/备份）
-  // 占住 sessions.json.tmp 时抛 EPERM，且写出的文件权限与其它 state 文件不一致。
-  if (!stateWritable) return; // 见 loadState：读失败/损坏时绝不回写，避免把丢失变成永久
-  atomicWriteJson(STATE_FILE, state);
+  // 统一走原子写；`stateWritable:false`（读失败/损坏）时绝不回写 —— 见 src/session/store.mjs 文件头。
+  saveSessionState({ file: STATE_FILE, atomicWriteJson, state, writable: stateWritable });
 }
 
 // ── 单实例锁 ─────────────────────────────────────────────────────────────────

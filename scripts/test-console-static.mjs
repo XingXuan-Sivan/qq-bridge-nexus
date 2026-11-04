@@ -102,9 +102,9 @@ ok(!/id="breadcrumbPage"/.test(html), '旧的纯文本面包屑 id 已移除');
 ok(/function positionConsoleSearch\(\)/.test(html) && /document\.body\.appendChild\(searchResults\)/.test(html), '搜索候选挂到 body（脱离 page-heading 层叠上下文）');
 ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选改为 fixed 定位');
 
-console.log('## 页面片段（3.1 试点：技能 / MCP / 管理行为）');
+console.log('## 页面片段（技能 / MCP / 管理行为 / 参考 / 访问 / 二代仿真）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['skills', 'mcp', 'behaviors', 'reference', 'access'];
+const pilotIds = ['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
@@ -116,7 +116,7 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['skills', 'mcp', 'behaviors', 'reference', 'access'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\(\['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');

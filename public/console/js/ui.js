@@ -101,3 +101,27 @@ export function simpleTable(columns, rows) {
   const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
+
+export function applyPageA11y(root = document) {
+// 把可访问名称/主次按钮/状态角色补到页面元素上：根层一次，片段页注入后再补一次（router 调用）。
+root.querySelectorAll('input,select,textarea').forEach(input => {
+  if (input.labels?.length || input.hasAttribute('aria-label')) return;
+  let label = input.previousElementSibling;
+  while (label && label.tagName !== 'LABEL') label = label.previousElementSibling;
+  if (label) {
+    const siblings = [];
+    let next = label.nextElementSibling;
+    while (next && next.tagName !== 'LABEL') {
+      if (next.matches('input,select,textarea')) siblings.push(next);
+      next = next.nextElementSibling;
+    }
+    input.setAttribute('aria-label', label.textContent.trim() + (siblings.length > 1 ? (siblings.indexOf(input) === 0 ? '（下限）' : '（上限）') : ''));
+  } else {
+    const names = { consoleTokenInput: '新的控制台访问令牌', closedPreset: '封闭 Agent 使用的 DSH 预设', tsKind: '测试消息目标类型', aiNotifyKind: '后台提醒目标类型', sStateKey: '一代仿真会话', v2SessionSelect: '二代仿真白名单会话', slangLimitCand: '候选词显示数量', slangLimitConfirmed: '已确认词显示数量', slangLimitRejected: '已拒绝词显示数量' };
+    input.setAttribute('aria-label', names[input.id] || input.placeholder || input.closest('section')?.querySelector('h2')?.textContent || '设置');
+  }
+});
+const primaryActions = ['roleSet','roleCreate','socialSave','v2ConfigSave','v2ConfigSaveTop','wlSave','secSave','consoleTokenSave','tsSend','aiNotifySend','slangAdd','slangConfigSave','slangModalDirectConfirm'];
+primaryActions.forEach(id => root.querySelector('#' + id)?.classList.add('primary'));
+root.querySelectorAll('.meta[id$="Msg"], .meta[id$="Msg2"]').forEach(el => el.setAttribute('role','status'));
+}

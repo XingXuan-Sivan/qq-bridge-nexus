@@ -123,5 +123,13 @@ ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html),
 // 整块搬迁用「哨兵」占位是最容易漏的方式：脚本替换完忘了回填，页面就会多出裸文本。
 ok(!/@@[A-Z][A-Z0-9_]*@@/.test(html), '控制台源码没有残留占位哨兵（@@SLOT@@ 之类）');
 
+console.log('## 浏览器标签图标');
+const faviconPath = path.join(ROOT, 'public', 'console', 'img', 'favicon.svg');
+ok(/<link rel="icon" href="\/console\/img\/favicon\.svg" type="image\/svg\+xml">/.test(html), '控制台声明了 SVG favicon');
+ok(fs.existsSync(faviconPath), 'favicon 文件存在（public/console/img/favicon.svg）');
+const favicon = fs.existsSync(faviconPath) ? fs.readFileSync(faviconPath, 'utf8') : '';
+ok(/^<svg [^>]*viewBox="0 0 32 32"/.test(favicon.trim()) && /aria-label="QQ Bridge"/.test(favicon), 'favicon 是可访问的 32×32 SVG');
+ok(!/<script/i.test(favicon) && !/on\w+=/i.test(favicon), 'favicon 不含脚本（可安全内联为图标）');
+
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

@@ -758,7 +758,7 @@ tr:last-child td {
     --topbar-h:54px
   }
   body {
-    grid-template-columns:1fr;
+    grid-template-columns:minmax(0,1fr);
     grid-template-rows:auto minmax(0,1fr)
   }
   .sidebar {
@@ -790,7 +790,9 @@ tr:last-child td {
     gap:5px;
     overflow-x:auto;
     overflow-y:visible;
-    padding-bottom:6px
+    padding-bottom:6px;
+    /* 横向滚动的导航不能把 19 项的 min-content 作为整页宽度往上顶 */
+    min-width:0
   }
   .nav-label,.sidebar-bottom,.nav-icon,.nav-note,.nav-count {
     display:none

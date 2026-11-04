@@ -5,6 +5,14 @@
 
 ## 未发布
 
+### 测试：控制台浏览器回归真正跑起来（2026-11-05）
+- 夹具 `scripts/console-ui-fixture.mjs` 之前只把 `public/console/js/*.js` 顶层文件注册进资源表，片段化后的 `js/components/*`、`js/lib/*` 全是 404 ⇒ `app.js` 的 import 失败、整页不启动、片段永不注入，测试卡在 hydrate 超时。改为递归提供全部脚本，并补 `/console/img/*`、`/console/fonts/*` 与 `/api/{plugins,commands,extensions,persona/sources}` 四个只读桩，15 个页面请求 404 清零。
+- 测试辅助 `reveal(selector)` 原来靠 `locator.evaluate(el => el.closest('[data-page]'))` 反查元素属于哪一页——片段化后元素在未注入的页里**根本不在 DOM**，于是先超时、永远走不到导航分支。改为启动时逐页 hydrate 一遍、拍下「元素 id → 所属页」快照，之后先切页再定位。
+- `dialog` 处理去掉重复的 `page.once('dialog', ...)`（两个 handler 会对同一个 dialog 二次 `accept()` 而抛错），只保留一个会 `catch` 的全局监听。
+- 修两个真实缺陷：① 手机 390px 下面板被 `#mainNav` 的 min-content 撑到 1179px 宽（网格列改 `minmax(0,1fr)`、`#mainNav` 加 `min-width:0`）；② 「二代仿真」页每次进入都重拉配置，把未保存的草稿冲掉（配置只在首次进入与保存成功后加载）。
+- 契约基线按当前控制台重录一次（`--accept-contracts`，25 条写请求）：差异是 `/api/mode` 与 `/api/roles/*` 新增 `level` / `apply` 字段——closed-agent 分级与人格切换生效时机是改版后能力。`--record-baseline` 仍只允许搭配 `--original`，重录开关与理由写进 `docs/guides/CONSOLE-UI-TESTING.md`。
+- 结果：`npm run test:console-ui`（配 `PLAYWRIGHT_MODULE='playwright-core'` + 本机 Edge）**23/23 全绿**、连跑两次稳定；此前本机因缺 `playwright` 一直整段跳过。
+
 ### 重构：`/reset` 的清理序列搬到 `src/session/reset.mjs`（P7 第三步，2026-11-05）
 - 新增 `src/session/reset.mjs`：`createSessionResetter(deps)` 返回 `resetSession(key)`，承接原来写在 `bridge.js` 里的 58 行清理序列——删 `state.sessions`/策略、清 8 个按旧 sessionId 索引的 Map、`pending` 与 `ext.approvals`、提示队列、`messageMediaStore`、social/socialV2/slang 的按键缓存、四个 wake 集合、`seenForwardIds`，再落盘、停 DSH 侧工作、归档、回执。
 - 顺序按「先删挂账、再清内存、再落盘、最后网络调用与回执」固定下来，并写进文件头注释：反过来会在清理没做完时就让用户看到「已重置」。

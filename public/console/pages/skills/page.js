@@ -3,7 +3,8 @@
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
-import { esc, simpleTable } from '../../js/ui.js';
+import { esc } from '../../js/ui.js';
+import { tableHtml } from '../../js/components/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 async function refreshSkills() {
@@ -14,7 +15,7 @@ async function refreshSkills() {
     const skills = data.skills ?? [];
     meta.textContent = skills.length ? `共 ${skills.length} 个技能包` : '没有找到 SKILL.md（DSH_HOME/skills 或仓库 skills/ 下）';
     list.innerHTML = skills.length
-      ? `<div class="tool-log-table">${simpleTable([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
+      ? `<div class="tool-log-table">${tableHtml([{ label: '技能', width: '200px' }, { label: '说明' }, { label: '路径', width: '340px' }],
         skills.map(skill => [`<strong>${esc(skill.name)}</strong>`, esc(skill.description || '（没有 description）'), `<code>${esc(skill.path)}</code>`]))}</div>`
       : '<div class="meta">把技能包放到 DSH 的 skills 目录，或仓库 skills/ 下，刷新即可看到。</div>';
   } catch (error) {

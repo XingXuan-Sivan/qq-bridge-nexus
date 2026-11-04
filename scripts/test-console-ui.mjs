@@ -59,17 +59,30 @@ try {
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('dialog', dialog => dialog.accept());
   await page.goto(fixture.url);
-  await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'qq-chat-v2' && document.getElementById('wlGroups')?.value.includes('123456789'));
+  // 控制台已片段化：各页 HTML 在第一次进入该页时才注入（router.hydratePage）。
+  // 所以这里先逐页 hydrate 一遍，后面「全量 legacy ID 都在」以及按 id 取元素才有东西可取。
+  await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
+  const allPages = await page.evaluate(() => [...document.querySelectorAll('#mainNav [data-view]')].map(node => node.dataset.view));
+  async function hydrate(view) {
+    await page.evaluate(v => { if (location.hash !== `#${v}`) location.hash = `#${v}`; }, view);
+    await page.waitForFunction(v => (document.querySelector(`[data-page="${v}"]`)?.children.length ?? 0) > 0, view);
+  }
+  for (const view of allPages) await hydrate(view);
+  await hydrate('overview');
 
   async function navigate(view) {
     if (original) return;
-    if (await page.locator(`[data-page="${view}"]:visible`).count()) return;
+    if (await page.locator(`[data-page="${view}"]:visible`).count()) {
+      await hydrate(view);
+      return;
+    }
     const nav = page.locator(`[data-view="${view}"]`).first();
     if (!await nav.isVisible()) {
       const toggle = page.locator('#navToggle, [data-nav-toggle], [aria-controls="sidebar"], button[aria-label*="导航"]').first();
       if (await toggle.count()) await toggle.click();
     }
     await nav.click();
+    await hydrate(view);
   }
   async function reveal(selector) {
     const target = page.locator(selector).first();
@@ -114,7 +127,8 @@ try {
     for (const [id, value] of Object.entries(drafts)) assert.equal(await (await reveal(`#${id}`)).inputValue(), value, `${id} lost its draft`);
     // Restore fixture defaults so the independent payload baseline remains deterministic.
     await page.reload();
-    await page.waitForFunction(() => document.getElementById('v2AgentPreset')?.value === 'qq-chat-v2');
+    await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
+    await hydrate('social-v2');
   });
 
   await test('Mode and preset contracts', async () => {
@@ -149,7 +163,7 @@ try {
   // 用户按提示处理后点「重新检测」应当转为成功态。
   await test('Unhardened state directory surfaces a warning with the exact command', async () => {
     await navigate('access');
-    await page.waitForFunction(() => document.getElementById('stateDirWarn')?.style.display !== 'none');
+    await page.waitForFunction(() => document.getElementById('stateDirWarn')?.hidden === false);
     const shown = await page.evaluate(() => ({
       path: document.getElementById('stateDirPath').textContent,
       cmd: document.getElementById('stateDirCmd').textContent,
@@ -164,7 +178,7 @@ try {
       page.click('#stateDirReharden'),
     ]);
     assert.deepEqual(JSON.parse(request.postData() || '{}'), { rehardenStateDir: true });
-    await page.waitForFunction(() => document.getElementById('stateDirWarn')?.style.display === 'none');
+    await page.waitForFunction(() => document.getElementById('stateDirWarn')?.hidden === true);
   });
 
   await test('Second-generation complete save payload, units, zero values and tool switches', async () => {

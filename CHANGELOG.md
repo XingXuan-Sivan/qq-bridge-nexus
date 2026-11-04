@@ -5,6 +5,12 @@
 
 ## 未发布
 
+### 重构：控制台组件层（3.2，2026-11-05）
+- 新增 `public/console/js/components/`：`table.js` 的 `tableHtml(columns, rows)`（由 `ui.js` 的 `simpleTable` 迁出，列宽仍走 `data-w`）、`message.js` 的 `setMsg(target, text, kind)`（把「设文本 + 设 `meta ok|err`」收成一处，22 处调用点全部改用它）、`modal.js` 的 `openModal`/`closeModal`/`isModalOpen`/`wireModal`（统一 `.open` 类与 `aria-hidden`，Esc 与点遮罩关闭）。
+- 插件详情弹窗与黑话模态改走 `wireModal`：前者据此挂到 `document.body`（片段注入在 `.card` 里，`.card` 的 `backdrop-filter` 会给 `fixed` 造包含块，遮罩只盖住卡片）；后者自带 Esc 焦点环，传 `closeOnEscape: false` 避免双重关闭。
+- `ui.js` 只剩 toast、`esc`、tile 列表与 `applyPageA11y`，无调用方的 `renderTable` 删除；三个只读页（技能 / MCP / 管理行为）改用 `tableHtml`。
+- 回归门禁：`test-console-static` 增 12 条组件断言（文件存在、导出签名、页面改用 `tableHtml(`、全局不再有 `className = 'meta ok|err'`）；`test-console-ui` 的片段化选择器改为「先切页再等元素」，两处 `style.display` 断言改成 `hidden` 属性。真机探针验证「点开 / Esc 关 / 点遮罩关 / 黑话页注入」全部通过、零异常。
+
 ### 安全：CSP 去掉 `unsafe-inline`（3.4 收尾，2026-11-05）
 - 控制台彻底外置：HTML 与 15 个页面模块里现在 **0 处内联 `style`**、`index.html` 无内联 `<script>`/`<style>`；主题引导抽成 `public/console/js/theme-boot.js`（同步 `<script src>`，仍放在样式表之前防首屏闪白）。
 - 动态排版改正规路径：表格列宽由内联 `style="width:Npx"` 改成 `data-w="N"`（`components.css` 用 `th[data-w="…"]` 给宽度，`renderTable`/`simpleTable`/管理行为页表头同步）、显隐一律用 `hidden` 属性（`base.css` 的 `[hidden]{display:none!important}` 兜底）、用量页进度条改 `data-pct` + `applyUsageBarWidths()` 用 CSSOM 写宽度——CSP 的 `style-src` 不拦 CSSOM。

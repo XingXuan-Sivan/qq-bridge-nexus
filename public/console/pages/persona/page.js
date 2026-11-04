@@ -3,6 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { setMsg } from '../../js/components/message.js';
 
 // ── 人格管理 ────────────────────────────────────────────────────────────────
 // 人格提示词 = roles/<名称>.md，桥接每条消息注入，保存即生效。
@@ -519,7 +520,7 @@ export function init() {
   document.getElementById('roleInjectMaxSave').addEventListener('click', async () => {
     const msg = document.getElementById('roleInjectMaxMsg');
     const value = Number(document.getElementById('roleInjectMax').value);
-    if (!Number.isFinite(value) || value < 1000 || value > 20000) { msg.textContent = '请输入 1000~20000 之间的整数'; msg.className = 'meta err'; return; }
+    if (!Number.isFinite(value) || value < 1000 || value > 20000) { setMsg(msg, '请输入 1000~20000 之间的整数', 'err'); return; }
     const r = await api('/api/roles/limit', 'POST', { maxInjectChars: value });
     msg.textContent = r.ok ? `✅ 已设为 ${r.maxInjectChars} 字符，下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
     msg.className = r.ok ? 'meta ok' : 'meta err';

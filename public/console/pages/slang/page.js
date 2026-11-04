@@ -4,6 +4,7 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
 
 let slangEntriesCache = [];
 let slangSelected = new Set();
@@ -218,10 +219,10 @@ function openSlangModal(id, mode, { adoptGuess = false } = {}) {
   }
   document.getElementById('slangModalDirectConfirm').textContent = mode === 'confirm' ? '直接确认（转正）' : '保存修改';
   document.getElementById('slangModalSendResearch').hidden = !(mode === 'confirm' && e.status === 'candidate');
-  document.getElementById('slangModalOverlay').classList.add('open');
+  openModal(document.getElementById('slangModalOverlay'));
 }
 function closeSlangModal() {
-  document.getElementById('slangModalOverlay').classList.remove('open');
+  closeModal(document.getElementById('slangModalOverlay'));
   slangModalId = null;
 }
 function readSlangModalPayload() {
@@ -356,7 +357,7 @@ export function init() {
     refreshSlang();
   });
   document.getElementById('slangModalCancel').addEventListener('click', closeSlangModal);
-  document.getElementById('slangModalOverlay').addEventListener('click', (e) => { if (e.target.id === 'slangModalOverlay') closeSlangModal(); });
+  wireModal(document.getElementById('slangModalOverlay'), { closeOnEscape: false });
   document.getElementById('slangAdd').addEventListener('click', async () => {
     const content = document.getElementById('slangContent').value.trim();
     const meaning = document.getElementById('slangMeaning').value.trim();

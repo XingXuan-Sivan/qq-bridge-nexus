@@ -3,6 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
+import { setMsg } from '../../js/components/message.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;
@@ -66,27 +67,23 @@ async function sendVoiceFromConsole() {
   const target = document.getElementById('voiceSendTarget').value.trim();
   const dryRun = document.getElementById('voiceSendDryRun').checked;
   const pick = document.querySelector('input[name="voicePick"]:checked');
-  if (!target) { msg.textContent = '❌ 请填发送目标（如 group:100005）'; msg.className = 'meta err'; return; }
-  if (!pick) { msg.textContent = '❌ 先刷新语音库并选中一个音频'; msg.className = 'meta err'; return; }
+  if (!target) { setMsg(msg, '❌ 请填发送目标（如 group:100005）', 'err'); return; }
+  if (!pick) { setMsg(msg, '❌ 先刷新语音库并选中一个音频', 'err'); return; }
   const entry = voiceEntries[Number(pick.value)];
   msg.textContent = '发送中…'; msg.className = 'meta';
   try {
     const r = await api('/api/voice/send', 'POST', { target, file: entry.name, dryRun });
     if (r.dryRun) {
-      msg.textContent = '✅ 校验通过（未发送）：' + (r.detail || '');
-      msg.className = 'meta ok';
+      setMsg(msg, '✅ 校验通过（未发送）：' + (r.detail || ''), 'ok');
     } else if (r.ok) {
-      msg.textContent = '✅ 已发出 messageId=' + (r.messageId ?? '?')
+      setMsg(msg, '✅ 已发出 messageId=' + (r.messageId ?? '?')
         + (r.detail ? '（' + r.detail + '）' : '')
-        + (r.verified ? '，已回读校验为语音段' : '，未能回读校验');
-      msg.className = 'meta ok';
+        + (r.verified ? '，已回读校验为语音段' : '，未能回读校验'), 'ok');
     } else {
-      msg.textContent = '❌ ' + (r.error || '失败');
-      msg.className = 'meta err';
+      setMsg(msg, '❌ ' + (r.error || '失败'), 'err');
     }
   } catch (error) {
-    msg.textContent = '❌ ' + (error && error.message ? error.message : error);
-    msg.className = 'meta err';
+    setMsg(msg, '❌ ' + (error && error.message ? error.message : error), 'err');
   }
 }
 
@@ -410,7 +407,7 @@ function renderV2Memory(data) {
 function loadV2Memory() {
   const key = document.getElementById('v2MemoryKey').value.trim();
   const msg = document.getElementById('v2MemoryMsg');
-  if (!key) { msg.textContent = '请输入会话 key'; msg.className = 'meta err'; return; }
+  if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
   msg.textContent = '加载中…';
   msg.className = 'meta';
   return api('/api/socialV2/memory?key=' + encodeURIComponent(key))
@@ -420,8 +417,7 @@ function loadV2Memory() {
       msg.className = r.ok ? 'meta ok' : 'meta err';
     })
     .catch(e => {
-      msg.textContent = '❌ ' + (e.message || e);
-      msg.className = 'meta err';
+      setMsg(msg, '❌ ' + (e.message || e), 'err');
     });
 }
 
@@ -477,7 +473,7 @@ function formatWakeStatus(r) {
 function loadV2WakeStatus() {
   const key = document.getElementById('v2WakeKey').value.trim();
   const msg = document.getElementById('v2WakeStatusMsg');
-  if (!key) { msg.textContent = '请输入会话 key'; msg.className = 'meta err'; return; }
+  if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
   msg.textContent = '加载中…';
   msg.className = 'meta';
   return api('/api/socialV2/state?key=' + encodeURIComponent(key))
@@ -487,8 +483,7 @@ function loadV2WakeStatus() {
       msg.className = r.ok ? 'meta ok' : 'meta err';
     })
     .catch(e => {
-      msg.textContent = '❌ ' + (e.message || e);
-      msg.className = 'meta err';
+      setMsg(msg, '❌ ' + (e.message || e), 'err');
     });
 }
 
@@ -609,7 +604,7 @@ function bindEvents() {
   document.getElementById('v2MemoryClearAll').addEventListener('click', async () => {
     const key = document.getElementById('v2MemoryKey').value.trim();
     const msg = document.getElementById('v2MemoryMsg');
-    if (!key) { msg.textContent = '请输入会话 key'; msg.className = 'meta err'; return; }
+    if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
     if (!confirm('确定清空该会话全部轻量记忆？')) return;
     const r = await api('/api/socialV2/memory-clear', 'POST', { key, category: '' });
     msg.textContent = r.ok ? '✅ 已清空全部记忆' : ('❌ ' + (r.error || '失败'));
@@ -621,7 +616,7 @@ function bindEvents() {
     if (!btn) return;
     const key = document.getElementById('v2MemoryKey').value.trim();
     const msg = document.getElementById('v2MemoryMsg');
-    if (!key) { msg.textContent = '请输入会话 key'; msg.className = 'meta err'; return; }
+    if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
     const cat = btn.dataset.cat;
     const action = btn.dataset.action;
     let r;

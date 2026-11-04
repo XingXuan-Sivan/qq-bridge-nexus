@@ -218,6 +218,28 @@ ok(ccFavicon === favicon, '控制中心与桥接控制台用同一个图标文�
 console.log('## 片段页的浮层归属');
 const pluginsModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'page.js'), 'utf8');
 ok(/document\.body\.appendChild\(overlay\)/.test(pluginsModule), '插件详情遮罩会被挂到 body（.card 的动画/滤镜会给 fixed 造包含块）');
+ok(/wireModal\(document\.getElementById\('pluginDetailOverlay'\)/.test(pluginsModule), '插件详情弹窗走 components/modal.js 的 wireModal（Esc / 点遮罩统一）');
+
+console.log('## 组件层（3.2）');
+const componentDir = path.join(ROOT, 'public', 'console', 'js', 'components');
+for (const name of ['message.js', 'table.js', 'modal.js']) {
+  ok(fs.existsSync(path.join(componentDir, name)), `组件 ${name} 存在`);
+}
+const messageModule = fs.readFileSync(path.join(componentDir, 'message.js'), 'utf8');
+ok(/export function setMsg\(target, text, kind = 'info'\)/.test(messageModule), 'setMsg 收口「文案 + 配色」');
+const modalModule = fs.readFileSync(path.join(componentDir, 'modal.js'), 'utf8');
+for (const fn of ['openModal', 'closeModal', 'isModalOpen', 'wireModal']) {
+  ok(new RegExp(`export function ${fn}\\(`).test(modalModule), `modal.js 导出 ${fn}`);
+}
+const uiModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'ui.js'), 'utf8');
+ok(!/function (simpleTable|renderTable)\(/.test(uiModule), 'ui.js 不再自带表格生成器（已搬到 components/table.js）');
+for (const id of ['skills', 'mcp', 'behaviors']) {
+  const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
+  ok(/from '\.\.\/\.\.\/js\/components\/table\.js'/.test(module) && /tableHtml\(/.test(module), `${id} 页改用 components/table.js 的 tableHtml`);
+}
+const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
+const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
+ok(rawMsg.length === 0, `没有页面再手写 className='meta ok|err'（${rawMsg.join(', ') || '全部走 setMsg'}）`);
 
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

@@ -317,7 +317,7 @@
 - `js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`——页面不再各写一份 `innerHTML` 模板。
 - `js/router.js`：`consolePages` 页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；数据刷新改成页面用 `onPageRefresh(page, fn)` 注册回调，路由器不再反向依赖页面模块。
 - `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
-- 第三阶段（✅ 2026-11-05 基本收口）：页面目录化 `pages/<id>/{page.html,page.css,page.js}`（15 页全部自包含）、公用层留在 `js/{api,ui,router,timezone,theme-boot}.js`、`app.css` 拆成 `css/{base,layout,components}`、内联样式收口到 `utilities.css` 且 0 残留、favicon、CSP 去掉 `unsafe-inline`、控制中心按 B 档独立目录化。详见本节「第三阶段」的 3.1–3.5。
+- 第三阶段（✅ 2026-11-05 基本收口）：页面目录化 `pages/<id>/{page.html,page.css,page.js}`（15 页全部自包含）、公用层留在 `js/{api,ui,router,timezone,theme-boot}.js` 与 `js/components/{message,table,modal}.js`、`app.css` 拆成 `css/{base,layout,components}`、内联样式收口到 `utilities.css` 且 0 残留、favicon、CSP 去掉 `unsafe-inline`、控制中心按 B 档独立目录化。详见本节「第三阶段」的 3.1–3.5。
 - 第二阶段剩余：第三阶段已搬走 15 个页面（技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批 / 运行总览 / 插件），全部页面都在 `public/console/pages/<id>/`，`app.js` 只剩全局状态刷新、搜索、主题与入口装配（约 290 行）；`js/store.js`（跨页共享状态）暂不做，等有真实共享状态再加。
 - 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。**整块搬迁不要用 `@@SLOT@@` 之类的哨兵占位**：脚本替换完忘记回填，裸文本会直接挂在 `main` 下、在每一页都显示（访问与安全页迁移时踩过，2 行残留）；真要占位就用带本页 id 的注释，并让 `test-console-static` 的哨兵断言兜住。**片段里的 `position:fixed` 浮层（modal / 抽屉 / 全局提示）必须挂到 `document.body`**：片段被注入在 `section.card` 里，而 `.card` 有入场动画与 `backdrop-filter`，会给 `fixed` 造出包含块——遮罩只盖住卡片、盖不住整页（插件详情弹窗踩过；搜索候选框是同一类问题的另一处）。挂载放在该页 `init()` 里，用 `if (el.parentElement !== document.body) document.body.appendChild(el)`，事件委托仍按 id 绑定。
 
@@ -328,11 +328,24 @@
 ```
 public/console/
   index.html                 只留骨架：aside 导航 / header（面包屑+搜索）/ <main id="pageHost"> / toast / modal 宿主
-  favicon.svg                浏览器标签图标（复用侧栏品牌标记 q↗ 的图形与配色）
-  app/                       公用层（跨页面共享）
-    core/{api,router,store,dom,format}.js
-    ui/{toast,table,tile-list,field,modal,pill}.js
-    styles/{tokens,base,layout}.css
+  img/favicon.svg            浏览器标签图标（复用侧栏品牌标记 q↗ 的图形与配色）
+  css/                       公用样式（按加载顺序）
+    tokens.css               设计令牌与深色覆盖
+    base.css                 重置、排版、滚动条、按钮与表单基线
+    layout.css               三容器外壳：侧栏 / 顶栏 / 主区
+    components.css           网格、卡片、表格、表单、弹窗、主题细节
+    utilities.css            工具类（宽度、间距、flex、行内对齐）
+  js/                        公用逻辑
+    api.js                   fetch 封装（x-console-token、401 重试）
+    router.js                页面表、hash/popstate、hydratePage、面包屑、onPageRefresh
+    ui.js                    toast、esc、tile 列表、applyPageA11y
+    timezone.js              时区下拉与偏移计算（定时任务 / 定时静默共用）
+    theme-boot.js            首屏前套用主题（避免闪白）
+    components/              可复用组件
+      message.js             setMsg / clearMsg（统一操作反馈配色）
+      table.js               tableHtml（表头宽度走 data-w）
+      modal.js               openModal / closeModal / wireModal（Esc、点遮罩）
+    app.js                   只做装配：建页面、绑全局事件、末尾 initRouter()
   pages/
     overview/{page.html,page.css,page.js}
     persona/{page.html,page.css,page.js}
@@ -350,7 +363,7 @@ public/console/
    - `overview`（运行总览）是**六块一页**：摘要指标、运行模式、活动日志、发言上限、定时静默、DSH 模型。六块按原顺序搬进 `pages/overview/page.html`；宿主 `#section-overview` 用 `.page-stack` 放在 `.grid` 首个子元素，`#overviewSummary` 保留 `overview-summary span-all` 与 `data-page="overview"`，仍是网格首行（`page.css` 只补一条 `margin-bottom:0`，避免 24px margin 与 22px 网格 gap 叠加）。这一页保留一个**跨页例外**：页面模块管交互（模式切换、发言上限、静默排期、DSH 模型读写与首次加载），`app.js` 仍管状态刷新——`refresh()` 继续写摘要指标、活动日志与 `#statusText`，概览页首次进入/切回或写操作成功后用 `console:refresh-status` 事件请它补一次；所有只存在于片段的节点写入都判空，`refreshSessionMetrics()` 逻辑未动。另把 `router.js` 的 `[data-view]` 从启动时 `querySelectorAll` 直接绑定改为 document 级事件委托，否则片段里后注入的 `#metricSessions`/`#metricPending` 点不动（`data-target="section-pending"` 的跨页 hydrate 链路保持原样）。`app.js` 因此少 291 行（590 → 299）。
     - 顺带修掉的隐患：`app.js` 的搜索索引原来在启动时用 `section.querySelector('h2')` 硬取标题，空 section 会抛 `TypeError` 并中断整个入口脚本的后续初始化；现在改为「按需重建 + 跳过空 section + 未注入的片段页用页面表标题兜底」，保证「没打开过的页也能搜到」。
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
-2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
+2. `3.2 组件层`（✅ 2026-11-05）：重复的模板与反馈写法收进 `js/components/`——`table.js` 的 `tableHtml(columns, rows)`（由 `ui.js` 的 `simpleTable` 迁出，表头宽度改走 `data-w` 属性，见 `components.css` 的 `th[data-w]`）、`message.js` 的 `setMsg(target, text, kind)`（把「设文本 + 设 `meta ok|err` 类」这一对动作收成一处，22 处调用点全部改用它）、`modal.js` 的 `openModal`/`closeModal`/`isModalOpen`/`wireModal`（统一 `.open` 类、`aria-hidden`、Esc 与点遮罩关闭；插件详情弹窗与黑话模态都改成它，后者因自带 Esc 焦点环传 `closeOnEscape: false`）。`ui.js` 只剩 toast、`esc`、tile 列表与 `applyPageA11y`；无调用方的 `renderTable` 一并删掉。`test-console-static` 增 12 条组件断言（文件存在、导出签名、页面改用 `tableHtml(`、全局不再有 `className = 'meta ok|err'`），真机探针验证「点开 / Esc 关 / 点遮罩关 / 黑话页注入」全部通过。
 3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，公用样式里不再出现 `#section-*` 选择器。
    - 第二步（✅ 2026-11-04）：`app.css`（1810 行）按**连续区间**拆成 `css/base.css`（重置、排版、滚动条、按钮与表单基线，123 行）、`css/layout.css`（三容器外壳、侧栏、顶栏、主区、页面标题与指标条，343 行）、`css/components.css`（网格、卡片、表格、表单、弹窗、主题与各页细节，1357 行），`index.html` 按 `tokens → base → layout → components → utilities` 依次 `<link>`。拆分脚本先校验「三件按序拼接 === 原文件（逐字节）」再落盘，因此级联顺序与拆分前完全一致；实测样式规则总数 296 条不变、概览页关键几何不变（模式卡 `y=484 / w=1086`）。
    - 第三步（✅ 2026-11-04，内联样式收口）：HTML 里 **407 处内联 `style` 中的 388 处**换成 `css/utilities.css` 的 57 个工具类（`.u-w-80`、`.u-flex-1`、`.u-mt-8`、`.u-m-0`、`.u-flex-basis-220`、`.u-between`……），工具类只在「宽度 / flex / 外边距 / gap / 文字对齐」这几种纯静态属性上按声明值一一映射，不承载主题色与组件样式；剩下 19 处保留内联，全部是 JS 会切换 `display` 的元素（隐藏/展开），换类会与 `el.style.display` 打架。实测 `u-w-*` 的宽度、`u-flex-1` 的 `flex-grow`、`u-mt-*` 的外边距都按预期生效，概览/插件/定时任务三页几何与转换前一致、零异常。

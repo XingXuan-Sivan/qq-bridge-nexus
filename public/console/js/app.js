@@ -3,6 +3,7 @@
 import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
+import { setMsg } from './components/message.js';
 
 bootstrapConsoleToken();
 
@@ -260,8 +261,7 @@ function renderSendLimitHits(x) {
   const el = document.getElementById('sendLimitHits');
   if (!el) return;
   if (!x) { el.textContent = '最近 24 小时没有被拦过'; el.className = 'meta'; return; }
-  el.textContent = `⚠️ 最近 24 小时被拦了 ${x.count} 次（${x.keys} 个会话；最近一次 ${new Date(x.lastAt).toLocaleTimeString()}，${x.lastKey}）。AI 经常一次发好几条的话，可以把上限调高一点`;
-  el.className = 'meta err';
+  setMsg(el, `⚠️ 最近 24 小时被拦了 ${x.count} 次（${x.keys} 个会话；最近一次 ${new Date(x.lastAt).toLocaleTimeString()}，${x.lastKey}）。AI 经常一次发好几条的话，可以把上限调高一点`, 'err');
 }
 
 // 全局：状态轮询 + 概览指标。各页自己的首次加载由 pages/<id>/page.js 的 init 负责。

@@ -3,6 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { setMsg } from '../../js/components/message.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
 // 为什么不用图表库：控制台 CSP 是 default-src 'self'，不能引外部脚本；
@@ -356,11 +357,9 @@ async function refreshUsage() {
     renderUsagePrices(r.priceTable ? { ...r.priceTable, nowTier: r.nowTier } : null);
     syncUsageKeySelect((r.conversations || []).map(c => String(c.key ?? '')));
     if (!document.getElementById('usageTurns').dataset.loaded && usageSelectedKey) refreshUsageTurns();
-    msg.textContent = `✅ 已同步于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
-    msg.className = 'meta ok';
+    setMsg(msg, `✅ 已同步于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`, 'ok');
   } catch (error) {
-    msg.textContent = `❌ 读取失败：${error?.message || '未知错误'}`;
-    msg.className = 'meta err';
+    setMsg(msg, `❌ 读取失败：${error?.message || '未知错误'}`, 'err');
   }
 }
 
@@ -450,8 +449,7 @@ export function init() {
       msg.textContent = r.ok ? '✅ 账本已清空' : ('❌ ' + (r.error || '失败'));
       msg.className = r.ok ? 'meta ok' : 'meta err';
     } catch (error) {
-      msg.textContent = '❌ ' + (error?.message || '失败');
-      msg.className = 'meta err';
+      setMsg(msg, '❌ ' + (error?.message || '失败'), 'err');
     }
     usageSelectedKey = '';
     document.getElementById('usageTurnScope').textContent = '—';
@@ -463,7 +461,7 @@ export function init() {
   document.getElementById('compactSave').addEventListener('click', async () => {
     const mode = (document.querySelector('input[name="compactMode"]:checked') || {}).value;
     const msg = document.getElementById('compactMsg');
-    if (!mode) { msg.textContent = '请先选一种压缩方式'; msg.className = 'meta err'; return; }
+    if (!mode) { setMsg(msg, '请先选一种压缩方式', 'err'); return; }
     const r = await api('/api/compact/config', 'POST', { mode, thresholdWan: Number(document.getElementById('compactWan').value) });
     msg.textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
     msg.className = r.ok ? 'meta ok' : 'meta err';

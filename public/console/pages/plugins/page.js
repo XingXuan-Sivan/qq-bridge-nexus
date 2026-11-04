@@ -4,6 +4,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
 
 // ── 桥接插件 ────────────────────────────────────────────────────────────────
 // 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。
@@ -41,7 +42,7 @@ async function openPluginDetail(id) {
   const overlay = document.getElementById('pluginDetailOverlay');
   if (!body || !overlay) return;
   body.textContent = '加载中…';
-  overlay.classList.add('open');
+  openModal(overlay);
   try {
     const data = await api(`/api/plugins/${encodeURIComponent(id)}`);
     const plugin = data?.plugin;
@@ -80,7 +81,7 @@ async function openPluginDetail(id) {
 }
 
 function closePluginDetail() {
-  document.getElementById('pluginDetailOverlay')?.classList.remove('open');
+  closeModal(document.getElementById('pluginDetailOverlay'));
 }
 
 async function installPluginFromZip() {
@@ -296,9 +297,7 @@ export function init() {
     refreshPlugins().catch(() => {});
   });
   document.getElementById('pluginDetailClose').addEventListener('click', closePluginDetail);
-  document.getElementById('pluginDetailOverlay').addEventListener('click', (event) => {
-    if (event.target.id === 'pluginDetailOverlay') closePluginDetail();
-  });
+  wireModal(document.getElementById('pluginDetailOverlay'), { onClose: () => { pluginDetailId = null; } });
   document.getElementById('pluginInstallZipBtn').addEventListener('click', () => { installPluginFromZip().catch(() => {}); });
   document.getElementById('pluginInstallPathBtn').addEventListener('click', () => { installPluginFromPath().catch(() => {}); });
   document.getElementById('promptBlockSave').addEventListener('click', () => { savePromptBlockSettings().catch(() => {}); });

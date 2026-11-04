@@ -19,49 +19,6 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/**
- * 生成一张表格（thead + tbody）。
- * @param {{ columns: Array<{label:string, width?:string}>, rows: Array<Array<string|Node>>, empty?: string }} options
- */
-export function renderTable({ columns, rows, empty = '暂无数据' }) {
-  const table = document.createElement('table');
-  table.className = 'tool-log-table';
-  const thead = document.createElement('thead');
-  const headRow = document.createElement('tr');
-  for (const column of columns) {
-    const th = document.createElement('th');
-    th.textContent = column.label;
-    // 列宽走 data-w 属性（见 components.css 的 th[data-w]），不写内联 style——CSP 会拦 style 属性。
-    if (column.width) th.dataset.w = String(column.width).replace('px', '');
-    headRow.append(th);
-  }
-  thead.append(headRow);
-  table.append(thead);
-  const tbody = document.createElement('tbody');
-  if (!rows.length) {
-    const tr = document.createElement('tr');
-    const td = document.createElement('td');
-    td.colSpan = columns.length;
-    td.className = 'meta';
-    td.textContent = empty;
-    tr.append(td);
-    tbody.append(tr);
-  } else {
-    for (const cells of rows) {
-      const tr = document.createElement('tr');
-      for (const cell of cells) {
-        const td = document.createElement('td');
-        if (cell instanceof Node) td.append(cell);
-        else td.textContent = String(cell ?? '');
-        tr.append(td);
-      }
-      tbody.append(tr);
-    }
-  }
-  table.append(tbody);
-  return table;
-}
-
 /** 卡片列表（与人格页/插件页共用 .tile-list + .tile 的间距与内距）。 */export function renderTileList(items) {
   const list = document.createElement('div');
   list.className = 'tile-list';
@@ -89,18 +46,6 @@ export function renderTable({ columns, rows, empty = '暂无数据' }) {
     list.append(tile);
   }
   return list;
-}
-
-/**
- * 生成一张静态表格的 HTML 字符串（单元格已经是 HTML 片段，调用方自己 esc）。
- * 与 renderTable 的区别：这个返回字符串、可直接塞 innerHTML；renderTable 返回节点。
- * @param {Array<{label:string, width?:string}>} columns
- * @param {Array<Array<string>>} rows
- */
-export function simpleTable(columns, rows) {
-  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
-  const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
-  return `<table>${head}<tbody>${body}</tbody></table>`;
 }
 
 export function applyPageA11y(root = document) {

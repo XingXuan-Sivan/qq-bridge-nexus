@@ -6,6 +6,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
+import { setMsg } from '../../js/components/message.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
@@ -310,7 +311,7 @@ export function init() {
     const r = await api('/api/dsh/model', 'POST', payload);
     msg.textContent = r.ok ? `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
     msg.className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) { await refreshDshModel(); msg.textContent = `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`; msg.className = 'meta ok'; }
+    if (r.ok) { await refreshDshModel(); setMsg(msg, `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`, 'ok'); }
   });
 
   // 静默开关（手动优先）

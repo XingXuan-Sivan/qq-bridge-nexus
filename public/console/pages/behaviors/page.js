@@ -2,7 +2,8 @@
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
-import { esc, simpleTable } from '../../js/ui.js';
+import { esc } from '../../js/ui.js';
+import { tableHtml } from '../../js/components/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
@@ -73,10 +74,10 @@ async function refreshBehaviors() {
     empty.textContent = '没有匹配的命令，换个筛选或关键词试试。';
     bridgeBox.innerHTML = rows.length ? behaviorTable(rows) : '';
     dshBox.innerHTML = (data.dsh ?? []).length
-      ? simpleTable([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
+      ? tableHtml([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
       : '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
     toolsBox.innerHTML = (data.tools ?? []).length
-      ? simpleTable([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
+      ? tableHtml([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
         (data.tools ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.source), esc(item.managed)]))
       : '<div class="meta">没有已登记的 Agent 工具。</div>';
   } catch (error) {

@@ -2,7 +2,8 @@
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
-import { esc, simpleTable } from '../../js/ui.js';
+import { esc } from '../../js/ui.js';
+import { tableHtml } from '../../js/components/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 async function refreshMcp() {
@@ -13,7 +14,7 @@ async function refreshMcp() {
     const servers = data.mcp ?? [];
     meta.textContent = servers.length ? `桥接自带 ${servers.length} 个 MCP server` : '没有登记 MCP server';
     list.innerHTML = servers.length
-      ? `<div class="tool-log-table">${simpleTable([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
+      ? `<div class="tool-log-table">${tableHtml([{ label: '服务器', width: '200px' }, { label: '说明' }, { label: '入口与工具' }],
         servers.map(server => [`<strong>${esc(server.name)}</strong>`, esc(server.note || ''), `<code>${esc(server.file)}</code>${(server.tools ?? []).length ? ` · 工具 ${esc(server.tools.join('、'))}` : ''}`]))}</div>`
       : '<div class="meta">没有登记 MCP server。</div>';
   } catch (error) {

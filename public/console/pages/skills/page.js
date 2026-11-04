@@ -1,8 +1,10 @@
 // 技能页：只读列出 DSH_HOME/skills 与仓库 skills/ 下的 SKILL.md。
 // 启停与安装由 DSH 自己管，这里不提供写操作。
-import { api } from '../api.js';
-import { esc, simpleTable } from '../ui.js';
-import { getCurrentPage, onPageRefresh } from '../router.js';
+//
+// 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
+import { api } from '../../js/api.js';
+import { esc, simpleTable } from '../../js/ui.js';
+import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 async function refreshSkills() {
   const meta = document.getElementById('skillsMeta');
@@ -20,7 +22,7 @@ async function refreshSkills() {
   }
 }
 
-export function initSkillsPage() {
+export function init() {
   document.getElementById('skillsRefresh')?.addEventListener('click', () => { refreshSkills().catch(() => {}); });
   onPageRefresh('skills', () => { refreshSkills().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);

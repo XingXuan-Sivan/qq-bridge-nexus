@@ -1,5 +1,5 @@
 // 控制台源码的统一读取口：拆分后前端在 public/console/ 下，旧测试仍按「一个字符串」断言。
-// 这里把 index.html + css/app.css + js/*.js 拼起来，让正则断言继续按文档顺序匹配。
+// 这里把骨架 + 公用样式 + 模块 + 各页片段拼起来，让正则断言继续按文档顺序匹配。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ export function consoleSourcePaths(root = ROOT) {
     css: path.join(dir, 'css', 'app.css'),
     jsDir: path.join(dir, 'js'),
     js: path.join(dir, 'js', 'app.js'),
+    pagesDir: path.join(dir, 'pages'),
   };
 }
 
@@ -30,7 +31,23 @@ export function consoleScriptPaths(root = ROOT) {
   return ordered.map((name) => path.join(jsDir, name));
 }
 
-/** 拼接顺序：index.html → app.css → js/app.js → 其它 js 模块（与拆分前的单文件阅读顺序接近）。 */
+/** 页面目录：pages/<id>/page.{html,css,js}（page.css 可缺，工具参考页连 page.js 都没有）。 */
+export function consolePageDirs(root = ROOT) {
+  const { pagesDir } = consoleSourcePaths(root);
+  let names = [];
+  try { names = fs.readdirSync(pagesDir, { withFileTypes: true }); } catch { return []; }
+  return names
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .map((id) => {
+      const dir = path.join(pagesDir, id);
+      const pick = (name) => (fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
+      return { id, dir, html: pick('page.html'), css: pick('page.css'), js: pick('page.js') };
+    });
+}
+
+/** 拼接顺序：index.html → app.css → js/（app.js 优先）→ pages/<id>/{page.html,page.css,page.js}。 */
 export function readConsoleSource(root = ROOT) {
   const paths = consoleSourcePaths(root);
   const read = (file, label) => {
@@ -39,5 +56,8 @@ export function readConsoleSource(root = ROOT) {
     }
   };
   const scripts = consoleScriptPaths(root).map((file) => read(file, path.basename(file)));
-  return [read(paths.index, 'index.html'), read(paths.css, 'app.css'), ...scripts].join('\n');
+  const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js]
+    .filter(Boolean)
+    .map((file) => read(file, path.relative(paths.dir, file))));
+  return [read(paths.index, 'index.html'), read(paths.css, 'app.css'), ...scripts, ...pages].join('\n');
 }

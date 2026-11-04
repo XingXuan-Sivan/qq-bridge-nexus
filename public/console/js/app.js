@@ -4,9 +4,6 @@ import { api, bootstrapConsoleToken } from './api.js';
 import { esc, showConsoleToast, simpleTable } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, onPageRefresh, setConsolePage, setSearchCloser } from './router.js';
 import { initPluginsPage } from './pages/plugins.js';
-import { initSkillsPage } from './pages/skills.js';
-import { initMcpPage } from './pages/mcp.js';
-import { initBehaviorsPage } from './pages/behaviors.js';
 
 bootstrapConsoleToken();
 
@@ -2273,22 +2270,37 @@ function positionConsoleSearch() {
 }
 window.addEventListener('resize', positionConsoleSearch);
 document.addEventListener('scroll', positionConsoleSearch, true);
-const featureIndex = [];
-document.querySelectorAll('section[data-page]').forEach(section => {
-  const page = section.dataset.page;
-  featureIndex.push({ page, label: section.querySelector('h2').textContent, target: section });
-  section.querySelectorAll('details.settings-group>summary,input,textarea,select').forEach(el => {
-    let label = el.tagName === 'SUMMARY' ? el.textContent : (el.getAttribute('aria-label') || el.labels?.[0]?.textContent || el.placeholder);
-    if (label) featureIndex.push({ page, label: label.trim(), target: el });
+// 搜索索引按需重建：片段页（pages/<id>/page.html）在首次进入时才注入 DOM，
+// 启动时扫一次会漏掉它们，也会在空 section 上踩到「没有 h2」。
+function buildFeatureIndex() {
+  const index = [];
+  const seen = new Set();
+  document.querySelectorAll('section[data-page]').forEach(section => {
+    const heading = section.querySelector('h2');
+    if (!heading) return;
+    const page = section.dataset.page;
+    seen.add(page);
+    index.push({ page, label: heading.textContent, target: section });
+    section.querySelectorAll('details.settings-group>summary,input,textarea,select').forEach(el => {
+      let label = el.tagName === 'SUMMARY' ? el.textContent : (el.getAttribute('aria-label') || el.labels?.[0]?.textContent || el.placeholder);
+      if (label) index.push({ page, label: label.trim(), target: el });
+    });
   });
-});
+  // 未注入的片段页也要能搜到（否则「没打开过就搜不到」）：用页面表里的大标题与说明兜底，
+  // 只是没有字段级条目——点进去后页面加载完，再搜就有细项了。
+  for (const [page, meta] of Object.entries(consolePages)) {
+    if (seen.has(page)) continue;
+    index.push({ page, label: `${meta[1]} ${meta[2]}`, target: document.getElementById(`section-${page}`) });
+  }
+  return index;
+}
 function closeConsoleSearch() { searchResults.hidden = true; searchInput.setAttribute('aria-expanded','false'); }
 setSearchCloser(closeConsoleSearch);
 searchInput.addEventListener('input', () => {
   const query = searchInput.value.trim().toLowerCase();
   searchResults.replaceChildren();
   if (!query) return closeConsoleSearch();
-  const matches = featureIndex.filter(entry => (consolePages[entry.page][0] + entry.label + entry.target.id).toLowerCase().includes(query)).slice(0,12);
+  const matches = buildFeatureIndex().filter(entry => (consolePages[entry.page][0] + entry.label + entry.target.id).toLowerCase().includes(query)).slice(0,12);
   if (!matches.length) { const empty = document.createElement('p'); empty.textContent = '未找到匹配功能，试试「唤醒」「白名单」或「表情」。'; searchResults.append(empty); }
   matches.forEach(entry => {
     const button = document.createElement('button');
@@ -3288,8 +3300,5 @@ setInterval(() => { if (getCurrentPage() !== 'usage') return; refreshUsage(); re
 })();
 
 initPluginsPage();
-initSkillsPage();
-initMcpPage();
-initBehaviorsPage();
 // 所有页面模块就绪后再接管路由（首屏恢复也在这里）。
 initRouter();

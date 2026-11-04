@@ -1,7 +1,9 @@
 // MCP 页：只读列出桥接登记的 MCP server 与各自工具。
-import { api } from '../api.js';
-import { esc, simpleTable } from '../ui.js';
-import { getCurrentPage, onPageRefresh } from '../router.js';
+//
+// 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
+import { api } from '../../js/api.js';
+import { esc, simpleTable } from '../../js/ui.js';
+import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 async function refreshMcp() {
   const meta = document.getElementById('mcpMeta');
@@ -19,7 +21,7 @@ async function refreshMcp() {
   }
 }
 
-export function initMcpPage() {
+export function init() {
   document.getElementById('mcpRefresh')?.addEventListener('click', () => { refreshMcp().catch(() => {}); });
   onPageRefresh('mcp', () => { refreshMcp().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);

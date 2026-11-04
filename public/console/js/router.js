@@ -27,6 +27,12 @@ export const consolePages = {
 const PAGE_STORAGE_KEY = 'qqb-console-page';
 let currentConsolePage = 'overview';
 
+// 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
+// 迁移期只有三个只读页走这条路径，其余页面仍是 index.html 里的静态 section。
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors']);
+// 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
+const fragmentLoads = new Map();
+
 // 页面进来时要跑的回调：由页面模块注册，路由器只负责触发。
 const pageRefreshers = new Map();
 // 搜索框的关闭动作由搜索模块注入：路由器不该知道搜索框长在哪。
@@ -81,12 +87,41 @@ export function renderBreadcrumb(page) {
   breadcrumb.replaceChildren(link, separator, current);
 }
 
+/** 片段页的 DOM 在 pages/<id>/page.html：取一次、注入空 section、再动态 import 页面模块。
+ *  失败时只在该 section 里显示占位文案，不影响其它页面（页面之间互不牵连）。 */
+function hydratePage(page) {
+  if (!PAGE_FRAGMENTS.has(page)) return Promise.resolve();
+  if (fragmentLoads.has(page)) return fragmentLoads.get(page);
+  const host = document.getElementById(`section-${page}`);
+  if (!host) return Promise.resolve();
+  const load = (async () => {
+    const response = await fetch(`/console/pages/${page}/page.html`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    host.innerHTML = await response.text();
+    if (!document.querySelector(`link[data-page-css="${page}"]`)) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.dataset.pageCss = page;
+      link.href = `/console/pages/${page}/page.css`;
+      document.head.appendChild(link);
+    }
+    const module = await import(`/console/pages/${page}/page.js`);
+    module.init?.();
+  })().catch((error) => {
+    host.innerHTML = `<div class="meta">页面加载失败：${error?.message || '未知错误'}（刷新重试）</div>`;
+    console.error(`[console] 页面片段加载失败：${page}`, error);
+  });
+  fragmentLoads.set(page, load);
+  return load;
+}
+
 /** 切页：只做展示层与 URL，数据加载交给各页面注册的回调。 */
 export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true } = {}) {
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   currentConsolePage = page;
   if (persist) rememberPage(page);
   document.querySelectorAll('[data-page]').forEach((el) => { el.hidden = el.dataset.page !== page; });
+  void hydratePage(page);
   document.querySelectorAll('#mainNav [data-view]').forEach((button) => {
     const selected = button.dataset.view === page;
     button.classList.toggle('active', selected);

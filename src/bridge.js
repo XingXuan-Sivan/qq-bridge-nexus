@@ -4466,7 +4466,7 @@ async function main() {
       // 控制台静态资源（样式/脚本/图标）不含数据，浏览器加载页面时也不会带令牌头：
       // 放在鉴权之前，否则拆分后的 /console/js/app.js 会被 401 挡掉、页面只剩空壳。
       // 只放行资源子目录；页面本身（/ 与 /console/）仍走下面的令牌校验。
-      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts)\//.test(url.pathname)) {
+      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts|pages)\//.test(url.pathname)) {
         serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
         return;
       }

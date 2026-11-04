@@ -1,0 +1,24 @@
+      <h2>管理行为</h2>
+      <div class="meta">桥接命令按注册表展示：<strong>注册表</strong>的由注册表执行，<strong>旧链</strong>的仍走原来的 <code>if</code> 分支。DSH 会话命令与 Agent 工具只读，桥接管不到它们的开关。</div>
+      <div class="row" style="margin-top:8px">
+        <button id="behaviorsRefresh">刷新</button>
+        <select id="behaviorsFilter" style="width:auto">
+          <option value="all">全部来源</option>
+          <option value="bridge">仅内置</option>
+          <option value="plugin">仅插件</option>
+        </select>
+        <select id="behaviorsPermission" style="width:auto">
+          <option value="">全部权限</option>
+          <option value="owner">owner</option>
+          <option value="admin">admin</option>
+          <option value="all">所有人</option>
+        </select>
+        <input id="behaviorsSearch" placeholder="搜索命令或说明…" style="max-width:240px">
+        <span class="meta" id="behaviorsMeta">加载中…</span>
+      </div>
+      <div id="behaviorsBridge" class="tool-log-table" hidden></div>
+      <div id="behaviorsEmpty" class="meta" hidden>没有匹配的命令，换个筛选或关键词试试。</div>
+      <h3 style="margin-top:18px">DSH 会话命令 <span class="meta">只读</span></h3>
+      <div id="behaviorsDsh" class="tool-log-table">加载中…</div>
+      <h3 style="margin-top:18px">Agent 工具 <span class="meta">只读</span></h3>
+      <div id="behaviorsTools" class="tool-log-table">加载中…</div>

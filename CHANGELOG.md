@@ -5,6 +5,14 @@
 
 ## 未发布
 
+### 重构：控制台页面目录化（3.1 试点，2026-11-04）
+- `public/console/pages/<id>/` 成为页面自包含目录：`skills`、`mcp`、`behaviors` 三页的 DOM 片段、私有样式、页面模块搬进各自目录；`index.html` 对应 `<section>` 只留空容器（页面不再是「全写死在 index 里」）。
+- 路由器新增 `hydratePage(page)`：首次进入时 fetch `page.html` → 注入容器 → 按需插 `page.css` → 动态 `import()` 页面模块并调 `init()`；每页只加载一次，并发切页复用同一个 Promise；片段取不到时只在该 section 显示「页面加载失败（刷新重试）」，不影响其它页。
+- `src/bridge.js` 的静态路由前缀扩到 `/console/(css|js|img|fonts|pages)/`（仍在令牌校验之前）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把页面片段拼进源码视图；`scripts/console-ui-fixture.mjs` 按真实路径提供 `pages/<id>/page.{html,css,js}`。
+- 修复搜索索引的启动期崩溃：原来在入口脚本里对每个 `section[data-page]` 直接取 `h2`，片段页为空时会抛 `TypeError` 并中断后续初始化（整页交互失效）；现改为按需重建、跳过空 section，并用页面表标题给未注入的页兜底，保证「没打开过也能搜到」。
+- `scripts/test-console-static.mjs` 增 16 条断言（页面目录三件套、index 容器为空、路由器注入、搜索索引兜底）。
+
+
 ### 重构：管理行为页迁到 pages/behaviors.js（2026-11-04）
 - 命令注册表表格（按 group 折叠）、筛选/搜索防抖、组行展开，以及 DSH 会话命令与 Agent 工具两张只读表整段搬到 `public/console/js/pages/behaviors.js`，导出 `initBehaviorsPage()`；`app.js` 只留调用。
 - 回归：无头 Edge 实测「注册表 5 条内置 + 0 条插件；显示 5 条」、2 个分组 7 行，无 JS 异常。

@@ -29,7 +29,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions']);
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -169,9 +169,13 @@ function restoreInitialPage() {
 
 /** 绑定导航、hash、popstate 与首屏恢复；入口脚本在所有页面模块加载后调一次。 */
 export function initRouter() {
-  document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => {
+  // 事件委托：片段页里的 [data-view]（例如概览页的「已建立会话 / 待处理请求」指标卡）
+  // 是在 initRouter 之后才注入的，启动时直接 querySelectorAll 绑定会漏掉它们。
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-view]');
+    if (!button) return;
     setConsolePage(button.dataset.view, { focus: true, target: button.dataset.target });
-  }));
+  });
   window.addEventListener('hashchange', () => {
     const page = location.hash.slice(1);
     if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }

@@ -3,7 +3,7 @@
 // 设计：这里只管「切哪一页」，不碰任何页面的数据加载；页面自己用 onPageRefresh() 注册
 // 「被切进来时要做什么」，避免路由器反过来 import 十几个页面模块。
 
-import { showConsoleToast } from './ui.js';
+import { showConsoleToast, applyPageA11y } from './ui.js';
 
 /** 页面元数据：[标题, 大标题, 说明]。新增页面必须同时加进 #mainNav 的 data-view。 */
 export const consolePages = {
@@ -28,8 +28,8 @@ const PAGE_STORAGE_KEY = 'qqb-console-page';
 let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
-// 迁移期只有三个只读页走这条路径，其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access']);
+// 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -107,6 +107,7 @@ function hydratePage(page) {
     }
     const module = await import(`/console/pages/${page}/page.js`);
     module.init?.();
+      applyPageA11y(host);
   })().catch((error) => {
     host.innerHTML = `<div class="meta">页面加载失败：${error?.message || '未知错误'}（刷新重试）</div>`;
     console.error(`[console] 页面片段加载失败：${page}`, error);

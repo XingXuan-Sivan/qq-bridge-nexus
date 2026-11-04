@@ -154,7 +154,14 @@ test('③ 桥接 viaPlatform：自愈只认平台端点，不扫描 SnowLuma 目
     assert.equal(r.wsUrl, null, '不会带回 SnowLuma 的真实 WS 端点');
     assert.equal(r.wsToken, null, '不会带回 SnowLuma 的真实 WS 令牌');
     const bridgeSrc = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
-    assert.match(bridgeSrc, /followDiscoveredEndpoint !== false && cfg\.snowluma\?\.viaPlatform !== true/, 'viaPlatform 强制不跟随端点');
+    // P7 第四步：跟随开关的判定搬进 upstream/snowluma-conn-update.mjs，bridge 只负责把 viaPlatform 传进去。
+    const connUpdateSrc = fs.readFileSync(path.join(root, 'src', 'upstream', 'snowluma-conn-update.mjs'), 'utf8');
+    assert.match(
+      connUpdateSrc,
+      /followDiscoveredEndpoint !== false && viaPlatform !== true/,
+      'viaPlatform 强制不跟随端点',
+    );
+    assert.match(bridgeSrc, /viaPlatform: cfg\.snowluma\?\.viaPlatform/, 'bridge 必须把 viaPlatform 传进决策函数');
   } finally {
     await p.shutdown('test');
     await fake.close();

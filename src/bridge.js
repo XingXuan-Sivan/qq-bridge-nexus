@@ -27,6 +27,9 @@ import { AUDIO_EXTS, cleanupTemp, describeAudio, formatBytes, formatDuration, in
 import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } from './snowluma-conn.js';
 // 上游适配（P7 第四步）：SnowLuma 接收链路的健康判定与兜底探测都在模块里。
 import { createSnowlumaHealth } from './upstream/snowluma-health.mjs';
+// 上游编排的纯策略：DSH 探活/地址重识别节流、SnowLuma 连接参数自愈决策。
+import { createDshProbe } from './upstream/dsh-probe.mjs';
+import { resolveConnectionUpdate } from './upstream/snowluma-conn-update.mjs';
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 // HTTP 边界（docs/HTTP_BOUNDARY.md）：安全响应头集中一处，静态资源守卫在 src/http/static.mjs。
 import { SECURITY_HEADERS } from './http/security.mjs';
@@ -2785,7 +2788,6 @@ async function main() {
 
   // DSH 侧。dsh.baseUrl 留空时自动识别端口（桌面版 0.2.0 写死 19387、0.2.1 起随机端口；命令行版默认 3080）。
   let dshBaseUrlAuto = false;   // 留空自动识别时为 true：DSH 不可用期间 checkDsh 会定期重新识别
-  let dshRediscoverAt = 0;
   {
     const ep = await resolveDshBaseUrl(cfg.dsh.baseUrl);
     if (ep.auto) log(`DSH 地址自动识别：${ep.url}${ep.discovered ? '（DSH 桌面版随机端口，按进程监听端口发现）' : ''}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；DSH 不可用期间会定期重新识别）'}`);
@@ -3861,26 +3863,26 @@ async function main() {
   const dshHealth = createDshHealth({ threshold: 2 });
   // 401：凭据读错目录时给出具体提示（src/dsh-auth-hint.js）；10 分钟内只提示一次。
   const dshAuthHint = createAuthHintGate();
+  const dshProbe = createDshProbe({
+    probe: () => api.settings.describe({}),
+    isAutoBaseUrl: () => dshBaseUrlAuto,
+    rediscover: async () => {
+      const ep = await resolveDshBaseUrl('', { timeoutMs: 600 });
+      return ep ? { reachable: Boolean(ep.reachable), url: ep.url } : null;
+    },
+    applyUrl: (url) => {
+      if (api.setBaseUrl(url)) cfg.dsh.baseUrl = url;
+    },
+    log,
+  });
+
   const checkDsh = async () => {
-    let ok = false;
-    let lastErr = null;
-    try {
-      await api.settings.describe({});
-      ok = true;
-    } catch (error) { lastErr = error; }
-    // dsh.baseUrl 留空（自动识别）时：DSH 不可用期间每 10 秒重新识别一次地址。
-    // DSH 桌面版 0.2.1 起每次启动换随机端口，只在桥接启动时识别一次的话，DSH 重启后就再也连不上。
-    if (!ok && dshBaseUrlAuto && Date.now() - dshRediscoverAt > 10_000) {
-      dshRediscoverAt = Date.now();
-      try {
-        const ep = await resolveDshBaseUrl('', { timeoutMs: 600 });
-        if (ep.reachable && api.setBaseUrl(ep.url)) {
-          cfg.dsh.baseUrl = ep.url;
-          log(`DSH 地址已变化，重新识别为 ${ep.url}${ep.discovered ? '（随机端口）' : ''}`);
-          try { await api.settings.describe({}); ok = true; } catch (error) { lastErr = error; }
-        }
-      } catch {}
-    }
+    // 「探活 + 失败时按 10s 节流重新识别随机端口」这条策略在 upstream/dsh-probe.mjs 里，
+    // 这里只拿结果去记账（健康度、模式、队列）。
+    const r = await dshProbe.check();
+    const ok = r.ok;
+    const lastErr = r.error;
+    if (r.rediscovered && ok) log(`DSH 地址已变化，重新识别为 ${r.url}`);
     if (ok) {
       dshAuthHint.reset();
       const rec = dshHealth.ok();
@@ -14384,49 +14386,42 @@ async function main() {
    * 只修其中一个的话，桥接仍会以 1006 反复重连（实测踩过）。
    */
   async function applyHealedTokens(r) {
-    const httpToken = r.token;
-    const wsToken = r.wsToken || r.token;
-    // ⚠️ 端点跟随是可关的（`snowluma.followDiscoveredEndpoint: false`），默认保持原行为。
-    //
-    // 为什么需要这个开关：自愈会拿 `discoverSnowLumaConnection()` **发现到的** wsUrl
-    // 覆盖掉配置里的值，并写回 config.json。这在"换了 QQ 账号所以端口变了"的主场景下
-    // 是对的（端口确实是 per-account 的），但它**不区分**「用户写的是一个过期值」和
-    // 「用户就是要指向别处」。后果：
-    //   · 想跑第二个实例/指向另一份 SnowLuma 安装（多账号、测试、灰度）时，
-    //     它会静默把端点改回去、连到发现到的那一份 —— 表现为"消息发到了另一个账号/群"，
-    //     或者"我明明指向了 B 却一直在收 A 的消息"，很难归因；
-    //   · 实测踩过：把 wsUrl 指向一个死端口想让它"别连"，启动后仍被改回真实端点并连上。
-    // 关掉之后**只自愈 token**（换账号仍然能恢复），但绝不动 URL、也不写回 URL。
-    // 经接口平台连接（snowluma.viaPlatform）时一律不跟随：端点只能是平台的兼容入口。
-    const followEndpoint = cfg.snowluma?.followDiscoveredEndpoint !== false && cfg.snowluma?.viaPlatform !== true;
-    const wsUrl = followEndpoint ? (r.wsUrl || cfg.snowluma.wsUrl) : cfg.snowluma.wsUrl;
-    const wsChanged = bot.accessToken !== wsToken || bot.url !== wsUrl;
+    // 决策在 upstream/snowluma-conn-update.mjs：两个 token 各修哪一个、发现到的端点该不该用。
+    // 这里只负责把结果落到 `bot.*` / `cfg.*` 并持久化——「follow=false 时绝不写 URL」这条
+    // 不变量因此在测试里可以直接断言（不用起连接）。
+    const update = resolveConnectionUpdate({
+      current: { wsToken: bot.accessToken, wsUrl: bot.url },
+      config: { accessToken: cfg.snowluma.accessToken, wsUrl: cfg.snowluma.wsUrl },
+      discovered: r,
+      followDiscoveredEndpoint: cfg.snowluma?.followDiscoveredEndpoint,
+      viaPlatform: cfg.snowluma?.viaPlatform,
+    });
+    const { httpToken, wsToken, wsUrl, wsChanged } = update;
+
     bot.accessToken = wsToken || undefined;
     // 端口也是 per-account 的（实测：换账号后 WS 从 3001 之类变到别的端口），
     // 只换 token 不换 URL 会一直 1006 重连。
     bot.url = wsUrl;
     if (wsChanged) log(`🔄 SnowLuma WS 连接已更新：${wsUrl}（token ${String(wsToken).slice(0, 4)}…）`);
-    if (cfg.snowluma.accessToken !== httpToken) {
-      log(`🔄 SnowLuma HTTP token 已更新（来源 ${r.source}）：${String(cfg.snowluma.accessToken).slice(0, 4)}… → ${String(httpToken).slice(0, 4)}…`);
+    if (update.httpTokenChanged) {
+      log(`🔄 SnowLuma HTTP token 已更新（来源 ${update.source}）：${String(cfg.snowluma.accessToken).slice(0, 4)}… → ${String(httpToken).slice(0, 4)}…`);
       cfg.snowluma.accessToken = httpToken;
     }
-    if (!followEndpoint && r.wsUrl && r.wsUrl !== cfg.snowluma.wsUrl) {
+    if (update.endpointIgnored) {
       log(`   （已按 snowluma.followDiscoveredEndpoint=false 忽略发现到的端点 ${r.wsUrl}，继续用配置值 ${cfg.snowluma.wsUrl}）`);
     }
     // 把确认可用的端点写回 config.json：下次启动直接就对了，不用再自愈一遍。
     // ⚠️ 必须在**改 cfg 之前**算出要写什么，但写文件时对照的是**文件里**的旧值 ——
     //    这里显式传 wsUrl，且不依赖 cfg 的内存值来判断"是否需要写"。
-    // 关掉端点跟随时不写 URL：否则"我设了别处"这件事会被自愈持久化地抹掉。
-    const previousWsUrl = cfg.snowluma.wsUrl;
-    cfg.snowluma.wsUrl = wsUrl;
+    // 关掉端点跟随时不写 URL：否则"我设了别处"这件事会被自愈持久化地抹掉（`persistUrl` 已表达）。
+    if (update.persistUrl) cfg.snowluma.wsUrl = wsUrl;
     try {
       const w = persistSnowLumaEndpoint(path.join(ROOT, 'config.json'), {
         accessToken: httpToken,
-        ...(followEndpoint ? { wsUrl, httpUrl: r.baseUrl } : {})
+        ...(update.persistUrl ? { wsUrl, httpUrl: r.baseUrl } : {})
       });
       if (w.updated) log(`   已写回 config.json：${Object.keys(w.changed).join(' / ')}`);
       else log('   config.json 端点已是最新，无需改写');
-      if (!followEndpoint && previousWsUrl !== wsUrl) cfg.snowluma.wsUrl = previousWsUrl;
     } catch (error) {
       log(`   ⚠️ 写回 config.json 失败：${error?.message ?? error}`);
     }

@@ -110,9 +110,15 @@ test('DSH 客户端换地址：baseUrl 更新并让旧凭据失效（Cookie 绑�
 
 test('桥接接线：留空自动识别时，DSH 不可用期间定期重新识别并切换地址', () => {
   const src = fs.readFileSync(new URL('../src/bridge.js', import.meta.url), 'utf8');
-  const seg = src.slice(src.indexOf('const checkDsh = async () => {'), src.indexOf('const checkDsh = async () => {') + 1500);
-  assert.match(seg, /!ok && dshBaseUrlAuto/, '只在自动识别模式、DSH 不可用时重新识别');
-  assert.match(seg, /api\.setBaseUrl\(ep\.url\)/, '切换到新地址');
+  // P7 第四步：策略搬进 src/upstream/dsh-probe.mjs（「失败 + 自动识别 + 节流窗口外」才重识别）。
+  const probe = fs.readFileSync(new URL('../src/upstream/dsh-probe.mjs', import.meta.url), 'utf8');
+  assert.match(probe, /if \(!isAutoBaseUrl\(\) \|\| throttled\(\)\)/, '只在自动识别模式、且不在节流窗口内才重新识别');
+  assert.match(probe, /rediscoverIntervalMs/, '重识别必须有节流窗口');
+  assert.match(probe, /applyUrl\(endpoint\.url\)/, '识别到新地址要应用');
+  // bridge 侧只保留接线：探活走 api.settings.describe，应用地址走 api.setBaseUrl。
+  assert.match(src, /createDshProbe\(\{/, 'bridge 必须用这个模块，而不是自己再写一份');
+  assert.match(src, /probe: \(\) => api\.settings\.describe\(\{\}\)/, '探活走 DSH 的 settings.describe');
+  assert.match(src, /applyUrl: \(url\) => \{[\s\S]{0,160}api\.setBaseUrl\(url\)/, '切换到新地址');
   assert.match(src, /dshBaseUrlAuto = ep\.auto;/);
 });
 

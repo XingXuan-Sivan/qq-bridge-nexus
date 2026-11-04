@@ -566,6 +566,14 @@ h1 {
 .span-all {
   grid-column:1/-1
 }
+/* 多卡片页面：宿主用 display:contents，让注入的 section 直接成为 main 的网格项——
+   注入前后布局完全一致，不需要给宿主再套一层卡片。 */
+.page-stack {
+  display:contents
+}
+.page-stack[hidden] {
+  display:none
+}
 .card h2 {
   font-size:16px;
   font-weight:600;

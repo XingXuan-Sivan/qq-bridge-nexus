@@ -1,0 +1,3 @@
+/* 访问与安全页：三张卡片（白名单 / 安全拦截 / 访问令牌）目前完全复用公共样式。
+   宿主 section 用 .page-stack（display:contents）让三张卡片直接落在 main 的网格里。
+   本页独有样式写在这里，不要回流到 css/app.css。 */

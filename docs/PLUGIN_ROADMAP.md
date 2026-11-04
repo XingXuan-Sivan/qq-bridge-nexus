@@ -293,7 +293,7 @@
 - 保持只读或不暴露：`audit.*`、`persona.cache.*`（详情里可见状态，但不给一键关）、`persona.provider`（等有第二个 provider 再做下拉）、插件自由 `config`（manifest 没有 `configSchema` 前不做通用表单）、`role.maxInjectChars`（人格页显示即可）。
 - 验收：`scripts/test-plugin-kernel.mjs` 增「设置接口：越界拒绝、白名单写回、watch 即时生效、未知字段忽略」（16/16）；两个 PATCH 都要求 JSON 与控制台令牌，写操作记审计 `settings`。
 
-### 8.7 控制台前端规范化与路由修复（进行中：第一阶段已落地）
+### 8.7 控制台前端规范化与路由修复（进行中：第二阶段收尾，第三阶段已定方案）
 
 背景：前端原来是 `public/console.html`（372 KB / 7097 行，样式与脚本全内联）加 `control-center.html`（97 KB），没有组件层；路由只靠 hash，刷新会回落首页，面包屑是纯文本，搜索候选被卡片遮挡。用户要求「框架依赖保持现状」下的规范化，并明确要求**先把 HTTP 边界写进文档**（已完成：[HTTP_BOUNDARY.md](HTTP_BOUNDARY.md)）。
 
@@ -317,29 +317,44 @@
 - `js/ui.js`：`showConsoleToast`、`esc`、`renderTable`、`renderTileList`——页面不再各写一份 `innerHTML` 模板。
 - `js/router.js`：`consolePages` 页面表、`setConsolePage`、面包屑、hash/popstate、首屏三层恢复；数据刷新改成页面用 `onPageRefresh(page, fn)` 注册回调，路由器不再反向依赖页面模块。
 - `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
-- 待办：`pages/*.js`（12 个页面；插件、技能、MCP、管理行为已迁，工具参考页是纯静态）、`js/store.js`（跨页共享状态）、CSS 拆 `tokens/layout/components/pages`、CSP 去 `unsafe-inline`。
+- 待办（第三阶段，方案已定、未动工）：页面目录化 `pages/<id>/{page.html,page.css,page.js}`、公用层移到 `app/{core,ui,styles}`、favicon、CSP 去 `unsafe-inline`。详见本节「第三阶段」。
+- 第二阶段剩余：`pages/*.js` 还有 11 个页面（人格、定时任务、黑话库、用量、安全、调试、二代/一代仿真等）；工具参考页是纯静态。`js/store.js`（跨页共享状态）暂不做，等有真实共享状态再加。
 - 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。
 
-**目标结构（A：原生 ESM + 微型运行时，零构建）**
+**目标结构（A：原生 ESM + 微运行时，零构建；页面与组件自包含）**
+
+设计原则：**页面归页面、公用归公用**——一个页面的 HTML/CSS/JS 放在同一个目录，能整目录搬走或删掉；公用组件同理；只有真正的横切能力（API、路由、存储、格式化、全局样式）留在 `app/`。不做 scoped CSS 编译、不做构建产物，保持「改完刷新就能看」的节奏。
 
 ```
 public/console/
-  index.html            只留骨架：aside / header / main
-  css/{tokens,layout,components,pages}.css
-  js/{router,api,components,store}.js
-  js/pages/{overview,sessions,persona,plugins,skills,mcp,behaviors,scheduler,usage,access,operations,reference}.js
+  index.html                 只留骨架：aside 导航 / header（面包屑+搜索）/ <main id="pageHost"> / toast / modal 宿主
+  favicon.svg                浏览器标签图标（复用侧栏品牌标记 q↗ 的图形与配色）
+  app/                       公用层（跨页面共享）
+    core/{api,router,store,dom,format}.js
+    ui/{toast,table,tile-list,field,modal,pill}.js
+    styles/{tokens,base,layout}.css
+  pages/
+    overview/{page.html,page.css,page.js}
+    persona/{page.html,page.css,page.js}
+    plugins/…  skills/…  mcp/…  behaviors/…  scheduler/…  slang/…  usage/…  access/…  operations/…  social-v1/…  social-v2/…  reference/…
 ```
 
-- `definePage(name, { title, parent, mount, refresh })` 注册页面，`setConsolePage` 只做「切换 + 落 URL + 记 sessionStorage」；
-- 组件：`renderTable({columns, rows})`、`renderTileList()`、`openModal()`、`toast()`、`renderBreadcrumb()`，替换现在散落的 `innerHTML` 拼接；
-- 样式只走 CSS 变量与既有类名（`.tile-list`/`.tile`、`.settings-group`/`.settings-content`），禁止 JS 拼布局；
-- 服务端加 `GET /console/*` 静态路由（带 [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) §1 的穿越守卫），同时把 CSP 的 `unsafe-inline` 收敛到 `'self'`。
+- **页面目录契约**：`page.html` 是该页 DOM 片段（不含 `<html>/<head>`，不引脚本）；`page.css` 只写本页私有样式；`page.js` 导出 `initXxxPage()`（沿用现有约定，自绑事件、自注册 `onPageRefresh`、自做首次加载）。工具参考页只有 `page.html`，没有 JS。
+- **路由器载入一页**：`loadPage(id)` → `fetch('pages/<id>/page.html')`（内存 Map 缓存，一页只取一次）→ 注入 `#pageHost` → 按需插 `<link rel="stylesheet" href="pages/<id>/page.css">`（按 URL 去重）→ `import('./pages/<id>/page.js')` → 调 `initXxxPage()`。片段取不到时显示「页面加载失败，刷新重试」占位并记一条 console 日志，不白屏。
+- **组件契约**：需要 DOM 结构的（modal、field、table）导出返回节点的构造函数；纯展示的（pill、tile、空态）导出 HTML 字符串。样式与组件同目录（`app/ui/table.css`），由 `components.css` 汇总引入。
+- **样式纪律**：全局只有 `app/styles/`；页面私有样式禁止写全局选择器；禁止 JS 拼布局。现有 407 处内联 `style="width:…"` 收敛为宽度工具类（`.w-200` / `.w-118` 这类），分批清，不一次性大改。
 
-**明确不做**：引入 React/Vue/Svelte 等运行时；引入 bundler/构建产物目录；把插件 UI 塞进宿主文档（插件 UI 走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
+**第三阶段（待动工）：页面目录化 + favicon**
+1. `3.1 骨架化`：把 `index.html` 里 25 个 `<section data-page>` 按页搬进 `pages/<id>/page.html`，`index.html` 只留骨架；路由器从「切 section 显隐」改成「往 `#pageHost` 注入片段」。**先拿 skills / mcp / behaviors 三个只读页试点**，验证夹具与测试改动，再推其余页。
+2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
+3. `3.3 样式分家`：`app.css`（2036 行）拆 `tokens/base/layout` + 每页 `page.css`；内联宽度分批改工具类。
+4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`；CSP 去掉 `unsafe-inline`（事件已全走委托，剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 改为拼接/分发 `pages/*/page.html` 与 `app/styles/*.css`。
 
-**代价与风险**：控制台从一个大 HTML 变成骨架 + 样式 + 逻辑三件套（第二阶段再拆成约 20 个模块），迁移期需要一次「双跑」窗口；`test-console-static.mjs`/`test-console-ui.mjs` 断言 HTML 字符串与 DOM 选择器，第一阶段已用 `scripts/console-source.mjs` 兼容，第二阶段拆模块后需要改成断言模块/渲染结果。
+- 测试与夹具影响：`console-source.mjs` 现在只拼 index + css + app.js + 模块，要扩成「骨架 + 各页片段 + 公用样式」；`test-console-static.mjs` 里针对单文件的字符串断言要改成读片段；`console-ui-fixture.mjs` 要按路径返回 `pages/<id>/page.html`。
+- **代价**：每页首次进入多 1 次片段请求（约 2–6 KB，浏览器缓存 + 内存 Map 兜底）；拆 15 页 + 2036 行 CSS 预计 6–8 个提交，每步保持 77/80 基线；迁移期页面结构会动，需逐页截图比对。
+- **明确不做**：引入 React/Vue/Svelte 运行时；引入 bundler 与构建产物目录；组件级 scoped CSS 编译；把插件 UI 塞进宿主文档（插件 UI 仍走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
 
-**验收**：B1–B3 各有回归用例；`npm run test:console-static` 全过；逐页截图与人格页对齐；CSP 响应头无 `unsafe-inline`。
+**验收**：15 个页面全部从 `pages/<id>/` 加载（HTML/CSS/JS 同目录）；`index.html` ≤ 150 行；`favicon.svg` 在浏览器标签生效；刷新保页、深链、面包屑、搜索层级全部不回归；CSP 响应头无 `unsafe-inline`；`npm run test:console-static` 全过。
 
 ### 8.8 `bridge.js` 按接缝抽层（进行中）
 

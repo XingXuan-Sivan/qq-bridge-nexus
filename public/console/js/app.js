@@ -3,7 +3,6 @@
 import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
-import { initPluginsPage } from './pages/plugins.js';
 
 bootstrapConsoleToken();
 
@@ -294,6 +293,5 @@ setInterval(() => { refresh(); refreshSessionMetrics(); }, 3000);
   });
 })();
 
-initPluginsPage();
 // 所有页面模块就绪后再接管路由（首屏恢复也在这里）。
 initRouter();

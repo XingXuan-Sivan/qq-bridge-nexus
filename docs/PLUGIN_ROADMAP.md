@@ -400,7 +400,7 @@ public/console/
 
 **验收**：15 个页面全部从 `pages/<id>/` 加载（HTML/CSS/JS 同目录）；`index.html` ≤ 150 行；`favicon.svg` 在浏览器标签生效；刷新保页、深链、面包屑、搜索层级全部不回归；CSP 响应头无 `unsafe-inline`；控制中心拆成 `public/control-center/` 三件并在桥接停止时可用；`npm run test:console-static` 全过。
 
-### 8.8 `bridge.js` 按接缝抽层（进行中：第 1、2 步已完成）
+### 8.8 `bridge.js` 按接缝抽层（进行中：第 1–3 步已完成，第 3 步只做了 `/reset`）
 
 现状：`src/bridge.js` 14.6k 行，HTTP 路由、业务规则、上游适配混在一个请求处理函数体里。**不重写**，按接缝逐步抽，每步一个提交、每次保持 `test-integration-v030` 全绿。
 
@@ -408,7 +408,7 @@ public/console/
 | --- | --- | --- | --- | --- |
 | 1 | 安全头与静态资源守卫、CSP | `src/http/{security,static}.mjs` | ✅ 2026-11-04（路由表/鉴权中间件仍在 `bridge.js`） | 低 |
 | 2 | 五条内置命令的壳与 `/api/commands` 响应 | `src/commands/{registry,builtin,payload}.mjs` | ✅ 2026-11-05（`/reset` 执行体仍在 `bridge.js`，留给第 3 步） | 低 |
-| 3 | 会话/模式状态（`state.sessions`、模式闸门、审批、`resetSession`） | `src/session/*` | 待做（A′ 方案） | 中 |
+| 3 | 会话/模式状态（`state.sessions`、模式闸门、审批、`resetSession`） | `src/session/*` | 🟡 2026-11-05：`resetSession` 清理序列已搬（A′）；模式闸门/审批/其余会话态待做 | 中 |
 | 4 | 上游适配（DSH / SnowLuma / MCP host） | `src/upstream/*` | 待做 | 中 |
 
 约定：
@@ -416,12 +416,14 @@ public/console/
 - **入口不动**：`package.json` 的 `start` 仍是 `node src/bridge.js`，`src/bridge.js` 保留为组装根（读配置 → 建依赖 → 注册路由 → 启动），最终收敛到 500 行量级；
 - 每一抽都必须「行为零变化」，只搬代码不改语义；语义要改的另开提交；
 - 抽完 HTTP 层后新增 `scripts/test-http-boundary.mjs`（穿越、符号链接、未启用 404、未知端点 404），并入 `test:audit`；
-- 抽命令层后新增 `src/commands/builtin.mjs` 的 deps 窄口（`send`/`session`/`acl`/`role`/`log`），让内置命令可以用假实现单测，不必起桥接。
+- 抽命令层后新增 `src/commands/builtin.mjs` 的 deps 窄口（`send`/`session`/`acl`/`role`/`log`），让内置命令可以用假实现单测，不必起桥接；
+- 抽会话层时，`resetSession` 的清理由 `deps` 显式登记每一个桶：新增缓存必须同步登记，漏了 `scripts/test-session-reset.mjs` 会立刻红——这是这一步唯一比「留在 bridge.js 里」更值钱的地方。
 
-**已完成的两步**：
+**已完成的三步**：
 
 - 第 1 步（2026-11-04，`cb2de96` / `3b8534c` / `43378be`）：`src/http/security.mjs`（安全头 + CSP 单一来源）、`src/http/static.mjs`（解码一次、`path.resolve` + `path.relative`、拒绝 `..`/盘符/ADS/反斜杠/符号链接/白名单外扩展名，失败统一 404）、`scripts/test-http-boundary.mjs`；VM 夹具补 `SECURITY_HEADERS`。
-- 第 2 步（2026-11-05）：`src/commands/builtin.mjs` 承载 `/reset` `/status` `/role` `/silent` `/active` 五条壳与文案；`src/commands/payload.mjs` 组装 `/api/commands`；`bridge.js` 删掉 `commandStatus`/`commandRole`/两条旧 if 分支与 5 条内联 `register`，`commandReset` 改名 `resetSession(key)` 保留原地。`src/bridge.js` 14745 → 14686 行（净 −59）。
+- 第 2 步（2026-11-05）：`src/commands/builtin.mjs` 承载 `/reset` `/status` `/role` `/silent` `/active` 五条壳与文案；`src/commands/payload.mjs` 组装 `/api/commands`；`bridge.js` 删掉 `commandStatus`/`commandRole`/两条旧 if 分支与 5 条内联 `register`。`src/bridge.js` 14745 → 14686 行（净 −59）。
+- 第 3 步（2026-11-05，A′）：`src/session/reset.mjs` 承接 `/reset` 的完整清理序列（删挂账 → 清 30 项内存态 → 落盘 → 停 DSH → 归档 → 回执），`bridge.js` 只留惰性拼 `deps` 的登记段；`sessionEpoch` 通过 `bumpEpoch` 回调传入。`scripts/test-session-reset.mjs` 4 条用例逐桶断言。行数上这一步几乎持平（−58 行逻辑、+64 行 deps 登记，`bridge.js` 14694 行）：换来的是清理序列可脱离桥接单测、漏清会被测试挡住。
 
 **验收**：`test-integration-v030` 31/31 不减；`test:audit` 不差于三项既有失败（`test-preset-local-tools` #5、`test-control-center` #20、`test-mac-app` #2）；`src/bridge.js` 行数逐阶段下降并在 CHANGELOG 记录。
 

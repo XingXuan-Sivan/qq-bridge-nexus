@@ -87,6 +87,8 @@ const tests = [
   'test-soulkit-persona.mjs',
   // 命令注册表（P3a）：最长匹配、别名、元数据回退、权限/scope、冲突保留先注册者。
   'test-command-registry.mjs',
+  // 会话重置（P7 第三步）：逐桶清理、落盘/停 DSH/回执的顺序、停止失败不阻断归档。
+  'test-session-reset.mjs',
   'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',

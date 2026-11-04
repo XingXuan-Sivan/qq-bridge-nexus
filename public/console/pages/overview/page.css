@@ -1,2 +1,78 @@
 /* 运行总览：六个块复用公共样式；摘要卡现在是 .grid 的第一个网格项，间距交给网格 gap，去掉原来的 margin-bottom 避免 24px + 22px 叠成双倍。 */
 .overview-summary { margin-bottom: 0; }
+
+/* 概览页私有：三块在 main 网格里的占位与顺序（app.css 只留通用布局）。 */
+#section-activity {
+  grid-column:1/-1;
+  order:3
+}
+#section-mode {
+  order:0
+}
+/* 静默开关：原来是「标题 + 两个按钮」的紧凑两栏；加了定时静默面板后改成普通块布局（.row 不能再钉在第 2 栏） */
+#section-silent {
+  grid-column:1/-1;
+  order:2;
+  display:block;
+  padding-top:20px;
+  padding-bottom:20px
+}
+#section-silent h2 {
+  margin:0
+}
+
+/* 窄屏：静默块从两栏改回块布局，标题与说明的间距单独收紧。 */
+@media (max-width:760px) {
+  #section-silent {
+    display:block
+  }
+  #section-silent h2 {
+    margin-bottom:14px
+  }
+  #section-silent .meta {
+    margin-top:10px
+  }
+}
+
+/* 后置覆盖（保持在原文件里的顺序语义）。 */
+#section-silent {
+  grid-column:1/-1
+}
+
+/* 概览页私有：三块在 main 网格里的占位与顺序（app.css 只留通用布局）。 */
+#section-activity {
+  grid-column:1/-1;
+  order:3
+}
+#section-mode {
+  order:0
+}
+/* 静默开关：原来是「标题 + 两个按钮」的紧凑两栏；加了定时静默面板后改成普通块布局（.row 不能再钉在第 2 栏） */
+#section-silent {
+  grid-column:1/-1;
+  order:2;
+  display:block;
+  padding-top:20px;
+  padding-bottom:20px
+}
+#section-silent h2 {
+  margin:0
+}
+
+/* 窄屏：静默块从两栏改回块布局，标题与说明的间距单独收紧。 */
+@media (max-width:760px) {
+  #section-silent {
+    display:block
+  }
+  #section-silent h2 {
+    margin-bottom:14px
+  }
+  #section-silent .meta {
+    margin-top:10px
+  }
+}
+
+/* 后置覆盖（保持在原文件里的顺序语义）。 */
+#section-silent {
+  grid-column:1/-1
+}

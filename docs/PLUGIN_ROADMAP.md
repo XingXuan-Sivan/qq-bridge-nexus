@@ -351,7 +351,7 @@ public/console/
     - 顺带修掉的隐患：`app.js` 的搜索索引原来在启动时用 `section.querySelector('h2')` 硬取标题，空 section 会抛 `TypeError` 并中断整个入口脚本的后续初始化；现在改为「按需重建 + 跳过空 section + 未注入的片段页用页面表标题兜底」，保证「没打开过的页也能搜到」。
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
-3. `3.3 样式分家`：`app.css`（2036 行）拆 `tokens/base/layout` + 每页 `page.css`；内联宽度分批改工具类。
+3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`，`index.html` 里先于 `app.css` 加载）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，`app.css` 不再出现 `#section-*` 选择器。剩下的第二步：把剩余的 `app.css`（约 1800 行）按 `base/layout/components` 再分文件，407 处内联宽度改工具类后再动 CSP。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04：`public/console/img/favicon.svg` 为 32×32、深色圆角底 + 品牌蓝紫渐变 `q↗`，`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、915 字节；静态测试加 4 条断言兜住它不被误删）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
 5. `3.5 控制中心`：`public/control-center.html` 按**B 档**独立目录化，**不并入** `pages/`；与 console 共享同一份 `app/styles/tokens.css`。详见本节「3.5 启动器控制中心」。
 

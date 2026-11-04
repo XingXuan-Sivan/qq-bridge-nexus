@@ -308,9 +308,10 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.match(html, /timeZoneName: 'shortOffset'/, '时区后面带 UTC 偏移');
   assert.match(html, /Intl\.supportedValuesOf\('timeZone'\)/, '列出全部时区');
   assert.match(html, /onPageRefresh\('scheduler', \(\) => setTimeout\(\(\) => refreshScheduler\(\), 0\)\);/, '直接打开 #scheduler 时推迟到脚本跑完再刷新');
-  // 时区下拉的初始化在 schedEl 定义之前，不能用 schedEl（否则整段脚本报错）
-  const tzInit = html.indexOf("document.getElementById('schedTimezone').innerHTML = schedTzOptionsHtml(false);");
-  assert.ok(tzInit > 0 && tzInit < html.indexOf('const schedEl = (id)'), '时区下拉初始化不依赖 schedEl');
+  // 时区下拉抽成 js/timezone.js（定时任务页与定时静默共用）；初始化在片段注入后的 init() 里跑，不再有「早于 schedEl」的限制。
+  assert.match(html, /export function tzOptionsHtml\(withFollow\)/);
+  assert.match(html, /document\.getElementById\('schedTimezone'\)\.innerHTML = tzOptionsHtml\(false\);/);
+  assert.match(html, /document\.getElementById\('schedTaskTz'\)\.innerHTML = tzOptionsHtml\(true\);/);
 });
 
 test('⑦ 插件任务类型：payload 校验、写盘、重建后仍在，未注册时拒绝', () => {

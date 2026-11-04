@@ -280,52 +280,7 @@
       <div class="meta" id="dshEffortNote"></div>
       <div class="meta" id="dshEffortSideEffect"></div>
     </section>
-<section id="section-test-send" data-page="operations" class="card">
-      <h2>测试发送</h2>
-      <div class="row">
-        <select id="tsKind" style="width:100px">
-          <option value="group">群</option>
-          <option value="private">私聊</option>
-        </select>
-        <input type="text" id="tsId" placeholder="群号 / QQ 号" style="width:140px">
-      </div>
-      <label>消息内容</label>
-      <textarea id="tsMsg" placeholder="这是一条测试消息"></textarea>
-      <div class="row" style="margin-top:8px">
-        <button id="tsSend">发送测试</button>
-        <span class="meta" id="tsMsg2"></span>
-      </div>
-      <div class="meta">目标必须在白名单内，否则拒绝。</div>
-    </section>
-<section id="section-maintenance" data-page="operations" class="card">
-      <h2>桥接控制</h2>
-      <div class="row">
-        <button id="restartBtn" class="danger">重启桥接</button>
-        <span class="meta" id="restartMsg"></span>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <button id="clearWsBtn" class="danger">清空 QQ 聊天工作区</button>
-        <span class="meta" id="clearWsMsg"></span>
-      </div>
-      <div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。</div>
-    </section>
-<section id="section-notify" data-page="operations" class="card span-all">
-      <h2>后台控制端引导</h2>
-      <div class="meta">直接向指定 QQ 会话的 DSH agent 投递一条“后台控制端提醒”，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>
-      <div class="row" style="margin-top:10px">
-        <select id="aiNotifyKind" style="width:110px">
-          <option value="group">群</option>
-          <option value="private">私聊</option>
-        </select>
-        <input type="text" id="aiNotifyId" placeholder="群号 / QQ 号" style="width:180px">
-      </div>
-      <label>提醒内容（发给 DSH agent 的引导/提醒）</label>
-      <textarea id="aiNotifyMessage" placeholder="例如：接下来群里聊到某个话题时，你可以更主动一点；或：先潜水，等我叫你。"></textarea>
-      <div class="row" style="margin-top:8px">
-        <button id="aiNotifySend">发送到 DSH</button>
-        <span class="meta" id="aiNotifyMsg"></span>
-      </div>
-    </section>
+<section id="section-operations" data-page="operations" class="page-stack"><!-- 片段：pages/operations/page.html（三张卡片：测试发送 / 桥接控制 / 后台控制端引导） --></section>
     <section id="section-usage" data-page="usage" class="page-stack"><!-- 片段：pages/usage/page.html（两张卡片：令牌与花费 / 上下文压缩） --></section>
       </div>
       <div class="overview-footnote" data-page="overview"><span id="accessSummary">正在读取访问范围…</span><button class="text-button" data-view="access">管理访问范围 →</button></div>

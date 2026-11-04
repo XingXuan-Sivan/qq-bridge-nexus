@@ -759,7 +759,8 @@ export function init() {
   void refreshStickerDescribe();
   onPageRefresh('social-v2', () => {
     void loadVoiceLibrary();
-    void loadV2Config();
+    // 不重拉整份配置：那会把用户还没保存的草稿（如 agentPreset 下拉）冲掉。
+    // 配置只在首次进入与保存成功后加载。
     void refreshV2Activity();
     if (document.getElementById('v2WakeKey')?.value.trim()) void loadV2WakeStatus();
   });

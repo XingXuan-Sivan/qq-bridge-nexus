@@ -31,7 +31,10 @@ node scripts/test-console-ui.mjs --artifacts=docs/ui-verification
 
 脚本使用 Playwright 和 Chromium。优先使用项目内安装的 `playwright`；Windows 上若未安装 Playwright，会自动改用本机 Chrome / Edge，无需下载浏览器。其他环境可安装 Playwright 及其浏览器，或通过以下环境变量指定：
 
-- `PLAYWRIGHT_MODULE`：Playwright 模块目录（例如 `npm install --no-save playwright` 后指向 `node_modules/playwright`）。
+- `PLAYWRIGHT_MODULE`：Playwright 模块目录（例如 `npm install --no-save playwright` 后指向 `node_modules/playwright`）。只装了 `playwright-core`（某些依赖会带进来）时，指向 `playwright-core` 也能跑，不需要额外下载浏览器：
+  ```powershell
+  $env:PLAYWRIGHT_MODULE='playwright-core'; npm run test:console-ui
+  ```
 - `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`：Chromium / Chrome 可执行文件。
 
 测试自行启动随机端口的 fixture，并在退出时关闭浏览器和服务。浏览器请求被限制到该 fixture 的 origin，外部请求会被阻止并使检查失败。
@@ -39,13 +42,14 @@ node scripts/test-console-ui.mjs --artifacts=docs/ui-verification
 覆盖范围：
 
 - 改造前 225 个元素 ID 保留，DOM ID 唯一。
-- 九个导航视图及切换后草稿保留，跨越实际的 3 秒状态轮询。
+- 控制台已按页片段化：启动时逐页注入一遍并拍下「元素 id → 所属页」快照，之后 `reveal()` 先切到该页再定位（否则刷新后未注入页里的元素会取不到）。
+- 十个导航视图及切换后草稿保留，跨越实际的 3 秒状态轮询。
 - 模式及预设、角色创建与切换、静默模式、白名单、安全设置。
 - 二代配置上下两个保存按钮的完整 payload，时间单位、零值、工具开关、暂停及恢复。
 - 一代社交参数与会话阶段。
 - 黑话添加、搜索、标签切换、确认对话框与学习参数。
 - 测试消息、AI 提醒仅发送到 mock API。
-- 全部 24 次写请求与改造前的 API payload 基线逐项完全比较。
+- 全部 25 次写请求与 API payload 基线逐项完全比较。
 - 手机 390px 与平板 768px 下九个视图没有页面级横向溢出。
 - 深色模式：切换生效、写入 `localStorage`、刷新后保持、`aria-pressed` 与 `color-scheme` 同步、正文对比度 ≥ 7:1、深色下 390 / 768px 无横向溢出。
 - 未做选择时跟随系统 `prefers-color-scheme`。
@@ -61,13 +65,23 @@ node scripts/test-console-ui.mjs --artifacts=docs/ui-verification
 
 ## 基线说明
 
-`console-ui-legacy-ids.json` 保存改造前的 225 个元素 ID。`console-ui-contracts.json` 来自原控制台在相同 fixture 中执行相同操作后的 24 次写请求，包含二代配置的完整嵌套参数。
+`console-ui-legacy-ids.json` 保存改造前的 225 个元素 ID。`console-ui-contracts.json` 来自原控制台在相同 fixture 中执行相同操作后的写请求，包含二代配置的完整嵌套参数。
 
 只有后端契约经过明确调整时才更新基线。`scripts/fixtures/console.before.html` 是改造前的原版控制台（通常无需改动），重录时运行：
 
 ```sh
 node scripts/test-console-ui.mjs --original --record-baseline
 ```
+
+`--record-baseline` 只允许搭配 `--original`：基线必须是改版前控制台的行为，否则「契约一致」就没有意义。
+
+若改动**确实**要调整前端提交的载荷（例如新增字段、把两次写合并成一次），用显式的重录开关，并把差异写进提交说明与 `CHANGELOG.md`：
+
+```sh
+node scripts/test-console-ui.mjs --accept-contracts
+```
+
+它会在套件全绿后按当前控制台重录基线并打印条数。**不要**用它绕过失败：先确认每一项差异都是有意为之。2026-11-05 重录过一次，差异是：`/api/mode` 与 `/api/roles/*` 增加 `level` / `apply` 字段（closed-agent 分级、人格切换生效时机），以及片段化后写请求顺序的相应变化。
 
 普通回归不依赖 `console.before.html`。不要用真实的 `test-console.mjs` 替代本脚本：那个脚本可能向真实 QQ 发送消息。
 

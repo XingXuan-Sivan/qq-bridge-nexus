@@ -465,11 +465,31 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
     for (const name of ['tokens.css', 'base.css', 'layout.css', 'components.css', 'utilities.css']) {
       assets.set(`/console/css/${name}`, { body: await readFile(resolve(dir, 'css', name)), type: 'text/css; charset=utf-8' });
     }
-    // js/ 下的模块逐个提供：入口 app.js 会 import ./api.js、./ui.js、./router.js。
-    for (const name of await readdir(resolve(dir, 'js'))) {
-      if (!name.endsWith('.js')) continue;
-      assets.set(`/console/js/${name}`, { body: await readFile(resolve(dir, 'js', name)), type: 'text/javascript; charset=utf-8' });
-    }
+    // js/ 下的模块逐个提供：入口 app.js 会 import ./api.js、./router.js、./components/*.js 等，
+    // 所以这里要递归（components/ 子目录也是真实请求路径的一部分，漏了就整页起不来）。
+    const jsRoot = resolve(dir, 'js');
+    const walkJs = async (abs, rel = '') => {
+      for (const entry of await readdir(abs, { withFileTypes: true })) {
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) { await walkJs(resolve(abs, entry.name), relPath); continue; }
+        if (!entry.name.endsWith('.js')) continue;
+        assets.set(`/console/js/${relPath}`, { body: await readFile(resolve(abs, entry.name)), type: 'text/javascript; charset=utf-8' });
+      }
+    };
+    await walkJs(jsRoot);
+    // 图片与字体（favicon.svg、以后的自托管字体）：按真实路径提供，缺了会 404 打断资源断言。
+    const binaryTypes = { svg: 'image/svg+xml', png: 'image/png', ico: 'image/x-icon', woff2: 'font/woff2', woff: 'font/woff' };
+    const walkBinary = async (abs, urlBase, rel = '') => {
+      for (const entry of await readdir(abs, { withFileTypes: true }).catch(() => [])) {
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) { await walkBinary(resolve(abs, entry.name), urlBase, relPath); continue; }
+        const type = binaryTypes[entry.name.split('.').pop()?.toLowerCase()];
+        if (!type) continue;
+        assets.set(`${urlBase}/${relPath}`, { body: await readFile(resolve(abs, entry.name)), type });
+      }
+    };
+    await walkBinary(resolve(dir, 'img'), '/console/img');
+    await walkBinary(resolve(dir, 'fonts'), '/console/fonts');
     // 页面片段：pages/<id>/{page.html,page.css,page.js} 按浏览器真实请求路径提供。
     for (const id of await readdir(resolve(dir, 'pages')).catch(() => [])) {
       const pageDir = resolve(dir, 'pages', id);
@@ -526,6 +546,34 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         switch (path) {
           case '/api/status': return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: state.whitelist.allow.groups, allowPrivate: state.whitelist.allow.private, activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
           case '/api/presets': return json({ presets: [{ id: 'qq-chat-v2', trust: 'user' }, { id: 'qq-chat', trust: 'user' }] });
+          // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
+          // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。
+          case '/api/plugins': return json({
+            ok: true,
+            enabled: true,
+            dir: 'plugins',
+            plugins: [{
+              id: 'demo-plugin', name: '演示插件', version: '0.1.0', status: 'active',
+              description: '离线预览用的假插件，不加载任何代码。',
+              permissions: ['state'], hooks: [], commands: 0, blocks: [], personas: [], taskTypes: [],
+            }],
+            persona: { plugin: null },
+            coreBlocks: { blocks: [], catalog: [] },
+            taskTypes: [],
+            settings: { watch: false, filters: { inbound: false }, limits: { hookTimeoutMs: 2000, maxPromptAppendChars: 4000 }, install: { enabled: true } },
+          });
+          case '/api/commands': return json({
+            ok: true,
+            bridge: { builtin: [{ id: 'reset', name: '/reset', aliases: ['/new'], scope: 'all', permission: 'owner', group: '会话', description: '重置会话' }], plugin: [] },
+            dsh: [{ name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' }],
+            tools: [{ name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' }],
+          });
+          case '/api/extensions': return json({
+            ok: true,
+            skills: [{ name: 'demo-skill', description: '离线预览用的假技能。', path: 'C:/fixture/skills/demo-skill' }],
+            mcp: [{ name: 'snowluma-host', file: 'src/mcp-host-server.js', tools: ['snowluma_status'], note: 'SnowLuma 网关状态，只读' }],
+          });
+          case '/api/persona/sources': return json({ ok: true, provider: null, rows: [] });
           case '/api/roles': return json({
             roles: state.roles.slice(),
             summaries: state.roles.map((name) => {

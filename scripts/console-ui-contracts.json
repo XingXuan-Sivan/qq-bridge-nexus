@@ -28,7 +28,8 @@
     "path": "/api/mode",
     "body": {
       "mode": "closed-agent",
-      "closedAgentPreset": ""
+      "closedAgentPreset": "",
+      "level": "L2"
     }
   },
   {
@@ -36,7 +37,8 @@
     "path": "/api/mode",
     "body": {
       "mode": "closed-agent",
-      "closedAgentPreset": "qq-chat-v2"
+      "closedAgentPreset": "qq-chat-v2",
+      "level": "L2"
     }
   },
   {
@@ -44,21 +46,24 @@
     "path": "/api/roles/create",
     "body": {
       "name": "契约测试角色",
-      "content": "温柔、有耐心，回答简洁。"
+      "content": "温柔、有耐心，回答简洁。",
+      "apply": "nextWake"
     }
   },
   {
     "method": "POST",
     "path": "/api/role",
     "body": {
-      "role": "契约测试角色"
+      "role": "契约测试角色",
+      "apply": "nextWake"
     }
   },
   {
     "method": "POST",
     "path": "/api/role",
     "body": {
-      "role": null
+      "role": null,
+      "apply": "nextWake"
     }
   },
   {
@@ -110,6 +115,13 @@
   },
   {
     "method": "POST",
+    "path": "/api/security",
+    "body": {
+      "rehardenStateDir": true
+    }
+  },
+  {
+    "method": "POST",
     "path": "/api/socialV2/config",
     "body": {
       "enabled": true,
@@ -143,9 +155,18 @@
         "getStickerImage": true,
         "sendSticker": true,
         "collectSticker": true,
+        "personProfile": true,
+        "requestMode": true,
+        "crossGroup": true,
+        "ownerGroupAccess": true,
+        "ownerRelay": true,
         "getSelfImage": true,
         "stickerNote": true,
-        "setStickerRemark": true
+        "setStickerRemark": true,
+        "sendVoice": true,
+        "webImage": true,
+        "schedule": true,
+        "handoverMemory": true
       },
       "wake": {
         "defaultMode": "diving",
@@ -262,9 +283,18 @@
         "getStickerImage": true,
         "sendSticker": true,
         "collectSticker": true,
+        "personProfile": true,
+        "requestMode": true,
+        "crossGroup": true,
+        "ownerGroupAccess": true,
+        "ownerRelay": true,
         "getSelfImage": true,
         "stickerNote": true,
-        "setStickerRemark": true
+        "setStickerRemark": true,
+        "sendVoice": true,
+        "webImage": true,
+        "schedule": true,
+        "handoverMemory": true
       },
       "wake": {
         "defaultMode": "diving",

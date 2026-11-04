@@ -5,7 +5,7 @@
 
 ## 未发布
 
-### 重构：控制台页面目录化（3.1：技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库，2026-11-04）
+### 重构：控制台页面目录化（3.1：技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务，2026-11-04）
 - `public/console/pages/<id>/` 成为页面自包含目录：`skills`、`mcp`、`behaviors`、`reference` 四页的 DOM 片段、私有样式、页面模块搬进各自目录；`index.html` 对应 `<section>` 只留空容器（页面不再是「全写死在 index 里」）。`reference` 是纯静态页，模块只导出空 `init()`，保持「每页都有 `init()`」的约定。
 - 路由器新增 `hydratePage(page)`：首次进入时 fetch `page.html` → 注入容器 → 按需插 `page.css` → 动态 `import()` 页面模块并调 `init()`；每页只加载一次，并发切页复用同一个 Promise；片段取不到时只在该 section 显示「页面加载失败（刷新重试）」，不影响其它页。
 - `src/bridge.js` 的静态路由前缀扩到 `/console/(css|js|img|fonts|pages)/`（仍在令牌校验之前）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把页面片段拼进源码视图；`scripts/console-ui-fixture.mjs` 按真实路径提供 `pages/<id>/page.{html,css,js}`。
@@ -14,6 +14,7 @@
 - 无障碍增强下沉：原来给表单补 `aria-label`、给主按钮补 `.primary`、给 `*Msg` 补 `role=status` 的代码只在入口脚本启动时跑一次，片段页注入得晚、永远补不上；现抽成 `ui.js` 的 `applyPageA11y(root)`，由路由器在页面 `init()` 后对注入的 host 再调一次。
 - `social-v1`（一代仿真）与 `slang`（黑话词库）也搬进各自目录：表单读写、筛选 Tab、批量研究/确认/拒绝、词库模态与键盘焦点环随页面模块走；`slang` 的模态 DOM 留在共享宿主（`</main>` 之后），逻辑搬进页面，避免每页各造一个壳。
 - 路由器新增 `refreshCurrentPage()`：全局刷新按钮现在会同时跑「当前页注册的 refresher」，搬走的页不再点刷新毫无反应。
+- `scheduler`（定时任务）也搬进 `pages/scheduler/`：任务列表、编辑器（13 种重复方式、时区、目标、payload）、限额与免打扰设置、执行记录整块随页面走。它与「定时静默」共用一套时区下拉，因此把 `tzOffset`/`tzOptionsHtml`/`tzSet` 抽成 `js/timezone.js` 两页共用，初始化改到 `init()` 里执行。
 - 修复搜索索引的启动期崩溃：原来在入口脚本里对每个 `section[data-page]` 直接取 `h2`，片段页为空时会抛 `TypeError` 并中断后续初始化（整页交互失效）；现改为按需重建、跳过空 section，并用页面表标题给未注入的页兜底，保证「没打开过也能搜到」。
 - `scripts/test-console-static.mjs` 增 16 条断言（页面目录三件套、index 容器为空、路由器注入、搜索索引兜底）。
 

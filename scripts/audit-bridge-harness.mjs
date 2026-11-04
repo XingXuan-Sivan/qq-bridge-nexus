@@ -47,6 +47,8 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
+// 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
+import { createSnowlumaHealth } from '../src/upstream/snowluma-health.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
@@ -239,6 +241,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     loadSessionState,
     saveSessionState,
     createSessionRegistry,
+    createSnowlumaHealth,
 createPromptBlockRegistry,
     createPluginKernel: async () => ({
       init: async () => {},

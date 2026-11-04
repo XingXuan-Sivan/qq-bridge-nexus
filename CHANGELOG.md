@@ -12,6 +12,12 @@
 - 既有 `scripts/test-snowluma-upstream-health.mjs` 同步改为**两侧断言**：取值逻辑看模块（`/get_status`、`body.data?.good`），接线看 bridge（`createSnowlumaHealth`、`snowlumaHealth.pollStatus`）——否则搬家后这条最重要的断言会静默失效。
 - 验证：新用例 10/10、既有用例 9/9、`test-integration-v030` 31/31、`test-audit-bridge` 全 PASS、全量 `test:audit` **82/85**（三项既有失败不变）。
 
+### 重构：上游编排的两条纯策略抽成模块（P7 第四步收尾，2026-11-05）
+- `src/upstream/dsh-probe.mjs`：把「探活失败时按 10s 节流重新识别 DSH 随机端口、识别到就重试一次」从 `checkDsh` 的闭包里抽出来。以前这段只能靠「起整桥接 + 关掉 DSH」验证，现在可以断言「首次即可重识别」「窗口内不重复扫端口」「识别到地址但探活仍失败时不能算恢复」。顺带修掉一处重复日志（重新识别的提示原先会打两遍）。
+- `src/upstream/snowluma-conn-update.mjs`：把「HTTP token 与 WS token 是两个不同的值」「发现到的端点该不该跟随」压成一张决策表。`snowluma.followDiscoveredEndpoint=false` 或经接口平台时**只自愈 token、绝不改 URL、绝不写回 config.json**——这条以前靠「改 cfg 之后再恢复」维持，现在由 `persistUrl` 直接表达，不会再漏。
+- 新增 `scripts/test-upstream-dsh-probe.mjs`（8 条）与 `scripts/test-upstream-conn-update.mjs`（8 条）；夹具补 `createDshProbe` / `resolveConnectionUpdate` 注入。
+- 边界说明：MCP server 由 DSH 以子进程方式启动（桥接只维护清单、不 spawn、不分配端口），因此第 4 步在上游侧没有「MCP host 启停」可搬；`bridge.js` 里剩下的上游代码是事件接线与模式/队列联动。
+
 ### 重构：会话映射表收进 `src/session/registry.mjs`（P7 第三步收尾，2026-11-05）
 - `state.sessions` / `state.sessionPolicies` 的 46 处直接读写全部换成注册表方法：`get` / `policyOf` / `has` / `keys` / `ids` / `entries` / `raw` / `bindSession` / `setPolicy` / `drop` / `dropPolicy` / `unbind` / `isCurrent` / `clearAll`。
 - 收口的价值在两条此前只写在注释里的规则：**映射与策略指纹必须成对维护**（只写映射不写指纹 ⇒ `isCurrentSession()` 永远判旧、会话无限重建；只删映射不删指纹 ⇒ 下次同 id 会被误当新会话），现在由 `bindSession()` / `unbind()` 保证。

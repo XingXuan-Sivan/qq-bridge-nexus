@@ -178,20 +178,28 @@ test('控制台有对应的告警条与卡片', () => {
 });
 
 test('端点自愈可关，且默认保持「跟随」（向后兼容）', () => {
+  // P7 第四步：决策搬进 src/upstream/snowluma-conn-update.mjs，bridge 只把配置传进去并应用结果。
+  const connUpdate = fs.readFileSync(path.join(ROOT, 'src', 'upstream', 'snowluma-conn-update.mjs'), 'utf8');
   assert.match(
-    bridgeCode,
-    /cfg\.snowluma\?\.followDiscoveredEndpoint !== false/,
-    '必须支持 snowluma.followDiscoveredEndpoint 关闭端点跟随',
+    connUpdate,
+    /followDiscoveredEndpoint !== false && viaPlatform !== true/,
+    '必须支持 snowluma.followDiscoveredEndpoint 关闭端点跟随（经接口平台同样不跟随）',
   );
   assert.equal(
     example.snowluma?.followDiscoveredEndpoint, true,
     '示例配置里默认值必须是 true —— 关闭会改变既有自愈行为，不能悄悄改默认',
   );
-  // 关掉时不得把发现的端点写回文件
+  // 关掉时不得把发现的端点写回文件：决策里体现为 persistUrl=false，bridge 只在 persistUrl 为真时传 wsUrl。
+  assert.match(
+    connUpdate,
+    /const persistUrl = followEndpoint && Boolean\(wsUrl\)/,
+    '关闭跟随时必须显式表达「不写回 URL」',
+  );
   assert.match(
     bridgeCode,
-    /\.\.\.\(followEndpoint \? \{ wsUrl, httpUrl: r\.baseUrl \} : \{\}\)/,
+    /\.\.\.\(update\.persistUrl \? \{ wsUrl, httpUrl: r\.baseUrl \} : \{\}\)/,
     '关闭跟随时不得把 wsUrl 写回 config.json（否则"我设了别处"会被持久化抹掉）',
   );
+  assert.match(bridgeCode, /followDiscoveredEndpoint: cfg\.snowluma\?\.followDiscoveredEndpoint/, 'bridge 必须把开关传进决策函数');
   assert.equal(typeof example.snowluma?.silenceWarnMs, 'number', '示例配置应记录静默告警阈值');
 });

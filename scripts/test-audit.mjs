@@ -97,6 +97,9 @@ const tests = [
   'test-session-registry.mjs',
   // 上游适配（P7 第四步）：SnowLuma「自报坏」与「静默」两个故障面、边沿告警、get_status 兜底轮询。
   'test-upstream-snowluma-health.mjs',
+  // 上游编排的纯策略：DSH 探活 + 自动识别地址的节流重试、SnowLuma 连接参数自愈（两个 token / 端点跟随开关）。
+  'test-upstream-dsh-probe.mjs',
+  'test-upstream-conn-update.mjs',
   'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',

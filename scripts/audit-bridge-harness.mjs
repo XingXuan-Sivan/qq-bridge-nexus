@@ -49,6 +49,9 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
 import { createSnowlumaHealth } from '../src/upstream/snowluma-health.mjs';
+// 上游编排的纯策略（P7 第四步）：bridge 的 import 会被本夹具剥掉，必须逐个注入。
+import { createDshProbe } from '../src/upstream/dsh-probe.mjs';
+import { resolveConnectionUpdate } from '../src/upstream/snowluma-conn-update.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
@@ -242,6 +245,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     saveSessionState,
     createSessionRegistry,
     createSnowlumaHealth,
+    createDshProbe,
+    resolveConnectionUpdate,
 createPromptBlockRegistry,
     createPluginKernel: async () => ({
       init: async () => {},

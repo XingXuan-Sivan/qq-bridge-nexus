@@ -410,7 +410,7 @@ public/console/
 | 1 | 安全头与静态资源守卫、CSP | `src/http/{security,static}.mjs` | ✅ 2026-11-04（路由表/鉴权中间件仍在 `bridge.js`） | 低 |
 | 2 | 五条内置命令的壳与 `/api/commands` 响应 | `src/commands/{registry,builtin,payload}.mjs` | ✅ 2026-11-05（`/reset` 执行体仍在 `bridge.js`，留给第 3 步） | 低 |
 | 3 | 会话/模式状态（`state.sessions`、模式闸门、审批、`resetSession`） | `src/session/*` | ✅ 2026-11-05：`resetSession` 清理序列、**模式闸门**（`mode-gate.mjs`）、**`sessions.json` 读写**（`store.mjs`）与**会话映射表**（`registry.mjs`）全部搬出，`bridge.js` 只剩薄包装与 `sessionPolicy()` 的指纹拼装（依赖 `modePreset` / `closedAgentPlan`，属于模式层） | 中 |
-| 4 | 上游适配（DSH / SnowLuma / MCP host） | `src/upstream/*` | 🟡 2026-11-05：**SnowLuma 接收链路健康**（`upstream/snowluma-health.mjs`）已搬——「自报坏」与「静默」两个故障面、边沿告警、`get_status` 兜底轮询都可离线测；DSH 客户端（`dsh-client.js`）与 MCP host（`mcp-host-server.js`）本就在独立模块，bridge 里剩的是接线与重连编排 | 中 |
+| 4 | 上游适配（DSH / SnowLuma / MCP host） | `src/upstream/*` | ✅ 2026-11-05：`upstream/snowluma-health.mjs`（两个故障面 + 边沿告警 + `get_status` 兜底）、`upstream/dsh-probe.mjs`（探活 + 随机端口重识别节流）、`upstream/snowluma-conn-update.mjs`（两个 token / 端点跟随开关）；DSH 客户端与 MCP server 本就是独立进程/模块（MCP 由 DSH 启动，桥接只列清单，不 spawn） | 中 |
 
 约定：
 

@@ -120,6 +120,8 @@ ok(/const PAGE_FRAGMENTS = new Set\(\['skills', 'mcp', 'behaviors', 'reference',
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
+// 整块搬迁用「哨兵」占位是最容易漏的方式：脚本替换完忘了回填，页面就会多出裸文本。
+ok(!/@@[A-Z][A-Z0-9_]*@@/.test(html), '控制台源码没有残留占位哨兵（@@SLOT@@ 之类）');
 
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

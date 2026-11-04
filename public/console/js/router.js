@@ -29,7 +29,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2']);
+const PAGE_FRAGMENTS = new Set(['skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -40,6 +40,12 @@ let searchCloser = () => {};
 
 export function getCurrentPage() { return currentConsolePage; }
 export function onPageRefresh(page, fn) { pageRefreshers.set(page, fn); }
+
+// 全局刷新按钮只知道自己被点了，不知道当前页该怎么刷：让页面注册的 refresher 去刷。
+export function refreshCurrentPage() {
+  const fn = pageRefreshers.get(getCurrentPage());
+  return typeof fn === 'function' ? fn() : undefined;
+}
 export function setSearchCloser(fn) { searchCloser = typeof fn === 'function' ? fn : () => {}; }
 
 // 导航分组从 DOM 推导，避免「页面表加了一页、面包屑忘了改」这种漂移。

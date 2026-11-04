@@ -54,8 +54,8 @@ function renderSnowlumaHealth(sl) {
     if (strong) { strong.textContent = strongText; strong.className = strongClass; }
     if (hint) hint.textContent = hintText;
     if (!el) return;
-    if (!degraded) { el.style.display = 'none'; return; }
-    el.style.display = '';
+    if (!degraded) { el.hidden = true; return; }
+    el.hidden = false;
     const warnHint = document.getElementById('snowlumaWarnHint');
     if (warnHint) warnHint.textContent = sl.hint || '桥接与 QQ 网关的 WebSocket 连着，但一直收不到 QQ 侧的数据。';
     const warnPkt = document.getElementById('snowlumaWarnPkt');
@@ -66,7 +66,7 @@ function renderSnowlumaHealth(sl) {
   }
   if (strong) { strong.textContent = strongText; strong.className = strongClass; }
   if (hint) hint.textContent = hintText;
-  if (el) el.style.display = 'none';
+  if (el) el.hidden = true;
 }
 
 async function refresh() {
@@ -153,7 +153,7 @@ function setConnectionError(error) {
   const snowHint = document.getElementById('metricSnowlumaHint');
   if (snowHint) snowHint.textContent = '当前状态可能已过期';
   const warn = document.getElementById('snowlumaWarn');
-  if (warn) warn.style.display = 'none';
+  if (warn) warn.hidden = true;
   const alert = document.getElementById('connectionAlert');
   if (alert) {
     alert.textContent = error.message === '未授权' ? '访问令牌无效或已取消输入。请使用启动日志中的控制台链接重新打开。' : '无法连接桥接服务，当前显示的是上次同步结果。请检查桥接是否运行，再点击右上角刷新。';

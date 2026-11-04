@@ -21,9 +21,9 @@ function behaviorTable(rows) {
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(entry);
   }
-  const head = '<thead><tr><th style="width:200px">指令</th><th style="width:92px">类型</th>'
-    + '<th style="width:118px">所属</th><th>描述</th><th style="width:84px">权限</th>'
-    + '<th style="width:84px">状态</th><th style="width:70px">操作</th></tr></thead>';
+  const head = '<thead><tr><th data-w="200">指令</th><th data-w="92">类型</th>'
+    + '<th data-w="118">所属</th><th>描述</th><th data-w="84">权限</th>'
+    + '<th data-w="84">状态</th><th data-w="70">操作</th></tr></thead>';
   const body = [...groups.entries()].map(([name, items], index) => {
     const open = index === 0;
     const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(name)}">`

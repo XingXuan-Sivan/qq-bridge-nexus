@@ -24,9 +24,9 @@ export function loadSecurity() {
     if (r.stateDir?.hardened === false) {
       $('stateDirPath').textContent = r.stateDir?.path || 'state/';
       $('stateDirCmd').textContent = r.stateDir?.manualCommand || '';
-      warn.style.display = '';
+      warn.hidden = false;
     } else {
-      warn.style.display = 'none';
+      warn.hidden = true;
     }
   }).catch(() => {});
 }

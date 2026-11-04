@@ -28,7 +28,7 @@
   <h3 class="u-m-0">任务列表 <span class="meta" id="schedCount"></span></h3>
   <button id="schedNew" class="small">＋ 新建任务</button>
 </div>
-<div id="schedList" style="overflow:auto"></div>
+<div id="schedList" class="u-overflow-auto"></div>
 
 <div class="sched-editor" id="schedEditor" hidden>
   <h3 class="u-mt-0" id="schedEditorTitle">新建任务</h3>
@@ -70,11 +70,11 @@
     <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
     <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
   </div>
-  <div class="row" id="schedPluginKindRow" style="margin-top:8px;display:none">
+  <div class="row u-mt-8" id="schedPluginKindRow" hidden>
     <label class="field u-flex-basis-240">插件任务类型<select id="schedPluginKind"></select></label>
     <span class="meta u-m-0">由插件注册；payload 见插件说明</span>
   </div>
-  <textarea id="schedPayloadJson" rows="3" style="width:100%;margin-top:8px;display:none" placeholder='{"payload": {"week": "周一"}}'></textarea>
+  <textarea id="schedPayloadJson" rows="3" class="u-w-full u-mt-8" hidden placeholder='{"payload": {"week": "周一"}}'></textarea>
   <textarea class="u-w-full-mt-8" id="schedContent" rows="3" placeholder="早上好"></textarea>
   <div class="meta" id="schedPreview">接下来：—</div>
   <div class="row u-mt-10">

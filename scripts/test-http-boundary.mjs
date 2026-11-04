@@ -98,6 +98,11 @@ test('serveStaticFile 带安全头，失败与未知端点都是 404', () => {
   assert.equal(res.calls[0].status, 200);
   assert.equal(res.calls[0].headers['X-Content-Type-Options'], 'nosniff');
   assert.equal(res.calls[0].headers['Content-Security-Policy'], SECURITY_HEADERS['Content-Security-Policy']);
+  // 控制台已完全外置（无内联 <style>/<script>、无 style 属性），所以不允许再回退到 unsafe-inline。
+  const csp = res.calls[0].headers['Content-Security-Policy'];
+  assert.equal(csp.includes("'unsafe-inline'"), false, `CSP 不应含 unsafe-inline：${csp}`);
+  assert.match(csp, /script-src 'self'/, 'script-src 只允许同源脚本');
+  assert.match(csp, /style-src 'self'/, 'style-src 只允许同源样式');
 
   const miss = mockRes();
   assert.equal(serveStaticFile(miss, resolve('/console/../x.html')), false);

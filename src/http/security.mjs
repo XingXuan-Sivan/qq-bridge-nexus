@@ -1,12 +1,13 @@
 // 安全响应头：集中一处，避免各请求分支各写一份导致「有的页面有 CSP、有的没有」。
 // 约定见 docs/HTTP_BOUNDARY.md §3。改这里等于改全部 HTTP 响应，务必跑 test:audit。
 
-// 现状（2026-11-04）：控制台仍是单文件内联样式/脚本，所以暂时保留 'unsafe-inline'。
-// 前端分层（PLUGIN_ROADMAP §8.7）完成后收成 script-src 'self'; style-src 'self'。
+// 控制台已完全外置：主题引导是 /console/js/theme-boot.js，样式全是 <link>，
+// HTML 里不再有内联 <style>/<script> 与 style 属性（2026-11-05 收口），所以这里不再放 'unsafe-inline'。
+// 动态宽度（搜索候选框定位、用量进度条）走 CSSOM 写入，不受 style-src 限制。
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
-  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self'",
+  "style-src 'self'",
   "img-src 'self' data:",
   "connect-src 'self'",
   "frame-ancestors 'none'",

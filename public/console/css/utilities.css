@@ -59,3 +59,26 @@
 .u-w-auto { width:auto }
 .u-gap-12 { gap:12px }
 .u-between { justify-content:space-between }
+.u-row-6 { display:flex; align-items:center; gap:6px }
+.u-row-6-nowrap { display:flex; align-items:center; gap:6px; flex-wrap:nowrap }
+.u-gap-6 { gap:6px }
+.u-gap-6-nowrap { gap:6px; flex-wrap:nowrap }
+.u-mt-8-grid { margin-top:8px; display:grid; gap:10px }
+.u-maxh-60vh-scroll { max-height:60vh; overflow:auto; white-space:pre-wrap }
+.u-code-block { user-select:all; overflow:auto; margin:4px 0; padding:6px; background:rgba(127,127,127,.12); border-radius:4px }
+.u-minw-180 { min-width:180px }
+.u-w-130 { width:130px }
+.u-w-full { width:100% }
+.u-mt-2 { margin-top:2px }
+.u-my-3 { margin:3px 0 }
+.u-cursor-default { cursor:default }
+.u-p-8 { padding:8px }
+.u-p-6-8 { padding:6px 8px }
+.u-p-8-10 { padding:8px 10px }
+.u-block-my-2 { display:block; margin:2px 0 }
+.u-row-8-wrap-mt-8 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px }
+.u-row-8-wrap-mt-10 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px }
+.u-flex-basis-200 { flex:1 1 200px }
+.u-flex-basis-220-mono { flex:1 1 220px; font-family:var(--mono, monospace) }
+.u-flex-basis-max-70 { flex:0 1 70px }
+.u-flex-basis-max-90 { flex:0 1 90px }

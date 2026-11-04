@@ -177,11 +177,11 @@ function renderPluginSettings(data) {
   if (rows && !document.activeElement?.closest('#promptBlockRows')) {
     rows.innerHTML = catalog.length
       ? catalog.map((item) => `
-        <div class="row" style="align-items:center;gap:12px">
-          <label class="field" style="display:flex;align-items:center;gap:6px;min-width:180px">
+        <div class="row u-row-12">
+          <label class="field u-row-6 u-minw-180">
             <input type="checkbox" data-core-enabled="${esc(item.id)}" ${item.enabled ? 'checked' : ''}> ${esc(item.label)}
           </label>
-          <label class="field">上限 <input type="number" data-core-max="${esc(item.id)}" min="1" max="100000" step="100" style="width:130px" value="${item.maxChars ?? ''}" placeholder="默认"></label>
+          <label class="field">上限 <input type="number" data-core-max="${esc(item.id)}" min="1" max="100000" step="100" class="u-w-130" value="${item.maxChars ?? ''}" placeholder="默认"></label>
           <span class="meta">${item.registered ? `已注册 · 调用 ${Number(item.calls) || 0} 次` : '已关闭'}</span>
         </div>`).join('')
       : '<div class="meta">没有可配置的内置块。</div>';

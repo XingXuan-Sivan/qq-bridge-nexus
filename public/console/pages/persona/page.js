@@ -196,7 +196,7 @@ async function refreshRoleDefaults() {
     row.className = 'row';
     row.style.marginTop = '4px';
     const state = !d.exists ? '已被删除' : (d.modified ? '改过' : '和原版一样');
-    row.innerHTML = `<span style="flex:0 0 auto"><b>${esc(d.name)}</b>${d.name === r.current ? '（当前启用）' : ''}</span><span class="pill ${!d.exists ? 'r' : (d.modified ? 'b' : 'g')}">${state}</span>`;
+    row.innerHTML = `<span class="u-flex-none"><b>${esc(d.name)}</b>${d.name === r.current ? '（当前启用）' : ''}</span><span class="pill ${!d.exists ? 'r' : (d.modified ? 'b' : 'g')}">${state}</span>`;
     const btn = document.createElement('button');
     btn.className = 'small';
     btn.textContent = d.exists ? '恢复成原版' : '重新放回';

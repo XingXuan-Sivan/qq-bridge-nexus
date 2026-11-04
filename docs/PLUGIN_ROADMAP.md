@@ -349,12 +349,36 @@ public/console/
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
 3. `3.3 样式分家`：`app.css`（2036 行）拆 `tokens/base/layout` + 每页 `page.css`；内联宽度分批改工具类。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`；CSP 去掉 `unsafe-inline`（事件已全走委托，剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 改为拼接/分发 `pages/*/page.html` 与 `app/styles/*.css`。
+5. `3.5 控制中心`：`public/control-center.html` 按**B 档**独立目录化，**不并入** `pages/`；与 console 共享同一份 `app/styles/tokens.css`。详见本节「3.5 启动器控制中心」。
 
 - 测试与夹具影响：`console-source.mjs` 现在只拼 index + css + app.js + 模块，要扩成「骨架 + 各页片段 + 公用样式」；`test-console-static.mjs` 里针对单文件的字符串断言要改成读片段；`console-ui-fixture.mjs` 要按路径返回 `pages/<id>/page.html`。
 - **代价**：每页首次进入多 1 次片段请求（约 2–6 KB，浏览器缓存 + 内存 Map 兜底）；拆 15 页 + 2036 行 CSS 预计 6–8 个提交，每步保持 77/80 基线；迁移期页面结构会动，需逐页截图比对。
 - **明确不做**：引入 React/Vue/Svelte 运行时；引入 bundler 与构建产物目录；组件级 scoped CSS 编译；把插件 UI 塞进宿主文档（插件 UI 仍走 iframe 沙箱，见 HTTP_BOUNDARY §5）。
 
-**验收**：15 个页面全部从 `pages/<id>/` 加载（HTML/CSS/JS 同目录）；`index.html` ≤ 150 行；`favicon.svg` 在浏览器标签生效；刷新保页、深链、面包屑、搜索层级全部不回归；CSP 响应头无 `unsafe-inline`；`npm run test:console-static` 全过。
+**3.5 启动器控制中心（B 档：独立目录化，不并入 console）**
+
+`public/control-center.html`（1280 行 / 97 KB，单个 `<style>` + 单个 `<script>`，0 个 `<link>`）是**启动器**页面，由 `src/launcher/control-center.mjs` 独立进程在 `127.0.0.1:3099` 托管（`PAGE_FILE` 见该文件 `:49`，`:592` 直接 `readFileSync`+`res.end`），用自己的 `state/control-center-token`（经地址 `#t=` 片段传给页面）与自己的 `state/control-center.json`/`.lock`。它负责启动/停止桥接、看四路日志、NapCat 扫码、SnowLuma 安装与迁移，因此**必须在桥接未运行或已崩溃时可用**。
+
+- 不并入 `pages/` 的四条硬理由：① 可用性边界相反（console 以桥接在跑为前提）；② 令牌体系不同（`x-console-token` vs 控制中心令牌 + `#t=`）；③ 宿主不同（launcher 没有 `/console/*` 静态路由，并进去等于复制一份 `src/http/static.mjs` 守卫）；④ 打包与测试按单文件引用它（`build-{linux-service,mac-app,release}.mjs`；`test-control-center` / `test-napcat-manage` / `test-platform` / `test-linux-support` / `test-mac-app`）。
+- 目标结构（与 console 同一套目录约定，但独立托管）：
+  ```
+  public/
+    console/{index.html,favicon.svg,app/styles/tokens.css,pages/<id>/…}
+    control-center/{index.html,app.css,app.js}   ← 原 control-center.html 拆三件
+  ```
+  `tokens.css` 是唯一色板来源，两个页面都 `<link>` 它；控制中心其余样式留 `public/control-center/app.css`，不跨目录 import console 的页面/组件样式。
+- launcher 改动：把 `PAGE_FILE` 单文件直出改成「`/control-center/{index.html,app.css,app.js}` 三个白名单路径 + 复用 `resolveStaticPath`（前缀锁死 `/control-center/`）」，其余路由与令牌逻辑不动；缺文件时仍返回 `控制中心页面缺失` 文案。
+- 影响面清单（一次提交内改完）：
+  1. `src/launcher/control-center.mjs`：静态服务 + 缺文件兜底；
+  2. `scripts/build-linux-service.mjs`、`build-mac-app.mjs`、`build-release.mjs`：产物拷贝路径从单文件改为目录（3 处）；
+  3. `scripts/test-control-center.mjs`、`test-napcat-manage.mjs`、`test-platform.mjs`、`test-linux-support.mjs`、`test-mac-app.mjs`：断言目标文件改为 `public/control-center/index.html`（5 处）；
+  4. `docs/FOLDER_MAP.md`、`README.md`、`docs/guides/CONTROL_CENTER.md`：路径说明；
+  5. `CHANGELOG.md` 一条。
+- 验收：控制中心在桥接**停止**状态仍能打开并启动桥接；`#t=` 令牌、锁文件、设置读写不回归；`/api/*` 全量路由不回归；两个页面色板来自同一 `tokens.css`；`test:audit` 不低于当前基线（77/80）。
+- 不做：把启动/修复能力搬进 console；给 launcher 引入构建步骤；把控制中心的 token 与 console token 合并。
+- **顺序**：放在 3.1–3.4 之后（3.5），因为「唯一色板 `tokens.css`」要等 3.3 样式分家落地后才存在。
+
+**验收**：15 个页面全部从 `pages/<id>/` 加载（HTML/CSS/JS 同目录）；`index.html` ≤ 150 行；`favicon.svg` 在浏览器标签生效；刷新保页、深链、面包屑、搜索层级全部不回归；CSP 响应头无 `unsafe-inline`；控制中心拆成 `public/control-center/` 三件并在桥接停止时可用；`npm run test:console-static` 全过。
 
 ### 8.8 `bridge.js` 按接缝抽层（进行中）
 

@@ -42,6 +42,7 @@
 ### 新增：HTTP 边界文档与控制台规范化路线（2026-11-04）
 - 新增 `docs/HTTP_BOUNDARY.md`：静态资源路径穿越守卫（`path.resolve` + `path.relative` + 拒绝清单 + 符号链接）、「未启用 = 404」「先鉴权后存在性」的语义表、CSP 与安全响应头现状与收敛目标、刷新/深链的三层恢复顺序、插件 UI 的 iframe 沙箱与样式隔离约定、验收清单。
 - `docs/PLUGIN_ROADMAP.md` 新增 §8.7（控制台前端分层 A 方案 + B1 刷新保页 / B2 面包屑可点 / B3 搜索层级）、§8.8（`bridge.js` 按接缝抽层，第一步 HTTP 层，入口路径不变），并把「不引前端框架」「不重写 bridge.js」写进已拍板决策。
+- `docs/PLUGIN_ROADMAP.md` §8.7 追加第三阶段「3.5 启动器控制中心（B 档）」：`public/control-center.html` 拆为 `public/control-center/{index.html,app.css,app.js}`，仍由 launcher 独立托管（默认 3099），与 console 共享 `app/styles/tokens.css`；列出四条不并入 console 的理由、launcher 静态服务改法、3 个打包脚本 + 5 个测试的影响面与验收。
 
 ### 新增：桥接插件内核与人格 provider（v1.2.0）
 - `plugins/` 成为桥接运行时插件目录，内核在 `src/plugins/`（`manifest` / `config` / `audit` / `persona` / `host-api` / `kernel`）；原先给 DSH 加载的两个 bundle 改名到 `dsh-bundles/`，避免「插件」一词指两样东西。

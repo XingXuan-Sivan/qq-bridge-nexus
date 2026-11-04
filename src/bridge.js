@@ -125,6 +125,8 @@ import { createBuiltinCommands } from './commands/builtin.mjs';
 import { buildCommandsPayload } from './commands/payload.mjs';
 // 会话重置的清理序列（P7 第三步），deps 见 src/session/reset.mjs 的文件头。
 import { createSessionResetter } from './session/reset.mjs';
+// 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
+import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from './session/mode-gate.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -1530,16 +1532,7 @@ function extractMediaFromSegments(segments) {
   return media;
 }
 
-function allowed(kind, id, cfg) {
-  // OneBot 事件里的 id 可能是数字也可能是字符串（int64 序列化差异），统一转字符串比较。
-  // 配置字段兼容单数（group/private）与复数（groups/privates）两种写法。
-  const s = String(id);
-  const denyList = cfg.deny[kind] ?? cfg.deny[kind + 's'] ?? [];
-  if (denyList.map(String).includes(s)) return false;
-  const allowList = cfg.allow[kind] ?? cfg.allow[kind + 's'] ?? [];
-  if (allowList.length > 0) return allowList.map(String).includes(s);
-  return cfg.allowAllWhenEmpty;
-}
+// 白名单判定已搬到 src/session/mode-gate.mjs（P7 第三步），见顶部 import。
 
 // 二代会话 key 规范化：只接受 group:正整数 / private:正整数，并去掉前导零，避免同一会话出现多个别名。
 // 和按会话设置人格卡用的是同一个函数（src/role-per-key.js），两处规则不会漂移。
@@ -3540,15 +3533,8 @@ async function main() {
     }
   }
 
-  /** 当前模式是否允许该会话进入 */
-  function modeAllowed(key, kind, id, cfg, mode) {
-    if (mode === 'closed-agent') {
-      // 封闭 agent 模式：仅 owner 私聊
-      return key === `private:${String(cfg.ownerQQ ?? '')}`;
-    }
-    // chat / reserved / reserved2（仿真模式，暂同 chat 白名单）
-    return allowed(kind, id, cfg);
-  }
+  /** 当前模式是否允许该会话进入（实现见 src/session/mode-gate.mjs） */
+  // modeAllowed 由模块提供，signature 保持 (key, kind, id, cfg, mode)。
 
   /**
    * 解析一个 preset 名。
@@ -3590,9 +3576,7 @@ async function main() {
 
   /** 判断一个会话 key 是否仍被当前模式/白名单允许（供唤醒调度与 HTTP 路由共用）。 */
   function isSessionAllowedInCurrentMode(key) {
-    const m = /^(group|private):(\d+)$/.exec(key);
-    if (!m) return false;
-    return modeAllowed(key, m[1], Number(m[2]), cfg, currentMode);
+    return sessionAllowed(key, cfg, currentMode);
   }
 
   /** closed-agent 当前级别的落地计划（agent preset + DSH 权限预设）。 */

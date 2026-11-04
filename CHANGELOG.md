@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：会话准入闸门搬到 `src/session/mode-gate.mjs`（P7 第三步续，2026-11-05）
+- `allowed`（白名单：deny 优先、单复数键名、空表按 `allowAllWhenEmpty`）、`modeAllowed`（closed-agent 只放行 owner 私聊，chat/reserved/reserved2 走白名单）、`isSessionAllowedInCurrentMode`（`group:`/`private:` 形态校验）从 `bridge.js` 搬到 `src/session/mode-gate.mjs`，保持纯函数、`cfg` 由调用方传入，行为逐字不变。
+- `bridge.js` 只留 `isSessionAllowedInCurrentMode(key)` 薄包装（转调 `sessionAllowed(key, cfg, currentMode)`），`builtin.mjs` 的 `acl: { allowed }` 接线不变；这些判断原先各有 7 / 18 / 多处调用，散在 14k 行里，改规则只能靠全量回归。
+- 新增 `scripts/test-session-mode-gate.mjs`（6 条）：白名单空表语义、单复数键名与字符串 id、deny 优先、closed-agent 只看 owner 私聊、三种聊天模式、非法 key 形态拒绝；已登记进 `test:audit`。
+- VM 夹具 `scripts/audit-bridge-harness.mjs` 补 `allowed` / `modeAllowed` / `sessionAllowed`（夹具会剥 `bridge.js` 的 import，漏补就 `ReferenceError: allowed is not defined`，整批用例红）。
+- 验证：`test-integration-v030` 31/31、`test-audit-bridge` 全 PASS、`test-session-mode-gate` 6/6；全量 `test:audit` **79/82**（三项既有失败不变）。
+
 ### 测试：控制台浏览器回归真正跑起来（2026-11-05）
 - 夹具 `scripts/console-ui-fixture.mjs` 之前只把 `public/console/js/*.js` 顶层文件注册进资源表，片段化后的 `js/components/*`、`js/lib/*` 全是 404 ⇒ `app.js` 的 import 失败、整页不启动、片段永不注入，测试卡在 hydrate 超时。改为递归提供全部脚本，并补 `/console/img/*`、`/console/fonts/*` 与 `/api/{plugins,commands,extensions,persona/sources}` 四个只读桩，15 个页面请求 404 清零。
 - 测试辅助 `reveal(selector)` 原来靠 `locator.evaluate(el => el.closest('[data-page]'))` 反查元素属于哪一页——片段化后元素在未注入的页里**根本不在 DOM**，于是先超时、永远走不到导航分支。改为启动时逐页 hydrate 一遍、拍下「元素 id → 所属页」快照，之后先切页再定位。

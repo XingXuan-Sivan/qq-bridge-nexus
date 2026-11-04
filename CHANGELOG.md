@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 重构：`sessions.json` 读写搬到 `src/session/store.mjs`（P7 第三步续二，2026-11-05）
+- `loadSessionState()` / `saveSessionState()` 从 `bridge.js` 搬到 `src/session/store.mjs`，`loadState()` / `saveState()` 只剩两行调用；文件、原子写、日志、`normalizeDormant` 全部由调用方注入，模块内不读全局。
+- 这一步的真正目的是把两条安全不变量变成可离线验证的代码：**读失败或 JSON 损坏 ⇒ `writable:false`，此后任何一次保存都不得回写**（早期实现读到坏文件就当空状态，紧接着的原子写会把空映射永久落盘）；**老文件缺 `sessionPolicies` / `dormantSessions` 就地补齐**，不因少一个键把整份判成不可用。
+- 新增 `scripts/test-session-store.mjs`（8 条）：ENOENT 空状态、BOM 剥离、缺字段补齐、`sessionPolicies` 数组被重置、`normalizeDormant` 注入生效、损坏 JSON ⇒ 只读 + 日志、非 ENOENT 读错 ⇒ 只读、`writable:false` 时 save 既不调用原子写也不改动原文件；已登记进 `test:audit`。
+- VM 夹具 `scripts/audit-bridge-harness.mjs` 再补 `loadSessionState` / `saveSessionState`（第三次踩同一个坑：夹具剥 import，漏补就是 `ReferenceError`）。
+- 验证：`test-session-store` 8/8、`test-integration-v030` 31/31、`test-audit-bridge` 全 PASS；全量 `test:audit` **80/83**（仍为三项既有失败）。
+
 ### 重构：会话准入闸门搬到 `src/session/mode-gate.mjs`（P7 第三步续，2026-11-05）
 - `allowed`（白名单：deny 优先、单复数键名、空表按 `allowAllWhenEmpty`）、`modeAllowed`（closed-agent 只放行 owner 私聊，chat/reserved/reserved2 走白名单）、`isSessionAllowedInCurrentMode`（`group:`/`private:` 形态校验）从 `bridge.js` 搬到 `src/session/mode-gate.mjs`，保持纯函数、`cfg` 由调用方传入，行为逐字不变。
 - `bridge.js` 只留 `isSessionAllowedInCurrentMode(key)` 薄包装（转调 `sessionAllowed(key, cfg, currentMode)`），`builtin.mjs` 的 `acl: { allowed }` 接线不变；这些判断原先各有 7 / 18 / 多处调用，散在 14k 行里，改规则只能靠全量回归。

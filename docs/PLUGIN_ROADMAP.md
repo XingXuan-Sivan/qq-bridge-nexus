@@ -409,7 +409,7 @@ public/console/
 | --- | --- | --- | --- | --- |
 | 1 | 安全头与静态资源守卫、CSP | `src/http/{security,static}.mjs` | ✅ 2026-11-04（路由表/鉴权中间件仍在 `bridge.js`） | 低 |
 | 2 | 五条内置命令的壳与 `/api/commands` 响应 | `src/commands/{registry,builtin,payload}.mjs` | ✅ 2026-11-05（`/reset` 执行体仍在 `bridge.js`，留给第 3 步） | 低 |
-| 3 | 会话/模式状态（`state.sessions`、模式闸门、审批、`resetSession`） | `src/session/*` | 🟡 2026-11-05：`resetSession` 清理序列（A′）与**模式闸门**（`mode-gate.mjs`）已搬；审批本就在 `src/admin/approvals.mjs`，只需在重置里 `forgetSession`；`state.sessions`/`sessionPolicy` 仍是 bridge 内的热路径，留到第 3 步收尾 | 中 |
+| 3 | 会话/模式状态（`state.sessions`、模式闸门、审批、`resetSession`） | `src/session/*` | 🟡 2026-11-05：`resetSession` 清理序列（A′）、**模式闸门**（`mode-gate.mjs`）与 **`sessions.json` 读写**（`store.mjs`）已搬；审批本就在 `src/admin/approvals.mjs`；`state.sessions` 44 处与 `sessionPolicy` 8 处仍是 bridge 内的热路径，留到第 3 步收尾 | 中 |
 | 4 | 上游适配（DSH / SnowLuma / MCP host） | `src/upstream/*` | 待做 | 中 |
 
 约定：
@@ -426,6 +426,7 @@ public/console/
 - 第 2 步（2026-11-05）：`src/commands/builtin.mjs` 承载 `/reset` `/status` `/role` `/silent` `/active` 五条壳与文案；`src/commands/payload.mjs` 组装 `/api/commands`；`bridge.js` 删掉 `commandStatus`/`commandRole`/两条旧 if 分支与 5 条内联 `register`。`src/bridge.js` 14745 → 14686 行（净 −59）。
 - 第 3 步（2026-11-05，A′）：`src/session/reset.mjs` 承接 `/reset` 的完整清理序列（删挂账 → 清 30 项内存态 → 落盘 → 停 DSH → 归档 → 回执），`bridge.js` 只留惰性拼 `deps` 的登记段；`sessionEpoch` 通过 `bumpEpoch` 回调传入。`scripts/test-session-reset.mjs` 4 条用例逐桶断言。行数上这一步几乎持平（−58 行逻辑、+64 行 deps 登记，`bridge.js` 14694 行）：换来的是清理序列可脱离桥接单测、漏清会被测试挡住。
 - 第 3 步续（2026-11-05）：`src/session/mode-gate.mjs` 收走 `allowed` / `modeAllowed` / `isSessionAllowedInCurrentMode`——它们在 `bridge.js` 里各有 7 / 18 / 多处调用，「群聊在 chat 模式下能不能进」这种判断以前只能起整个桥接才能验证。`bridge.js` 只留 `isSessionAllowedInCurrentMode(key)` 薄包装（`sessionAllowed(key, cfg, currentMode)`），`acl: { allowed }` 的接线不变。新增 `scripts/test-session-mode-gate.mjs` 6 条（白名单空表语义、单复数键名、deny 优先、closed-agent 只看 owner 私聊、三种聊天模式、key 形态校验）。VM 夹具补 `allowed` / `modeAllowed` / `sessionAllowed` 三个符号——**夹具剥 import，漏一个就是 `ReferenceError` 把整个用例打红**（这次又踩到一次）。
+- 第 3 步续二（2026-11-05）：`src/session/store.mjs` 收走 `sessions.json` 的读写，`bridge.js` 的 `loadState()` / `saveState()` 变成两行调用。这一步搬的不是「几行 IO」，而是两条安全不变量：**读失败或 JSON 损坏时 `writable:false`，此后任何一次 `saveState()` 都不得回写**（早期实现读到坏文件当空状态处理，紧接着的原子写会把空映射永久落盘）；**老文件缺 `sessionPolicies` / `dormantSessions` 就地补齐**，不因少一个键把整份判成不可用。`scripts/test-session-store.mjs` 8 条覆盖：ENOENT、BOM、字段补齐、`sessionPolicies` 数组重置、`normalizeDormant` 注入、损坏 JSON、非 ENOENT 读错、`writable:false` 时 save 既不写也不动原文件。VM 夹具补 `loadSessionState` / `saveSessionState`（同上，剥 import 必红）。
 
 **验收**：`test-integration-v030` 31/31 不减；`test:audit` 不差于三项既有失败（`test-preset-local-tools` #5、`test-control-center` #20、`test-mac-app` #2）；`src/bridge.js` 行数逐阶段下降并在 CHANGELOG 记录。
 

@@ -91,6 +91,8 @@ const tests = [
   'test-session-reset.mjs',
   // 会话准入闸门（P7 第三步）：白名单/deny 优先级、closed-agent 只放行 owner 私聊、key 形态校验。
   'test-session-mode-gate.mjs',
+  // sessions.json 读写（P7 第三步续）：损坏/读失败降级为只读不写、缺字段补齐、可写才落盘。
+  'test-session-store.mjs',
   'test-core-prompt-blocks.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',

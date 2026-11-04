@@ -352,7 +352,7 @@ public/console/
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
 3. `3.3 样式分家`：`app.css`（2036 行）拆 `tokens/base/layout` + 每页 `page.css`；内联宽度分批改工具类。
-4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`；CSP 去掉 `unsafe-inline`（事件已全走委托，剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 改为拼接/分发 `pages/*/page.html` 与 `app/styles/*.css`。
+4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04：`public/console/img/favicon.svg` 为 32×32、深色圆角底 + 品牌蓝紫渐变 `q↗`，`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、915 字节；静态测试加 4 条断言兜住它不被误删）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
 5. `3.5 控制中心`：`public/control-center.html` 按**B 档**独立目录化，**不并入** `pages/`；与 console 共享同一份 `app/styles/tokens.css`。详见本节「3.5 启动器控制中心」。
 
 - 测试与夹具影响（已在 3.1 落地）：`console-source.mjs` 拼 index + css + js + `pages/*/{html,css,js}`；`console-ui-fixture.mjs` 按路径返回 `pages/<id>/page.{html,css,js}`；`test-console-static.mjs` 改为断言片段存在、index 对应 section 为空、路由器有 `hydratePage`。

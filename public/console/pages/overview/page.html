@@ -13,20 +13,20 @@
     <button data-mode="reserved" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>一代仿真</strong><small>按策略自然参与群聊</small></button>
     <button data-mode="reserved2" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>二代仿真</strong><small>自主阅读、发言与潜水</small></button>
   </div>
-  <div class="row" style="margin-top:12px">
-    <label style="flex:1;margin:0">封闭 Agent 自选 DSH 预设（仅 admin.allowCustomAgentPreset=true 时对 L2/L3 生效，且没有审批闸门）</label>
-    <select id="closedPreset" style="max-width:260px"><option value="">（DSH 默认 preset）</option></select>
+  <div class="row u-mt-12">
+    <label class="u-flex-1-m-0">封闭 Agent 自选 DSH 预设（仅 admin.allowCustomAgentPreset=true 时对 L2/L3 生效，且没有审批闸门）</label>
+    <select class="u-maxw-260" id="closedPreset"><option value="">（DSH 默认 preset）</option></select>
   </div>
-  <div class="row" style="margin-top:8px">
-    <label style="flex:1;margin:0">封闭 Agent 权限级别</label>
-    <select id="closedLevel" style="max-width:260px">
+  <div class="row u-mt-8">
+    <label class="u-flex-1-m-0">封闭 Agent 权限级别</label>
+    <select class="u-maxw-260" id="closedLevel">
       <option value="L1">L1 本地只读（只读工具白名单）</option>
       <option value="L2" selected>L2 工作区读写（危险操作需审批）</option>
       <option value="L3">L3 高权限（需 TOTP 动态码 + 每次审批）</option>
     </select>
   </div>
-  <div class="row" style="margin-top:8px">
-    <span class="meta" id="adminStatus" style="flex:1">管理通道状态读取中…</span>
+  <div class="row u-mt-8">
+    <span class="meta u-flex-1" id="adminStatus">管理通道状态读取中…</span>
     <button type="button" id="adminPanic" class="danger">紧急关闭（回到安全模式）</button>
   </div>
   <div class="meta">切换后即时保存。仿真参数可在左侧对应页面调整；封闭 Agent 仅允许管理员私聊。v0.3.0 起所有模式变更都会私聊通知管理员，并写入 state/admin/audit.jsonl；高权限闲置超时自动回落。</div>
@@ -38,44 +38,44 @@
 <section id="section-sendlimit" data-page="overview" class="card span-all">
   <h2 data-note="保存后立即生效">发言上限</h2>
   <div class="meta">二代仿真里每个群 / 私聊 AI 最多能发多少条，防止刷屏和账号风控。超过上限时 AI 这次的话不会发出去（表现为「AI 不说话了」）；填 0 表示不限。</div>
-  <div class="row" style="margin-top:10px">
-    <label style="flex:0 0 auto">每分钟最多</label><input type="number" id="sendLimitMin" min="0" max="999" style="width:80px"><span class="meta" style="margin:0">条</span>
-    <label style="flex:0 0 auto;margin-left:16px">每小时最多</label><input type="number" id="sendLimitHour" min="0" max="9999" style="width:80px"><span class="meta" style="margin:0">条</span>
+  <div class="row u-mt-10">
+    <label class="u-flex-none">每分钟最多</label><input class="u-w-80" type="number" id="sendLimitMin" min="0" max="999"><span class="meta u-m-0">条</span>
+    <label class="u-flex-none-ml-16">每小时最多</label><input class="u-w-80" type="number" id="sendLimitHour" min="0" max="9999"><span class="meta u-m-0">条</span>
   </div>
-  <div class="row" style="margin-top:10px;justify-content:space-between">
-    <span class="meta" style="margin:0" id="sendLimitHits">最近 24 小时没有被拦过</span>
-    <div class="row"><span class="meta" style="margin:0" id="sendLimitMsg"></span><button id="sendLimitSave">保存发言上限</button></div>
+  <div class="row u-mt-10-between">
+    <span class="meta u-m-0" id="sendLimitHits">最近 24 小时没有被拦过</span>
+    <div class="row"><span class="meta u-m-0" id="sendLimitMsg"></span><button id="sendLimitSave">保存发言上限</button></div>
   </div>
 </section>
 <section id="section-silent" data-page="overview" class="card span-all">
-  <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0">静默开关</h2>
+  <div class="row u-between">
+    <h2 class="u-m-0">静默开关</h2>
     <span id="silenceStatePill" class="pill">—</span>
   </div>
-  <div class="row" style="margin-top:10px">
+  <div class="row u-mt-10">
     <button id="silentOn">开启静默</button>
     <button id="silentOff">恢复正常</button>
-    <span class="meta" style="margin:0">手动开关优先：手动开启后一直静默；定时静默期间点「恢复正常」= 这一段临时恢复，下一段照常。</span>
+    <span class="meta u-m-0">手动开关优先：手动开启后一直静默；定时静默期间点「恢复正常」= 这一段临时恢复，下一段照常。</span>
   </div>
   <div class="meta">静默时群友消息不投递 agent，仅管理员可对话。</div>
 
   <div class="silence-block">
-    <div class="row" style="justify-content:space-between">
+    <div class="row u-between">
       <div class="row">
-        <label class="sched-chip" style="margin:0"><input type="checkbox" id="silenceEnabled"> <b>定时静默</b></label>
-        <span class="meta" style="margin:0">按时间段自动静默，用来避开高峰价、省 token</span>
+        <label class="sched-chip u-m-0"><input type="checkbox" id="silenceEnabled"> <b>定时静默</b></label>
+        <span class="meta u-m-0">按时间段自动静默，用来避开高峰价、省 token</span>
       </div>
-      <div class="row"><span class="meta" style="margin:0">时区</span><select id="silenceTz" style="flex:0 1 320px" aria-label="定时静默的时区"></select></div>
+      <div class="row"><span class="meta u-m-0">时区</span><select class="u-flex-basis-max-320" id="silenceTz" aria-label="定时静默的时区"></select></div>
     </div>
-    <div id="silenceRanges" style="margin-top:8px"></div>
-    <div class="row" style="margin-top:8px">
+    <div class="u-mt-8" id="silenceRanges"></div>
+    <div class="row u-mt-8">
       <button id="silenceAdd" class="small">＋ 添加时间段</button>
       <button id="silencePeak" class="small">一键填入 DeepSeek 高峰时段</button>
-      <span class="meta" style="margin:0" id="silencePeakNote">高峰：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</span>
+      <span class="meta u-m-0" id="silencePeakNote">高峰：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</span>
     </div>
     <div class="silence-options">
-      <div style="font-weight:500">静默期间</div>
-      <div class="meta" style="margin:4px 0 0">AI 的唤醒</div>
+      <div class="u-fw-500">静默期间</div>
+      <div class="meta u-mt-4">AI 的唤醒</div>
       <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="stop"> 全部停止（被 @、主动冒泡、睡醒、回复检查都不唤醒）——最省 token<span class="meta">原来的手动静默只拦发送，AI 仍会被定时唤醒去思考；这一档连唤醒一起停</span></label>
       <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="direct"> 只在被 @ 或私聊时唤醒<span class="meta">有人 @ AI、引用回复 AI 或私聊 AI 时，这个群 / 私聊照常放行 10 分钟（能接着聊几句）；主动冒泡、睡醒等其余唤醒照样停，大头的花费照样省下</span></label>
       <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="normal"> 照常唤醒，只拦往外发<span class="meta">AI 照样思考、照样花钱，只是说的话不发出去</span></label>
@@ -84,26 +84,26 @@
       <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="pauseAiTasks"> 定时任务里「叫 AI 来说」的也暂停（任务里可以单独设「照常执行」）；固定文字照发</label>
       <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="includeOwnerPrivate"> 管理员私聊也一起静默（默认不勾：你随时能和 AI 私聊）</label>
     </div>
-    <div class="row" style="margin-top:12px;justify-content:space-between">
-      <span class="meta" style="margin:0" id="silenceUpcoming">—</span>
-      <div class="row"><span class="meta" style="margin:0" id="silenceMsg"></span><button id="silenceSave">保存定时静默</button></div>
+    <div class="row u-mt-12-between">
+      <span class="meta u-m-0" id="silenceUpcoming">—</span>
+      <div class="row"><span class="meta u-m-0" id="silenceMsg"></span><button id="silenceSave">保存定时静默</button></div>
     </div>
   </div>
 </section>
 <section id="section-dsh" data-page="overview" class="card span-all">
   <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
   <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
-  <div class="row dsh-model-row" style="margin-top:10px">
-    <label style="flex:0 0 auto">提供方</label>
-    <select id="dshProviderSelect" style="flex:0 1 220px"></select>
-    <label style="flex:0 0 auto">模型</label>
-    <select id="dshModelSelect" style="flex:0 1 260px"></select>
+  <div class="row dsh-model-row u-mt-10">
+    <label class="u-flex-none">提供方</label>
+    <select class="u-flex-basis-max-220" id="dshProviderSelect"></select>
+    <label class="u-flex-none">模型</label>
+    <select class="u-flex-basis-max-260" id="dshModelSelect"></select>
   </div>
-  <div class="row dsh-model-row" style="margin-top:8px">
-    <label style="flex:0 0 auto">思考强度</label>
-    <select id="dshEffortSelect" style="flex:0 1 220px"></select>
-    <label style="flex:0 0 auto" title="DSH 的模型目录不说明模型能不能看图：自动 = 只有核实过的模型才把图片交给它，其余把图片改成文字占位">看图能力</label>
-    <select id="dshVisionSelect" style="flex:0 1 220px">
+  <div class="row dsh-model-row u-mt-8">
+    <label class="u-flex-none">思考强度</label>
+    <select class="u-flex-basis-max-220" id="dshEffortSelect"></select>
+    <label class="u-flex-none" title="DSH 的模型目录不说明模型能不能看图：自动 = 只有核实过的模型才把图片交给它，其余把图片改成文字占位">看图能力</label>
+    <select class="u-flex-basis-max-220" id="dshVisionSelect">
       <option value="auto">自动（未知的按不能看图）</option>
       <option value="yes">能看图</option>
       <option value="no">不能看图</option>

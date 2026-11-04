@@ -148,6 +148,16 @@ ok(fs.existsSync(faviconPath), 'favicon 文件存在（public/console/img/favico
 const favicon = fs.existsSync(faviconPath) ? fs.readFileSync(faviconPath, 'utf8') : '';
 ok(/^<svg [^>]*viewBox="0 0 32 32"/.test(favicon.trim()) && /aria-label="QQ Bridge"/.test(favicon), 'favicon 是可访问的 32×32 SVG');
 ok(!/<script/i.test(favicon) && !/on\w+=/i.test(favicon), 'favicon 不含脚本（可安全内联为图标）');
+// 图标必须与侧栏品牌标记同形（q + ↗ 两个字形），且不能画背景块——否则深色/浅色主题下会糊成一块。
+ok(/<text[^>]*>q<\/text>/.test(favicon) && /<text[^>]*>↗<\/text>/.test(favicon), 'favicon 复用侧栏品牌标记的字形（q 与 ↗）');
+ok(!/<rect|<circle|<path/i.test(favicon), 'favicon 只有字形、没有背景块或自绘图形');
+ok(/prefers-color-scheme/.test(favicon), 'favicon 跟随系统深浅色切换颜色');
+const ccFavicon = fs.readFileSync(path.join(ROOT, 'public', 'control-center', 'favicon.svg'), 'utf8');
+ok(ccFavicon === favicon, '控制中心与桥接控制台用同一个图标文件');
+
+console.log('## 片段页的浮层归属');
+const pluginsModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'page.js'), 'utf8');
+ok(/document\.body\.appendChild\(overlay\)/.test(pluginsModule), '插件详情遮罩会被挂到 body（.card 的动画/滤镜会给 fixed 造包含块）');
 
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

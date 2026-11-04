@@ -16,9 +16,14 @@
 - 页面私有样式回各自目录：`overview` 的三块网格占位、顺序与窄屏覆盖 → `pages/overview/page.css`；`usage` 的账本数字对齐、进度条、手写 SVG 图表与图例 → `pages/usage/page.css`；`app.css` 不再持有 `#section-*` 选择器。
 - `test-console-static` 增 7 条断言（tokens 文件与顺序、app.css 不持有令牌、两页私有规则归属），防止样式回流。
 
+### 修复：插件详情弹窗只罩住卡片；标签图标改回品牌字形（2026-11-04）
+- 插件详情遮罩被 `.card` 的入场动画/`backdrop-filter` 形成的包含块困住，`position:fixed` 只覆盖卡片；现在 `init()` 里把 `#pluginDetailOverlay` 挂到 `document.body`（实测遮罩 1410×905 = 整页视口），并在路线图「页面模块约定」写明「片段里的 fixed 浮层必须挂 body」。
+- 重画标签图标：不再自绘几何图形（原版被看成性别符号），直接复用侧栏品牌标记的字形——`<text>q</text>` + `<text>↗</text>`、同一套字体栈，**不画背景块**，颜色用 `@media (prefers-color-scheme)` 跟随系统深浅色；控制中心 `favicon.svg` 与之逐字节相同，两处图标只有一个来源。
+- `test-console-static` 增 4 条断言（同形、无背景与自绘图形、跟随主题、两处一致）与 1 条浮层归属断言。
+
 ### 重构：控制台页面目录化（3.1：全部 15 页，2026-11-04）
 - 收尾：插件页也收进 `pages/plugins/`（`js/pages/plugins.js` 删除），控制台 15 个页面至此全部自包含；`js/` 只剩 `api.js` / `ui.js` / `router.js` / `timezone.js` / `app.js`（约 290 行，只做全局刷新、搜索、主题与入口装配）。
-- 新增 `public/console/img/favicon.svg`（32×32，深色圆角底 + 品牌蓝紫渐变 `q↗`），`index.html` 声明 `<link rel="icon" type="image/svg+xml">`；`/console/img/` 沿用鉴权前的静态放行，标签图标不再空白。
+- 新增 `public/console/img/favicon.svg`（初版为深色圆角底 + 自绘 `q↗`，当日晚些改版为「只留品牌字形、无背景」，见上方修复条目），`index.html` 声明 `<link rel="icon" type="image/svg+xml">`；`/console/img/` 沿用鉴权前的静态放行，标签图标不再空白。
 - `public/console/pages/<id>/` 成为页面自包含目录：`skills`、`mcp`、`behaviors`、`reference` 四页的 DOM 片段、私有样式、页面模块搬进各自目录；`index.html` 对应 `<section>` 只留空容器（页面不再是「全写死在 index 里」）。`reference` 是纯静态页，模块只导出空 `init()`，保持「每页都有 `init()`」的约定。
 - 路由器新增 `hydratePage(page)`：首次进入时 fetch `page.html` → 注入容器 → 按需插 `page.css` → 动态 `import()` 页面模块并调 `init()`；每页只加载一次，并发切页复用同一个 Promise；片段取不到时只在该 section 显示「页面加载失败（刷新重试）」，不影响其它页。
 - `src/bridge.js` 的静态路由前缀扩到 `/console/(css|js|img|fonts|pages)/`（仍在令牌校验之前）；`scripts/console-source.mjs` 增 `consolePageDirs()` 并把页面片段拼进源码视图；`scripts/console-ui-fixture.mjs` 按真实路径提供 `pages/<id>/page.{html,css,js}`。

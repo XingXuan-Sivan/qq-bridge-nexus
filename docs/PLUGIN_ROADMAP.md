@@ -319,7 +319,7 @@
 - `js/app.js` 只留装配：import 三个模块 + 建页面 + 绑定事件 + 末尾 `initRouter()`。
 - 待办（第三阶段，方案已定、未动工）：页面目录化 `pages/<id>/{page.html,page.css,page.js}`、公用层移到 `app/{core,ui,styles}`、favicon、CSP 去 `unsafe-inline`。详见本节「第三阶段」。
 - 第二阶段剩余：第三阶段已搬走 15 个页面（技能 / MCP / 管理行为 / 工具参考 / 访问与安全 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批 / 运行总览 / 插件），全部页面都在 `public/console/pages/<id>/`，`app.js` 只剩全局状态刷新、搜索、主题与入口装配（约 290 行）；`js/store.js`（跨页共享状态）暂不做，等有真实共享状态再加。
-- 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。**整块搬迁不要用 `@@SLOT@@` 之类的哨兵占位**：脚本替换完忘记回填，裸文本会直接挂在 `main` 下、在每一页都显示（访问与安全页迁移时踩过，2 行残留）；真要占位就用带本页 id 的注释，并让 `test-console-static` 的哨兵断言兜住。
+- 页面模块约定：`pages/<page>.js` 导出 `initXxxPage()`，自己绑事件、自己 `onPageRefresh('<page>', ...)`、自己做首次加载；入口只调 `initXxxPage()`。**迁移时必须逐个核对用到的辅助函数**（`esc`、`showConsoleToast`、`api` 从 `../ui.js`、`../api.js` 显式 import）——漏掉一个会被 `init` 末尾的 `.catch(() => {})` 吞掉，页面停在「加载中…」而控制台无报错（插件页迁移时踩过）。**整块搬迁不要用 `@@SLOT@@` 之类的哨兵占位**：脚本替换完忘记回填，裸文本会直接挂在 `main` 下、在每一页都显示（访问与安全页迁移时踩过，2 行残留）；真要占位就用带本页 id 的注释，并让 `test-console-static` 的哨兵断言兜住。**片段里的 `position:fixed` 浮层（modal / 抽屉 / 全局提示）必须挂到 `document.body`**：片段被注入在 `section.card` 里，而 `.card` 有入场动画与 `backdrop-filter`，会给 `fixed` 造出包含块——遮罩只盖住卡片、盖不住整页（插件详情弹窗踩过；搜索候选框是同一类问题的另一处）。挂载放在该页 `init()` 里，用 `if (el.parentElement !== document.body) document.body.appendChild(el)`，事件委托仍按 id 绑定。
 
 **目标结构（A：原生 ESM + 微运行时，零构建；页面与组件自包含）**
 
@@ -352,7 +352,7 @@ public/console/
    - 真机验证（无头 Edge + CDP，3111）：三页都能注入并渲染（技能「共 1 个技能包」、MCP「桥接自带 3 个 MCP server」、管理行为「注册表 5 条内置 + 0 条插件」）；冷启动直开 `#mcp` 正常；`#behaviors` 刷新后仍在原页且内容重新注入；搜索「技能」能命中未打开过的页面并跳转；控制台零异常。
 2. `3.2 组件层`：把各页重复的卡片头、表格、表单行、详情弹窗抽成 `app/ui/*`，页面改调用；删掉重复的 `innerHTML` 模板。
 3. `3.3 样式分家`（第一步 ✅ 2026-11-04）：`css/tokens.css` 单独承载设计令牌（`:root` + `[data-theme="dark"]`，`index.html` 里先于 `app.css` 加载）；页面私有规则回各自 `pages/<id>/page.css`——`overview` 的网格占位与窄屏覆盖、`usage` 的账本/进度条/SVG 图表与图例，`app.css` 不再出现 `#section-*` 选择器。剩下的第二步：把剩余的 `app.css`（约 1800 行）按 `base/layout/components` 再分文件，407 处内联宽度改工具类后再动 CSP。
-4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04：`public/console/img/favicon.svg` 为 32×32、深色圆角底 + 品牌蓝紫渐变 `q↗`，`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、915 字节；静态测试加 4 条断言兜住它不被误删）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
+4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04，同日晚些按反馈改版：图标不画背景块，直接复用侧栏品牌标记的字形——`<text>q</text>` + `<text>↗</text>`，与侧栏同一套字体栈与字重，颜色走 `@media (prefers-color-scheme)` 跟随系统深浅色；控制中心 `public/control-center/favicon.svg` 与它**逐字节相同**，两处图标只有一个来源；`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、508 字节；静态测试 8 条断言兜住「同形、无背景、跟随主题、两处一致」）。CSP 去掉 `unsafe-inline` 仍未做（剩内联 style 与主题脚本两处要处理）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
 5. `3.5 控制中心`（✅ 2026-11-04）：`public/control-center.html` 已按**B 档**拆成 `public/control-center/{index.html,app.css,app.js}`，**不并入** `pages/`；控制中心样式独立（`tokens.css` 共享为后续项）。详见本节「3.5 启动器控制中心」。
 
 - 测试与夹具影响（已在 3.1 落地）：`console-source.mjs` 拼 index + css + js + `pages/*/{html,css,js}`；`console-ui-fixture.mjs` 按路径返回 `pages/<id>/page.{html,css,js}`；`test-console-static.mjs` 改为断言片段存在、index 对应 section 为空、路由器有 `hydratePage`。

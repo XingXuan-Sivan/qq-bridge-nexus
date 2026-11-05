@@ -1,5 +1,8 @@
 /* 设计令牌：颜色、圆角、阴影、字体族。改主题只改这里。 */
 :root {
+  /* 字体：界面与等宽内容；控制台与控制中心共用同一套 */
+  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono",Consolas,"Microsoft YaHei Mono",monospace;
   /* 外壳尺寸：侧栏与顶栏是独立容器，媒体查询只改变量，不再改两处布局 */
   --sidebar-w:234px;
   --topbar-h:76px;
@@ -83,7 +86,21 @@
   /* 背景点缀 */
   --decor-a:#4d6bfe14;
   --decor-b:#7c5cff0f;
+  /* 实心主色/危险色上的文字 */
+  --on-solid:#fff;
+  /* 终端面板：两种主题下都是深底，所以在 :root 定义一次、深色块不覆盖 */
+  --term-bg:#0b0e12;
+  --term-fg:#d7dde4;
+  --term-fg-dim:#5f6b77;
+  --term-tag:#9aa7b4;
+  --term-err:#ff8a80;
+  --term-warn:#ffd479;
+  --term-system:#7cc4ff;
+  --term-cmd:#c9a7ff;
+  /* 实心危险按钮/告警徽标底色 */
+  --danger-solid:#cf222e;
   --radius:16px;
+  --radius-sm:10px;
   color-scheme:light
 }
 
@@ -138,6 +155,7 @@
   --danger-border:#4b2b2e;
   --danger-hover-bg:#3a2120;
   --err:#ff8f84;
+  --danger-solid:#d1393f;
   --ok:#4fd1a5;
   --pill-blue-bg:#1b2440;
   --pill-blue-fg:#aabaff;

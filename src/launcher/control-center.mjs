@@ -55,6 +55,13 @@ function setRoot(root) {
 }
 setRoot(DEFAULT_ROOT);
 
+// 控制中心与控制台共用设计令牌与主题引导：页面里的 /shared/* 固定映射到 console 的源文件，
+// 不复制、不参数化路径。控制中心不启动桥接也能独立读到（文件在磁盘上）。
+const SHARED_FILES = new Map([
+  ['/shared/tokens.css', { file: path.join(DEFAULT_ROOT, 'public', 'console', 'css', 'tokens.css'), type: 'text/css; charset=utf-8' }],
+  ['/shared/theme-boot.js', { file: path.join(DEFAULT_ROOT, 'public', 'console', 'js', 'theme-boot.js'), type: 'text/javascript; charset=utf-8' }],
+]);
+
 // ── 小工具 ────────────────────────────────────────────────────────────────────
 
 function readJson(file, fallback = null) {
@@ -566,7 +573,7 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   };
   const allowedHosts = () => [`127.0.0.1:${server.address()?.port ?? port}`, `localhost:${server.address()?.port ?? port}`];
 
@@ -593,6 +600,14 @@ export async function startControlCenter({ open = true, port: portOverride = nul
         let html;
         try { html = fs.readFileSync(PAGE_FILE, 'utf8'); } catch { return send(500, '控制中心页面缺失：public/control-center/index.html', 'text/plain; charset=utf-8'); }
         return send(200, html, 'text/html; charset=utf-8');
+      }
+      // 与控制台共用的设计令牌/主题引导：固定文件，无路径参数，不经过 resolveStaticPath。
+      if (req.method === 'GET' && SHARED_FILES.has(url.pathname)) {
+        const shared = SHARED_FILES.get(url.pathname);
+        let buf;
+        try { buf = fs.readFileSync(shared.file); } catch { return send(500, `共享资源缺失：${path.relative(DEFAULT_ROOT, shared.file)}`, 'text/plain; charset=utf-8'); }
+        res.writeHead(200, { 'content-type': shared.type, 'content-length': buf.length, ...SEC });
+        return res.end(buf);
       }
       // 控制中心自己的静态资源（css / js / favicon）：只放行这一层目录，走与桥接控制台同一套路径守卫。
       if (req.method === 'GET' && url.pathname.startsWith('/control-center/')) {

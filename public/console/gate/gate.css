@@ -1,0 +1,62 @@
+/* 门页私有规则：整页文档（不是控制台片段），只补居中与间距。
+   颜色、圆角、按钮、输入框全部复用 tokens.css + base/components，避免再养一套门页皮肤。 */
+body.gate-body {
+  display:block;
+  height:auto;
+  min-height:100vh;
+  min-height:100dvh;
+  overflow:auto
+}
+.gate-main {
+  position:relative;
+  z-index:1;
+  min-height:100vh;
+  min-height:100dvh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:48px 20px
+}
+.gate-card {
+  width:100%;
+  max-width:420px
+}
+.gate-brand {
+  padding:0 0 20px;
+  font-size:19px
+}
+.gate-brand .brand-mark {
+  font-size:31px
+}
+.gate-card h1 {
+  margin:2px 0 8px;
+  font-size:25px
+}
+.gate-lead {
+  color:var(--muted);
+  font-size:13px;
+  line-height:1.8
+}
+.gate-submit {
+  width:100%;
+  margin-top:18px
+}
+.gate-error {
+  margin-top:10px;
+  font-size:12px
+}
+.gate-foot {
+  margin-top:20px;
+  font-size:11px
+}
+.gate-noscript {
+  position:fixed;
+  left:20px;
+  right:20px;
+  bottom:20px;
+  z-index:2
+}
+@media (max-width:420px) {
+  .gate-main { padding:28px 14px }
+  .gate-card { padding:22px }
+}

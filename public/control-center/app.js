@@ -17,7 +17,7 @@
     box.className = 'banner bad';
     box.id = 'tokenBox';
     box.append(`${reason}打开项目目录里的 state 文件夹，复制 control-center-token 文件的内容粘贴到这里（或重新双击 control-center.bat，它会带着令牌打开页面）。 `);
-    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '粘贴令牌'; inp.style.minWidth = '320px';
+    const inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = '粘贴令牌'; inp.className = 'token-input';
     const btn = document.createElement('button'); btn.className = 'primary'; btn.textContent = '确定';
     btn.onclick = () => { const v = inp.value.trim(); if (v) { sessionStorage.setItem('ccToken', v); location.reload(); } };
     box.append(inp, ' ', btn);
@@ -601,7 +601,7 @@
     const extra = pl?.external ? '\n外部运行的接口平台不受影响。' : '';
     if (!await confirmBox('退出控制中心', `会先停止由控制中心启动的桥接、接口平台和 SnowLuma（机器人将离线），然后关闭控制中心。不是由控制中心启动的进程不会被停止。${extra}`, '全部退出')) return;
     try { await api('/api/exit', {}); } catch {}
-    document.body.innerHTML = '<div style="padding:40px;font-size:15px">控制中心已退出，可以关闭这个页面。</div>';
+    document.body.innerHTML = '<div class="exit-screen">控制中心已退出，可以关闭这个页面。</div>';
   };
 
   // ── 命令行（固定命令集）──

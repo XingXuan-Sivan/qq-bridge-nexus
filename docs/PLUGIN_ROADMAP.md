@@ -369,6 +369,7 @@ public/console/
    - 第三步（✅ 2026-11-04，内联样式收口）：HTML 里 **407 处内联 `style` 中的 388 处**换成 `css/utilities.css` 的 57 个工具类（`.u-w-80`、`.u-flex-1`、`.u-mt-8`、`.u-m-0`、`.u-flex-basis-220`、`.u-between`……），工具类只在「宽度 / flex / 外边距 / gap / 文字对齐」这几种纯静态属性上按声明值一一映射，不承载主题色与组件样式；剩下 19 处保留内联，全部是 JS 会切换 `display` 的元素（隐藏/展开），换类会与 `el.style.display` 打架。实测 `u-w-*` 的宽度、`u-flex-1` 的 `flex-grow`、`u-mt-*` 的外边距都按预期生效，概览/插件/定时任务三页几何与转换前一致、零异常。
    - 第四步（✅ 2026-11-05，CSP 收口）：剩下 19 处内联 `style` 与所有 `el.style.display` 全部搬走——表格列宽改 `data-w`（`components.css` 用 `th[data-w="…"]` 给宽度，`renderTable`/`simpleTable`/管理行为页表头同步）、显隐改 `hidden` 属性（`base.css` 的 `[hidden]{display:none!important}` 兜底）、内联主题脚本抽成 `js/theme-boot.js`（同步 `<script src>`，仍放样式表之前防闪白）、用量页进度条改 `data-pct` + `applyUsageBarWidths()` 用 CSSOM 写宽度。结果：HTML 与页面模块里 **0 处内联 style、0 处内联 script/style 块**，`src/http/security.mjs` 的 CSP 去掉两处 `'unsafe-inline'`。验证：`test-http-boundary` 7 pass（新断言 CSP 不含 `unsafe-inline`）、`test-console-static` 全过（新断言 0 内联 style + 模块语法用 `node --check`），浏览器探针深链/切页/搜索候选/表格列宽全部正常、`securitypolicyviolation` 与异常均为空。
 4. `3.4 收尾`：`favicon.svg` + `<link rel="icon">`（✅ 2026-11-04，同日晚些按反馈改版：图标不画背景块，直接复用侧栏品牌标记的字形——`<text>q</text>` + `<text>↗</text>`，与侧栏同一套字体栈与字重，颜色走 `@media (prefers-color-scheme)` 跟随系统深浅色；控制中心 `public/control-center/favicon.svg` 与它**逐字节相同**，两处图标只有一个来源；`index.html` 已声明 `<link rel="icon" type="image/svg+xml">`，`/console/img/` 走鉴权前的静态放行，实测无令牌 200、`image/svg+xml`、580 字节；静态测试 8 条断言兜住「同形、无背景、跟随主题、两处一致」）。CSP 去掉 `unsafe-inline` 已于 2026-11-05 完成（见 3.3 第四步）；`scripts/console-source.mjs` 与 `console-ui-fixture.mjs` 的拼接/分发已在 3.1 完成。
+    - 补记（2026-11-05）：CSP 收紧时漏掉了 `bridge.js` 里那张 401 登录页——它的内联 `<script>` 被浏览器直接拦掉，无令牌打开控制台只剩标签「需要令牌」的白屏。现已外置为 `public/console/gate/{index.html,gate.css,gate.js}`：门页是整页文档，不并入 `pages/`（那里会被 `console-source` 拼进控制台源码）；401 时读 `index.html` 返回（缺文件 500 兜底），静态放行单列 `gate/`；门页保留 `location.hash`，提交后走 `/?token=…#page`，`api.js` 落盘再 `replaceState` 还原。刷新不再闪门页：页面鉴权通过后种 `qq_console_token`（HttpOnly、SameSite=Strict、30 天滑动），cookie 只参与页面 GET，API 仍只认 `x-console-token`。会话内 API 401 也不再弹原生 `prompt`，统一跳 `/?reauth=1#<原页面>` 回门页重新登录。`?token=` 同时对 `/console` 与 `/console/` 生效，`consoleTokenTried` 已删。验证：`test-control-center` 21/21、`test-console-static` 全过、`test-http-boundary` 7 pass + 1 skip。
 5. `3.5 控制中心`（✅ 2026-11-04）：`public/control-center.html` 已按**B 档**拆成 `public/control-center/{index.html,app.css,app.js}`，**不并入** `pages/`；控制中心样式独立（`tokens.css` 共享为后续项）。详见本节「3.5 启动器控制中心」。
 6. `浏览器回归`（✅ 2026-11-05）：`scripts/test-console-ui.mjs` 在本机真正跑通（此前因缺 `playwright` 整段跳过）。夹具递归提供 `js/**`、补 `/console/img|fonts` 与四个只读接口桩；`reveal()` 改成「先按 id 快照切页再定位」；手机 390px 横向溢出与「进页重拉配置冲掉草稿」两个缺陷修复；契约基线用 `--accept-contracts` 有意重录（`level` / `apply` 两个新字段）。**23/23 全绿**，连跑两次稳定。用法与重录规则见 `docs/guides/CONSOLE-UI-TESTING.md`。
 
@@ -387,7 +388,7 @@ public/console/
     console/{index.html,favicon.svg,app/styles/tokens.css,pages/<id>/…}
     control-center/{index.html,app.css,app.js}   ← 原 control-center.html 拆三件
   ```
-  `tokens.css` 是唯一色板来源，两个页面最终都 `<link>` 它（控制中心目前仍用自带 `app.css`，色值对齐在后续项）；控制中心其余样式留 `public/control-center/app.css`，不跨目录 import console 的页面/组件样式。
+  `tokens.css` 是唯一色板来源，两个页面都 `<link>` 它（控制中心经 launcher 的 `/shared/tokens.css` 读同一份文件，2026-11-05 已落地；新增的 13 个令牌按通用语义定义，不按消费方分）；控制中心其余样式留 `public/control-center/app.css`，不跨目录 import console 的页面/组件样式。
 - launcher 改动（已完成）：`PAGE_FILE` 指向 `public/control-center/index.html`；新增 GET `/control-center/*` 静态路由，复用 `resolveStaticPath`（前缀锁死 `/control-center/`）与 `serveStaticFile`，穿越一律 404；其余路由与令牌逻辑不动；缺文件时返回「控制中心页面缺失：public/control-center/index.html」。
 - 影响面清单（实际落地）：
   1. `src/launcher/control-center.mjs`：`PAGE_FILE` 改目录内 index + 静态服务 + 缺文件兜底；
@@ -395,8 +396,8 @@ public/console/
   3. 测试：`test-control-center` / `test-napcat-manage` / `test-platform` / `test-linux-support` 的读取改为「`index.html` + `'\n'` + `app.js`」拼接（保留对 DOM 与脚本的原有断言），共 8 处；
   4. 文档：`docs/FOLDER_MAP.md`、本文件、`interface-platform/docs/MILESTONES.md`、`CHANGELOG.md`；
   5. `CHANGELOG.md` 一条（见下）。
-- 验收（实测）：`GET /` 200 `text/html` 25073 字节；`/control-center/app.css` 200 12287；`/control-center/app.js` 200 60543；`/control-center/favicon.svg` 200 915；`/control-center/../../state/console-token` **404**；无头 Edge 打开页面（`#t=` 令牌）零异常，`app.css` 129 条规则生效、`#bridgeStart`/`#consoleOpen`/`#tab-platform` 均在；`test-napcat-manage` 13/13、`test-platform` 8/8、`test-linux-support` 9/9、`test-control-center` 20/21（失败项是改动前就存在的第 20 条 SnowLuma 迁移用例）。
-- 不做：把启动/修复能力搬进 console；给 launcher 引入构建步骤；把控制中心的 token 与 console token 合并。
+- 验收（实测）：`GET /` 200 `text/html` 25169 字节；`/control-center/app.css` 200 12093；`/control-center/app.js` 200 60543；`/control-center/favicon.svg` 200 915；`/shared/tokens.css` 200 5106（与 `public/console/css/tokens.css` 字节一致）；`/control-center/../../state/console-token` **404**；无头 Edge 打开页面（`#t=` 令牌）零异常，`app.css` 129 条规则生效、`#bridgeStart`/`#consoleOpen`/`#tab-platform` 均在；`test-napcat-manage` 13/13、`test-platform` 8/8、`test-linux-support` 9/9、`test-control-center` 22/22。
+- 不做：把启动/修复能力搬进 console；给 launcher 引入构建步骤。
 - **顺序**：放在 3.1–3.4 之后（3.5），因为「唯一色板 `tokens.css`」要等 3.3 样式分家落地后才存在。
 
 **验收**：15 个页面全部从 `pages/<id>/` 加载（HTML/CSS/JS 同目录）；`index.html` ≤ 150 行；`favicon.svg` 在浏览器标签生效；刷新保页、深链、面包屑、搜索层级全部不回归；CSP 响应头无 `unsafe-inline`；控制中心拆成 `public/control-center/` 三件并在桥接停止时可用；`npm run test:console-static` 全过。

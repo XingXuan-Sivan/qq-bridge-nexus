@@ -11,7 +11,6 @@ import { fileURLToPath } from 'node:url';
 import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec, migrationWarning, snowlumaDataSummary } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
-import { readConsoleSource } from './console-source.mjs';
 // 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
 process.env.QQ_BRIDGE_NAPCAT_HOME ||= path.join(os.tmpdir(), 'qq-bridge-test-no-napcat');
 
@@ -152,7 +151,7 @@ function req(port, method, route, { body, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const data = body !== undefined ? JSON.stringify(body) : undefined;
     const r = http.request({ host: '127.0.0.1', port, path: route, method, headers: { ...(data ? { 'content-type': 'application/json' } : {}), ...headers } }, (res) => {
-      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, body: j, text: b }); });
+      let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, body: j, text: b, headers: res.headers }); });
     });
     r.on('error', reject);
     r.end(data);
@@ -183,6 +182,20 @@ test('控制中心：启动时不会启动桥接或 SnowLuma；页面无需令�
     const st = await req(port, 'GET', '/api/state', { headers: T });
     assert.equal(st.status, 200);
     assert.equal(st.body.health.config.exists, false, '未部署也能打开');
+  });
+});
+
+test('控制中心：与控制台共用 /shared/tokens.css 与 theme-boot.js（同一份文件，不是拷贝）', async () => {
+  await withCenter(async ({ port }) => {
+    const css = await req(port, 'GET', '/shared/tokens.css');
+    assert.equal(css.status, 200);
+    assert.match(css.headers['content-type'], /^text\/css/);
+    assert.equal(css.text, fs.readFileSync(path.join(root, 'public', 'console', 'css', 'tokens.css'), 'utf8'));
+
+    const boot = await req(port, 'GET', '/shared/theme-boot.js');
+    assert.equal(boot.status, 200);
+    assert.match(boot.headers['content-type'], /javascript/);
+    assert.equal(boot.text, fs.readFileSync(path.join(root, 'public', 'console', 'js', 'theme-boot.js'), 'utf8'));
   });
 });
 
@@ -310,16 +323,33 @@ test('控制中心：「打开桥接控制台」在桥接卡片里（启动与�
   }, { config: {} });
 });
 
-test('桥接控制台 401 页：先用本机已存的令牌自动试一次，失败或 ?manual=1 才弹窗', () => {
+test('桥接控制台 401 门页：public/console/gate/ 整页文档、外链脚本、保留 hash、支持手动入口', () => {
+  const gateDir = path.join(root, 'public', 'console', 'gate');
+  const page = fs.readFileSync(path.join(gateDir, 'index.html'), 'utf8');
+  assert.match(page, /<title>[^<]*需要令牌[^<]*<\/title>/);
+  assert.ok(/^<!doctype html>/i.test(page.trim()), '门页是完整文档（不是控制台片段）');
+  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/.test(page), '门页不内联脚本（CSP 无 unsafe-inline）');
+  assert.match(page, /<script src="\/console\/gate\/gate\.js"><\/script>/, '门页脚本外链且与页面同目录');
+  assert.match(page, /href="\/console\/css\/tokens\.css"/, '门页复用控制台色板');
+  assert.match(page, /href="\/console\/gate\/gate\.css"/, '门页私有样式与页面同目录');
+  const js = fs.readFileSync(path.join(gateDir, 'gate.js'), 'utf8');
+  assert.match(js, /location\.hash/, '记住上一页 hash');
+  assert.match(js, /'\/\?token=' \+ encodeURIComponent\((?:saved|value)\) \+ hash/, '令牌拼回 URL 时带上 hash');
+  assert.match(js, /manual/, '手动入口跳过自动尝试');
+  assert.match(js, /localStorage\.removeItem\('consoleToken'\)/, '被拒的令牌要清掉');
+  assert.match(js, /history\.replaceState/, '失效令牌从地址栏抹掉（hash 保留）');
   const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
-  const line = src.split('\n').find((l) => l.includes('<title>需要令牌</title>'));
-  assert.ok(line, '找到 401 页');
-  assert.match(line, /localStorage\.getItem\(\\'consoleToken\\'\)/);
-  assert.match(line, /consoleTokenTried/, '有防循环标记');
-  assert.match(line, /manual/, '手动入口跳过自动尝试');
-  assert.match(line, /prompt\(/, '仍保留手动输入');
-  const page = readConsoleSource(root);
-  assert.ok(page.includes("sessionStorage.removeItem('consoleTokenTried')"), '鉴权成功后清掉标记');
+  assert.ok(!src.includes('<title>需要令牌</title>'), 'bridge.js 不再内联登录页 HTML');
+  assert.match(src, /'console', 'gate', 'index\.html'/, '401 读取静态门页');
+  assert.match(src, /Set-Cookie/, '页面鉴权成功后种 cookie（刷新不再回门页）');
+  assert.match(src, /HttpOnly; SameSite=Strict/, 'cookie 仅页面导航可用、脚本读不到');
+  assert.match(src, /Max-Age=2592000/, 'cookie 30 天滑动续期');
+  assert.match(src, /forceGate/, 'reauth=1 时即使 cookie 有效也强制回门页，避免 401 循环');
+  assert.match(js, /reauth/, '会话内 401 跳回门页（不再弹原生 prompt）');
+  assert.match(js, /登录状态已失效/, '门页区分「换过令牌」与「会话失效」');
+  const apiSrc = fs.readFileSync(path.join(root, 'public', 'console', 'js', 'api.js'), 'utf8');
+  assert.ok(!/prompt\(/.test(apiSrc), '控制台不再用原生 prompt 要令牌（与门页重复）');
+  assert.match(apiSrc, /\/\?reauth=1/, 'API 401 统一跳回门页');
 });
 
 test('NapCat 自动登录设置：读 webui.json 的 autoLoginAccount，结果缓存 10 分钟（避免反复触发 macOS「访问其他 App 的数据」）', async () => {

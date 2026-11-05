@@ -10,7 +10,7 @@ body {
   margin:0;
   background:var(--bg);
   color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-family:var(--font-ui);
   font-size:14px;
   line-height:1.65;
   /* 标准后台外壳：aside / header / main 三个独立容器，只有 main 内部滚动 */
@@ -103,7 +103,7 @@ button:hover {
 button.active,.primary {
   background:var(--accent);
   border-color:var(--accent);
-  color:#fff
+  color:var(--on-solid)
 }
 button.danger {
   background:var(--danger);

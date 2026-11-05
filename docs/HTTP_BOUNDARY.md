@@ -33,8 +33,10 @@
 
 ### 现状
 
-- 控制台已是分层目录：`public/console/index.html`（结构）、`public/console/css/{tokens,base,layout,components}.css`（按加载顺序分层）、`public/console/js/*.js`（公用模块 + `pages/<id>/page.js`）；`GET /` 与 `GET /console/` 返回 index（失败 404「控制台页面缺失」）。
-- 静态资源只放行 `^/console/(css|js|img|fonts|pages)/` 这五个子目录，且**排在令牌校验之前**——浏览器取 `<link>`/`<script>` 不会带 `x-console-token`，放在鉴权之后页面会白屏（实测：拆分后不前置时 `/console/js/app.js` 返回 401）。页面本身（`/`、`/console/`）仍要求令牌。`pages/` 是页面片段目录（`pages/<id>/page.html`、同目录 `page.css` 与页面模块 `page.js`），由路由器在进入该页时按需 fetch，扩展名仍受白名单约束（`.html/.css/.js`）。
+- 控制台已是分层目录：`public/console/index.html`（结构）、`public/console/css/{tokens,base,layout,components}.css`（按加载顺序分层）、`public/console/js/*.js`（公用模块 + `pages/<id>/page.js`）；`GET /`、`GET /console/` 与 `GET /console` 返回 index（失败 404「控制台页面缺失」）。
+- 静态资源只放行 `^/console/(css|js|img|fonts|pages|gate)/` 这六个子目录，且**排在令牌校验之前**——浏览器取 `<link>`/`<script>` 不会带 `x-console-token`，放在鉴权之后页面会白屏（实测：拆分后不前置时 `/console/js/app.js` 返回 401）。页面本身（`/`、`/console/`、`/console`）仍要求令牌。`pages/` 是页面片段目录（`pages/<id>/page.html`、同目录 `page.css` 与页面模块 `page.js`），由路由器在进入该页时按需 fetch，扩展名仍受白名单约束（`.html/.css/.js`）；`gate/` 是 401 门页自己的 `index.html`、`gate.css`、`gate.js`——门页是**整页文档**，不能并入 `pages/`（那里会被 `console-source` 拼进控制台源码）。
+- 无令牌或令牌失效时，页面入口返回 **401 + `public/console/gate/index.html` 的原文**（`src/bridge.js` 读文件，缺文件 500 兜底）。门页不内联脚本/样式，URL 不变，因此 `location.hash` 天然保留；提交后由 `api.js` 落盘令牌并 `replaceState` 还原 hash。
+- 页面鉴权通过后服务端种 `qq_console_token`（`Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`）：之后刷新导航由浏览器自动带上，直接 200，不再「401 → 门页 → 跳 `?token=`」闪一下。cookie **只**参与页面 GET，API 仍只认 `x-console-token`；页面取值优先级 `?token=` > cookie > 头。
 - 守卫实现：`src/http/static.mjs` 的 `resolveStaticPath` / `serveStaticFile` / `sendNotFound`；用例 `scripts/test-http-boundary.mjs`（7 pass / 1 skip，符号链接用例在无权限环境自动跳过）。
 - 新增静态目录（例如将来的 `public/console/img/`）只需在 `resolveStaticPath` 的调用里登记前缀，不要另写一套校验。
 
@@ -79,7 +81,7 @@ export const SECURITY_HEADERS = {
 };
 ```
 
-控制台已彻底外置：`public/console/index.html` 只留骨架与 `<link>`，样式在 `css/{tokens,base,layout,components,utilities}.css`，脚本在 `js/*.js` 与 `pages/<id>/page.js`。收敛路径（`docs/PLUGIN_ROADMAP.md` §8.7 的 3.3）：
+控制台已彻底外置：`public/console/index.html` 只留骨架与 `<link>`，样式在 `css/{tokens,base,layout,components,utilities}.css`，脚本在 `js/*.js` 与 `pages/<id>/page.js`；401 门页 `public/console/gate/` 同样只走外链（`gate.css`、`gate.js`），响应体是它的 HTML 原文。收敛路径（`docs/PLUGIN_ROADMAP.md` §8.7 的 3.3）：
 
 1. 407 处内联 `style` → 57 个工具类（`utilities.css`），HTML 与页面模块里现在 **0 处内联 style**；
 2. 表格列宽由 `style="width:Npx"` 改成 `data-w="N"`，`components.css` 按 `th[data-w]` 给宽度；
@@ -106,7 +108,15 @@ export const SECURITY_HEADERS = {
 ### 页面标识
 
 - 唯一真源是 URL hash：`#overview`、`#plugins`、`#scheduler`…，键集合 = `consolePages` 的 key。
-- 导航点击 → `pushState` 写 hash；**刷新必须回到同一页**，这是硬要求（当前实现不满足，见 `PLUGIN_ROADMAP.md` §8.7 的 B1）。
+- 导航点击 → `pushState` 写 hash；**刷新必须回到同一页**，这是硬要求（三层恢复见下，B1 已收口）。
+
+### 令牌门页
+
+- 401 只发生在页面入口（`/`、`/console/`、`/console`）；响应体是 `public/console/gate/index.html`（整页文档），URL 不变，所以 `location.hash` 天然保留。
+- 门页提交时拼成 `/?token=<新令牌>#<原页面>`；`api.js` 的 `bootstrapConsoleToken()` 落盘后 `replaceState` 回 `#<原页面>`。
+- 带 `?token=` 仍 401 ⇒ 令牌被拒：门页清掉本地令牌、抹掉地址栏里的失效令牌并提示「令牌无效或已更换」，不自动重试；`?manual=1` 跳过自动尝试（控制中心的手动入口）。
+- 控制台里 API 401 不弹原生 `prompt`，统一跳 `/?reauth=1#<原页面>`；服务端见到 `reauth=1` 时忽略仍然有效的页面 cookie、强制返回门页（否则会 401 → 控制台 → 401 循环）。门页清掉旧令牌并提示「登录状态已失效」，提交后回原页面。
+- 鉴权通过后服务端种 `qq_console_token`（HttpOnly / SameSite=Strict / 30 天滑动）：刷新导航直接 200，不再回门页；`page.js` 放 `<head>` 先于样式表，只在没有 cookie 且本地有令牌时于首绘前跳 `?token=`。
 
 ### 恢复顺序（三层保底）
 
@@ -131,6 +141,14 @@ export const SECURITY_HEADERS = {
 
 - 控制台所有样式集中在 `public/console/css/`，用 CSS 变量（`--surface`、`--accent`…）表达主题，禁止在 JS 里拼 `style="..."` 做布局；
 - 组件类名走统一前缀语义：布局（`.workspace/.topbar`）、组件（`.tile-list/.tile`、`.settings-group/.settings-content`）、页面（`#section-*`）。新增页面前先对照「人格与角色」页，不许自造网格与间距。
+
+### 共享令牌（控制台 / 控制中心）
+
+- 唯一来源是 `public/console/css/tokens.css`：两个页面都 `<link>` 同一份文件，不复制、不各自维护色板。
+- 控制中心由 launcher 在 `127.0.0.1:3099` 托管，读不到桥接的 `/console/*` 路由；`src/launcher/control-center.mjs` 用固定文件表暴露 `/shared/tokens.css` 与 `/shared/theme-boot.js`（只这两个文件，不走目录遍历），内容与磁盘上一模一样。
+- 令牌按语义命名，不按消费方命名：`--term-*`（终端面板）控制中心现在用、控制台以后也可以直接用于日志视图；字体 `--font-ui/--font-mono`、实心底色 `--on-solid`、危险实心 `--danger-solid` 同理。
+- 主题仍是 `:root` 浅色 + `[data-theme="dark"]`；终端配色只在 `:root` 定义、深色块不覆盖（终端恒深底）。
+- `public/control-center/app.css` 不再有 `:root`、不再用 `prefers-color-scheme`；控制中心 `index.html` 先加载 `/shared/theme-boot.js` 与 `/shared/tokens.css`，再加载自己的 `app.css`。
 
 ### 插件 UI（未来契约，先定边界）
 
@@ -160,8 +178,11 @@ export const SECURITY_HEADERS = {
 | 未启用 404 | 禁用某插件后请求它的路由得 404；审计仍 200 |
 | 未知 API | 任意 `/api/nope` → 404 `{"ok":false,"error":"not found"}` |
 | 刷新保页 | 打开 `#scheduler` 后 F5，仍在 `#scheduler`；关闭标签再开回落 `#overview` |
+| 刷新不闪门页 | 登录后 F5 直接 200（响应带 `Set-Cookie` 续期），不出现门页卡片 |
+| 无令牌打开控制台 | `GET /` 得 401 + 门页（有输入框、无白屏），源码不含内联 `<script>` |
+| 令牌失效回跳 | 带旧令牌打开 `#scheduler`，门页提示并抹掉 URL 里的 `?token=`；输入新令牌后落回 `#scheduler` |
 | 面包屑 | 任意二级页的可点父级能回到父页，键盘 Tab 可达 |
 | 搜索层级 | 任意页面点开搜索候选，候选不被卡片遮挡（截图 + `z-index` 断言） |
-| CSP | 响应头不含 `unsafe-inline`（迁移完成后）；控制台无内联 `onclick=` |
+| CSP | 响应头不含 `unsafe-inline`；控制台与 401 门页都没有内联 `onclick=` / `<script>` |
 
 自动化入口：`npm run test:console-static`（静态断言）、`npm run test:audit`（接口与集成）、新增 `test:http-boundary`（穿越/404 用例，随 HTTP 层抽取一起加）。

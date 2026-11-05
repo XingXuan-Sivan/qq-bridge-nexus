@@ -28,6 +28,7 @@
 | 8 | 没有 CI | `Partial`（差：至少一个 workflow 跑门禁） | 现在所有门禁都是本地手动跑；仓库没有 `.github/workflows` | 推送后自动跑 `test:audit`（以及可选的 `test:console-ui`），红灯阻断合并 | 需要确认托管平台与是否愿意为此加配置 | 低 |
 | 9 | 控制台契约基线的维护流程 | `Partial`（差：基线变化时的提示与评审约定） | `scripts/console-ui-contracts.json` 是 25 条写请求的期望；改前端会合法地改变它，现在靠 `--accept-contracts` 手动重录 | 契约 diff 出现在 PR/提交里并附一句「为什么变」；不接受静默重录 | 无 | 低 |
 | 10 | `fs.watch` 在 Windows 的稳定性 | `Blocked`（等：目标平台实测；当前 `watch` 默认关） | 插件文件监听（P2c）默认关闭，因为跨平台可靠性未验证 | 连续 100 次增删改插件文件，自动重载成功率 100% 且无重复加载；再把默认值改回 `true` | Windows 实测（长时运行） | 低 |
+| 11 | 迁移评估（`docs/PARITY.md`） | `Blocked`（等：4 个决策 D-1～D-4 拍板） | nexus 与 enhanced 手改版、enhanced 上游 v1.1.2 逐维度对照：按会话人格卡、切换角色入口、换人格是否换会话、注入位置与 token、可扩展性、soulkit 联动、会话管理页、会话标题、`messages` 严格数组、切换与数据迁移 | `PARITY.md` 的 11 个维度全部有「保持/补齐/重设计」结论，且「待核实」4 项清零；被判定补齐的项各自拆成可验收的小项并入本表 | 用户对 D-1（soulkit 联动形态）、D-2（是否换会话）、D-3（会话页范围）、D-4（本地卡与 soulkit 卡主次）的决定 | 高 |
 
 ---
 

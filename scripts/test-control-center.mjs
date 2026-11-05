@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec, migrationWarning, snowlumaDataSummary } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
@@ -18,8 +19,20 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-cc-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function fakeSnowLuma(dir, version, { full = true, files = {} } = {}) {
-  fs.mkdirSync(dir, { recursive: true });
+/** 拿一个「刚才还空着」的端口：绑 0 再关掉。用来构造「SnowLuma 没在跑」的目录，
+ *  避免测试受本机真实 SnowLuma 占用默认 6099 的影响（那会让迁移守卫误判 409）。 */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+
+function fakeSnowLuma(dir, version, { full = true, files = {} } = {}) {  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@snowluma/runtime', version }));
   fs.writeFileSync(path.join(dir, 'index.mjs'), '');
   fs.writeFileSync(path.join(dir, 'launcher.bat'), '@echo off\r\necho fake snowluma\r\n');
@@ -346,7 +359,10 @@ test('控制中心：选择缺数据的新目录时先不切换、返回迁移�
   const d = tmp();
   fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ version: '9.9.9-test' }));
   fs.mkdirSync(path.join(d, 'node_modules'));
-  const old = fakeSnowLuma(path.join(d, 'sl-old'), '1.14.22', { files: { 'config/onebot_10001.json': '{}', 'config/webui.json': '{"passwordHash":"fake"}' } });
+  // 旧目录的 WebUI 端口显式指向一个刚空出来的端口：迁移守卫会看「该端口是否在监听」，
+  // 用默认 6099 的话，本机真的开着 SnowLuma 时这里会误判成「运行中」而 409。
+  const oldPort = await freePort();
+  const old = fakeSnowLuma(path.join(d, 'sl-old'), '1.14.22', { files: { 'config/onebot_10001.json': '{}', 'config/webui.json': '{"passwordHash":"fake"}', 'config/runtime.json': JSON.stringify({ webuiPort: oldPort }) } });
   const fresh = fakeSnowLuma(path.join(d, 'sl-new'), '2.0.3');
   fs.mkdirSync(path.join(d, 'state'), { recursive: true });
   fs.writeFileSync(path.join(d, 'state', 'control-center.json'), JSON.stringify({ snowlumaDir: old }));

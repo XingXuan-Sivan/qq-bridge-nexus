@@ -5,6 +5,18 @@
 
 ## 未发布
 
+### 重构：会话策略指纹收进 `src/session/policy.mjs`（P7 第三步收尾，2026-11-05）
+- `sessionPolicy()` 与 `isCurrentSession()` 从 `bridge.js` 搬出，`bridge.js` 只留两行薄包装。指纹由「模式 + 模式预设 + （closed-agent 才有的）管理员/级别/权限预设」组成；**级别只在 closed-agent 进指纹**是有意为之——漏了它，「管理通道提权成功但旧会话继续按低权限跑」；多算易变量则「每次检查都判过期、会话无限重建、反复读卡烧 token」。
+- `isCurrent()` 把「仍被允许 + 映射没换 + 指纹没变」三条件写在一处，缺一条就会复活幽灵会话。
+- 新增 `scripts/test-session-policy.mjs`（9 条）：chat 指纹只含模式+预设、私聊 null 稳定成空串、closed-agent 级别变化必须改指纹、`plan.ok=false` 时预设位空串、非 closed-agent 级别不进指纹、三条件、缺参不抛、缺依赖构造即报错。VM 夹具补 `createSessionPolicy`。
+
+### 收口：三项长期「既有失败」修绿（P7 第五步，2026-11-05）
+- **红着就等于没有这条断言**，而这三项恰好都在安全/可用边界上。逐条真因与处理：
+  - `test-preset-local-tools` #5：守卫名单按目标版本（DSH 0.3.x）写，本机是 0.1.1-rc.2，15 个 0.3 才有的工具名在安装目录里本来就不存在。加 `TOOL_NAMES_ADDED_AFTER_0_1` 豁免集 + 版本判定：**只有本机 DSH < 0.3 才豁免**，升级后自动恢复严格（版本读不到时从严）。既不逼人删真名字，也不给拼错名字长期开洞。
+  - `test-control-center` #20：迁移守卫检查「旧目录 WebUI 端口是否在监听」，用例假目录没写 `runtime.json` ⇒ 落默认 6099，本机真开着 SnowLuma 时被误判「运行中」而 409。用例改为写 `config/runtime.json` 的 `webuiPort`，端口由 `freePort()`（绑 0 再关）现取，产品逻辑不动。
+  - `test-mac-app` #2：`control-center.command` 被 Windows 编辑器改成 CRLF，而断言用 `else\n` 锚点 ⇒ 整条不匹配。读入后统一 `\r\n → \n` 再断言。
+- 另外修掉 `interface-platform` 的一条**偶发**红：「健康阶梯」断言 `nickname === '测试机器人'` 时只等了「账号出现在列表里」，而上游登录信息是随后一拍才回报的 —— 现在等到 nickname 就位再断言（连跑 3 次均 14/14）。
+- 结果：`npm run test:audit` 不再有「已知失败」项，`test-preset-local-tools` 7/7、`test-control-center` 21/21、`test-mac-app` 3 pass + 1 skip（macOS 专属）。
 ### 重构：SnowLuma 接收链路健康搬进 `src/upstream/snowluma-health.mjs`（P7 第四步，2026-11-05）
 - 健康状态机、快照文案与 `get_status` 兜底轮询从 `bridge.js` 搬出（−104 行 → +33 行接线），`bridge.js` 只喂心跳/状态事件、保留 `pollSnowlumaStatus()` / `startSnowlumaWatch()` 两个薄包装；日志、`fetch`、时钟、定时器、告警阈值全部注入，可用假时钟驱动。
 - 这一步真正收口的是**两个故障面不能混**：`good=false` 是 SnowLuma 自报 **[Hook] 收不到 QQ 数据**（消息进不来），长时间没有事件包只是**进程/WS 静默**（心跳由它自己无条件发，不代表 hook 死了）——排查方向完全不同，以前这两种情况共用一条 `degraded` 布尔与一段文案。

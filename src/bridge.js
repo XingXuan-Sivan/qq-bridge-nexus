@@ -135,6 +135,7 @@ import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed }
 // sessions.json 的读写与「损坏后不覆盖」不变量（P7 第三步续），见模块头。
 import { loadSessionState, saveSessionState } from './session/store.mjs';
 import { createSessionRegistry } from './session/registry.mjs';
+import { createSessionPolicy } from './session/policy.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
 
@@ -3572,16 +3573,26 @@ async function main() {
     return resolveLevelPlan(currentLevel, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
   }
 
+  // 指纹怎么拼、什么算「当前会话」在 session/policy.mjs（三条件：准入 + 映射 + 指纹）。
+  const sessionPolicyImpl = createSessionPolicy({
+    getMode: () => currentMode,
+    modePreset: (key, mode) => modePreset(key, mode, cfg),
+    getOwnerQQ: () => cfg.ownerQQ,
+    getLevel: () => currentLevel,
+    getClosedAgentPlan: () => closedAgentPlan(),
+  });
+
   function sessionPolicy(key) {
-    // 级别也进入策略指纹：L1 → L2 之类的变化会让旧会话退役、按新权限重建。
-    const plan = currentMode === 'closed-agent' ? closedAgentPlan() : null;
-    return JSON.stringify([currentMode, modePreset(key, currentMode, cfg) ?? '', currentMode === 'closed-agent' ? cfg.ownerQQ : null,
-      ...(currentMode === 'closed-agent' ? [currentLevel, plan?.ok ? plan.permissionPreset : ''] : [])]);
+    return sessionPolicyImpl.policyOf(key);
   }
 
   function isCurrentSession(key, sessionId) {
-    return isSessionAllowedInCurrentMode(key) && sessions.get(key) === sessionId
-      && sessions.policyOf(key) === sessionPolicy(key);
+    return sessionPolicyImpl.isCurrent({
+      key,
+      sessionId,
+      registry: sessions,
+      allowed: isSessionAllowedInCurrentMode,
+    });
   }
 
   /**

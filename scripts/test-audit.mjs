@@ -95,6 +95,8 @@ const tests = [
   'test-session-store.mjs',
   // 会话映射表（P7 第三步收尾）：映射与策略指纹成对维护、isCurrent 三条件、state 被替换后仍有效。
   'test-session-registry.mjs',
+  // 会话策略指纹（P7 第三步收尾）：级别进指纹（提权要退役旧会话）、非 closed-agent 不进指纹、isCurrent 三条件。
+  'test-session-policy.mjs',
   // 上游适配（P7 第四步）：SnowLuma「自报坏」与「静默」两个故障面、边沿告警、get_status 兜底轮询。
   'test-upstream-snowluma-health.mjs',
   // 上游编排的纯策略：DSH 探活 + 自动识别地址的节流重试、SnowLuma 连接参数自愈（两个 token / 端点跟随开关）。

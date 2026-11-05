@@ -72,7 +72,12 @@ async function ready(s, account = 'qq:10001') {
 test('健康阶梯：连上游 → 识别账号 → 心跳 good 后才算收发就绪；离线心跳回落', T15, async () => {
   const s = await setup();
   try {
-    const acc = await until(() => s.platform.accounts().find((a) => a.account === 'qq:10001'));
+    // 昵称来自上游的登录信息回报，与「账号出现在列表里」不是同一拍：
+    // 只等列表会让这条断言在机器慢时偶发失败（拿到的是还没有 nickname 的中间态）。
+    const acc = await until(() => {
+      const a = s.platform.accounts().find((x) => x.account === 'qq:10001');
+      return a && a.nickname ? a : null;
+    });
     assert.equal(acc.health.backendReachable, true);
     assert.equal(acc.health.loggedIn, true);
     assert.equal(acc.health.ioReady, false, '没有心跳之前不能说收发就绪');

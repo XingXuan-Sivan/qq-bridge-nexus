@@ -140,6 +140,7 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
+import { formatKey, platformOfConfig } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -1559,8 +1560,25 @@ const REJECT_WORDS = new Set(['拒绝', '不同意', '不允许', '驳回', 'no'
 let stateDirHardened = null;
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
+/**
+ * 会话 key 的唯一构造出口。
+ *
+ * 默认仍产出旧的 `group:<id>` / `private:<id>`（行为与迁移前逐字一致）；
+ * 配置 `platform.keyedFormat: true` 时产出 `<platform>:<group|private>:<id>`。
+ * 这样「改形态」和「迁移数据」可以分两步做，每一步都能单独跑门禁。
+ */
+function sessionKey(kind, id) {
+  const cfg = bridgeCfg;
+  if (cfg?.platform?.keyedFormat === true) return formatKey(platformOfConfig(cfg), kind, String(id));
+  return `${kind}:${String(id)}`;
+}
+
+// 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
+let bridgeCfg = null;
+
 async function main() {
   const cfg = loadConfig();
+  bridgeCfg = cfg;
   // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
   const ownerRelayStore = createOwnerRelayStore();
   const ownerRelayLimiter = createOwnerRelayLimiter();
@@ -3150,7 +3168,7 @@ async function main() {
     // 不能只靠 reconcileSessionPolicies —— 它在 DSH preset 清单未知时会跳过判定（见其注释），
     // 那样 /panic 之后旧的高权限回合可能还在跑，审批也还能被「通过」。
     if (fromMode === 'closed-agent' && (mode !== 'closed-agent' || rank(currentLevel) < rank(fromLevel))) {
-      const ownerKey = `private:${String(cfg.ownerQQ ?? '')}`;
+      const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
       for (const e of ext.approvals.removeKey(ownerKey)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
       if (sessions.get(ownerKey)) retireSession(ownerKey);
     }
@@ -3181,7 +3199,7 @@ async function main() {
   });
   // ── 定时任务（逻辑在 src/scheduler/，这里只接线：校验目标、怎么发） ──────────────────
   const scheduledNotes = createScheduledNoteStore();
-  const schedulerOwnerKey = () => `private:${String(cfg.ownerQQ ?? '')}`;
+  const schedulerOwnerKey = () => sessionKey('private', String(cfg.ownerQQ ?? ''));
   /** 定时任务的发送对象：管理员私聊、白名单好友、白名单群。 */
   function schedulerTargetError(key) {
     const m = /^(group|private):([1-9]\d{0,11})$/.exec(String(key));
@@ -3363,7 +3381,7 @@ async function main() {
   function scheduledSilenceFor(key) {
     const w = silence.current();
     if (!w) return null;
-    if (key === `private:${String(cfg.ownerQQ ?? '')}` && !silence.config().options.includeOwnerPrivate) return null;
+    if (key === sessionKey('private', String(cfg.ownerQQ ?? '')) && !silence.config().options.includeOwnerPrivate) return null;
     if ((silenceBypass.get(key) ?? 0) > Date.now()) return null;
     return w;
   }
@@ -3734,7 +3752,7 @@ async function main() {
 
   // ── 模式切换不失忆：休眠表 + owner 私聊交接（逻辑在 src/mode-handover.js） ────────────
   const parsePolicyMode = (policy) => { try { return String(JSON.parse(policy)[0] ?? ''); } catch { return ''; } };
-  const ownerKeyOf = () => `private:${String(cfg.ownerQQ ?? '')}`;
+  const ownerKeyOf = () => sessionKey('private', String(cfg.ownerQQ ?? ''));
   const hibernateEnabled = () => cfg.admin?.hibernateChatSessions !== false;
   const handoverEnabled = () => cfg.admin?.handover !== false && /^[1-9]\d{0,11}$/.test(String(cfg.ownerQQ ?? ''));
   const dormantMaxMs = () => Math.max(60_000, Number(cfg.admin?.dormantMaxMs) || DORMANT_MAX_MS);
@@ -4123,7 +4141,7 @@ async function main() {
   /** 补收的对象：当前模式允许的群和私聊（有会话或有二代状态的），管理员私聊总在里面。 */
   function backfillTargets() {
     const keys = new Set([...sessions.keys(), ...socialV2.conversations.keys()]);
-    if (cfg.ownerQQ) keys.add(`private:${String(cfg.ownerQQ)}`);
+    if (cfg.ownerQQ) keys.add(sessionKey('private', String(cfg.ownerQQ)));
     return [...keys].filter((k) => /^(group|private):\d+$/.test(k) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
   }
   async function runBackfill({ since, gapMs }) {
@@ -5462,7 +5480,7 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           const list = [];
           for (const [key, sessionId] of sessions.entries()) {
-            list.push({ key, sessionId, owner: key === `private:${String(cfg.ownerQQ ?? '')}` });
+            list.push({ key, sessionId, owner: key === sessionKey('private', String(cfg.ownerQQ ?? '')) });
           }
           sendJson({ sessions: list });
           return;
@@ -5665,8 +5683,8 @@ async function main() {
               // 可选的发送对象：管理员私聊 + 白名单好友 + 白名单群（群名尽量带上，方便勾选）
               const listOf = (kind) => (cfg.allow?.[kind] ?? cfg.allow?.[kind + 's'] ?? []).map(String);
               const targets = [{ key: schedulerOwnerKey(), label: '管理员私聊', kind: 'owner' }];
-              for (const id of listOf('private')) if (`private:${id}` !== schedulerOwnerKey()) targets.push({ key: `private:${id}`, label: `好友 ${id}`, kind: 'private' });
-              for (const id of listOf('group')) targets.push({ key: `group:${id}`, label: `群 ${id}`, kind: 'group' });
+              for (const id of listOf('private')) if (sessionKey('private', id) !== schedulerOwnerKey()) targets.push({ key: sessionKey('private', id), label: `好友 ${id}`, kind: 'private' });
+              for (const id of listOf('group')) targets.push({ key: sessionKey('group', id), label: `群 ${id}`, kind: 'group' });
               sendJson({ ok: true, ...snap, targets, taskTypes: plugins?.taskTypes() ?? [], writable: scheduler.isWritable(), mode: currentMode });
               return;
             }
@@ -8252,7 +8270,7 @@ async function main() {
           if (!content) { sendJson({ ok: false, error: 'content 不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(content)) { sendJson({ ok: false, error: '内容疑似含路径/凭据，拒绝记录' }, 400); return; }
           // 私聊会话只能给「对方本人」记私聊记忆；不能在 A 的私聊里给 B 写档案。
-          if (key.startsWith('private:') && key !== `private:${userId}`) { sendJson({ ok: false, error: '私聊里只能记录与对方本人有关的记忆' }, 403); return; }
+          if (key.startsWith('private:') && key !== sessionKey('private', userId)) { sendJson({ ok: false, error: '私聊里只能记录与对方本人有关的记忆' }, 403); return; }
           // 群会话：对象必须是本群见过的人（防止凭空给任意 QQ 号建档/投毒）。
           if (gm && !ext.people.getPerson(userId)?.groups?.[gm[1]]) { sendJson({ ok: false, error: '这个 QQ 号没有在本群出现过，不能记录' }, 403); return; }
           try {
@@ -8319,7 +8337,7 @@ async function main() {
             sendJson({ ok: true, capability, targetGroupId: target, userId, ...queryPresence(ext.people, target, userId) });
             return;
           }
-          sendJson({ ok: true, capability, targetGroupId: target, ...queryActivity(socialV2.conversations.get(`group:${target}`) ?? null) });
+          sendJson({ ok: true, capability, targetGroupId: target, ...queryActivity(socialV2.conversations.get(sessionKey('group', target)) ?? null) });
           return;
         }
         // ── v0.4.2 AI 工具：管理员私聊托付群会话（方案 C，默认关闭）──
@@ -8823,7 +8841,7 @@ async function main() {
           // 保留 isReply 变量只是为了下面的端点语义判断，别再让人以为这里有过分支逻辑。
           const replyToMessageId = body.replyToMessageId;
           const atUserId = body.atUserId ?? null;
-          const key = isPrivate ? `private:${targetId}` : `group:${targetId}`;
+          const key = isPrivate ? sessionKey('private', targetId) : sessionKey('group', targetId);
           // 安全边界：发送工具只允许在 closed-agent（管理员私聊）或 reserved2（二代 AI 带会话令牌）下使用；
           // chat/reserved 的自动转发已覆盖正常回复，MCP 发送工具不应成为 prompt injection 的越权出口。
           if (currentMode === 'chat' || currentMode === 'reserved') {
@@ -9941,7 +9959,7 @@ async function main() {
   // 审计范围：closed-agent 仅对 owner 私聊跳过；其余模式/会话一律审计
   function shouldAuditKey(key) {
     if (currentMode === 'closed-agent') {
-      return !(key === `private:${String(cfg.ownerQQ ?? '')}`);
+      return !(key === sessionKey('private', String(cfg.ownerQQ ?? '')));
     }
     return true;
   }
@@ -9961,7 +9979,7 @@ async function main() {
   // 静默模式：除 owner 私聊外，不发送任何在途 AI 回复。
   function shouldBlockSilentReply(key) {
     const roleState = readRoleState();
-    if (roleState.mode === 'silent' && key !== `private:${String(cfg.ownerQQ ?? '')}`) return true;
+    if (roleState.mode === 'silent' && key !== sessionKey('private', String(cfg.ownerQQ ?? ''))) return true;
     // 定时静默：时段内同样不往外发（管理员私聊默认不受影响；「照常执行」的定时任务临时放行）
     return !!scheduledSilenceFor(key);
   }
@@ -10953,7 +10971,7 @@ async function main() {
     const t = setInterval(() => {
       void (async () => {
         if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !api.commands?.execute) return;
-        const key = `private:${String(cfg.ownerQQ ?? '')}`;
+        const key = sessionKey('private', String(cfg.ownerQQ ?? ''));
         const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
         if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
@@ -13085,7 +13103,7 @@ async function main() {
     const gid = String(groupId);
     if (!allowed('group', Number(gid), cfg)) return `群 ${gid} 不在白名单 allow.groups 内，未发送。`;
     if (SENSITIVE_RE.test(textToSay)) return '内容疑似含路径/凭据，未发送。';
-    const key = `group:${gid}`;
+    const key = sessionKey('group', gid);
     await sendToQQ(key, textToSay);
     if (!lastSendSucceeded(key)) return `发送到群 ${gid} 失败（可能当前模式不允许该群，或 QQ 侧发送失败）。`;
     try {
@@ -13749,7 +13767,7 @@ async function main() {
     if (!ext.continuityEnabled()) return null;
     const ev = normalizeMemberNotice(event);
     if (!ev) return null;
-    const key = `group:${ev.groupId}`;
+    const key = sessionKey('group', ev.groupId);
     const r = await processMemberEvent(ev, {
       people: ext.people,
       continuity: ext.continuity(),

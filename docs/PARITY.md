@@ -118,3 +118,75 @@ N 的现状：会话相关能力散在「运行总览」「会话与审批」两
 - `docs/STATUS.md`：总清单（Done/Partial/Blocked）；本文件的每个维度落地后，回去改那一行。
 - `docs/PLUGIN_ROADMAP.md`：nexus 自身功能路线；本文件只讨论「与 enhanced 的对齐」，不重复路线图条目。
 - `docs/PLUGIN_KERNEL.md`：插件契约；若 D-1 选 B，新增的 `persona-bind/1` 要写进它的能力表。
+
+## 7. 2026-11-06 决策与补充调研
+
+### 7.1 决策落定（覆盖 §5 的「建议」列）
+
+| 编号 | 决定 | 说明 |
+|---|---|---|
+| D-1 | **B** | 新增可选 provider 能力 `persona-bind/1`，由插件实现「写绑定」；内核不写死 soulkit |
+| D-2 | 先调研再决定 | 调研结论见 7.2，倾向「保持不换会话」 |
+| D-3 | **B，且「是否切换会话」做成可配置项** | 会话列表与平台解耦、面板删改与 DSH 同步见 7.3 |
+| D-4 | 待评估后讨论 | 见 7.4 |
+
+### 7.2 D-2：换人格是否换会话 —— AstrBot 的做法
+
+- AstrBot **不靠换会话**解决长对话：同一 conversation 内超阈值就压缩上下文（`llm_compress_keep_recent_ratio: 0.15`、`max_context_length`），压缩摘要继续留在原会话；新建会话是用户显式 `/new`（`astrbot/core/conversation_mgr.py:92 new_conversation`）。
+- 证据：`astrbot/core/astr_main_agent.py:219,2015,2022`；`astrbot/core/agent_runner.py:22,115-129`。
+- 结论：成熟实现（AstrBot）用「压缩 + 手动新建」，不用「自动换会话」。
+- 建议：nexus 保持「不换会话」；enhanced 手改版的 rotate / slots 作为**可选增强**（默认关），等真机出现「旧上下文污染新人格」再开。
+
+### 7.3 D-3 拆出的三个新维度
+
+**D12 会话标识与平台解耦**
+
+- 现状：nexus 的 key 是 `group:<id>` / `private:<id>`（`src/session/mode-gate.mjs` 正则 `^(group|private):(\d+)$`），平台隐含为 QQ。
+- AstrBot：以 `unified_msg_origin`（UMO）为唯一键（形如 `平台:消息类型:会话id`），所有子系统按同一 key 索引 ⇒ 天然多平台。
+- 方案（待批准）：key 改为 `<platform>:<group|private>:<id>`；旧数据一次性迁移（`qq:group:…`）；`mode-gate` 正则同步；控制台会话列表按平台分组。
+- 代价：所有以 key 为索引的状态文件（`state/sessions.json`、`persona-bindings.json`、`mode.json`、`social-v2.json`、`scheduler.json` 的 target）都要迁移，一次做干净，之后不再改。
+
+**D13 面板删改 ↔ DSH 会话同步（边界表）**
+
+| 情形 | 行为 |
+|---|---|
+| 面板删除会话 | 先归档 DSH 会话（`api.workspace.archiveSession`），成功后再删本地映射 |
+| DSH 侧 404（已不存在） | 视为成功，继续删本地映射，不报错 |
+| 本地有映射、DSH 无会话 | 清理本地映射（孤儿） |
+| DSH 有会话、本地无映射 | 列表标「未接管」，提供「接管 / 归档」两个动作 |
+| 会话正在唤醒或挂着定时任务 | 先取消挂账与定时任务，再归档 |
+| 归档失败 | 保留映射 + 报错；**不回滚本地**（否则出现「面板说删了、DSH 还活着」） |
+| 面板改标题 | 只改本地标题表，DSH 侧不动（DSH 没有标题概念） |
+
+- AstrBot 对应做法：`ConversationManager.register_on_session_deleted` 事件钩子，别的模块订阅后清理。nexus 可加等价的 `session.deleted` 本地事件。
+
+**D14 自动轮转（按轮数 / 按天）**
+
+- 调研结论：AstrBot **没有**该功能（`auto.*conversation` 0 命中；`轮转` 2 命中都是日志文件轮转；`新的一天`/`次日` 0 命中）。
+- 判断：**不建议默认开启**。理由：① 陪伴产品的价值在连续性，自动换会话＝定期失忆；② 长会话成本已有压缩（v1.1.1 自动 compact）解决；③ 真需要时，「按天归档 + 次日新建（可回看）」比「按轮数」安全——按轮数会和压缩阈值打架。
+- 若要做：做成可配置的归档策略（保留旧会话可查），先做「手动归档」验证需求。
+
+### 7.4 D-4：本地卡与 soulkit 卡的主次（待评估）
+
+- 现状：`persona.provider = soulkit` 时 provider 优先，返回 `none` 才回落本地卡（`src/persona-resolve.mjs`）。
+- 问题：soulkit 的卡与本地 `roles/*.md` 是两套内容源，同名不同内容时用户无法判断「这张卡哪来的」。
+- 待评估：控制台来源页是否显示三级来源（会话覆盖 / provider / 本地卡）与指纹；是否需要「锁定本地卡」开关。
+
+### 7.5 dsh-bundles 手改审计（已完成）
+
+- 方法：逐文件比对 `git show upstream/main:plugins/<f>` 与 `git show HEAD:dsh-bundles/<f>`（12 个文件）。
+- 结果：**只有 1 处内容差异**——`qq-agent-presets/protected-paths.mjs` 顶部注释里的路径（`plugins/` → `dsh-bundles/`，本次改名带来的）；其余 11 个文件仅行尾 CRLF 不同。
+- 结论：`dsh-bundles/` 里没有手改的功能逻辑；手改都在 `qq-bridge-enhanced` 的 `src/`（已审计 4 个文件）。
+
+### 7.6 扩展便利性（新增计划项，未实施）
+
+缺口清单（每项都要有判据）：
+
+- 插件 UI 面板：`/plugin-ui/<id>/` 沙箱页 + 按插件隔离的鉴权（现为 0 行代码）。
+- 插件配置 schema 化：现在是手写 HTML 表单，想要「manifest 声明字段 → 自动渲染」。
+- 插件 i18n、依赖与版本约束、命令/工具的静态声明（manifest `commands`）。
+- 运行时注册 DSH 工具、MCP 清单：都卡在 DSH 侧能力（见 STATUS 第 2、3 行）。
+- 安装来源校验与版本（市场式安装）。
+
+归属：写进 `docs/PLUGIN_ROADMAP.md` §9.4，不混进本次迁移评估。
+

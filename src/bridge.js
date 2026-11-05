@@ -140,7 +140,7 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
-import { configureKeys, key as buildKey, platformOfConfig } from './session/key.mjs';
+import { configureKeys, key as buildKey, platformOfConfig, idOfKey, isGroupKey } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -5493,9 +5493,30 @@ async function main() {
         }
         // ── 会话查看 ──────────────────────────────────────────────────────────
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
+          // 控制台「会话」页的唯一数据源：把桥接知道的、和这个会话有关的东西一次给全，
+          // 页面不再为了凑一行去依次打 4 个接口。**这里只读**——改名走 /api/session/rename。
           const list = [];
           for (const [key, sessionId] of sessions.entries()) {
-            list.push({ key, sessionId, owner: key === sessionKey('private', String(cfg.ownerQQ ?? '')) });
+            const policy = typeof sessions.policyOf === 'function' ? sessions.policyOf(key) : null;
+            const resolved = personaResolver ? personaResolver.resolve(key) : null;
+            const conv = socialV2?.conversations?.get(key) ?? null;
+            list.push({
+              key,
+              sessionId,
+              owner: key === sessionKey('private', String(cfg.ownerQQ ?? '')),
+              kind: isGroupKey(key) ? 'group' : 'private',
+              id: idOfKey(key),
+              mode: policy?.mode ?? null,
+              preset: policy?.preset ?? null,
+              level: policy?.level ?? null,
+              // 人格卡的来源：card=全局卡、provider=外部来源（如 soulkit）、none=没挂卡。
+              // stale 表示 provider 这次没取到、用的是上一版缓存。
+              persona: resolved
+                ? { source: resolved.source ?? 'none', name: resolved.name ?? null, stale: Boolean(resolved.stale) }
+                : { source: 'none', name: null, stale: false },
+              unread: Array.isArray(conv?.unread) ? conv.unread.length : 0,
+              lastWakeAt: Number(conv?.wakeConfig?.lastWakeAt) || 0,
+            });
           }
           sendJson({ sessions: list });
           return;
@@ -8985,6 +9006,28 @@ async function main() {
           if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           const r = await compactConversation(key, '控制台手动');
           sendJson(r, r.ok ? 200 : 409);
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/session/rename') {
+          // 改的是 DSH 侧会话标题（侧栏显示的那个），桥接不另存一份，避免两处标题打架。
+          const body = await readBody();
+          const key = String(body.key ?? '');
+          const sessionId = sessions.get(key);
+          if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          // 标题允许中文、空白折叠；控制字符一律拍平（它会被拼进侧栏，不能让换行把布局搞乱）。
+          const title = String(body.title ?? '')
+            .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!title) { sendJson({ ok: false, error: '标题不能为空' }, 400); return; }
+          if (title.length > 60) { sendJson({ ok: false, error: '标题最多 60 个字符' }, 400); return; }
+          try {
+            await api.callUnary('session.rename', { sessionId, title });
+            log(`控制台：会话改名 ${key} → ${title}`);
+            sendJson({ ok: true, key, sessionId, title });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/session/reset') {

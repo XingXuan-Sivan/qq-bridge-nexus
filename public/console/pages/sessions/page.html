@@ -1,8 +1,45 @@
-<section id="section-session-map" data-page="sessions" class="card span-all">
-      <h2>会话映射</h2>
-      <div id="sessionList">加载中…</div>
+    <section class="card span-all">
+      <h2>会话与审批</h2>
+      <div class="meta">「会话」是桥接当前握着的全部会话：改名会写回 DSH 侧栏标题，清除上下文只会换一个 DSH 会话，本地记忆与人物库不动。「审批 / 提问」只读，批准或回答都要去对应 QQ 会话里回复。</div>
+      <div class="page-tabs">
+        <button class="page-tab active" data-sessions-tab="sessions">会话 <span class="meta" id="sessionsTabCount"></span></button>
+        <button class="page-tab" data-sessions-tab="pending">审批 / 提问 <span class="meta" id="pendingTabCount"></span></button>
+      </div>
+
+      <div class="page-panel" data-sessions-panel="sessions">
+        <div class="row u-mt-8">
+          <button id="sessionsRefresh">刷新</button>
+          <select class="u-w-auto" id="sessionsKind">
+            <option value="all">全部类型</option>
+            <option value="group">仅群聊</option>
+            <option value="private">仅私聊</option>
+          </select>
+          <input class="u-maxw-240" id="sessionsSearch" placeholder="搜索会话、模式或角色…">
+          <span class="meta" id="sessionsMeta">加载中…</span>
+        </div>
+        <div id="sessionList" class="tool-log-table">加载中…</div>
+      </div>
+
+      <div class="page-panel" data-sessions-panel="pending" hidden>
+        <div class="row u-mt-8">
+          <button id="pendingRefresh">刷新</button>
+          <span class="meta" id="pendingMeta">加载中…</span>
+        </div>
+        <div id="pendingList" class="tool-log-table">加载中…</div>
+      </div>
     </section>
-<section id="section-pending" data-page="sessions" class="card span-all">
-      <h2>挂起审批 / 提问</h2>
-      <div id="pendingList">加载中…</div>
-    </section>
+
+    <div class="modal-overlay" id="sessionRenameOverlay">
+      <div class="modal u-maxw-720" role="dialog" aria-modal="true" aria-labelledby="sessionRenameTitle" tabindex="-1">
+        <h3 id="sessionRenameTitle">重命名会话</h3>
+        <div class="meta" id="sessionRenameWho"></div>
+        <label class="field u-mt-8"><span>标题（最多 60 字，侧栏直接显示）</span>
+          <input id="sessionRenameInput" maxlength="60" placeholder="例如：群聊·喵喵屋｜星苒">
+        </label>
+        <div class="row u-mt-8">
+          <button id="sessionRenameSave">保存</button>
+          <button id="sessionRenameCancel">取消</button>
+          <span class="meta" id="sessionRenameMsg"></span>
+        </div>
+      </div>
+    </div>

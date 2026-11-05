@@ -119,6 +119,40 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   } catch (error) { failures++; console.error('FAIL console reset cleanup:', error.message); }
   finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }
 }
+{ // 控制台改名：标题在桥接侧归一化（折叠空白、去控制字符、限长），只把结果交给 DSH 的 session.rename，
+  // 桥接自己**不存**第二份标题——存了就会和 DSH 侧栏打架。
+  const h = await bridgeHarness();
+  const server = h.startConsoleServer();
+  try {
+    if (!server.listening) await new Promise((resolve) => server.once('listening', resolve));
+    const sessionId = await h.ensureSession('private:123');
+    const postRename = (payload) => new Promise((resolve, reject) => {
+      const request = http.request({ host: '127.0.0.1', port: server.address().port, path: '/api/session/rename', method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-console-token': 'fixture-console-token' } }, (response) => {
+        let text = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { text += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, body: text ? JSON.parse(text) : null }));
+      });
+      request.on('error', reject);
+      request.setTimeout(3000, () => request.destroy(new Error('rename request hung')));
+      request.end(JSON.stringify(payload));
+    });
+    assert.equal((await postRename({ key: 'private:123', title: '   ' })).status, 400, '空标题必须 400');
+    assert.equal((await postRename({ key: 'private:123', title: 'x'.repeat(61) })).status, 400, '超过 60 字必须 400');
+    assert.equal((await postRename({ key: 'private:404', title: 'ok' })).status, 404, '不存在的会话必须 404');
+
+    h.calls.cancelled.length = 0;
+    const ok = await postRename({ key: 'private:123', title: '  群聊·喵喵屋\n｜星苒  ' });
+    assert.equal(ok.status, 200);
+    const call = h.calls.cancelled.find((x) => x.method === 'session.rename');
+    assert.ok(call, 'rename must call DSH session.rename');
+    assert.equal(call.params.sessionId, sessionId);
+    assert.equal(call.params.title, '群聊·喵喵屋 ｜星苒', '换行与多余空白要折叠成单空格');
+    assert.equal(ok.body.title, '群聊·喵喵屋 ｜星苒');
+    console.log('PASS console rename normalizes the title and only asks DSH to rename');
+  } finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }
+}
 {
   const image = Buffer.from('89504e470d0a1a0a00000000', 'hex');
   let body;

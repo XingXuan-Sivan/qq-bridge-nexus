@@ -1,1 +1,6 @@
-/* 会话与审批页：会话映射 / 挂起审批与提问两张卡片目前完全复用公共样式；本页独有样式写在这里，不要回流 css/app.css。 */
+/* 会话与审批页：两张表都复用 .tool-log-table + 全局表格样式，这里只留本页独有的窄屏处理。
+   标签页（.page-tabs/.page-tab）在 css/components.css 里，和别的页面共用，不要在这里重写。 */
+@media (max-width: 760px) {
+  /* 会话行里「DSH 会话」是最长的一列，窄屏优先让操作列可点，别把按钮挤出屏幕。 */
+  #sessionList table { table-layout:auto }
+}

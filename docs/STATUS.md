@@ -45,6 +45,7 @@
 | 命令注册表与「扩展」四页、插件注册命令 | `Done` | `node scripts/test-command-registry.mjs` |
 | 具名注入块（插件块 + 内置 `core-stickers` / `core-digest`） | `Done` | `node scripts/test-prompt-blocks.mjs`、`node scripts/test-core-prompt-blocks.mjs` |
 | 技能清单 provider 化（路线图 §9.2） | `Done` | `node scripts/test-skills-index.mjs`、`node scripts/test-core-prompt-blocks.mjs`（`core-skills` 用例）；配置见 `config.example.json` 的 `skills` 段 |
+| 控制台「会话与审批」页（会话清单 + 审批标签页，PARITY D3/D7 第一步） | `Done` | 打开控制台「会话与审批」：会话页签有 模式/人格/未读/最近唤醒/改名/清除上下文；`POST /api/session/rename` 见 `test-audit-bridge.mjs` 的改名用例；`GET /api/sessions` 的一次性字段见 `src/bridge.js` |
 | 出站装饰 `onReplyDecorate`、入站过滤 `onInbound` | `Done` | `test-plugin-kernel` 的装饰/过滤用例 |
 | 定时任务类型插件化 | `Done` | `node scripts/test-scheduler.mjs` |
 | 配置面板 P5（注入块、运行设置、插件持久化） | `Done` | `test-plugin-kernel` 的设置接口用例 + 手动核对控制台 |

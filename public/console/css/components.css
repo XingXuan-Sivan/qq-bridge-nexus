@@ -404,13 +404,13 @@ tr:last-child td {
   white-space:pre-wrap;
   overflow-wrap:anywhere
 }
-.slang-tabs {
+.slang-tabs,.page-tabs {
   display:flex;
   gap:5px;
   border-bottom:1px solid var(--card-border);
   margin:22px 0 18px
 }
-.slang-tab {
+.slang-tab,.page-tab {
   border:0;
   border-radius:0;
   background:transparent;
@@ -418,12 +418,15 @@ tr:last-child td {
   color:var(--muted);
   font-size:13px
 }
-.slang-tab.active {
+.slang-tab.active,.page-tab.active {
   color:var(--accent);
   border-bottom:2px solid var(--accent);
   background:transparent
 }
 .slang-panel {
+  display:none
+}
+.page-panel[hidden] {
   display:none
 }
 .dsh-notice {

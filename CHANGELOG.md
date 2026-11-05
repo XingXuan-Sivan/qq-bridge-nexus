@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 控制台：会话清单与审批标签页（PARITY D3 / D7 第一步）
+- 「会话与审批」页不再用两张卡片平铺：改成 **会话 / 审批 / 提问** 两个标签页，共用同一张卡片。标签页样式抽成通用 `.page-tabs` / `.page-tab`（与黑话页的 `.slang-tabs` 同一套规则），页面不再各写一份。
+- 会话清单从「key + DSH 会话 ID + 类型」扩成完整一行：**模式**（含封闭 Agent 的权限级别）、**人格来源**（provider / 全局卡 / 未挂卡，`stale` 标「缓存」）、**未读数**、**最近唤醒时间**、DSH 会话 ID，以及「改名 / 清除上下文」两个动作。
+- 新增 `POST /api/session/rename`：标题在桥接侧归一化（折叠空白、去控制字符、限 60 字），只调 DSH 的 `session.rename`，**桥接不另存一份标题**（存了就会和 DSH 侧栏打架）。空标题 / 超长 400，会话不存在 404，DSH 失败 502。
+- `GET /api/sessions` 一次给全：`kind` / `id` / `mode` / `preset` / `level` / `persona{source,name,stale}` / `unread` / `lastWakeAt`。页面不再为了凑一行依次打四个接口。
+- 测试：`test-audit-bridge` 新增改名用例（400/404/标题归一化/只调一次 `session.rename`）；`test:audit` 90/90。
+
 ### 文档：真机联调记录与 STATUS 更新（2026-11-05）
 - `docs/STATUS.md` 新增 §5「真机联调记录」：记下已验证项（SnowLuma 连接、白名单、chat 回复、reserved2 唤醒、三个注入块各 2 次调用、soulkit 人格卡）与未验证项。未验证的回复发送不是 nexus 缺陷，而是 DSH profile 的 MCP server 仍指向 `qq-bridge-enhanced` 的脚本（读 enhanced 的 `config.json`，端口 3100，`ECONNREFUSED`）；修复动作已写明（`setup-dsh` 重指 + 重启 DSH）。
 - 同步把 §1 第 1 行从「从未跑过」改为按证据描述差什么，依赖列补「MCP 指向 nexus 并重启 DSH」。

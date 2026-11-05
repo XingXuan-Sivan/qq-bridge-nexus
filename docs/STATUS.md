@@ -123,3 +123,12 @@ npm run test:console-ui
 - 回滚：`platform.keyedFormat` 改回 `false` 并重启，再从 `state.bak-*` 手工还原需要的文件（没有自动工具，这是策略的一部分）。
 - 夹具教训：`scripts/test-qq-model-view.mjs` 的临时目录只拷被 spawn 的 3 个文件，`mcp-snowluma-safe.js` 新增依赖 `src/session/key.mjs` 后子进程 import 失败、报 `MCP error -32000: Connection closed`；已补拷依赖。**给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具。**
 
+### 6.2 偏差：解析侧未跟着迁移，开关已回退为 `false`（2026-11-06）
+
+- **现象**：`platform.keyedFormat: true` 时，私聊消息能进 `bot.onPrivateMessage`，但既不进未读、也不报错、也不打 `忽略未授权会话`，日志完全静默；`/api/sessions` 永远空。
+- **根因**：只迁移了 key 的**构造**，没迁移 key 的**解析**。`src/session/mode-gate.mjs:44` 的 `isSessionAllowedInCurrentMode()` 仍用 `/^(group|private):(\d+)$/`，形如 `qq:private:2897715886` 的 key 直接判 false；`src/bridge.js:13347` 的 `if (!isSessionAllowedInCurrentMode(key)) return;` 是静默返回 ⇒ 消息在准入闸门被丢弃。
+- **同类未改点**（都是「只认旧形态」的正则）：`src/bridge.js` 的 `3220`、`4160`、`5943`、`6619`、`6749`、`6875`、`6987`、`7373`、`7444`、`7541`、`8071`、`8178`、`8800`、`8823`、`8905`、`8985`、`10558`；`src/prompt-blocks.js:31`；`src/role-per-key.js:23`；`src/role-refresh.js:51/90`；`src/voice-core.js:255`；`src/social/memory-policy.js:50/87`；`src/social/people.js:80`；`src/mode-handover.js:57`；夹具 `scripts/console-ui-fixture.mjs:385/731`。
+- **处置**：`config.json` 的 `platform.keyedFormat` 已改回 `false` 并重启，消息链路恢复（`06:51` 起「消息已入未读」正常）。**开关在解析侧全部改完之前不要打开。**
+- **待办**：把上面这些正则统一换成 `src/session/key.mjs` 的 `parseKey()`/`isGroupKey()`/`isPrivateKey()`（新形态与旧形态都认），再开开关复测；这属于功能性改动，需先批准。
+
+

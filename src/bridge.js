@@ -763,8 +763,22 @@ function normalizePromptBlocks(raw) {
   return out;
 }
 
-function normalizeSkills(raw) {
-  const out = { enabled: true, maxEntries: 12, maxChars: 1200, maxDescriptionChars: 40, dirs: [] };
+/**
+ * 平台段：`platform.id`（默认 qq）+ `platform.keyedFormat`（默认 false，产旧 key 形态）。
+ *
+ * `keyedFormat` 默认关是有意的：打开它意味着磁盘上所有以 key 为索引的状态
+ * （sessions.json / prompt-blocks / role-seen / social-v2 / persona-cache…）都要同步迁移，
+ * 否则旧数据一条都查不到。所以它是一个「迁移开关」，不是「功能开关」。
+ */
+function normalizePlatform(raw) {
+  const out = { id: 'qq', keyedFormat: false };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  if (typeof raw.id === 'string' && /^[a-z][a-z0-9-]{0,15}$/.test(raw.id.trim().toLowerCase())) out.id = raw.id.trim().toLowerCase();
+  if (typeof raw.keyedFormat === 'boolean') out.keyedFormat = raw.keyedFormat;
+  return out;
+}
+
+function normalizeSkills(raw) {  const out = { enabled: true, maxEntries: 12, maxChars: 1200, maxDescriptionChars: 40, dirs: [] };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
   for (const [key, min, max] of [['maxEntries', 1, 40], ['maxChars', 100, 8000], ['maxDescriptionChars', 8, 120]]) {
@@ -884,6 +898,7 @@ function loadConfig() {
     promptBlocks: normalizePromptBlocks(file.promptBlocks),
     // 技能清单（§9.2）：唤醒时注入固定行数的可用技能索引，全文由 AI 需要时自己读。
     skills: normalizeSkills(file.skills),
+  platform: normalizePlatform(file.platform),
     socialV2: {
       enabled: true,
       autoReplyCheckMs: 30000,

@@ -112,8 +112,11 @@ npm run test:console-ui
 - 偏差/未做：
   - **没有执行迁移**。因为 `platform.keyedFormat` 仍默认关；先迁移数据会让磁盘 key（新形态）与代码产出（旧形态）对不上，等于人为制造一次全量「查不到会话」。
   - 其余 key 构造点：**已迁 6 个模块**（`social/people.js` 7 处、`social/owner-relay.js`、`social/group-rules.js`、`social/memory-policy.js`、`mcp-snowluma-safe.js`、`bridge-extensions.js`、`session/mode-gate.mjs`，全部改为 `import { key } from '…/session/key.mjs'` 或 `sameSession`/`isGroupKey` 等解析助手）。形态由 `key.mjs` 的进程级设置决定，默认仍是旧形态，所以行为未变。
+  - **已执行数据迁移**（2026-11-06 04:23）：先把 `config.json` 的 `platform.keyedFormat` 置为 `true` 并重启 nexus（配置备份 `config.json.bak-pre-keyed-*`），再 `node scripts/migrate-session-keys.mjs --apply` 写入 8 处，备份目录 `state.bak-2026-11-05T20-23-59-947Z`。迁移后重启，日志出现 `停用旧映射 qq:private:2897715886 -> session-c71a72c9…`，`/api/sessions` 返回空、`/api/status` 正常（`mode: reserved2`、`botAccount: 星苒`），说明新 key 已被正确读取。
+  - **回滚路径**（未验证，但已具备）：`config.json` 的 `keyedFormat` 改回 `false` → `node scripts/migrate-session-keys.mjs --revert` → 重启。回滚后旧代码路径与旧数据形态重新对齐。
   - **仍未迁**：`src/core/session-router.mjs` 8 处。它**没有被 `bridge.js` 引用**（`grep session-router src/bridge.js` 为 0），是一套独立的「会话状态机 + 规范 key」实现（自带 `session-router.test.mjs`），与 DSH 会话映射是两套。要不要迁、是否将来替换用，需要先定性，不做猜测式改动。
   - 迁移脚本只处理 `state/` 下的一级 `*.json`，`state/admin/*.json`、`state/social/*.json` 等子目录未纳入（当前无键，但加功能后会漏，需要在脚本里补 `**/*.json`）。
+  - 备份目录 `state.bak-*` 已加进 `.gitignore`（7.7 MB，含运行时日志，不该入库）。
   - 夹具连带修复：`scripts/test-qq-model-view.mjs` 的临时 fixture 只拷被启动的 3 个文件，`mcp-snowluma-safe.js` 新依赖 `src/session/key.mjs` ⇒ 子进程 import 失败、测试报 `MCP error -32000: Connection closed`。已在该夹具里补拷 `src/session/key.mjs`（教训：给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具）。
 - 依赖：`platform.keyedFormat` 开关 + 构造点全部迁移完成后，才允许 `--apply`。
 

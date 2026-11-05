@@ -103,6 +103,8 @@ const tests = [
   'test-upstream-dsh-probe.mjs',
   'test-upstream-conn-update.mjs',
   'test-core-prompt-blocks.mjs',
+  // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
+  'test-skills-index.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',
   // preset 源与 bundle patch 不漂移（v0.3.0 起多了 qq-agent-readonly，一并钉住）。

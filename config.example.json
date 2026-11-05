@@ -14,7 +14,15 @@
   },
   "promptBlocks": {
     "core-stickers": { "enabled": true },
-    "core-digest": { "enabled": true }
+    "core-digest": { "enabled": true },
+    "core-skills": { "enabled": true }
+  },
+  "skills": {
+    "enabled": true,
+    "maxEntries": 12,
+    "maxChars": 1200,
+    "maxDescriptionChars": 40,
+    "dirs": []
   },
   "snowluma": {
     "wsUrl": "ws://127.0.0.1:3001",

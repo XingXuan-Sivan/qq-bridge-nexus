@@ -4,6 +4,9 @@
 // 这里走 bridgeHarness 真跑 buildWakePromptV2，避免只测注册表而漏掉桥接接线。
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 const KEY = 'group:1047096216';
@@ -55,4 +58,22 @@ test('core-stickers：配置可单独关闭该块，关掉后不再出现表情�
   assert.ok(!disabled.includes(marker), '关掉后不应再出现表情策略段');
   assert.match(disabled, /【进行中的话题】/, '关掉表情块不应影响记忆段');
   assert.ok(disabled.length < enabled.length, '关掉一块后 prompt 应变短');
+});
+
+test('core-skills：技能只以「名字 + 一句说明」进提示，关掉后整段消失', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'qq-bridge-skills-'));
+  await mkdir(path.join(dir, 'demo-skill'), { recursive: true });
+  await writeFile(path.join(dir, 'demo-skill', 'SKILL.md'), '---\nname: demo-skill\ndescription: 一段演示用技能说明\n---\n正文很长，不应该整段进提示词。\n', 'utf8');
+  try {
+    const enabled = await capture({ skills: { dirs: [dir] } });
+    assert.match(enabled, /可用技能（需要时用文件工具读对应 SKILL\.md 看全文/, '应有一行固定标题');
+    assert.match(enabled, /- demo-skill：一段演示用技能说明/, '技能应以单行形式出现');
+    assert.doesNotMatch(enabled, /正文很长，不应该整段进提示词/, 'SKILL.md 正文不应被整段注入');
+
+    const disabled = await capture({ skills: { dirs: [dir] }, promptBlocks: { 'core-skills': { enabled: false } } });
+    assert.doesNotMatch(disabled, /可用技能（需要时用文件工具读/, '关掉后不应再出现技能段');
+    assert.ok(disabled.length < enabled.length, '关掉技能块后 prompt 应变短');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

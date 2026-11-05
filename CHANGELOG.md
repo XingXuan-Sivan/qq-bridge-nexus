@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 文档：一页可复核的未完项清单（2026-11-05）
+- 新增 `docs/STATUS.md`：把散在路线图、提交信息与口头汇报里的「没做完 / 只做了一半 / 卡在别人身上」收敛成一张表，每项写清 **是什么 / 完成判据 / 依赖 / 优先级**，状态只允许 `Done`、`Partial`（括号里写差什么）、`Blocked`（括号里写等什么）。
+- 与路线图分工：路线图写「打算怎么做、为什么」，状态清单写「现在到哪、还差什么、怎么复核」；`Partial` 不许写成 `Done`，阶段收尾先对表。同时列出明确不做的项（指向路线图 §10），避免把「决定不做」混进「还没做」。
+- 文档索引 `docs/README.md` 增加入口。
+
 ### 样式：控制中心与控制台共用一套设计令牌（2026-11-05）
 - `public/console/css/tokens.css` 补 13 个通用令牌：`--font-ui`/`--font-mono`、`--on-solid`、`--danger-solid`、`--radius-sm`，以及终端面板的 `--term-bg`/`--term-fg`/`--term-fg-dim`/`--term-tag`/`--term-err`/`--term-warn`/`--term-system`/`--term-cmd`。按语义命名，不标「某端专用」——控制台以后做日志/终端视图可直接用。
 - 控制中心 `app.css` 删掉自己的 `:root` 与 `prefers-color-scheme`，15 个本地变量全部映射到共享令牌（`--panel→--surface`、`--panel2→--surface-subtle`、`--line→--border`、`--bad→--err`/`--danger-solid`、`--chip→--surface-chip`、`--warn→--warn-fg`/`--warn-border`、`--term→--term-bg`、`--radius→--radius-sm`、`--mono→--font-mono`），并去掉旧色值字面量。

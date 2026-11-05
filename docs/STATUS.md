@@ -18,7 +18,7 @@
 
 | # | 项 | 状态 | 是什么 | 完成判据 | 依赖 | 优先级 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 真机端到端联调 | `Partial`（差：从未在真实 DSH + SnowLuma 上跑过一轮；现阶段全部证据来自夹具，只证明接线对，不证明协议假设成立） | 用真实账号跑一遍：唤醒提示里能看到 `core-stickers` / `core-digest` 两段、人格 provider 取卡与回落、`onReplyDecorate` 与 `inbound:filter` 在真实事件上生效、插件任务类型按时触发、`operator` 只读令牌边界 | 留下一份跑通记录：每步的命令/响应或截图，落在 `docs/` 或提交信息里；未通过的项转入本表 | 真实 QQ 账号、SnowLuma（需扫码）、DSH 运行中 | 高 |
+| 1 | 真机端到端联调 | `Partial`（差：回复发送没验到——DSH profile 的 MCP server 仍指向 `qq-bridge-enhanced` 的脚本，读它的 `config.json` 走 3100，会话里 `mcp__snowluma__*` 发送必然 `fetch failed`；`operator` 只读令牌边界、插件任务类型按时触发、`onReplyDecorate` 真实生效也未验） | 用真实账号跑一遍：唤醒提示里能看到 `core-stickers` / `core-digest` 两段、人格 provider 取卡与回落、`onReplyDecorate` 与 `inbound:filter` 在真实事件上生效、插件任务类型按时触发、`operator` 只读令牌边界 | 留下一份跑通记录：每步的命令/响应或截图，落在 `docs/` 或提交信息里；未通过的项转入本表 | 真实 QQ 账号、SnowLuma（需扫码）、DSH 运行中；回复链路还需把 DSH profile 的 MCP 指向 nexus 并重启 DSH（用户已自定义过 enhanced 的 MCP/插件，需其确认） | 高 |
 | 2 | MCP 清单（路线图 §9.1） | `Blocked`（等：验证 DSH 是否支持运行时增删 MCP，见路线图 §11 第 1 条） | 三个写死的 stdio server 变成 `mcp.json` 清单 + 控制台「MCP 服务」页，插件可贡献 server 定义 | 加一个 server 后不重启 DSH 能出现在工具表；否则只能降级为「写配置 + 提示重启」，需要用户先接受这个体验 | DSH 侧能力验证（读 MCP 配置加载路径 + 一次「加了不重启」实验） | 中 |
 | 3 | Agent 工具注册（路线图 §8.5） | `Blocked`（等：DSH 支持运行时更新工具表） | `qq_*` 工具现在写死在 preset 补丁里，改一次要重启 DSH；想做成插件可注册 | 注册后模型当轮就能看到新工具；做不到就不做（避免「注册了但模型看不到」的假功能） | 同 2，DSH 侧能力 | 中 |
 | 4 | 插件控制台面板（路线图 §8.4） | `Partial`（差：`/plugin-ui/<id>/` 静态路由、按插件隔离的鉴权、页面容器；目前 0 行代码） | 插件可以在控制台里拥有一小块自己的界面，只能拿自己的数据 | 未启用插件的面板返回 404；面板读不到其它插件与会话数据；CSP 不被放宽 | 无 | 低 |
@@ -72,3 +72,26 @@ npm run test:console-ui
 ```
 
 数字变了就是变了——基线不接受「偶发」解释，除非能在干净 HEAD 上复现同样的失败。
+
+---
+
+## 5. 真机联调记录（2026-11-05 深夜，单号单客户端切换窗口）
+
+环境：nexus 在 3111 接管 SnowLuma（`ws://127.0.0.1:3001`，HTTP token 走 `snowluma.homeDir` 下的 `config/onebot_2890363827.json`），DSH 桌面版随机端口自动发现到 `57254`；`qq-bridge-enhanced` 的 watchdog（`DSHBot\start.ps1 -Watch`）与其 bridge 已停，验证后已按 A 方案回滚（`socialV2.enabled` 改回 `false`、nexus 重启）。
+
+已验证（有日志/接口证据）：
+
+| 项 | 证据 |
+| --- | --- |
+| SnowLuma 连接与账号 | `SnowLuma 1.14.19-node 已连接：ws://127.0.0.1:3001`；`/api/status` → `botAccount={userId:2890363827,nickname:星苒}`、`snowluma.connected=true` |
+| 白名单与越权拒绝 | 私聊 `private:2897715886` 正常处理；群 `group:903621673` 打出 `忽略未授权会话` |
+| 会话建立与回复（chat 路径） | `23:04:34 会话 private:2897715886 已挂载 preset qq-chat` → `新会话 … session-d3a9b6aa…` → `agent 回复 (private:2897715886) 9 字` |
+| 唤醒路径 | `23:47:44 唤醒 private:2897715886（private）` → 新会话 `session-c71a72c9-d80c-4941-959d-49c7f7cb4875`（reserved2 / qq-chat-v2）；`/api/socialV2/state` → `wakeCount=1`、`lastWakeReason=private` |
+| 注入块真的组装了 | `/api/plugins` → `core-stickers` / `core-skills` / `core-digest` 三个块 `calls` 均为 **2** |
+| 人格 provider 取卡 | `/api/persona/sources` → `provider:soulkit`、`rows:[{key:'private:2897715886',source:'provider',name:'魅魔2',stale:false}]` |
+| 未授权群不抢答 | 同段日志 `忽略未授权会话 group:903621673`（非白名单） |
+
+未验证（阻塞原因写清，不写成「待办」）：
+
+- **回复发送**：唤醒会话里 `mcp__snowluma__*` 调用 `qq_send_message` / `qq_mark_read` 报 `fetch failed / ECONNREFUSED 127.0.0.1:3100`。根因是 `C:\Users\starl\.dsh\profiles\desktop\cordis.patch.yml` 的 `# === qq-bridge MCP BEGIN/END ===` 区块仍指向 `qq-bridge-enhanced\src\mcp-*.js`，而这些脚本以自身仓库为 `ROOT` 读 enhanced 的 `config.json`（`consolePort:3100`）与 enhanced 的 `state/console-token`。修复动作明确：跑 `node scripts/setup-dsh.mjs` 把该区块重指 nexus，再重启 DSH（会中断当前会话）。用户已手工改过 enhanced 的 MCP 与 DSH 插件，故这一步交由其决定。
+- **`onReplyDecorate` 真实生效、插件任务类型按时触发、`operator` 只读令牌边界**：本轮窗口没覆盖，靠上面那次修复后再补。

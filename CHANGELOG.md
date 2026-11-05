@@ -5,6 +5,10 @@
 
 ## 未发布
 
+### 文档：真机联调记录与 STATUS 更新（2026-11-05）
+- `docs/STATUS.md` 新增 §5「真机联调记录」：记下已验证项（SnowLuma 连接、白名单、chat 回复、reserved2 唤醒、三个注入块各 2 次调用、soulkit 人格卡）与未验证项。未验证的回复发送不是 nexus 缺陷，而是 DSH profile 的 MCP server 仍指向 `qq-bridge-enhanced` 的脚本（读 enhanced 的 `config.json`，端口 3100，`ECONNREFUSED`）；修复动作已写明（`setup-dsh` 重指 + 重启 DSH）。
+- 同步把 §1 第 1 行从「从未跑过」改为按证据描述差什么，依赖列补「MCP 指向 nexus 并重启 DSH」。
+
 ### 新增：技能清单注入（路线图 §9.2）
 - `src/skills/index.mjs`：只读扫描技能根目录（`SKILL.md` 前 600 字，认 `name` / `description`），不执行脚本、不跟随符号链接，目录缺失或损坏只跳过。
 - 唤醒提示新增内置块 `core-skills`（priority 150）：标题 1 行 + 最多 `skills.maxEntries` 行 + 溢出提示 1 行，每条只给「名字：一句说明」——**行数由配置固定，不随技能数量膨胀**，全文由 AI 需要时自己读 `SKILL.md`。

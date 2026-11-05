@@ -4256,6 +4256,19 @@ async function main() {
         res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...SECURITY_HEADERS });
         res.end(JSON.stringify(obj, null, 2));
       };
+      // 页面令牌的浏览器凭据（方案 B）：登录成功后种 HttpOnly cookie，刷新导航直接带上，
+      // 服务端 200 出页，不再「401 门页 → 再跳 ?token=」。API 不认它，仍只认 x-console-token。
+      const CONSOLE_COOKIE = 'qq_console_token';
+      const readConsoleCookie = () => {
+        const raw = String(req.headers.cookie ?? '');
+        for (const part of raw.split(';')) {
+          const eq = part.indexOf('=');
+          if (eq < 0) continue;
+          if (part.slice(0, eq).trim() !== CONSOLE_COOKIE) continue;
+          try { return decodeURIComponent(part.slice(eq + 1).trim()); } catch { return ''; }
+        }
+        return '';
+      };
       const readBody = () => new Promise((resolve, reject) => {
         const MAX_BODY_BYTES = 1_000_000;
         const chunks = [];
@@ -4375,17 +4388,27 @@ async function main() {
       // 控制台静态资源（样式/脚本/图标）不含数据，浏览器加载页面时也不会带令牌头：
       // 放在鉴权之前，否则拆分后的 /console/js/app.js 会被 401 挡掉、页面只剩空壳。
       // 只放行资源子目录；页面本身（/ 与 /console/）仍走下面的令牌校验。
-      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts|pages)\//.test(url.pathname)) {
+      // gate/ 是 401 门页自己的样式/脚本：页面被拒时浏览器仍要能取到它们，否则又会白屏。
+      // 注意门页是整页文档，不能放进 pages/——那里会被 console-source 拼进控制台源码。
+      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts|pages|gate)\//.test(url.pathname)) {
         serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
         return;
       }
-      // 控制台鉴权：所有请求需带 x-console-token 或 ?token=
+      // 控制台鉴权：API 只认 x-console-token；页面 GET 还可以用 ?token= 或页面 cookie（见下）。
       // 定长比较：`!==` 会在第一个不同的字符处短路，理论上可被本机进程用响应时延逐字节试探。
       // 令牌是 192 bit 随机值且只监听回环，所以这是纵深防御而非在野漏洞。
-      // v0.3.0：`?token=` 只接受用于打开控制台页面（GET /）。API 一律要求 x-console-token 请求头 ——
-      // 否则一个只能发 GET 的工具（例如 L1 运维 Agent 的 web_fetch）拿到令牌后就能读管理接口。
-      const queryToken = req.method === 'GET' && url.pathname === '/' ? url.searchParams.get('token') : null;
-      const suppliedToken = String(queryToken ?? req.headers['x-console-token'] ?? '');
+      // v0.3.0：`?token=` 只接受用于打开控制台页面（GET /、/console/、/console）。API 一律要求 x-console-token
+      // 请求头 —— 否则一个只能发 GET 的工具（例如 L1 运维 Agent 的 web_fetch）拿到令牌后就能读管理接口。
+      const isConsolePage = req.method === 'GET' && (url.pathname === '/' || url.pathname === '/console/' || url.pathname === '/console');
+      // 控制台里 API 401 会跳 /?reauth=1：即使页面 cookie 仍有效，也强制回门页重新登录，
+      // 否则「cookie 有效但页面拿不到令牌」会被 200 直接送回控制台，形成 401 循环。
+      const forceGate = isConsolePage && url.searchParams.get('reauth') === '1';
+      const queryToken = isConsolePage ? url.searchParams.get('token') : null;
+      // 页面导航带不了自定义头：登录成功后服务端种 HttpOnly cookie（见下），刷新由浏览器自动带上，
+      // 直接 200，不再「401 → 门页 → 再跳 ?token=」闪一下（方案 B）。cookie 只参与页面 GET 鉴权，
+      // API 仍只认 x-console-token；取值优先级 ?token= > cookie > 头。
+      const cookieToken = isConsolePage ? readConsoleCookie() : '';
+      const suppliedToken = String(queryToken || cookieToken || req.headers['x-console-token'] || '');
       const tokenMatches = (() => {
         if (!consoleToken) return false; // 上面已拒绝空令牌；真出现也只许失败关闭，绝不 return true
         const a = Buffer.from(suppliedToken, 'utf8');
@@ -4393,16 +4416,31 @@ async function main() {
         if (a.length !== b.length) return false;
         return crypto.timingSafeEqual(a, b);
       })();
-      if (consoleToken && !tokenMatches) {
-        if (req.method === 'GET' && url.pathname === '/') {
+      if (consoleToken && (!tokenMatches || forceGate)) {
+        if (isConsolePage) {
+          // 门页是 public/console/gate/index.html：整页文档，与 pages/ 分开放（pages/ 会被
+          // console-source 拼进控制台源码，整页文档混进去语义就错了）。
+          // CSP 已去掉 unsafe-inline，脚本/样式必须外链，否则无令牌时只剩白屏。
+          // URL 仍是 /，hash 原样保留；gate.js 提交时把 ?token= 拼回去，api.js 落盘后再 replaceState 还原 hash。
+          let gate = '';
+          try {
+            gate = fs.readFileSync(path.join(ROOT, 'public', 'console', 'gate', 'index.html'), 'utf8');
+          } catch {
+            res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS });
+            res.end('控制台登录页缺失：public/console/gate/index.html');
+            return;
+          }
           res.writeHead(401, { 'content-type': 'text/html; charset=utf-8', ...SECURITY_HEADERS });
-          // 免重复输入：本源 localStorage 里有上次的令牌就先自动试一次（sessionStorage 记一笔，防止旧令牌失效时来回跳）；
-          // 试过仍失败、或带 ?manual=1（控制中心的「手动输入令牌」）时才弹窗。令牌只在本机浏览器里，不经服务端回显。
-          res.end('<!doctype html><meta charset="utf-8"><title>需要令牌</title><script>(function(){var q=new URLSearchParams(location.search);var s=null;try{s=localStorage.getItem(\'consoleToken\')}catch(e){}if(s&&!q.has(\'manual\')&&!sessionStorage.getItem(\'consoleTokenTried\')){sessionStorage.setItem(\'consoleTokenTried\',\'1\');location.replace(\'/?token=\'+encodeURIComponent(s));return}sessionStorage.removeItem(\'consoleTokenTried\');var t=prompt(\'请输入控制台访问令牌\');if(t)location.href=\'/?token=\'+encodeURIComponent(t.trim())})();</script>');
+          res.end(gate);
         } else {
           sendJson({ ok: false, error: '未授权：请提供控制台访问令牌' }, 401);
         }
         return;
+      }
+      if (tokenMatches && isConsolePage) {
+        // 页面鉴权通过：种/续期页面 cookie（30 天滑动）。HttpOnly 让前端读不到，SameSite=Strict
+        // 让别的站点发起的导航也不带它；API 不认 cookie，所以 CSRF 拿不到管理能力。
+        res.setHeader('Set-Cookie', `${CONSOLE_COOKIE}=${encodeURIComponent(consoleToken)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`);
       }
       // 智能体调用隔离（集中关卡）。
       //

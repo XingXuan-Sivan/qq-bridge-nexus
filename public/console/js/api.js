@@ -1,39 +1,38 @@
-// 控制台 API 客户端：令牌的保存/重试与 JSON 请求都在这里，页面代码只管「调哪个接口」。
+// 控制台 API 客户端：令牌的保存与 JSON 请求都在这里，页面代码只管「调哪个接口」。
 //
-// 令牌有三个来源，优先级从高到低：URL 的 ?token=（首次打开控制台时由服务端 401 页引导）、
-// localStorage（同一浏览器后续访问）、以及 401 时的手动输入。令牌只存在本机浏览器，不回显。
+// 令牌有两个来源：URL 的 ?token=（首次打开控制台时由 401 门页引导）与 localStorage
+// （同一浏览器后续访问）。401 不再弹原生 prompt——那和门页是两套登录 UI；统一跳回门页
+// 重新登录，并带上当前 hash 与 reauth=1（服务端据此强制回门页、忽略仍然有效的 cookie）。
 
 /** 从 ?token= 落盘的引导逻辑；入口脚本在启动时调一次。 */
 export function bootstrapConsoleToken() {
   const qs = new URLSearchParams(location.search);
   const token = qs.get('token');
-  try { sessionStorage.removeItem('consoleTokenTried'); } catch { /* 隐私模式下不可用，忽略 */ }
   if (token) {
     localStorage.setItem('consoleToken', token);
     history.replaceState({}, '', location.pathname + location.hash);
   }
 }
 
+let reauthing = false;
+
 /**
  * 统一的 API 请求。
- * 401 时最多重试两次：先弹窗要令牌，要不到就清掉本地令牌并抛错。
+ * 401 说明页面手里的令牌已经不能用了（换过令牌、或 localStorage 被清过）：
+ * 交给门页重新登录，登录后按 hash 回到原来那一页。不在控制台里再放一个登录弹窗。
  */
-export async function api(path, method, body, _retried = 0) {
+export async function api(path, method, body) {
   const headers = body ? { 'content-type': 'application/json' } : {};
   const token = localStorage.getItem('consoleToken');
   if (token) headers['x-console-token'] = token;
   const res = await fetch(path, { method: method || 'GET', headers, body: body ? JSON.stringify(body) : undefined });
   if (res.status === 401) {
-    if (_retried >= 2) {
-      localStorage.removeItem('consoleToken');
-      throw new Error('未授权');
+    // reauth=1 让服务端忽略仍然有效的页面 cookie 强制返回门页——否则「cookie 有效但
+    // 页面拿不到令牌」会变成 401 → 控制台 → 401 的循环。
+    if (!reauthing) {
+      reauthing = true;
+      location.replace('/?reauth=1' + (location.hash || ''));
     }
-    const t = prompt('请输入控制台访问令牌：');
-    if (t) {
-      localStorage.setItem('consoleToken', t.trim());
-      return api(path, method, body, _retried + 1);
-    }
-    localStorage.removeItem('consoleToken');
     throw new Error('未授权');
   }
   return res.json();

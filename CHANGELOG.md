@@ -5,6 +5,22 @@
 
 ## 未发布
 
+### 样式：控制中心与控制台共用一套设计令牌（2026-11-05）
+- `public/console/css/tokens.css` 补 13 个通用令牌：`--font-ui`/`--font-mono`、`--on-solid`、`--danger-solid`、`--radius-sm`，以及终端面板的 `--term-bg`/`--term-fg`/`--term-fg-dim`/`--term-tag`/`--term-err`/`--term-warn`/`--term-system`/`--term-cmd`。按语义命名，不标「某端专用」——控制台以后做日志/终端视图可直接用。
+- 控制中心 `app.css` 删掉自己的 `:root` 与 `prefers-color-scheme`，15 个本地变量全部映射到共享令牌（`--panel→--surface`、`--panel2→--surface-subtle`、`--line→--border`、`--bad→--err`/`--danger-solid`、`--chip→--surface-chip`、`--warn→--warn-fg`/`--warn-border`、`--term→--term-bg`、`--radius→--radius-sm`、`--mono→--font-mono`），并去掉旧色值字面量。
+- launcher 新增固定文件路由 `/shared/tokens.css` 与 `/shared/theme-boot.js`（只这两个文件，不走目录遍历）；控制中心页面先加载它们再加载 `app.css`——两个页面现在真的读同一份文件，主题都走 `data-theme`。
+- 控制台同步：`base.css` 字体改用 `--font-ui`、主按钮白字改用 `--on-solid`；`utilities.css` 与 `components.css` 的等宽栈统一用 `--font-mono`（原来 `var(--mono)` 落空，另有 5 处硬编码 Consolas）。
+- 测试：`test-console-static` 断言控制中心无 `:root`/媒体查询、先加载共享令牌、引用的 28 个令牌都存在；`test-control-center` 新增 `/shared` 两个文件的 200/MIME/字节一致断言。
+
+### 修复：控制台 401 门页外置 + 页面 cookie，无令牌不再白屏、刷新不再闪门页（2026-11-05）
+- 根因：`43378be` 去掉 CSP 的 `unsafe-inline` 时，`bridge.js` 里那张 401 页仍是内联 `<script>`，被浏览器直接拦掉 ⇒ `body` 为空、只剩标签「需要令牌」。
+- 门页单独放 `public/console/gate/{index.html,gate.css,gate.js}`：整页文档不能并入 `pages/`（那里会被 `console-source` 拼进控制台源码）；401 时读 `index.html` 原文返回（缺文件 500 兜底），脚本/样式全部外链，`bridge.js` 不再内联任何登录页 HTML/JS。
+- 刷新不再闪门页：页面鉴权通过后服务端种 `qq_console_token`（`Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000`，30 天滑动），之后刷新导航直接 200；cookie 只参与页面 GET，API 仍只认 `x-console-token`，取值优先级 `?token=` > cookie > 头。
+- 门页脚本放在 `<head>` 先于样式表执行：带本地令牌时在首绘前直接 `/?token=…#page`；被服务端拒绝（URL 带 `?token=` 仍 401）就清掉本机令牌、抹掉地址栏里的失效令牌并提示「令牌无效或已更换」；`?manual=1` 跳过自动尝试（控制中心「手动输入」入口）。
+- 会话内不再弹原生 `prompt`（那是和门页重复的第二套登录 UI）：控制台 API 401 统一 `location.replace('/?reauth=1' + hash)`，门页清掉旧令牌并提示「登录状态已失效」；`reauth=1` 时服务端即使页面 cookie 仍有效也强制回门页，避免「cookie 有效但页面拿不到令牌」变成 401 → 控制台 → 401 循环。
+- hash 回跳：门页把 `location.hash` 拼进 `/?token=…#page`，`api.js` 落盘后 `replaceState` 还原；`?token=` 现在对 `/console` 与 `/console/` 同样生效；`api.js` 里已无用的 `consoleTokenTried` 清掉。
+- 测试：`test-control-center` #17 改为断言门页在 `gate/`、是完整文档、外链脚本、hash/manual/清令牌，并断言 `bridge.js` 不再内联、读新路径、种 cookie；`test-console-static` 把门页纳入内联 style/script 扫描与 `node --check`。三套用例：console-static 全过、control-center 21/21、http-boundary 7 pass + 1 skip。
+
 ### 重构：会话策略指纹收进 `src/session/policy.mjs`（P7 第三步收尾，2026-11-05）
 - `sessionPolicy()` 与 `isCurrentSession()` 从 `bridge.js` 搬出，`bridge.js` 只留两行薄包装。指纹由「模式 + 模式预设 + （closed-agent 才有的）管理员/级别/权限预设」组成；**级别只在 closed-agent 进指纹**是有意为之——漏了它，「管理通道提权成功但旧会话继续按低权限跑」；多算易变量则「每次检查都判过期、会话无限重建、反复读卡烧 token」。
 - `isCurrent()` 把「仍被允许 + 映射没换 + 指纹没变」三条件写在一处，缺一条就会复活幽灵会话。

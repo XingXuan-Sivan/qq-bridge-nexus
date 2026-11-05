@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="/control-center/favicon.svg" type="image/svg+xml">
 <title>qq-bridge 控制中心</title>
+<script src="/shared/theme-boot.js"></script>
+<link rel="stylesheet" href="/shared/tokens.css">
 <link rel="stylesheet" href="/control-center/app.css">
 </head>
 <body>
@@ -76,10 +78,10 @@
     </nav>
 
     <!-- 概览 -->
-    <div id="pview-overview" role="tabpanel" aria-labelledby="ptab-overview" style="display:flex;flex-direction:column;gap:14px">
+    <div id="pview-overview" role="tabpanel" aria-labelledby="ptab-overview" class="pview-stack">
     <section aria-label="接入后端">
       <div class="backends" id="backendCards"></div>
-      <p class="note" style="margin:8px 2px 0">点「开启」：确保接口平台在运行 → 启动该后端程序（能启动时）→ 在接口平台里建好并连接它的实例。各后端互相独立，可以同时开启；「关闭」只断开该后端，并停止由控制中心启动的那个程序。</p>
+      <p class="note backend-note">点「开启」：确保接口平台在运行 → 启动该后端程序（能启动时）→ 在接口平台里建好并连接它的实例。各后端互相独立，可以同时开启；「关闭」只断开该后端，并停止由控制中心启动的那个程序。</p>
     </section>
     <div class="card">
       <div class="card-head">
@@ -111,7 +113,7 @@
       <section class="card" aria-label="实例列表">
         <div class="card-head"><h3>接入实例</h3><span class="grow"></span><button id="instAddBtn">添加</button></div>
         <ul class="list" id="instList"></ul>
-        <div class="note" style="padding:8px 14px" id="instProvidersNote"></div>
+        <div class="note note-pad" id="instProvidersNote"></div>
       </section>
       <section class="card" aria-label="实例详情">
         <div class="panel-sub" id="instAddPanel">
@@ -124,7 +126,7 @@
             <label for="addToken">令牌</label><input type="password" id="addToken" placeholder="WS accessToken（填了目录可留空）" autocomplete="off">
             <label for="addHome">后端目录</label><input type="text" id="addHome" placeholder="可选：SnowLuma 目录或 NapCat 配置目录，按目录自动发现账号">
           </div>
-          <div class="row" style="justify-content:flex-end"><button class="ghost" id="addCancel">取消</button><button class="primary" id="addGo">创建</button></div>
+          <div class="row end"><button class="ghost" id="addCancel">取消</button><button class="primary" id="addGo">创建</button></div>
         </div>
         <div id="instEmpty" class="empty-state"><p>选择左侧的实例查看详情。</p></div>
         <div id="instDetail" hidden>
@@ -137,20 +139,20 @@
             <button class="primary" id="idConnect">连接</button>
             <button class="danger" id="idDisconnect">断开</button>
           </div>
-          <p class="note" id="idLocalNote" style="padding:10px 14px;margin:0" hidden>这是本机程序（不是平台里的实例）：这里只能启停和设置程序本身。接口平台没运行、或平台里还没有对应实例时显示；启动接口平台并在「概览」里开启后端后，会列出平台里的实例。</p>
+          <p class="note note-block" id="idLocalNote" hidden>这是本机程序（不是平台里的实例）：这里只能启停和设置程序本身。接口平台没运行、或平台里还没有对应实例时显示；启动接口平台并在「概览」里开启后端后，会列出平台里的实例。</p>
           <div class="form platform-only">
             <label for="idWs">WS 地址</label><input type="text" id="idWs">
             <label for="idHome">后端目录</label><input type="text" id="idHome" placeholder="SnowLuma 目录 / NapCat 配置目录：填了就按目录发现账号（推荐），留空则用 WS 地址 + 令牌">
             <label for="idToken">令牌</label><input type="password" id="idToken" autocomplete="off" placeholder="留空 = 不修改">
           </div>
-          <div class="row platform-only" style="padding:0 14px 12px;justify-content:flex-end"><span class="note" id="idSaveNote"></span><button id="idSave">保存配置</button></div>
-          <div class="platform-only" style="padding:0 14px 12px">
+          <div class="row end platform-only section-pad"><span class="note" id="idSaveNote"></span><button id="idSave">保存配置</button></div>
+          <div class="platform-only section-pad">
             <table aria-label="上游链路"><thead><tr><th>链路</th><th>账号</th><th>状态</th><th>原因</th><th>最近收包</th></tr></thead><tbody id="idLinks"></tbody></table>
           </div>
 
           <!-- SnowLuma 程序：只有用户亲手点击才启停（不经接口平台、不经桥接/AI） -->
           <div id="snowSection">
-            <div class="card-head" style="border-top:1px solid var(--line)">
+            <div class="card-head divided">
               <span class="dot" id="snowDot"></span>
               <h3 id="snowTitle">SnowLuma 程序（由你亲手启停）</h3>
               <span class="badge" id="snowState">未选择目录</span>
@@ -212,12 +214,12 @@
               <button class="ghost" id="snowDownload">下载日志</button>
               <button class="ghost" id="snowClear">清屏</button>
             </div>
-            <div class="term" id="snowTerm" role="log" aria-live="polite" style="max-height:360px"></div>
+            <div class="term h-360" id="snowTerm" role="log" aria-live="polite"></div>
           </div>
 
           <!-- NapCat 程序：只有用户亲手点击才启停（不经接口平台、不经桥接/AI） -->
           <div id="napSection" hidden>
-            <div class="card-head" style="border-top:1px solid var(--line)">
+            <div class="card-head divided">
               <span class="dot" id="napDot"></span>
               <h3>NapCat 程序（由你亲手启停）</h3>
               <span class="badge" id="napState">—</span>
@@ -225,12 +227,12 @@
               <button class="primary" id="napStart">启动 NapCat</button>
               <button class="danger" id="napStop">停止 NapCat</button>
             </div>
-            <p class="note" id="napNote" style="padding:8px 14px;margin:0"></p>
+            <p class="note note-pad" id="napNote"></p>
             <div class="qr-panel" id="napQrPanel" hidden>
               <img id="napQrImg" alt="NapCat 登录二维码" width="220" height="220">
               <div>
-                <h3 style="margin:0 0 6px">用手机 QQ 扫码登录机器人账号</h3>
-                <p class="note" style="margin:0">二维码约 2 分钟过期，NapCat 会自动换新的，这里也会跟着刷新。登录成功后这块会自动消失。<br>
+                <h3 class="qr-title">用手机 QQ 扫码登录机器人账号</h3>
+                <p class="note m-0">二维码约 2 分钟过期，NapCat 会自动换新的，这里也会跟着刷新。登录成功后这块会自动消失。<br>
                 <span id="napQrTime"></span></p>
               </div>
             </div>
@@ -254,22 +256,22 @@
               <h3>NapCat 设置</h3>
               <p class="note">留空 = 用默认位置。改启动方式在下次启动 NapCat 时生效；改 NapCat 目录会同步给接口平台的 NapCat 实例。</p>
               <div class="row" id="napQQAppRow">
-                <label for="napQQAppInput" style="min-width:110px">QQ.app</label>
+                <label for="napQQAppInput" class="label-narrow">QQ.app</label>
                 <input type="text" id="napQQAppInput" placeholder="/Applications/QQ.app" aria-label="QQ.app 位置">
                 <button id="napQQAppBrowse">浏览…</button>
               </div>
               <div class="row" id="napCmdRow">
-                <label for="napCmdInput" style="min-width:110px">启动文件</label>
+                <label for="napCmdInput" class="label-narrow">启动文件</label>
                 <input type="text" id="napCmdInput" placeholder="NapCat.Shell 里的 .bat / .exe" aria-label="NapCat 启动文件">
                 <button id="napCmdBrowse">浏览…</button>
               </div>
               <div class="row">
-                <label for="napHomeInput" style="min-width:110px">NapCat 目录</label>
+                <label for="napHomeInput" class="label-narrow">NapCat 目录</label>
                 <input type="text" id="napHomeInput" aria-label="NapCat 目录（含 config/onebot11_<QQ号>.json）">
                 <button id="napHomeBrowse">浏览…</button>
               </div>
               <div class="row">
-                <label for="napQuickInput" style="min-width:110px">快速登录 QQ 号</label>
+                <label for="napQuickInput" class="label-narrow">快速登录 QQ 号</label>
                 <input type="text" id="napQuickInput" inputmode="numeric" placeholder="可选：机器人 QQ 号，启动时加 -q（NapCat 已设自动登录时不用填）" aria-label="快速登录 QQ 号">
               </div>
               <div class="row">
@@ -287,7 +289,7 @@
               <button class="ghost" id="napDownload">下载日志</button>
               <button class="ghost" id="napClear">清屏</button>
             </div>
-            <div class="term" id="napTerm" role="log" aria-live="polite" style="max-height:420px"></div>
+            <div class="term h-420" id="napTerm" role="log" aria-live="polite"></div>
           </div>
         </div>
       </section>
@@ -296,7 +298,7 @@
     <!-- 账号 -->
     <div id="pview-accounts" role="tabpanel" aria-labelledby="ptab-accounts" class="card" hidden>
       <div class="card-head"><h2>账号</h2><span class="grow"></span><span class="note">健康阶梯：核心运行 → 后端可连接 → 账号已登录 → 收发就绪 → 桥接已启用</span></div>
-      <div style="padding:0 14px 12px;overflow:auto">
+      <div class="section-pad scroll">
         <table aria-label="账号"><thead><tr><th>账号</th><th>昵称</th><th>实例</th><th>健康</th><th>原因</th><th>桥接</th><th>收 / 发</th><th>最近收发</th></tr></thead><tbody id="acctRows"></tbody></table>
         <p class="note" id="acctEmpty"></p>
       </div>
@@ -319,8 +321,8 @@
     <!-- 设置 -->
     <div id="pview-settings" role="tabpanel" aria-labelledby="ptab-settings" class="card" hidden>
       <div class="card-head"><h2>桥接接入</h2><span class="badge" id="linkState">—</span><span class="grow"></span><button class="primary" id="linkOn">接入桥接</button><button id="linkOff">恢复直连</button></div>
-      <p class="note" style="padding:10px 14px;margin:0">「接入桥接」把桥接 <code>config.json</code> 的 SnowLuma 端点改为接口平台的 OneBot 兼容入口（原值备份在 <code>state\platform-link-backup.json</code>），重启桥接后生效。「恢复直连」按备份还原。两者都不会启停任何进程。</p>
-      <div class="card-head" style="border-top:1px solid var(--line)"><h2>平台信息</h2></div>
+      <p class="note note-block">「接入桥接」把桥接 <code>config.json</code> 的 SnowLuma 端点改为接口平台的 OneBot 兼容入口（原值备份在 <code>state\platform-link-backup.json</code>），重启桥接后生效。「恢复直连」按备份还原。两者都不会启停任何进程。</p>
+      <div class="card-head divided"><h2>平台信息</h2></div>
       <dl class="info">
         <dt>版本</dt><dd id="sVer">—</dd>
         <dt>平台目录</dt><dd id="sData">—</dd>
@@ -331,7 +333,7 @@
         <dt>运行环境</dt><dd id="sEnv">—</dd>
         <dt>支持范围</dt><dd id="sSupport">—</dd>
       </dl>
-      <p class="note" style="padding:10px 14px;margin:0">兼容入口目标账号、恢复策略等平台配置在接口平台自己的 <code>interface-platform\state\platform.json</code>；控制中心不读写它。平台端口与目录是控制中心的设置（<code>state\control-center.json</code> 的 <code>platformPort</code> / <code>platformDir</code>），改后重启接口平台。令牌不会显示在页面上。</p>
+      <p class="note note-block">兼容入口目标账号、恢复策略等平台配置在接口平台自己的 <code>interface-platform\state\platform.json</code>；控制中心不读写它。平台端口与目录是控制中心的设置（<code>state\control-center.json</code> 的 <code>platformPort</code> / <code>platformDir</code>），改后重启接口平台。令牌不会显示在页面上。</p>
     </div>
   </section>
 </main>

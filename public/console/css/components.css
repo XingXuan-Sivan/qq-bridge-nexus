@@ -170,7 +170,7 @@ input[type=number] {
   font-variant-numeric:tabular-nums
 }
 code {
-  font-family:Consolas,"SFMono-Regular",monospace;
+  font-family:var(--font-mono);
   font-size:.94em;
   color:var(--code-fg)
 }
@@ -179,7 +179,7 @@ pre {
   border:1px solid var(--border-subtle);
   border-radius:10px;
   padding:16px;
-  font-family:Consolas,"Microsoft YaHei",monospace;
+  font-family:var(--font-mono);
   font-size:12px;
   line-height:1.8;
   max-height:300px;
@@ -302,7 +302,7 @@ summary {
   margin-top:3px
 }
 .v2-tool-item b {
-  font-family:Consolas,monospace;
+  font-family:var(--font-mono);
   font-size:12px;
   font-weight:500;
   color:var(--code-fg-strong)
@@ -1129,7 +1129,7 @@ tr:last-child td {
 }
 .role-editor {
   min-height:320px;
-  font-family:Consolas,"Microsoft YaHei",monospace;
+  font-family:var(--font-mono);
   font-size:12.5px
 }
 .code-area {
@@ -1139,7 +1139,7 @@ tr:last-child td {
   overflow:auto;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
-  font-family:Consolas,"Microsoft YaHei",monospace;
+  font-family:var(--font-mono);
   font-size:12px;
   line-height:1.75;
   background:var(--surface-sunken);

@@ -58,6 +58,7 @@ console.log('## JS 语法');
     }
   };
   collect(jsDir);
+  collect(path.join(ROOT, 'public', 'console', 'gate')); // 门页 gate.js（整页文档的普通脚本）
   let failing = '';
   for (const file of moduleFiles) {
     const temp = path.join(os.tmpdir(), `console-check-${path.basename(file, '.js')}-${process.pid}.mjs`);
@@ -162,6 +163,27 @@ ok(!fs.existsSync(path.join(cssDir, 'app.css')), 'app.css 已删除（拆成 bas
 ok(!/\[data-theme="dark"\] \{/.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css'])
   && !/^:root \{/m.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css']),
 '三个分层文件都不持有设计令牌（令牌只在 tokens.css）');
+// 控制中心与控制台共用同一套令牌：它不再自带 :root，也不按系统媒体查询切主题。
+const ccDir = path.join(ROOT, 'public', 'control-center');
+const ccCss = fs.readFileSync(path.join(ccDir, 'app.css'), 'utf8');
+const ccIndex = fs.readFileSync(path.join(ccDir, 'index.html'), 'utf8');
+ok(!/:root\s*\{/.test(ccCss), '控制中心不再自带 :root 色板（令牌只在 tokens.css）');
+ok(!/prefers-color-scheme/.test(ccCss), '控制中心主题走 data-theme，不再用系统媒体查询');
+ok(ccIndex.indexOf('/shared/tokens.css') >= 0 && ccIndex.indexOf('/shared/tokens.css') < ccIndex.indexOf('/control-center/app.css'),
+  '控制中心先加载共享 tokens，再加载自己的 app.css');
+ok(ccIndex.includes('/shared/theme-boot.js'), '控制中心复用控制台的主题引导脚本');
+// launcher 的 CSP 也已收紧：页面不能再靠内联 style / 内联事件处理器。
+ok(!/\sstyle\s*=/.test(ccIndex) && !/<style[\s>]/i.test(ccIndex), '控制中心页面没有内联样式（CSP 已无 unsafe-inline）');
+ok(!/\son[a-z]+\s*=/i.test(ccIndex), '控制中心页面没有内联事件处理器');
+const ccJs = fs.readFileSync(path.join(ccDir, 'app.js'), 'utf8');
+ok(!/\sstyle\s*=/.test(ccJs), '控制中心脚本不再拼接内联 style');
+const launcherSrc = fs.readFileSync(path.join(ROOT, 'src', 'launcher', 'control-center.mjs'), 'utf8');
+ok(!/unsafe-inline/.test(launcherSrc), '控制中心 CSP 不再放 unsafe-inline');
+ok(!/#0f1216|#161b22|#1c232c|#2a333e|#e6edf3|#8b98a5|#4c9aff|#3fb950|#d29922|#f85149|#212a35/i.test(ccCss),
+  '控制中心不再残留旧的硬编码色值');
+const ccUsed = [...new Set([...ccCss.matchAll(/var\(--([a-z0-9-]+)/g)].map((m) => m[1]))];
+const ccMissing = ccUsed.filter((name) => !tokens.includes(`--${name}:`));
+ok(ccMissing.length === 0, `控制中心引用的 ${ccUsed.length} 个令牌都在 tokens.css 里${ccMissing.length ? `（缺 ${ccMissing.join(', ')}）` : ''}`);
 ok(/^\* \{\n\s+box-sizing:border-box/m.test(layerText['base.css']) && /^html \{/m.test(layerText['base.css']),
   'base.css 承载盒模型重置与 html/body 基线');
 ok(/\.sidebar \{/.test(layerText['layout.css']) && /\.workspace \{/.test(layerText['layout.css']), 'layout.css 承载三容器外壳');
@@ -176,7 +198,7 @@ const utilities = fs.existsSync(utilitiesPath) ? fs.readFileSync(utilitiesPath, 
 ok(/\.u-flex-1 \{/.test(utilities) && /\.u-w-80 \{/.test(utilities) && /\.u-mt-8 \{/.test(utilities),
   'utilities.css 提供 flex / 宽度 / 外边距三类工具类');
 // CSP 已去掉 'unsafe-inline'：HTML 与页面模块里都不允许再出现 style 属性（动态尺寸走 CSSOM）。
-const inlineFiles = [path.join(ROOT, 'public', 'console', 'index.html')];
+const inlineFiles = [path.join(ROOT, 'public', 'console', 'index.html'), path.join(ROOT, 'public', 'console', 'gate', 'index.html')];
 for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
   const dir = path.join(ROOT, 'public', 'console', 'pages', id);
   for (const name of ['page.html', 'page.js']) {
@@ -186,6 +208,15 @@ for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) 
 }
 const inlineTotal = inlineFiles.reduce((n, file) => n + (fs.readFileSync(file, 'utf8').match(/\sstyle="/g)?.length ?? 0), 0);
 ok(inlineTotal === 0, `HTML / 页面模块里没有内联 style（剩 ${inlineTotal} 处）`);
+// 401 门页与 index 同一套 CSP：脚本/样式必须外链，否则无令牌时只剩白屏。
+// 门页是整页文档（不是 console 片段），所以单独放 public/console/gate/，不并入 pages/。
+const gateDir = path.join(ROOT, 'public', 'console', 'gate');
+const gateHtml = fs.readFileSync(path.join(gateDir, 'index.html'), 'utf8');
+ok(/^<!doctype html>/i.test(gateHtml.trim()), '401 门页是完整文档（不是控制台片段）');
+ok(!/<script(?![^>]*\bsrc=)[^>]*>/.test(gateHtml), '401 门页没有内联脚本');
+ok(/href="\/console\/css\/tokens\.css"/.test(gateHtml) && /src="\/console\/gate\/gate\.js"/.test(gateHtml)
+  && /href="\/console\/gate\/gate\.css"/.test(gateHtml),
+  '401 门页复用 tokens.css，私有样式与脚本同目录外链');
 const inlineWidthInHtml = (() => {
   const files = [path.join(ROOT, 'public', 'console', 'index.html')];
   for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {

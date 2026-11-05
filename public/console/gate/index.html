@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>需要令牌 · QQ 桥接控制台</title>
+<link rel="icon" href="/console/img/favicon.svg" type="image/svg+xml">
+<!-- 门页是整页文档（不是控制台片段）：脚本放在 head 且先于样式表，带本地令牌的刷新能在
+     首次绘制前直接跳走（方案 A）；其余页面逻辑在 DOMContentLoaded 后接上表单。 -->
+<script src="/console/gate/gate.js"></script>
+<script src="/console/js/theme-boot.js"></script>
+<link rel="stylesheet" href="/console/css/tokens.css">
+<link rel="stylesheet" href="/console/css/base.css">
+<link rel="stylesheet" href="/console/css/layout.css">
+<link rel="stylesheet" href="/console/css/components.css">
+<link rel="stylesheet" href="/console/css/utilities.css">
+<link rel="stylesheet" href="/console/gate/gate.css">
+</head>
+<body class="gate-body">
+  <div class="bg-decor" aria-hidden="true"></div>
+  <main class="gate-main">
+    <section class="card gate-card" aria-labelledby="gateTitle">
+      <div class="brand gate-brand"><span class="brand-mark" aria-hidden="true">q<span>↗</span></span><span>QQ Bridge<small>DeepSeek Harness 控制台</small></span></div>
+      <h1 id="gateTitle">需要访问令牌</h1>
+      <p class="gate-lead">令牌保存在项目目录的 <code>state/console-token</code>；从控制中心打开会自动带入。</p>
+      <form id="gateForm" method="get" action="/">
+        <label for="gateToken">控制台令牌</label>
+        <input id="gateToken" name="token" type="password" autocomplete="current-password" spellcheck="false" required>
+        <p id="gateError" class="err gate-error" role="alert" hidden></p>
+        <button type="submit" class="primary gate-submit">进入控制台</button>
+      </form>
+      <p class="meta gate-foot">只接受本机回环访问；令牌只留在这台机器的浏览器里。</p>
+    </section>
+  </main>
+  <noscript><div class="connection-alert gate-noscript">控制台需要启用 JavaScript 才能校验令牌。</div></noscript>
+</body>
+</html>

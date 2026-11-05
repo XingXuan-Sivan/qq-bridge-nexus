@@ -79,6 +79,6 @@
 .u-row-8-wrap-mt-8 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px }
 .u-row-8-wrap-mt-10 { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px }
 .u-flex-basis-200 { flex:1 1 200px }
-.u-flex-basis-220-mono { flex:1 1 220px; font-family:var(--mono, monospace) }
+.u-flex-basis-220-mono { flex:1 1 220px; font-family:var(--font-mono) }
 .u-flex-basis-max-70 { flex:0 1 70px }
 .u-flex-basis-max-90 { flex:0 1 90px }

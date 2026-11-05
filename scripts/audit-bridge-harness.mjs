@@ -47,6 +47,7 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
+import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
 import { createSnowlumaHealth } from '../src/upstream/snowluma-health.mjs';
 // 上游编排的纯策略（P7 第四步）：bridge 的 import 会被本夹具剥掉，必须逐个注入。
@@ -244,6 +245,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     loadSessionState,
     saveSessionState,
     createSessionRegistry,
+    createSessionPolicy,
     createSnowlumaHealth,
     createDshProbe,
     resolveConnectionUpdate,

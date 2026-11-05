@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
 import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-names.mjs';
+import { dshModulesDir } from './dsh-modules.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PRESETS_DIR = path.join(ROOT, 'dsh', 'agent-presets');
@@ -98,6 +99,24 @@ function collectDshToolNames() {
   try { ({ names } = collectDshToolNamesShared()); } catch { return null; }
   return names.size === 0 ? null : new Set(names.keys());
 }
+
+/** 本机安装的 DSH 版本（读不到时返回 null，按"未知"处理：不做版本放宽）。 */
+function localDshVersion() {
+  let dir;
+  try { dir = dshModulesDir(); } catch { return null; }
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, '..', 'package.json'), 'utf8'));
+    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(pkg.version ?? ''));
+    return m ? { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), raw: pkg.version } : null;
+  } catch { return null; }
+}
+
+/** 本机 DSH 是否早于 0.3（0.1.x 时名单里有些名字本来就还没出现）。 */
+function dshPredatesToolExemptions() {
+  const v = localDshVersion();
+  if (!v) return false; // 版本未知时从严：不放宽
+  return v.major === 0 && v.minor < 3;
+}
 /**
  * 不在 npm 版 DSH 里、只存在于**可选第三方 bundle** 的工具名：在装了该 bundle 的机器上真实存在，
  * 所以守卫必须继续 restrict 它们；在没装的机器上找不到属于正常情况，不算拼错的假名。
@@ -106,6 +125,23 @@ function collectDshToolNames() {
 const OPTIONAL_BUNDLE_TOOL_NAMES = new Set(['dsh_snapshot', 'dsh_rollback', 'incident_resolved']);
 /** 允许出现在名单里、但不属于"本地执行"语义的名字（开发/注入器）。 */
 const DEV_TOOL_PREFIX = /^dev_/;
+
+/**
+ * 0.1.x 的 DSH 里**还没有**的工具名（0.3.x 才加）：本机装的是 0.1.1-rc.2，这些名字
+ * 在安装目录里当然找不到。它们不是拼错的假名——是守卫名单按**目标版本**（桌面版 DSH
+ * 0.3.x）写的。
+ *
+ * 判定方式按版本走：本机 DSH < 0.3 时容许这些名字缺席；本机 DSH ≥ 0.3 时不再容许
+ * （那时它们应该真的在工具包里，缺席就意味着名单又被改坏了）。这样既不会在旧环境里
+ * 逼人删掉真名字，也不会在升级后继续放行拼错的名字。
+ */
+const TOOL_NAMES_ADDED_AFTER_0_1 = new Set([
+  'load_workspace_dependencies', 'list_subagent_models', 'present',
+  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
+  'subagent_codex', 'subagent_claude_code',
+  'spawn_teammate', 'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
+  'plugin_manager', 'schedule_update',
+]);
 
 /** 允许出现的 MCP 命名空间前缀（QQ 动作面）。 */
 const EXPECTED_SAFE_PREFIXES = [
@@ -217,8 +253,11 @@ test('守卫名单里的每个名字都是 DSH 真实注册的工具（防拼错
   for (const id of SIMULATION_PRESETS) {
     const { dir } = readPreset(id);
     const mod = await import(pathToFileURL(path.join(dir, 'qq-tool-restrict.mjs')).href);
+    // 旧版 DSH 上「0.3 才加的名字」缺席是版本差异，不是拼错；升级后不再放宽。
+    const exempt = dshPredatesToolExemptions() ? TOOL_NAMES_ADDED_AFTER_0_1 : new Set();
     const fabricated = mod.RESTRICTED_TOOL_NAMES
-      .filter((n) => !DEV_TOOL_PREFIX.test(n) && !OPTIONAL_BUNDLE_TOOL_NAMES.has(n) && !dshNames.has(n));
+      .filter((n) => !DEV_TOOL_PREFIX.test(n) && !OPTIONAL_BUNDLE_TOOL_NAMES.has(n)
+        && !exempt.has(n) && !dshNames.has(n));
     assert.deepEqual(fabricated, [],
       `${id}: 以下名字在 DSH 已安装的工具包里找不到 ⇒ restrict 会抛错并被吞掉，`
       + `限制静默失效：${fabricated.join(', ')}`);

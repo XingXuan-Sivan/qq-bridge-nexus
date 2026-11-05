@@ -23,7 +23,9 @@ test('App 脚本：后台启动控制中心（nohup、输出进日志、不占 s
 });
 
 test('control-center.command 第一次运行时自动生成 App：只在 App 不存在时生成、失败不影响启动、可用环境变量关闭', () => {
-  const s = fs.readFileSync(path.join(root, 'control-center.command'), 'utf8');
+  // 换行统一成 LF 再断言：这个脚本在 Windows 上被编辑过时会带 CRLF，
+  // 而 `else\n` 这种锚点会因此整条不匹配（曾经就这样误报过一次）。
+  const s = fs.readFileSync(path.join(root, 'control-center.command'), 'utf8').replace(/\r\n/g, '\n');
   const gen = s.indexOf('node scripts/build-mac-app.mjs');
   const start = s.indexOf('node src/launcher/control-center.mjs');
   assert.ok(gen > 0 && start > gen, '先（按需）生成 App，再启动控制中心');

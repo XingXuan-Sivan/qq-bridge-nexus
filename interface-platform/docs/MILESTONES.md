@@ -12,7 +12,7 @@
 | `src/bridge.js` `applyHealedTokens` | token 自愈会把 wsUrl 改回发现到的真实 SnowLuma 端点，绕过平台 | 新增 `snowluma.viaPlatform`：为 true 时不跟随端点、不扫描 SnowLuma 目录 |
 | `src/snowluma-conn.js` | 从 `<SnowLuma>/config/onebot_<QQ>.json` 发现 token | 平台的 SnowLuma 连接器各自实现一份；桥接侧在 viaPlatform 时跳过 |
 | `src/mcp-snowluma-safe.js` | 读 `config.json` 的 `httpUrl + accessToken` 调 OneBot HTTP | 自动随配置走平台，无需改代码 |
-| `src/core/session-router.mjs` | 会话键只接受 `private:<数字>` / `group:<数字>` | M2 |
+| `src/core/session-router.mjs` | 会话键只接受 `private:<数字>` / `group:<数字>` | M2（**2026-11-06 已随确认死代码删除**：全仓库无引用、未登记门禁；键形态现由 `src/session/key.mjs` 统一） |
 | `src/social/people.js`、owner 权限 | QQ 号身份假设 | M2；按交接 §8.6 不跨平台合并身份 |
 | `src/launcher/control-center.mjs`、`public/control-center/` | SnowLuma 专属卡片 | M1 改为顶部大标签；SnowLuma 卡片移入「接口平台 → 接入实例」 |
 

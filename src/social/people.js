@@ -11,6 +11,7 @@
 // 本模块只做数据与规则，不碰网络、不碰 DSH；时间来源可注入，便于离线测试。
 
 import { createJsonStore } from '../lib/json-store.js';
+import { idOfKey, isPrivateKey, key } from '../session/key.mjs';
 
 export const ACQUAINTANCE_LEVELS = ['listed', 'observed', 'talked', 'familiar'];
 const NOTE_MAX_CHARS = 120;
@@ -212,7 +213,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
     if (kind === 'group') {
       const gid = normalizeGroupId(groupId);
       if (gid) {
-        if (!p.firstSeenIn) p.firstSeenIn = `group:${gid}`;
+        if (!p.firstSeenIn) p.firstSeenIn = key('group', gid);
         const { g, created: newInGroup } = ensureGroupEntry(p, gid, at, 'message');
         result.isNewInGroup = newInGroup;
         const c = cleanName(card);
@@ -226,7 +227,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
         g.messageCount = (Number(g.messageCount) || 0) + 1;
       }
     } else if (kind === 'private') {
-      if (!p.firstSeenIn) p.firstSeenIn = `private:${qq}`;
+      if (!p.firstSeenIn) p.firstSeenIn = key('private', qq);
       p.private = p.private ?? { firstSeenAt: at, lastSeenAt: at, messageCount: 0 };
       p.private.lastSeenAt = at;
       p.private.messageCount = (Number(p.private.messageCount) || 0) + 1;
@@ -279,7 +280,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
     if (c && c !== g.card) { g.card = c; g.cardHistory = pushHistory(g.cardHistory, c, at); }
     const nick = cleanName(nickname);
     if (nick && nick !== p.nickname) { p.nickname = nick; p.nicknameHistory = pushHistory(p.nicknameHistory, nick, at); }
-    if (!p.firstSeenIn) p.firstSeenIn = `group:${gid}`;
+    if (!p.firstSeenIn) p.firstSeenIn = key('group', gid);
     p.lastSeenAt = at;
     markDirty();
     return {
@@ -371,7 +372,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
       if (c && c !== g.card) { g.card = c; g.cardHistory = pushHistory(g.cardHistory, c, at); }
       const nick = cleanName(m?.nickname);
       if (nick && nick !== p.nickname) { p.nickname = nick; p.nicknameHistory = pushHistory(p.nicknameHistory, nick, at); }
-      if (!p.firstSeenIn) p.firstSeenIn = `group:${gid}`;
+      if (!p.firstSeenIn) p.firstSeenIn = key('group', gid);
     }
     let missedLeaves = 0;
     if (!first) {
@@ -583,7 +584,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
     let n = 0;
     for (const p of Object.values(data().people)) {
       if (p.groups[gid]) { delete p.groups[gid]; n += 1; }
-      p.notes = p.notes.filter((x) => x.scope !== `group:${gid}`);
+      p.notes = p.notes.filter((x) => x.scope !== key('group', gid));
     }
     delete data().groups[gid];
     markDirty();
@@ -631,7 +632,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
       if (!nameToIds.has(name)) nameToIds.set(name, new Set());
       nameToIds.get(name).add(qq);
     }
-    const privateQQ = scope.startsWith('private:') ? scope.slice(8) : null;
+    const privateQQ = isPrivateKey(scope) ? String(idOfKey(scope)) : null;
     let imported = 0;
     let review = 0;
     for (const [rawName, im] of Object.entries(impressions)) {

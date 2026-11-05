@@ -1,3 +1,4 @@
+import { isGroupKey, isPrivateKey, key, sameSession } from '../session/key.mjs';
 // 人物记忆的共享策略与注入过滤 —— **可见范围由程序在注入时执行，不交给模型自觉**。
 //
 // 三档共享策略（continuity.sharePolicy，默认 identity）：
@@ -67,7 +68,7 @@ export function noteVisibleIn(note, convKey, personQQ, policy) {
   const scope = String(note.scope ?? '');
   const vis = String(note.visibility ?? scope);
   // 1) 私聊来源：只在与本人的私聊里可见（即使被错误标成 public 也不放行）。
-  if (scope.startsWith('private:')) return convKey === `private:${personQQ}` && scope === convKey;
+  if (isPrivateKey(scope)) return sameSession(convKey, scope) && sameSession(scope, key('private', personQQ));
   // 2) 本会话自己的记录永远可见。
   if (scope === convKey) return true;
   // 3) 其余只有 shared 策略 + visibility=public + 已批准 才可见。
@@ -129,7 +130,7 @@ export function buildPersonView(person, convKey, continuityCfg = {}, { maxNotes 
     .filter((n) => noteVisibleIn(n, convKey, person.qq, policyForNotes))
     // 来自 recordable=false / none 群的记录，即使被批准过也不外流。
     .filter((n) => {
-      if (n.scope === convKey || !n.scope.startsWith('group:')) return true;
+      if (n.scope === convKey || !isGroupKey(n.scope)) return true;
       return effectivePolicyBetween(continuityCfg, convKey, n.scope.slice(6)) === 'shared';
     })
     .sort((a, b) => PRIORITY(a, convKey) - PRIORITY(b, convKey) || (b.updatedAt - a.updatedAt))

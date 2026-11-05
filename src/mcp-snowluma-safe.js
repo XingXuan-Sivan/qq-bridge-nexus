@@ -7,6 +7,7 @@
 //   allow.groups / allow.private，否则拒绝 —— agent 只能往被允许的地方发消息。
 // - 所有调用走 OneBot HTTP API（httpUrl + accessToken）。
 import fs from 'node:fs';
+import { key as skillKey } from './session/key.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -677,7 +678,7 @@ server.tool(
   },
   async ({ groupId, token, messages }) => {
     try {
-      const key = `group:${groupId}`;
+      const key = skillKey('group', groupId);
       let finalMessages = messages;
       if (typeof finalMessages === 'string') {
         const trimmed = finalMessages.trim();

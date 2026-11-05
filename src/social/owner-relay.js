@@ -1,3 +1,4 @@
+import { key } from '../session/key.mjs';
 // 管理员私聊托付：让「目标群自己的会话」去群里说话（v0.4.2，方案 C）。
 //
 // 背景：每个 QQ 会话（group:<群号> / private:<QQ号>）在 DSH 里是独立的 AI 会话，各有一个会话令牌，
@@ -52,7 +53,7 @@ export function validateOwnerRelay({ fromKey, tokenOk, isOwnerPrivateKey, isTarg
   if (!isOwnerPrivateKey(fromKey)) return { ok: false, status: 403, error: '只有管理员本人的私聊会话可以托付其它群会话' };
   const gid = String(targetGroupId ?? '').trim();
   if (!/^[1-9]\d{0,11}$/.test(gid)) return { ok: false, status: 400, error: 'targetGroupId 必须是群号' };
-  const targetKey = `group:${gid}`;
+  const targetKey = key('group', gid);
   if (!isTargetAllowed(targetKey)) return { ok: false, status: 403, error: '目标群不在白名单（或当前模式允许范围）内' };
   const text = String(instruction ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return { ok: false, status: 400, error: 'instruction 不能为空' };

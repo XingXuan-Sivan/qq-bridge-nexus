@@ -111,8 +111,9 @@ npm run test:console-ui
 - 预演结果（`node scripts/migrate-session-keys.mjs`，未 `--apply`）：**8 处 / 5 个文件**——`persona-cache.json` 3 键、`prompt-blocks.json` 1 键、`role-seen.json` 1 键、`sessions.json` 2 键、`social-v2.json` 1 键。
 - 偏差/未做：
   - **没有执行迁移**。因为 `platform.keyedFormat` 仍默认关；先迁移数据会让磁盘 key（新形态）与代码产出（旧形态）对不上，等于人为制造一次全量「查不到会话」。
-  - 其余 key 构造点未迁：`src/core/session-router.mjs` 8 处、`src/social/people.js` 5 处、`owner-relay.js` / `group-rules.js` / `memory-policy.js` / `mcp-snowluma-safe.js` / `bridge-extensions.js` / `mode-gate.mjs` 各 1 处。这些模块只产字符串、不读配置，要迁得先把「平台 + 格式」作为依赖传进去，属于第二步。
-  - `src/core/session-router.mjs` 目前**没有被 `bridge.js` 引用**（`grep session-router src/bridge.js` 为 0），它的 key 用于会话状态机内部，与 DSH 会话映射是两套；迁移时要一并确认它是不是「未来替换用」的半成品。
+  - 其余 key 构造点：**已迁 6 个模块**（`social/people.js` 7 处、`social/owner-relay.js`、`social/group-rules.js`、`social/memory-policy.js`、`mcp-snowluma-safe.js`、`bridge-extensions.js`、`session/mode-gate.mjs`，全部改为 `import { key } from '…/session/key.mjs'` 或 `sameSession`/`isGroupKey` 等解析助手）。形态由 `key.mjs` 的进程级设置决定，默认仍是旧形态，所以行为未变。
+  - **仍未迁**：`src/core/session-router.mjs` 8 处。它**没有被 `bridge.js` 引用**（`grep session-router src/bridge.js` 为 0），是一套独立的「会话状态机 + 规范 key」实现（自带 `session-router.test.mjs`），与 DSH 会话映射是两套。要不要迁、是否将来替换用，需要先定性，不做猜测式改动。
   - 迁移脚本只处理 `state/` 下的一级 `*.json`，`state/admin/*.json`、`state/social/*.json` 等子目录未纳入（当前无键，但加功能后会漏，需要在脚本里补 `**/*.json`）。
+  - 夹具连带修复：`scripts/test-qq-model-view.mjs` 的临时 fixture 只拷被启动的 3 个文件，`mcp-snowluma-safe.js` 新依赖 `src/session/key.mjs` ⇒ 子进程 import 失败、测试报 `MCP error -32000: Connection closed`。已在该夹具里补拷 `src/session/key.mjs`（教训：给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具）。
 - 依赖：`platform.keyedFormat` 开关 + 构造点全部迁移完成后，才允许 `--apply`。
 

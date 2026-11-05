@@ -101,22 +101,24 @@ npm run test:console-ui
 
 ---
 
-## 6. 迁移执行记录
+## 6. 主键形态变更与数据迁移
 
-原则：每次数据迁移都先预演、再备份、再执行，并在这里记「做了什么 / 偏差 / 未做 / 依赖」。不是每次都写满，但**没做的必须留痕**。
+原则：**主键形态变更不做数据迁移**——nexus 启用后从新会话开始，旧会话映射与旧会话级状态一律作废。少一个长期维护的迁移工具，也少一条「代码形态与磁盘数据对不上」的隐蔽故障路径。
 
-### 6.1 会话 key 平台化（2026-11-06，进行中）
+做法与边界：
 
-- 已完成：`src/session/key.mjs`（组装/解析/判等，9 条单测）、`src/bridge.js` 的 18 处 key 构造收敛到 `sessionKey()`（默认仍产出旧形态，行为逐字不变）、`scripts/migrate-session-keys.mjs`（`--apply`/`--revert`，写前整目录备份 `state.bak-<时间戳>`）+ 5 条纯函数测试。
-- 预演结果（`node scripts/migrate-session-keys.mjs`，未 `--apply`）：**8 处 / 5 个文件**——`persona-cache.json` 3 键、`prompt-blocks.json` 1 键、`role-seen.json` 1 键、`sessions.json` 2 键、`social-v2.json` 1 键。
-- 偏差/未做：
-  - **没有执行迁移**。因为 `platform.keyedFormat` 仍默认关；先迁移数据会让磁盘 key（新形态）与代码产出（旧形态）对不上，等于人为制造一次全量「查不到会话」。
-  - 其余 key 构造点：**已迁 6 个模块**（`social/people.js` 7 处、`social/owner-relay.js`、`social/group-rules.js`、`social/memory-policy.js`、`mcp-snowluma-safe.js`、`bridge-extensions.js`、`session/mode-gate.mjs`，全部改为 `import { key } from '…/session/key.mjs'` 或 `sameSession`/`isGroupKey` 等解析助手）。形态由 `key.mjs` 的进程级设置决定，默认仍是旧形态，所以行为未变。
-  - **已执行数据迁移**（2026-11-06 04:23）：先把 `config.json` 的 `platform.keyedFormat` 置为 `true` 并重启 nexus（配置备份 `config.json.bak-pre-keyed-*`），再 `node scripts/migrate-session-keys.mjs --apply` 写入 8 处，备份目录 `state.bak-2026-11-05T20-23-59-947Z`。迁移后重启，日志出现 `停用旧映射 qq:private:2897715886 -> session-c71a72c9…`，`/api/sessions` 返回空、`/api/status` 正常（`mode: reserved2`、`botAccount: 星苒`），说明新 key 已被正确读取。
-  - **回滚路径**（未验证，但已具备）：`config.json` 的 `keyedFormat` 改回 `false` → `node scripts/migrate-session-keys.mjs --revert` → 重启。回滚后旧代码路径与旧数据形态重新对齐。
-  - **`src/core/` 已删除**（2026-11-06）：确认 `session-router.mjs` + `session-router.test.mjs` 是死代码——全仓库只有它自己的测试 import 它，`src/bridge.js` 与任何模块都不引用，也没有登记在 `test-audit.mjs` 里；`src/core/` 目录下再无其它文件。会话状态机与规范 key 现由 `src/session/{key,store,registry,policy,mode-gate}.mjs` 承担。历史里程碑文档 `MILESTONES.md` 里那一行保留为记录并标注已删除。
-  - 迁移脚本只处理 `state/` 下的一级 `*.json`，`state/admin/*.json`、`state/social/*.json` 等子目录未纳入（当前无键，但加功能后会漏，需要在脚本里补 `**/*.json`）。
-  - 备份目录 `state.bak-*` 已加进 `.gitignore`（7.7 MB，含运行时日志，不该入库）。
-  - 夹具连带修复：`scripts/test-qq-model-view.mjs` 的临时 fixture 只拷被启动的 3 个文件，`mcp-snowluma-safe.js` 新依赖 `src/session/key.mjs` ⇒ 子进程 import 失败、测试报 `MCP error -32000: Connection closed`。已在该夹具里补拷 `src/session/key.mjs`（教训：给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具）。
-- 依赖：`platform.keyedFormat` 开关 + 构造点全部迁移完成后，才允许 `--apply`。
+- 变更前后各跑一次门禁；动手前把 `state/` 整目录备份成 `state.bak-<时间戳>`（已在 `.gitignore` 里），观察一个周期后再删。
+- **会丢的**（有意丢）：`sessions.json` 的「会话 → DSH 会话」映射、`social-v2.json` 的每会话唤醒配置与未读数、`prompt-blocks.json` / `role-seen.json` / `persona-cache.json` 这些以会话 key 为索引的缓存。
+- **不受影响的**（不以会话 key 为索引，只要不清 `state/`）：群规则、定时任务、人物库、黑白名单、人格卡本地库、审计日志。
+- **孤儿 key 不报错**：形态变化后旧形态 key 查不到任何东西、日志也不告警；需要旧数据只能翻备份。
+
+### 6.1 会话 key 平台化（2026-11-06，已完成）
+
+- 形态：`group:<id>` / `private:<id>` → `qq:group:<id>` / `qq:private:<id>`；开关是 `config.json` 的 `platform.keyedFormat`（默认 `false`，本机已置 `true`）。
+- 代码：`src/session/key.mjs` 统一组装/解析/判等（`formatKey`/`parseKey`/`sameSession`/`isGroupKey`/`isPrivateKey` + 进程级 `configureKeys()`/`key()`）；`src/bridge.js` 18 处构造与 7 个业务模块（`social/people.js`、`owner-relay`、`group-rules`、`memory-policy`、`mcp-snowluma-safe`、`bridge-extensions`、`session/mode-gate`）全部改走该出口。
+- 单测：`scripts/test-session-key.mjs` 10 条（含开关关/开两种形态、非法平台回落、非法类型与 id 抛错）。
+- 已删除：`src/core/session-router.mjs` 及其测试（全仓库无引用、未登记门禁，属死代码）；`scripts/migrate-session-keys.mjs` 及其测试（按本节策略不再需要迁移工具）。
+- 已发生的偏差：本机在定策略**之前**跑过一次迁移（8 处 / 5 个文件），备份 `state.bak-2026-11-05T20-23-59-947Z`。这不影响策略，只是「旧会话映射作废」这条提前发生了。
+- 回滚：`platform.keyedFormat` 改回 `false` 并重启，再从 `state.bak-*` 手工还原需要的文件（没有自动工具，这是策略的一部分）。
+- 夹具教训：`scripts/test-qq-model-view.mjs` 的临时目录只拷被 spawn 的 3 个文件，`mcp-snowluma-safe.js` 新增依赖 `src/session/key.mjs` 后子进程 import 失败、报 `MCP error -32000: Connection closed`；已补拷依赖。**给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具。**
 

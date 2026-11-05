@@ -19,6 +19,7 @@
 | [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) | 插件与扩展的后续路线（P2a 启停/重载、P2b 安装、P2c 监听、命令注册与注入块、MCP/Skills 门槛、明确不做） | 🚧 进行中（P2a–P2c 已完成，2026-11-03） |
 | [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表（P3a）：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands`、管理行为页与 P3b 预留 | ✅ 与当前实现同步（2026-11-03） |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界约定**：静态资源路径穿越守卫、未启用=404 与先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复顺序、插件 UI 沙箱与样式隔离、验收清单 | ✅ 现行约定（2026-11-04 起，改路由/静态资源/插件 UI 前必读） |
+| [STATUS.md](STATUS.md) | **未完项清单**：每项写是什么 / 完成判据 / 依赖 / 优先级，状态只允许 Done、Partial（差什么）、Blocked（等什么）；阶段收尾先对这张表，防止把半成品说成已完成 | ✅ 现行（2026-11-05 起，每阶段收尾复核） |
 
 ---
 

@@ -5,6 +5,14 @@
 
 ## 未发布
 
+### 新增：技能清单注入（路线图 §9.2）
+- `src/skills/index.mjs`：只读扫描技能根目录（`SKILL.md` 前 600 字，认 `name` / `description`），不执行脚本、不跟随符号链接，目录缺失或损坏只跳过。
+- 唤醒提示新增内置块 `core-skills`（priority 150）：标题 1 行 + 最多 `skills.maxEntries` 行 + 溢出提示 1 行，每条只给「名字：一句说明」——**行数由配置固定，不随技能数量膨胀**，全文由 AI 需要时自己读 `SKILL.md`。
+- 根顺序：`config.json` 的 `skills.dirs` → `DSH_HOME/skills` → 仓库 `skills/`，同名技能以先出现的为准；扫描结果缓存 60 秒。
+- 配置白名单：`skills.enabled` / `maxEntries`（1–40）/ `maxChars`（100–8000）/ `maxDescriptionChars`（8–120）/ `dirs`（≤8 条）；也可用 `promptBlocks['core-skills'].enabled` 单独关块。
+- `/api/extensions` 的技能列表改为同一个 `skillIndex`：控制台「技能」页与提示词注入同源（此前是两份扫描逻辑，页面上有、提示词里没有）。
+- 测试：`scripts/test-skills-index.mjs` 8 条 + `test-core-prompt-blocks.mjs` 的 `core-skills` 端到端用例；`test:audit` 89/89。
+
 ### 文档：一页可复核的未完项清单（2026-11-05）
 - 新增 `docs/STATUS.md`：把散在路线图、提交信息与口头汇报里的「没做完 / 只做了一半 / 卡在别人身上」收敛成一张表，每项写清 **是什么 / 完成判据 / 依赖 / 优先级**，状态只允许 `Done`、`Partial`（括号里写差什么）、`Blocked`（括号里写等什么）。
 - 与路线图分工：路线图写「打算怎么做、为什么」，状态清单写「现在到哪、还差什么、怎么复核」；`Partial` 不许写成 `Done`，阶段收尾先对表。同时列出明确不做的项（指向路线图 §10），避免把「决定不做」混进「还没做」。

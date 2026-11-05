@@ -454,11 +454,23 @@ public/console/
 - 目标：`mcp.json` 清单 + 控制台「MCP 服务」页（启停、测试连接、看工具），插件可贡献 server 定义。参考 AstrBot 的 `data/mcp_server.json` + `func_tool_manager.py`（`init_mcp_clients` / `enable_mcp_server` / `test_mcp_server_connection`）。
 - **开工门槛**：先验证 DSH 是否支持运行时增删 MCP。不支持就只能「写配置 + 提示重启 DSH」，体验打折，需要用户确认是否接受。
 
-### 9.2 Skills（低成本，可先做）
+### 9.2 Skills（✅ 已完成 2026-11-05）
 
 - 目标：每个角色/会话一个 skills 目录，人格卡声明「可用技能」；唤醒时只注入清单，agent 用时再读全文。参考 AstrBot 的 `SkillManager`（`SKILL.md` + frontmatter + 渐进式披露）。
 - 代价：低（目录约定 + prompt 约定）。风险：技能里的脚本等于执行面，必须白名单 + 只读挂载。
 - 验收：技能清单只在系统提示里占固定行数，不随技能数量线性膨胀。
+
+**实现口径**：
+
+- `src/skills/index.mjs`：`createSkillIndex({ roots, maxEntries, maxDescriptionChars, ttlMs, fs, now, log })` → `list()` / `render()` / `status()` / `invalidate()`；只读扫描根目录下含 `SKILL.md` 的目录（读前 600 字），不执行任何脚本、不跟随符号链接，目录缺失/无权限只跳过。
+- 根顺序：`config.json` 的 `skills.dirs`（额外目录）→ `DSH_HOME/skills` → 仓库 `skills/`；**同名技能以先出现的根为准**，避免同一个技能出现两遍。
+- 注入块 `core-skills`（priority 150，介于贴纸 100 与记忆摘要 200 之间）：固定格式为「标题 1 行 + 最多 `maxEntries` 行 + 溢出提示 1 行」；每条 `- 名字：一句说明`，说明超 `maxDescriptionChars` 截断加省略号；总字数超 `maxChars` 时先丢尾部条目并计入「另有 N 个未列出」——**行数由配置固定，不随技能数量增长**。
+- 配置（`config.json`，全部有白名单校验）：`skills.enabled`、`skills.maxEntries`（1–40，默认 12）、`skills.maxChars`（100–8000，默认 1200）、`skills.maxDescriptionChars`（8–120，默认 40）、`skills.dirs`（≤8 条、≤500 字符、拒绝控制字符）；块的开关也能用 `promptBlocks['core-skills'].enabled` 单独关掉。
+- `/api/extensions` 的技能列表改为同一个 `skillIndex`：控制台「技能」页看到的就是 AI 看到的（此前是两份独立的扫描逻辑，页面上有、提示词里没有）。
+- 扫描结果缓存 60 秒（技能目录变化不频繁，避免每轮唤醒都读盘）；新增/删除技能最多一分钟后生效。
+- 测试：`scripts/test-skills-index.mjs` 8 条（frontmatter 去引号、跳无 `SKILL.md`、跳符号链接、同名去重、行数固定 7 行、字数预算丢尾部、缓存与 `invalidate`、`status` 形状）；`scripts/test-core-prompt-blocks.mjs` 增 `core-skills` 端到端用例（临时技能目录出现在提示里、正文不被整段注入、关掉后整段消失）。
+- 明确不做：技能里声明的工具/脚本不在这一版执行（那是插件与 MCP 的职责）。
+
 
 ### 9.3 其他 provider 化
 

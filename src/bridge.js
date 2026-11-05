@@ -138,6 +138,8 @@ import { createSessionRegistry } from './session/registry.mjs';
 import { createSessionPolicy } from './session/policy.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
 import { createPersonaResolver } from './persona-resolve.mjs';
+// 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
+import { createSkillIndex } from './skills/index.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -760,6 +762,24 @@ function normalizePromptBlocks(raw) {
   return out;
 }
 
+function normalizeSkills(raw) {
+  const out = { enabled: true, maxEntries: 12, maxChars: 1200, maxDescriptionChars: 40, dirs: [] };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  if (typeof raw.enabled === 'boolean') out.enabled = raw.enabled;
+  for (const [key, min, max] of [['maxEntries', 1, 40], ['maxChars', 100, 8000], ['maxDescriptionChars', 8, 120]]) {
+    const value = Number(raw[key]);
+    if (Number.isInteger(value) && value >= min && value <= max) out[key] = value;
+  }
+  // 额外目录：只接受字符串数组，含控制字符或过长的一律丢弃（路径来自配置文件，仍需最基本的形状校验）
+  if (Array.isArray(raw.dirs)) {
+    out.dirs = raw.dirs
+      .filter((dir) => typeof dir === 'string' && dir.trim() && dir.length <= 500 && !/[\u0000-\u001f]/.test(dir))
+      .map((dir) => dir.trim())
+      .slice(0, 8);
+  }
+  return out;
+}
+
 function loadConfig() {
   const p = path.join(ROOT, 'config.json');
   const file = readJsonSafe(p, null, true);
@@ -861,6 +881,8 @@ function loadConfig() {
     },
     // 内置段落的块化（P4）：按块 id 配 enabled / maxChars。只有显式 false 才关闭，配错一律回落默认。
     promptBlocks: normalizePromptBlocks(file.promptBlocks),
+    // 技能清单（§9.2）：唤醒时注入固定行数的可用技能索引，全文由 AI 需要时自己读。
+    skills: normalizeSkills(file.skills),
     socialV2: {
       enabled: true,
       autoReplyCheckMs: 30000,
@@ -1555,6 +1577,19 @@ async function main() {
   // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
   // 插件块受 plugins.json 的 maxPromptAppendChars（4000）约束，内置段落沿用现有长度，不能互相挤占。
   const corePromptBlocks = createPromptBlockRegistry({ log, maxTotalChars: 200000 });
+  // 技能索引（§9.2）：技能目录只读扫描，结果缓存 60s；额外目录来自 config.json 的 skills.dirs。
+  // 根顺序 = 额外目录 → DSH_HOME/skills → 仓库 skills/，同名技能以先出现的为准。
+  const skillIndex = createSkillIndex({
+    roots: [
+      ...(Array.isArray(cfg.skills?.dirs) ? cfg.skills.dirs : []),
+      path.join(dshHomeDir(), 'skills'),
+      path.join(ROOT, 'skills'),
+    ].filter(Boolean),
+    maxEntries: cfg.skills?.maxEntries ?? 12,
+    maxDescriptionChars: cfg.skills?.maxDescriptionChars ?? 40,
+    fs,
+    log,
+  });
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
   const registerCoreBlocks = () => {
     corePromptBlocks.unregisterPlugin('core');
@@ -1576,6 +1611,13 @@ async function main() {
       return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
     });
     registerCoreBlock('core-digest', 200, ({ memoryText }) => memoryText || '');
+    // 技能清单排在注入块之间：贴纸（100）之后、记忆摘要（200）之前都不合适，
+    // 取 150——它描述「能做什么」，跟着行为提示走比跟着记忆走更自然。
+    registerCoreBlock('core-skills', 150, ({ skillText } = {}) => {
+      if (typeof skillText === 'string') return skillText;
+      if (cfg.skills?.enabled === false) return '';
+      return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200 });
+    });
   };
   registerCoreBlocks();
   try {
@@ -4659,6 +4701,7 @@ async function main() {
           const coreBlockCatalog = [
             { id: 'core-stickers', label: '表情包策略' },
             { id: 'core-digest', label: '记忆摘要' },
+            { id: 'core-skills', label: '技能清单' },
           ].map((item) => {
             const conf = (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[item.id] : null) || {};
             const live = coreStatus.blocks.find((block) => block.id === item.id);
@@ -4795,27 +4838,9 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/extensions') {
-          // 技能与 MCP 的只读清单：技能扫 DSH 的 skills 目录（认 SKILL.md frontmatter），
+          // 技能与 MCP 的只读清单：技能走同一个 skillIndex（与唤醒注入同源，页面上看到的就是 AI 看到的），
           // MCP 只列桥接自己维护的 server；DSH 侧的 MCP 配置不在这里猜。
-          const home = process.env.DSH_HOME || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, '.dsh') : null);
-          const skillRoots = [home ? path.join(home, 'skills') : null, path.join(ROOT, 'skills')].filter(Boolean);
-          const skills = [];
-          for (const root of skillRoots) {
-            let entries = [];
-            try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { continue; }
-            for (const entry of entries) {
-              if (!entry.isDirectory()) continue;
-              const dir = path.join(root, entry.name);
-              let head = '';
-              try { head = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8').slice(0, 600); } catch { continue; }
-              const field = (raw) => String(raw ?? '').trim().replace(/^["']|["']$/g, '');
-              skills.push({
-                name: field(head.match(/^name:\s*(.+)$/m)?.[1]) || entry.name,
-                description: field(head.match(/^description:\s*(.+)$/m)?.[1]),
-                path: dir,
-              });
-            }
-          }
+          const skills = skillIndex.list().map(({ name, description, dir }) => ({ name, description, path: dir }));
           const mcp = [
             { name: 'snowluma-host', file: 'src/mcp-host-server.js', tools: ['snowluma_status'], note: 'SnowLuma 网关状态，只读' },
             { name: 'web-search-safe', file: 'src/mcp-web-search-safe.js', tools: ['web_search', 'web_fetch'], note: '只读联网，禁内网地址' },
@@ -12449,6 +12474,10 @@ async function main() {
     // 表情参考（内置块 core.stickers）：是否只给一行由 blockPlan 决定，块可单独关掉。
     const stickerBlock = corePromptBlocks.renderBlockSync('core-stickers', { key, reason, stickerFull, blockPlan });
     const stickerLine = stickerBlock.text ? `${stickerBlock.text}\n\n` : '';
+    // 技能清单（内置块 core-skills）：只给「名字 + 一句说明」，全文让 AI 自己读 SKILL.md。
+    // 行数由 skills.maxEntries 固定，关掉后整段消失——不会因为技能变多把提示词撑长。
+    const skillBlock = corePromptBlocks.renderBlockSync('core-skills', { key, reason });
+    const skillLine = skillBlock.text ? `${skillBlock.text}\n\n` : '';
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
     const proactiveLine = '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
     const replyTiming = replyTimingV2(st);
@@ -12480,7 +12509,7 @@ async function main() {
     const identityLine = selfIdentityTextV2();
     const initialPromptText = reason === 'bootstrap' ? formatInitialPromptV2(key) : '';
     const initialPromptLine = initialPromptText ? `${initialPromptText}\n\n` : '';
-    const base = roleLine + identityLine + tokenLine + initialPromptLine + antiAiLine + proactiveLine + stickerLine + replyLine + statusLine + wakeLine + memoryLine + peopleLine + participationLine + preSleepLine;
+    const base = roleLine + identityLine + tokenLine + initialPromptLine + antiAiLine + proactiveLine + skillLine + stickerLine + replyLine + statusLine + wakeLine + memoryLine + peopleLine + participationLine + preSleepLine;
     if (reason === 'bootstrap') {
       return `${base}【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`;
     }

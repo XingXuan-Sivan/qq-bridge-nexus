@@ -1,3 +1,4 @@
+import { key } from '../session/key.mjs';
 // 管理员私聊的跨群能力（默认关闭，开关 socialV2.tools.ownerGroupAccess）：
 //   ① 只读查看白名单群：最近消息 + 该群会话的记忆摘要 + 长期规则（qq_owner_peek_group）；
 //   ② 给群设长期规则（qq_owner_group_rule）：由**桥接**写进目标群会话的记忆（ownerRules 字段），
@@ -27,7 +28,7 @@ export function validateOwnerGroupAccess({ fromKey, tokenOk, isOwnerPrivateKey, 
   if (!isOwnerPrivateKey(fromKey)) return { ok: false, status: 403, error: '只有管理员本人的私聊会话可以查看其它群或设定群规则' };
   const gid = String(targetGroupId ?? '').trim();
   if (!/^[1-9]\d{0,11}$/.test(gid)) return { ok: false, status: 400, error: 'targetGroupId 必须是群号' };
-  const targetKey = `group:${gid}`;
+  const targetKey = key('group', gid);
   if (!isTargetAllowed(targetKey)) return { ok: false, status: 403, error: '目标群不在白名单（或当前模式允许范围）内' };
   return { ok: true, targetKey };
 }

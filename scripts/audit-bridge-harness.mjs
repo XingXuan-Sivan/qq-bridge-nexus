@@ -40,6 +40,7 @@ import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
 import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createSkillIndex } from '../src/skills/index.mjs';
 import { formatKey, platformOfConfig } from '../src/session/key.mjs';
+import { configureKeys, key as buildKey } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
 // 内置命令的壳与 /api/commands 组装：夹具剥掉 import，所以要在 sandbox 里补这两项（P7 抽层后新增）。
 import { createBuiltinCommands } from '../src/commands/builtin.mjs';
@@ -255,6 +256,8 @@ createPromptBlockRegistry,
 createSkillIndex,
     formatKey,
     platformOfConfig,
+    configureKeys,
+    buildKey,
     createPluginKernel: async () => ({
       init: async () => {},
       notify: () => {},

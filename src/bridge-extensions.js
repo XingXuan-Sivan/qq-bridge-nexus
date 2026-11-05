@@ -10,6 +10,7 @@
 //   state/admin/totp.json        TOTP 秘密（npm run admin:totp-setup 生成；也可用环境变量）
 
 import fs from 'node:fs';
+import { idOfKey, isGroupKey, key as buildKey, sameSession } from './session/key.mjs';
 import path from 'node:path';
 import { createPeopleRegistry, normalizeQQ, normalizeGroupId } from './social/people.js';
 import { buildPersonView, renderPeopleBlock } from './social/memory-policy.js';
@@ -99,7 +100,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   const continuity = () => cfg.continuity ?? {};
   const continuityEnabled = () => cfg.continuity?.enabled !== false;
   const adminEnabled = () => cfg.admin?.enabled !== false && !!normalizeQQ(cfg.ownerQQ);
-  const isOwnerPrivateKey = (key) => !!normalizeQQ(cfg.ownerQQ) && key === `private:${normalizeQQ(cfg.ownerQQ)}`;
+  const isOwnerPrivateKey = (k) => !!normalizeQQ(cfg.ownerQQ) && sameSession(k, buildKey('private', normalizeQQ(cfg.ownerQQ)));
 
   function groupRecordable(groupId) {
     return cfg.continuity?.groups?.[String(groupId)]?.recordable !== false;
@@ -127,7 +128,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   /** 唤醒提示词的「在场人物」小节（按需注入：只含本轮消息里出现的人）。 */
   function peopleBlockFor(key, userIds) {
     if (!continuityEnabled() || cfg.continuity?.injectPeople === false) return '';
-    const m = /^group:(\d+)$/.exec(key);
+    const m = isGroupKey(key) ? [key, String(idOfKey(key))] : null;
     if (m && !groupRecordable(m[1])) return '';
     const seen = new Set();
     const persons = [];
@@ -149,7 +150,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   function personViewFor(key, userId) {
     const p = people.getPerson(userId);
     if (!p) return null;
-    const m = /^group:(\d+)$/.exec(key);
+    const m = isGroupKey(key) ? [key, String(idOfKey(key))] : null;
     if (m && !groupRecordable(m[1])) return null;
     const v = buildPersonView(p, key, continuity(), { now: now(), maxNotes: 10 });
     if (!v) return null;

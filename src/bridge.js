@@ -140,7 +140,7 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
-import { formatKey, platformOfConfig } from './session/key.mjs';
+import { configureKeys, key as buildKey, platformOfConfig } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -1563,14 +1563,13 @@ let stateDirHardened = null;
 /**
  * 会话 key 的唯一构造出口。
  *
- * 默认仍产出旧的 `group:<id>` / `private:<id>`（行为与迁移前逐字一致）；
- * 配置 `platform.keyedFormat: true` 时产出 `<platform>:<group|private>:<id>`。
+ * 形态由 `src/session/key.mjs` 的进程级设置决定：启动时按配置 `platform` 设一次，
+ * 默认仍是旧的 `group:<id>` / `private:<id>`（与迁移前逐字一致）；
+ * `platform.keyedFormat: true` 时变成 `<platform>:<group|private>:<id>`。
  * 这样「改形态」和「迁移数据」可以分两步做，每一步都能单独跑门禁。
  */
 function sessionKey(kind, id) {
-  const cfg = bridgeCfg;
-  if (cfg?.platform?.keyedFormat === true) return formatKey(platformOfConfig(cfg), kind, String(id));
-  return `${kind}:${String(id)}`;
+  return buildKey(kind, id);
 }
 
 // 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
@@ -1579,6 +1578,7 @@ let bridgeCfg = null;
 async function main() {
   const cfg = loadConfig();
   bridgeCfg = cfg;
+  configureKeys({ platform: platformOfConfig(cfg), keyedFormat: cfg?.platform?.keyedFormat === true });
   // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
   const ownerRelayStore = createOwnerRelayStore();
   const ownerRelayLimiter = createOwnerRelayLimiter();

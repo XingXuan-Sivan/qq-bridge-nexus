@@ -1,3 +1,4 @@
+import { DEFAULT_PLATFORM, formatKey, sameSession } from './key.mjs';
 /**
  * 会话准入闸门：白名单 + 模式。
  *
@@ -29,7 +30,7 @@ export function allowed(kind, id, cfg) {
 export function modeAllowed(key, kind, id, cfg, mode) {
   if (mode === 'closed-agent') {
     // 封闭 agent 模式：仅 owner 私聊
-    return key === `private:${String(cfg.ownerQQ ?? '')}`;
+    return sameSession(key, formatKey(DEFAULT_PLATFORM, 'private', String(cfg.ownerQQ ?? '')));
   }
   // chat / reserved / reserved2（仿真模式，暂同 chat 白名单）
   return allowed(kind, id, cfg);

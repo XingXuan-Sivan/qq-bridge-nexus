@@ -13,9 +13,15 @@
     "maxInjectChars": 8000
   },
   "promptBlocks": {
-    "core-stickers": { "enabled": true },
-    "core-digest": { "enabled": true },
-    "core-skills": { "enabled": true }
+    "core-stickers": {
+      "enabled": true
+    },
+    "core-digest": {
+      "enabled": true
+    },
+    "core-skills": {
+      "enabled": true
+    }
   },
   "skills": {
     "enabled": true,
@@ -23,6 +29,10 @@
     "maxChars": 1200,
     "maxDescriptionChars": 40,
     "dirs": []
+  },
+  "platform": {
+    "id": "qq",
+    "keyedFormat": false
   },
   "snowluma": {
     "wsUrl": "ws://127.0.0.1:3001",

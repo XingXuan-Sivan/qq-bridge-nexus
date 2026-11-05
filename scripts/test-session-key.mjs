@@ -5,9 +5,12 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_PLATFORM,
+  configureKeys,
   formatKey,
   idOfKey,
   isSessionKey,
+  key,
+  keyFormat,
   kindOfKey,
   legacyToKey,
   parseKey,
@@ -72,4 +75,20 @@ test('sameSession：同一会话的新旧写法视为相同，不同平台视为
   assert.equal(sameSession('qq:group:1', 'group:1'), true);
   assert.equal(sameSession('qq:group:1', 'tg:group:1'), false);
   assert.equal(sameSession('qq:group:1', null), false);
+});
+
+test('key()：默认产旧形态，开关打开后产新形态，非法参数抛错', () => {
+  try {
+    assert.equal(key('group', 7), 'group:7');
+    assert.equal(key('private', '42'), 'private:42');
+    configureKeys({ platform: 'tg', keyedFormat: true });
+    assert.equal(key('group', 7), 'tg:group:7');
+    assert.deepEqual(keyFormat(), { platform: 'tg', keyed: true });
+    configureKeys({ platform: 'BAD NAME', keyedFormat: true });
+    assert.equal(key('group', 7), 'qq:group:7', '非法平台名回落 qq');
+    assert.throws(() => key('channel', 1), /类型不合法/);
+    assert.throws(() => key('group', 'abc'), /id 不合法/);
+  } finally {
+    configureKeys({});
+  }
 });

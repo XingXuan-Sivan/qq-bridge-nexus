@@ -99,6 +99,8 @@ const tests = [
   'test-session-policy.mjs',
   // 会话标识平台化（第一步）：key 组装/解析、新旧形态互认、非法输入不产出半成品 key。
   'test-session-key.mjs',
+  // 会话 key 迁移脚本的纯函数：整串匹配、键值同改、幂等、不动普通字段。
+  'test-migrate-session-keys.mjs',
   // 上游适配（P7 第四步）：SnowLuma「自报坏」与「静默」两个故障面、边沿告警、get_status 兜底轮询。
   'test-upstream-snowluma-health.mjs',
   // 上游编排的纯策略：DSH 探活 + 自动识别地址的节流重试、SnowLuma 连接参数自愈（两个 token / 端点跟随开关）。

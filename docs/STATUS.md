@@ -30,7 +30,7 @@
 | 10 | `fs.watch` 在 Windows 的稳定性 | `Blocked`（等：目标平台实测；当前 `watch` 默认关） | 插件文件监听（P2c）默认关闭，因为跨平台可靠性未验证 | 连续 100 次增删改插件文件，自动重载成功率 100% 且无重复加载；再把默认值改回 `true` | Windows 实测（长时运行） | 低 |
 | 11 | 迁移评估与实施（`docs/PARITY.md`） | `Partial`（差：2026-11-06 已落定 D-1=B（`persona-bind/1` 插件能力）、D-3=B（会话页 + 可配置切换 + 平台解耦 + 删改同步）；D-2/D-4 仍调研；被判定「补齐/重设计」的项尚未动工） | 见 `PARITY.md` §3 维度表：11 个维度全部有「保持/补齐/重设计」结论；被判定补齐的项拆成可验收小项 | 各小项的判据与依赖见 `PARITY.md` §7；顺序：会话标识平台化 → 会话页（含删改同步）→ `persona-bind/1` → 会话标题 → 切换/迁移脚本 | 高 |
 | 12 | 扩展便利性（`PARITY.md` §7.6） | `Partial`（差：插件 UI 面板、配置 schema 化表单、manifest 静态 `commands`、i18n、依赖约束、安装来源校验） | 新增一个插件时，不改控制台 HTML 就能有配置界面与面板；清单见 `PARITY.md` §7.6 | 需要先定「插件面板」的鉴权与静态路由（等 D-3 的会话页做完再排） | 中 |
-| 13 | 会话标识平台解耦 | `Partial`（差：key 从 `group:/private:` 改为 `<platform>:<类型>:<id>`，以及全部以 key 为索引的状态文件迁移） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 依赖 `PARITY.md` D12 方案批准；需一次数据迁移脚本与回滚方案 | 中 |
+| 13 | 会话标识平台解耦 | `Partial`（差：已建 `src/session/key.mjs` 与 `sessionKey()` 出口、`scripts/migrate-session-keys.mjs`；还差 ① 其余构造点未迁（`src/core/session-router.mjs` 8 处、`src/social/people.js` 5 处、`owner-relay.js`/`group-rules.js`/`memory-policy.js`/`mcp-snowluma-safe.js`/`bridge-extensions.js`/`mode-gate.mjs` 各 1 处）② `platform.keyedFormat` 仍是默认关 ③ 数据迁移未执行） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 先迁完构造点 → 打开 `platform.keyedFormat` 跑门禁 → 执行迁移脚本 → 观察一个周期再定默认值；迁移脚本 dry-run 已知命中 8 处/5 个文件 | 中 |
 
 ---
 
@@ -98,3 +98,21 @@ npm run test:console-ui
 
 - **回复发送**：唤醒会话里 `mcp__snowluma__*` 调用 `qq_send_message` / `qq_mark_read` 报 `fetch failed / ECONNREFUSED 127.0.0.1:3100`。根因是 `C:\Users\starl\.dsh\profiles\desktop\cordis.patch.yml` 的 `# === qq-bridge MCP BEGIN/END ===` 区块仍指向 `qq-bridge-enhanced\src\mcp-*.js`，而这些脚本以自身仓库为 `ROOT` 读 enhanced 的 `config.json`（`consolePort:3100`）与 enhanced 的 `state/console-token`。修复动作明确：跑 `node scripts/setup-dsh.mjs` 把该区块重指 nexus，再重启 DSH（会中断当前会话）。用户已手工改过 enhanced 的 MCP 与 DSH 插件，故这一步交由其决定。
 - **`onReplyDecorate` 真实生效、插件任务类型按时触发、`operator` 只读令牌边界**：本轮窗口没覆盖，靠上面那次修复后再补。
+
+---
+
+## 6. 迁移执行记录
+
+原则：每次数据迁移都先预演、再备份、再执行，并在这里记「做了什么 / 偏差 / 未做 / 依赖」。不是每次都写满，但**没做的必须留痕**。
+
+### 6.1 会话 key 平台化（2026-11-06，进行中）
+
+- 已完成：`src/session/key.mjs`（组装/解析/判等，9 条单测）、`src/bridge.js` 的 18 处 key 构造收敛到 `sessionKey()`（默认仍产出旧形态，行为逐字不变）、`scripts/migrate-session-keys.mjs`（`--apply`/`--revert`，写前整目录备份 `state.bak-<时间戳>`）+ 5 条纯函数测试。
+- 预演结果（`node scripts/migrate-session-keys.mjs`，未 `--apply`）：**8 处 / 5 个文件**——`persona-cache.json` 3 键、`prompt-blocks.json` 1 键、`role-seen.json` 1 键、`sessions.json` 2 键、`social-v2.json` 1 键。
+- 偏差/未做：
+  - **没有执行迁移**。因为 `platform.keyedFormat` 仍默认关；先迁移数据会让磁盘 key（新形态）与代码产出（旧形态）对不上，等于人为制造一次全量「查不到会话」。
+  - 其余 key 构造点未迁：`src/core/session-router.mjs` 8 处、`src/social/people.js` 5 处、`owner-relay.js` / `group-rules.js` / `memory-policy.js` / `mcp-snowluma-safe.js` / `bridge-extensions.js` / `mode-gate.mjs` 各 1 处。这些模块只产字符串、不读配置，要迁得先把「平台 + 格式」作为依赖传进去，属于第二步。
+  - `src/core/session-router.mjs` 目前**没有被 `bridge.js` 引用**（`grep session-router src/bridge.js` 为 0），它的 key 用于会话状态机内部，与 DSH 会话映射是两套；迁移时要一并确认它是不是「未来替换用」的半成品。
+  - 迁移脚本只处理 `state/` 下的一级 `*.json`，`state/admin/*.json`、`state/social/*.json` 等子目录未纳入（当前无键，但加功能后会漏，需要在脚本里补 `**/*.json`）。
+- 依赖：`platform.keyedFormat` 开关 + 构造点全部迁移完成后，才允许 `--apply`。
+

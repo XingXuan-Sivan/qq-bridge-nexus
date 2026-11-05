@@ -5498,6 +5498,19 @@ async function main() {
           const list = [];
           for (const [key, sessionId] of sessions.entries()) {
             const policy = typeof sessions.policyOf === 'function' ? sessions.policyOf(key) : null;
+            // policyOf() 返回的是指纹 JSON 数组字符串（[mode, preset, ownerQQ, level?, preset?]），
+            // 不是对象；早期版本这里当成对象取字段，结果三个字段永远是 null。
+            let policyMode = null, policyPreset = null, policyLevel = null;
+            if (typeof policy === 'string') {
+              try {
+                const parts = JSON.parse(policy);
+                if (Array.isArray(parts)) {
+                  policyMode = parts[0] ?? null;
+                  policyPreset = parts[1] || null;
+                  policyLevel = parts[3] ?? null;
+                }
+              } catch { /* 指纹不是数组就保持 null，页面显示「—」 */ }
+            }
             const resolved = personaResolver ? personaResolver.resolve(key) : null;
             const conv = socialV2?.conversations?.get(key) ?? null;
             list.push({
@@ -5506,9 +5519,9 @@ async function main() {
               owner: key === sessionKey('private', String(cfg.ownerQQ ?? '')),
               kind: isGroupKey(key) ? 'group' : 'private',
               id: idOfKey(key),
-              mode: policy?.mode ?? null,
-              preset: policy?.preset ?? null,
-              level: policy?.level ?? null,
+              mode: policyMode,
+              preset: policyPreset,
+              level: policyLevel,
               // 人格卡的来源：card=全局卡、provider=外部来源（如 soulkit）、none=没挂卡。
               // stale 表示 provider 这次没取到、用的是上一版缓存。
               persona: resolved

@@ -30,7 +30,7 @@
 | 10 | `fs.watch` 在 Windows 的稳定性 | `Blocked`（等：目标平台实测；当前 `watch` 默认关） | 插件文件监听（P2c）默认关闭，因为跨平台可靠性未验证 | 连续 100 次增删改插件文件，自动重载成功率 100% 且无重复加载；再把默认值改回 `true` | Windows 实测（长时运行） | 低 |
 | 11 | 迁移评估与实施（`docs/PARITY.md`） | `Partial`（差：2026-11-06 已落定 D-1=B（`persona-bind/1` 插件能力）、D-3=B（会话页 + 可配置切换 + 平台解耦 + 删改同步）；D-2/D-4 仍调研；被判定「补齐/重设计」的项尚未动工） | 见 `PARITY.md` §3 维度表：11 个维度全部有「保持/补齐/重设计」结论；被判定补齐的项拆成可验收小项 | 各小项的判据与依赖见 `PARITY.md` §7；顺序：会话标识平台化 → 会话页（含删改同步）→ `persona-bind/1` → 会话标题 → 切换/迁移脚本 | 高 |
 | 12 | 扩展便利性（`PARITY.md` §7.6） | `Partial`（差：插件 UI 面板、配置 schema 化表单、manifest 静态 `commands`、i18n、依赖约束、安装来源校验） | 新增一个插件时，不改控制台 HTML 就能有配置界面与面板；清单见 `PARITY.md` §7.6 | 需要先定「插件面板」的鉴权与静态路由（等 D-3 的会话页做完再排） | 中 |
-| 13 | 会话标识平台解耦 | `Partial`（差：已建 `src/session/key.mjs` 与 `sessionKey()` 出口、`scripts/migrate-session-keys.mjs`；还差 ① 其余构造点未迁（`src/core/session-router.mjs` 8 处、`src/social/people.js` 5 处、`owner-relay.js`/`group-rules.js`/`memory-policy.js`/`mcp-snowluma-safe.js`/`bridge-extensions.js`/`mode-gate.mjs` 各 1 处）② `platform.keyedFormat` 仍是默认关 ③ 数据迁移未执行） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 先迁完构造点 → 打开 `platform.keyedFormat` 跑门禁 → 执行迁移脚本 → 观察一个周期再定默认值；迁移脚本 dry-run 已知命中 8 处/5 个文件 | 中 |
+| 13 | 会话标识平台解耦 | `Done`（2026-11-06：`src/session/key.mjs` 统一组装/解析、`sessionKey()` 出口、7 个业务模块迁移、`platform.keyedFormat` 已打开、`state/` 数据已迁移 8 处；死代码 `src/core/session-router.mjs` 已删除） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 复核：`node scripts/test-session-key.mjs`、`node scripts/migrate-session-keys.mjs`（预演应为 0 处）、`npm run test:audit` | — |
 
 ---
 
@@ -114,7 +114,7 @@ npm run test:console-ui
   - 其余 key 构造点：**已迁 6 个模块**（`social/people.js` 7 处、`social/owner-relay.js`、`social/group-rules.js`、`social/memory-policy.js`、`mcp-snowluma-safe.js`、`bridge-extensions.js`、`session/mode-gate.mjs`，全部改为 `import { key } from '…/session/key.mjs'` 或 `sameSession`/`isGroupKey` 等解析助手）。形态由 `key.mjs` 的进程级设置决定，默认仍是旧形态，所以行为未变。
   - **已执行数据迁移**（2026-11-06 04:23）：先把 `config.json` 的 `platform.keyedFormat` 置为 `true` 并重启 nexus（配置备份 `config.json.bak-pre-keyed-*`），再 `node scripts/migrate-session-keys.mjs --apply` 写入 8 处，备份目录 `state.bak-2026-11-05T20-23-59-947Z`。迁移后重启，日志出现 `停用旧映射 qq:private:2897715886 -> session-c71a72c9…`，`/api/sessions` 返回空、`/api/status` 正常（`mode: reserved2`、`botAccount: 星苒`），说明新 key 已被正确读取。
   - **回滚路径**（未验证，但已具备）：`config.json` 的 `keyedFormat` 改回 `false` → `node scripts/migrate-session-keys.mjs --revert` → 重启。回滚后旧代码路径与旧数据形态重新对齐。
-  - **仍未迁**：`src/core/session-router.mjs` 8 处。它**没有被 `bridge.js` 引用**（`grep session-router src/bridge.js` 为 0），是一套独立的「会话状态机 + 规范 key」实现（自带 `session-router.test.mjs`），与 DSH 会话映射是两套。要不要迁、是否将来替换用，需要先定性，不做猜测式改动。
+  - **`src/core/` 已删除**（2026-11-06）：确认 `session-router.mjs` + `session-router.test.mjs` 是死代码——全仓库只有它自己的测试 import 它，`src/bridge.js` 与任何模块都不引用，也没有登记在 `test-audit.mjs` 里；`src/core/` 目录下再无其它文件。会话状态机与规范 key 现由 `src/session/{key,store,registry,policy,mode-gate}.mjs` 承担。历史里程碑文档 `MILESTONES.md` 里那一行保留为记录并标注已删除。
   - 迁移脚本只处理 `state/` 下的一级 `*.json`，`state/admin/*.json`、`state/social/*.json` 等子目录未纳入（当前无键，但加功能后会漏，需要在脚本里补 `**/*.json`）。
   - 备份目录 `state.bak-*` 已加进 `.gitignore`（7.7 MB，含运行时日志，不该入库）。
   - 夹具连带修复：`scripts/test-qq-model-view.mjs` 的临时 fixture 只拷被启动的 3 个文件，`mcp-snowluma-safe.js` 新依赖 `src/session/key.mjs` ⇒ 子进程 import 失败、测试报 `MCP error -32000: Connection closed`。已在该夹具里补拷 `src/session/key.mjs`（教训：给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具）。

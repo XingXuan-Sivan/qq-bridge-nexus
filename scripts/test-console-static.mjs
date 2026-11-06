@@ -258,7 +258,7 @@ ok(/wireModal\(document\.getElementById\('pluginDetailOverlay'\)/.test(pluginsMo
 
 console.log('## 组件层（3.2）');
 const componentDir = path.join(ROOT, 'public', 'console', 'components');
-for (const name of ['message', 'table', 'modal', 'search-box']) {
+for (const name of ['message', 'table', 'modal', 'search-box', 'form']) {
   ok(fs.existsSync(path.join(componentDir, name, `${name}.js`)), `组件 ${name}.js 在 components/${name}/`);
   ok(fs.existsSync(path.join(componentDir, name, `${name}.css`)), `组件 ${name}.css 与 js 同住 components/${name}/`);
 }
@@ -288,6 +288,15 @@ for (const id of ['skills', 'mcp', 'behaviors']) {
   const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
   ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的 tableHtml`);
 }
+// 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
+const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
+for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm']) {
+  ok(new RegExp(`export function ${fn}\\(`).test(formModule), `form.js 导出 ${fn}`);
+}
+const formCss = fs.readFileSync(path.join(componentDir, 'form', 'form.css'), 'utf8');
+ok(/.field-error {/.test(formCss) && /.form-actions {/.test(formCss), 'form.css 自带字段错误行与动作区样式');
+ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');
+
 const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
 const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
 ok(rawMsg.length === 0, `没有页面再手写 className='meta ok|err'（${rawMsg.join(', ') || '全部走 setMsg'}）`);

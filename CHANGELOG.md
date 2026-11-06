@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 新增：表单组件（`components/form/`）
+- 16 个控件工厂：文本、数字、密码、多行文本、下拉、单选组、多选组、单复选、开关、文件、日期、时间、日期时间、时间区间、只读展示，加动作区；全部返回 HTML 字符串，与 `components/table` 的写法一致。
+- `createForm(root, { rules, depends, onSubmit })` 内核：按类型取值（空数字是 `null` 不是 `NaN`）、字段与跨字段校验、`blur` 才报错、条件显示（隐藏字段不参与校验与提交）、提交态、`dirty()/reset()`、`setErrors()` 服务端错误回填。
+- 字段注解统一由工厂渲染：`hint`（灰）、`warn`（黄，写触发条件与后果）、`danger`（红，写清不可恢复的是什么）、`docs`（链接），另有块级 `formCallout()`。
+- 日期时间用原生控件，值格式 `YYYY-MM-DD` / `HH:mm`，按北京时间；`timeRangeField` 支持跨零点与「开始≠结束」校验。
+- 演示页 `components/form/demo.html`（不进导航）铺满 16 个控件与三类注解，同时作为 `test-console-ui` 的回归夹具：19 条断言覆盖取值/条件显示/校验/开关/脏值与 `reset`。
+
 ### 变更：控制台基础层（语义令牌、12 列栅格、输入外观改元素级）
 - `tokens.css` 新增语义别名与 `--space-1..8`/`--radius-md`/`--elevation-*`/`--text-*`/`--bp-*`；原 163 个令牌一个未改，别名用 `var()` 指向它们，深色主题自动跟随。
 - 新增 `css/grid.css`：`.cols` + `.col-1..12` + `.col-{sm,md,lg,xl}-*` + `.stack`/`.cluster`，断点与现有 760/900/1180/1500 对齐；`index.html` 中排在 `components.css` 之前。

@@ -2,7 +2,7 @@
 
 面向改 `public/console/` 的人。目标是让「同一个控件在五个地方长得不一样」不再发生，并且新增页面时先想「用哪个组件」，而不是先写一段 HTML。
 
-> 状态：**组件目录已落地**（2026-11-06）：`components/{message,modal,table,search-box}/` 已迁移完成，`/console/components/` 已放行；后续新增控件按本文第 2 节的六条规则走。
+> 状态：**组件目录已落地**（2026-11-06）：`components/{message,modal,table,search-box,form}/` 已迁移完成，`/console/components/` 已放行；后续新增控件按本文第 2 节的六条规则走。
 
 ---
 
@@ -17,7 +17,7 @@
 | `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
-| `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住（`message` / `modal` / `table` / `search-box`） |
+| `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住（`message` / `modal` / `table` / `search-box` / `form`） |
 | `public/console/css/*.css` | `tokens`（设计令牌）→ `base` → `layout` → `components` → `utilities`，**顺序即层叠顺序** |
 | `public/console/pages/<name>/` | 页面片段：`page.html` + `page.js` + `page.css`，由路由按需加载 |
 
@@ -39,7 +39,8 @@ public/console/
 │  ├─ message/{message.js,message.css}
 │  ├─ modal/{modal.js,modal.css}
 │  ├─ table/{table.js,table.css}
-│  └─ search-box/{search-box.js,search-box.css}
+│  ├─ search-box/{search-box.js,search-box.css}
+│  └─ form/{form.js,form.css,demo.html,demo.js,demo.css}
 ├─ pages/<name>/        # 页面片段（只在两页以上复用的东西才上提成组件）
 └─ img/ gate/           # 静态资源、401 门页
 ```

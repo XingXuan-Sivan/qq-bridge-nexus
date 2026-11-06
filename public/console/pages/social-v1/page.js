@@ -3,6 +3,19 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { SOCIAL_V1_FIELDS } from './fields.js';
+
+// 字段规格先渲染，后面所有 getElementById 才取得到节点。
+function renderSocialV1FieldGroups() {
+  const root = document.getElementById('section-social-v1');
+  if (!root) return;
+  root.querySelectorAll('[data-social-fields]').forEach((host) => {
+    const spec = SOCIAL_V1_FIELDS[host.dataset.socialFields];
+    if (!spec) return;
+    renderFields(host, spec.fields, { columns: 2, layout: spec.fields.some((f) => f.type === 'action') ? 'inline' : 'grid' });
+  });
+}
 
 // 只在页面加载/保存成功后填充输入框（避免自动刷新覆盖用户正在编辑的值）
 async function loadSocialForm() {
@@ -14,8 +27,7 @@ async function loadSocialForm() {
     document.getElementById('sCheckMax').value = Math.round((c.activeCheckMaxMs || 0) / 1000);
     document.getElementById('sActiveDelayMin').value = Math.round((c.activeReplyDelayMinMs || 0) / 1000);
     document.getElementById('sActiveDelayMax').value = Math.round((c.activeReplyDelayMaxMs || 0) / 1000);
-    document.getElementById('sActiveDurationEnabled').checked = c.activeDurationEnabled !== false;
-    document.getElementById('sActiveDurationMin').value = Math.round((c.activeDurationMinMs || 0) / 60000);
+    setSwitch(document.getElementById('sActiveDurationEnabled'), c.activeDurationEnabled !== false);    document.getElementById('sActiveDurationMin').value = Math.round((c.activeDurationMinMs || 0) / 60000);
     document.getElementById('sActiveDurationMax').value = Math.round((c.activeDurationMaxMs || 0) / 60000);
     document.getElementById('sIdleWindow').value = Math.round((c.idleWindowMs || 0) / 60000);
     document.getElementById('sIdleRetry').value = c.idleRetryProbability;
@@ -24,14 +36,14 @@ async function loadSocialForm() {
     document.getElementById('sSurrenderProb').value = c.surrenderProbability ?? 0.08;
     document.getElementById('sContextWindow').value = c.contextWindow;
     document.getElementById('sMaxChars').value = c.maxReplyChars ?? 500;
-    document.getElementById('sBurstEnabled').checked = c.burstEnabled !== false;
+    setSwitch(document.getElementById('sBurstEnabled'), c.burstEnabled !== false);
     document.getElementById('sBurstIntervalMin').value = c.burstIntervalMinMs ?? 1000;
     document.getElementById('sBurstIntervalMax').value = c.burstIntervalMaxMs ?? 3000;
     document.getElementById('sLongGapProb').value = c.longGapProbability ?? 0.1;
     document.getElementById('sLongGapMin').value = c.longGapMinMs ?? 2500;
     document.getElementById('sLongGapMax').value = c.longGapMaxMs ?? 5000;
     document.getElementById('sKeywords').value = (c.mustReplyKeywords || []).join(', ');
-    document.getElementById('sProactiveEnabled').checked = c.proactiveEnabled !== false;
+    setSwitch(document.getElementById('sProactiveEnabled'), c.proactiveEnabled !== false);
     document.getElementById('sProactiveIdle').value = Math.round((c.proactiveIdleThresholdMs || 0) / 60000);
     document.getElementById('sProactiveCheckMin').value = Math.round((c.proactiveCheckMinMs || 0) / 60000);
     document.getElementById('sProactiveCheckMax').value = Math.round((c.proactiveCheckMaxMs || 0) / 60000);
@@ -71,11 +83,14 @@ async function setSocialPhase(phase) {
   if (!key) { alert('请先选择会话'); return; }
   const r = await api('/api/social/state', 'POST', { key, phase });
   document.getElementById('socialMsg').textContent = r.ok ? ('✅ 已设为' + (phase === 'active' ? '活跃' : '观望')) : ('❌ ' + (r.error || '失败'));
-  document.getElementById('socialMsg').className = r.ok ? 'meta ok' : 'meta err';
+  document.getElementById('socialMsg').className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
   refreshSocialStatus();
 }
 
 export function init() {
+  renderSocialV1FieldGroups();
+  // 开关是 <button role="switch">，点击委托必须显式绑（不绑就点不动）。
+  bindSwitches(document.getElementById('section-social-v1'));
   document.getElementById('socialSave').addEventListener('click', async () => {
     const n = (id) => Number(document.getElementById(id).value);
     const r = await api('/api/social', 'POST', {
@@ -84,7 +99,7 @@ export function init() {
       activeCheckMaxMs: Math.max(5, n('sCheckMax')) * 1000,
       activeReplyDelayMinMs: Math.max(0, n('sActiveDelayMin')) * 1000,
       activeReplyDelayMaxMs: Math.max(0, n('sActiveDelayMax')) * 1000,
-      activeDurationEnabled: document.getElementById('sActiveDurationEnabled').checked,
+      activeDurationEnabled: getSwitch(document.getElementById('sActiveDurationEnabled')),
       activeDurationMinMs: Math.max(1, n('sActiveDurationMin')) * 60000,
       activeDurationMaxMs: Math.max(1, n('sActiveDurationMax')) * 60000,
       idleWindowMs: Math.max(1, n('sIdleWindow')) * 60000,
@@ -94,27 +109,27 @@ export function init() {
       surrenderProbability: Math.min(1, Math.max(0, n('sSurrenderProb'))),
       contextWindow: Math.min(100, Math.max(1, n('sContextWindow'))),
       maxReplyChars: Math.max(1, n('sMaxChars')),
-      burstEnabled: document.getElementById('sBurstEnabled').checked,
+      burstEnabled: getSwitch(document.getElementById('sBurstEnabled')),
       burstIntervalMinMs: Math.max(0, n('sBurstIntervalMin')),
       burstIntervalMaxMs: Math.max(0, n('sBurstIntervalMax')),
       longGapProbability: Math.min(1, Math.max(0, n('sLongGapProb'))),
       longGapMinMs: Math.max(0, n('sLongGapMin')),
       longGapMaxMs: Math.max(0, n('sLongGapMax')),
       mustReplyKeywords: document.getElementById('sKeywords').value.split(/[,，]/).map(x => x.trim()).filter(Boolean),
-      proactiveEnabled: document.getElementById('sProactiveEnabled').checked,
+      proactiveEnabled: getSwitch(document.getElementById('sProactiveEnabled')),
       proactiveIdleThresholdMs: Math.max(1, n('sProactiveIdle')) * 60000,
       proactiveCheckMinMs: Math.max(1, n('sProactiveCheckMin')) * 60000,
       proactiveCheckMaxMs: Math.max(1, n('sProactiveCheckMax')) * 60000,
       proactiveProbability: Math.min(1, Math.max(0, n('sProactiveProb')))
     });
     document.getElementById('socialMsg').textContent = r.ok ? '✅ 已保存' : ('❌ ' + (r.error || '失败'));
-    document.getElementById('socialMsg').className = r.ok ? 'meta ok' : 'meta err';
+    document.getElementById('socialMsg').className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
     if (r.ok) { loadSocialForm(); refreshSocialStatus(); }
   });
   document.getElementById('socialFlush').addEventListener('click', async () => {
     const r = await api('/api/social/flush', 'POST', {});
     document.getElementById('socialMsg').textContent = r.ok ? '✅ 已触发摘要投喂' : ('❌ ' + (r.error || '失败'));
-    document.getElementById('socialMsg').className = r.ok ? 'meta ok' : 'meta err';
+    document.getElementById('socialMsg').className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
   });
   document.getElementById('sStateActive').addEventListener('click', () => setSocialPhase('active'));
   document.getElementById('sStateIdle').addEventListener('click', () => setSocialPhase('idle'));

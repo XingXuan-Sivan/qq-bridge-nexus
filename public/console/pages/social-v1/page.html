@@ -1,102 +1,40 @@
-      <h2>一代仿真模式（reserved）</h2>
-      <div class="meta" id="socialStatus">加载中…</div>
-
-      <div class="row u-mt-10">
-        <label class="u-flex-1">普通消息触发概率（观望期）</label><input class="u-w-80" type="number" id="sTrigger" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">活跃检测间隔（秒）</label>
-        <input class="u-w-70" type="number" id="sCheckMin" min="5"> ~
-        <input class="u-w-70" type="number" id="sCheckMax" min="5">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">活跃回复延迟（秒）</label>
-        <input class="u-w-70" type="number" id="sActiveDelayMin" min="0"> ~
-        <input class="u-w-70" type="number" id="sActiveDelayMax" min="0">
-      </div>
-      <details class="settings-group"><summary>群聊活跃超时主动退出</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">启用</label><input class="u-w-auto" type="checkbox" id="sActiveDurationEnabled">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">活跃最长持续时间（分）</label>
-        <input class="u-w-70" type="number" id="sActiveDurationMin" min="1"> ~
-        <input class="u-w-70" type="number" id="sActiveDurationMax" min="1">
-      </div>
-      <div class="meta">从进入群聊活跃那一刻起随机取一个时长；到点后即使群里还在聊，也会提示 AI 说一句收尾话并回到观望。私聊不自动退场。</div>
-
-      <div class="row">
-        <label class="u-flex-1">冷场窗口（分）</label><input class="u-w-80" type="number" id="sIdleWindow" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">冷场试探概率</label><input class="u-w-80" type="number" id="sIdleRetry" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">试探等待窗口（分）</label><input class="u-w-80" type="number" id="sIdleWait" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">普通消息沉默概率</label><input class="u-w-80" type="number" id="sSkipProb" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">抬杠时退让概率</label><input class="u-w-80" type="number" id="sSurrenderProb" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">附带上下文条数</label><input class="u-w-80" type="number" id="sContextWindow" min="1" max="100">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">单条消息长度上限（字）</label><input class="u-w-80" type="number" id="sMaxChars" min="1">
+      <div class="card span-all">
+        <div class="card-head">
+          <h2>一代仿真模式（reserved）</h2>
+        </div>
+        <div class="meta">按空格分句、按概率参与；进入活跃后每隔一会儿批量看消息，冷场再退回观望。参数改完点底部「保存社交配置」。</div>
+        <div class="meta" id="socialStatus">加载中…</div>
+        <div data-social-fields="core"></div>
       </div>
 
-      </div></details>
-<details class="settings-group"><summary>分条发送（按空格分句）</summary><div class="settings-content">
-      <div class="meta u-mb-8">AI 用空格表示“分成下一条消息”；中英文/数字之间的空格也会被当成分条信号，不想分条就不要加空格、用标点连接。单条只做安全长度上限，不再限制条数。</div>
-      <div class="row">
-        <label class="u-flex-1">启用分条发送</label><input class="u-w-auto" type="checkbox" id="sBurstEnabled">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">条间间隔（毫秒）</label>
-        <input class="u-w-70" type="number" id="sBurstIntervalMin" min="0"> ~
-        <input class="u-w-70" type="number" id="sBurstIntervalMax" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">长间隔概率</label><input class="u-w-80" type="number" id="sLongGapProb" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">长间隔范围（毫秒）</label>
-        <input class="u-w-70" type="number" id="sLongGapMin" min="0"> ~
-        <input class="u-w-70" type="number" id="sLongGapMax" min="0">
-      </div>
-      <label>必回关键词（逗号分隔）</label>
-      <input type="text" id="sKeywords" placeholder="deepseek, 在吗">
+      <details class="settings-group span-all" data-group="timeout">
+        <summary>群聊活跃超时主动退出</summary>
+        <div class="settings-content">
+          <div data-social-fields="timeout"></div>
+          <div class="meta">从进入群聊活跃那一刻起随机取一个时长；到点后即使群里还在聊，也会提示 AI 说一句收尾话并回到观望。私聊不自动退场。</div>
+        </div>
+      </details>
 
-      </div></details>
-<details class="settings-group"><summary>主动开话题（观望期第三种触发）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">启用主动开话题</label><input class="u-w-auto" type="checkbox" id="sProactiveEnabled">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">群安静多久判定（分）</label><input class="u-w-80" type="number" id="sProactiveIdle" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">判定间隔（分）</label>
-        <input class="u-w-70" type="number" id="sProactiveCheckMin" min="1"> ~
-        <input class="u-w-70" type="number" id="sProactiveCheckMax" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">判定成功概率</label><input class="u-w-80" type="number" id="sProactiveProb" step="0.05" min="0" max="1">
-      </div>
+      <details class="settings-group span-all" data-group="burst">
+        <summary>分条发送（按空格分句）</summary>
+        <div class="settings-content">
+          <div data-social-fields="burst"></div>
+          <div class="meta">AI 用空格表示「分成下一条消息」；中英文/数字之间的空格也会被当成分条信号，不想分条就不要加空格、用标点连接。单条只做安全长度上限，不再限制条数。</div>
+        </div>
+      </details>
 
-</div></details>
-    <div class="save-bar">
-      <div class="row u-mt-10">
-        <button id="socialSave">保存社交配置</button>
-        <button id="socialFlush">立刻投喂摘要</button>
-        <span class="meta" id="socialMsg"></span>
+      <details class="settings-group span-all" data-group="proactive">
+        <summary>主动开话题（观望期第三种触发）</summary>
+        <div class="settings-content">
+          <div data-social-fields="proactive"></div>
+        </div>
+      </details>
+
+      <div class="card span-all">
+        <div class="card-head">
+          <h3>保存与手动切换</h3>
+        </div>
+        <div data-social-fields="actions"></div>
+        <div data-social-fields="state"></div>
+        <div class="meta">一代仿真模式状态机：观望期按「明确点名 / 小概率」触发进入活跃；活跃期每隔一会儿批量查看新消息并回应；群聊活跃超过随机上限会主动提示 AI 收尾退场；冷场后大概率回观望、小概率让 AI 试探一句。可手动强制切换状态。</div>
       </div>
-      <div class="row u-mt-10">
-        <select class="u-flex-1" id="sStateKey"><option value="">选择会话</option></select>
-        <button id="sStateActive" class="small">设为活跃</button>
-        <button id="sStateIdle" class="small">设为观望</button>
-      </div>
-      <div class="meta">一代仿真模式状态机：观望期按“明确点名 / 小概率”触发进入活跃；活跃期每 10~20 秒批量查看新消息并回应；群聊活跃超过随机上限会主动提示 AI 收尾退场；冷场后大概率回观望、小概率让 AI 试探一句。可手动强制切换状态。</div>
-    </div>

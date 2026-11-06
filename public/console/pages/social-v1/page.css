@@ -1,1 +1,13 @@
-/* social-v1 页面样式暂全部沿用公共 css/app.css；后续如需页面专属样式再放这里。 */
+/* 一代仿真页私有样式：都是「数值很小、标签在左」的字段，收一下输入框宽度。 */
+.field-control > input[type="number"] { max-width: 160px; }
+
+/* 区间行：起始 ～ 结束 [+ 单位] */
+.s1-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.s1-range input[type="number"] {
+  width: 96px;
+  flex: 0 0 auto;
+}

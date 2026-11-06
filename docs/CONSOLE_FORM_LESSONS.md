@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 三十九个真实踩过的坑
+## 1. 四十个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -219,6 +219,12 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 ```
 
 同理，「全选本页」要按 `tbody tr:not([hidden])` 取行，否则会把其它页/被筛掉的行一起勾上。
+
+### 1.40 状态块塞进 `.card-head` 会撑成两行；长标签在 148px 列里会折行
+
+`social-v1` 迁移时把 `<span class="status-badge" id="socialStatus">` 放在 `.card-head` 里，而它的内容是「摘要缓冲: 无 / 状态: 暂无（发过消息的群会显示状态）」这种长文本——`.card-head` 是 `flex + justify-content:space-between`，于是标题被挤到左边、状态块自己换行占满右侧，卡头高了一倍。状态类文本要么是短徽标（`is-pill` + 两三个字），要么单独一行 `<div class="meta">`，不要放进卡头。
+
+同一页还有 5 个超过 148px 标签列宽度的字段名（「普通消息触发概率（观望期）」之类），实测在标签列里折成两行、把整行撑高，视觉上像错位。约定：**标签只写名词，限定条件放 `hint`**（「触发概率」+ hint「观望期收到普通消息时，按这个概率决定是否回应」），单位放控件后缀（`.field-unit`）而不是标签括号里。
 
 ## 2. 迁移一个页面的检查清单
 

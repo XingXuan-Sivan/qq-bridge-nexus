@@ -55,6 +55,20 @@
 .table-toolbar .search-box {
   height: var(--control-h, 40px);
 }
+/* 全局 select 是 width:100%（表单里要占满一行），工具栏里必须按内容收窄。
+   2026-11-07 会话页接入平台/类型筛选时踩到：不写这条，两个下拉各占一整行，工具栏被撑成三行。 */
+.table-toolbar .table-filter {
+  width: auto;
+  min-width: 116px;
+  flex: 0 0 auto;
+}
+/* 下拉框被 initSelects 包成 .select-wrap（表单里 width:100%）：工具栏里要按内容收窄，
+   否则每个筛选器都占满一整行——同一条规则在 2026-11-07 会话页踩过。 */
+.table-toolbar .select-wrap {
+  width: auto;
+  min-width: 116px;
+  flex: 0 0 auto;
+}
 .table-toolbar-meta {
   font-size: 12px;
   color: var(--muted);

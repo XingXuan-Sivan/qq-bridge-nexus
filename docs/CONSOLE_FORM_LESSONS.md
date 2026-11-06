@@ -244,6 +244,12 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 - 切片只用来断言**页面结构**（宿主 div、卡片标题），控件是否存在改在整份 `readConsoleSource()` 里找；
 - 工厂生成的控件源码里只有 `name: 'x'`（渲染时才变成 id），断言要接受 `id="x"` / `name: 'x'` / `id: 'x'` 三种写法（与 1.18 同一个坑，这里是切片版本）。
 
+### 1.43 工具栏筛选器：`.table-filter` 与 `.select-wrap` 都要按内容收窄
+
+全局 `select { width:100% }` 是给表单用的；`dataTableHtml` 的 `filters` 放在 `.table-toolbar-main` 里，若不收窄，每个下拉占满一整行，工具栏被撑成三行（会话页 2026-11-07 实际踩到）。而且 `initSelects()` 会把每个 `<select>` 包进 `.select-wrap`（默认 `display:block;width:100%`），只给 `select` 写 `width:auto` 仍然不够——箭头会跑到整行最右边。
+
+**规则**：`components/table/table.css` 里同时写 `.table-toolbar .table-filter { width:auto; min-width:116px; flex:0 0 auto }` 与 `.table-toolbar .select-wrap { width:auto; min-width:116px; flex:0 0 auto }`。新页接筛选器时先看一眼工具栏是不是一行。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -294,6 +300,6 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 
 **骨架已经定了**（`docs/CONSOLE_FORMS.md`「一个页面的固定骨架」+ `scheduler` 样板）：`page-stack` 宿主 + 每张卡 `span-all` + 页头 `.form-inline-bar`（左字段 / 右状态徽标 + 动作）+ 列表卡 `.card-head` + 表格走 `dataTableHtml` + 折叠组走 `settings-group` + `initGroups` 记忆。逐页迁移只换内容，不再各自发明结构。
 
-1. `social-v1`（32，与 v2 同构，可复用字段清单）→ 2. `overview`（32，卡片式，注意裸 `button` 与 `metric`）→ 3. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）→ 4. `plugins`（16，四组折叠 + 详情弹窗）→ 5. `usage`（14，三张手写表 + 两个图表）→ 6. `access`（12）→ 7. `operations`（10）→ 8. `sessions`（10，两张表 + 重命名弹窗）→ 9. `mcp` / `skills` / `reference`（0–1 个控件，随功能顺带）。
-`persona`（27→0）、`slang`（36→0）、`scheduler`（28→0）已迁完。
+1. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）→ 2. `plugins`（16，四组折叠 + 详情弹窗）→ 3. `usage`（14，三张手写表 + 两个图表）。
+`social-v2`（38→0）、`scheduler`（28→0）、`persona`（27→0）、`slang`（36→0）、`social-v1`（28→0）、`overview`（32→0）、`operations`（10→0）、`sessions`（10→0）、`access`（12→0）与三个只读清单页（`mcp`/`skills`/`reference`）已迁完。
 每迁一页：`BARE_CONTROL_BASELINE` 该页改 0、`STATUS` 第 14 行更新数字、截图存档；一页一提交，不要攒。

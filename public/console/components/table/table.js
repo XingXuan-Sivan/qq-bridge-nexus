@@ -15,7 +15,14 @@ const PAGE_SIZES = [10, 20, 50];
  */
 export function tableHtml(columns, rows) {
   const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
-  const body = rows.map((cells) => `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('');
+  // 行可以只给单元格数组，也可以给 `{ cells, attrs }`：attrs 落到 <tr> 上，
+  // 供工具栏的筛选器按 data-filter-<id> 读取（例如会话页按平台 / 类型筛）。
+  const body = rows.map((row) => {
+    const cells = Array.isArray(row) ? row : row.cells;
+    const attrs = Array.isArray(row) ? '' : Object.entries(row.attrs || {})
+      .map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('');
+    return `<tr${attrs}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
+  }).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
 

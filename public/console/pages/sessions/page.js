@@ -6,8 +6,10 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
-import { bindSearchBox } from '../../components/search-box/search-box.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { renderFields } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { SESSIONS_FIELDS } from './fields.js';
 
 const MODE_LABEL = {
   chat: '聊天模式',
@@ -51,62 +53,64 @@ function whenCell(ts) {
   return esc(`${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
 }
 
-// 平台下拉按数据现算：出现哪些平台就列哪些，不写死 qq。
-function syncPlatformOptions() {
-  const select = document.getElementById('sessionsPlatform');
-  if (!select) return;
-  const current = select.value || 'all';
+// 平台下拉按数据现算：出现哪些平台就列哪些，不写死 qq。筛选本身交给 dataTableHtml 的 filters。
+function platformOptions() {
   const platforms = [...new Set(sessionsCache.map(platformOf))].sort();
-  const options = ['<option value="all">全部平台</option>']
-    .concat(platforms.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`));
-  select.innerHTML = options.join('');
-  select.value = current === 'all' || platforms.includes(current) ? current : 'all';
-}
-
-function filteredSessions() {
-  const platform = document.getElementById('sessionsPlatform')?.value || 'all';
-  const kind = document.getElementById('sessionsKind')?.value || 'all';
-  const keyword = (document.getElementById('sessionsSearch')?.value || '').trim().toLowerCase();
-  return sessionsCache.filter((entry) => {
-    if (platform !== 'all' && platformOf(entry) !== platform) return false;
-    if (kind !== 'all' && entry.kind !== kind) return false;
-    if (!keyword) return true;
-    return [entry.key, entry.id, entry.mode, entry.persona?.name, MODE_LABEL[entry.mode]]
-      .filter(Boolean).some((x) => String(x).toLowerCase().includes(keyword));
-  });
+  return [{ value: 'all', label: '全部平台' }, ...platforms.map((p) => ({ value: p, label: p }))];
 }
 
 function renderSessions() {
   const box = document.getElementById('sessionList');
-  const meta = document.getElementById('sessionsMeta');
   if (!box) return;
-  const rows = filteredSessions();
-  if (meta) meta.textContent = `共 ${sessionsCache.length} 个会话，显示 ${rows.length} 个`;
-  if (!sessionsCache.length) {
-    box.innerHTML = '<div class="empty-state"><strong>还没有会话</strong><p>白名单中的群或好友发来消息、或被唤醒后，会话会显示在这里。</p></div>';
-    return;
-  }
-  if (!rows.length) {
-    box.innerHTML = '<div class="empty-state"><strong>没有匹配的会话</strong><p>换个平台、类型或关键词试试。</p></div>';
-    return;
-  }
-  const head = '<thead><tr><th data-w="250">会话</th><th data-w="150">模式</th>'
-    + '<th data-w="170">人格</th><th data-w="70">未读</th><th data-w="100">最近唤醒</th>'
-    + '<th data-w="110">操作</th></tr></thead>';
-  const body = rows.map((entry) => {
+  const platforms = platformOptions();
+  const rows = sessionsCache.map((entry) => {
     const ownerTag = entry.owner ? ' <span class="pill r">管理员</span>' : '';
     const platformTag = `<span class="pill">${esc(platformOf(entry))}</span>`;
     const unread = entry.unread ? `<span class="pill r">${entry.unread}</span>` : '<span class="meta">0</span>';
-    return `<tr>`
-      + `<td><strong>${esc(entry.key)}</strong> ${platformTag}${kindPill(entry)}${ownerTag}</td>`
-      + `<td>${modeCell(entry)}</td>`
-      + `<td>${personaCell(entry)}</td>`
-      + `<td>${unread}</td>`
-      + `<td>${whenCell(entry.lastWakeAt)}</td>`
-      + `<td><button class="small" data-rename-key="${esc(entry.key)}">改名</button></td>`
-      + `</tr>`;
-  }).join('');
-  box.innerHTML = `<table>${head}<tbody>${body}</tbody></table>`;
+    return {
+      cells: [
+        `<strong>${esc(entry.key)}</strong> ${platformTag}${kindPill(entry)}${ownerTag}`,
+        modeCell(entry),
+        personaCell(entry),
+        unread,
+        whenCell(entry.lastWakeAt),
+        `<button type="button" class="btn small" data-rename-key="${esc(entry.key)}">改名</button>`,
+      ],
+      attrs: { 'data-filter-platform': platformOf(entry), 'data-filter-kind': entry.kind || '' },
+    };
+  });
+  box.innerHTML = dataTableHtml({
+    columns: [
+      { label: '会话', width: '250px' },
+      { label: '模式', width: '150px' },
+      { label: '人格', width: '170px' },
+      { label: '未读', width: '70px' },
+      { label: '最近唤醒', width: '100px' },
+      { label: '操作', width: '110px' },
+    ],
+    rows,
+    pageSize: 20,
+    search: { placeholder: '搜索会话、模式或人格…' },
+    refresh: true,
+    filters: [
+      {
+        id: 'platform',
+        label: '平台',
+        options: platforms,
+      },
+      {
+        id: 'kind',
+        label: '类型',
+        options: [
+          { value: 'all', label: '全部类型' },
+          { value: 'group', label: '仅群聊' },
+          { value: 'private', label: '仅私聊' },
+        ],
+      },
+    ],
+    empty: '还没有会话：白名单中的群或好友发来消息、或被唤醒后，会话会显示在这里。',
+  });
+  initDataTables(box, { onRefresh: refreshSessions });
 
   box.querySelectorAll('[data-rename-key]').forEach((btn) => btn.addEventListener('click', () => {
     openRename(btn.dataset.renameKey);
@@ -121,7 +125,6 @@ async function refreshSessions() {
     if (metric) metric.textContent = sessionsCache.length;
     const tabCount = document.getElementById('sessionsTabCount');
     if (tabCount) tabCount.textContent = String(sessionsCache.length);
-    syncPlatformOptions();
     renderSessions();
   } catch (error) {
     const box = document.getElementById('sessionList');
@@ -131,22 +134,22 @@ async function refreshSessions() {
 
 function renderPending(rows) {
   const box = document.getElementById('pendingList');
-  const meta = document.getElementById('pendingMeta');
   if (!box) return;
-  if (meta) meta.textContent = rows.length ? `共 ${rows.length} 条待处理` : '没有待处理请求';
-  if (!rows.length) {
-    box.innerHTML = '<div class="empty-state"><strong>暂时没有待处理请求</strong><p>AI 的提问或工具审批会出现在这里，请前往对应 QQ 会话回复。</p></div>';
-    return;
-  }
-  const head = '<thead><tr><th data-w="250">会话</th><th data-w="90">类型</th><th>详情</th></tr></thead>';
   const body = rows.map((x) => {
     const kind = x.kind === 'approval' ? '<span class="pill r">审批</span>' : '<span class="pill b">提问</span>';
     let detail = '';
     if (x.kind === 'approval') detail = `${esc(x.toolName || '')}${x.reason ? '：' + esc(x.reason) : ''}`;
     else if (Array.isArray(x.questions)) detail = x.questions.map((q) => esc(q.question)).join(' / ');
-    return `<tr><td><strong>${esc(x.key)}</strong></td><td>${kind}</td><td>${detail || '<span class="meta">—</span>'}</td></tr>`;
-  }).join('');
-  box.innerHTML = `<table>${head}<tbody>${body}</tbody></table>`;
+    return [`<strong>${esc(x.key)}</strong>`, kind, detail || '<span class="meta">—</span>'];
+  });
+  box.innerHTML = dataTableHtml({
+    columns: [{ label: '会话', width: '250px' }, { label: '类型', width: '90px' }, { label: '详情' }],
+    rows: body,
+    pageSize: 20,
+    refresh: true,
+    empty: '暂时没有待处理请求：AI 的提问或工具审批会出现在这里，请前往对应 QQ 会话回复。',
+  });
+  initDataTables(box, { onRefresh: refreshPending });
 }
 
 async function refreshPending() {
@@ -223,6 +226,13 @@ function refreshActive() {
 }
 
 export function init() {
+  // 先渲染字段规格（标签条 / 两个面板宿主 / 改名弹窗），下面取节点才不会拿到空。
+  document.querySelectorAll('[data-sessions-fields]').forEach((host) => {
+    const spec = SESSIONS_FIELDS[host.dataset.sessionsFields];
+    if (spec?.html) host.innerHTML = spec.html;
+    else if (spec?.fields) renderFields(host, spec.fields, { columns: 1 });
+  });
+
   // 弹窗必须挂在 body 上：片段在 section.card 内，.card 的滤镜会给 position:fixed 造包含块。
   const overlay = document.getElementById('sessionRenameOverlay');
   if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
@@ -231,11 +241,6 @@ export function init() {
   document.querySelectorAll('[data-sessions-tab]').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.sessionsTab));
   });
-  document.getElementById('sessionsRefresh')?.addEventListener('click', refreshSessions);
-  document.getElementById('pendingRefresh')?.addEventListener('click', refreshPending);
-  document.getElementById('sessionsPlatform')?.addEventListener('change', renderSessions);
-  document.getElementById('sessionsKind')?.addEventListener('change', renderSessions);
-  bindSearchBox('sessionsSearch', renderSessions);
   document.getElementById('sessionRenameSave')?.addEventListener('click', saveRename);
   document.getElementById('sessionRenameCancel')?.addEventListener('click', () => closeModal(overlay));
   document.getElementById('sessionRenameInput')?.addEventListener('keydown', (event) => {

@@ -1,0 +1,22 @@
+/* 搜索框外观（search-box）：右上角全局搜索与页面内搜索共用同一套。
+   写成 input.search-box 而不是依赖 input[type=…]：类型属性缺一个就退回浏览器默认描边。 */
+input.search-box {
+  background: var(--surface);
+  border: 1px solid var(--border-input);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text);
+  appearance: none;
+  -webkit-appearance: none;
+}
+/* Safari/Edge 的原生搜索装饰（清除按钮与放大镜）会破坏统一外观，隐藏掉。 */
+input.search-box::-webkit-search-decoration,
+input.search-box::-webkit-search-cancel-button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+input.search-box::placeholder { color: var(--placeholder); }
+/* 窄版：工具栏里的小搜索框。用 input.search-box--w240 而不是通用 .u-maxw-240，
+   因为基础输入规则的 input[type=search]（特异性 0,1,1）会把 max-width:100% 盖回来。 */
+input.search-box--w240 { max-width: 240px; }

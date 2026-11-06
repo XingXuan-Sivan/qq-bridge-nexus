@@ -3,7 +3,8 @@
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
-import { tableHtml } from '../../js/components/table.js';
+import { tableHtml } from '../../components/table/table.js';
+import { bindSearchBox } from '../../components/search-box/search-box.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
@@ -94,7 +95,7 @@ export function init() {
   document.getElementById('behaviorsFilter')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });
   document.getElementById('behaviorsPermission')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });
   let searchTimer = null;
-  document.getElementById('behaviorsSearch')?.addEventListener('input', () => {
+  bindSearchBox('behaviorsSearch', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { refreshBehaviors().catch(() => {}); }, 180);
   });

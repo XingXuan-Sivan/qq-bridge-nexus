@@ -1,5 +1,6 @@
 // 页面统一的操作反馈：把「设文本 + 设配色类」这一对动作收在一处。
 // 约定：元素必须已在 DOM 里（片段页的 init 之后才调），kind 决定配色（ok / err / info）。
+// 样式同住本目录 message.css，不依赖组件外部的 .ok/.err 顺序。
 
 /**
  * @param {Element|string|null} target 元素或元素 id

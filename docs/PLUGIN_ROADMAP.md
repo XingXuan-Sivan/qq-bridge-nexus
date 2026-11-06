@@ -444,7 +444,7 @@ public/console/
 
 
 
-### 8.9 控制台前端组件化（计划，2026-11-06 立项）
+### 8.9 控制台前端组件化（步骤 1–2 已完成，2026-11-06 立项）
 
 **问题**：同一个控件在多处长得不一样，且组件「js 在 `js/components/`、样式在 `css/components.css`」分家。搜索框是最典型的例子——页面里的五个搜索框漏写 `type` 属性，`input[type=text]` 的基础外观规则整条不命中，退回浏览器默认描边；全局搜索有 `type="search"` 所以是「正确」的那一个。**这不是审美问题，是选择器写法的坑**。
 
@@ -457,6 +457,8 @@ public/console/
 5. 约定「页面专属组件先留在页内，第二次复用才上提」，避免 `components/` 变杂物间。
 
 **顺序**：先 1–2（骨架与白名单）→ 再 3（组件落在新目录）→ 再 4。只有一次搬迁。
+
+**进度（2026-11-06）**：1、2、3、4 全部完成——`components/{message,modal,table,search-box}/` 已落地，`src/bridge.js` 的放行正则已含 `components`，6 处搜索框已替换并补 `type="search"`，静态断言已加；窄版曾用 `u-maxw-240` 踩到一次特异性坑（`input[type=search]` 的 `max-width:100%` 盖掉工具类），已改走组件自己的 `input.search-box--w240`。剩余精力转到「其余控件按第 5 条逐步上提」。
 
 **判据**：全站页面零 404（Network 无红）；三页与右上角搜索框在 1440 宽下描边/圆角/高度/字号一致（截图比对）；`test-console-static` 通过、`test-console-ui` 契约基线不变（说明只是搬家）。
 
@@ -576,6 +578,5 @@ public/console/
 5. 控制台折叠面板统一 `<details class="settings-group"><summary>…</summary><div class="settings-content">…</div></details>`：内容必须包在 `.settings-content` 里，否则没有内距、会贴着边框；内层小折叠用 `<details class="settings-sub">`，别再手写 padding。
 6. 控制台列表与工具栏统一：卡片列表用 `.tile-list` + `.tile`（人格卡与插件卡同一套间距，`gap:10px`、`margin:10px 0 4px`、tile 内距 `13px 15px`）；表格列表用 `.tool-log-table`（自带 `margin-top:12px`），外层不要再叠加内联 `margin-top`；h2 下与列表前的工具栏行用 `class="row" style="margin-top:8px"`。新增页面先对照人格页的间距，不要自造网格或 padding。
 7. 阶段收尾先对 [STATUS.md](STATUS.md)：未完项、`Partial` 差什么、`Blocked` 等什么都写在那张表里；只有判据全部满足才改成 `Done`，不允许只在汇报里说「已完成」。
-8. 控制台搜索框统一用 `class="search-box"`（宽度仍用 `u-maxw-240` / `u-flex-1` 之类的工具类）：它与右上角全局搜索共用 `components.css` 里的 `.search-wrap input,input.search-box` 一条规则（`10px` 圆角、`12px` 字号）。不要再用裸 `<input>` 走默认外观——那是给普通表单字段的 8px/13px。
-   **过渡期说明**：这条规则是临时方案，`search-box` 组件（路线图 §8.9）落地后会改成 `searchBoxHtml()` + `class="searchbox"`，届时本条的类名与写法一并替换，不要再新增手写的 `search-box`。
+8. 控制台搜索框统一用 `components/search-box` 组件：HTML 由 `searchBoxHtml({ id, placeholder })` 产出（固定 `type="search" class="search-box"`），行为用 `bindSearchBox()` 绑定；外观只在 `components/search-box/search-box.css` 定义，窄版用 `input.search-box--w240`（**不要**用 `u-maxw-240`，它会被 `input[type=search]` 的 `max-width:100%` 盖掉）。不要再手写 `<input class="search-box">`。
 9. 新增控件先查 `components/` 有没有现成的；没有就先在页内实现，出现第二个使用者再上提到 `components/<name>/`（js 与 css 同住、css 自包含、不自带全局重置）。写外观样式时**不要用 `input[type=…]` 这类靠标签属性命中的选择器当组件外观来源**——漏写属性就会退回浏览器默认样式（搜索框就是这么坏的）。

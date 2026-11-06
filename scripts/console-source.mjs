@@ -18,7 +18,24 @@ export function consoleSourcePaths(root = ROOT) {
     jsDir: path.join(dir, 'js'),
     js: path.join(dir, 'js', 'app.js'),
     pagesDir: path.join(dir, 'pages'),
+    componentsDir: path.join(dir, 'components'),
   };
+}
+
+/** 组件目录：components/<name>/{<name>.js,<name>.css}（docs/CONSOLE_UI.md：js 与 css 同住）。 */
+export function consoleComponentFiles(root = ROOT) {
+  const { componentsDir } = consoleSourcePaths(root);
+  let names = [];
+  try { names = fs.readdirSync(componentsDir, { withFileTypes: true }); } catch { return { css: [], js: [] }; }
+  const css = [];
+  const js = [];
+  for (const entry of names.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const name of ['css', 'js']) {
+      const file = path.join(componentsDir, entry.name, `${entry.name}.${name}`);
+      if (fs.existsSync(file)) (name === 'css' ? css : js).push(file);
+    }
+  }
+  return { css, js };
 }
 
 /** js/ 下所有模块（按文件名排序，入口 app.js 排在最前）：拆模块后测试仍能一次读到全部源码。 */
@@ -58,8 +75,9 @@ export function readConsoleSource(root = ROOT) {
       throw new Error(`控制台源码缺失：${label}（${file}）：${error?.message ?? error}`);
     }
   };
-  const styles = paths.css.map((file) => read(file, path.relative(paths.dir, file)));
-  const scripts = consoleScriptPaths(root).map((file) => read(file, path.basename(file)));
+  const componentFiles = consoleComponentFiles(root);
+  const styles = [...paths.css, ...componentFiles.css].map((file) => read(file, path.relative(paths.dir, file)));
+  const scripts = [...consoleScriptPaths(root), ...componentFiles.js].map((file) => read(file, path.basename(file)));
   const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js]
     .filter(Boolean)
     .map((file) => read(file, path.relative(paths.dir, file))));

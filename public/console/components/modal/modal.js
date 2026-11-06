@@ -1,6 +1,7 @@
 // 弹窗组件：统一「.open 类 + Esc 关闭 + 点遮罩关闭」这套行为。
 // 约定：遮罩节点由页面 HTML 提供（id 自定），且必须挂在 document.body 上——
 // 片段被注入在 section.card 里，.card 的动画/滤镜会给 position:fixed 造包含块。
+// 样式同住本目录 modal.css（.modal-overlay / .modal 系列）。
 
 export function openModal(overlay) {
   if (!overlay) return false;

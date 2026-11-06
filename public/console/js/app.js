@@ -3,7 +3,7 @@
 import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
-import { setMsg } from './components/message.js';
+import { setMsg } from '../components/message/message.js';
 
 bootstrapConsoleToken();
 

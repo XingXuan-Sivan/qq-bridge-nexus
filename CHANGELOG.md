@@ -5,6 +5,12 @@
 
 ## 未发布
 
+### 变更：控制台组件目录化，搜索框外观收口到组件
+- 新增 `public/console/components/<name>/{<name>.js,<name>.css}`：`message` / `modal` / `table` 从 `js/components/` 与 `css/components.css` 迁入，js 与 css 同住；`index.html` 逐个 `<link>` 组件样式，`src/bridge.js` 的静态放行加 `components`。
+- 新增 `search-box` 组件：`searchBoxHtml()` / `bindSearchBox()`；6 处搜索框统一成 `type="search" class="search-box"`，删掉 `components.css` 里的 `.search-wrap input,input.search-box` 组合规则。
+- 修掉「页面里的搜索框没有外观」的根因：漏写 `type` 导致 `input[type=…]` 基础规则不命中。窄版宽度改用组件自己的 `input.search-box--w240`（通用 `.u-maxw-240` 会被 `input[type=search]` 的 `max-width:100%` 盖掉）。
+- `scripts/test-console-static.mjs` 增组件目录、样式归属、`type="search"` 三类断言；`scripts/console-ui-fixture.mjs` 与 `scripts/console-source.mjs` 同步支持 `components/`。
+
 ### 修复：soulkit 人格卡按 key 形态读不到
 - soulkit 的绑定按 `<group|private>:<id>` 存，而桥接的会话 key 是 `<platform>:<kind>:<id>`；`plugins/soulkit-persona` 直接把带平台前缀的 key 传过去，`/api/persona/card` 一律回 `mode: "none"`（表现是会话页「未挂卡」、日志 `人格卡刷新失败`）。
 - 适配器新增 `soulkitKey()`：认得出新形态就剥成 `<kind>:<id>` 再请求，认不出原样透传；**soulkit 侧未改**。

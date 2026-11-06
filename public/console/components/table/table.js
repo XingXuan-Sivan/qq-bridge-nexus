@@ -1,5 +1,6 @@
 // 静态表格组件：返回 HTML 字符串，调用方把它塞进容器（数据版用 DOM 的见页面内的 renderTable）。
-import { esc } from '../ui.js';
+// 样式同住本目录 table.css（.tool-log-table 容器 + 固定表头）。
+import { esc } from '../../js/ui.js';
 
 /**
  * @param {Array<{label:string, width?:number|string}>} columns

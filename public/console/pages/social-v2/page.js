@@ -3,7 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
-import { setMsg } from '../../js/components/message.js';
+import { setMsg } from '../../components/message/message.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;

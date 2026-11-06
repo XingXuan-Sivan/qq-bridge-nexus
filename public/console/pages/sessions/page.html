@@ -33,16 +33,21 @@
     </section>
 
     <div class="modal-overlay" id="sessionRenameOverlay">
-      <div class="modal u-maxw-720" role="dialog" aria-modal="true" aria-labelledby="sessionRenameTitle" tabindex="-1">
-        <h3 id="sessionRenameTitle">重命名会话</h3>
-        <div class="meta" id="sessionRenameWho"></div>
-        <label class="field u-mt-8"><span>标题（最多 60 字，侧栏直接显示）</span>
-          <input type="text" id="sessionRenameInput" maxlength="60" placeholder="例如：群聊·喵喵屋｜星苒">
-        </label>
-        <div class="row u-mt-8">
-          <button id="sessionRenameSave">保存</button>
-          <button id="sessionRenameCancel">取消</button>
-          <span class="meta" id="sessionRenameMsg"></span>
+      <div class="modal u-maxw-720" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="sessionRenameTitle" tabindex="-1">
+        <header class="modal-head">
+          <h3 id="sessionRenameTitle">重命名会话</h3>
+          <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body">
+          <div class="meta" id="sessionRenameWho"></div>
+          <label class="field u-mt-8"><span>标题（最多 60 字，侧栏直接显示）</span>
+            <input type="text" id="sessionRenameInput" maxlength="60" placeholder="例如：群聊·喵喵屋｜星苒">
+          </label>
         </div>
+        <footer class="modal-foot">
+          <span class="modal-status" id="sessionRenameMsg"></span>
+          <button id="sessionRenameCancel" class="btn" type="button">取消</button>
+          <button id="sessionRenameSave" class="btn primary" type="button">保存</button>
+        </footer>
       </div>
     </div>

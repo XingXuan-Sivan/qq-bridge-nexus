@@ -131,6 +131,28 @@ form.destroy();
 - 开关、单个复选框与输入框同一水平线（控件列内左对齐、40px 行高），不再单独占一行控件区。
 - 窄屏（≤760px）自动退回「标签在上、控件在下」的单列。
 - 保存类操作条 `.save-bar` 是页面内的静态块（顶部另有快捷保存按钮），不吸底、不遮挡内容。
+
+### 表单弹窗（2026-11-07 定，`scheduler` 的任务编辑器为样板）
+
+「新建 / 编辑」这类**长表单**放弹窗，不在卡片里内联展开：内联会把列表推下去、保存按钮被挤到看不见的位置，而且每页都要自己写显隐逻辑。
+
+弹窗组件是**三段式**，头尾常驻、只有主体滚动：
+
+```
+.modal-overlay#id[aria-hidden]
+  └ .modal[data-modal-panel]（宽表单加 .modal--wide，默认 680px / 宽版 960px）
+      ├ header.modal-head  > h3#title + button.modal-close[data-modal-close]
+      ├ div.modal-body     > 表单控件（唯一的滚动区，overflow:auto）
+      └ footer.modal-foot  > span.modal-status + .btn（取消）+ .btn.primary（保存）
+```
+
+- 右上角关闭按钮属于组件：用 `[data-modal-close]` 标记，`wireModal()` 会自动绑定；页面**不要**再写「关闭」按钮做唯一出口（可以保留一个文字版关闭，但不是必须）。
+- 动作按钮放 `.modal-foot`，不要塞在滚动主体里。同一条 foot 里按钮同高（`.btn` 标准 40px）；状态文字用 `.modal-status`（`ok` / `err` 变体）。
+- 遮罩节点写在 `public/console/index.html`（body 级）或页面片段所在文档的 body 级位置，**不要写进被注入的 `.card` 内**：`.card` 的动画 / 滤镜会给 `position:fixed` 造包含块，弹窗会被裁在卡片里。
+- 行为一律用 `components/modal/modal.js`：`openModal` / `closeModal` / `wireModal`（Esc、点遮罩、`[data-modal-close]`）。**不要**自己切 `hidden` 或 `display`。
+- 关闭回调里清掉「正在编辑的 id」，否则下次点「新建」会带着上一条记录的 id 走 PATCH。
+- JS 动态建弹窗时用 `modalHtml({ id, title, body, footer, wide })` 生成同样的结构，不要手拼。
+
 ### 组件选择规则（2026-11-06 定）
 
 - 单个布尔状态（启用 / 允许 / 自动 / 关闭某能力）一律用 `switchField`：`role="switch"`，文案「开 / 关」，与输入框同高。
@@ -162,7 +184,7 @@ form.destroy();
 | `custom` | `customField({ id, label, html })` | 一段复合控件（语音库面板、key + 按钮 + 状态位） | 内部排版用 `.control-row`；`label` 仍参与左列对齐 |
 | `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（权限项、少量选项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
 | `checkTable` | `checkTableField({ id, label, options, nameHeader, descHeader, search, refresh, pageSize })` | 条目多、需要逐条扫读的开关清单（工具清单） | 复用 `components/table` 的 `dataTableHtml()`（工具栏 + 表体 + 分页都在组件里，表单不自带表格样式）；取值同样为字符串数组；`id` 落在容器 `div` 上；字段写 `span: 2`；表格行同样顶对齐 |
-| `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位 |
+| `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位；**默认标准档 40px**，卡片头 / 表格行这类紧凑位置才写 `small: true`（32px） |
 | `status` | `statusBadge({ text, tone, pill })` | 只读状态（`运行中`） | 页头固定高度位置用 `pill: true` |
 
 ### 一个「表格整体」的固定结构（2026-11-06 落地）

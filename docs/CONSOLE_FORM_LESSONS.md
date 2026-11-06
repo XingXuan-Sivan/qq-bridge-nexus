@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 二十六个真实踩过的坑
+## 1. 二十七个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -112,6 +112,11 @@
 `switchField()` 渲染的是 `<button type="button" role="switch" aria-checked>`，切换逻辑原本只挂在 `createForm()` 的点击委托里。`scheduler` 整页字段用 `renderFields` 渲染、没调 `createForm`，于是三个后果叠在一起：点击毫无反应；`el.checked = true` 只是给 button 加了个无意义的属性（视觉不变）；`el.checked` 读回来是 `undefined`，保存时把 `enabled` 写成了 `false`——而徽标仍按服务端的真实值显示「运行中」，看起来就像「开关是关的，却还显示运行中」。
 
 **规则**：开关只有两种接法——走 `createForm`（组件内已绑），或在 `init()` 里 `bindSwitches(root)` 并一律用 `getSwitch`/`setSwitch` 读写。`test-console-static` 现在会扫「用了 `type:'switch'` 却没绑定」的页面。判断一个控件是不是开关，看它是不是 `[role="switch"]`，不要看 `id` 像不像布尔。
+
+### 1.27 弹窗自己切 `hidden`、动作条塞在滚动区里，都会变成「按钮找不到」
+`scheduler` 的编辑器一开始是卡片里内联的 `<div id="schedEditor" hidden>`：打开就是 `hidden = false`，列表被推下去，保存按钮滚出视口后完全找不到。搬到弹窗后先只把整块内容塞进 `.modal`，又出现两个后续问题：整个弹窗一起滚，头尾跟着跑；底部动作条用 sticky 兜，结果预览文字从按钮缝里漏出来。
+
+**规则**：弹窗用组件的三段式（`.modal-head` / `.modal-body` / `.modal-foot`，`.modal[data-modal-panel]`），**只有 body 滚动**；关闭/打开一律 `openModal`/`closeModal`，关闭按钮写 `[data-modal-close]` 让 `wireModal` 统一绑定；动作按钮放 foot，不要放进滚动主体，也不要靠 sticky 打补丁。同一动作条里按钮同高——`inlineActions` 默认 40px，紧凑处显式 `small: true`（32px），混档看起来就是没对齐。
 
 
 ## 2. 迁移一个页面的检查清单

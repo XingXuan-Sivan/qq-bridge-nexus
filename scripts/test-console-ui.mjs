@@ -185,6 +185,18 @@ try {
     assert.ok(geom.cellW > 400, 'expected two columns, got ' + geom.cellW + 'px');
   });
 
+  await test('Action rows keep one button height', async () => {
+    await hydrate('social-v2');
+    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#section-social-v2 .form-actions')).map((row) => {
+      const hs = Array.from(row.querySelectorAll('button')).map((b) => Math.round(b.getBoundingClientRect().height)).filter((h) => h > 0);
+      return { cls: row.className, heights: [...new Set(hs)] };
+    }));
+    const mixed = rows.filter((row) => row.heights.length > 1);
+    // 同一动作条里混用 40px 标准档和 32px 紧凑档，看起来就是「按钮没对齐」；这是 2026-11-07 报过的缺陷。
+    assert.deepEqual(mixed, [], 'every action row must use a single button height, got ' + JSON.stringify(mixed));
+    assert.ok(rows.length > 0, 'expected at least one action row on social-v2');
+  });
+
   await test('Tool table paginates, searches and keeps every checkbox in the form', async () => {
     await hydrate('social-v2');
     // 工具表在折叠分组里：先展开，否则行有布局但被祖先裁掉，点击不可达。
@@ -341,6 +353,23 @@ try {
     assert.equal(await page.locator('#slangCandidateList [data-slang-confirm="demo-candidate"]').count(), 0, '有含义的候选不在待研究栏');
     await (await reveal('.slang-tab[data-slang-tab="researched"]')).click();
     await page.locator('[data-slang-confirm="demo-candidate"]').click();
+    // 弹窗组件标准结构：头（标题 + 自带关闭）、体（唯一滚动区）、脚（动作按钮）。
+    const chrome = await page.evaluate(() => {
+      const ov = document.getElementById('slangModalOverlay');
+      const panel = ov?.querySelector('.modal[data-modal-panel]');
+      const body = panel?.querySelector('.modal-body');
+      const foot = panel?.querySelector('.modal-foot');
+      const close = panel?.querySelector('.modal-head [data-modal-close]');
+      return {
+        open: ov?.classList.contains('open'),
+        head: !!panel?.querySelector('.modal-head h3'),
+        close: !!close,
+        bodyScrolls: body ? getComputedStyle(body).overflowY === 'auto' : false,
+        footVisible: foot ? foot.getBoundingClientRect().height > 20 : false,
+        footInside: foot && panel ? panel.getBoundingClientRect().bottom - foot.getBoundingClientRect().bottom < 2 : false,
+      };
+    });
+    assert.deepEqual(chrome, { open: true, head: true, close: true, bodyScrolls: true, footVisible: true, footInside: true }, 'modal should be header/body/footer with a built-in close button');
     await fill('slangModalMeaning', '感到安慰');
     await fill('slangModalUsage', '轻松聊天');
     await fill('slangModalExample', '有被治愈到。');

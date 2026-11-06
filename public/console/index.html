@@ -92,28 +92,94 @@
     </main>
   </div>
       <div class="modal-overlay" id="slangModalOverlay">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="slangModalTitle" tabindex="-1">
-        <h3 id="slangModalTitle">确认黑话</h3>
-        <div class="meta u-mb-6" id="slangModalContent"></div>
-        <div class="meta slang-guess u-mb-6" id="slangModalGuess" hidden></div>
-        <label>含义 *</label>
-        <input type="text" id="slangModalMeaning" placeholder="必须填写，确认后才会注入 AI 上下文">
-        <label>用法（可选）</label>
-        <input type="text" id="slangModalUsage" placeholder="使用场景 / 语气">
-        <label>示例（可选）</label>
-        <input type="text" id="slangModalExample" placeholder="自然短句示例">
-        <label>风险/慎用说明（可选）</label>
-        <input type="text" id="slangModalRisk" placeholder="敏感 / 慎用风险">
-        <label>参考来源（可选，每行一个 URL）</label>
-        <textarea id="slangModalSources" rows="3" placeholder="https://..."></textarea>
-        <div class="row">
-          <button id="slangModalDirectConfirm" class="small">直接确认（转正）</button>
-          <button id="slangModalSendResearch" class="small">送 DSH 深度研究</button>
-          <button id="slangModalCancel" class="small">取消</button>
+      <div class="modal" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="slangModalTitle" tabindex="-1">
+        <header class="modal-head">
+          <h3 id="slangModalTitle">确认黑话</h3>
+          <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body">
+          <div class="meta u-mb-6" id="slangModalContent"></div>
+          <div class="meta slang-guess u-mb-6" id="slangModalGuess" hidden></div>
+          <label>含义 *</label>
+          <input type="text" id="slangModalMeaning" placeholder="必须填写，确认后才会注入 AI 上下文">
+          <label>用法（可选）</label>
+          <input type="text" id="slangModalUsage" placeholder="使用场景 / 语气">
+          <label>示例（可选）</label>
+          <input type="text" id="slangModalExample" placeholder="自然短句示例">
+          <label>风险/慎用说明（可选）</label>
+          <input type="text" id="slangModalRisk" placeholder="敏感 / 慎用风险">
+          <label>参考来源（可选，每行一个 URL）</label>
+          <textarea id="slangModalSources" rows="3" placeholder="https://..."></textarea>
         </div>
+        <footer class="modal-foot">
+          <button id="slangModalSendResearch" class="btn">送 DSH 深度研究</button>
+          <button id="slangModalCancel" class="btn" type="button">取消</button>
+          <button id="slangModalDirectConfirm" class="btn primary" type="button">直接确认（转正）</button>
+        </footer>
       </div>
     </div>
 
+
+<div class="modal-overlay" id="schedEditorOverlay" aria-hidden="true">
+      <div class="modal modal--wide" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="schedEditorTitle" tabindex="-1">
+        <header class="modal-head">
+          <h3 id="schedEditorTitle">新建任务</h3>
+          <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body" id="schedEditor">
+          <div class="grid u-gap-12">
+            <div><label for="schedName">名称</label><input type="text" id="schedName" placeholder="早安"></div>
+            <div><label for="schedTaskTz">时区</label><select id="schedTaskTz"></select></div>
+          </div>
+          <label for="schedType">重复方式</label>
+          <select id="schedType">
+            <option value="once">一次性</option>
+            <option value="daily">每天</option>
+            <option value="weekly">每周</option>
+            <option value="workdays">工作日（周一至周五，跳过法定节假日）</option>
+            <option value="monthly">每月几号</option>
+            <option value="monthlyWeekday">每月第几个周几</option>
+            <option value="yearly">每年</option>
+            <option value="dates">特殊日期</option>
+            <option value="everyNDays">每隔 N 天</option>
+            <option value="interval">每隔 N 分钟</option>
+            <option value="dailyRandom">每天随机几次</option>
+            <option value="monthlyRandom">每月随机几次</option>
+            <option value="cron">高级：cron 表达式</option>
+          </select>
+          <div class="sched-fields" id="schedFields"></div>
+          <div class="grid u-gap-12">
+            <div><label>有效期（可选）</label><div class="row"><input class="u-flex-basis-120" type="text" id="schedStartDate" placeholder="开始 YYYY-MM-DD"><input class="u-flex-basis-120" type="text" id="schedEndDate" placeholder="结束 YYYY-MM-DD"></div></div>
+            <div><label for="schedMaxRuns">共执行几次后停止（可选）</label><input type="number" id="schedMaxRuns" min="1" placeholder="不限"></div>
+          </div>
+          <div class="grid u-gap-12">
+            <div><label for="schedExclude">排除日期（可选，逗号分隔）</label><input type="text" id="schedExclude" placeholder="2026-12-25, 2027-01-01"></div>
+            <div><label>其它</label><div class="row"><label class="sched-chip u-m-0"><input type="checkbox" id="schedSkipHolidays"> 跳过法定节假日</label>
+              <select class="u-flex-basis-160" id="schedSilence" title="只对「叫 AI 来说」有效；固定文字在定时静默里照发"><option value="skip">定时静默时段内：跳过这次</option><option value="run">定时静默时段内：照常执行</option></select>
+              <select class="u-flex-basis-160" id="schedMissed"><option value="grace">错过了：补发时间内补发，否则跳过</option><option value="skip">错过了：直接跳过</option></select></div></div>
+          </div>
+          <label>发给谁（可多选）</label>
+          <div id="schedTargets"></div>
+          <label>内容</label>
+          <div class="row">
+            <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
+            <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
+          </div>
+          <div class="row u-mt-8" id="schedPluginKindRow" hidden>
+            <label class="field u-flex-basis-240">插件任务类型<select id="schedPluginKind"></select></label>
+            <span class="meta u-m-0">由插件注册；payload 见插件说明</span>
+          </div>
+          <textarea id="schedPayloadJson" rows="3" class="u-w-full u-mt-8" hidden placeholder='{"payload": {"week": "周一"}}'></textarea>
+          <textarea class="u-w-full-mt-8" id="schedContent" rows="3" placeholder="早上好"></textarea>
+          <div class="meta" id="schedPreview">接下来：—</div>
+        </div>
+        <footer class="modal-foot">
+          <span class="modal-status" id="schedEditorMsg"></span>
+          <button class="btn" type="button" id="schedCancel">取消</button>
+          <button class="btn primary" type="button" id="schedSave">保存任务</button>
+        </footer>
+      </div>
+    </div>
 
   <div class="toast" id="consoleToast" role="status" hidden></div>
   <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>

@@ -58,15 +58,22 @@
       </details>
     </section>
     <div class="modal-overlay" id="pluginDetailOverlay">
-      <div class="modal u-maxw-720" role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
-        <h3 id="pluginDetailTitle">插件详情</h3>
-        <div class="meta u-maxh-60vh-scroll" id="pluginDetailBody"></div>
-        <div class="row u-mt-8" id="pluginPersistRow">
-          <label class="field u-row-6"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
-          <button id="pluginPersistSave">保存</button>
-          <span class="meta" id="pluginPersistMsg"></span>
+      <div class="modal u-maxw-720" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
+        <header class="modal-head">
+          <h3 id="pluginDetailTitle">插件详情</h3>
+          <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body">
+          <div class="meta" id="pluginDetailBody"></div>
+          <div class="row u-mt-8" id="pluginPersistRow">
+            <label class="field u-row-6"><input type="checkbox" id="pluginPersistEnabled"> 写入 plugins.json（重启后仍生效）</label>
+          </div>
         </div>
-        <div class="row"><button id="pluginDetailClose">关闭</button></div>
+        <footer class="modal-foot">
+          <span class="modal-status" id="pluginPersistMsg"></span>
+          <button id="pluginDetailClose" class="btn" type="button">关闭</button>
+          <button id="pluginPersistSave" class="btn primary" type="button">保存</button>
+        </footer>
       </div>
     </div>
     <!-- 页面片段由路由器按需注入（pages/<id>/page.html）：这里只留容器，不放内容。 -->

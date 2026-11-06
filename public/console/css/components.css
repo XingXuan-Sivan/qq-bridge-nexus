@@ -527,11 +527,10 @@ tr:last-child td {
 .sched-fields .row {
   margin-top:6px
 }
+/* 编辑器在弹窗（index.html 的 #schedEditorOverlay）里：弹窗组件负责头/体/脚与滚动，
+   页面不再给编辑器画边框，也不自己做吸底动作条。 */
 .sched-editor {
-  border:1px solid var(--accent);
-  border-radius:var(--radius);
-  padding:18px;
-  margin-top:14px
+  display:block
 }
 .sched-history div {
   font-size:12px;

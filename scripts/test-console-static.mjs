@@ -367,7 +367,10 @@ const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {
   if (!page.html) continue;
   const text = fs.readFileSync(page.html, 'utf8');
-  bareByPage[page.id] = (text.match(/<(input|button|select|textarea)\b/g) || []).length;
+  // 弹窗右上角的关闭按钮属于 modal 组件的固定结构，不算「页面手写控件」。
+  const raw = (text.match(/<(input|button|select|textarea)\b/g) || []).length;
+  const modalChrome = (text.match(/<button class="modal-close"/g) || []).length;
+  bareByPage[page.id] = raw - modalChrome;
 }
 const bareRegressed = Object.entries(bareByPage)
   .filter(([id, count]) => count > (BARE_CONTROL_BASELINE[id] ?? 0))
@@ -385,6 +388,13 @@ for (const page of consolePageDirs(ROOT)) {
   if (!/bindSwitches\(|createForm\(/.test(js)) unboundSwitchPages.push(page.id);
 }
 ok(unboundSwitchPages.length === 0, `用开关的页面都绑了点击委托（${unboundSwitchPages.join('、') || '全部已绑'}）`);
+
+// 弹窗必须挂在 body 上（片段被注入 .card，.card 的动画/滤镜会给 position:fixed 造包含块），
+// 且页面脚本要用组件 API（openModal/closeModal），不能自己切 hidden。
+const schedulerJs = fs.readFileSync(path.join(ROOT, 'public/console/pages/scheduler/page.js'), 'utf8');
+ok(html.includes('id="schedEditorOverlay"'), '定时任务编辑器弹窗挂在骨架里（#schedEditorOverlay）');
+ok(/import \{[^}]*openModal[^}]*\} from '\.\.\/\.\.\/components\/modal\/modal\.js'/.test(schedulerJs), '定时任务页用 modal 组件打开编辑器（不自己切 hidden）');
+ok(!/schedEditor'\)\.hidden/.test(schedulerJs), '定时任务页不再用 .hidden 控制编辑器显隐');
 
 const rowHacks = [];
 for (const page of consolePageDirs(ROOT)) {

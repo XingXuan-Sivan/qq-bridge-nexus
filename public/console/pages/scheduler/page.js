@@ -4,6 +4,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
 
@@ -21,8 +22,18 @@ let schedState = null;
 let schedEditingId = null;
 let schedPreviewTimer = null;
 const schedEl = (id) => document.getElementById(id);
+// 编辑器在 body 级弹窗里（index.html 的 #schedEditorOverlay）：片段被注入 .card 内，
+// .card 的动画/滤镜会给 position:fixed 造包含块，所以遮罩必须挂在 document.body 上。
+const schedEditorOverlay = () => schedEl('schedEditorOverlay');
 const schedSplit = (v) => String(v ?? '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
-function schedMsg(id, text, ok) { const el = schedEl(id); el.textContent = text; el.className = ok == null ? 'form-actions-status' : (ok ? 'form-actions-status ok' : 'form-actions-status err'); }
+// 状态位有两种宿主：动作条里的是 .form-actions-status，弹窗脚里的是 .modal-status。
+// 基础类跟着元素现有 class 走，避免「换了个位置样式就全丢」。
+function schedMsg(id, text, ok) {
+  const el = schedEl(id);
+  el.textContent = text;
+  const base = el.classList.contains('modal-status') ? 'modal-status' : 'form-actions-status';
+  el.className = ok == null ? base : `${base} ${ok ? 'ok' : 'err'}`;
+}
 
 /** 把 fields.js 的规格渲染进每个 `<div data-sched-fields="…">`。init() 里第一件事。 */
 function renderSchedFieldGroups() {
@@ -228,7 +239,7 @@ function renderSchedTargets(selected) {
 
 function openSchedEditor(task = null) {
   schedEditingId = task ? task.id : null;
-  schedEl('schedEditor').hidden = false;
+  openModal(schedEditorOverlay());
   schedEl('schedEditorTitle').textContent = task ? `编辑任务 #${task.id}` : '新建任务';
   const s = task?.schedule || { type: 'daily', times: ['09:00'] };
   schedEl('schedName').value = task?.name || '';
@@ -254,7 +265,6 @@ function openSchedEditor(task = null) {
   schedEl('schedContent').placeholder = kind === 'ai' ? '随便跟我聊一句，或者发个可爱的表情包' : '早上好';
   schedSyncKindUi();
   schedMsg('schedEditorMsg', '');
-  schedEl('schedEditor').scrollIntoView({ block: 'nearest' });
   schedPreview();
 }
 
@@ -281,6 +291,9 @@ export function init() {
   renderSchedFieldGroups();
   // 开关是 <button role="switch">，点击委托必须显式绑；不绑就点不动（form.js 只在 createForm 里绑）。
   bindSwitches(document.getElementById('section-scheduler'));
+  bindSwitches(schedEditorOverlay());
+  // Esc / 点遮罩关闭时清掉编辑态，避免下次「新建」带着上一个任务的 id 走 PATCH。
+  wireModal(schedEditorOverlay(), { onClose: () => { schedEditingId = null; } });
   document.getElementById('schedTimezone').innerHTML = tzOptionsHtml(false);
   document.getElementById('schedTaskTz').innerHTML = tzOptionsHtml(true);
 
@@ -292,7 +305,7 @@ schedEl('schedEditor').addEventListener('change', (e) => {
   if (e.target.id !== 'schedContent' && e.target.id !== 'schedName') schedPreview();
 });
 schedEl('schedNew').addEventListener('click', () => openSchedEditor(null));
-schedEl('schedCancel').addEventListener('click', () => { schedEl('schedEditor').hidden = true; schedEditingId = null; });
+schedEl('schedCancel').addEventListener('click', () => { closeModal(schedEditorOverlay()); schedEditingId = null; });
 schedEl('schedSave').addEventListener('click', async () => {
   const payload = schedPayload();
   if (!payload) return;
@@ -301,10 +314,9 @@ schedEl('schedSave').addEventListener('click', async () => {
     : await api(`/api/scheduler/tasks/${schedEditingId}`, 'PATCH', payload);
   if (!r.ok) { schedMsg('schedEditorMsg', '❌ ' + (r.error || '保存失败'), false); return; }
   schedMsg('schedEditorMsg', `✅ 已保存 #${r.task.id}${r.task.nextRunText ? '，下次 ' + r.task.nextRunText : ''}`, true);
-  schedEl('schedEditor').hidden = true;
+  closeModal(schedEditorOverlay());
   schedEditingId = null;
-  showConsoleToast(`定时任务 #${r.task.id} 已保存${r.task.nextRunText ? '，下次 ' + r.task.nextRunText : ''}`);
-  refreshScheduler();
+  showConsoleToast(`定时任务 #${r.task.id} 已保存${r.task.nextRunText ? '，下次 ' + r.task.nextRunText : ''}`);  refreshScheduler();
 });
 schedEl('schedSettingsSave').addEventListener('click', async () => {
   const r = await api('/api/scheduler/settings', 'POST', {

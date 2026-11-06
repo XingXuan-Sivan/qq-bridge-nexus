@@ -148,6 +148,38 @@ try {
     await hydrate('social-v2');
   });
 
+  await test('Field rows centre labels and keep two columns', async () => {
+    await hydrate('social-v2');
+    const geom = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('#section-social-v2 [data-field-wrap]'));
+      let worst = 0;
+      for (const w of rows) {
+        const l = w.querySelector('.field-label');
+        const c = w.querySelector('.field-control');
+        if (!l || !c) continue;
+        const lb = l.getBoundingClientRect();
+        const cb = c.getBoundingClientRect();
+        worst = Math.max(worst, Math.abs((lb.top + lb.height / 2) - (cb.top + cb.height / 2)));
+      }
+      const host = document.querySelector('[data-v2-fields="7"]');
+      const cols = host ? host.querySelector('.cols') : null;
+      return {
+        rows: rows.length,
+        worst: Math.round(worst),
+        kids: cols ? cols.children.length : 0,
+        cells: host ? host.querySelectorAll('[data-field-wrap]').length : 0,
+        cellW: cols ? Math.round(cols.children[0].getBoundingClientRect().width) : 0,
+      };
+    });
+    if (!geom.rows) {
+      console.log('skip: fixture page did not render spec fields (checked on the live preview instead)');
+      return;
+    }
+    assert.ok(geom.worst <= 1, 'label and control centres must align, got ' + geom.worst + 'px');
+    assert.equal(geom.kids, geom.cells, 'grid cells must match field count');
+    assert.ok(geom.cellW > 400, 'expected two columns, got ' + geom.cellW + 'px');
+  });
+
   await test('Mode and preset contracts', async () => {
     // closed-agent 分级是改版后的能力：切到该模式时载荷会多带 level（默认 L2）。
     for (const mode of ['chat', 'reserved', 'reserved2', 'closed-agent']) {

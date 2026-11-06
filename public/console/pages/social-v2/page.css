@@ -21,7 +21,7 @@
   flex-wrap: wrap;
 }
 
-.v2-head-fields .field {
+.v2-head-fields .field-row {
   display: flex;
   align-items: center;
   gap: 10px;

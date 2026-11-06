@@ -297,6 +297,11 @@ ok(/type === 'section'/.test(formModule), 'renderFields 支持 section 分组');
 ok(/form-cols/.test(formModule), 'renderFields 输出走 12 列栅格');
 const formCss = fs.readFileSync(path.join(componentDir, 'form', 'form.css'), 'utf8');
 ok(/.field-error {/.test(formCss) && /.form-actions {/.test(formCss), 'form.css 自带字段错误行与动作区样式');
+ok(/.field-row {/.test(formCss), 'form.css 定义行原语 .field-row');
+ok(/.field-block > .field-notes {/.test(formCss), '注解区在行外的 .field-notes 里');
+ok(!/\.field-row > \.field-label \{[^}]*\b(min-)?height:/.test(formCss), '标签列不许自己写 height/min-height（高度由行决定）');
+ok(/\.field-row > \.field-label \{[^}]*margin: 0 !important/.test(formCss), '标签列必须清空继承来的 margin');
+ok(/\.field-block--inline/.test(formCss) && /field-block--inline/.test(formModule), '开关/单选行走 .field-block--inline 变体');
 ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');
 
 const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];

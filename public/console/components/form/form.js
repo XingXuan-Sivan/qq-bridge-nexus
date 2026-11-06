@@ -40,12 +40,13 @@ function fieldNotes(id, { hint, warn, danger, docs }) {
 function fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra = '', className = '' }) {
   const notes = fieldNotes(id, { hint, warn, danger, docs });
   const errorId = `${id}-error`;
-  const wrapClass = ['field', className].filter(Boolean).join(' ');
+  const wrapClass = ['field-block', className].filter(Boolean).join(' ');
   return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
-  <label class="field-label" for="${esc(id)}">${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
-  <div class="field-control">${control}</div>
-  ${notes.html}${hintExtra}
-  <p class="field-error" id="${esc(errorId)}" role="alert" hidden></p>
+  <div class="field-row">
+    <label class="field-label" for="${esc(id)}">${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
+    <div class="field-control">${control}</div>
+  </div>
+  <div class="field-notes">${notes.html}${hintExtra}<p class="field-error" id="${esc(errorId)}" role="alert" hidden></p></div>
 </div>`;
 }
 
@@ -137,11 +138,12 @@ export function checkboxField({ id, label, checked = false, hint, warn, danger, 
 
 export function switchField({ id, label, checked = false, onLabel = '开', offLabel = '关', hint, warn, danger, docs, disabled = false }) {
   const control = `<button type="button" class="field-switch" role="switch" id="${esc(id)}" data-field="${esc(id)}" data-on-label="${esc(onLabel)}" data-off-label="${esc(offLabel)}" aria-checked="${checked ? 'true' : 'false'}"${disabled ? ' disabled' : ''}><span class="field-switch-track" aria-hidden="true"></span><span>${esc(checked ? onLabel : offLabel)}</span></button>`;
-  const shell = `<div class="field" data-field-wrap="${esc(id)}">
-  <span class="field-label" id="${esc(id)}-label">${esc(label)}</span>
-  <div class="field-control">${control}</div>
-  ${fieldNotes(id, { hint, warn, danger, docs }).html}
-  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
+  const shell = `<div class="field-block field-block--inline" data-field-wrap="${esc(id)}">
+  <div class="field-row">
+    <span class="field-label" id="${esc(id)}-label">${esc(label)}</span>
+    <div class="field-control">${control}</div>
+  </div>
+  <div class="field-notes">${fieldNotes(id, { hint, warn, danger, docs }).html}<p class="field-error" id="${esc(id)}-error" role="alert" hidden></p></div>
 </div>`;
   return shell;
 }

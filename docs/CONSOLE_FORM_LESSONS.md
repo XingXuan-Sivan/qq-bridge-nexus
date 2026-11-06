@@ -250,6 +250,12 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 
 **规则**：`components/table/table.css` 里同时写 `.table-toolbar .table-filter { width:auto; min-width:116px; flex:0 0 auto }` 与 `.table-toolbar .select-wrap { width:auto; min-width:116px; flex:0 0 auto }`。新页接筛选器时先看一眼工具栏是不是一行。
 
+### 1.44 普通行里的 .select-wrap 同样要收窄，不只工具栏
+
+同一个坑在**非表格的普通行**里也会犯：令牌与花费页的「逐轮花费」行是 .row.usage-controls（一个 select#usageKeySelect + 一个「加载逐轮明细」按钮）。.select-wrap 默认 display:block;width:100%，下拉先占满整行，按钮被挤到下一行，箭头还贴在整行最右（2026-11-07 实测）。
+
+**规则**：任何「一行里放 select + 其它控件」的自定义行，都要给 .select-wrap 写 width:auto + flex:0 0 auto（usage 的做法是 width:auto; min-width:190px; max-width:280px），并让父行 display:flex; align-items:center; flex-wrap:wrap。不要指望 select { width:auto } 单独生效——被包起来的永远是 .select-wrap。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

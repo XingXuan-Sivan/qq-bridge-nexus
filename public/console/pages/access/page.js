@@ -1,8 +1,18 @@
 import { api } from '../../js/api.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { ACCESS_FIELDS } from './fields.js';
 
 const $ = (id) => document.getElementById(id);
+
+// 静态控件按字段规格渲染：页面只留卡片与宿主，渲染之后再取 id。
+function renderAccessFieldGroups() {
+  document.querySelectorAll('[data-access-fields]').forEach((host) => {
+    const spec = ACCESS_FIELDS[host.dataset.accessFields];
+    if (spec) renderFields(host, spec.fields, { columns: 2 });
+  });
+}
 
 // 数据都是「读一次填表单」：进入本页时拉一次，保存后再拉一次。
 export async function refreshWhitelist() {
@@ -18,7 +28,7 @@ export async function refreshWhitelist() {
 
 export function loadSecurity() {
   api('/api/security').then((r) => {
-    $('secInterceptNotify').checked = r.security?.interceptNotify !== false;
+    setSwitch($('secInterceptNotify'), r.security?.interceptNotify !== false);
     // state/ 的 ACL 是否收紧（Windows 上需要管理员权限，未提权时会失败）。
     // 明确警示 + 给出可复制的命令，而不是让用户以为已经安全。
     const warn = $('stateDirWarn');
@@ -52,6 +62,9 @@ async function changeConsoleToken(generate) {
 }
 
 export function init() {
+  // 先渲染字段规格，下面所有 $('…') 才取得到节点；开关的点击委托也要在这个范围内显式绑。
+  renderAccessFieldGroups();
+  bindSwitches(document.getElementById('section-access'));
   $('wlSave').addEventListener('click', async () => {
     const parse = (s) => s.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
     const r = await api('/api/whitelist', 'POST', {
@@ -64,7 +77,7 @@ export function init() {
   });
 
   $('secSave').addEventListener('click', async () => {
-    const r = await api('/api/security', 'POST', { interceptNotify: $('secInterceptNotify').checked });
+    const r = await api('/api/security', 'POST', { interceptNotify: getSwitch($('secInterceptNotify')) });
     const msg = $('secMsg');
     msg.textContent = r.ok ? '✅ 已保存' : ('❌ ' + (r.error || '失败'));
     msg.className = r.ok ? 'meta ok' : 'meta err';

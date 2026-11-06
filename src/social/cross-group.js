@@ -10,6 +10,8 @@
 //     AI 天然无法往别的群发消息；owner 代发走管理通道的 /say 命令。
 //   · 每次查询都写审计日志（调用方负责）。
 
+import { parseKey } from '../session/key.mjs';
+
 export const CROSS_GROUP_CAPABILITIES = ['presence', 'activity'];
 
 function str(v) { return String(v ?? '').trim(); }
@@ -22,9 +24,9 @@ export function checkCrossGroup(cfg, fromKey, toGroupId, capability) {
   const cg = cfg?.crossGroup ?? {};
   if (cg.enabled !== true) return { ok: false, reason: '跨群协作未启用（crossGroup.enabled=false）' };
   if (!CROSS_GROUP_CAPABILITIES.includes(capability)) return { ok: false, reason: `未知能力：${capability}` };
-  const m = /^group:(\d+)$/.exec(str(fromKey));
-  if (!m) return { ok: false, reason: '只有群会话可以发起跨群查询' };
-  const from = m[1];
+  const m = parseKey(str(fromKey));
+  if (!m || m.kind !== 'group') return { ok: false, reason: '只有群会话可以发起跨群查询' };
+  const from = String(m.id);
   const to = str(toGroupId);
   if (!/^\d+$/.test(to)) return { ok: false, reason: '目标群号无效' };
   if (from === to) return { ok: false, reason: '目标群就是当前群' };

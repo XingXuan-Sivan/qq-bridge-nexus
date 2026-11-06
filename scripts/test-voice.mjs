@@ -345,7 +345,7 @@ if (process.env.QQ_BRIDGE_TEST_LIVE === '1') {
       const res = await fetch(`http://127.0.0.1:${port}/api/voice/send`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...(token ? { 'x-console-token': token } : {}) },
-        body: JSON.stringify({ target: `group:${target}`, file: first, dryRun: true }),
+        body: JSON.stringify({ target: `qq:group:${target}`, file: first, dryRun: true }),
         signal: AbortSignal.timeout(30000)
       });
       const body = await res.json();

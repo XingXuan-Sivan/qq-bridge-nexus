@@ -31,8 +31,7 @@
     "dirs": []
   },
   "platform": {
-    "id": "qq",
-    "keyedFormat": false
+    "id": "qq"
   },
   "snowluma": {
     "wsUrl": "ws://127.0.0.1:3001",

@@ -17,8 +17,8 @@ import {
 } from '../src/backfill.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
-const GROUP = 'group:456';
-const OWNER = 'private:123';
+const GROUP = 'qq:group:456';
+const OWNER = 'qq:private:123';
 const SELF = 999999;
 const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 

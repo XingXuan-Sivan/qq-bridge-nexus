@@ -12,7 +12,7 @@ async function fixture(run, cfg = {}) {
     ...cfg,
   } } });
   h.setMode('reserved2');
-  const key = 'group:456';
+  const key = 'qq:group:456';
   const st = h.getSocialV2State(key);
   const server = h.startConsoleServer();
   if (!server.listening) await new Promise(resolve => server.once('listening', resolve));

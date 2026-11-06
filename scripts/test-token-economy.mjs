@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
-const KEY = 'group:456';
+const KEY = 'qq:group:456';
 const ACTIVE = { mode: 'active' };
 const DIVING = { mode: 'diving', infinite: true, triggers: { atMention: true, anyMessage: false } };
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -182,7 +182,7 @@ await test('wait exposes new messages and grants only their actually observed cu
 await test('another conversation token, pause, mode and allowlist guards still reject combined close', async ({ h, st, request, append }) => {
   append('protected conversation');
   await request('unread');
-  const otherToken = h.getSocialV2State('private:123').agentToken;
+  const otherToken = h.getSocialV2State('qq:private:123').agentToken;
   const body = { config: ACTIVE, throughSeq: 1 };
   assert.equal((await request('wake-config', { body, token: otherToken })).status, 403);
   h.socialV2.paused = true;

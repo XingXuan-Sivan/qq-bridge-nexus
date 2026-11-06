@@ -39,10 +39,10 @@ await test('session creation crossing a mode change never accepts stale permissi
   h.setMode('chat');
   release();
   await assert.rejects(pending);
-  assert.equal(h.state.sessions['private:123'], undefined);
+  assert.equal(h.state.sessions['qq:private:123'], undefined);
 });
 await test('queued send rechecks allowlist at actual transport time', async (h) => {
-  const sending = h.sendToQQ('group:456', 'fixture');
+  const sending = h.sendToQQ('qq:group:456', 'fixture');
   h.cfg.allow.groups = [];
   await sending;
   assert.equal(h.calls.sent.length, 0);
@@ -53,20 +53,20 @@ await test('old prompt completion cannot delete replacement queue after reset', 
     await new Promise((resolve) => release.push(resolve));
     return { result: { ok: true, value: {} } };
   };
-  const first = h.deliverPrompt('group:456', 'first');
+  const first = h.deliverPrompt('qq:group:456', 'first');
   while (release.length < 1) await new Promise((resolve) => setImmediate(resolve));
-  h.drainPromptQueue('group:456', 'reset');
-  const second = h.deliverPrompt('group:456', 'second');
+  h.drainPromptQueue('qq:group:456', 'reset');
+  const second = h.deliverPrompt('qq:group:456', 'second');
   while (release.length < 2) await new Promise((resolve) => setImmediate(resolve));
-  const replacement = h.promptQueues.get('group:456');
+  const replacement = h.promptQueues.get('qq:group:456');
   release[0](); await first;
-  assert.equal(h.promptQueues.get('group:456'), replacement);
+  assert.equal(h.promptQueues.get('qq:group:456'), replacement);
   release[1](); await second;
 });
 await test('same-policy sessions are reused but legacy unlabelled sessions are replaced', async (h) => {
   const first = await h.ensureSession('private:123');
   assert.equal(await h.ensureSession('private:123'), first);
-  delete h.state.sessionPolicies['private:123'];
+  delete h.state.sessionPolicies['qq:private:123'];
   assert.notEqual(await h.ensureSession('private:123'), first);
 });
 await test('reset during model selection cannot return a detached session', async (h) => {
@@ -75,7 +75,7 @@ await test('reset during model selection cannot return a detached session', asyn
     return { result: { ok: true, value: { selected: {} } } };
   };
   await assert.rejects(h.ensureSession('private:123'));
-  assert.equal(h.state.sessions['private:123'], undefined);
+  assert.equal(h.state.sessions['qq:private:123'], undefined);
 });
 await test('malformed HTTP request targets return 400 without hanging', async (h) => {
   const server = h.startConsoleServer();
@@ -98,7 +98,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   try {
     if (!server.listening) await new Promise((resolve) => server.once('listening', resolve));
     const sessionId = await h.ensureSession('private:123');
-    assert.ok(h.state.sessionPolicies['private:123'], 'policy should exist before reset');
+    assert.ok(h.state.sessionPolicies['qq:private:123'], 'policy should exist before reset');
     h.calls.cancelled.length = 0;
     const status = await new Promise((resolve, reject) => {
       const request = http.request({ host: '127.0.0.1', port: server.address().port, path: '/api/session/reset', method: 'POST',
@@ -112,8 +112,8 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       request.end(JSON.stringify({ key: 'private:123' }));
     });
     assert.equal(status, 200);
-    assert.equal(h.state.sessions['private:123'], undefined);
-    assert.equal(h.state.sessionPolicies['private:123'], undefined, 'policy must not be orphaned by reset');
+    assert.equal(h.state.sessions['qq:private:123'], undefined);
+    assert.equal(h.state.sessionPolicies['qq:private:123'], undefined, 'policy must not be orphaned by reset');
     assert.ok(h.calls.cancelled.includes(sessionId), 'reset must stop the retired DSH session');
     console.log('PASS console reset drops the session policy and stops the retired DSH session');
   } catch (error) { failures++; console.error('FAIL console reset cleanup:', error.message); }

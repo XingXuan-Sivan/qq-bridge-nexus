@@ -63,16 +63,16 @@ await test('保存后可读回、key 归一化，并在重启后从文件恢复'
   try {
     await withServer(h, async (port) => {
       const created = await call(port, '/api/socialV2/initial-prompt', {
-        method: 'POST', headers: ADMIN, body: { key: 'group:0456', text: ENV_TEXT }
+        method: 'POST', headers: ADMIN, body: { key: 'qq:group:0456', text: ENV_TEXT }
       });
       assert.equal(created.status, 200, '管理员应能保存初始提示词');
       assert.equal(created.json.ok, true);
-      assert.equal(created.json.key, 'group:456', 'key 必须归一化（去前导零）');
+      assert.equal(created.json.key, 'qq:group:456', 'key 必须归一化（去前导零）');
       assert.equal(created.json.chars, ENV_TEXT.length);
       savedKey = created.json.key;
 
       // 内存态立即可见（AI 的下一次 bootstrap 就能拿到）
-      assert.equal(h.getInitialPrompt('group:456')?.text, ENV_TEXT);
+      assert.equal(h.getInitialPrompt('qq:group:456')?.text, ENV_TEXT);
 
       const read = await call(port, '/api/socialV2/initial-prompt?key=group%3A456', { headers: ADMIN });
       assert.equal(read.status, 200);
@@ -82,7 +82,7 @@ await test('保存后可读回、key 归一化，并在重启后从文件恢复'
       const list = await call(port, '/api/socialV2/initial-prompt', { headers: ADMIN });
       assert.equal(list.status, 200);
       assert.equal(list.json.entries.length, 1);
-      assert.equal(list.json.entries[0].key, 'group:456');
+      assert.equal(list.json.entries[0].key, 'qq:group:456');
       assert.ok(list.json.entries[0].preview.length <= 80, '列表只给预览，不回整段内容');
       assert.ok(Number.isInteger(list.json.maxChars) && list.json.maxChars > 0, '列表返回当前字数上限');
 
@@ -91,8 +91,8 @@ await test('保存后可读回、key 归一化，并在重启后从文件恢复'
       assert.ok(fs.existsSync(file), '必须写入 state/initial-prompts.json');
       persisted = fs.readFileSync(file, 'utf8');
       const onDisk = JSON.parse(persisted);
-      assert.equal(onDisk['group:456'].text, ENV_TEXT);
-      assert.ok(onDisk['group:456'].updatedAt > 0, '记录更新时间');
+      assert.equal(onDisk['qq:group:456'].text, ENV_TEXT);
+      assert.ok(onDisk['qq:group:456'].updatedAt > 0, '记录更新时间');
     });
   } finally { await h.close(); }
 
@@ -107,28 +107,28 @@ await test('保存后可读回、key 归一化，并在重启后从文件恢复'
 await test('初始提示词只出现在 bootstrap 唤醒，且只给配置的那个会话', async () => {
   const h = await bridgeHarness();
   try {
-    const r = h.setInitialPrompt('group:456', ENV_TEXT);
+    const r = h.setInitialPrompt('qq:group:456', ENV_TEXT);
     assert.equal(r.ok, true);
 
-    const bootstrap = h.buildWakePromptV2('group:456', 'bootstrap');
+    const bootstrap = h.buildWakePromptV2('qq:group:456', 'bootstrap');
     assert.ok(bootstrap.includes(ENV_TEXT), 'bootstrap 唤醒必须带操作者预写的环境说明');
     assert.ok(bootstrap.includes('群聊环境'), '注入段要有可识别的标题');
     assert.ok(bootstrap.includes('仅本次首次唤醒参考'), '注入段要说明只在首次唤醒参考');
     assert.ok(bootstrap.includes('不是群友发的消息'), '要告诉 AI 这不是群友发言（防提示注入误读）');
 
     for (const reason of ['question', 'atMention', 'timeout', 'replyCheck', 'proactiveCheck', 'poke', 'admin', 'keyword:小鲸鱼']) {
-      assert.ok(!h.buildWakePromptV2('group:456', reason).includes(ENV_TEXT), `${reason} 唤醒不得重复注入初始提示词`);
+      assert.ok(!h.buildWakePromptV2('qq:group:456', reason).includes(ENV_TEXT), `${reason} 唤醒不得重复注入初始提示词`);
     }
-    assert.ok(!h.buildWakePromptV2('group:999', 'bootstrap').includes(ENV_TEXT), '不得串到别的会话');
+    assert.ok(!h.buildWakePromptV2('qq:group:999', 'bootstrap').includes(ENV_TEXT), '不得串到别的会话');
 
     // 私聊用「私聊环境」标签，方便 AI 分清群里还是私聊
-    h.setInitialPrompt('private:123', '这是管理员私聊，直接说结论即可。');
-    const priv = h.buildWakePromptV2('private:123', 'bootstrap');
+    h.setInitialPrompt('qq:private:123', '这是管理员私聊，直接说结论即可。');
+    const priv = h.buildWakePromptV2('qq:private:123', 'bootstrap');
     assert.ok(priv.includes('私聊环境') && priv.includes('这是管理员私聊'));
 
     // 删除后不再注入
-    assert.equal(h.setInitialPrompt('group:456', '').deleted, true);
-    assert.ok(!h.buildWakePromptV2('group:456', 'bootstrap').includes(ENV_TEXT), '删除后 bootstrap 不得再注入');
+    assert.equal(h.setInitialPrompt('qq:group:456', '').deleted, true);
+    assert.ok(!h.buildWakePromptV2('qq:group:456', 'bootstrap').includes(ENV_TEXT), '删除后 bootstrap 不得再注入');
   } finally { await h.close(); }
 });
 
@@ -137,7 +137,7 @@ await test('agent token 既读不到初始提示词，也改不了它', async ()
   const h = await bridgeHarness();
   try {
     h.setMode('reserved2');
-    h.setInitialPrompt('group:456', ENV_TEXT);
+    h.setInitialPrompt('qq:group:456', ENV_TEXT);
     await withServer(h, async (port) => {
       const asAgent = { ...ADMIN, 'x-agent-token': 'fixture-agent-token', 'x-agent-call': '1' };
       const readOne = await call(port, '/api/socialV2/initial-prompt?key=group%3A456', { headers: asAgent });
@@ -145,10 +145,10 @@ await test('agent token 既读不到初始提示词，也改不了它', async ()
       const readList = await call(port, '/api/socialV2/initial-prompt', { headers: asAgent });
       assert.equal(readList.status, 403, 'agent token 列全部必须 403');
       const write = await call(port, '/api/socialV2/initial-prompt', {
-        method: 'POST', headers: asAgent, body: { key: 'group:456', text: 'AI 自己改掉的内容' }
+        method: 'POST', headers: asAgent, body: { key: 'qq:group:456', text: 'AI 自己改掉的内容' }
       });
       assert.equal(write.status, 403, 'agent token 写必须 403');
-      assert.equal(h.getInitialPrompt('group:456')?.text, ENV_TEXT, '被拒后内容不得改变');
+      assert.equal(h.getInitialPrompt('qq:group:456')?.text, ENV_TEXT, '被拒后内容不得改变');
 
       // 仅控制台令牌（管理端）可以
       const admin = await call(port, '/api/socialV2/initial-prompt?key=group%3A456', { headers: ADMIN });
@@ -163,35 +163,35 @@ await test('非法 key / 超长 / 缺 text 都被拒，且不会误删已有内�
   const h = await bridgeHarness({ config: { socialV2: { initialPromptMaxChars: 100 } } });
   try {
     assert.equal(h.initialPromptMaxChars(), 100);
-    assert.equal(h.setInitialPrompt('group:456', 'x'.repeat(100)).ok, true, '正好到上限允许');
-    assert.equal(h.setInitialPrompt('group:456', 'x'.repeat(101)).ok, false, '超上限必须拒绝');
-    assert.equal(h.getInitialPrompt('group:456').text.length, 100, '被拒的写入不得覆盖原有内容');
+    assert.equal(h.setInitialPrompt('qq:group:456', 'x'.repeat(100)).ok, true, '正好到上限允许');
+    assert.equal(h.setInitialPrompt('qq:group:456', 'x'.repeat(101)).ok, false, '超上限必须拒绝');
+    assert.equal(h.getInitialPrompt('qq:group:456').text.length, 100, '被拒的写入不得覆盖原有内容');
 
     await withServer(h, async (port) => {
-      for (const key of ['', 'group:', 'group:abc', 'private:0', 'group:-1', 'wechat:123', 'group:9007199254740993']) {
+      for (const key of ['', 'group:', 'group:abc', 'qq:private:0', 'group:-1', 'wechat:123', 'qq:group:9007199254740993']) {
         const res = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key, text: 'x' } });
         assert.equal(res.status, 400, `非法 key「${key}」必须 400，实际 ${res.status}`);
       }
-      const badType = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456', text: { a: 1 } } });
+      const badType = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: { a: 1 } } });
       assert.equal(badType.status, 400, 'text 非字符串必须 400');
 
       // 缺 text 且没写 delete:true —— 绝不能被当成"清空"（否则一次漏字段的调用就删了内容）
-      const missing = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456' } });
+      const missing = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456' } });
       assert.equal(missing.status, 400, '缺 text 必须 400 而不是静默删除');
-      assert.equal(h.getInitialPrompt('group:456')?.text.length, 100, '缺 text 的请求不得删除已有内容');
+      assert.equal(h.getInitialPrompt('qq:group:456')?.text.length, 100, '缺 text 的请求不得删除已有内容');
 
-      const tooLong = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456', text: 'y'.repeat(101) } });
+      const tooLong = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: 'y'.repeat(101) } });
       assert.equal(tooLong.status, 400);
       assert.match(tooLong.json.error, /过长|上限/, '错误信息要说明是超长');
 
-      const byDelete = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456', delete: true } });
+      const byDelete = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', delete: true } });
       assert.equal(byDelete.status, 200);
       assert.equal(byDelete.json.deleted, true);
-      assert.equal(h.getInitialPrompt('group:456'), null);
+      assert.equal(h.getInitialPrompt('qq:group:456'), null);
 
       // 空内容保存 = 删除（文本域清空后点保存的自然语义）
-      h.setInitialPrompt('group:456', 'abc');
-      const empty = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456', text: '   \n  ' } });
+      h.setInitialPrompt('qq:group:456', 'abc');
+      const empty = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: '   \n  ' } });
       assert.equal(empty.status, 200);
       assert.equal(empty.json.deleted, true, '空白内容等于删除');
     });
@@ -213,13 +213,13 @@ await test('initial-prompts.json 损坏时降级为只读，保存失败且原�
   const broken = '{ this is not json';
   const h = await bridgeHarness({ files: { 'state/initial-prompts.json': broken } });
   try {
-    assert.equal(h.getInitialPrompt('group:456'), null, '损坏文件不产生条目');
+    assert.equal(h.getInitialPrompt('qq:group:456'), null, '损坏文件不产生条目');
     await withServer(h, async (port) => {
       const list = await call(port, '/api/socialV2/initial-prompt', { headers: ADMIN });
       assert.equal(list.json.writable, false, '损坏时应标记为不可写');
-      const save = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'group:456', text: 'abc' } });
+      const save = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: 'abc' } });
       assert.equal(save.status, 500, '只读降级下保存必须失败');
-      assert.equal(h.getInitialPrompt('group:456'), null, '失败后内存也要回滚');
+      assert.equal(h.getInitialPrompt('qq:group:456'), null, '失败后内存也要回滚');
       const onDisk = fs.readFileSync(path.join(h.temp, 'state', 'initial-prompts.json'), 'utf8');
       assert.equal(onDisk, broken, '原文件必须原样保留，等待人工修复');
     });
@@ -231,15 +231,15 @@ await test('手动唤醒在会话未 bootstrap 时必须走 bootstrap（否则�
   const h = await bridgeHarness();
   try {
     h.setMode('reserved2');
-    h.setInitialPrompt('group:456', ENV_TEXT);
+    h.setInitialPrompt('qq:group:456', ENV_TEXT);
     await withServer(h, async (port) => {
-      const first = await call(port, '/api/socialV2/wake', { method: 'POST', headers: ADMIN, body: { key: 'group:456', reason: 'admin' } });
+      const first = await call(port, '/api/socialV2/wake', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', reason: 'admin' } });
       assert.equal(first.status, 200);
       assert.equal(first.json.reason, 'bootstrap', '首次唤醒必须走 bootstrap');
       assert.equal(first.json.firstWake, true);
       assert.equal(first.json.requestedReason, 'admin', '仍回显操作者请求的原因');
 
-      const second = await call(port, '/api/socialV2/wake', { method: 'POST', headers: ADMIN, body: { key: 'group:456', reason: 'admin' } });
+      const second = await call(port, '/api/socialV2/wake', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', reason: 'admin' } });
       assert.equal(second.status, 200);
       assert.equal(second.json.reason, 'admin', '已 bootstrap 过则保持原原因');
       assert.equal(second.json.firstWake, false);
@@ -259,7 +259,7 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
   const h = await bridgeHarness({ config: { socialV2: { wake: { batchWindowMs: 1000 } } } });
   try {
     h.setMode('reserved2');
-    h.setInitialPrompt('group:456', ENV_TEXT);
+    h.setInitialPrompt('qq:group:456', ENV_TEXT);
     const event = {
       self_id: 999,
       user_id: 123,

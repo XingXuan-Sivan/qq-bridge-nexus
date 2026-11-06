@@ -114,30 +114,30 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
     h.setMode('reserved2');
     h.scheduler.updateSettings({ limits: { quietEnabled: false } }, { source: 'console' });
     const port = await listen(server);
-    await h.ensureSession('group:456');
+    await h.ensureSession('qq:group:456');
     // 开定时静默（覆盖现在）
     const saved = await req(port, '/api/silence', 'POST', {}, { enabled: true, timezone: BJ, ranges: [rangeAroundNow()] });
     assert.equal(saved.status, 200, JSON.stringify(saved.json));
     assert.equal(saved.json.active.name, '测试段');
-    assert.ok(h.scheduledSilenceFor('group:456'), '群在静默里');
-    assert.equal(h.scheduledSilenceFor('private:123'), null, '管理员私聊默认不受影响');
-    assert.equal(h.shouldBlockSilentReply('group:456'), true, '群里发送被拦');
+    assert.ok(h.scheduledSilenceFor('qq:group:456'), '群在静默里');
+    assert.equal(h.scheduledSilenceFor('qq:private:123'), null, '管理员私聊默认不受影响');
+    assert.equal(h.shouldBlockSilentReply('qq:group:456'), true, '群里发送被拦');
 
     // 群里 @ AI：消息记下，不唤醒；标记结束时补唤醒
     const prompts0 = h.calls.prompts.length;
     await h.handleIncoming('group', 456, groupAt('鲸鱼在吗'), h.cfg);
-    await h.sendWakePromptV2('group:456', 'proactiveCheck');
-    await h.sendWakePromptV2('group:456', 'timeout');
+    await h.sendWakePromptV2('qq:group:456', 'proactiveCheck');
+    await h.sendWakePromptV2('qq:group:456', 'timeout');
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(h.calls.prompts.length, prompts0, '静默期间一次都没唤醒（不花 token）');
-    const st = h.getSocialV2State('group:456');
+    const st = h.getSocialV2State('qq:group:456');
     assert.ok(st.unread.some((m) => /鲸鱼在吗/.test(m.text)), '消息照样记进未读');
     assert.equal(st.silenceMissedDirect, true, '记下「有人直接找过 AI」');
 
     // 定时任务：叫 AI 来说 → 跳过；照常执行 → 放行；固定文字照发；预览标出会跳过
-    const skip = h.scheduler.createTask({ name: 'AI 群聊', kind: 'ai', instruction: '随便聊一句', schedule: { type: 'daily', times: ['09:00'] }, targets: ['group:456'] }, { source: 'console' });
-    const run = h.scheduler.createTask({ name: 'AI 例外', kind: 'ai', instruction: '提醒交周报', schedule: { type: 'daily', times: ['10:00'] }, targets: ['group:456'], runDuringSilence: true }, { source: 'console' });
-    const text = h.scheduler.createTask({ name: '文字', kind: 'text', text: '记得喝水', schedule: { type: 'daily', times: ['11:00'] }, targets: ['group:456'] }, { source: 'console' });
+    const skip = h.scheduler.createTask({ name: 'AI 群聊', kind: 'ai', instruction: '随便聊一句', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:group:456'] }, { source: 'console' });
+    const run = h.scheduler.createTask({ name: 'AI 例外', kind: 'ai', instruction: '提醒交周报', schedule: { type: 'daily', times: ['10:00'] }, targets: ['qq:group:456'], runDuringSilence: true }, { source: 'console' });
+    const text = h.scheduler.createTask({ name: '文字', kind: 'text', text: '记得喝水', schedule: { type: 'daily', times: ['11:00'] }, targets: ['qq:group:456'] }, { source: 'console' });
     for (const t of [skip, run, text]) h.scheduler.getTask(t.id).nextRunAt = Date.now() - 1000;
     const sent0 = h.calls.sent.length;
     await h.scheduler.tick();
@@ -147,13 +147,13 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
     assert.equal(hist.find((x) => x.taskId === run.id)?.status, 'sent', '设了照常执行的放行');
     assert.ok(h.calls.prompts.slice(prompts0).some((p) => p.content.some((c) => /提醒交周报/.test(c.text ?? ''))), '照常执行的唤醒了 AI');
     assert.ok(h.calls.sent.slice(sent0).some((x) => String(x.text) === '记得喝水'), '固定文字照发');
-    const pv = await req(port, '/api/scheduler/preview', 'POST', {}, { schedule: { type: 'interval', everyMinutes: 30, window: ['00:00', '23:30'] }, kind: 'ai', targets: ['group:456'], count: 5 });
+    const pv = await req(port, '/api/scheduler/preview', 'POST', {}, { schedule: { type: 'interval', everyMinutes: 30, window: ['00:00', '23:30'] }, kind: 'ai', targets: ['qq:group:456'], count: 5 });
     assert.ok(pv.json.next.some((x) => x.silenced === '测试段'), '预览标出落在静默里的那几次');
 
     // 手动「恢复正常」：这一段临时恢复
     const resume = await req(port, '/api/role-mode', 'POST', {}, { mode: 'active' });
     assert.equal(resume.json.resumedScheduled.name, '测试段');
-    assert.equal(h.scheduledSilenceFor('group:456'), null, '这一段临时恢复了');
+    assert.equal(h.scheduledSilenceFor('qq:group:456'), null, '这一段临时恢复了');
     const status = await req(port, '/api/status');
     assert.equal(status.json.silence, null, '状态里不再显示静默');
 
@@ -166,9 +166,9 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
     for (let i = 0; i < 50 && h.calls.prompts.length === prompts1; i += 1) await settle();
     const wake = h.calls.prompts.slice(prompts1).map((p) => p.content.map((c) => c.text ?? '').join('\n')).join('\n');
     // 会话若还忙着上一轮（上面「照常执行」的任务刚唤醒过它），补唤醒会排队，空下来再发
-    const queued = (h.getSocialV2State('group:456').pendingWakeReasons || []).some((r) => r.reason === 'silenceEnded');
+    const queued = (h.getSocialV2State('qq:group:456').pendingWakeReasons || []).some((r) => r.reason === 'silenceEnded');
     assert.ok(/定时静默刚结束/.test(wake) || queued, '结束时补一次唤醒（立即发出，或会话忙时排队）');
-    assert.equal(h.getSocialV2State('group:456').silenceMissedDirect, false);
+    assert.equal(h.getSocialV2State('qq:group:456').silenceMissedDirect, false);
 
     // 控制台接口：AI 的令牌不行；不合法的设置拒绝
     const asAgent = await req(port, '/api/silence', 'POST', { 'x-agent-token': st.agentToken }, { enabled: false });
@@ -209,33 +209,33 @@ test('④ 「只在被 @ 或私聊时唤醒」档位', async () => {
     h.setMode('reserved2');
     h.scheduler.updateSettings({ limits: { quietEnabled: false } }, { source: 'console' });
     const port = await listen(server);
-    await h.ensureSession('group:456');
+    await h.ensureSession('qq:group:456');
     const saved = await req(port, '/api/silence', 'POST', {}, { enabled: true, timezone: BJ, ranges: [rangeAroundNow()], options: { stopWakes: true, directWakes: true } });
     assert.equal(saved.status, 200, JSON.stringify(saved.json));
     assert.equal(saved.json.config.options.directWakes, true);
 
     // 没人找：主动冒泡、睡醒照样不唤醒，发送照样拦
     const prompts0 = h.calls.prompts.length;
-    await h.sendWakePromptV2('group:456', 'proactiveCheck');
-    await h.sendWakePromptV2('group:456', 'timeout');
+    await h.sendWakePromptV2('qq:group:456', 'proactiveCheck');
+    await h.sendWakePromptV2('qq:group:456', 'timeout');
     await new Promise((r) => setTimeout(r, 200));
     assert.equal(h.calls.prompts.length, prompts0, '没人找时不唤醒');
-    assert.equal(h.shouldBlockSilentReply('group:456'), true);
+    assert.equal(h.shouldBlockSilentReply('qq:group:456'), true);
 
-    assert.ok(!h.getSocialV2State('group:456').pendingWakeReason, '静默中没有排队的唤醒');
+    assert.ok(!h.getSocialV2State('qq:group:456').pendingWakeReason, '静默中没有排队的唤醒');
     // 群友没 @ 的普通消息：照样只记不唤醒
     const plain = { ...groupAt('今天好热'), message: [{ type: 'text', data: { text: '今天好热' } }] };
     await h.handleIncoming('group', 456, plain, h.cfg);
-    assert.ok(h.scheduledSilenceFor('group:456'), '普通消息不放行');
+    assert.ok(h.scheduledSilenceFor('qq:group:456'), '普通消息不放行');
 
     // 被 @：这个群放行，能唤醒、能发
     await h.handleIncoming('group', 456, groupAt('鲸鱼在吗'), h.cfg);
-    assert.equal(h.scheduledSilenceFor('group:456'), null, '被 @ 后这个群放行');
-    assert.equal(h.shouldBlockSilentReply('group:456'), false, '放行期间能发');
-    assert.ok(!h.getSocialV2State('group:456').silenceMissedDirect, '已经当场处理，结束时不用再补');
-    assert.ok(h.getSocialV2State('group:456').unread.some((m) => /鲸鱼在吗/.test(m.text)), '消息走了正常流程');
-    assert.ok(h.getSocialV2State('group:456').pendingWakeReason, '被 @ 后排上了唤醒（合并窗口几秒后发出）');
-    assert.ok(h.scheduledSilenceFor('group:789'), '别的群照样静默');
+    assert.equal(h.scheduledSilenceFor('qq:group:456'), null, '被 @ 后这个群放行');
+    assert.equal(h.shouldBlockSilentReply('qq:group:456'), false, '放行期间能发');
+    assert.ok(!h.getSocialV2State('qq:group:456').silenceMissedDirect, '已经当场处理，结束时不用再补');
+    assert.ok(h.getSocialV2State('qq:group:456').unread.some((m) => /鲸鱼在吗/.test(m.text)), '消息走了正常流程');
+    assert.ok(h.getSocialV2State('qq:group:456').pendingWakeReason, '被 @ 后排上了唤醒（合并窗口几秒后发出）');
+    assert.ok(h.scheduledSilenceFor('qq:group:789'), '别的群照样静默');
   } finally {
     h.scheduler.stop();
     h.ext.controller.stop();

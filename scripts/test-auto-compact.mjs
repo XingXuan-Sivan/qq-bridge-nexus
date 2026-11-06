@@ -14,7 +14,7 @@ import { normalizeCompactConfig, inputTokensOf, decideCompact, COMPACT_DEFAULTS,
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { readConsoleSource } from './console-source.mjs';
 
-const GROUP = 'group:456';
+const GROUP = 'qq:group:456';
 const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
 
 test('① 模块', () => {

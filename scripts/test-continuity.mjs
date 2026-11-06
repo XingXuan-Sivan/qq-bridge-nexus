@@ -135,7 +135,7 @@ test('持久化与重启恢复', () => {
   const dir = tmpdir();
   const { reg } = registry(dir);
   reg.observeMessage({ kind: 'group', groupId: G1, userId: ALICE, card: 'Alice' });
-  reg.addNote(ALICE, { text: '喜欢猫', scope: `group:${G1}` });
+  reg.addNote(ALICE, { text: '喜欢猫', scope: `qq:group:${G1}` });
   reg.flush();
   const again = createPeopleRegistry({ file: path.join(dir, 'people.json') });
   again.load();
@@ -175,35 +175,35 @@ test('json-store：版本过新拒绝加载（防回滚程序把新数据写丢�
 test('真删除：人物与全部作用域记忆一起删除', () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'private', userId: ALICE });
-  reg.addNote(ALICE, { text: '私聊里说过的事', scope: `private:${ALICE}` });
-  reg.addNote(ALICE, { text: '群里的事', scope: `group:${G1}` });
+  reg.addNote(ALICE, { text: '私聊里说过的事', scope: `qq:private:${ALICE}` });
+  reg.addNote(ALICE, { text: '群里的事', scope: `qq:group:${G1}` });
   assert.equal(reg.deletePerson(ALICE), true);
   assert.equal(reg.getPerson(ALICE), null);
   assert.equal(reg.deletePerson(ALICE), false);
 });
 
 test('可见性：私聊记忆只在本人私聊可见，即使被错误标成 public', () => {
-  const note = { scope: `private:${ALICE}`, visibility: 'public', shareStatus: 'approved', text: 'x' };
-  assert.equal(noteVisibleIn(note, `private:${ALICE}`, ALICE, 'shared'), true);
-  assert.equal(noteVisibleIn(note, `group:${G1}`, ALICE, 'shared'), false);
-  assert.equal(noteVisibleIn(note, `private:${BOB}`, ALICE, 'shared'), false);
+  const note = { scope: `qq:private:${ALICE}`, visibility: 'public', shareStatus: 'approved', text: 'x' };
+  assert.equal(noteVisibleIn(note, `qq:private:${ALICE}`, ALICE, 'shared'), true);
+  assert.equal(noteVisibleIn(note, `qq:group:${G1}`, ALICE, 'shared'), false);
+  assert.equal(noteVisibleIn(note, `qq:private:${BOB}`, ALICE, 'shared'), false);
 });
 
 test('默认 identity：跨群只知道「同一个人、在别处见过」，不带别处记忆', () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', groupId: G1, userId: ALICE, card: 'Alice' });
-  reg.addNote(ALICE, { text: '在群1说过下周面试', scope: `group:${G1}` });
-  reg.addNote(ALICE, { text: '私聊说过心情不好', scope: `private:${ALICE}` });
+  reg.addNote(ALICE, { text: '在群1说过下周面试', scope: `qq:group:${G1}` });
+  reg.addNote(ALICE, { text: '私聊说过心情不好', scope: `qq:private:${ALICE}` });
   reg.observeJoin({ groupId: G2, userId: ALICE, card: '小爱', time: 1 });
   const cfg = { sharePolicy: 'identity' };
-  const v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  const v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.equal(v.seenInOtherGroups, 1);
   assert.equal(v.names.currentCard, '小爱');
   assert.equal(v.notes.length, 0, 'identity 档不带任何别处记忆');
   assert.ok(!v.text.includes('面试'));
   assert.ok(!v.text.includes('心情'));
   // 本群（G1）能看到本群记忆，但看不到私聊记忆
-  const v1 = buildPersonView(reg.getPerson(ALICE), `group:${G1}`, cfg);
+  const v1 = buildPersonView(reg.getPerson(ALICE), `qq:group:${G1}`, cfg);
   assert.ok(v1.text.includes('面试'));
   assert.ok(!v1.text.includes('心情'));
 });
@@ -212,43 +212,43 @@ test('none 档：连「在别处见过」都不说；群级 none 覆盖全局 sh
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', groupId: G1, userId: ALICE, card: 'Alice' });
   reg.observeMessage({ kind: 'group', groupId: G2, userId: ALICE, card: '小爱' });
-  const v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, { sharePolicy: 'none' });
+  const v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, { sharePolicy: 'none' });
   assert.equal(v.seenInOtherGroups, 0);
   assert.ok(!v.text.includes('见过'));
   const cfg = { sharePolicy: 'shared', groups: { [G1]: { sharePolicy: 'none' } } };
-  assert.equal(effectivePolicyBetween(cfg, `group:${G2}`, G1), 'none');
-  const v2 = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  assert.equal(effectivePolicyBetween(cfg, `qq:group:${G2}`, G1), 'none');
+  const v2 = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.equal(v2.seenInOtherGroups, 0, 'G1 设为 none，G2 里不提 G1');
 });
 
 test('shared 档：只有管理员批准的共享记忆跨群可见；未批准的不外流', () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', groupId: G1, userId: ALICE, card: 'Alice' });
-  const pending = reg.addNote(ALICE, { text: '是个摄影爱好者', scope: `group:${G1}`, share: true });
-  reg.addNote(ALICE, { text: '群1的内部梗', scope: `group:${G1}` });
+  const pending = reg.addNote(ALICE, { text: '是个摄影爱好者', scope: `qq:group:${G1}`, share: true });
+  reg.addNote(ALICE, { text: '群1的内部梗', scope: `qq:group:${G1}` });
   reg.observeMessage({ kind: 'group', groupId: G2, userId: ALICE, card: '小爱' });
   const cfg = { sharePolicy: 'shared', groups: { [G1]: { label: '摄影群' } } };
-  let v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  let v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.equal(v.notes.length, 0, 'pending 的共享申请不可见');
   reg.reviewNote(ALICE, pending.id, true);
-  v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.deepEqual(v.notes.map((n) => n.text), ['是个摄影爱好者']);
   assert.equal(v.notes[0].where, '跨群共享');
   assert.deepEqual(v.otherGroupLabels, ['摄影群']);
   assert.ok(!v.text.includes('内部梗'));
   // 管理员写的 global 记忆在 shared 档可见
   reg.addNote(ALICE, { text: '大家都叫她阿爱', scope: 'global', origin: 'admin' });
-  v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.ok(v.notes.some((n) => n.text === '大家都叫她阿爱'));
 });
 
 test('recordable=false 的群：其记录即使被批准共享也不外流', () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', groupId: G1, userId: ALICE });
-  const n = reg.addNote(ALICE, { text: '工作群的事', scope: `group:${G1}`, share: true });
+  const n = reg.addNote(ALICE, { text: '工作群的事', scope: `qq:group:${G1}`, share: true });
   reg.reviewNote(ALICE, n.id, true);
   const cfg = { sharePolicy: 'shared', groups: { [G1]: { recordable: false } } };
-  const v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, cfg);
+  const v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, cfg);
   assert.equal(v.notes.length, 0);
   assert.equal(v.seenInOtherGroups, 0);
 });
@@ -258,9 +258,9 @@ test('冲突处理：本群记录排在跨群记录前面，置顶/明确优先'
   reg.observeMessage({ kind: 'group', groupId: G2, userId: ALICE });
   reg.addNote(ALICE, { text: '全局：不吃辣', scope: 'global', origin: 'admin' });
   clock.t += 10;
-  const local = reg.addNote(ALICE, { text: '本群：最近开始吃辣了', scope: `group:${G2}` });
+  const local = reg.addNote(ALICE, { text: '本群：最近开始吃辣了', scope: `qq:group:${G2}` });
   reg.editNote(ALICE, local.id, '本群：最近开始吃辣了（本人纠正）');
-  const v = buildPersonView(reg.getPerson(ALICE), `group:${G2}`, { sharePolicy: 'shared' });
+  const v = buildPersonView(reg.getPerson(ALICE), `qq:group:${G2}`, { sharePolicy: 'shared' });
   assert.equal(v.notes[0].where, '本群');
   assert.equal(v.notes[0].pinned, true);
 });
@@ -273,7 +273,7 @@ test('在场人物块有字数上限，且声明以 QQ 号认人', () => {
     reg.observeMessage({ kind: 'group', groupId: G1, userId: qq, card: `成员${i}` });
     persons.push(reg.getPerson(qq));
   }
-  const block = renderPeopleBlock(persons, `group:${G1}`, {}, { maxPeople: 8, maxChars: 300 });
+  const block = renderPeopleBlock(persons, `qq:group:${G1}`, {}, { maxPeople: 8, maxChars: 300 });
   assert.ok(block.startsWith('【在场人物】'));
   assert.ok(block.length < 600);
   assert.ok(block.includes('同名不同号'));
@@ -286,7 +286,7 @@ test('旧版 memberImpressions 迁移：唯一映射才导入，歧义进人工�
     { sender: '同名', userId: BOB },
     { sender: '同名', userId: CAROL },
   ];
-  const r = reg.importLegacyImpressions(`group:${G1}`, {
+  const r = reg.importLegacyImpressions(`qq:group:${G1}`, {
     Alice: { traits: ['爱打游戏'] },
     同名: { traits: ['不确定是谁'] },
     路人: { traits: ['没出现过'] },
@@ -295,7 +295,7 @@ test('旧版 memberImpressions 迁移：唯一映射才导入，歧义进人工�
   assert.equal(r.review, 2);
   assert.equal(reg.getPerson(ALICE).notes[0].origin, 'migration');
   assert.equal(reg.getPerson(BOB)?.notes?.length ?? 0, 0);
-  const again = reg.importLegacyImpressions(`group:${G1}`, { Alice: { traits: ['x'] } }, recent);
+  const again = reg.importLegacyImpressions(`qq:group:${G1}`, { Alice: { traits: ['x'] } }, recent);
   assert.equal(again.skipped, true, '同一会话只迁移一次');
 });
 
@@ -351,13 +351,13 @@ test('退群默认不唤醒；撤回只记录不复述', async () => {
 
 test('跨群协作：默认关闭；有向链接；只给统计不给内容', () => {
   const base = { allow: { groups: [G1, G2] } };
-  assert.equal(checkCrossGroup(base, `group:${G1}`, G2, 'activity').ok, false);
+  assert.equal(checkCrossGroup(base, `qq:group:${G1}`, G2, 'activity').ok, false);
   const cfg = { ...base, crossGroup: { enabled: true, links: [{ from: G1, to: G2, allow: ['activity'] }] } };
-  assert.equal(checkCrossGroup(cfg, `group:${G1}`, G2, 'activity').ok, true);
-  assert.equal(checkCrossGroup(cfg, `group:${G2}`, G1, 'activity').ok, false, '反向未授权');
-  assert.equal(checkCrossGroup(cfg, `group:${G1}`, G2, 'presence').ok, false, '能力未授权');
-  assert.equal(checkCrossGroup(cfg, `private:${ALICE}`, G2, 'activity').ok, false, '私聊不能发起');
-  assert.equal(checkCrossGroup({ ...cfg, allow: { groups: [G1] } }, `group:${G1}`, G2, 'activity').ok, false, '目标不在白名单');
+  assert.equal(checkCrossGroup(cfg, `qq:group:${G1}`, G2, 'activity').ok, true);
+  assert.equal(checkCrossGroup(cfg, `qq:group:${G2}`, G1, 'activity').ok, false, '反向未授权');
+  assert.equal(checkCrossGroup(cfg, `qq:group:${G1}`, G2, 'presence').ok, false, '能力未授权');
+  assert.equal(checkCrossGroup(cfg, `qq:private:${ALICE}`, G2, 'activity').ok, false, '私聊不能发起');
+  assert.equal(checkCrossGroup({ ...cfg, allow: { groups: [G1] } }, `qq:group:${G1}`, G2, 'activity').ok, false, '目标不在白名单');
   const now = 1_700_000_000_000;
   const act = queryActivity({ recentMessages: [{ time: now - 1000, userId: ALICE, text: '秘密内容' }, { time: now - 2000, userId: BOB, text: 'x' }, { time: now - 10, isSelf: true, text: '我' }] }, now);
   assert.equal(act.messagesLastHour, 2);
@@ -372,10 +372,10 @@ test('跨群协作：默认关闭；有向链接；只给统计不给内容', ()
 test('记忆写入：作用域非法拒绝；每个作用域有上限；pinned 不被淘汰', () => {
   const { reg, clock } = registry();
   assert.throws(() => reg.addNote(ALICE, { text: 'x', scope: 'group:abc' }), /scope/);
-  assert.throws(() => reg.addNote('abc', { text: 'x', scope: `group:${G1}` }), /QQ/);
-  const pinned = reg.addNote(ALICE, { text: '置顶的边界', scope: `group:${G1}`, pinned: true });
-  for (let i = 0; i < 40; i++) { clock.t += 1; reg.addNote(ALICE, { text: `第${i}条`, scope: `group:${G1}` }); }
-  const notes = reg.getPerson(ALICE).notes.filter((n) => n.scope === `group:${G1}`);
+  assert.throws(() => reg.addNote('abc', { text: 'x', scope: `qq:group:${G1}` }), /QQ/);
+  const pinned = reg.addNote(ALICE, { text: '置顶的边界', scope: `qq:group:${G1}`, pinned: true });
+  for (let i = 0; i < 40; i++) { clock.t += 1; reg.addNote(ALICE, { text: `第${i}条`, scope: `qq:group:${G1}` }); }
+  const notes = reg.getPerson(ALICE).notes.filter((n) => n.scope === `qq:group:${G1}`);
   assert.equal(notes.length, 30);
   assert.ok(notes.some((n) => n.id === pinned.id));
 });

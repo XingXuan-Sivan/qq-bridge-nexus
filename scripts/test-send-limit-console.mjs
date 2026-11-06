@@ -9,7 +9,7 @@ import http from 'node:http';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { readConsoleSource } from './console-source.mjs';
 
-const GROUP = 'group:456';
+const GROUP = 'qq:group:456';
 const CONSOLE = { 'x-console-token': 'fixture-console-token' };
 function call(port, pathname, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {

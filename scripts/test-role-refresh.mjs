@@ -14,8 +14,8 @@ import {
 } from '../src/role-refresh.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
-const GROUP_KEY = 'group:456';
-const OWNER_KEY = 'private:123';
+const GROUP_KEY = 'qq:group:456';
+const OWNER_KEY = 'qq:private:123';
 const CARD_A = '# 角色卡：测试鱼\n你是测试鱼，说话很凶。被怼就顶回去。';
 const CARD_B = '# 角色卡：测试鱼\n你是测试鱼，说话软软的。被怼就撒娇。';
 const promptText = (p) => (Array.isArray(p?.content) ? p.content.map((c) => String(c?.text ?? '')).join('\n') : '');
@@ -58,7 +58,7 @@ test('① 模块：指纹、读卡记录、持久化、提示块', () => {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.deepEqual(Object.keys(raw), [GROUP_KEY], '坏 key 不记');
     assert.ok(!JSON.stringify(raw).includes('测试鱼'), '只存指纹，不存卡片内容');
-    fs.writeFileSync(file, JSON.stringify({ ...raw, 'group:789': { sessionId: 's', fp: 'zz' }, junk: 1 }));
+    fs.writeFileSync(file, JSON.stringify({ ...raw, 'qq:group:789': { sessionId: 's', fp: 'zz' }, junk: 1 }));
     const again = createRoleRefreshTracker({ file });
     assert.equal(again.size(), 1, '重启后读回，坏条目丢弃');
     assert.equal(again.needsRefresh(GROUP_KEY, 's1', fp1), false);

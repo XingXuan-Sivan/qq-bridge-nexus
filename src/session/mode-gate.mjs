@@ -1,4 +1,4 @@
-import { DEFAULT_PLATFORM, formatKey, sameSession } from './key.mjs';
+import { DEFAULT_PLATFORM, formatKey, parseKey, sameSession } from './key.mjs';
 /**
  * 会话准入闸门：白名单 + 模式。
  *
@@ -41,7 +41,7 @@ export function modeAllowed(key, kind, id, cfg, mode) {
  * key 只认 `group:<id>` / `private:<id>`；其它形态一律拒绝。
  */
 export function isSessionAllowedInCurrentMode(key, cfg, mode) {
-  const m = /^(group|private):(\d+)$/.exec(key);
-  if (!m) return false;
-  return modeAllowed(key, m[1], Number(m[2]), cfg, mode);
+  const parsed = parseKey(key);
+  if (!parsed) return false;
+  return modeAllowed(key, parsed.kind, parsed.id, cfg, mode);
 }

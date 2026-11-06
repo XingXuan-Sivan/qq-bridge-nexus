@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { parseKey } from './session/key.mjs';
 
 /** 休眠会话最长保留多久；超过就归档（DSH 那边的会话也可能早被清理）。 */
 export const DORMANT_MAX_MS = 24 * 3600_000;
@@ -54,7 +55,7 @@ export function normalizeDormant(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [key, v] of Object.entries(raw)) {
-    if (!/^(group|private):\d+$/.test(key) || !v || typeof v !== 'object') continue;
+    if (!parseKey(key) || !v || typeof v !== 'object') continue;
     const sessionId = String(v.sessionId ?? '');
     const policy = String(v.policy ?? '');
     const at = Number(v.dormantAt);

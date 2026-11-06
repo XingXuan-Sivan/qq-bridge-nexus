@@ -20,8 +20,8 @@ import { readConsoleSource } from './console-source.mjs';
 
 const OWNER = 123;
 const GROUP = 456;
-const OWNER_KEY = `private:${OWNER}`;
-const GROUP_KEY = `group:${GROUP}`;
+const OWNER_KEY = `qq:private:${OWNER}`;
+const GROUP_KEY = `qq:group:${GROUP}`;
 const pol = (...a) => JSON.stringify(a);
 const settle = () => new Promise((r) => setTimeout(r, 30));
 const textMsg = (t) => [{ type: 'text', data: { text: t } }];
@@ -40,7 +40,7 @@ test('① 模块：休眠判定、休眠表清洗、交接文本', () => {
     [GROUP_KEY]: { sessionId: 's1', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
     'group:abc': { sessionId: 's2', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
     [OWNER_KEY]: { sessionId: 's3', policy: pol('closed-agent', 'x', '1', 'L2', 'y'), dormantAt: now },
-    'group:789': { sessionId: '', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
+    'qq:group:789': { sessionId: '', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
   });
   assert.deepEqual(Object.keys(clean), [GROUP_KEY], '坏 key、高权限、空 id 都丢弃');
 

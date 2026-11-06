@@ -30,7 +30,7 @@
 | 10 | `fs.watch` 在 Windows 的稳定性 | `Blocked`（等：目标平台实测；当前 `watch` 默认关） | 插件文件监听（P2c）默认关闭，因为跨平台可靠性未验证 | 连续 100 次增删改插件文件，自动重载成功率 100% 且无重复加载；再把默认值改回 `true` | Windows 实测（长时运行） | 低 |
 | 11 | 迁移评估与实施（`docs/PARITY.md`） | `Partial`（差：2026-11-06 已落定 D-1=B（`persona-bind/1` 插件能力）、D-3=B（会话页 + 可配置切换 + 平台解耦 + 删改同步）；D-2/D-4 仍调研；被判定「补齐/重设计」的项尚未动工） | 见 `PARITY.md` §3 维度表：11 个维度全部有「保持/补齐/重设计」结论；被判定补齐的项拆成可验收小项 | 各小项的判据与依赖见 `PARITY.md` §7；顺序：会话标识平台化 → 会话页（含删改同步）→ `persona-bind/1` → 会话标题 → 切换/迁移脚本 | 高 |
 | 12 | 扩展便利性（`PARITY.md` §7.6） | `Partial`（差：插件 UI 面板、配置 schema 化表单、manifest 静态 `commands`、i18n、依赖约束、安装来源校验） | 新增一个插件时，不改控制台 HTML 就能有配置界面与面板；清单见 `PARITY.md` §7.6 | 需要先定「插件面板」的鉴权与静态路由（等 D-3 的会话页做完再排） | 中 |
-| 13 | 会话标识平台解耦 | `Done`（2026-11-06：`src/session/key.mjs` 统一组装/解析、`sessionKey()` 出口、7 个业务模块迁移、`platform.keyedFormat` 已打开、`state/` 数据已迁移 8 处；死代码 `src/core/session-router.mjs` 已删除） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 复核：`node scripts/test-session-key.mjs`、`node scripts/migrate-session-keys.mjs`（预演应为 0 处）、`npm run test:audit` | — |
+| 13 | 会话标识平台解耦 | `Done`（2026-11-06：`src/session/key.mjs` 统一组装/解析/判等，产出与解析两侧全部迁移，7 个业务模块 + 桥接 18 处构造 + 43 处解析 + 54 处接口入参归一；`platform.keyedFormat` 开关已彻底删除；死代码 `src/core/session-router.mjs` 已删除） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 复核：`node scripts/test-session-key.mjs`（11/11）、`node scripts/test-integration-v030.mjs`（31/31）、`npm run test:audit`（90/90） | — |
 
 ---
 
@@ -64,7 +64,7 @@
 ## 4. 复核命令
 
 ```powershell
-# 全量门禁（当前基线：88/88）
+# 全量门禁（当前基线：90/90）
 npm run test:audit
 
 # 跨版本集成
@@ -115,20 +115,22 @@ npm run test:console-ui
 
 ### 6.1 会话 key 平台化（2026-11-06，已完成）
 
-- 形态：`group:<id>` / `private:<id>` → `qq:group:<id>` / `qq:private:<id>`；开关是 `config.json` 的 `platform.keyedFormat`（默认 `false`，本机已置 `true`）。
-- 代码：`src/session/key.mjs` 统一组装/解析/判等（`formatKey`/`parseKey`/`sameSession`/`isGroupKey`/`isPrivateKey` + 进程级 `configureKeys()`/`key()`）；`src/bridge.js` 18 处构造与 7 个业务模块（`social/people.js`、`owner-relay`、`group-rules`、`memory-policy`、`mcp-snowluma-safe`、`bridge-extensions`、`session/mode-gate`）全部改走该出口。
-- 单测：`scripts/test-session-key.mjs` 10 条（含开关关/开两种形态、非法平台回落、非法类型与 id 抛错）。
+- 形态：只有一种 —— `<platform>:<group|private>:<id>`（qq 即 `qq:group:<id>` / `qq:private:<id>`）；**没有开关**，旧形态 `group:<id>` 只在读取侧被 `parseKey()` 兼容。
+- 代码：`src/session/key.mjs` 统一组装/解析/判等（`formatKey`/`parseKey`/`sameSession`/`isGroupKey`/`isPrivateKey`/`idOfKey` + 进程级 `configureKeys()`/`key()`）；`src/bridge.js` 18 处构造、7 个业务模块（`social/people.js`、`owner-relay`、`group-rules`、`memory-policy`、`mcp-snowluma-safe`、`bridge-extensions`、`session/mode-gate`）全部改走该出口。
+- 解析侧（2026-11-06 补齐）：`src/bridge.js` 43 处、`prompt-blocks.js`、`role-per-key.js`、`role-refresh.js`、`mode-handover.js`、`voice-core.js`、`social/memory-policy.js`、`social/cross-group.js`、`scheduler/engine.js` 的正则/`split(':')`/`startsWith('group:')` 全部换成 `parseKey()`/`isGroupKey()`/`isPrivateKey()`；`sendToQQ` 等 8 处发送解包改 `parseKey()`（此前 `qq:group:1` 会被解成 `kind='qq'`、`id='group'`，实际发 `sendGroupMessage(null)`）；HTTP 接口的 `key` 参数（19 处 query + 35 处 body）统一经 `apiKey()` 归一，`ensureSession()` 也归一；`admin/approvals.js` 用 `normKey()` 归一登记与匹配。
+- 门禁：`scripts/test-session-key.mjs` 11 条；`test-integration-v030` 31/31；**`npm run test:audit` = 90/90**（迁移过程中一度回落到 78/90，逐项修完）。
 - 已删除：`src/core/session-router.mjs` 及其测试（全仓库无引用、未登记门禁，属死代码）；`scripts/migrate-session-keys.mjs` 及其测试（按本节策略不再需要迁移工具）。
 - 已发生的偏差：本机在定策略**之前**跑过一次迁移（8 处 / 5 个文件），备份 `state.bak-2026-11-05T20-23-59-947Z`。这不影响策略，只是「旧会话映射作废」这条提前发生了。
-- 回滚：`platform.keyedFormat` 改回 `false` 并重启，再从 `state.bak-*` 手工还原需要的文件（没有自动工具，这是策略的一部分）。
-- 夹具教训：`scripts/test-qq-model-view.mjs` 的临时目录只拷被 spawn 的 3 个文件，`mcp-snowluma-safe.js` 新增依赖 `src/session/key.mjs` 后子进程 import 失败、报 `MCP error -32000: Connection closed`；已补拷依赖。**给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具。**
+- 回滚：没有开关可回；要退回旧形态需回滚代码提交，再从 `state.bak-*` 手工还原需要的文件（没有自动工具，这是策略的一部分）。
+- 夹具教训：① `scripts/test-qq-model-view.mjs` 的临时目录只拷被 spawn 的 3 个文件，`mcp-snowluma-safe.js` 新增依赖 `src/session/key.mjs` 后子进程 import 失败、报 `MCP error -32000: Connection closed`；已补拷依赖。**给被单独 spawn 的模块加 import，要同步修「只拷部分文件」的夹具。** ② VM 夹具会剥 import，`parseKey`/`isGroupKey`/`isPrivateKey`/`idOfKey` 都要同时加进 sandbox 列表，否则 `ReferenceError`。
 
-### 6.2 偏差：解析侧未跟着迁移，开关已回退为 `false`（2026-11-06）
+### 6.2 已修复：解析侧未迁移导致私聊静默丢失（2026-11-06）
 
 - **现象**：`platform.keyedFormat: true` 时，私聊消息能进 `bot.onPrivateMessage`，但既不进未读、也不报错、也不打 `忽略未授权会话`，日志完全静默；`/api/sessions` 永远空。
 - **根因**：只迁移了 key 的**构造**，没迁移 key 的**解析**。`src/session/mode-gate.mjs:44` 的 `isSessionAllowedInCurrentMode()` 仍用 `/^(group|private):(\d+)$/`，形如 `qq:private:2897715886` 的 key 直接判 false；`src/bridge.js:13347` 的 `if (!isSessionAllowedInCurrentMode(key)) return;` 是静默返回 ⇒ 消息在准入闸门被丢弃。
-- **同类未改点**（都是「只认旧形态」的正则）：`src/bridge.js` 的 `3220`、`4160`、`5943`、`6619`、`6749`、`6875`、`6987`、`7373`、`7444`、`7541`、`8071`、`8178`、`8800`、`8823`、`8905`、`8985`、`10558`；`src/prompt-blocks.js:31`；`src/role-per-key.js:23`；`src/role-refresh.js:51/90`；`src/voice-core.js:255`；`src/social/memory-policy.js:50/87`；`src/social/people.js:80`；`src/mode-handover.js:57`；夹具 `scripts/console-ui-fixture.mjs:385/731`。
-- **处置**：`config.json` 的 `platform.keyedFormat` 已改回 `false` 并重启，消息链路恢复（`06:51` 起「消息已入未读」正常）。**开关在解析侧全部改完之前不要打开。**
-- **待办**：把上面这些正则统一换成 `src/session/key.mjs` 的 `parseKey()`/`isGroupKey()`/`isPrivateKey()`（新形态与旧形态都认），再开开关复测；这属于功能性改动，需先批准。
+- **处置（已完成）**：解析侧全部改走 `parseKey()` 系（见 6.1）；`platform.keyedFormat` 这个开关已彻底删除（`src/bridge.js`、`config.json`、`config.example.json` 三处），因为形态只剩一种，留着就是技术债。
+- **复测**：重启后 `消息已入未读` 正常、`/api/sessions` 有真实数据（`qq:private:2897715886`、`mode: reserved2`、`preset: qq-chat-v2`）、强制唤醒生成 `session-8031d170-…`。
+- **教训**：改主键形态必须**同时**改「产出」和「解析」，并且要用真机跑一遍私聊链路 —— 单元测试全绿也可能整条消息链静默断掉。
+
 
 

@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { key as buildKey, parseKey } from './session/key.mjs';
 
 /** 网关能直接吃进去的音频扩展名（SnowLuma 会自动转 SILK）。 */
 export const AUDIO_EXTS = [
@@ -245,16 +246,18 @@ export function describeAudio(info) {
 }
 
 /**
- * 目标 key 解析：group:123 / private:123。
+ * 目标 key 解析：新旧形态都认（`qq:group:123` / `group:123`）。
  *
  * 号码必须是**正整数**（不以 0 开头）：QQ 号与群号都不可能是 0，
  * 放 `group:0` 过去只会让一个必然失败的请求走到网关。
  * 非零开头同时也挡住了 `group:007` 这种写法。
  */
-export function parseTargetKey(key) {
-  const m = /^(group|private):([1-9]\d*)$/.exec(String(key ?? '').trim());
-  if (!m) return null;
-  return { kind: m[1], id: m[2], key: `${m[1]}:${m[2]}` };
+export function parseTargetKey(raw) {
+  const parsed = parseKey(String(raw ?? '').trim());
+  if (!parsed) return null;
+  // parseKey 允许前导零（它只校验数字），这里再收一道
+  if (!/^[1-9]\d*$/.test(String(parsed.id))) return null;
+  return { kind: parsed.kind, id: String(parsed.id), key: buildKey(parsed.kind, parsed.id) };
 }
 
 /** 上传文件名净化：去掉路径、控制字符、Windows 保留字符，保留中文。 */

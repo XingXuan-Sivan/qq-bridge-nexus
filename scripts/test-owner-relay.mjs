@@ -12,13 +12,13 @@ import {
 } from '../src/social/owner-relay.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OWNER = 'private:10001';
+const OWNER = 'qq:private:10001';
 const ALLOWED_GROUP = '20002';
 const base = {
   fromKey: OWNER,
   tokenOk: true,
   isOwnerPrivateKey: (k) => k === OWNER,
-  isTargetAllowed: (k) => k === `group:${ALLOWED_GROUP}`,
+  isTargetAllowed: (k) => k === `qq:group:${ALLOWED_GROUP}`,
   enabled: true,
   targetGroupId: ALLOWED_GROUP,
   instruction: '在群里随便冒个泡',
@@ -28,18 +28,18 @@ const base = {
 test('合法托付：管理员私聊 → 白名单群', () => {
   const r = validateOwnerRelay(base);
   assert.equal(r.ok, true);
-  assert.equal(r.targetKey, `group:${ALLOWED_GROUP}`);
+  assert.equal(r.targetKey, `qq:group:${ALLOWED_GROUP}`);
   assert.equal(r.instruction, '在群里随便冒个泡');
 });
 
 test('拒绝：开关关闭 / 令牌不对 / 非管理员私聊 / 群会话发起 / 白名单外 / 非群号 / 超长 / 空内容', () => {
   assert.match(validateOwnerRelay({ ...base, enabled: false }).error, /未启用/);
   assert.match(validateOwnerRelay({ ...base, tokenOk: false }).error, /token/);
-  assert.match(validateOwnerRelay({ ...base, fromKey: 'private:30003' }).error, /只有管理员/);
-  assert.match(validateOwnerRelay({ ...base, fromKey: `group:${ALLOWED_GROUP}` }).error, /只有管理员/, '群会话不能托付别的群（防群内提示词注入）');
+  assert.match(validateOwnerRelay({ ...base, fromKey: 'qq:private:30003' }).error, /只有管理员/);
+  assert.match(validateOwnerRelay({ ...base, fromKey: `qq:group:${ALLOWED_GROUP}` }).error, /只有管理员/, '群会话不能托付别的群（防群内提示词注入）');
   assert.match(validateOwnerRelay({ ...base, targetGroupId: '40004' }).error, /白名单/);
   assert.match(validateOwnerRelay({ ...base, targetGroupId: 'abc' }).error, /群号/);
-  assert.match(validateOwnerRelay({ ...base, targetGroupId: 'group:20002' }).error, /群号/);
+  assert.match(validateOwnerRelay({ ...base, targetGroupId: 'qq:group:20002' }).error, /群号/);
   assert.match(validateOwnerRelay({ ...base, instruction: 'x'.repeat(301) }).error, /300/);
   assert.match(validateOwnerRelay({ ...base, instruction: '   ' }).error, /不能为空/);
   // 开关检查在身份检查之前也无妨，但令牌检查必须最先：不给无效令牌任何信息。
@@ -50,28 +50,28 @@ test('限频：全局与单群上限，一小时后恢复', () => {
   let t = 0;
   const lim = createOwnerRelayLimiter({ now: () => t });
   const cfg = { maxPerHour: 3, maxPerTargetPerHour: 2 };
-  assert.equal(lim.take('group:1', cfg), null);
-  assert.equal(lim.take('group:1', cfg), null);
-  assert.match(lim.take('group:1', cfg), /这个群/);
-  assert.equal(lim.take('group:2', cfg), null);
-  assert.match(lim.take('group:3', cfg), /每小时 3 次/);
+  assert.equal(lim.take('qq:group:1', cfg), null);
+  assert.equal(lim.take('qq:group:1', cfg), null);
+  assert.match(lim.take('qq:group:1', cfg), /这个群/);
+  assert.equal(lim.take('qq:group:2', cfg), null);
+  assert.match(lim.take('qq:group:3', cfg), /每小时 3 次/);
   t = 3600_000;
-  assert.equal(lim.take('group:1', cfg), null);
+  assert.equal(lim.take('qq:group:1', cfg), null);
 });
 
 test('待办：peek 不取走、take 取走、过期丢弃、每群有上限', () => {
   let t = 0;
   const store = createOwnerRelayStore({ now: () => t, maxPerKey: 2 });
-  store.add('group:1', 'a', 1000);
-  assert.equal(store.peek('group:1').length, 1);
-  assert.equal(store.peek('group:1').length, 1, 'peek 不会消耗（唤醒提示词会构建两次）');
-  assert.deepEqual(store.take('group:1').map((x) => x.instruction), ['a']);
-  assert.equal(store.peek('group:1').length, 0);
-  store.add('group:1', 'b', 1000);
+  store.add('qq:group:1', 'a', 1000);
+  assert.equal(store.peek('qq:group:1').length, 1);
+  assert.equal(store.peek('qq:group:1').length, 1, 'peek 不会消耗（唤醒提示词会构建两次）');
+  assert.deepEqual(store.take('qq:group:1').map((x) => x.instruction), ['a']);
+  assert.equal(store.peek('qq:group:1').length, 0);
+  store.add('qq:group:1', 'b', 1000);
   t = 2000;
-  assert.equal(store.has('group:1'), false, '过期丢弃');
-  store.add('group:1', 'c', 1000); store.add('group:1', 'd', 1000); store.add('group:1', 'e', 1000);
-  assert.deepEqual(store.peek('group:1').map((x) => x.instruction), ['d', 'e']);
+  assert.equal(store.has('qq:group:1'), false, '过期丢弃');
+  store.add('qq:group:1', 'c', 1000); store.add('qq:group:1', 'd', 1000); store.add('qq:group:1', 'e', 1000);
+  assert.deepEqual(store.peek('qq:group:1').map((x) => x.instruction), ['d', 'e']);
 });
 
 test('提示词与返回文案：标明来源、不让原样转发、不让模型谎称已发出', () => {
@@ -81,7 +81,7 @@ test('提示词与返回文案：标明来源、不让原样转发、不让模�
   assert.match(block, /不要原样复述/);
   assert.match(block, /不要发送会话令牌/);
   assert.equal(ownerRelayPromptBlock([]), '');
-  assert.match(ownerRelayResultText('group:1', false), /不要声称已经发出/);
+  assert.match(ownerRelayResultText('qq:group:1', false), /不要声称已经发出/);
   const c = ownerRelayConfig({ maxChars: -1, notifyOwner: false, maxPerHour: '7' });
   assert.equal(c.maxChars, 300);
   assert.equal(c.maxPerHour, 7);

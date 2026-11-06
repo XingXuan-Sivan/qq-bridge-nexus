@@ -10,7 +10,7 @@
 //   state/admin/totp.json        TOTP 秘密（npm run admin:totp-setup 生成；也可用环境变量）
 
 import fs from 'node:fs';
-import { idOfKey, isGroupKey, key as buildKey, sameSession } from './session/key.mjs';
+import { idOfKey, isGroupKey, isPrivateKey, key as buildKey, sameSession } from './session/key.mjs';
 import path from 'node:path';
 import { createPeopleRegistry, normalizeQQ, normalizeGroupId } from './social/people.js';
 import { buildPersonView, renderPeopleBlock } from './social/memory-policy.js';
@@ -134,7 +134,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     const persons = [];
     for (const uid of userIds) {
       const qq = normalizeQQ(uid);
-      if (!qq || seen.has(qq) || qq === normalizeQQ(cfg.ownerQQ) && key.startsWith('private:')) continue;
+      if (!qq || seen.has(qq) || qq === normalizeQQ(cfg.ownerQQ) && isPrivateKey(key)) continue;
       seen.add(qq);
       const p = people.getPerson(qq);
       if (p) persons.push(p);
@@ -202,10 +202,10 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     if (p.private) lines.push(`· 私聊：${p.private.messageCount} 条`);
     const showPrivate = cfg.admin?.showPrivateNotes === true;
     for (const n of p.notes) {
-      if (n.scope.startsWith('private:') && !showPrivate) continue;
+      if (isPrivateKey(n.scope) && !showPrivate) continue;
       lines.push(`  [${n.id}] ${n.scope}${n.shareStatus === 'pending' ? '（申请共享）' : n.shareStatus === 'approved' && n.scope !== 'global' ? '（已共享）' : ''}：${n.text}`);
     }
-    const privateCount = p.notes.filter((n) => n.scope.startsWith('private:')).length;
+    const privateCount = p.notes.filter((n) => isPrivateKey(n.scope)).length;
     if (privateCount && !showPrivate) lines.push(`  （另有 ${privateCount} 条私聊来源的记忆，默认不在管理通道显示；控制台可查看）`);
     if (Object.keys(p.preferences).length) lines.push(`互动偏好：${Object.entries(p.preferences).map(([k, v]) => `${k}=${v}`).join('，')}`);
     if (p.aliases.length) lines.push(`管理员关联的小号：${p.aliases.join('、')}`);

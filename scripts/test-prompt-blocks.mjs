@@ -10,7 +10,7 @@ import path from 'node:path';
 import { blockFingerprint, createBlockTracker, BLOCK_REFS } from '../src/prompt-blocks.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
-const GROUP = 'group:456';
+const GROUP = 'qq:group:456';
 const promptText = (p) => (Array.isArray(p?.content) ? p.content.map((c) => String(c?.text ?? '')).join('\n') : '');
 
 test('① 模块', () => {

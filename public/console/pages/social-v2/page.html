@@ -82,136 +82,29 @@
 
       </div></details>
 <details class="settings-group"><summary>唤醒推荐值（仅参考，AI 可不遵守）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">默认模式</label>
-        <select class="u-w-120" id="v2WakeDefaultMode"><option value="diving">潜水</option><option value="active">活跃</option></select>
-        <label class="u-flex-1">默认下一次唤醒：无限期（永久）</label><input class="u-w-auto" type="checkbox" id="v2RecDefaultInfinite">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">推荐潜水时长（分）</label>
-        <input class="u-w-80" type="number" id="v2RecSleepMin" min="1"> ~
-        <input class="u-w-80" type="number" id="v2RecSleepMax" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">推荐普通消息概率</label><input class="u-w-80" type="number" id="v2RecProb" step="0.05" min="0" max="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">推荐关键词（逗号分隔）</label><input class="u-flex-1" type="text" id="v2RecKeywords" placeholder="小鲸鱼, DeepSeek">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">推荐 @ 唤醒</label><input class="u-w-auto" type="checkbox" id="v2RecAt">
-        <label class="u-flex-1">推荐名字唤醒</label><input class="u-w-auto" type="checkbox" id="v2RecName">
-        <label class="u-flex-1">推荐提问唤醒</label><input class="u-w-auto" type="checkbox" id="v2RecQuestion">
-        <label class="u-flex-1">推荐拍一拍唤醒</label><input class="u-w-auto" type="checkbox" id="v2RecPoke">
-      </div>
+      <div data-v2-fields="2"></div>
       <label>唤醒推荐提示（给 AI 看的文字）</label>
       <textarea id="v2WakeHint" rows="2" placeholder="例如：如果你在潜水，推荐 5~120 分钟、普通消息概率 0.05…"></textarea>
 
       </div></details>
 <details class="settings-group"><summary>唤醒硬限制</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">最小潜水（秒）</label><input class="u-w-90" type="number" id="v2SleepMinMs" min="0">
-        <label class="u-flex-1">最大潜水（秒，0=不限）</label><input class="u-w-90" type="number" id="v2SleepMaxMs" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">每分钟最多唤醒</label><input class="u-w-90" type="number" id="v2MaxWakeMin" min="0">
-        <label class="u-flex-1">每小时最多唤醒</label><input class="u-w-90" type="number" id="v2MaxWakeHour" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">合并窗口（毫秒）</label><input class="u-w-100" type="number" id="v2BatchWindowMs" min="1000" step="500">
-        <label class="u-flex-1">无行动兜底次数</label><input class="u-w-80" type="number" id="v2NoActionLimit" min="1">
-        <label class="u-flex-1">唤醒收尾提醒次数</label><input class="u-w-80" type="number" id="v2MaxWakeConfigReminders" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">启用沉睡前强制等待</label><input class="u-w-auto" type="checkbox" id="v2PreSleepWaitEnabled">
-        <label class="u-flex-1">沉睡前强制等待（分）</label><input class="u-w-80" type="number" id="v2PreSleepWaitMin" min="0" step="1">
-        <span class="meta u-flex-2">AI 设置潜水/下一次唤醒前，默认必须先等够这个观察窗口；0 表示不限制。</span>
-      </div>
-
+      <div data-v2-fields="3"></div>
       </div></details>
 <details class="settings-group"><summary>发送限制</summary><div class="settings-content">
       <div class="meta u-mb-8">二代不再按空格自动拆条；AI 要分多条必须显式传数组或用 qq_send_burst。</div>
-      <div class="row">
-        <label class="u-flex-1">允许多条发送</label><input class="u-w-auto" type="checkbox" id="v2BurstEnabled">
-        <label class="u-flex-1">单次最多条数</label><input class="u-w-70" type="number" id="v2BurstMax" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">条间间隔（毫秒）</label>
-        <input class="u-w-80" type="number" id="v2BurstMin" min="0"> ~
-        <input class="u-w-80" type="number" id="v2BurstMaxMs" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">长间隔概率</label><input class="u-w-80" type="number" id="v2LongGapProb" step="0.05" min="0" max="1">
-        <label class="u-flex-1">长间隔范围（毫秒）</label>
-        <input class="u-w-80" type="number" id="v2LongGapMin" min="0"> ~
-        <input class="u-w-80" type="number" id="v2LongGapMax" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">每分钟最多发送</label><input class="u-w-80" type="number" id="v2MaxSendMin" min="0">
-        <label class="u-flex-1">每小时最多发送</label><input class="u-w-80" type="number" id="v2MaxSendHour" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">单条最大字符</label><input class="u-w-80" type="number" id="v2MaxMsgChars" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">最大条间隔（毫秒，防止过长）</label><input class="u-w-90" type="number" id="v2MaxGapMs" min="100">
-        <label class="u-flex-1">按字数基础间隔（毫秒）</label><input class="u-w-80" type="number" id="v2GapBaseMs" min="0">
-        <label class="u-flex-1">每字追加（毫秒）</label><input class="u-w-80" type="number" id="v2GapPerCharMs" min="0">
-      </div>
+      <div data-v2-fields="4"></div>
       <label>发送推荐提示（给 AI 看的文字）</label>
       <textarea id="v2SendHint" rows="2" placeholder="例如：普通闲聊建议一次 1~3 条，条间 1~3 秒…"></textarea>
 
       </div></details>
 <details class="settings-group"><summary>等待工具参数（qq_wait_for_messages）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">默认等待（毫秒）</label><input class="u-w-90" type="number" id="v2WaitDefaultMs" min="100">
-        <label class="u-flex-1">最小等待（毫秒）</label><input class="u-w-90" type="number" id="v2WaitMinMs" min="100">
-        <label class="u-flex-1">最大等待（毫秒）</label><input class="u-w-90" type="number" id="v2WaitMaxMs" min="100">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">默认静默窗口（毫秒）</label><input class="u-w-90" type="number" id="v2WaitDefaultQuietMs" min="0">
-        <label class="u-flex-1">收到新消息后最小静默（毫秒）</label><input class="u-w-90" type="number" id="v2MinQuietAfterNewMs" min="0">
-        <span class="meta u-flex-2">收到新消息后至少再等这么久（默认 10000ms=10 秒），防止抢话。</span>
-      </div>
-      <div class="row">
-        <label class="u-flex-1">回复检查延迟（秒）</label><input class="u-w-90" type="number" id="v2AutoReplyCheckSec" min="1">
-        <span class="meta u-flex-2">回复检查是 AI 发消息后回来检查是否有人回复的延迟。</span>
-      </div>
-
+      <div data-v2-fields="5"></div>
       </div></details>
 <details class="settings-group"><summary>主动机会参数（proactive：群安静时 AI 主动冒泡）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">启用主动机会</label><input class="u-w-auto" type="checkbox" id="v2ProactiveEnabled">
-        <label class="u-flex-1">检查间隔（分）</label>
-        <input class="u-w-80" type="number" id="v2ProactiveIntervalMin" min="1"> ~
-        <input class="u-w-80" type="number" id="v2ProactiveIntervalMax" min="1">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">安静阈值（分）</label><input class="u-w-80" type="number" id="v2ProactiveIdleThreshold" min="1">
-        <label class="u-flex-1">触发概率</label><input class="u-w-80" type="number" id="v2ProactiveProbability" step="0.05" min="0" max="1">
-      </div>
-
+      <div data-v2-fields="6"></div>
       </div></details>
 <details class="settings-group"><summary>表情包参数（sticker：QQ 收藏表情体系）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">启用表情包体系</label><input class="u-w-auto" type="checkbox" id="v2StickerEnabled">
-        <label class="u-flex-1">同步缓存 TTL（秒）</label><input class="u-w-90" type="number" id="v2StickerSyncTtlSec" min="1">
-        <label class="u-flex-1">列表最大返回数</label><input class="u-w-90" type="number" id="v2StickerMaxList" min="1" max="500">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">提示中列出常用表情数</label><input class="u-w-90" type="number" id="v2StickerPromptMax" min="1" max="30">
-        <label class="u-flex-1">在 prompt/唤醒里附带表情摘要</label><input class="u-w-auto" type="checkbox" id="v2StickerIncludePrompt">
-        <span class="meta u-flex-2">关闭后 AI 仍可主动调用 qq_list_stickers，只是不主动喂到上下文。</span>
-      </div>
-      <div class="row">
-        <label class="u-flex-1">AI 收藏表情</label><input class="u-w-auto" type="checkbox" id="v2StickerCollectEnabled">
-        <label class="u-flex-1">每分钟最多收藏</label><input class="u-w-80" type="number" id="v2StickerCollectPerMin" min="0">
-        <label class="u-flex-1">每小时最多收藏</label><input class="u-w-80" type="number" id="v2StickerCollectPerHour" min="0">
-      </div>
-      <div class="row">
-        <label class="u-flex-1">收藏备注最大字数</label><input class="u-w-80" type="number" id="v2StickerCollectRemarkMax" min="1" max="50">
-        <span class="meta u-flex-2">AI 收藏别人表情时写的简短备注长度上限。</span>
-      </div>
+      <div data-v2-fields="7"></div>
       <div class="row u-row-12-wrap">
         <button id="stickerDescribeBtn" type="button">让 AI 看图补表情说明</button>
         <span class="meta" id="stickerDescribeStatus">加载中…</span>
@@ -221,18 +114,10 @@
 
       </div></details>
 <details class="settings-group"><summary>上下文参数（recent / unread / contextWindow）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">最近消息上限</label><input class="u-w-80" type="number" id="v2ContextRecentLimit" min="1">
-        <label class="u-flex-1">未读上限</label><input class="u-w-80" type="number" id="v2ContextUnreadLimit" min="1">
-        <label class="u-flex-1">上下文窗口</label><input class="u-w-80" type="number" id="v2ContextWindow" min="1">
-      </div>
-
+      <div data-v2-fields="8"></div>
       </div></details>
 <details class="settings-group"><summary>反馈工具参数（qq_report_feedback）</summary><div class="settings-content">
-      <div class="row">
-        <label class="u-flex-1">反馈最大长度</label><input class="u-w-90" type="number" id="v2FeedbackMaxLength" min="1">
-        <label class="u-flex-1">错误级通知 owner</label><input class="u-w-auto" type="checkbox" id="v2FeedbackNotifyOwner">
-      </div>
+      <div data-v2-fields="9"></div>
       <div class="row u-mt-6">
         <button id="v2FeedbackLoad" class="small">加载 AI 反馈</button>
         <button id="v2FeedbackClear" class="small danger">清空 AI 反馈</button>

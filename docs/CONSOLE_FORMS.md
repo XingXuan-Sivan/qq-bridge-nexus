@@ -136,6 +136,10 @@ form.destroy();
 
 2. **再加能力**：条件显示、字段级校验、脏值提示、错误回填。
 
+> **2026-11-06 改为方式 B（字段规格 + 统一渲染），方式 A 已废弃**：字段搬到 `pages/social-v2/fields.js` 的 `V2_FIELDS`（8 组、57 字段，含 4 个「上限」补录），`page.html` 只留分组外壳、说明文字与工具开关等交互块，`page.js` 用 `renderFields(host, spec.fields, { columns: 2 })` 铺字段、`createForm` 接管；`enhanceForm` 已删除。取值 `fv(id)` 内核优先、`domValue` 兜底（复选框回布尔），`fc(id) = Boolean(fv(id))`；长文本（关键词、提示词）在 spec 里写 `span: 2` 占整行。验收：payload 契约逐字节一致、225 个旧 id 全在、`test-console-ui` 24/24、`test-audit` 90/90。
+>
+> 方式 A 的三个坑留作历史教训：`.settings-content > .row label` 的 `flex-basis:100px!important` 会把字段标题撑成 100px 高（已改 `:not(.field-label)`）；`appendChild` 后不要再 `remove()`；搬完控件再 `insertBefore` 会报 `HierarchyRequestError`。
+
 其余页面按「一页一次迁完」推进：`overview` → `scheduler` → `persona` → `social-v1` → `slang` → 小页面。
 
 ## 6. 与契约的关系（硬约束）

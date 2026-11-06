@@ -227,26 +227,32 @@ export function renderFields(host, spec, options = {}) {
   const items = Array.isArray(spec) ? spec : [];
   const out = [];
   let inSection = false;
+  let gridOpen = false;
   let count = 0;
+  const openGrid = () => { if (!gridOpen) { out.push('<div class="cols form-cols">'); gridOpen = true; } };
+  const closeGrid = () => { if (gridOpen) { out.push('</div>'); gridOpen = false; } };
   const closeSection = () => {
-    if (inSection) {
-      out.push('</div></fieldset>');
-      inSection = false;
-    }
+    if (!inSection) return;
+    closeGrid();
+    out.push('</fieldset>');
+    inSection = false;
   };
   for (const raw of items) {
     const item = raw ?? {};
     if (item.type === 'section') {
       closeSection();
-      out.push(`<fieldset class="form-section"><legend>${esc(item.label ?? '')}</legend>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}<div class="cols form-cols">`);
+      out.push(`<fieldset class="form-section"><legend>${esc(item.label ?? '')}</legend>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
       inSection = true;
+      openGrid();
       continue;
     }
     if (item.type === 'callout') {
+      closeGrid();
       out.push(formCallout(item));
       continue;
     }
     if (item.type === 'actions') {
+      closeGrid();
       out.push(formActions(item));
       continue;
     }
@@ -256,10 +262,12 @@ export function renderFields(host, spec, options = {}) {
     const span = Math.max(1, Math.min(columns, Number(item.span) || 1));
     const colClass = span >= columns ? 'col-12' : `col-12 col-lg-${Math.round((12 * span) / columns)}`;
     const { name, span: _span, ...props } = item;
+    openGrid();
     out.push(`<div class="${colClass}">${factory({ ...props, id: name })}</div>`);
     count += 1;
   }
   closeSection();
+  closeGrid();
   host.innerHTML = out.join('');
   return count;
 }
@@ -669,76 +677,6 @@ export function createForm(root, options = {}) {
 }
 
 /* ---------------------------------------------------------------- 就地增强 */
-
-/**
- * 把「label + 控件」的既有声明式标记就地升级成字段结构：
- * .field > (.field-label + .field-control + .field-error)，控件保留原 id，只补 data-field。
- * 页面 HTML 不用改；也支持「label 包住 input」的复选/单选写法。返回升级的字段数。
- */
-export function enhanceForm(root, { skip } = {}) {
-  if (!root) return 0;
-  let count = 0;
-  for (const control of [...root.querySelectorAll('input[id], select[id], textarea[id]')]) {
-    if (!control.id || control.dataset.field || control.closest('[data-field-wrap]')) continue;
-    if (skip && control.matches(String(skip))) continue;
-    const id = control.id;
-    control.dataset.field = id;
-
-    const field = document.createElement('div');
-    field.className = 'field';
-    field.dataset.fieldWrap = id;
-
-    const error = document.createElement('p');
-    error.className = 'field-error';
-    error.id = `${id}-error`;
-    error.setAttribute('role', 'alert');
-    error.hidden = true;
-
-    const label = control.parentElement?.tagName === 'LABEL' && !control.parentElement.getAttribute('for')
-      ? control.parentElement
-      : null;
-
-    if (label) {
-      // label 包住控件（复选框/单选框）：整块放进 .field-control，标题用前一个 label
-      const origin = label.parentElement;
-      const anchor = label.nextSibling;
-      field.className = 'field';
-      const controlBox = document.createElement('div');
-      controlBox.className = 'field-control';
-      label.classList.remove('u-flex-1', 'u-flex-none');
-      label.classList.add('field-inline');
-      controlBox.appendChild(label);
-      const title = label.previousElementSibling;
-      if (title?.tagName === 'LABEL') {
-        title.classList.remove('u-flex-1', 'u-flex-none');
-        title.classList.add('field-label');
-        if (!title.getAttribute('for')) title.setAttribute('for', id);
-        field.appendChild(title);
-      }
-      field.appendChild(controlBox);
-      field.appendChild(error);
-      origin.insertBefore(field, anchor);
-    } else {
-      const origin = control.parentElement;
-      const anchor = control.nextSibling;
-      const title = control.previousElementSibling;
-      if (title?.tagName === 'LABEL') {
-        title.classList.remove('u-flex-1', 'u-flex-none');
-        title.classList.add('field-label');
-        if (!title.getAttribute('for')) title.setAttribute('for', id);
-        field.appendChild(title);
-      }
-      const controlBox = document.createElement('div');
-      controlBox.className = 'field-control';
-      controlBox.appendChild(control);
-      field.appendChild(controlBox);
-      field.appendChild(error);
-      origin.insertBefore(field, anchor);
-    }
-    count += 1;
-  }
-  return count;
-}
 
 function cssEscape(value) {
   if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value));

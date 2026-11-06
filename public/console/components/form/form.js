@@ -42,7 +42,7 @@ function fieldShell({ id, label, required, control, hint, warn, danger, docs, hi
   const errorId = `${id}-error`;
   const wrapClass = ['field', className].filter(Boolean).join(' ');
   return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
-  <label class="field-label" for="${esc(id)}">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</label>
+  <label class="field-label" for="${esc(id)}">${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
   <div class="field-control">${control}</div>
   ${notes.html}${hintExtra}
   <p class="field-error" id="${esc(errorId)}" role="alert" hidden></p>
@@ -126,7 +126,7 @@ export function checkboxGroup({ id, label, options = [], value = [], inline = tr
 }
 
 export function checkboxField({ id, label, checked = false, hint, warn, danger, docs, disabled = false }) {
-  const control = `<label class="field-inline"><input${attrs({ id, type: 'checkbox', 'data-field': id, checked: checked || null, disabled })}>${esc(label)}</label>`;
+  const control = `<input${attrs({ id, type: 'checkbox', 'data-field': id, checked: checked || null, disabled })}>`;
   const notes = fieldNotes(id, { hint, warn, danger, docs });
   return `<div class="field" data-field-wrap="${esc(id)}">
   <div class="field-control">${control}</div>

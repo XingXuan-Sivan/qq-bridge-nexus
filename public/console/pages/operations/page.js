@@ -2,8 +2,19 @@
 // 结构照搬迁移前 index.html 的 #section-test-send / #section-maintenance / #section-notify；
 // 片段由路由器注入后再调 init()，这里直接绑定按钮。
 import { api } from '../../js/api.js';
+import { renderFields } from '../../components/form/form.js';
+import { OPERATIONS_FIELDS } from './fields.js';
+
+// 静态控件按字段规格渲染：页面只留卡片与宿主，渲染之后再取 id。
+function renderOperationsFieldGroups() {
+  document.querySelectorAll('[data-operations-fields]').forEach((host) => {
+    const spec = OPERATIONS_FIELDS[host.dataset.operationsFields];
+    if (spec) renderFields(host, spec.fields, { columns: 2 });
+  });
+}
 
 export function init() {
+  renderOperationsFieldGroups();
   document.getElementById('tsSend').addEventListener('click', async () => {
     const r = await api('/api/test-send', 'POST', {
       kind: document.getElementById('tsKind').value,
@@ -12,7 +23,7 @@ export function init() {
     });
     const msg = document.getElementById('tsMsg2');
     msg.textContent = r.ok ? ('✅ 已发送 message_id=' + r.message_id) : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
   });
 
   document.getElementById('restartBtn').addEventListener('click', async () => {
@@ -26,7 +37,7 @@ export function init() {
     const r = await api('/api/workspace/reset', 'POST', {});
     const msg = document.getElementById('clearWsMsg');
     msg.textContent = r.ok ? (`✅ 已归档 ${r.archivedCount} 个会话，工作区已清空`) : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
     // 会话表与活动日志由各自页面在进入时刷新；全局指标由 app.js 的轮询更新。
   });
 
@@ -38,6 +49,6 @@ export function init() {
     const r = await api('/api/console/notify-ai', 'POST', { key: kind + ':' + id, message });
     const msg = document.getElementById('aiNotifyMsg');
     msg.textContent = r.ok ? ('✅ 已投递到 DSH：' + r.sessionId) : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
   });
 }

@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 三十三个真实踩过的坑
+## 1. 三十六个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -161,6 +161,36 @@ button:not(.nav-item):hover:not(:disabled) { transform: translateY(-1px) }
 **规则**：绝对定位的图标按钮不要靠 `transform` 居中（用 `top:0; bottom:0; margin:auto 0`），并加 `.btn-icon` 类——全局 hover/active 的浮动位移已经用 `:not(.btn-icon)` 排除。改完 hover 前后 `getBoundingClientRect().y` 必须一致（探针量过：375 → 375）。
 
 
+### 1.34 单选/复选组没走 `fieldShell`：标签落在左上、控件掉到下一行
+
+`radioGroup` / `checkboxGroup` 早期直接返回 `<div class="field"><span class="field-label">…</span><div class="field-control">…`，没有 `.field-block / .field-row`。这种「看着能用」的旧结构一旦混进规格，同一页里就会有两种对齐：普通字段标签在 148px 列，单选组标签贴在左边缘、控件另起一行（`persona` 的「生效方式」就是这样被看出来的）。
+
+规矩：**所有字段工厂的外壳只允许 `fieldShell()` 一种**。它顺带处理 `data-field-wrap`、hint/warn/danger/docs、`labelFor`（没有可聚焦控件时传 `''`）与 `required`。
+
+```js
+// 对：radio 组也走 fieldShell，label 落在标签列
+return fieldShell({ id, label, required, control: `<div class="field-inline" role="radiogroup" aria-label="${esc(label)}">…</div>`, hint, warn, danger, docs, labelFor: '' });
+```
+
+（原来的 `aria-labelledby="<id>-label"` 指向的 `<span>` 不存在了，改用 `aria-label`，别再引回去。）
+
+### 1.35 容器类挂到 `.field-block` 上：一个控件两层框
+
+`className` 落在字段**外壳**（`.field-block`）上，不是控件本身。把 `.code-area`（自带 border / padding / 背景 / `margin-top` 的容器类）当 className 传进 `textareaField`，就得到「外层容器一个框 + textarea 自己一个框」——用户看到的是「套了两层文本框」。
+
+给控件加样式要写后代选择器，不要复用容器类：
+
+```css
+.field-block--code > .field-row > .field-control > textarea {
+  min-height: 280px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+  background: var(--surface-sunken); color: var(--pre-fg);
+}
+```
+
+### 1.36 页面里不要写 `style="…"`：CSP 直接拒绝
+
+控制台 CSP 是 `style-src 'self'`，内联 style 会被浏览器拒绝（控制台刷 `Applying inline style violates the following Content Security Policy directive`），控件静默退回默认样式。宽度/间距用工具类（`.u-w-140`）或外层 `<span class="u-flex-basis-max-220">` 收窄；行布局用类名，不要在 JS 里 `el.style.marginTop = …`。迁移 `persona` 时清掉 `page.js` 里 5 处 `.style.` 后才恢复对齐。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -190,6 +220,9 @@ button:not(.nav-item):hover:not(:disabled) { transform: translateY(-1px) }
 - 页面 css 里有没有对 `.field-row` / `.field-control` / `.field-block` 写 `display` / `grid-template-columns` / `height`？
 - 页面里每个 class 都能在某个 css 里找到定义吗（没有就是 1.22 的死类名）？
 - 表格：翻到第 2 页、搜一个词之后，`input[data-field]` 的总数还等于总行数吗？
+- 单选/复选组的标签是否也在 148px 标签列（而不是贴左边缘、控件另起一行）？
+- 长文本/代码块是不是只有一层边框（`.field-block` 上有没有误挂 `.code-area` 这类容器类）？
+- 页面源码里还有没有 `style="` 或 JS 里的 `.style.`（CSP 会拒绝，静默失效）？
 - 折叠分组（`<details>`）全部展开后，有没有行被裁掉/点不到（1.20 的测试也要先展开）？
 - 页面上每个开关点一下：`aria-checked` 和「开/关」文案是否同步翻转？保存后请求体里的布尔值是否跟着变（不是 `undefined`，也不是永远 `false`）？
 - 日期字段能否整段键入 `2026-12-25`（不是被年份段吞掉）？点日历按钮能否弹出面板、选完是否回填？

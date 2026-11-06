@@ -34,11 +34,11 @@ function pageNumbers(page, pages) {
 }
 
 function pagerHtml(page, pages) {
-  const button = (n) => `<button type="button" class="pager-btn${n === page ? ' is-current' : ''}" data-page="${n}"${n === page ? ' aria-current="page"' : ''}>${n}</button>`;
+  const button = (n) => `<button type="button" class="pager-btn${n === page ? ' is-current' : ''}" data-pager-page="${n}"${n === page ? ' aria-current="page"' : ''}>${n}</button>`;
   const steps = pageNumbers(page, pages).map((n) => (n === '…' ? '<span class="pager-gap" aria-hidden="true">…</span>' : button(n))).join('');
-  return `<button type="button" class="pager-btn pager-step" data-page="${page - 1}"${page <= 1 ? ' disabled' : ''} aria-label="上一页">‹</button>`
+  return `<button type="button" class="pager-btn pager-step" data-pager-page="${page - 1}"${page <= 1 ? ' disabled' : ''} aria-label="上一页">‹</button>`
     + steps
-    + `<button type="button" class="pager-btn pager-step" data-page="${page + 1}"${page >= pages ? ' disabled' : ''} aria-label="下一页">›</button>`;
+    + `<button type="button" class="pager-btn pager-step" data-pager-page="${page + 1}"${page >= pages ? ' disabled' : ''} aria-label="下一页">›</button>`;
 }
 
 /**
@@ -169,9 +169,9 @@ function setupDataTable(table, hooks) {
     render();
   }));
   pager?.addEventListener('click', (event) => {
-    const button = event.target.closest('[data-page]');
+    const button = event.target.closest('[data-pager-page]');
     if (!button || button.disabled) return;
-    state.page = Number(button.dataset.page);
+    state.page = Number(button.dataset.pagerPage);
     render();
   });
   sizeSelect?.addEventListener('change', () => {

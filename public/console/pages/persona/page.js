@@ -4,6 +4,17 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
+import { renderFields } from '../../components/form/form.js';
+import { PERSONA_FIELDS } from './fields.js';
+
+/** 把 fields.js 的规格渲染进每个 `<div data-persona-fields="…">`。init() 里第一件事。 */
+function renderPersonaFieldGroups() {
+  document.querySelectorAll('[data-persona-fields]').forEach((host) => {
+    const spec = PERSONA_FIELDS[host.dataset.personaFields];
+    if (!spec) return;
+    renderFields(host, spec.fields, { columns: Number(host.dataset.personaColumns) || 2 });
+  });
+}
 
 // ── 人格管理 ────────────────────────────────────────────────────────────────
 // 人格提示词 = roles/<名称>.md，桥接每条消息注入，保存即生效。
@@ -93,7 +104,7 @@ async function saveRoleAssign(key, value) {
   const x = await api('/api/roles/assign', 'POST', roleAssignBody(key, value));
   if (x.ok) roleAssignDirty.delete(x.key);
   const msg = document.getElementById('roleAssignMsg');
-  msg.className = x.ok ? 'meta ok' : 'meta err';
+  msg.className = x.ok ? 'control-note ok' : 'control-note err';
   msg.textContent = !x.ok ? '❌ ' + (x.error || '保存失败')
     : '✅ ' + x.key + (x.source === 'global' ? ' 跟随全局默认' : x.source === 'off' ? ' 不挂角色卡' : ' 单独使用「' + x.role + '」') + roleSaveRefreshText(x.refresh);
   if (x.ok) refreshRoles();
@@ -108,16 +119,15 @@ function renderRoleAssignments(r) {
   if (!list.length) box.textContent = '还没有会话。有群或私聊和 AI 聊过之后会出现在这里，也可以在下面直接填会话添加。';
   for (const a of list) {
     const row = document.createElement('div');
-    row.className = 'row';
-    row.style.marginTop = '4px';
+    // 行内布局走类名（页内 css），不再写内联 style：内联样式会被 CSP 拦，也没法统一间距。
+    row.className = 'assign-row';
     row.dataset.roleAssignKey = a.key;
     const label = document.createElement('code');
-    label.style.flex = '0 0 auto';
-    label.style.minWidth = '170px';
+    label.className = 'assign-key';
     label.textContent = a.key;
     row.appendChild(label);
     const sel = document.createElement('select');
-    sel.style.flex = '0 1 220px';
+    sel.setAttribute('aria-label', a.key + ' 的人格');
     const saved = a.source === 'off' ? 'off' : a.source === 'key' ? 'role:' + a.role : 'default';
     roleAssignOptions(sel, saved, globalRole);
     // 之前改了没保存：保留那个选择（选项还在的话）
@@ -140,7 +150,7 @@ function renderRoleAssignments(r) {
       dirtyPill.hidden = !roleAssignDirty.has(a.key);
     });
     const btn = document.createElement('button');
-    btn.className = 'small';
+    btn.className = 'btn small';
     btn.textContent = '保存';
     btn.addEventListener('click', () => saveRoleAssign(a.key, sel.value));
     row.appendChild(btn);
@@ -194,12 +204,11 @@ async function refreshRoleDefaults() {
   if (!(r.defaults || []).length) { box.textContent = '发布包里没有找到默认人格（assets/default-roles/）'; return; }
   for (const d of r.defaults) {
     const row = document.createElement('div');
-    row.className = 'row';
-    row.style.marginTop = '4px';
+    row.className = 'assign-row';
     const state = !d.exists ? '已被删除' : (d.modified ? '改过' : '和原版一样');
     row.innerHTML = `<span class="u-flex-none"><b>${esc(d.name)}</b>${d.name === r.current ? '（当前启用）' : ''}</span><span class="pill ${!d.exists ? 'r' : (d.modified ? 'b' : 'g')}">${state}</span>`;
     const btn = document.createElement('button');
-    btn.className = 'small';
+    btn.className = 'btn small';
     btn.textContent = d.exists ? '恢复成原版' : '重新放回';
     btn.dataset.roleRestore = d.name;
     btn.disabled = d.exists && !d.modified;
@@ -208,7 +217,7 @@ async function refreshRoleDefaults() {
       const apply = (document.querySelector('input[name="roleSaveApply"]:checked') || {}).value || 'nextWake';
       const x = await api('/api/roles/restore-default', 'POST', { name: d.name, apply });
       const msg = document.getElementById('roleDefaultsMsg');
-      msg.className = x.ok ? 'meta ok' : 'meta err';
+      msg.className = x.ok ? 'control-note ok' : 'control-note err';
       msg.textContent = !x.ok ? '❌ ' + (x.error || '恢复失败')
         : x.unchanged ? `「${d.name}」本来就是原版`
         : `✅ 已恢复「${d.name}」` + (x.backup ? `（改过的那份备份为 state/role-backups/${x.backup}）` : '（原来被删了，已重新放回）') + roleSaveRefreshText(x.refresh);
@@ -344,7 +353,10 @@ async function refreshPersonaStatus() {
   try {
     const s = await api('/api/status');
     document.getElementById('roleText').textContent = s.role || '无';
-    document.getElementById('roleModeText').textContent = s.roleMode === 'silent' ? '静默' : '正常';
+    const pill = document.getElementById('roleModeText');
+    const silent = s.roleMode === 'silent';
+    pill.textContent = silent ? '静默' : '正常';
+    pill.className = `status-badge is-pill ${silent ? 'warn' : 'ok'}`;
   } catch {}
 }
 
@@ -417,6 +429,8 @@ function showRoleApplyResult(r) {
 }
 
 export function init() {
+  // 先把控件渲染出来：后面所有 getElementById 都要取到它们。
+  renderPersonaFieldGroups();
   setupRoleSuggest();
 
   document.getElementById('roleSet').addEventListener('click', async () => {
@@ -523,7 +537,7 @@ export function init() {
     if (!Number.isFinite(value) || value < 1000 || value > 20000) { setMsg(msg, '请输入 1000~20000 之间的整数', 'err'); return; }
     const r = await api('/api/roles/limit', 'POST', { maxInjectChars: value });
     msg.textContent = r.ok ? `✅ 已设为 ${r.maxInjectChars} 字符，下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
+    msg.className = r.ok ? 'control-note ok' : 'control-note err';
     if (r.ok) refreshRoles();
   });
 

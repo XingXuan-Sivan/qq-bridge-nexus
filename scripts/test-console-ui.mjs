@@ -80,7 +80,7 @@ try {
   // 但快照仍然有效，reveal() 先按快照切页再定位。
   const idPage = await page.evaluate(() => {
     const map = {};
-    for (const section of document.querySelectorAll('[data-page]')) {
+    for (const section of document.querySelectorAll('main section[data-page]')) {
       for (const node of section.querySelectorAll('[id]')) map[node.id] = section.dataset.page;
     }
     return map;
@@ -135,7 +135,9 @@ try {
   if (!original) await test('All ten navigation destinations work and preserve unsaved form values across polling', async () => {
     for (const view of views) {
       await navigate(view);
-      const visiblePages = await page.locator('[data-page]').evaluateAll(nodes => nodes.filter(x => x.getClientRects().length && getComputedStyle(x).visibility !== 'hidden').map(x => x.dataset.page));
+      // page-stack 是 display:contents，section 自身没有盒子，不能用 getClientRects 判断可见性；
+      // 这里只认 main 的直接子 section，按 hidden 属性判断。
+      const visiblePages = await page.locator('main section[data-page]').evaluateAll(nodes => nodes.filter(x => !x.hidden).map(x => x.dataset.page));
       assert(visiblePages.length > 0, `${view} has no visible content`);
       assert(visiblePages.every(x => x === view), `${view} exposes another page: ${visiblePages.join(', ')}`);
     }
@@ -158,7 +160,8 @@ try {
       for (const w of rows) {
         // 清单/表格行刻意顶对齐：几十行高的控件里标签居中会飘在中间。
         // 这里只量「单行字段」；这类长控件行的对齐由截图验收负责。
-        if (w.classList.contains('field-block--checklist') || w.classList.contains('field-block--table')) continue;
+        // 清单、表格、多行文本域都是「标签贴顶」的刻意设计（控件很高，标签居中会飘在中间），不参与单行对齐断言。
+        if (w.classList.contains('field-block--checklist') || w.classList.contains('field-block--table') || w.classList.contains('field-block--textarea')) continue;
         const l = w.querySelector('.field-label');
         const c = w.querySelector('.field-control');
         if (!l || !c) continue;
@@ -208,7 +211,7 @@ try {
       return {
         total: rows.length,
         shown: rows.filter((row) => !row.hidden).length,
-        pages: [...table.querySelectorAll('[data-pager] [data-page]')].map((el) => el.dataset.page),
+        pages: [...table.querySelectorAll('[data-pager] [data-pager-page]')].map((el) => Number(el.dataset.pagerPage)),
         summary: table.querySelector('[data-table-summary]')?.textContent ?? '',
         boxes: table.querySelectorAll('input[data-field="v2Tools"]').length,
       };
@@ -219,10 +222,10 @@ try {
     // 分页只隐藏行：所有 checkbox 必须仍在文档里，否则保存时会把翻页外的工具写成关闭。
     assert.equal(first.boxes, first.total, 'pagination must keep every checkbox in the form');
     if (first.total > 20) {
-      assert.ok(first.pages.includes('2'), 'pager should offer page 2');
+      assert.ok(first.pages.includes(2), 'pager should offer page 2');
       // 底部保存栏是 sticky 的：先把分页滚到视口中间，否则点击会被浮条挡住。
       await page.locator('#v2Tools [data-table-footer]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
-      await page.locator('#v2Tools [data-pager] [data-page="2"]').first().click();
+      await page.locator('#v2Tools [data-pager] [data-pager-page="2"]').first().click();
       const second = await snapshot();
       assert.equal(second.shown, Math.min(20, second.total - 20), 'page 2 should show the remaining rows, got ' + second.shown);
       assert.ok(second.summary.includes(String(21)), 'summary should start at row 21: ' + second.summary);
@@ -627,6 +630,8 @@ try {
 
   if (!original) await test('仿真提示词默认可查看、解锁后可编辑、保存后提示需重启 DSH', async () => {
     await navigate('persona');
+    // 仿真提示词现在收在默认折叠的分组里：先展开，否则控件存在但不可点。
+    await page.evaluate(() => { const d = document.querySelector('details[data-group="sim"]'); if (d) d.open = true; });
     await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
     assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), '', '默认应为只读');
     assert.equal(await page.locator('#simPromptSave').isDisabled(), true, '只读时不应能保存');
@@ -648,6 +653,7 @@ try {
 
   if (!original) await test('仿真提示词可切换到一代/二代，两代内容相互独立', async () => {
     await navigate('persona');
+    await page.evaluate(() => { const d = document.querySelector('details[data-group="sim"]'); if (d) d.open = true; });
     await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
     const v2 = await page.locator('#simPromptText').inputValue();
     assert.match(await page.locator('#simPromptStatus').textContent(), /二代仿真|qq-chat-v2/);

@@ -127,8 +127,9 @@
   min-width: 0;
   width: 100%;
 }
-.control-row > input:not([type=checkbox]):not([type=radio]),
-.control-row > select {
+/* 行内输入框默认吃掉剩余宽度；显式标了 .control-fixed 的（窄数字框、固定下拉）不吃。 */
+.control-row > input:not([type=checkbox]):not([type=radio]):not(.control-fixed),
+.control-row > select:not(.control-fixed) {
   flex: 1 1 160px;
   width: auto;
   min-width: 0;
@@ -136,7 +137,9 @@
 .control-row > button,
 .control-row > .field-switch,
 .control-row > .status-badge,
-.control-row > .control-fixed {
+.control-row > .control-fixed,
+.control-row > input.control-fixed,
+.control-row > select.control-fixed {
   flex: 0 0 auto;
 }
 .control-row > .control-grow {
@@ -724,6 +727,18 @@
 }
 .field-switch:focus-visible .field-switch-track {
   box-shadow: 0 0 0 3px var(--focus-ring, rgba(99, 102, 241, 0.25));
+}
+
+/* 代码/长文本编辑区：样式只作用在 textarea 本身。
+   别把 .code-area 那种「带边框+内边距的容器」类挂到 .field-block 上，否则会出现内外两层框。 */
+.field-block--code > .field-row > .field-control > textarea {
+  min-height: 280px;
+  max-height: 520px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  background: var(--surface-sunken);
+  color: var(--pre-fg);
 }
 
 

@@ -309,11 +309,14 @@ test('④ QQ 命令 /role 只改当前会话', async () => {
 });
 
 test('⑤ 控制台：人格页有「按会话设置人格」', () => {
+  // 控件已搬进 pages/persona/fields.js（readConsoleSource 会把 page.html/css/js/fields 拼在一起），
+  // 所以这里不再按 <details> 切片找 id，而是对整份源码断言；id/name 允许出现在 HTML 或字段规格里。
   const html = readConsoleSource();
-  const i = html.indexOf('<details class="settings-group" id="roleAssignGroup">');
+  const i = html.indexOf('data-group="assign"');
   assert.ok(i > html.indexOf('<section id="section-persona"'), '在人格与角色页里');
-  const sec = html.slice(i, html.indexOf('</details>', i));
-  for (const id of ['roleAssignList', 'roleAssignKey', 'roleAssignNewUse', 'roleAssignAdd', 'roleAssignMsg']) assert.ok(sec.includes(`id="${id}"`), id);
+  for (const id of ['roleAssignList', 'roleAssignKey', 'roleAssignNewUse', 'roleAssignAdd', 'roleAssignMsg']) {
+    assert.ok(html.includes(`id="${id}"`) || html.includes(`id: '${id}'`) || html.includes(`name: '${id}'`), id);
+  }
   assert.match(html, /api\('\/api\/roles\/assign', 'POST'/);
   assert.match(html, /renderRoleAssignments\(r\)/, '刷新人格列表时一起刷新');
   assert.match(html, /onPageRefresh\('persona', \(\) => \{/, '进入人格页自动刷新（路由回调）');
@@ -321,6 +324,6 @@ test('⑤ 控制台：人格页有「按会话设置人格」', () => {
   assert.match(html, /box\.contains\(document\.activeElement\)\) return/, '正在操作下拉框时不打断');
   assert.match(html, /const roleAssignDirty = new Map\(\)/, '没保存的选择单独记着');
   assert.match(html, /textContent = '未保存'/, '标出未保存');
-  assert.ok(sec.includes('name="roleAssignApply"'), '按会话设置有自己的一组生效方式');
+  assert.ok(html.includes('name="roleAssignApply"') || html.includes(`name: 'roleAssignApply'`), '按会话设置有自己的一组生效方式');
   assert.match(html, /function roleAssignBody\(key, value\) \{\n  const apply = roleAssignApplyMode\(\);/, '保存时只看这一组');
 });

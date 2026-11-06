@@ -80,13 +80,14 @@ export function passwordField({ id, label, value = '', placeholder, hint, warn, 
   return fieldShell({ id, label, required, control, hint, warn, danger, docs });
 }
 
-export function textareaField({ id, label, value = '', placeholder, hint, warn, danger, docs, rows = 4, maxlength, counter = false, mono = false, required = false, autosize = false }) {
+export function textareaField({ id, label, value = '', placeholder, hint, warn, danger, docs, rows = 4, maxlength, counter = false, mono = false, required = false, autosize = false, readonly = false, disabled = false, spellcheck = true, className = '' }) {
   const counterHtml = counter
     ? `<span class="field-counter" data-counter-for="${esc(id)}" data-max="${esc(String(maxlength ?? ''))}">${esc(String(value ?? '').length)}${maxlength ? ` / ${esc(String(maxlength))}` : ''}</span>`
     : '';
-  const control = `<textarea${attrs({ id, rows, placeholder, maxlength, required, class: mono ? 'field-textarea-mono' : null })}${base({ id, hint, warn, danger, docs, required })}>${esc(value ?? '')}</textarea>${counterHtml}`;
+  const control = `<textarea${attrs({ id, rows, placeholder, maxlength, required, readonly, disabled, spellcheck: spellcheck ? null : 'false', class: [mono ? 'field-textarea-mono' : '', className].filter(Boolean).join(' ') || null })}${base({ id, hint, warn, danger, docs, required })}>${esc(value ?? '')}</textarea>${counterHtml}`;
   void autosize;
-  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+  // 多行控件很高：标签要贴顶，不能垂直居中（否则标签飘在文本域中间）。
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs, className: ['field-block--textarea', className].filter(Boolean).join(' ') });
 }
 
 export function selectField({ id, label, options = [], value, placeholder, hint, warn, danger, docs, disabled = false, required = false }) {
@@ -108,13 +109,10 @@ export function radioGroup({ id, label, options = [], value, inline = true, card
     return `<label><input${attrs({ type: 'radio', name, value: option.value, 'data-field': id, checked: checked || null, disabled })}>${esc(option.label)}</label>`;
   }).join('');
   const cls = cards ? 'field-cards' : `field-inline${inline ? '' : ' field-inline-cols'}`;
-  const control = `<div class="${cls}" role="radiogroup" aria-labelledby="${esc(id)}-label">${items}</div>`;
-  return `<div class="field" data-field-wrap="${esc(id)}">
-  <span class="field-label" id="${esc(id)}-label">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</span>
-  <div class="field-control">${control}</div>
-  ${fieldNotes(id, { hint, warn, danger, docs }).html}
-  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
-</div>`;
+  const control = `<div class="${cls}" role="radiogroup" aria-label="${esc(label)}">${items}</div>`;
+  // 走统一的 fieldShell（148px 标签列 + 行内控件），不再用老的 .field 竖排结构：
+  // 老结构没有 .field-block/.field-row，混在表单里会「标签在上、控件在下」，边距也和别的行对不齐。
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs, labelFor: '' });
 }
 
 export function checkboxGroup({ id, label, options = [], value = [], inline = true, columns, hint, warn, danger, docs, selectAll = false, required = false, disabled = false }) {
@@ -122,13 +120,9 @@ export function checkboxGroup({ id, label, options = [], value = [], inline = tr
   const items = options.map((option) => `<label><input${attrs({ type: 'checkbox', name: id, value: option.value, 'data-field': id, checked: picked.has(String(option.value)) || null, disabled })}>${esc(option.label)}</label>`).join('');
   const style = columns ? ` data-columns="${Number(columns) || 2}"` : '';
   const cls = inline ? 'field-inline' : 'field-inline-cols';
-  const control = `<div class="${cls}" role="group" aria-labelledby="${esc(id)}-label"${style}>${items}</div>${selectAll ? `<label class="field-hint"><input type="checkbox" data-check-all="${esc(id)}"> 全选</label>` : ''}`;
-  return `<div class="field" data-field-wrap="${esc(id)}">
-  <span class="field-label" id="${esc(id)}-label">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</span>
-  <div class="field-control">${control}</div>
-  ${fieldNotes(id, { hint, warn, danger, docs }).html}
-  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
-</div>`;
+  const control = `<div class="${cls}" role="group" aria-label="${esc(label)}"${style}>${items}</div>${selectAll ? `<label class="field-hint"><input type="checkbox" data-check-all="${esc(id)}"> 全选</label>` : ''}`;
+  // 与 radioGroup 同理：统一走 fieldShell，别再回到「标签在上」的老 .field 结构。
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs, labelFor: '' });
 }
 
 export function checkboxField({ id, label, checked = false, hint, warn, danger, docs, disabled = false }) {

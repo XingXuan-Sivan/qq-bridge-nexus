@@ -147,7 +147,9 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   currentConsolePage = page;
   if (persist) rememberPage(page);
-  document.querySelectorAll('[data-page]').forEach((el) => {
+  // 只切「页面宿主」（main 里的 section）的显隐：分页器按钮也带 data-page 的数字属性，
+  // 不能用全局 [data-page] 选择器，否则点过一次分页后按钮会被当成页面宿主隐藏。
+  document.querySelectorAll('main section[data-page]').forEach((el) => {
     el.hidden = el.dataset.page !== page;
     // 非片段页（参考页）的 DOM 直接在 index.html 里，切到即就绪；片段页由 hydratePage 标记。
     if (el.dataset.page === page && !PAGE_FRAGMENTS.has(page)) el.dataset.pageReady = '1';

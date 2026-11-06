@@ -1,1 +1,27 @@
-/* 人格与角色页：当前完全复用公共样式；出现页内私有样式再写在这里，不要回流 css/app.css。 */
+/* 人格与角色页：只放本页私有的列表行样式；控件与字段布局一律走 components/。 */
+
+/* 按会话 / 恢复默认：一行一条记录。用 flex + 类名，替代原来的内联 style。
+   下拉框由 select 组件包一层 .select-wrap，所以宽度约束加在 wrapper 上（加在 select 上会被包层挡住）。 */
+.assign-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.assign-row:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+.assign-key {
+  flex: 0 0 auto;
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.assign-row > .select-wrap {
+  flex: 0 1 240px;
+  min-width: 180px;
+  width: auto;
+}

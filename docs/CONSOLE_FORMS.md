@@ -323,7 +323,7 @@ span.time-field
 
 ## 5. 现有复杂表单的迁移
 
-按控件量排序（2026-11-06 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`persona` 27、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**、`scheduler` **0**。
+按控件量排序（2026-11-07 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**、`scheduler` **0**、`persona` **0**。
 
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 
@@ -346,6 +346,11 @@ span.time-field
 > 3. **页面不许拆原语**：`page.css` 里对 `.field-row` / `.field-control` / `.field-block` 写 `display` / `grid-template-columns` / `height` 一律失败。
 >
 > 验收方式（本机没有 playwright 时）：`node scripts/test-console-static.mjs` 全过；再用 CDP 截图核对三档宽度下「按钮 / 输入框 / 开关 / 徽标」是否同高居中（见 `docs/CONSOLE_FORM_LESSONS.md` 第 11 条）。
+>
+> **2026-11-07 `persona` 收口（第三个样板，验证「非表格页」）**：27 个手写控件清零，六组字段进 `pages/persona/fields.js` 的 `PERSONA_FIELDS`，页内私有的「按会话/恢复默认」行样式进 `pages/persona/page.css`（`.assign-row` / `.assign-key`）。这一轮新增三条硬约束：
+> 1. **所有字段工厂的外壳只能是 `fieldShell()`**——`radioGroup` / `checkboxGroup` 早期是旧的 `<div class="field">`，标签贴左、控件另起一行；改成 `fieldShell({ …, labelFor: '' })` 后才和 148px 标签列对齐。
+> 2. **`className` 是外壳类，不是控件类**——把 `.code-area`（自带 border/padding）当 className 会给长文本套出两层框；控件样式写 `.field-block--code > .field-row > .field-control > textarea`。
+> 3. **页面与 `page.js` 里不许出现内联 style**（CSP `style-src 'self'` 会拒绝）；宽度用 `.u-w-140` / `span.u-flex-basis-max-220`，行布局用页面类名。
 
 ## 6. 与契约的关系（硬约束）
 

@@ -67,7 +67,7 @@ async function loadVoiceLibrary(force) {
 async function sendVoiceFromConsole() {
   const msg = document.getElementById('voiceMsg');
   const target = fv('voiceSendTarget').trim();
-  const dryRun = fc('voiceSendDryRun');
+  const dryRun = document.getElementById('voiceSendDryRun')?.getAttribute('aria-checked') === 'true';
   const pick = document.querySelector('input[name="voicePick"]:checked');
   if (!target) { setMsg(msg, '❌ 请填发送目标（如 group:100005）', 'err'); return; }
   if (!pick) { setMsg(msg, '❌ 先刷新语音库并选中一个音频', 'err'); return; }
@@ -678,7 +678,7 @@ function bindEvents() {
     setValue('v2InitPromptKey', key);
   });
   document.getElementById('v2ConfigSave').addEventListener('click', saveV2Config);
-  document.getElementById('v2ConfigSaveTop').addEventListener('click', saveV2Config);
+  document.getElementById('v2ConfigSaveTop')?.addEventListener('click', saveV2Config);
   document.getElementById('voiceRefreshBtn').addEventListener('click', () => loadVoiceLibrary(true));
   document.getElementById('voiceSendBtn').addEventListener('click', sendVoiceFromConsole);
   document.getElementById('v2PauseBtn').addEventListener('click', async () => {

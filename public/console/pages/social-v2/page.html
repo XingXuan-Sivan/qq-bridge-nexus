@@ -1,13 +1,9 @@
       <h2>二代仿真模式（reserved2）控制台</h2>
       <div class="meta">配置保存后写入 config.json 并热更新；工具开关决定 AI 能调用哪些工具。已接入开关的工具在<b>重启 DSH 后</b>会从工具清单里彻底消失（少一份 schema 就少一份每次请求的 token）；发送类等跨模式共用的工具只在调用时被桥接拒绝，清单不变。</div>
 
-      <div class="u-mt-10" data-v2-fields="header"></div>
-      <div class="row u-mt-10">
-        <button id="v2PauseBtn" class="danger">暂停二代 AI</button>
-        <button id="v2ResumeBtn">恢复二代 AI</button>
-        <button id="v2ResetBtn" class="danger">重置二代状态</button>
-        <button class="u-bold-pad-sm" id="v2ConfigSaveTop">保存当前参数</button>
-        <span class="meta" id="v2ActivityStatus">读取中…</span>
+      <div class="v2-head u-mt-10">
+        <div class="v2-head-fields" data-v2-fields="header"></div>
+        <span class="meta v2-head-state" id="v2ActivityStatus">读取中…</span>
       </div>
 
       <details class="settings-group"><summary>工具开关（关闭后 AI 不再拿到该工具；需重启 DSH 刷新工具清单，重启前仅调用时拒绝）</summary><div class="settings-content">
@@ -63,7 +59,8 @@
         <button id="voiceRefreshBtn" type="button" class="btn-secondary">刷新语音库</button>
         <label class="u-flex-none">发送目标</label>
         <input class="u-w-190" type="text" id="voiceSendTarget" placeholder="group:100005">
-        <label class="u-flex-none"><input class="u-w-auto" type="checkbox" id="voiceSendDryRun"> 只校验不发送</label>
+        <button type="button" class="field-switch" role="switch" id="voiceSendDryRun" data-field="voiceSendDryRun" aria-checked="false" data-on-label="开" data-off-label="关"><span class="field-switch-track" aria-hidden="true"></span><span>关</span></button>
+        <span class="meta u-flex-none">只校验不发送</span>
         <button id="voiceSendBtn" type="button">试发选中语音</button>
         <span id="voiceMsg" class="meta"></span>
       </div>
@@ -188,6 +185,9 @@
     </div></details>
 <div class="save-bar">
       <div class="row">
+        <button id="v2PauseBtn" class="danger">暂停二代 AI</button>
+        <button id="v2ResumeBtn">恢复二代 AI</button>
+        <button id="v2ResetBtn" class="danger">重置二代状态</button>
         <button class="u-bold-pad-md" id="v2ConfigSave">保存当前参数（写入 config.json）</button>
         <span class="meta" id="v2ConfigMsg"></span>
       </div>

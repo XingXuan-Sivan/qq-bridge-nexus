@@ -123,9 +123,9 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 225 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 224 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    assert.equal(legacyIds.length, 225);
+    assert.equal(legacyIds.length, 224);
     assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
@@ -217,7 +217,7 @@ try {
     const firstTool = page.locator('[data-v2-tool]').first();
     await reveal('[data-v2-tool]');
     await firstTool.setChecked(false);
-    const body = await clickWrite('#v2ConfigSaveTop', '/api/socialV2/config');
+    const body = await clickWrite('#v2ConfigSave', '/api/socialV2/config');
     assert.equal(body.wake.recommendedSleepMinMs, 420000);
     assert.equal(body.wake.sleepMinMs, 42000);
     assert.equal(body.wake.preSleepWaitMs, 0);

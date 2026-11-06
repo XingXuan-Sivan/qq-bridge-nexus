@@ -92,6 +92,32 @@ public/console/
 | `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、契约基线 25 条（改前端交互后跑） |
 | 截图 | 视觉一致性（间距、对齐、层叠），见路线图 §12 第 5–8 条的既有约定 |
 
+### 5.1 长页面的重排成本（2026-11-07 实测）
+
+现象：DevTools 设备模式拖拽改视口宽度时，页面又卡又抖；直接拖浏览器窗口反而流畅。
+
+原因与数字（`social-v2` 全部分组展开，1600→1288 宽逐档改，主线程 `Performance.getMetrics`）：
+
+| 场景 | TaskDuration / 次 | LayoutDuration / 次 |
+| --- | --- | --- |
+| 默认状态（只展开第一组，3238 个节点 / 2869px） | 4.9ms | 0.8ms |
+| 16 组全展开（6905px） | 30.7ms | 15.9ms |
+| 全展开 + `.settings-group{content-visibility:auto}` | **7.3ms** | **1.6ms** |
+| 全展开 + 去掉顶栏 `backdrop-filter` | 30.4ms（无变化） | 15.9ms |
+
+结论：**不是毛玻璃、也不是 transition**——设备模式每移动一像素就改一次布局视口，浏览器必须整棵树重排，成本随「已渲染内容」线性增长；普通拖窗口走的是另一条合并路径，所以看起来流畅。修法是对屏幕外的折叠组跳过排版：
+
+```css
+.settings-group {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+```
+
+`contain-intrinsic-size` 用 `auto`：记住上次渲染的高度，滚动条不会跳。代价是折叠组**内部**的 `position:sticky` 后代（例如超长表格的表头）在组处于屏外时不可靠；当前表格都分页（≤20 行），可接受。
+
+已知未解决：`usage` 页默认状态每次重排仍要 16ms（图表绘制占大头，和折叠组无关），属于后续单独优化的范围。
+
 ---
 
 ## 6. 不做的事

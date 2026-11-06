@@ -229,7 +229,13 @@ pre {
   border:1px solid var(--card-border);
   border-radius:11px;
   margin-top:12px;
-  background:var(--surface)
+  background:var(--surface);
+  /* 折叠组一多，整页就成了几千个节点：DevTools 设备模式拖拽时每次鼠标移动都会改视口宽度，
+     浏览器要为每一帧重排整棵树（实测 social-v2 全展开 30.7ms/帧，肉眼就是卡+抖）。
+     对屏幕外的分组跳过排版，滚到附近再渲染；contain-intrinsic-size 用 auto，
+     记住上次渲染的高度，滚动条不会来回跳。实测同一场景降到 7.3ms/帧。 */
+  content-visibility:auto;
+  contain-intrinsic-size:auto 600px
 }
 .settings-group summary {
   display:flex;

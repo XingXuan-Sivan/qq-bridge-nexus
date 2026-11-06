@@ -1,4 +1,4 @@
-import { isGroupKey, isPrivateKey, key, sameSession } from '../session/key.mjs';
+import { idOfKey, isGroupKey, isPrivateKey, key, parseKey, sameSession } from '../session/key.mjs';
 // 人物记忆的共享策略与注入过滤 —— **可见范围由程序在注入时执行，不交给模型自觉**。
 //
 // 三档共享策略（continuity.sharePolicy，默认 identity）：
@@ -47,14 +47,14 @@ export function groupPolicy(continuityCfg = {}, groupId) {
 /** 当前会话与另一个群之间生效的共享策略。 */
 export function effectivePolicyBetween(continuityCfg, convKey, otherGroupId) {
   const base = normalizePolicy(continuityCfg?.sharePolicy, 'identity');
-  const m = /^(group|private):(\d+)$/.exec(String(convKey));
-  const here = m && m[1] === 'group' ? groupPolicy(continuityCfg, m[2]).sharePolicy : base;
+  const m = parseKey(String(convKey));
+  const here = m && m.kind === 'group' ? groupPolicy(continuityCfg, m.id).sharePolicy : base;
   const there = groupPolicy(continuityCfg, otherGroupId);
   if (!there.recordable) return 'none';
   return stricter(here, there.sharePolicy);
 }
 
-const PRIORITY = (n, here) => (n.scope === here ? 0 : 1) * 10 + (n.pinned ? 0 : 2) + (n.certainty === 'explicit' ? 0 : 1);
+const PRIORITY = (n, here) => (sameSession(n.scope, here) ? 0 : 1) * 10 + (n.pinned ? 0 : 2) + (n.certainty === 'explicit' ? 0 : 1);
 
 /**
  * 计算某条记忆在某个会话里是否可见。这是唯一的判定函数，所有注入路径都必须走这里。
@@ -69,8 +69,8 @@ export function noteVisibleIn(note, convKey, personQQ, policy) {
   const vis = String(note.visibility ?? scope);
   // 1) 私聊来源：只在与本人的私聊里可见（即使被错误标成 public 也不放行）。
   if (isPrivateKey(scope)) return sameSession(convKey, scope) && sameSession(scope, key('private', personQQ));
-  // 2) 本会话自己的记录永远可见。
-  if (scope === convKey) return true;
+  // 2) 本会话自己的记录永远可见（新旧形态都算同一会话）。
+  if (sameSession(scope, convKey)) return true;
   // 3) 其余只有 shared 策略 + visibility=public + 已批准 才可见。
   if (policy !== 'shared') return false;
   if (vis !== 'public') return false;
@@ -84,10 +84,10 @@ export function noteVisibleIn(note, convKey, personQQ, policy) {
  */
 export function buildPersonView(person, convKey, continuityCfg = {}, { maxNotes = 6, now = Date.now() } = {}) {
   if (!person) return null;
-  const m = /^(group|private):(\d+)$/.exec(String(convKey));
+  const m = parseKey(String(convKey));
   if (!m) return null;
-  const kind = m[1];
-  const hereId = m[2];
+  const kind = m.kind;
+  const hereId = String(m.id);
   const basePolicy = kind === 'group' ? groupPolicy(continuityCfg, hereId).sharePolicy : normalizePolicy(continuityCfg.sharePolicy, 'identity');
   const hereGroup = kind === 'group' ? person.groups?.[hereId] ?? null : null;
 
@@ -130,8 +130,8 @@ export function buildPersonView(person, convKey, continuityCfg = {}, { maxNotes 
     .filter((n) => noteVisibleIn(n, convKey, person.qq, policyForNotes))
     // 来自 recordable=false / none 群的记录，即使被批准过也不外流。
     .filter((n) => {
-      if (n.scope === convKey || !isGroupKey(n.scope)) return true;
-      return effectivePolicyBetween(continuityCfg, convKey, n.scope.slice(6)) === 'shared';
+      if (sameSession(n.scope, convKey) || !isGroupKey(n.scope)) return true;
+      return effectivePolicyBetween(continuityCfg, convKey, idOfKey(n.scope)) === 'shared';
     })
     .sort((a, b) => PRIORITY(a, convKey) - PRIORITY(b, convKey) || (b.updatedAt - a.updatedAt))
     .filter((n) => (seen.has(n.text) ? false : (seen.add(n.text), true)))
@@ -139,7 +139,7 @@ export function buildPersonView(person, convKey, continuityCfg = {}, { maxNotes 
   view.notes = visible.map((n) => ({
     id: n.id,
     text: n.text,
-    where: n.scope === convKey ? (kind === 'group' ? '本群' : '私聊') : '跨群共享',
+    where: sameSession(n.scope, convKey) ? (kind === 'group' ? '本群' : '私聊') : '跨群共享',
     source: n.source,
     certainty: n.certainty,
     pinned: !!n.pinned,

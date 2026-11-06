@@ -18,17 +18,17 @@ const GROUP = 456;      // 夹具白名单群
 const GROUP2 = 789;     // 白名单外
 const QUESTION_RULE = '用问号怼人时，先单独发一条只有「？」的消息，再把后面的话作为下一条发';
 
-const base = { tokenOk: true, isOwnerPrivateKey: (k) => k === `private:${OWNER}`, isTargetAllowed: (k) => k === `group:${GROUP}`, enabled: true };
+const base = { tokenOk: true, isOwnerPrivateKey: (k) => k === `qq:private:${OWNER}`, isTargetAllowed: (k) => k === `qq:group:${GROUP}`, enabled: true };
 
 test('校验：令牌、开关、只有 owner 私聊、群号格式、白名单', () => {
-  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `private:${OWNER}`, targetGroupId: String(GROUP) }).targetKey, `group:${GROUP}`);
-  assert.match(validateOwnerGroupAccess({ ...base, tokenOk: false, fromKey: `private:${OWNER}`, targetGroupId: GROUP }).error, /token/);
-  assert.match(validateOwnerGroupAccess({ ...base, enabled: false, fromKey: `private:${OWNER}`, targetGroupId: GROUP }).error, /未启用/);
-  assert.match(validateOwnerGroupAccess({ ...base, fromKey: `group:${GROUP}`, targetGroupId: GROUP }).error, /管理员本人的私聊/);
-  assert.match(validateOwnerGroupAccess({ ...base, fromKey: 'private:999', targetGroupId: GROUP }).error, /管理员本人的私聊/);
-  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `private:${OWNER}`, targetGroupId: 'abc' }).status, 400);
-  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `private:${OWNER}`, targetGroupId: '0123' }).status, 400);
-  assert.match(validateOwnerGroupAccess({ ...base, fromKey: `private:${OWNER}`, targetGroupId: GROUP2 }).error, /白名单/);
+  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `qq:private:${OWNER}`, targetGroupId: String(GROUP) }).targetKey, `qq:group:${GROUP}`);
+  assert.match(validateOwnerGroupAccess({ ...base, tokenOk: false, fromKey: `qq:private:${OWNER}`, targetGroupId: GROUP }).error, /token/);
+  assert.match(validateOwnerGroupAccess({ ...base, enabled: false, fromKey: `qq:private:${OWNER}`, targetGroupId: GROUP }).error, /未启用/);
+  assert.match(validateOwnerGroupAccess({ ...base, fromKey: `qq:group:${GROUP}`, targetGroupId: GROUP }).error, /管理员本人的私聊/);
+  assert.match(validateOwnerGroupAccess({ ...base, fromKey: 'qq:private:999', targetGroupId: GROUP }).error, /管理员本人的私聊/);
+  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `qq:private:${OWNER}`, targetGroupId: 'abc' }).status, 400);
+  assert.equal(validateOwnerGroupAccess({ ...base, fromKey: `qq:private:${OWNER}`, targetGroupId: '0123' }).status, 400);
+  assert.match(validateOwnerGroupAccess({ ...base, fromKey: `qq:private:${OWNER}`, targetGroupId: GROUP2 }).error, /白名单/);
 });
 
 test('规则：新增、同文去重、字数与条数上限、按编号删除、空内容拒绝', () => {
@@ -111,9 +111,9 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
     await h.initControllerOnce('reserved2');
     h.setMode('reserved2');
     h.cfg.allow.private = [String(OWNER)];
-    const ownerSt = h.getSocialV2State(`private:${OWNER}`);
-    const groupSt = h.getSocialV2State(`group:${GROUP}`);
-    h.appendSocialV2Message(`group:${GROUP}`, '甲', '大家好', '大家好', false, false, '11', [], '20001');
+    const ownerSt = h.getSocialV2State(`qq:private:${OWNER}`);
+    const groupSt = h.getSocialV2State(`qq:group:${GROUP}`);
+    h.appendSocialV2Message(`qq:group:${GROUP}`, '甲', '大家好', '大家好', false, false, '11', [], '20001');
     const server = h.startConsoleServer();
     await new Promise((r) => (server.listening ? r() : server.once('listening', r)));
     try {
@@ -121,35 +121,35 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
       const peek = (st, from, gid) => request(server, 'GET', `/api/socialV2/owner-peek?key=${encodeURIComponent(from)}&targetGroupId=${gid}`, { headers: hdr(st) });
       const rule = (st, from, gid, body) => request(server, 'POST', '/api/socialV2/group-rule', { body: { key: from, targetGroupId: String(gid), ...body }, headers: hdr(st) });
 
-      assert.equal((await peek(ownerSt, `private:${OWNER}`, GROUP)).status, 403, '默认关闭');
+      assert.equal((await peek(ownerSt, `qq:private:${OWNER}`, GROUP)).status, 403, '默认关闭');
       h.cfg.socialV2.tools.ownerGroupAccess = true;
-      assert.equal((await peek(groupSt, `group:${GROUP}`, GROUP)).status, 403, '群会话不能用');
-      assert.equal((await peek(groupSt, `private:${OWNER}`, GROUP)).status, 403, '拿群令牌冒充 owner 私聊 key 不行');
-      assert.equal((await peek(ownerSt, `private:${OWNER}`, GROUP2)).status, 403, '白名单外的群不行');
+      assert.equal((await peek(groupSt, `qq:group:${GROUP}`, GROUP)).status, 403, '群会话不能用');
+      assert.equal((await peek(groupSt, `qq:private:${OWNER}`, GROUP)).status, 403, '拿群令牌冒充 owner 私聊 key 不行');
+      assert.equal((await peek(ownerSt, `qq:private:${OWNER}`, GROUP2)).status, 403, '白名单外的群不行');
       assert.equal((await request(server, 'GET', `/api/socialV2/owner-peek?key=private:${OWNER}&targetGroupId=${GROUP}`)).status, 403, '没有会话令牌（只有控制台令牌）不行');
 
       const readBefore = groupSt.lastReadThroughSeq;
-      const p = await peek(ownerSt, `private:${OWNER}`, GROUP);
+      const p = await peek(ownerSt, `qq:private:${OWNER}`, GROUP);
       assert.equal(p.status, 200, JSON.stringify(p.body));
       assert.ok(p.body.messages.some((m) => m.text === '大家好'), '看得到目标群消息');
       assert.ok(!JSON.stringify(p.body).includes(groupSt.agentToken), '不外露目标群令牌');
       assert.equal(groupSt.lastReadThroughSeq, readBefore, '查看不改变目标群的已读进度');
 
-      const add = await rule(ownerSt, `private:${OWNER}`, GROUP, { action: 'add', text: QUESTION_RULE });
+      const add = await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'add', text: QUESTION_RULE });
       assert.equal(add.status, 200, JSON.stringify(add.body));
       assert.equal(groupSt.ownerRules.length, 1);
-      assert.equal((await rule(groupSt, `group:${GROUP}`, GROUP, { action: 'add', text: '群会话自己加' })).status, 403, '群会话不能给自己加规则');
-      assert.equal((await rule(ownerSt, `private:${OWNER}`, GROUP, { action: 'add', text: 'token: abcdefg123' })).status, 403, '敏感内容被拦');
+      assert.equal((await rule(groupSt, `qq:group:${GROUP}`, GROUP, { action: 'add', text: '群会话自己加' })).status, 403, '群会话不能给自己加规则');
+      assert.equal((await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'add', text: 'token: abcdefg123' })).status, 403, '敏感内容被拦');
 
       const saved = JSON.parse(fs.readFileSync(path.join(h.temp, 'state', 'social-v2.json'), 'utf8'));
-      assert.equal(saved.conversations[`group:${GROUP}`].ownerRules[0].text, QUESTION_RULE, '规则落盘');
-      const prompt = h.buildWakePromptV2(`group:${GROUP}`, 'question');
+      assert.equal(saved.conversations[`qq:group:${GROUP}`].ownerRules[0].text, QUESTION_RULE, '规则落盘');
+      const prompt = h.buildWakePromptV2(`qq:group:${GROUP}`, 'question');
       assert.ok(prompt.includes('管理员为本群设定的长期规则') && prompt.includes(QUESTION_RULE), '目标群唤醒提示词里有这条规则');
-      assert.ok(!h.buildWakePromptV2(`private:${OWNER}`, 'question').includes(QUESTION_RULE), '规则只注入目标群，不串到私聊');
+      assert.ok(!h.buildWakePromptV2(`qq:private:${OWNER}`, 'question').includes(QUESTION_RULE), '规则只注入目标群，不串到私聊');
 
-      const list = await rule(ownerSt, `private:${OWNER}`, GROUP, { action: 'list' });
+      const list = await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'list' });
       assert.equal(list.body.rules[0].id, 1);
-      const rm = await rule(ownerSt, `private:${OWNER}`, GROUP, { action: 'remove', ruleId: 1 });
+      const rm = await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'remove', ruleId: 1 });
       assert.equal(rm.status, 200);
       assert.equal(groupSt.ownerRules.length, 0);
 

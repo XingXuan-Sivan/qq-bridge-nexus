@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { parseKey } from './session/key.mjs';
 
 /** 满多少次唤醒强制完整给一次（防止早先那次完整内容被 DSH 压缩掉后 AI 只剩一句「和上次一样」）。 */
 export const REFRESH_EVERY_WAKES = 30;
@@ -28,13 +29,11 @@ export const BLOCK_REFS = {
   sticker: '【表情包】策略和常用表情都和上次一样（完整列表用 qq_list_stickers 查，没备注的先 qq_get_sticker_image 看图）。',
 };
 
-const KEY_RE = /^(group|private):\d+$/;
-
 function normalize(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [key, v] of Object.entries(raw)) {
-    if (!KEY_RE.test(key) || !v || typeof v !== 'object' || !v.sessionId || typeof v.blocks !== 'object') continue;
+    if (!parseKey(key) || !v || typeof v !== 'object' || !v.sessionId || typeof v.blocks !== 'object') continue;
     const blocks = {};
     for (const [name, b] of Object.entries(v.blocks)) {
       if (!b || !/^[0-9a-f]{16}$/.test(String(b.fp))) continue;
@@ -71,7 +70,7 @@ export function createBlockTracker({ file, refreshEvery = REFRESH_EVERY_WAKES, r
     },
     /** 这次唤醒已送达：完整给的记下指纹并清零计数，只放了一行的计数 +1。 */
     delivered(key, sessionId, name, { full, fp, empty }) {
-      if (!KEY_RE.test(String(key)) || !sessionId || empty) return;
+      if (!parseKey(String(key)) || !sessionId || empty) return;
       let rec = entries[key];
       if (!rec || rec.sessionId !== String(sessionId)) rec = entries[key] = { sessionId: String(sessionId), blocks: {} };
       if (full) rec.blocks[name] = { fp, at: now(), wakes: 0 };

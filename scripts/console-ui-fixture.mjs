@@ -11,6 +11,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { createScheduler } from '../src/scheduler/engine.js';
+import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
@@ -382,7 +383,7 @@ function getFixtureScheduler() {
   fixtureScheduler = createScheduler({
     file: joinPath(dir, 'scheduler.json'),
     deliver: async () => ({ status: 'sent', reason: '离线演示，没有真的发送' }),
-    validateTarget: (k) => (/^(group|private):\d+$/.test(k) ? null : `发送对象「${k}」格式不对`),
+    validateTarget: (k) => (parseKey(k) ? null : `发送对象「${k}」格式不对`),
     ownerKey: () => 'private:100001',
     holidays: CN_HOLIDAYS,
   });
@@ -728,7 +729,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             return json({ ok: true, mode: body.mode, thresholdTokens: state.compactThreshold || 300000 });
           }
           case '/api/roles/assign': {
-            if (!/^(group|private):[1-9]\d*$/.test(String(body.key ?? ''))) return json({ ok: false, error: '会话格式应为 group:群号 或 private:QQ号' }, 400);
+            if (!/^(?:[a-z][a-z0-9-]{0,15}:)?(group|private):[1-9]\d*$/.test(String(body.key ?? ''))) return json({ ok: false, error: '会话格式应为 qq:group:群号 或 qq:private:QQ号' }, 400);
             if (body.use === 'default') delete state.roleByKey[body.key];
             else if (body.use === 'off') state.roleByKey[body.key] = null;
             else if (body.use === 'role' && state.roles.includes(body.role)) state.roleByKey[body.key] = body.role;

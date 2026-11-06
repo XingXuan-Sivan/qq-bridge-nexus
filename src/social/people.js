@@ -11,7 +11,7 @@
 // 本模块只做数据与规则，不碰网络、不碰 DSH；时间来源可注入，便于离线测试。
 
 import { createJsonStore } from '../lib/json-store.js';
-import { idOfKey, isPrivateKey, key } from '../session/key.mjs';
+import { idOfKey, isPrivateKey, key, parseKey } from '../session/key.mjs';
 
 export const ACQUAINTANCE_LEVELS = ['listed', 'observed', 'talked', 'familiar'];
 const NOTE_MAX_CHARS = 120;
@@ -73,14 +73,14 @@ function emptyData() {
   };
 }
 
-/** 把 scope 字符串规整为 group:<id> / private:<qq> / global；非法返回 null。 */
+/** 把 scope 字符串规整为当前平台的会话 key（`qq:group:<id>` / `qq:private:<qq>`）/ global；非法返回 null。 */
 export function normalizeScope(scope) {
   const s = String(scope ?? '').trim();
   if (s === 'global') return 'global';
-  const m = /^(group|private):(\d+)$/.exec(s);
-  if (!m) return null;
-  const id = m[1] === 'group' ? normalizeGroupId(m[2]) : normalizeQQ(m[2]);
-  return id ? `${m[1]}:${id}` : null;
+  const parsed = parseKey(s);
+  if (!parsed) return null;
+  const id = parsed.kind === 'group' ? normalizeGroupId(parsed.id) : normalizeQQ(parsed.id);
+  return id ? key(parsed.kind, id) : null;
 }
 
 /**

@@ -5,6 +5,14 @@
 
 ## 未发布
 
+### 变更：会话 key 只剩一种形态，删除 `platform.keyedFormat` 开关
+- 会话 key 统一为 `<platform>:<group|private>:<id>`（qq 即 `qq:group:1`）。旧的 `group:1` 只在**读取侧**由 `parseKey()` 兼容，不再有任何产出路径，也不再有任何开关。
+- 解析侧全面迁移：`mode-gate`、`prompt-blocks`、`role-per-key`、`role-refresh`、`mode-handover`、`voice-core`、`memory-policy`、`cross-group`、`scheduler/engine` 里只认旧形态的正则 / `split(':')` / `startsWith('group:')` 一律换成 `parseKey()` / `isGroupKey()` / `isPrivateKey()`。
+- 修掉一个**真实发送失败**：`sendToQQ` 及另外 7 处 `key.split(':')` 在 `qq:group:1` 上会解出 `kind='qq'`、`id='group'`，实际调用 `sendGroupMessage(null)`；现在统一 `parseKey()`。
+- 接口容错：HTTP 的 `key` 参数（19 处 query、35 处 body）、`ensureSession()`、审批登记表都经 `apiKey()` / `normKey()` 归一，旧形态请求不会 404。
+- 修复因解析侧未迁移导致的**私聊静默丢失**（消息在准入闸门被丢弃、日志无任何输出）；详见 `docs/STATUS.md` §6.1 / §6.2。
+- 门禁：`test-session-key` 11/11、`test-integration-v030` 31/31、`npm run test:audit` 90/90。
+
 ### 控制台：会话清单与审批标签页（PARITY D3 / D7 第一步）
 - 「会话与审批」页不再用两张卡片平铺：改成 **会话 / 审批 / 提问** 两个标签页，共用同一张卡片。标签页样式抽成通用 `.page-tabs` / `.page-tab`（与黑话页的 `.slang-tabs` 同一套规则），页面不再各写一份。
 - 会话清单从「key + DSH 会话 ID + 类型」扩成完整一行：**模式**（含封闭 Agent 的权限级别）、**人格来源**（provider / 全局卡 / 未挂卡，`stale` 标「缓存」）、**未读数**、**最近唤醒时间**、DSH 会话 ID，以及「改名 / 清除上下文」两个动作。

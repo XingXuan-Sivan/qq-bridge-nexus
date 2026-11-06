@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import { hamming, findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker, ROTATE_AFTER } from '../src/agent-token-guard.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
-const GROUP = 'group:456';
+const GROUP = 'qq:group:456';
 const promptText = (p) => (Array.isArray(p?.content) ? p.content.map((c) => String(c?.text ?? '')).join('\n') : '');
 const flip = (tok, i = Math.floor(tok.length / 2)) => tok.slice(0, i) + (tok[i] === '1' ? '2' : '1') + tok.slice(i + 1);
 

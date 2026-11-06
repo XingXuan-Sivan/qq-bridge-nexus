@@ -140,7 +140,7 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
-import { configureKeys, key as buildKey, platformOfConfig, idOfKey, isGroupKey } from './session/key.mjs';
+import { configureKeys, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -764,17 +764,16 @@ function normalizePromptBlocks(raw) {
 }
 
 /**
- * 平台段：`platform.id`（默认 qq）+ `platform.keyedFormat`（默认 false，产旧 key 形态）。
+ * 平台段：`platform.id`（默认 qq）。
  *
- * `keyedFormat` 默认关是有意的：打开它意味着磁盘上所有以 key 为索引的状态
- * （sessions.json / prompt-blocks / role-seen / social-v2 / persona-cache…）都要同步迁移，
- * 否则旧数据一条都查不到。所以它是一个「迁移开关」，不是「功能开关」。
+ * key 形态只有一种：`<platform>:<group|private>:<id>`。老的 `group:<id>` 只在**读取侧**
+ * 兼容（`parseKey()` 两种都认），写入侧一律带平台前缀——这样加平台不用再改内核，
+ * 也不需要「迁移开关」这种两步走的东西。
  */
 function normalizePlatform(raw) {
-  const out = { id: 'qq', keyedFormat: false };
+  const out = { id: 'qq' };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   if (typeof raw.id === 'string' && /^[a-z][a-z0-9-]{0,15}$/.test(raw.id.trim().toLowerCase())) out.id = raw.id.trim().toLowerCase();
-  if (typeof raw.keyedFormat === 'boolean') out.keyedFormat = raw.keyedFormat;
   return out;
 }
 
@@ -1418,7 +1417,7 @@ function log(...args) {
   appendBridgeLog(`${line}\n`);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const convKey = (kind, id) => `${kind}:${id}`;
+const convKey = (kind, id) => sessionKey(kind, id);
 const SEND_TIMEOUT_MS = 15000;
 // DSH 控制类调用（停任务/归档会话）的超时。这些 await 以前是裸的：DSH 接受了连接但
 // 不返回响应时，HTTP handler 永不返回，控制台与群消息一起失去响应（issue #32）。
@@ -1576,15 +1575,23 @@ let stateDirHardened = null;
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 /**
- * 会话 key 的唯一构造出口。
+ * 会话 key 的唯一构造出口：`<platform>:<group|private>:<id>`（平台名来自 `platform.id`）。
  *
- * 形态由 `src/session/key.mjs` 的进程级设置决定：启动时按配置 `platform` 设一次，
- * 默认仍是旧的 `group:<id>` / `private:<id>`（与迁移前逐字一致）；
- * `platform.keyedFormat: true` 时变成 `<platform>:<group|private>:<id>`。
- * 这样「改形态」和「迁移数据」可以分两步做，每一步都能单独跑门禁。
+ * 平台在进程启动时由 `configureKeys()` 固化一次；读取侧统一走 `parseKey()`，
+ * 老的 `group:<id>` 形态仍然认得，但不再产出。
  */
 function sessionKey(kind, id) {
   return buildKey(kind, id);
+}
+
+/**
+ * 读取接口里的会话 key：旧形态 `group:1` 自动归一成当前平台的 `qq:group:1`。
+ * 认不出来就原样返回，让调用方自己决定（通常是 404/400），不要在这里吞掉异常输入。
+ */
+function apiKey(raw) {
+  const text = String(raw ?? '').trim();
+  const parsed = parseKey(text);
+  return parsed ? buildKey(parsed.kind, parsed.id) : text;
 }
 
 // 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
@@ -1593,7 +1600,7 @@ let bridgeCfg = null;
 async function main() {
   const cfg = loadConfig();
   bridgeCfg = cfg;
-  configureKeys({ platform: platformOfConfig(cfg), keyedFormat: cfg?.platform?.keyedFormat === true });
+  configureKeys({ platform: platformOfConfig(cfg) });
   // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
   const ownerRelayStore = createOwnerRelayStore();
   const ownerRelayLimiter = createOwnerRelayLimiter();
@@ -2006,7 +2013,7 @@ async function main() {
     const sendPath = processed.path;
 
     const assertSendAllowed = guard ? captureSendGuard(key) : null;
-    const [kind, id] = key.split(':');
+    const { kind, id } = parseKey(key) ?? {};
     const recordSegment = { type: 'record', data: { file: sendPath } };
     let resolveSend;
     let rejectSend;
@@ -2174,7 +2181,7 @@ async function main() {
     if (!entry) throw new Error(`找不到表情 ${stickerRef}，请先用 qq_list_stickers 获取有效 id`);
     const url = entry.url;
     if (!url) throw new Error(`表情 ${entry.id} 没有可发送的图片地址`);
-    const [kind, id] = key.split(':');
+    const { kind, id } = parseKey(key) ?? {};
     const segments = [];
     const replyToMessageId = options.replyToMessageId;
     const atUserId = options.atUserId;
@@ -2261,7 +2268,7 @@ async function main() {
   /** 把一张已经校验过的图片按图片消息发出（与文字、表情共用 sendChain，保证顺序）。 */
   async function sendImageBufferV2(key, buffer) {
     const assertSendAllowed = captureSendGuard(key);
-    const [kind, id] = key.split(':');
+    const { kind, id } = parseKey(key) ?? {};
     const segments = [{ type: 'image', data: { file: 'base64://' + buffer.toString('base64') } }];
     const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
     const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
@@ -3217,10 +3224,10 @@ async function main() {
   const schedulerOwnerKey = () => sessionKey('private', String(cfg.ownerQQ ?? ''));
   /** 定时任务的发送对象：管理员私聊、白名单好友、白名单群。 */
   function schedulerTargetError(key) {
-    const m = /^(group|private):([1-9]\d{0,11})$/.exec(String(key));
+    const m = parseKey(String(key));
     if (!m) return `发送对象「${key}」格式不对（要写成 group:群号 或 private:QQ号）`;
     if (key === schedulerOwnerKey()) return null;
-    if (!allowed(m[1], Number(m[2]), cfg)) return `${key} 不在白名单里（allow.${m[1] === 'group' ? 'groups' : 'private'}），不能作为定时任务的发送对象`;
+    if (!allowed(m.kind, m.id, cfg)) return `${key} 不在白名单里（allow.${m.kind === 'group' ? 'groups' : 'private'}），不能作为定时任务的发送对象`;
     return null;
   }
   async function deliverScheduled(task, target, { manual, scheduledAt }) {
@@ -3661,9 +3668,9 @@ async function main() {
     return sessionPolicyImpl.policyOf(key);
   }
 
-  function isCurrentSession(key, sessionId) {
+  function isCurrentSession(rawKey, sessionId) {
     return sessionPolicyImpl.isCurrent({
-      key,
+      key: apiKey(rawKey),
       sessionId,
       registry: sessions,
       allowed: isSessionAllowedInCurrentMode,
@@ -3893,8 +3900,7 @@ async function main() {
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
           try {
-            const [kind, idStr] = key.split(':');
-            const id = Number(idStr);
+            const { kind, id } = parseKey(key) ?? {};
             if (!modeAllowed(key, kind, id, cfg, currentMode)) {
               log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
               continue;
@@ -4157,7 +4163,7 @@ async function main() {
   function backfillTargets() {
     const keys = new Set([...sessions.keys(), ...socialV2.conversations.keys()]);
     if (cfg.ownerQQ) keys.add(sessionKey('private', String(cfg.ownerQQ)));
-    return [...keys].filter((k) => /^(group|private):\d+$/.test(k) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
+    return [...keys].filter((k) => Boolean(parseKey(k)) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
   }
   async function runBackfill({ since, gapMs }) {
     const c = normalizeBackfillConfig(cfg.snowluma?.backfill);
@@ -4172,7 +4178,7 @@ async function main() {
     const ownerCommands = [];
     const failed = [];
     for (const key of backfillTargets()) {
-      const [kind, id] = key.split(':');
+      const { kind, id } = parseKey(key) ?? {};
       // 上次没补上的会话：从它更早的那个时间开始补
       const keySince = Math.min(since, backfillUnfinished.get(key) ?? since);
       let res;
@@ -5431,7 +5437,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/slang/extract') {
           if (cfg.slang?.enabled === false) { sendJson({ ok: false, error: '黑话学习已关闭（slang.enabled=false）' }, 400); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (key && slangWindows.has(key)) {
             queueSlangTask(() => runSlangExtraction(key));
             sendJson({ ok: true, key });
@@ -5847,7 +5853,7 @@ async function main() {
           if (!message) { sendJson({ ok: false, error: '消息不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(message)) { sendJson({ ok: false, error: '消息含敏感信息，已阻止发送' }, 403); return; }
           if (!allowed(kind, id, cfg)) { sendJson({ ok: false, error: `目标不在白名单内（${kind} ${id}），请先加入白名单` }, 403); return; }
-          if (!modeAllowed(`${kind}:${id}`, kind, id, cfg, currentMode)) { sendJson({ ok: false, error: `当前模式（${currentMode}）不允许向 ${kind}:${id} 发送测试消息` }, 403); return; }
+          if (!modeAllowed(convKey(kind, id), kind, id, cfg, currentMode)) { sendJson({ ok: false, error: `当前模式（${currentMode}）不允许向 ${kind}:${id} 发送测试消息` }, 403); return; }
           try {
             const safeMessage = escapeCqText(redactKnownTokensOnly(message));
             const result = kind === 'private'
@@ -5862,7 +5868,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/social/state') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           const phase = body.phase;
           if (phase === 'active') {
@@ -5947,19 +5953,19 @@ async function main() {
         // ── 后台控制端引导：向指定会话的 DSH agent 投递提醒 ──────────────────
         if (req.method === 'POST' && url.pathname === '/api/console/notify-ai') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const message = String(body.message ?? '').trim();
           if (!key || !message) {
             sendJson({ ok: false, error: 'key 和 message 不能为空' }, 400);
             return;
           }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) {
             sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400);
             return;
           }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0) {
             sendJson({ ok: false, error: 'id 无效' }, 400);
             return;
@@ -6252,7 +6258,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/state') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -6273,7 +6279,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/prompt') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -6383,7 +6389,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/unread') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 30));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -6405,7 +6411,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/recent') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 20));
           const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0);
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
@@ -6422,7 +6428,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/mark-read') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -6464,7 +6470,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/wake-config') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -6557,7 +6563,7 @@ async function main() {
           // null/undefined/非法值统一清空，避免“null”被当成有效唤醒条件绕过防永眠。
           next.triggers.speakerIds = normalizeSpeakerIdsV2(next.triggers.speakerIds);
           // 私聊不适用“指定成员发言醒来”：清除以免误导/脏数据（私聊仍按原有逻辑每次消息都唤醒）。
-          if (key.startsWith('private:')) {
+          if (isPrivateKey(key)) {
             next.triggers.speakerIds = [];
           }
           // 防止 AI 永眠：无限期潜水必须至少有一个可触发条件
@@ -6625,14 +6631,14 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/wake') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const reason = String(body.reason ?? 'admin').trim() || 'admin';
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -6662,7 +6668,7 @@ async function main() {
         // 内容只在该会话**首次唤醒**（bootstrap）时注入一次，见 buildWakePromptV2。
         if (url.pathname === '/api/socialV2/initial-prompt' && (req.method === 'GET' || req.method === 'POST')) {
           if (req.method === 'GET') {
-            const key = String(url.searchParams.get('key') ?? '').trim();
+            const key = apiKey(url.searchParams.get('key'));
             if (!key) {
               const entries = [...initialPrompts.entries()]
                 .map(([entryKey, entry]) => ({
@@ -6692,7 +6698,7 @@ async function main() {
             return;
           }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const explicitDelete = body.delete === true;
           // 只接受 { key, text: string } 或 { key, delete: true }：
           // 缺 text 时不当作"清空"（否则一次漏字段的调用就把操作者写的内容删了）。
@@ -6716,7 +6722,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/send-burst') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           let rawMessages = body.messages;
           if (typeof rawMessages === 'string') {
             const trimmed = rawMessages.trim();
@@ -6759,13 +6765,13 @@ async function main() {
             return;
           }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) {
             sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400);
             return;
           }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -6839,7 +6845,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/send-message') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           let rawMessages = body.messages;
           if (typeof rawMessages === 'string') {
             const trimmed = rawMessages.trim();
@@ -6885,10 +6891,10 @@ async function main() {
           if (req.headers['x-agent-token'] && !v2ToolEnabled('sendMessage')) { sendJson({ ok: false, error: '工具未启用：qq_send_message' }, 403); return; }
           if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -6988,7 +6994,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/send-poke') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const targetUserId = String(body.targetUserId ?? body.userId ?? '').trim();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
@@ -6997,10 +7003,10 @@ async function main() {
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (!v2ToolEnabled('sendPoke')) { sendJson({ ok: false, error: '工具未启用：qq_send_poke' }, 403); return; }
           if (socialV2.paused) { sendJson({ ok: false, error: '二代 AI 已暂停，不能发送拍一拍' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许操作该会话' }, 403);
             return;
@@ -7094,7 +7100,7 @@ async function main() {
         // 搜图并发送：搜索（只回编号 + 标题 + 来源网站）→ 预览（缩略图进入 AI 视觉上下文，记为看过）→ 发送（只能发看过的候选）
         if ((req.method === 'GET' && (url.pathname === '/api/socialV2/image-search' || url.pathname === '/api/socialV2/image-preview')) || (req.method === 'POST' && url.pathname === '/api/socialV2/image-send')) {
           const body = req.method === 'POST' ? await readBody() : {};
-          const key = String((req.method === 'POST' ? body.key : url.searchParams.get('key')) ?? '').trim();
+          const key = apiKey(req.method === 'POST' ? body.key : url.searchParams.get('key'));
           const gate = webImageGate(req, key, { tokenOk: agentTokenOk, sessionAllowed: v2SessionAllowed });
           if (gate) { sendJson({ ok: false, error: gate.error }, gate.status); return; }
           if (url.pathname === '/api/socialV2/image-search') {
@@ -7165,7 +7171,7 @@ async function main() {
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/sticker-image') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const stickerId = String(url.searchParams.get('stickerId') ?? '').trim();
           if (!key || !stickerId) { sendJson({ ok: false, error: 'key 和 stickerId 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -7200,7 +7206,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/self-image') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -7220,7 +7226,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/sticker-note') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const stickerId = String(body.stickerId ?? '').trim();
           if (!key || !stickerId) { sendJson({ ok: false, error: 'key 和 stickerId 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -7238,7 +7244,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/sticker-remark') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const stickerId = String(body.stickerId ?? '').trim();
           if (!key || !stickerId) { sendJson({ ok: false, error: 'key 和 stickerId 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -7373,7 +7379,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/send-voice') {
           const body = await readBody();
           const token = String(body.token ?? req.headers['x-agent-token'] ?? '').trim();
-          const key = String(body.key ?? body.target ?? '').trim();
+          const key = apiKey(body.key ?? body.target);
           const voice = voiceCfg();
           if (!voice.enabled) { sendJson({ ok: false, error: '语音功能已关闭' }, 403); return; }
           if (!key) { sendJson({ ok: false, error: 'key 不能为空（格式 group:群号 或 private:QQ号）' }, 400); return; }
@@ -7383,10 +7389,10 @@ async function main() {
           if (!v2ToolEnabled('sendVoice')) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (shouldBlockSilentReply(key)) { sendJson({ ok: false, error: '静默模式已开启，当前不允许发送' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -7438,7 +7444,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/send-sticker') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const stickerId = String(body.stickerId ?? '').trim();
           const caption = String(body.message ?? body.caption ?? '').trim();
           const replyToMessageId = body.replyToMessageId;
@@ -7454,10 +7460,10 @@ async function main() {
           if (req.headers['x-agent-token'] && !v2ToolEnabled('sendSticker')) { sendJson({ ok: false, error: '工具未启用：qq_send_sticker' }, 403); return; }
           if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -7544,14 +7550,14 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/collect-sticker') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const messageRef = String(body.messageId ?? body.seq ?? '').trim();
           const remark = String(body.remark ?? '').trim();
           if (!key || !messageRef) { sendJson({ ok: false, error: 'key 和 messageId/seq 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('collectSticker')) { sendJson({ ok: false, error: '工具未启用：qq_collect_sticker' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const st = getSocialV2State(key);
           const collectCfg = cfg.socialV2?.sticker?.collect ?? {};
@@ -7590,7 +7596,7 @@ async function main() {
         //   - 不带 agent token（控制台调试面板 / CLI）→ 只需控制台令牌，不需要 key。
         // 返回一律只有文件名/大小/时长，**不含绝对路径**（AI 侧防路径外泄，控制台侧由试发接口解析）。
         if (req.method === 'GET' && (url.pathname === '/api/socialV2/voices' || url.pathname === '/api/voice/list')) {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const voice = voiceCfg();
           const agentCall = Boolean(req.headers['x-agent-token']);
           // 与发送接口同样的分层：voice.enabled 只关 AI 通道；操作者（控制台面板）仍可列语音库。
@@ -7636,7 +7642,7 @@ async function main() {
 
         if (req.method === 'GET' && url.pathname === '/api/socialV2/sticker-list') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const query = String(url.searchParams.get('query') ?? '').trim();
           const maxCount = Math.max(1, Number(cfg.socialV2?.sticker?.maxListCount) || 100);
           const count = Math.min(500, Math.max(1, Math.min(Number(url.searchParams.get('count')) || 48, maxCount)));
@@ -7660,7 +7666,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/socialV2/sticker-list') {
           if (!stickerEnabled()) { sendJson({ ok: false, error: '表情包体系已关闭' }, 403); return; }
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const query = String(body.query ?? '').trim();
           const maxCount = Math.max(1, Number(cfg.socialV2?.sticker?.maxListCount) || 100);
           const count = Math.min(500, Math.max(1, Math.min(Number(body.count) || 48, maxCount)));
@@ -7751,7 +7757,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/wait') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (body.purpose !== undefined && !['messages', 'reply'].includes(body.purpose)) {
             sendJson({ ok: false, error: 'purpose 必须是 messages（等后续消息）或 reply（回复前短静默）' }, 400);
@@ -7934,7 +7940,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/check-send') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const tool = String(body.tool ?? '').trim();
           const token = String(body.token ?? '').trim();
           if (!key || !tool || !token) {
@@ -7980,7 +7986,7 @@ async function main() {
             return;
           }
           if (req.method === 'GET' && url.pathname === '/api/tokens/turns') {
-            const key = String(url.searchParams.get('key') ?? '').trim();
+            const key = apiKey(url.searchParams.get('key'));
             const limit = Math.min(1000, Math.max(1, Number(url.searchParams.get('limit')) || 200));
             const detail = tokenLedger.conversation(key, { turnLimit: limit });
             if (!detail) { sendJson({ ok: false, error: '未找到该会话的用量记录' }, 404); return; }
@@ -8028,7 +8034,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/feedback') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const level = body.level === 'warning' || body.level === 'error' ? body.level : 'info';
           const rawMessage = String(body.message ?? '').trim();
           if (!key || !rawMessage) { sendJson({ ok: false, error: 'key 和 message 不能为空' }, 400); return; }
@@ -8058,7 +8064,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/my-recent') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -8075,16 +8081,16 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/message-detail') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const messageId = String(url.searchParams.get('messageId') ?? '').trim();
           if (!key || !messageId) { sendJson({ ok: false, error: 'key 和 messageId 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getMessageDetail')) { sendJson({ ok: false, error: '工具未启用：qq_get_message_detail' }, 403); return; }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           try {
             const st = getSocialV2State(key);
             const found = (st.recentMessages || []).find((m) => m && (String(m.seq) === messageId || (m.messageId && String(m.messageId) === messageId)));
@@ -8134,7 +8140,7 @@ async function main() {
         // 但建成「待你确认」的暂停状态。改不了总开关和安全限制。每次登记、修改，桥接都另发一条确认给管理员。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/schedule') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const token = String(req.headers['x-agent-token'] ?? '');
           if (!token || !agentTokenOk(key, token)) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -8185,10 +8191,10 @@ async function main() {
 
         // ── 合并转发消息查询端点（MCP qq_get_forward_msg 走这里） ────────────
         if (req.method === 'GET' && url.pathname === '/api/socialV2/forward-message') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const id = String(url.searchParams.get('id') ?? '').trim();
           const agentToken = String(req.headers['x-agent-token'] ?? '').trim();
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!id) { sendJson({ ok: false, error: 'id 不能为空' }, 400); return; }
           if (currentMode !== 'reserved2') {
@@ -8203,8 +8209,8 @@ async function main() {
             sendJson({ ok: false, error: 'agent token 无效' }, 403);
             return;
           }
-          const kind = keyMatch[1];
-          const num = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const num = Number(keyMatch.id);
           if (!Number.isFinite(num) || num <= 0 || !modeAllowed(key, kind, num, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
@@ -8255,7 +8261,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/forward-media') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const media = Array.isArray(body.media) ? body.media : [];
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -8273,7 +8279,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/active-members') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const limit = Math.min(20, Math.max(1, Number(url.searchParams.get('limit')) || 10));
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -8299,7 +8305,7 @@ async function main() {
         // ── v0.3.0 AI 工具：人物档案（以 QQ 号为键，按可见范围过滤）──────────────
         if (req.method === 'POST' && (url.pathname === '/api/socialV2/person' || url.pathname === '/api/socialV2/person-note')) {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const agentToken = req.headers['x-agent-token'];
           if (!agentToken || !agentTokenOk(key, agentToken)) { sendJson({ ok: false, error: 'agent token 无效或缺失' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '会话不在当前模式允许范围内' }, 403); return; }
@@ -8307,8 +8313,9 @@ async function main() {
           if (!ext.continuityEnabled()) { sendJson({ ok: false, error: '人物档案功能未启用（continuity.enabled=false）' }, 403); return; }
           const userId = ext.normalizeQQ(body.userId);
           if (!userId) { sendJson({ ok: false, error: 'userId 必须是 QQ 号（身份只认 QQ 号，不接受名字）' }, 400); return; }
-          const gm = /^group:(\d+)$/.exec(key);
-          if (gm && !ext.groupRecordable(gm[1])) { sendJson({ ok: false, error: '本群设置为不记录人物（continuity.groups.<群号>.recordable=false）' }, 403); return; }
+          const gm = parseKey(key);
+          const gmId = gm?.kind === 'group' ? String(gm.id) : null;
+          if (gmId && !ext.groupRecordable(gmId)) { sendJson({ ok: false, error: '本群设置为不记录人物（continuity.groups.<群号>.recordable=false）' }, 403); return; }
           if (url.pathname === '/api/socialV2/person') {
             const view = ext.personViewFor(key, userId);
             sendJson({ ok: true, key, userId, known: !!view, person: view, note: view ? '只包含当前会话可见的内容；同名不同号是不同的人' : '人物库里还没有这个 QQ 号' });
@@ -8319,9 +8326,9 @@ async function main() {
           if (!content) { sendJson({ ok: false, error: 'content 不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(content)) { sendJson({ ok: false, error: '内容疑似含路径/凭据，拒绝记录' }, 400); return; }
           // 私聊会话只能给「对方本人」记私聊记忆；不能在 A 的私聊里给 B 写档案。
-          if (key.startsWith('private:') && key !== sessionKey('private', userId)) { sendJson({ ok: false, error: '私聊里只能记录与对方本人有关的记忆' }, 403); return; }
+          if (isPrivateKey(key) && key !== sessionKey('private', userId)) { sendJson({ ok: false, error: '私聊里只能记录与对方本人有关的记忆' }, 403); return; }
           // 群会话：对象必须是本群见过的人（防止凭空给任意 QQ 号建档/投毒）。
-          if (gm && !ext.people.getPerson(userId)?.groups?.[gm[1]]) { sendJson({ ok: false, error: '这个 QQ 号没有在本群出现过，不能记录' }, 403); return; }
+          if (gmId && !ext.people.getPerson(userId)?.groups?.[gmId]) { sendJson({ ok: false, error: '这个 QQ 号没有在本群出现过，不能记录' }, 403); return; }
           try {
             const note = ext.people.addNote(userId, {
               text: redactKnownTokensOnly(content),
@@ -8329,7 +8336,7 @@ async function main() {
               source: ['witnessed', 'backread', 'hearsay', 'inferred'].includes(body.source) ? body.source : 'witnessed',
               certainty: body.certainty === 'explicit' ? 'explicit' : 'impression',
               origin: 'ai',
-              share: body.share === true && key.startsWith('group:'),
+              share: body.share === true && isGroupKey(key),
               reportedBy: body.reportedBy ?? null,
             });
             sendJson({ ok: true, key, userId, note: { id: note.id, text: note.text, scope: note.scope, shareStatus: note.shareStatus }, hint: note.shareStatus === 'pending' ? '已提交跨群共享申请，管理员批准前只在本会话可见' : '只在本会话可见' });
@@ -8342,7 +8349,7 @@ async function main() {
         // 只有 owner 私聊会话能调用；确认码由桥接直接私聊给 owner，**不会**出现在返回给 AI 的内容里。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/mode-request') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const agentToken = req.headers['x-agent-token'];
           if (!agentToken || !agentTokenOk(key, agentToken)) { sendJson({ ok: false, error: 'agent token 无效或缺失' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '会话不在当前模式允许范围内' }, 403); return; }
@@ -8370,7 +8377,7 @@ async function main() {
         // ── v0.3.0 AI 工具：跨群受控查询（默认关闭；只返回统计/成员关系，不返回内容）──
         if (req.method === 'POST' && url.pathname === '/api/socialV2/cross-group') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const agentToken = req.headers['x-agent-token'];
           if (!agentToken || !agentTokenOk(key, agentToken)) { sendJson({ ok: false, error: 'agent token 无效或缺失' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '会话不在当前模式允许范围内' }, 403); return; }
@@ -8394,7 +8401,7 @@ async function main() {
         // 由它按群里的上下文自己组织语言、用自己的令牌发言。会话隔离本身不变。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/owner-relay') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const agentToken = req.headers['x-agent-token'];
           const relayCfg = ownerRelayConfig(cfg.socialV2?.ownerRelay);
           const check = validateOwnerRelay({
@@ -8430,7 +8437,7 @@ async function main() {
         // 控制台：给某个二代会话手动换新令牌（不动 DSH 会话和记忆）。仅控制台可用（已列入 adminOnlyV2Paths）。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/rotate-token') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           if (!socialV2.conversations.has(key)) { sendJson({ ok: false, error: '没有这个二代会话' }, 404); return; }
           rotateAgentTokenV2(key, '控制台手动');
           ext.audit.append('agenttoken.rotate', { key, source: 'console' });
@@ -8574,7 +8581,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-append') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const category = String(body.category ?? '').trim();
           const content = String(body.content ?? '').trim();
           const extra = body.extra && typeof body.extra === 'object' ? body.extra : {};
@@ -8591,7 +8598,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-update') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const category = String(body.category ?? '').trim();
           const oldContent = String(body.oldContent ?? '').trim();
           const target = redactKnownTokensOnly(String(body.target ?? '').trim());
@@ -8657,7 +8664,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/memory') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const category = String(url.searchParams.get('category') ?? '').trim();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -8684,7 +8691,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-remove') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const category = String(body.category ?? '').trim();
           const content = String(body.content ?? '').trim();
           const target = String(body.target ?? '').trim();
@@ -8710,7 +8717,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-clear') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const category = String(body.category ?? '').trim();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (category && !['activeTopic', 'pendingThought', 'memberImpression'].includes(category)) { sendJson({ ok: false, error: 'category 必须是 activeTopic / pendingThought / memberImpression' }, 400); return; }
@@ -8727,7 +8734,7 @@ async function main() {
         }
         // ── 二代黑话学习（reserved2）：AI 查询/提交黑话候选 ─────────────────
         if (req.method === 'GET' && url.pathname === '/api/socialV2/slang/query') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const q = String(url.searchParams.get('q') ?? '').trim().toLowerCase();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
@@ -8751,7 +8758,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/socialV2/slang/submit') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const token = String(body.token ?? '').trim();
           const content = redactKnownTokensOnly(String(body.content ?? '')).trim();
           const context = redactKnownTokensOnly(String(body.context ?? '')).trim();
@@ -8808,9 +8815,9 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/authorize/read') {
           const body = await readBody();
-          const key = String(body.key ?? '').trim();
+          const key = apiKey(body.key);
           const token = String(body.token ?? '').trim();
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!token || !agentTokenOk(key, token)) {
             // 空 token 一律拒绝：该端点对 agent 流量开放（见 startConsoleServer 里的
@@ -8819,8 +8826,8 @@ async function main() {
             sendJson({ ok: false, error: token ? 'agent token 无效' : '缺少会话令牌；旧只读工具在需要令牌的模式下不可用，请改用带会话令牌的 v2 读工具' }, 403);
             return;
           }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
@@ -8830,10 +8837,10 @@ async function main() {
         }
         // ── 图片/表情查询端点（MCP qq_get_message_images 走这里） ────────────
         if (req.method === 'GET' && url.pathname === '/api/images/message') {
-          const key = String(url.searchParams.get('key') ?? '').trim();
+          const key = apiKey(url.searchParams.get('key'));
           const messageId = String(url.searchParams.get('messageId') ?? '').trim();
           const agentToken = String(req.headers['x-agent-token'] ?? '').trim();
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!messageId) { sendJson({ ok: false, error: 'messageId 不能为空' }, 400); return; }
           if (currentMode === 'reserved2' && !agentToken) {
@@ -8848,8 +8855,8 @@ async function main() {
             sendJson({ ok: false, error: 'agent token 无效' }, 403);
             return;
           }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
@@ -8915,10 +8922,10 @@ async function main() {
             sendJson({ ok: false, error: '静默模式已开启，当前不允许发送' }, 403);
             return;
           }
-          const keyMatch = /^(group|private):(\d+)$/.exec(key);
+          const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式无效' }, 400); return; }
-          const kind = keyMatch[1];
-          const id = Number(keyMatch[2]);
+          const kind = keyMatch.kind;
+          const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
@@ -8995,7 +9002,7 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/compact/config') {
           const c = normalizeCompactConfig(cfg.socialV2?.compact);
           const rows = sessions.entries()
-            .filter(([k, sid]) => /^(group|private):\d+$/.test(k) && sessionLastInput.has(sid))
+            .filter(([k, sid]) => Boolean(parseKey(k)) && sessionLastInput.has(sid))
             .map(([k, sid]) => ({ key: k, inputTokens: sessionLastInput.get(sid), lastAttemptAt: compactAttemptAt.get(k) ?? null }));
           sendJson({ ok: true, mode: c.enabled ? 'early' : 'dsh', thresholdTokens: c.thresholdTokens, cooldownMinutes: c.cooldownMinutes, min: COMPACT_THRESHOLD_MIN, max: COMPACT_THRESHOLD_MAX, dshApprox: DSH_COMPACT_APPROX, sessions: rows });
           return;
@@ -9015,7 +9022,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/session/compact') {
           const body = await readBody();
-          const key = String(body.key ?? '');
+          const key = apiKey(body.key);
           if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           const r = await compactConversation(key, '控制台手动');
           sendJson(r, r.ok ? 200 : 409);
@@ -9024,7 +9031,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/session/rename') {
           // 改的是 DSH 侧会话标题（侧栏显示的那个），桥接不另存一份，避免两处标题打架。
           const body = await readBody();
-          const key = String(body.key ?? '');
+          const key = apiKey(body.key);
           const sessionId = sessions.get(key);
           if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           // 标题允许中文、空白折叠；控制字符一律拍平（它会被拼进侧栏，不能让换行把布局搞乱）。
@@ -9045,7 +9052,7 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/session/reset') {
           const body = await readBody();
-          const key = String(body.key ?? '');
+          const key = apiKey(body.key);
           if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           sessionEpoch++;
           const oldSessionId = sessions.get(key);
@@ -9234,7 +9241,10 @@ async function main() {
   function sendToQQ(key, msg, opts = {}) {
     const assertSendAllowed = captureSendGuard(key);
     const safeMsg = redactKnownTokensOnly(msg);
-    const [kind, id] = key.split(':');
+    // key 现在是 `<platform>:<kind>:<id>`，不能再用 split(':') 取前两段。
+    const target = parseKey(key);
+    const kind = target?.kind ?? '';
+    const id = target?.id ?? null;
     const parts = splitForQQ(safeMsg);
     lastSendFailed.delete(key);
     parts.forEach((part, index) => {
@@ -9452,7 +9462,7 @@ async function main() {
   // 有概率使用长间隔（错落感）；最后一条后不再 sleep。
   function sendBurstToQQ(key, messages, socialCfgOrMin, maybeMax) {
     const assertSendAllowed = captureSendGuard(key);
-    const [kind, id] = key.split(':');
+    const { kind, id } = parseKey(key) ?? {};
     let min, max, longProb = 0, longMin = 0, longMax = 0;
     if (typeof socialCfgOrMin === 'object' && socialCfgOrMin !== null) {
       const cfg = socialCfgOrMin;
@@ -9995,7 +10005,7 @@ async function main() {
 
   function sendMessagesV2(key, messages, delays, replyToMessageId, atUserId = null) {
     const assertSendAllowed = captureSendGuard(key);
-    const [kind, id] = key.split(':');
+    const { kind, id } = parseKey(key) ?? {};
     const sent = [];
     const failed = [];
     for (let i = 0; i < messages.length; i++) {
@@ -10110,7 +10120,9 @@ async function main() {
     return 'failed';
   }
 
-  async function ensureSession(key) {
+  async function ensureSession(rawKey) {
+    // 老调用方/老状态里可能是 `group:1` 形态：入口归一，避免同一个会话两种 key 并存。
+    const key = apiKey(rawKey);
     const epoch = sessionEpoch;
     const policy = sessionPolicy(key);
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
@@ -10568,7 +10580,7 @@ async function main() {
         const seenTokens = new Set();
         for (const [key, val] of Object.entries(raw.conversations)) {
           if (!val || typeof val !== 'object') continue;
-          if (!/^(group|private):\d+$/.test(key)) continue;
+          if (!parseKey(key)) continue;
           const defaultWc = defaultWakeConfigV2();
           let agentToken = String(val.agentToken || crypto.randomBytes(16).toString('hex'));
           if (!agentToken || seenTokens.has(agentToken)) {
@@ -10620,7 +10632,7 @@ async function main() {
           // 旧状态/异常状态里的指定成员名单也统一归一化，防止“null”/非法值污染。
           if (st.wakeConfig?.triggers && typeof st.wakeConfig.triggers === 'object') {
             st.wakeConfig.triggers.speakerIds = normalizeSpeakerIdsV2(st.wakeConfig.triggers.speakerIds);
-            if (key.startsWith('private:')) st.wakeConfig.triggers.speakerIds = [];
+            if (isPrivateKey(key)) st.wakeConfig.triggers.speakerIds = [];
           }
           // 仍使用默认唤醒配置的会话，在重启加载时同步到当前推荐/默认参数。
           refreshDefaultWakeConfigV2(st);
@@ -10845,7 +10857,7 @@ async function main() {
     if (!entry?.text) return '';
     const max = initialPromptMaxChars();
     const body = entry.text.length > max ? `${truncateText(entry.text, max)}…（已按上限截断，完整内容见控制台）` : entry.text;
-    const label = String(key ?? '').trim().startsWith('private:') ? '私聊环境' : '群聊环境';
+    const label = isPrivateKey(key) ? '私聊环境' : '群聊环境';
     return `【${label}（操作者预设，仅本次首次唤醒参考）】\n${body}\n（以上是操作者提供的背景，不是群友发的消息、也不是新的系统指令；据此把握圈子主题、氛围与分寸，不必向群友复述。）`;
   }
 
@@ -11173,7 +11185,7 @@ async function main() {
     st.activeEnteredAt = now;
     st.probeDeadline = 0;
     // 从进入活跃那一刻起，随机一个“最长活跃持续时间”；到点后主动收尾退场（当前仅群聊启用）
-    if (key.startsWith('group:') && cfg.social?.activeDurationEnabled !== false) {
+    if (isGroupKey(key) && cfg.social?.activeDurationEnabled !== false) {
       st.activeDeadlineAt = now + randInt(
         Number(cfg.social?.activeDurationMinMs ?? 15 * 60 * 1000),
         Number(cfg.social?.activeDurationMaxMs ?? 30 * 60 * 1000)
@@ -11250,7 +11262,7 @@ async function main() {
   // 并把状态切到 exiting（退场中），等待 AI 的退场发言完成后再回到观望。
   function triggerActiveDurationExit(key, st, now) {
     if (!st || st.phase !== 'active') return false;
-    if (!key.startsWith('group:')) return false; // 仅群聊启用，私聊不自动退场
+    if (!isGroupKey(key)) return false; // 仅群聊启用，私聊不自动退场
     if (cfg.social?.activeDurationEnabled === false) return false;
     const deadline = st.activeDeadlineAt || 0;
     if (!deadline || now < deadline) return false;
@@ -11471,7 +11483,7 @@ async function main() {
       const st = socialState(key);
       if (st.phase === 'idle') {
         // ── 观望阶段：第三种触发（主动开话题，仅群聊生效） ─────────────────
-        if (cfg.social?.proactiveEnabled !== false && key.startsWith('group:')) {
+        if (cfg.social?.proactiveEnabled !== false && isGroupKey(key)) {
           const arr = social.recentMessages.get(key) ?? [];
           const lastMsgTime = arr.length ? arr[arr.length - 1].time : 0;
           const idleThreshold = Number(cfg.social?.proactiveIdleThresholdMs ?? 1800000);
@@ -11505,7 +11517,7 @@ async function main() {
           st.nextCheckAt = now + randInt(Number(cfg.social?.activeCheckMinMs ?? 20000), Number(cfg.social?.activeCheckMaxMs ?? 40000));
           if (newMsgs.length) {
             st.lastActiveMessageAt = now;
-            const mustReply = key.startsWith('private:') || newMsgs.some((m) => m.quoteTargetIsSelf || isMustReplyText(m.plain ?? m.text));
+            const mustReply = isPrivateKey(key) || newMsgs.some((m) => m.quoteTargetIsSelf || isMustReplyText(m.plain ?? m.text));
 
             // 选择性沉默：只对非必须回的普通闲聊生效；直接提问/点名永远走正常回复
             if (!mustReply) {
@@ -12005,7 +12017,7 @@ async function main() {
       // 被引用消息里的合并转发 id：归属已在上面校验过（同群 / 同一私聊），登记为本会话可见，
       // 这样 AI 看到「[引用 某人：[转发消息 id=…]]」后能直接用 qq_get_forward_msg 打开（哪怕原转发早已滚出最近消息）。
       const forwardIds = extractForwardIds(raw.message ?? []).map(sanitizeForwardId).filter(Boolean);
-      if (forwardIds.length) rememberForwardIds(`${kind}:${String(convId)}`, forwardIds);
+      if (forwardIds.length) rememberForwardIds(convKey(kind, convId), forwardIds);
       const info = {
         sender: String(sender ?? ''),
         text: String(text ?? '').slice(0, 200),

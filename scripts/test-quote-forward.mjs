@@ -95,13 +95,13 @@ test('② 引用解析：等不到返回 pending；后台完成后命中并登�
     assert.equal(done.sender, '转发的人');
     assert.match(done.text, /\[转发消息 id=fw-1001\]/);
     assert.deepEqual([...done.forwardIds], ['fw-1001']);
-    assert.ok(h.seenForwardIds.get(`group:${GROUP}`)?.has('fw-1001'), '被引用的转发登记为本会话可见');
+    assert.ok(h.seenForwardIds.get(`qq:group:${GROUP}`)?.has('fw-1001'), '被引用的转发登记为本会话可见');
 
     // 其它群的消息：归属校验不过，既不返回内容，也不登记
     const p = h.resolveReplyInfo('group', GROUP, '1002', null, { waitMs: 200 });
     (await waitRelease('1002'))(forwardMsg(1002, '789'));
     assert.equal(await p, null);
-    assert.ok(!h.seenForwardIds.get(`group:${GROUP}`)?.has('fw-1002'), '跨群的转发 id 不登记');
+    assert.ok(!h.seenForwardIds.get(`qq:group:${GROUP}`)?.has('fw-1002'), '跨群的转发 id 不登记');
   } finally { await h.close(); }
 });
 
@@ -132,7 +132,7 @@ test('③④ 收消息不被慢引用卡住；之后 AI 能查详情并打开引
     // 快的引用：这条消息直接带上被引用转发的 id
     h.bot.getMessage = async (id) => forwardMsg(Number(id));
     await h.handleIncoming('group', GROUP, groupEvent(5001, 3001, '这个转发太好笑了'), h.cfg);
-    const st = h.getSocialV2State(`group:${GROUP}`);
+    const st = h.getSocialV2State(`qq:group:${GROUP}`);
     const fast = st.unread.find((m) => String(m.messageId) === '5001');
     assert.ok(fast, '消息进了未读');
     assert.deepEqual([...fast.forwardIds], ['fw-3001'], '引用里的转发 id 记到这条消息上');
@@ -151,13 +151,13 @@ test('③④ 收消息不被慢引用卡住；之后 AI 能查详情并打开引
 
     const port = await listenPort(server);
     const hdr = { 'x-console-token': 'fixture-console-token', 'x-agent-token': st.agentToken, 'x-agent-call': '1' };
-    const detail = (mid) => request(port, `/api/socialV2/message-detail?key=${encodeURIComponent(`group:${GROUP}`)}&messageId=${mid}`, hdr);
+    const detail = (mid) => request(port, `/api/socialV2/message-detail?key=${encodeURIComponent(`qq:group:${GROUP}`)}&messageId=${mid}`, hdr);
     const loading = await detail(3002);
     assert.equal(loading.status, 200);
     assert.equal(loading.json.info.pending, true);
     assert.match(loading.json.info.note, /稍后再查/);
     // 打开引用里的转发之前：id 还没登记，拒绝
-    const fwd = (fid) => request(port, `/api/socialV2/forward-message?key=${encodeURIComponent(`group:${GROUP}`)}&id=${fid}`, hdr);
+    const fwd = (fid) => request(port, `/api/socialV2/forward-message?key=${encodeURIComponent(`qq:group:${GROUP}`)}&id=${fid}`, hdr);
     assert.equal((await fwd('fw-3002')).status, 404, '没见过的转发 id 不能读');
 
     releaseSlow();

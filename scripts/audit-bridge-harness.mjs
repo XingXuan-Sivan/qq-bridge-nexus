@@ -39,8 +39,8 @@ import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
 // 人格三层解析是纯函数模块（不读盘、不联网），直接用真实现：夹具要验证它读到的本地卡是否正确。
 import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createSkillIndex } from '../src/skills/index.mjs';
-import { formatKey, platformOfConfig } from '../src/session/key.mjs';
-import { configureKeys, key as buildKey } from '../src/session/key.mjs';
+import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
+import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
 // 内置命令的壳与 /api/commands 组装：夹具剥掉 import，所以要在 sandbox 里补这两项（P7 抽层后新增）。
 import { createBuiltinCommands } from '../src/commands/builtin.mjs';
@@ -255,9 +255,13 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
 createPromptBlockRegistry,
 createSkillIndex,
     formatKey,
+    parseKey,
     platformOfConfig,
     configureKeys,
     buildKey,
+    isGroupKey,
+    isPrivateKey,
+    idOfKey,
     createPluginKernel: async () => ({
       init: async () => {},
       notify: () => {},

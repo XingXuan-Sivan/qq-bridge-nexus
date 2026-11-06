@@ -107,8 +107,8 @@ function engine({ nowRef, deliver = async () => ({ status: 'sent' }), file } = {
     file: file ?? path.join(tmpDir(), 'scheduler.json'),
     now: () => nowRef.t,
     deliver: async (task, target, ctx) => { sent.push({ id: task.id, target, ctx }); return deliver(task, target, ctx); },
-    validateTarget: (k) => (/^(group|private):\d+$/.test(k) ? null : '格式不对'),
-    ownerKey: () => 'private:123',
+    validateTarget: (k) => (/^(?:[a-z][a-z0-9-]{0,15}:)?(group|private):\d+$/.test(k) ? null : '格式不对'),
+    ownerKey: () => 'qq:private:123',
     holidays: [],
     sensitive: (t) => /\/Users\//.test(t),
   });
@@ -123,29 +123,29 @@ test('③ 引擎：执行、错过、限额、免打扰、满次停用、持久�
 
   // 安全：AI 不能改总开关和限制；AI 只能发给管理员私聊
   assert.throws(() => sch.updateSettings({ enabled: false }, { source: 'owner-chat-ai' }), /只能在控制台/);
-  assert.throws(() => sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'owner-chat-ai' }), /只能登记发给管理员私聊/);
+  assert.throws(() => sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] }, { source: 'owner-chat-ai' }), /只能登记发给管理员私聊/);
   sch.updateSettings({ allowAiGroup: true }, { source: 'console' });
-  const pending = sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'owner-chat-ai' });
+  const pending = sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] }, { source: 'owner-chat-ai' });
   assert.equal(pending.enabled, false); assert.equal(pending.pendingConfirm, true, '发群的 AI 任务建成待确认');
   assert.throws(() => sch.setEnabled(pending.id, true, { source: 'owner-chat-ai' }), /管理员确认/);
   assert.equal(sch.setEnabled(pending.id, true, { source: 'owner-command' }).pendingConfirm, false, '管理员确认后启用');
   sch.deleteTask(pending.id, { source: 'console' });
-  assert.throws(() => sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'cron', expr: '0 9 * * *' }, targets: ['private:123'] }, { source: 'owner-chat-ai' }), /cron 表达式只能在控制台/, 'AI 不能用 cron');
-  const cronTask = sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'cron', expr: '0 9 * * *' }, targets: ['private:123'] }, { source: 'console' });
+  assert.throws(() => sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'cron', expr: '0 9 * * *' }, targets: ['qq:private:123'] }, { source: 'owner-chat-ai' }), /cron 表达式只能在控制台/, 'AI 不能用 cron');
+  const cronTask = sch.createTask({ kind: 'text', text: 'hi', schedule: { type: 'cron', expr: '0 9 * * *' }, targets: ['qq:private:123'] }, { source: 'console' });
   sch.deleteTask(cronTask.id, { source: 'console' });
-  assert.throws(() => sch.createTask({ kind: 'text', text: '看 /Users/a/x', schedule: { type: 'daily', times: ['06:00'] }, targets: ['private:123'] }, { source: 'console' }), /路径/);
+  assert.throws(() => sch.createTask({ kind: 'text', text: '看 /Users/a/x', schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:private:123'] }, { source: 'console' }), /路径/);
   sch.updateSettings({ limits: { minIntervalMin: 30 } }, { source: 'console' });
-  assert.throws(() => sch.createTask({ kind: 'text', text: 'x', schedule: { type: 'interval', everyMinutes: 10 }, targets: ['private:123'] }, { source: 'console' }), /至少隔 30 分钟/, '两次最小间隔');
+  assert.throws(() => sch.createTask({ kind: 'text', text: 'x', schedule: { type: 'interval', everyMinutes: 10 }, targets: ['qq:private:123'] }, { source: 'console' }), /至少隔 30 分钟/, '两次最小间隔');
   sch.updateSettings({ limits: { minIntervalMin: 10 } }, { source: 'console' });
 
   // 到点执行（固定时间带随机偏移：在 ±2 分钟内）
-  const t1 = sch.createTask({ name: '早安', kind: 'text', text: '早上好', schedule: { type: 'daily', times: ['06:00'] }, targets: ['private:123'] }, { source: 'console' });
+  const t1 = sch.createTask({ name: '早安', kind: 'text', text: '早上好', schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:private:123'] }, { source: 'console' });
   const raw = sch.getTask(t1.id);
   assert.ok(Math.abs(raw.nextRunAt - at('2026-10-21T22:00:00Z')) <= 2 * 60_000, '偏移不超过 ±2 分钟');
   assert.match(t1.nextRunText, /2026-10-22 06:00（北京时间 UTC\+8）（前后 2 分钟内）/, '显示设定的时间');
   nowRef.t = raw.nextRunAt + 5_000;
   await sch.tick();
-  assert.deepEqual(sent.map((x) => x.target), ['private:123']);
+  assert.deepEqual(sent.map((x) => x.target), ['qq:private:123']);
   assert.equal(sch.getTask(t1.id).runs, 1);
   assert.ok(sch.getTask(t1.id).nextScheduledAt === at('2026-10-22T22:00:00Z'), '下一次是第二天 06:00');
 
@@ -158,7 +158,7 @@ test('③ 引擎：执行、错过、限额、免打扰、满次停用、持久�
   // 免打扰（群）、每群每天上限、满 N 次停用
   sch.updateSettings({ limits: { perGroupPerDay: 1, quietStart: '00:00', quietEnd: '07:00' } }, { source: 'console' });
   assert.equal(inQuietHours(at('2026-10-22T20:30:00Z'), sch.snapshot().settings.limits, BJ), true, '北京 04:30 在免打扰时段');
-  const t2 = sch.createTask({ name: '群', kind: 'text', text: '大家好', schedule: { type: 'dates', items: [{ date: '2026-10-24', time: '04:30' }, { date: '2026-10-24', time: '12:00' }, { date: '2026-10-24', time: '13:00' }] }, targets: ['group:456'], maxRuns: 3, jitterMin: 0 }, { source: 'console' });
+  const t2 = sch.createTask({ name: '群', kind: 'text', text: '大家好', schedule: { type: 'dates', items: [{ date: '2026-10-24', time: '04:30' }, { date: '2026-10-24', time: '12:00' }, { date: '2026-10-24', time: '13:00' }] }, targets: ['qq:group:456'], maxRuns: 3, jitterMin: 0 }, { source: 'console' });
   for (const iso of ['2026-10-23T20:30:00Z', '2026-10-24T04:00:00Z', '2026-10-24T05:00:00Z']) {
     nowRef.t = at(iso) + 1000;
     await sch.tick();
@@ -177,7 +177,7 @@ test('③ 引擎：执行、错过、限额、免打扰、满次停用、持久�
   fs.writeFileSync(badFile, '{坏了');
   const broken = engine({ nowRef, file: badFile }).sch;
   assert.equal(broken.isWritable(), false);
-  broken.createTask({ kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['private:123'] }, { source: 'console' });
+  broken.createTask({ kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:private:123'] }, { source: 'console' });
   assert.equal(fs.readFileSync(badFile, 'utf8'), '{坏了', '读坏的数据文件不会被覆盖');
   if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600, '数据文件 0600');
 
@@ -188,7 +188,7 @@ test('③ 引擎：执行、错过、限额、免打扰、满次停用、持久�
 
   // 任务数上限
   sch.updateSettings({ limits: { maxTasks: 2 } }, { source: 'console' });
-  assert.throws(() => sch.createTask({ kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['private:123'] }, { source: 'console' }), /上限 2/);
+  assert.throws(() => sch.createTask({ kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:private:123'] }, { source: 'console' }), /上限 2/);
   // 启动补漏：错过太久的记 missed 并顺延
   nowRef.t = at('2026-11-30T00:00:00Z');
   sch.setEnabled(t1.id, true, { source: 'console' });
@@ -249,29 +249,29 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
     assert.ok(h.calls.sent.slice(sentBefore).some((x) => x.kind === 'private' && String(x.text) === '早上好'), '到点发出固定文字');
     // 叫 AI 来说：唤醒提示词带上任务（先关掉定时任务免打扰，测试不能依赖跑测试时的北京时间）
     h.scheduler.updateSettings({ limits: { quietEnabled: false } }, { source: 'console' });
-    const ai = h.scheduler.createTask({ name: '陪聊', kind: 'ai', instruction: '随便发个可爱的表情包', schedule: { type: 'daily', times: ['09:00'] }, targets: ['group:456'] }, { source: 'console' });
+    const ai = h.scheduler.createTask({ name: '陪聊', kind: 'ai', instruction: '随便发个可爱的表情包', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:group:456'] }, { source: 'console' });
     h.scheduler.getTask(ai.id).nextRunAt = Date.now() - 1000;
-    await h.ensureSession('group:456');
+    await h.ensureSession('qq:group:456');
     const promptsBefore = h.calls.prompts.length;
     await h.scheduler.tick();
     for (let i = 0; i < 50 && h.calls.prompts.length === promptsBefore; i += 1) await settle();
     const wake = h.calls.prompts.slice(promptsBefore).map((p) => p.content.map((c) => c.text ?? '').join('\n')).join('\n');
     assert.match(wake, /【定时任务】[\s\S]*随便发个可爱的表情包/, '唤醒提示词里有任务说明');
-    assert.equal(h.scheduledNotes.peek('group:456').length, 0, '投递后取走，不会下次再重复');
+    assert.equal(h.scheduledNotes.peek('qq:group:456').length, 0, '投递后取走，不会下次再重复');
 
     // AI 工具：群会话不能用；管理员私聊能用，桥接另发确认
-    const ownerSt = h.getSocialV2State('private:123');
-    const groupSt = h.getSocialV2State('group:456');
+    const ownerSt = h.getSocialV2State('qq:private:123');
+    const groupSt = h.getSocialV2State('qq:group:456');
     const call = (key, token, payload) => req(port, '/api/socialV2/schedule', 'POST', { 'x-agent-token': token, 'x-agent-call': '1' }, { key, ...payload });
-    const fromGroup = await call('group:456', groupSt.agentToken, { action: 'create', task: { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['07:00'] } } });
+    const fromGroup = await call('qq:group:456', groupSt.agentToken, { action: 'create', task: { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['07:00'] } } });
     assert.equal(fromGroup.status, 403); assert.match(fromGroup.json.error, /只能在管理员的私聊里登记/);
     const sentBefore2 = h.calls.sent.length;
-    const ok = await call('private:123', ownerSt.agentToken, { action: 'create', task: { name: '喝水', kind: 'text', text: '记得喝水', schedule: { type: 'daily', times: ['15:00'] } } });
+    const ok = await call('qq:private:123', ownerSt.agentToken, { action: 'create', task: { name: '喝水', kind: 'text', text: '记得喝水', schedule: { type: 'daily', times: ['15:00'] } } });
     assert.equal(ok.status, 200, JSON.stringify(ok.json));
     assert.ok(ok.json.upcoming, '返回接下来几次的时间');
     await settle();
     assert.ok(h.calls.sent.slice(sentBefore2).some((x) => /AI 帮你登记了定时任务/.test(String(x.text))), '桥接另发确认给管理员');
-    const toGroup = await call('private:123', ownerSt.agentToken, { action: 'create', task: { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['07:00'] }, targets: ['group:456'] } });
+    const toGroup = await call('qq:private:123', ownerSt.agentToken, { action: 'create', task: { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['07:00'] }, targets: ['qq:group:456'] } });
     assert.equal(toGroup.status, 400); assert.match(toGroup.json.error, /只能登记发给管理员私聊[\s\S]*不要口头答应/);
 
     // 控制台接口：管理员可以；AI 的令牌不行
@@ -279,9 +279,9 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
     assert.equal(list.status, 200); assert.ok(list.json.tasks.length >= 3); assert.ok(list.json.targets.some((t) => t.kind === 'owner'));
     const asAgent = await req(port, '/api/scheduler/settings', 'POST', { 'x-agent-token': ownerSt.agentToken }, { enabled: false });
     assert.equal(asAgent.status, 403, '定时任务的控制台接口拒绝 agent token');
-    const created = await req(port, '/api/scheduler/tasks', 'POST', {}, { name: '群公告', kind: 'text', text: '周末愉快', schedule: { type: 'weekly', weekdays: [5], times: ['18:00'] }, targets: ['group:456'] });
+    const created = await req(port, '/api/scheduler/tasks', 'POST', {}, { name: '群公告', kind: 'text', text: '周末愉快', schedule: { type: 'weekly', weekdays: [5], times: ['18:00'] }, targets: ['qq:group:456'] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
-    const badTarget = await req(port, '/api/scheduler/tasks', 'POST', {}, { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['group:999999'] });
+    const badTarget = await req(port, '/api/scheduler/tasks', 'POST', {}, { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:group:999999'] });
     assert.equal(badTarget.status, 400); assert.match(badTarget.json.error, /不在白名单/);
     const preview = await req(port, '/api/scheduler/preview', 'POST', {}, { schedule: { type: 'dailyRandom', count: 3, window: ['09:00', '22:00'] } });
     assert.equal(preview.json.next.length, 5);
@@ -332,7 +332,7 @@ test('⑦ 插件任务类型：payload 校验、写盘、重建后仍在，未�
       now: () => at('2026-11-04T01:00:00Z'),
       deliver: async () => ({ status: 'sent' }),
       validateTarget: () => null,
-      ownerKey: () => 'private:123',
+      ownerKey: () => 'qq:private:123',
       holidays: [],
       taskKinds,
     });
@@ -342,18 +342,18 @@ test('⑦ 插件任务类型：payload 校验、写盘、重建后仍在，未�
 
   const sch = make(kinds);
   const task = sch.createTask(
-    { kind: 'pig-latin', payload: { text: ' abc ' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] },
+    { kind: 'pig-latin', payload: { text: ' abc ' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] },
     { source: 'console' },
   );
   assert.equal(task.kind, 'pig-latin');
   assert.deepEqual(task.payload, { text: 'abc' });
   assert.equal(task.kindLabel, '倒着念');
   assert.throws(
-    () => sch.createTask({ kind: 'pig-latin', payload: { text: '' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    () => sch.createTask({ kind: 'pig-latin', payload: { text: '' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] }, { source: 'console' }),
     /text 必填/,
   );
   assert.throws(
-    () => sch.createTask({ kind: 'nope', schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    () => sch.createTask({ kind: 'nope', schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] }, { source: 'console' }),
     /未知任务类型/,
   );
 
@@ -370,7 +370,7 @@ test('⑦ 插件任务类型：payload 校验、写盘、重建后仍在，未�
   assert.equal(kept.kind, 'pig-latin');
   assert.equal(kept.kindLabel, null);
   assert.throws(
-    () => missing.createTask({ kind: 'pig-latin', payload: { text: 'x' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['group:456'] }, { source: 'console' }),
+    () => missing.createTask({ kind: 'pig-latin', payload: { text: 'x' }, schedule: { type: 'daily', times: ['06:00'] }, targets: ['qq:group:456'] }, { source: 'console' }),
     /未知任务类型/,
   );
 });

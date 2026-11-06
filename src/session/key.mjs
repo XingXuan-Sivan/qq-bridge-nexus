@@ -105,31 +105,28 @@ export function isPrivateKey(key) {
   return kindOfKey(key) === 'private';
 }
 
-// ── 进程内默认格式 ────────────────────────────────────────────────────────────
+// ── 进程内默认平台 ────────────────────────────────────────────────────────────
 // 各业务模块（社交、记忆、托付、MCP 工具……）都在产 key。给每个模块塞一个
 // `keyOf` 依赖会把签名搞得很脏；这里改成一个进程级设置，启动时按配置设一次，
 // 之后所有模块 `import { key }` 就得到与内核一致的形态。
-let active = { platform: DEFAULT_PLATFORM, keyed: false };
+// 形态本身只有一种：`<platform>:<kind>:<id>`（旧的 `group:<id>` 只在读取侧兼容）。
+let active = { platform: DEFAULT_PLATFORM };
 
-/** 启动时调用一次：把配置里的平台与形态固化下来（不合法时回落默认，不抛错） */
-export function configureKeys({ platform, keyedFormat } = {}) {
+/** 启动时调用一次：把配置里的平台固化下来（不合法时回落默认，不抛错） */
+export function configureKeys({ platform } = {}) {
   const p = String(platform ?? '').trim().toLowerCase();
-  active = {
-    platform: PLATFORM_RE.test(p) ? p : DEFAULT_PLATFORM,
-    keyed: keyedFormat === true,
-  };
+  active = { platform: PLATFORM_RE.test(p) ? p : DEFAULT_PLATFORM };
   return { ...active };
 }
 
-/** 当前进程的 key 形态（测试与状态页用） */
+/** 当前进程用的平台（测试与状态页用） */
 export function keyFormat() {
   return { ...active };
 }
 
 /**
- * 按当前形态组装 key：`keyed=false` 时仍是旧的 `group:<id>`（行为与迁移前逐字一致），
- * `keyed=true` 时是 `<platform>:<group|private>:<id>`。
- * 参数非法时同样抛错，不产出半个 key。
+ * 按当前平台组装 key：`<platform>:<group|private>:<id>`。
+ * 参数非法时抛错，不产出半个 key。
  */
 export function key(kind, id) {
   if (!KIND_RE.test(String(kind ?? '').trim())) {
@@ -137,6 +134,6 @@ export function key(kind, id) {
   }
   const i = String(id ?? '').trim();
   if (!ID_RE.test(i)) throw new Error(`会话 key 的 id 不合法：${JSON.stringify(id)}（只支持数字）`);
-  return active.keyed ? formatKey(active.platform, kind, i) : `${kind}:${i}`;
+  return formatKey(active.platform, kind, i);
 }
 

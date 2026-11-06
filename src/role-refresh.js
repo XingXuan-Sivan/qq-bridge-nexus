@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { parseKey } from './session/key.mjs';
 
 /** 切换人格时的生效方式。 */
 export const ROLE_APPLY_MODES = ['nextWake', 'immediate'];
@@ -48,7 +49,7 @@ function normalizeEntries(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   for (const [key, v] of Object.entries(raw)) {
-    if (!/^(group|private):\d+$/.test(key) || !v || typeof v !== 'object') continue;
+    if (!parseKey(key) || !v || typeof v !== 'object') continue;
     const sessionId = String(v.sessionId ?? '');
     const fp = String(v.fp ?? '');
     if (!sessionId || !/^[0-9a-f]{16}$/.test(fp)) continue;
@@ -87,7 +88,7 @@ export function createRoleRefreshTracker({ file, now = Date.now, onError = () =>
     },
     /** 记下：这个会话已经读到这一版卡。 */
     markSeen(key, sessionId, fp) {
-      if (!/^(group|private):\d+$/.test(String(key)) || !sessionId || !/^[0-9a-f]{16}$/.test(String(fp))) return;
+      if (!parseKey(String(key)) || !sessionId || !/^[0-9a-f]{16}$/.test(String(fp))) return;
       const rec = entries[key];
       if (rec && rec.sessionId === String(sessionId) && rec.fp === fp) return;
       entries[key] = { sessionId: String(sessionId), fp, at: now() };

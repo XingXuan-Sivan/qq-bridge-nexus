@@ -14,17 +14,17 @@
 // - 只有桥接代码（控制台、管理员的 /role 命令）写这个文件，AI 没有任何能改人格的工具。
 
 import path from 'node:path';
+import { key as buildKey, parseKey } from './session/key.mjs';
 
 /** byKey 最多记这么多会话，防止被手改的文件撑爆。 */
 export const ROLE_BY_KEY_MAX = 500;
 
-/** 会话 key 规范化：只接受 group:正整数 / private:正整数，去掉前导零。不合法返回 null。 */
-export function canonicalConversationKey(key) {
-  const m = /^(group|private):(\d+)$/.exec(String(key ?? '').trim());
-  if (!m) return null;
-  const id = Number(m[2]);
-  if (!Number.isSafeInteger(id) || id <= 0) return null;
-  return `${m[1]}:${id}`;
+/** 会话 key 规范化：接受新旧两种形态，统一成当前平台的 key，去掉前导零。不合法返回 null。 */
+export function canonicalConversationKey(raw) {
+  const parsed = parseKey(String(raw ?? '').trim());
+  if (!parsed) return null;
+  if (!Number.isSafeInteger(parsed.id) || parsed.id <= 0) return null;
+  return buildKey(parsed.kind, parsed.id);
 }
 
 /** 人格名清洗：只留中文 / 字母 / 数字 / 下划线 / 横线；清洗后为空返回 null。 */

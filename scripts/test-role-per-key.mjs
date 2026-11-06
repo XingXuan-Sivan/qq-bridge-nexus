@@ -19,8 +19,8 @@ import {
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { readConsoleSource } from './console-source.mjs';
 
-const GROUP = 'group:456';
-const OWNER = 'private:123';
+const GROUP = 'qq:group:456';
+const OWNER = 'qq:private:123';
 const SELF = 999999;
 const CARD_A = '# 角色卡：甲鱼\n你是甲鱼，说话很凶。';
 const CARD_B = '# 角色卡：乙鱼\n你是乙鱼，说话软软的。';
@@ -51,15 +51,15 @@ test('① 模块：回落规则、非法 key、路径穿越、改名删除', () 
   // 命中 / 未命中 / null
   const s = normalizeRoleState({ role: '甲鱼', mode: 'active', byKey: { [GROUP]: '乙鱼', [OWNER]: null } });
   assert.equal(roleNameFor(s, GROUP), '乙鱼', '命中');
-  assert.equal(roleNameFor(s, 'group:789'), '甲鱼', '未命中回落全局');
+  assert.equal(roleNameFor(s, 'qq:group:789'), '甲鱼', '未命中回落全局');
   assert.equal(roleNameFor(s, OWNER), null, 'null = 不挂卡，不回落全局');
   assert.equal(roleSourceFor(s, OWNER), 'off');
   assert.equal(roleNameFor(s, undefined), '甲鱼', '不传 key 用全局');
 
   // 非法 key 忽略、别名归一
-  const bad = normalizeRoleState({ role: null, byKey: { 'group:abc': '乙鱼', 'group:0': '乙鱼', 'channel:1': '乙鱼', 'group:-5': '乙鱼', 'group:0789': '乙鱼', [GROUP]: 42 } });
-  assert.deepEqual(Object.keys(bad.byKey).join(','), 'group:789', '只留合法 key，前导零去掉；值不是字符串的丢掉');
-  assert.equal(roleNameFor(bad, 'group:0789'), '乙鱼', '查询时别名也归一');
+  const bad = normalizeRoleState({ role: null, byKey: { 'group:abc': '乙鱼', 'qq:group:0': '乙鱼', 'channel:1': '乙鱼', 'group:-5': '乙鱼', 'qq:group:0789': '乙鱼', [GROUP]: 42 } });
+  assert.deepEqual(Object.keys(bad.byKey).join(','), 'qq:group:789', '只留合法 key，前导零去掉；值不是字符串的丢掉');
+  assert.equal(roleNameFor(bad, 'qq:group:0789'), '乙鱼', '查询时别名也归一');
   assert.equal(canonicalConversationKey(' private:00123 '), OWNER);
   assert.equal(canonicalConversationKey('group:1.5'), null);
   assert.equal(canonicalConversationKey('__proto__'), null);
@@ -82,7 +82,7 @@ test('① 模块：回落规则、非法 key、路径穿越、改名删除', () 
   assert.equal(t.role, '甲鱼', '全局不动');
   t = withRoleForKey(t, GROUP, 'off');
   assert.equal(roleNameFor(t, GROUP), null);
-  t = withRoleForKey(t, 'group:0456', 'default');
+  t = withRoleForKey(t, 'qq:group:0456', 'default');
   assert.equal(roleSourceFor(t, GROUP), 'global', '回到全局（别名也能定位）');
   assert.throws(() => withRoleForKey(old, 'group:x', 'off'), /会话格式/);
   assert.throws(() => withRoleForKey(old, GROUP, 'role', '../'), /不合法/);
@@ -102,8 +102,8 @@ test('① 模块：回落规则、非法 key、路径穿越、改名删除', () 
   assert.equal(roleInUse(s, '乙鱼'), true);
   assert.equal(roleInUse(s, '甲鱼'), true);
   assert.equal(roleInUse(normalizeRoleState({ role: null, byKey: { [GROUP]: null } }), '甲鱼', [GROUP]), false);
-  const list = roleAssignments(s, [GROUP, 'group:789', 'bad'], (n) => n !== '乙鱼');
-  assert.deepEqual(list.map((x) => `${x.key}=${x.source}:${x.role}:${x.missing}`).join(' | '), `group:456=key:乙鱼:true | group:789=global:甲鱼:false | private:123=off:null:false`);
+  const list = roleAssignments(s, [GROUP, 'qq:group:789', 'bad'], (n) => n !== '乙鱼');
+  assert.deepEqual(list.map((x) => `${x.key}=${x.source}:${x.role}:${x.missing}`).join(' | '), `qq:group:456=key:乙鱼:true | qq:group:789=global:甲鱼:false | qq:private:123=off:null:false`);
 });
 
 async function withHarness(run, files = {}) {

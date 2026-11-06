@@ -15,6 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { normalizeSchedule, nextOccurrence, previewOccurrences, describeSchedule, seededRandom } from './schedule.js';
 import { isValidTimeZone, zonedParts, dateKey, parseTime, describeInstant } from './time.js';
+import { isGroupKey } from '../session/key.mjs';
 
 export const DEFAULT_TIMEZONE = 'Asia/Shanghai';
 export const DEFAULT_LIMITS = Object.freeze({
@@ -423,7 +424,7 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       outcomes.push({ target: '*', status: 'skipped' });
     } else {
       for (const target of task.targets) {
-        const isGroup = target.startsWith('group:');
+        const isGroup = isGroupKey(target);
         let status; let reason = '';
         if (c.total >= L.totalPerDay) { status = 'skipped'; reason = `今天全部任务已发 ${L.totalPerDay} 条（每天上限）`; }
         else if (isGroup && (c.perTarget[target] ?? 0) >= L.perGroupPerDay) { status = 'skipped'; reason = `这个群今天已收到 ${L.perGroupPerDay} 条（每群每天上限）`; }

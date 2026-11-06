@@ -376,3 +376,35 @@
     flex-wrap: wrap;
   }
 }
+
+
+/* ---------------------------------------------------------- 就地增强（enhanceForm） */
+
+/* 老页面把字段写成 .row 里的「label + 控件」，label 带着 flex:0 1 100px 这类工具栏尺寸；
+   增强后字段要按列排，必须把这套尺寸清掉。 */
+.row > .field {
+  flex: 1 1 220px;
+  min-width: 180px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.row > .field > .field-label {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  display: block;
+}
+
+.row > .field > .field-control {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.row > .field > .field-error {
+  margin-top: 0;
+}

@@ -131,6 +131,9 @@ form.destroy();
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 
 1. **只换壳不改行为**：把裸 `<input>`/`<label>` 换成工厂 + `createForm` 接管取值与回填，提交仍走原来的 `POST /api/socialV2/config`，**请求体逐字节一致**（用现有 25 条契约兜底）。
+
+   > **2026-11-06 第一步已落地（方式 A：DOM 增强，不动页面 HTML）**：`page.js` 的 `init()` 里先 `enhanceForm(section)` 把「label + 控件」就地包成 `.field`，再 `createForm(root, {})`；`saveV2Config()` 的 113 处 `.value`、29 处 `.checked` 读取统一走 `fv(id)`/`fc(id)`（内核读 DOM，读不到再兜底 DOM），写回仍是 `setCheck`/`setValue` 直接落 DOM。**请求体与改前逐字节一致**（`test-console-ui` 的 payload 基线未变，24/24）。三个坑：① `.settings-content > .row label` 的 `flex-basis:100px!important` 会把字段标题撑成 100px 高，已改成 `:not(.field-label)`；② `appendChild` 之后不要再 `remove()`，会把刚挂上的节点删掉；③ 搬完控件再 `insertBefore` 会报 `HierarchyRequestError`，必须先记住原父节点与后继节点。
+
 2. **再加能力**：条件显示、字段级校验、脏值提示、错误回填。
 
 其余页面按「一页一次迁完」推进：`overview` → `scheduler` → `persona` → `social-v1` → `slang` → 小页面。

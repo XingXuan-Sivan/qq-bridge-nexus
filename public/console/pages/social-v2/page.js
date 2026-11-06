@@ -4,6 +4,7 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
+import { createForm, enhanceForm } from '../../components/form/form.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;
@@ -64,8 +65,8 @@ async function loadVoiceLibrary(force) {
 
 async function sendVoiceFromConsole() {
   const msg = document.getElementById('voiceMsg');
-  const target = document.getElementById('voiceSendTarget').value.trim();
-  const dryRun = document.getElementById('voiceSendDryRun').checked;
+  const target = fv('voiceSendTarget').trim();
+  const dryRun = fc('voiceSendDryRun');
   const pick = document.querySelector('input[name="voicePick"]:checked');
   if (!target) { setMsg(msg, '❌ 请填发送目标（如 group:100005）', 'err'); return; }
   if (!pick) { setMsg(msg, '❌ 先刷新语音库并选中一个音频', 'err'); return; }
@@ -92,79 +93,79 @@ async function loadV2Config() {
   try {
     const r = await api('/api/socialV2/config');
     const c = r.config || {};
-    document.getElementById('v2Enabled').checked = c.enabled !== false;
-    document.getElementById('v2AgentPreset').value = c.agentPreset || '';
-    document.getElementById('v2ProvideRecommendations').checked = c.provideRecommendations !== false;
+    setCheck('v2Enabled', c.enabled !== false);
+    setValue('v2AgentPreset', c.agentPreset || '');
+    setCheck('v2ProvideRecommendations', c.provideRecommendations !== false);
     document.querySelectorAll('[data-v2-tool]').forEach(el => {
       el.checked = (c.tools && c.tools[el.dataset.v2Tool] !== false);
     });
     const w = c.wake || {};
-    document.getElementById('v2WakeDefaultMode').value = w.defaultMode === 'active' ? 'active' : 'diving';
-    document.getElementById('v2RecDefaultInfinite').checked = w.recommendedDefaultInfinite !== false;
-    document.getElementById('v2RecSleepMin').value = Math.round((w.recommendedSleepMinMs || 300000) / 60000);
-    document.getElementById('v2RecSleepMax').value = Math.round((w.recommendedSleepMaxMs || 7200000) / 60000);
-    document.getElementById('v2RecProb').value = w.recommendedProbability ?? 0.05;
-    document.getElementById('v2RecKeywords').value = (w.recommendedKeywords || []).join(', ');
-    document.getElementById('v2RecAt').checked = w.recommendedAtMention !== false;
-    document.getElementById('v2RecName').checked = w.recommendedNameMention !== false;
-    document.getElementById('v2RecQuestion').checked = w.recommendedQuestion !== false;
-    document.getElementById('v2RecPoke').checked = w.recommendedPoke !== false;
-    document.getElementById('v2WakeHint').value = w.recommendedHint || '';
-    document.getElementById('v2SleepMinMs').value = Math.round((w.sleepMinMs || 60000) / 1000);
-    document.getElementById('v2SleepMaxMs').value = Math.round((w.sleepMaxMs || 0) / 1000);
-    document.getElementById('v2MaxWakeMin').value = w.maxWakePerMinute ?? 1;
-    document.getElementById('v2MaxWakeHour').value = w.maxWakePerHour ?? 12;
-    document.getElementById('v2BatchWindowMs').value = w.batchWindowMs ?? 8000;
-    document.getElementById('v2NoActionLimit').value = w.noActionLimit ?? 3;
-    document.getElementById('v2MaxWakeConfigReminders').value = w.maxWakeConfigReminders ?? 2;
-    document.getElementById('v2PreSleepWaitEnabled').checked = w.preSleepWaitEnabled !== false;
-    document.getElementById('v2PreSleepWaitMin').value = Number.isFinite(Number(w.preSleepWaitMs)) ? Math.round(Number(w.preSleepWaitMs) / 60000) : 5;
+    setValue('v2WakeDefaultMode', w.defaultMode === 'active' ? 'active' : 'diving');
+    setCheck('v2RecDefaultInfinite', w.recommendedDefaultInfinite !== false);
+    setValue('v2RecSleepMin', Math.round((w.recommendedSleepMinMs || 300000) / 60000));
+    setValue('v2RecSleepMax', Math.round((w.recommendedSleepMaxMs || 7200000) / 60000));
+    setValue('v2RecProb', w.recommendedProbability ?? 0.05);
+    setValue('v2RecKeywords', (w.recommendedKeywords || []).join(', '));
+    setCheck('v2RecAt', w.recommendedAtMention !== false);
+    setCheck('v2RecName', w.recommendedNameMention !== false);
+    setCheck('v2RecQuestion', w.recommendedQuestion !== false);
+    setCheck('v2RecPoke', w.recommendedPoke !== false);
+    setValue('v2WakeHint', w.recommendedHint || '');
+    setValue('v2SleepMinMs', Math.round((w.sleepMinMs || 60000) / 1000));
+    setValue('v2SleepMaxMs', Math.round((w.sleepMaxMs || 0) / 1000));
+    setValue('v2MaxWakeMin', w.maxWakePerMinute ?? 1);
+    setValue('v2MaxWakeHour', w.maxWakePerHour ?? 12);
+    setValue('v2BatchWindowMs', w.batchWindowMs ?? 8000);
+    setValue('v2NoActionLimit', w.noActionLimit ?? 3);
+    setValue('v2MaxWakeConfigReminders', w.maxWakeConfigReminders ?? 2);
+    setCheck('v2PreSleepWaitEnabled', w.preSleepWaitEnabled !== false);
+    setValue('v2PreSleepWaitMin', Number.isFinite(Number(w.preSleepWaitMs)) ? Math.round(Number(w.preSleepWaitMs) / 60000) : 5);
     const s = c.send || {};
-    document.getElementById('v2BurstEnabled').checked = s.burstEnabled !== false;
-    document.getElementById('v2BurstMax').value = s.burstMaxMessages ?? 8;
-    document.getElementById('v2BurstMin').value = s.burstIntervalMinMs ?? 1000;
-    document.getElementById('v2BurstMaxMs').value = s.burstIntervalMaxMs ?? 3000;
-    document.getElementById('v2LongGapProb').value = s.longGapProbability ?? 0.2;
-    document.getElementById('v2LongGapMin').value = s.longGapMinMs ?? 5000;
-    document.getElementById('v2LongGapMax').value = s.longGapMaxMs ?? 10000;
-    document.getElementById('v2MaxSendMin').value = s.maxSendPerMinute ?? 8;
-    document.getElementById('v2MaxSendHour').value = s.maxSendPerHour ?? 60;
-    document.getElementById('v2MaxMsgChars').value = s.maxMessageChars ?? 500;
-    document.getElementById('v2MaxGapMs').value = s.maxGapMs ?? 10000;
-    document.getElementById('v2GapBaseMs').value = s.gapBaseMs ?? 800;
-    document.getElementById('v2GapPerCharMs').value = s.gapPerCharMs ?? 20;
-    document.getElementById('v2SendHint').value = s.recommendedHint || '';
+    setCheck('v2BurstEnabled', s.burstEnabled !== false);
+    setValue('v2BurstMax', s.burstMaxMessages ?? 8);
+    setValue('v2BurstMin', s.burstIntervalMinMs ?? 1000);
+    setValue('v2BurstMaxMs', s.burstIntervalMaxMs ?? 3000);
+    setValue('v2LongGapProb', s.longGapProbability ?? 0.2);
+    setValue('v2LongGapMin', s.longGapMinMs ?? 5000);
+    setValue('v2LongGapMax', s.longGapMaxMs ?? 10000);
+    setValue('v2MaxSendMin', s.maxSendPerMinute ?? 8);
+    setValue('v2MaxSendHour', s.maxSendPerHour ?? 60);
+    setValue('v2MaxMsgChars', s.maxMessageChars ?? 500);
+    setValue('v2MaxGapMs', s.maxGapMs ?? 10000);
+    setValue('v2GapBaseMs', s.gapBaseMs ?? 800);
+    setValue('v2GapPerCharMs', s.gapPerCharMs ?? 20);
+    setValue('v2SendHint', s.recommendedHint || '');
     const wt = c.wait || {};
-    document.getElementById('v2WaitDefaultMs').value = wt.defaultMs ?? 30000;
-    document.getElementById('v2WaitMinMs').value = wt.minMs ?? 5000;
-    document.getElementById('v2WaitMaxMs').value = wt.maxMs ?? 600000;
-    document.getElementById('v2WaitDefaultQuietMs').value = wt.defaultQuietMs ?? 8000;
-    document.getElementById('v2MinQuietAfterNewMs').value = wt.minQuietAfterNewMs ?? 10000;
-    document.getElementById('v2AutoReplyCheckSec').value = Math.round((c.autoReplyCheckMs || 30000) / 1000);
+    setValue('v2WaitDefaultMs', wt.defaultMs ?? 30000);
+    setValue('v2WaitMinMs', wt.minMs ?? 5000);
+    setValue('v2WaitMaxMs', wt.maxMs ?? 600000);
+    setValue('v2WaitDefaultQuietMs', wt.defaultQuietMs ?? 8000);
+    setValue('v2MinQuietAfterNewMs', wt.minQuietAfterNewMs ?? 10000);
+    setValue('v2AutoReplyCheckSec', Math.round((c.autoReplyCheckMs || 30000) / 1000));
     const pa = c.proactive || {};
-    document.getElementById('v2ProactiveEnabled').checked = pa.enabled !== false;
-    document.getElementById('v2ProactiveIntervalMin').value = Math.round((pa.checkIntervalMinMs || 1800000) / 60000);
-    document.getElementById('v2ProactiveIntervalMax').value = Math.round((pa.checkIntervalMaxMs || 5400000) / 60000);
-    document.getElementById('v2ProactiveIdleThreshold').value = Math.round((pa.idleThresholdMs || 900000) / 60000);
-    document.getElementById('v2ProactiveProbability').value = pa.probability ?? 0.3;
+    setCheck('v2ProactiveEnabled', pa.enabled !== false);
+    setValue('v2ProactiveIntervalMin', Math.round((pa.checkIntervalMinMs || 1800000) / 60000));
+    setValue('v2ProactiveIntervalMax', Math.round((pa.checkIntervalMaxMs || 5400000) / 60000));
+    setValue('v2ProactiveIdleThreshold', Math.round((pa.idleThresholdMs || 900000) / 60000));
+    setValue('v2ProactiveProbability', pa.probability ?? 0.3);
     const stk = c.sticker || {};
-    document.getElementById('v2StickerEnabled').checked = stk.enabled !== false;
-    document.getElementById('v2StickerSyncTtlSec').value = Math.round((stk.syncTtlMs || 60000) / 1000);
-    document.getElementById('v2StickerMaxList').value = stk.maxListCount ?? 100;
-    document.getElementById('v2StickerPromptMax').value = stk.promptMaxStickers ?? 8;
-    document.getElementById('v2StickerIncludePrompt').checked = stk.includeInPrompt !== false;
+    setCheck('v2StickerEnabled', stk.enabled !== false);
+    setValue('v2StickerSyncTtlSec', Math.round((stk.syncTtlMs || 60000) / 1000));
+    setValue('v2StickerMaxList', stk.maxListCount ?? 100);
+    setValue('v2StickerPromptMax', stk.promptMaxStickers ?? 8);
+    setCheck('v2StickerIncludePrompt', stk.includeInPrompt !== false);
     const stkCollect = stk.collect || {};
-    document.getElementById('v2StickerCollectEnabled').checked = stkCollect.enabled !== false;
-    document.getElementById('v2StickerCollectPerMin').value = stkCollect.maxPerMinute ?? 2;
-    document.getElementById('v2StickerCollectPerHour').value = stkCollect.maxPerHour ?? 10;
-    document.getElementById('v2StickerCollectRemarkMax').value = stkCollect.maxRemarkChars ?? 20;
+    setCheck('v2StickerCollectEnabled', stkCollect.enabled !== false);
+    setValue('v2StickerCollectPerMin', stkCollect.maxPerMinute ?? 2);
+    setValue('v2StickerCollectPerHour', stkCollect.maxPerHour ?? 10);
+    setValue('v2StickerCollectRemarkMax', stkCollect.maxRemarkChars ?? 20);
     const ctx = c.context || {};
-    document.getElementById('v2ContextRecentLimit').value = ctx.recentLimit ?? 100;
-    document.getElementById('v2ContextUnreadLimit').value = ctx.unreadLimit ?? 30;
-    document.getElementById('v2ContextWindow').value = ctx.contextWindow ?? 20;
+    setValue('v2ContextRecentLimit', ctx.recentLimit ?? 100);
+    setValue('v2ContextUnreadLimit', ctx.unreadLimit ?? 30);
+    setValue('v2ContextWindow', ctx.contextWindow ?? 20);
     const fb = c.feedback || {};
-    document.getElementById('v2FeedbackMaxLength').value = fb.maxLength ?? 500;
-    document.getElementById('v2FeedbackNotifyOwner').checked = fb.notifyOwnerOnError === true;
+    setValue('v2FeedbackMaxLength', fb.maxLength ?? 500);
+    setCheck('v2FeedbackNotifyOwner', fb.notifyOwnerOnError === true);
   } catch {}
 }
 
@@ -172,84 +173,84 @@ async function saveV2Config() {
   const tools = {};
   document.querySelectorAll('[data-v2-tool]').forEach(el => { tools[el.dataset.v2Tool] = el.checked; });
   const body = {
-    enabled: document.getElementById('v2Enabled').checked,
-    agentPreset: document.getElementById('v2AgentPreset').value.trim(),
-    provideRecommendations: document.getElementById('v2ProvideRecommendations').checked,
-    autoReplyCheckMs: Math.round(Number(document.getElementById('v2AutoReplyCheckSec').value) || 30) * 1000,
+    enabled: fc('v2Enabled'),
+    agentPreset: fv('v2AgentPreset').trim(),
+    provideRecommendations: fc('v2ProvideRecommendations'),
+    autoReplyCheckMs: Math.round(Number(fv('v2AutoReplyCheckSec')) || 30) * 1000,
     tools,
     wake: {
-      defaultMode: document.getElementById('v2WakeDefaultMode').value,
-      recommendedDefaultInfinite: document.getElementById('v2RecDefaultInfinite').checked,
-      preSleepWaitEnabled: document.getElementById('v2PreSleepWaitEnabled').checked,
-      preSleepWaitMs: (Number.isFinite(Number(document.getElementById('v2PreSleepWaitMin').value)) && Number(document.getElementById('v2PreSleepWaitMin').value) >= 0 ? Math.round(Number(document.getElementById('v2PreSleepWaitMin').value)) : 5) * 60000,
-      recommendedSleepMinMs: (Math.round(Number(document.getElementById('v2RecSleepMin').value) || 5)) * 60000,
-      recommendedSleepMaxMs: (Math.round(Number(document.getElementById('v2RecSleepMax').value) || 120)) * 60000,
-      recommendedProbability: Number(document.getElementById('v2RecProb').value) || 0,
-      recommendedKeywords: document.getElementById('v2RecKeywords').value.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-      recommendedAtMention: document.getElementById('v2RecAt').checked,
-      recommendedNameMention: document.getElementById('v2RecName').checked,
-      recommendedQuestion: document.getElementById('v2RecQuestion').checked,
-      recommendedPoke: document.getElementById('v2RecPoke').checked,
-      recommendedHint: document.getElementById('v2WakeHint').value,
-      sleepMinMs: (Math.round(Number(document.getElementById('v2SleepMinMs').value) || 0)) * 1000,
-      sleepMaxMs: (Math.round(Number(document.getElementById('v2SleepMaxMs').value) || 0)) * 1000,
-      maxWakePerMinute: Math.round(Number(document.getElementById('v2MaxWakeMin').value) || 0),
-      maxWakePerHour: Math.round(Number(document.getElementById('v2MaxWakeHour').value) || 0),
-      batchWindowMs: Math.round(Number(document.getElementById('v2BatchWindowMs').value) || 8000),
-      noActionLimit: Math.round(Number(document.getElementById('v2NoActionLimit').value) || 3),
-      maxWakeConfigReminders: Math.round(Number(document.getElementById('v2MaxWakeConfigReminders').value) || 2)
+      defaultMode: fv('v2WakeDefaultMode'),
+      recommendedDefaultInfinite: fc('v2RecDefaultInfinite'),
+      preSleepWaitEnabled: fc('v2PreSleepWaitEnabled'),
+      preSleepWaitMs: (Number.isFinite(Number(fv('v2PreSleepWaitMin'))) && Number(fv('v2PreSleepWaitMin')) >= 0 ? Math.round(Number(fv('v2PreSleepWaitMin'))) : 5) * 60000,
+      recommendedSleepMinMs: (Math.round(Number(fv('v2RecSleepMin')) || 5)) * 60000,
+      recommendedSleepMaxMs: (Math.round(Number(fv('v2RecSleepMax')) || 120)) * 60000,
+      recommendedProbability: Number(fv('v2RecProb')) || 0,
+      recommendedKeywords: fv('v2RecKeywords').split(/[,，]/).map(s => s.trim()).filter(Boolean),
+      recommendedAtMention: fc('v2RecAt'),
+      recommendedNameMention: fc('v2RecName'),
+      recommendedQuestion: fc('v2RecQuestion'),
+      recommendedPoke: fc('v2RecPoke'),
+      recommendedHint: fv('v2WakeHint'),
+      sleepMinMs: (Math.round(Number(fv('v2SleepMinMs')) || 0)) * 1000,
+      sleepMaxMs: (Math.round(Number(fv('v2SleepMaxMs')) || 0)) * 1000,
+      maxWakePerMinute: Math.round(Number(fv('v2MaxWakeMin')) || 0),
+      maxWakePerHour: Math.round(Number(fv('v2MaxWakeHour')) || 0),
+      batchWindowMs: Math.round(Number(fv('v2BatchWindowMs')) || 8000),
+      noActionLimit: Math.round(Number(fv('v2NoActionLimit')) || 3),
+      maxWakeConfigReminders: Math.round(Number(fv('v2MaxWakeConfigReminders')) || 2)
     },
     send: {
-      burstEnabled: document.getElementById('v2BurstEnabled').checked,
-      burstMaxMessages: Math.round(Number(document.getElementById('v2BurstMax').value) || 8),
-      burstIntervalMinMs: Math.round(Number(document.getElementById('v2BurstMin').value) || 1000),
-      burstIntervalMaxMs: Math.round(Number(document.getElementById('v2BurstMaxMs').value) || 3000),
-      longGapProbability: Number(document.getElementById('v2LongGapProb').value) || 0,
-      longGapMinMs: Math.round(Number(document.getElementById('v2LongGapMin').value) || 5000),
-      longGapMaxMs: Math.round(Number(document.getElementById('v2LongGapMax').value) || 10000),
-      maxSendPerMinute: Math.round(Number(document.getElementById('v2MaxSendMin').value) || 0),
-      maxSendPerHour: Math.round(Number(document.getElementById('v2MaxSendHour').value) || 0),
-      maxMessageChars: Math.round(Number(document.getElementById('v2MaxMsgChars').value) || 500),
-      maxGapMs: Math.round(Number(document.getElementById('v2MaxGapMs').value) || 10000),
-      gapBaseMs: Math.round(Number(document.getElementById('v2GapBaseMs').value) || 800),
-      gapPerCharMs: Math.round(Number(document.getElementById('v2GapPerCharMs').value) || 20),
-      recommendedHint: document.getElementById('v2SendHint').value
+      burstEnabled: fc('v2BurstEnabled'),
+      burstMaxMessages: Math.round(Number(fv('v2BurstMax')) || 8),
+      burstIntervalMinMs: Math.round(Number(fv('v2BurstMin')) || 1000),
+      burstIntervalMaxMs: Math.round(Number(fv('v2BurstMaxMs')) || 3000),
+      longGapProbability: Number(fv('v2LongGapProb')) || 0,
+      longGapMinMs: Math.round(Number(fv('v2LongGapMin')) || 5000),
+      longGapMaxMs: Math.round(Number(fv('v2LongGapMax')) || 10000),
+      maxSendPerMinute: Math.round(Number(fv('v2MaxSendMin')) || 0),
+      maxSendPerHour: Math.round(Number(fv('v2MaxSendHour')) || 0),
+      maxMessageChars: Math.round(Number(fv('v2MaxMsgChars')) || 500),
+      maxGapMs: Math.round(Number(fv('v2MaxGapMs')) || 10000),
+      gapBaseMs: Math.round(Number(fv('v2GapBaseMs')) || 800),
+      gapPerCharMs: Math.round(Number(fv('v2GapPerCharMs')) || 20),
+      recommendedHint: fv('v2SendHint')
     },
     wait: {
-      defaultMs: Math.round(Number(document.getElementById('v2WaitDefaultMs').value) || 5000),
-      minMs: Math.round(Number(document.getElementById('v2WaitMinMs').value) || 1000),
-      maxMs: Math.round(Number(document.getElementById('v2WaitMaxMs').value) || 10000),
-      defaultQuietMs: Number.isFinite(Number(document.getElementById('v2WaitDefaultQuietMs').value)) ? Math.max(0, Math.round(Number(document.getElementById('v2WaitDefaultQuietMs').value))) : 8000,
-      minQuietAfterNewMs: Number.isFinite(Number(document.getElementById('v2MinQuietAfterNewMs').value)) ? Math.max(0, Math.round(Number(document.getElementById('v2MinQuietAfterNewMs').value))) : 10000
+      defaultMs: Math.round(Number(fv('v2WaitDefaultMs')) || 5000),
+      minMs: Math.round(Number(fv('v2WaitMinMs')) || 1000),
+      maxMs: Math.round(Number(fv('v2WaitMaxMs')) || 10000),
+      defaultQuietMs: Number.isFinite(Number(fv('v2WaitDefaultQuietMs'))) ? Math.max(0, Math.round(Number(fv('v2WaitDefaultQuietMs')))) : 8000,
+      minQuietAfterNewMs: Number.isFinite(Number(fv('v2MinQuietAfterNewMs'))) ? Math.max(0, Math.round(Number(fv('v2MinQuietAfterNewMs')))) : 10000
     },
     proactive: {
-      enabled: document.getElementById('v2ProactiveEnabled').checked,
-      checkIntervalMinMs: Math.round(Number(document.getElementById('v2ProactiveIntervalMin').value) || 30) * 60000,
-      checkIntervalMaxMs: Math.round(Number(document.getElementById('v2ProactiveIntervalMax').value) || 90) * 60000,
-      idleThresholdMs: Math.round(Number(document.getElementById('v2ProactiveIdleThreshold').value) || 15) * 60000,
-      probability: Number(document.getElementById('v2ProactiveProbability').value) || 0
+      enabled: fc('v2ProactiveEnabled'),
+      checkIntervalMinMs: Math.round(Number(fv('v2ProactiveIntervalMin')) || 30) * 60000,
+      checkIntervalMaxMs: Math.round(Number(fv('v2ProactiveIntervalMax')) || 90) * 60000,
+      idleThresholdMs: Math.round(Number(fv('v2ProactiveIdleThreshold')) || 15) * 60000,
+      probability: Number(fv('v2ProactiveProbability')) || 0
     },
     sticker: {
-      enabled: document.getElementById('v2StickerEnabled').checked,
-      syncTtlMs: Math.max(1000, Math.round(Number(document.getElementById('v2StickerSyncTtlSec').value) || 60) * 1000),
-      maxListCount: Math.min(500, Math.max(1, Math.round(Number(document.getElementById('v2StickerMaxList').value) || 100))),
-      includeInPrompt: document.getElementById('v2StickerIncludePrompt').checked,
-      promptMaxStickers: Math.min(30, Math.max(1, Math.round(Number(document.getElementById('v2StickerPromptMax').value) || 8))),
+      enabled: fc('v2StickerEnabled'),
+      syncTtlMs: Math.max(1000, Math.round(Number(fv('v2StickerSyncTtlSec')) || 60) * 1000),
+      maxListCount: Math.min(500, Math.max(1, Math.round(Number(fv('v2StickerMaxList')) || 100))),
+      includeInPrompt: fc('v2StickerIncludePrompt'),
+      promptMaxStickers: Math.min(30, Math.max(1, Math.round(Number(fv('v2StickerPromptMax')) || 8))),
       collect: {
-        enabled: document.getElementById('v2StickerCollectEnabled').checked,
-        maxPerMinute: Math.max(0, Math.round(Number(document.getElementById('v2StickerCollectPerMin').value) || 0)),
-        maxPerHour: Math.max(0, Math.round(Number(document.getElementById('v2StickerCollectPerHour').value) || 0)),
-        maxRemarkChars: Math.min(50, Math.max(1, Math.round(Number(document.getElementById('v2StickerCollectRemarkMax').value) || 20)))
+        enabled: fc('v2StickerCollectEnabled'),
+        maxPerMinute: Math.max(0, Math.round(Number(fv('v2StickerCollectPerMin')) || 0)),
+        maxPerHour: Math.max(0, Math.round(Number(fv('v2StickerCollectPerHour')) || 0)),
+        maxRemarkChars: Math.min(50, Math.max(1, Math.round(Number(fv('v2StickerCollectRemarkMax')) || 20)))
       }
     },
     context: {
-      recentLimit: Math.round(Number(document.getElementById('v2ContextRecentLimit').value) || 100),
-      unreadLimit: Math.round(Number(document.getElementById('v2ContextUnreadLimit').value) || 30),
-      contextWindow: Math.round(Number(document.getElementById('v2ContextWindow').value) || 20)
+      recentLimit: Math.round(Number(fv('v2ContextRecentLimit')) || 100),
+      unreadLimit: Math.round(Number(fv('v2ContextUnreadLimit')) || 30),
+      contextWindow: Math.round(Number(fv('v2ContextWindow')) || 20)
     },
     feedback: {
-      maxLength: Math.round(Number(document.getElementById('v2FeedbackMaxLength').value) || 500),
-      notifyOwnerOnError: document.getElementById('v2FeedbackNotifyOwner').checked
+      maxLength: Math.round(Number(fv('v2FeedbackMaxLength')) || 500),
+      notifyOwnerOnError: fc('v2FeedbackNotifyOwner')
     }
   };
   const r = await api('/api/socialV2/config', 'POST', body);
@@ -260,7 +261,7 @@ async function saveV2Config() {
 }
 
 async function viewV2State() {
-  const key = document.getElementById('v2StateKey').value.trim();
+  const key = fv('v2StateKey').trim();
   if (!key) { alert('请输入会话 key'); return; }
   const r = await api('/api/socialV2/state?key=' + encodeURIComponent(key));
   document.getElementById('v2StateOutput').textContent = JSON.stringify(r, null, 2);
@@ -405,7 +406,7 @@ function renderV2Memory(data) {
   box.innerHTML = html;
 }
 function loadV2Memory() {
-  const key = document.getElementById('v2MemoryKey').value.trim();
+  const key = fv('v2MemoryKey').trim();
   const msg = document.getElementById('v2MemoryMsg');
   if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
   msg.textContent = '加载中…';
@@ -471,7 +472,7 @@ function formatWakeStatus(r) {
   return '<div class="u-p-8">' + lines.join('') + '</div>';
 }
 function loadV2WakeStatus() {
-  const key = document.getElementById('v2WakeKey').value.trim();
+  const key = fv('v2WakeKey').trim();
   const msg = document.getElementById('v2WakeStatusMsg');
   if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
   msg.textContent = '加载中…';
@@ -489,7 +490,7 @@ function loadV2WakeStatus() {
 
 // ── 初始提示词（每个会话一份，只在 AI 首次唤醒时注入一次） ────────────────────
 let v2InitPromptTextEl = null;
-function v2InitPromptKeyValue() { return document.getElementById('v2InitPromptKey').value.trim(); }
+function v2InitPromptKeyValue() { return fv('v2InitPromptKey').trim(); }
 function setV2InitPromptMsg(text, kind) {
   const msg = document.getElementById('v2InitPromptMsg');
   msg.textContent = text;
@@ -602,7 +603,7 @@ function bindEvents() {
   });
   document.getElementById('v2MemoryLoad').addEventListener('click', loadV2Memory);
   document.getElementById('v2MemoryClearAll').addEventListener('click', async () => {
-    const key = document.getElementById('v2MemoryKey').value.trim();
+    const key = fv('v2MemoryKey').trim();
     const msg = document.getElementById('v2MemoryMsg');
     if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
     if (!confirm('确定清空该会话全部轻量记忆？')) return;
@@ -614,7 +615,7 @@ function bindEvents() {
   document.getElementById('v2MemoryOutput').addEventListener('click', async (ev) => {
     const btn = ev.target.closest('button[data-action]');
     if (!btn) return;
-    const key = document.getElementById('v2MemoryKey').value.trim();
+    const key = fv('v2MemoryKey').trim();
     const msg = document.getElementById('v2MemoryMsg');
     if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
     const cat = btn.dataset.cat;
@@ -663,17 +664,17 @@ function bindEvents() {
   document.getElementById('v2InitPromptList').addEventListener('click', (ev) => {
     const btn = ev.target.closest('button[data-init-prompt-key]');
     if (!btn) return;
-    document.getElementById('v2InitPromptKey').value = btn.dataset.initPromptKey || '';
+    setValue('v2InitPromptKey', btn.dataset.initPromptKey || '');
     loadV2InitialPrompt();
   });
   document.getElementById('v2SessionRefresh').addEventListener('click', loadV2SessionOptions);
   document.getElementById('v2SessionSelect').addEventListener('change', (ev) => {
     const key = ev.target.value;
     if (!key) return;
-    document.getElementById('v2StateKey').value = key;
-    document.getElementById('v2MemoryKey').value = key;
-    document.getElementById('v2WakeKey').value = key;
-    document.getElementById('v2InitPromptKey').value = key;
+    setValue('v2StateKey', key);
+    setValue('v2MemoryKey', key);
+    setValue('v2WakeKey', key);
+    setValue('v2InitPromptKey', key);
   });
   document.getElementById('v2ConfigSave').addEventListener('click', saveV2Config);
   document.getElementById('v2ConfigSaveTop').addEventListener('click', saveV2Config);
@@ -699,7 +700,7 @@ function bindEvents() {
   });
   document.getElementById('v2StateView').addEventListener('click', viewV2State);
   document.getElementById('v2ForceWake').addEventListener('click', async () => {
-    const key = document.getElementById('v2StateKey').value.trim();
+    const key = fv('v2StateKey').trim();
     if (!key) { alert('请输入会话 key'); return; }
     const r = await api('/api/socialV2/wake', 'POST', { key, reason: 'admin' });
     const msg = document.getElementById('v2ConfigMsg');
@@ -744,10 +745,30 @@ function bindEvents() {
 }
 
 let pageInitialized = false;
+let v2Form = null;
+
+// 字段读取统一走表单内核（DOM 兜底，保证增强失败时行为不变）。
+const fv = (id) => (v2Form ? v2Form.getValue(id) : document.getElementById(id)?.value);
+const fc = (id) => {
+  const value = v2Form ? v2Form.getValue(id) : document.getElementById(id)?.checked;
+  return Boolean(value);
+};
+// 写回仍是直接落到 DOM（表单内核按需读 DOM，不缓存取值）。
+const setCheck = (id, value) => {
+  const element = document.getElementById(id);
+  if (element) element.checked = Boolean(value);
+};
+const setValue = (id, value) => {
+  const element = document.getElementById(id);
+  if (element) element.value = value ?? '';
+};
 export function init() {
   if (pageInitialized) return;
   pageInitialized = true;
   v2InitPromptTextEl = document.getElementById('v2InitPromptText');
+  const formRoot = document.getElementById('section-social-v2') ?? document;
+  enhanceForm(formRoot);
+  v2Form = createForm(formRoot, {});
   bindEvents();
   // 原 app.js 启动批次里的页面加载顺序：配置 → 活动状态 → 工具日志 → 会话选项。
   void loadV2Config();
@@ -762,6 +783,6 @@ export function init() {
     // 不重拉整份配置：那会把用户还没保存的草稿（如 agentPreset 下拉）冲掉。
     // 配置只在首次进入与保存成功后加载。
     void refreshV2Activity();
-    if (document.getElementById('v2WakeKey')?.value.trim()) void loadV2WakeStatus();
+    if (fv('v2WakeKey').trim()) void loadV2WakeStatus();
   });
 }

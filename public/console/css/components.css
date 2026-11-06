@@ -244,7 +244,7 @@ pre {
 .settings-content>.row:last-child {
   border-bottom:0
 }
-.settings-content>.row label {
+.settings-content>.row label:not(.field-label) {
   flex-basis:100px!important
 }
 /* 一行里多个复选框：不按字段宽度撑开，也不让文字折行 */

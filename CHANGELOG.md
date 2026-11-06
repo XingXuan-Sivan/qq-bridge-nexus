@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 变更：二代仿真配置页换壳为表单组件（DOM 增强）
+- `enhanceForm(root)`：把既有「label + 控件」就地升级成 `.field`（标题、控件、错误行），页面 HTML 不改；`social-v2` 在 `init()` 里升级后挂 `createForm`。
+- `saveV2Config()` 的 113 处 `.value` 与 29 处 `.checked` 读取改走内核（读取时直接读 DOM），写回仍是直接写 DOM；请求体与改前逐字节一致，`test-console-ui` 的 payload 基线未变（24/24）。
+- 修 `.settings-content > .row label` 的 `flex-basis:100px!important` 误伤字段标题（改 `:not(.field-label)`）。
+
 ### 新增：表单组件（`components/form/`）
 - 16 个控件工厂：文本、数字、密码、多行文本、下拉、单选组、多选组、单复选、开关、文件、日期、时间、日期时间、时间区间、只读展示，加动作区；全部返回 HTML 字符串，与 `components/table` 的写法一致。
 - `createForm(root, { rules, depends, onSubmit })` 内核：按类型取值（空数字是 `null` 不是 `NaN`）、字段与跨字段校验、`blur` 才报错、条件显示（隐藏字段不参与校验与提交）、提交态、`dirty()/reset()`、`setErrors()` 服务端错误回填。

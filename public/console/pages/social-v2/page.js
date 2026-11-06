@@ -4,7 +4,8 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
-import { createForm, enhanceForm } from '../../components/form/form.js';
+import { createForm, renderFields } from '../../components/form/form.js';
+import { V2_FIELDS } from './fields.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;
@@ -747,12 +748,18 @@ function bindEvents() {
 let pageInitialized = false;
 let v2Form = null;
 
-// 字段读取统一走表单内核（DOM 兜底，保证增强失败时行为不变）。
-const fv = (id) => (v2Form ? v2Form.getValue(id) : document.getElementById(id)?.value);
-const fc = (id) => {
-  const value = v2Form ? v2Form.getValue(id) : document.getElementById(id)?.checked;
-  return Boolean(value);
+// 字段读取统一走表单内核（DOM 兜底，保证未纳入规格的控件行为不变）。
+const domValue = (id) => {
+  const element = document.getElementById(id);
+  if (!element) return '';
+  return element.type === 'checkbox' ? element.checked : element.value;
 };
+const fv = (id) => {
+  const value = v2Form ? v2Form.getValue(id) : undefined;
+  if (value !== undefined && value !== null) return value;
+  return domValue(id);
+};
+const fc = (id) => Boolean(fv(id));
 // 写回仍是直接落到 DOM（表单内核按需读 DOM，不缓存取值）。
 const setCheck = (id, value) => {
   const element = document.getElementById(id);
@@ -767,7 +774,11 @@ export function init() {
   pageInitialized = true;
   v2InitPromptTextEl = document.getElementById('v2InitPromptText');
   const formRoot = document.getElementById('section-social-v2') ?? document;
-  enhanceForm(formRoot);
+  // 字段由 fields.js 的规格渲染，页面 HTML 只保留分组外壳与说明文字。
+  for (const host of formRoot.querySelectorAll('[data-v2-fields]')) {
+    const spec = V2_FIELDS[host.dataset.v2Fields];
+    if (spec) renderFields(host, spec.fields, { columns: 2 });
+  }
   v2Form = createForm(formRoot, {});
   bindEvents();
   // 原 app.js 启动批次里的页面加载顺序：配置 → 活动状态 → 工具日志 → 会话选项。

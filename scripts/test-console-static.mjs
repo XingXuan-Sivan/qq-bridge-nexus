@@ -290,7 +290,7 @@ for (const id of ['skills', 'mcp', 'behaviors']) {
 }
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
-for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm', 'enhanceForm', 'renderFields']) {
+for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm', 'renderFields']) {
   ok(new RegExp(`export function ${fn}\\(`).test(formModule), `form.js 导出 ${fn}`);
 }
 ok(/type === 'section'/.test(formModule), 'renderFields 支持 section 分组');

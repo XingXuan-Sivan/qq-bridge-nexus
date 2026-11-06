@@ -5,6 +5,10 @@
 
 ## 未发布
 
+### 变更：二代仿真配置页改为「字段规格 + 统一渲染」
+- 新增 `pages/social-v2/fields.js`（`V2_FIELDS`：8 组、57 字段），`page.html` 只保留分组外壳与说明；字段由 `renderFields(host, spec, { columns: 2 })` 渲染，默认两列、长文本用 `span: 2` 占整行。
+- 删除 `enhanceForm`（不再有页面使用）；取值统一 `fv/fc`（内核优先、DOM 兜底），写回仍落 DOM。
+- 验收：payload 契约逐字节一致、225 个旧 id 全在、`test-console-ui` 24/24、`test-audit` 90/90。
 ### 变更：二代仿真配置页换壳为表单组件（DOM 增强）
 - `enhanceForm(root)`：把既有「label + 控件」就地升级成 `.field`（标题、控件、错误行），页面 HTML 不改；`social-v2` 在 `init()` 里升级后挂 `createForm`。
 - `saveV2Config()` 的 113 处 `.value` 与 29 处 `.checked` 读取改走内核（读取时直接读 DOM），写回仍是直接写 DOM；请求体与改前逐字节一致，`test-console-ui` 的 payload 基线未变（24/24）。

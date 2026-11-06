@@ -1,0 +1,67 @@
+/* 日期字段：文本框 + 日历按钮 + 隐藏的原生 date（用来弹浏览器自带面板）。
+   外观与普通输入框一致：同样的高度、圆角、边框、内边距，右侧留出按钮位置。 */
+
+.date-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.date-field > .date-field-text {
+  flex: 1 1 auto;
+  width: 100%;
+  padding-right: 38px; /* 给右侧按钮让位，避免文字压到图标 */
+}
+
+.date-field > .date-field-btn {
+  position: absolute;
+  right: 4px;
+  top: 0;
+  bottom: 0;
+  /* 垂直居中用 auto 外边距，不用 transform：components.css 里有一条
+     `button:hover{transform:translateY(-1px)}`（带 :not 的复合选择器，权重比这里高），
+     会把 translateY(-50%) 顶掉，按钮在 hover 时往下掉半格、背景看起来溢出输入框。 */
+  margin: auto 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.date-field > .date-field-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.date-field > .date-field-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.date-field > .date-field-btn svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+/* 原生输入只用来弹面板：留在文档里（showPicker 要求元素已渲染），但视觉上不占位。 */
+.date-field > input[data-date-native] {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}

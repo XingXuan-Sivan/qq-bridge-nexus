@@ -4,6 +4,8 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { initDateFields } from '../../components/date/date.js';
+import { initTimeFields } from '../../components/time/time.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
@@ -139,6 +141,21 @@ function renderScheduler() {
 
 function schedFieldsHtml(type, s = {}) {
   const v = (x, d = '') => esc(x ?? d);
+  // 日期字段：可见的是文本框（能整段粘贴/键入），日历按钮背后挂隐藏的原生 date 输入。
+  // 与 index.html 里的有效期两个框、以及 components/date/date.js 的约定保持一致。
+  const CAL = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="3.4" width="11.6" height="10.2" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M2.4 6.6h11.2M5.4 2.2v2.4M10.6 2.2v2.4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+  const dateField = (id, value = '', label = '日期') => `<span class="date-field">`
+    + `<input type="text" class="date-field-text" id="${id}" value="${v(value)}" placeholder="YYYY-MM-DD" inputmode="numeric" autocomplete="off" aria-label="${label}">`
+    + `<button type="button" class="date-field-btn btn-icon" aria-label="选择${label}">${CAL}</button>`
+    + `<input type="date" class="date-field-native" data-date-native="${id}" tabindex="-1" aria-hidden="true">`
+    + `</span>`;
+  // 时间字段：同上，文本框可整段键入 HH:mm，时钟按钮调起原生面板。
+  const CLOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+  const timeField = (id, value = '', label = '时间') => `<span class="time-field">`
+    + `<input type="text" class="time-field-text" id="${id}" value="${v(value)}" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="${label}">`
+    + `<button type="button" class="time-field-btn btn-icon" aria-label="选择${label}">${CLOCK}</button>`
+    + `<input type="time" data-time-native="${id}" tabindex="-1" aria-hidden="true">`
+    + `</span>`;
   const times = (s.times || ['09:00']).join(', ');
   // 统一行结构：标签在左、控件在右，和 fields.js 渲染出来的行完全一致。
   // 动态编辑器最容易写成「标签在上」，那样看起来和弹窗其它行不是一套表单。
@@ -147,16 +164,16 @@ function schedFieldsHtml(type, s = {}) {
     + `<div class="field-control field-inline">${control}</div>`
     + `</div>${hint ? `<div class="field-notes"><p class="field-hint">${hint}</p></div>` : ''}</div>`;
   const timesRow = row('时间', `<input type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00">`);
-  const windowRow = (w) => row('时间段', `<input type="time" id="sf_w0" value="${v((w || [])[0], '09:00')}"><span class="field-unit">到</span><input type="time" id="sf_w1" value="${v((w || [])[1], '22:00')}">`);
+  const windowRow = (w) => row('时间段', timeField('sf_w0', (w || [])[0] ?? '09:00', '开始时间') + '<span class="field-unit">到</span>' + timeField('sf_w1', (w || [])[1] ?? '22:00', '结束时间'));
   switch (type) {
-    case 'once': return row('日期和时间', `<input type="date" id="sf_date" value="${v(s.date)}"><input type="time" id="sf_time" value="${v(s.time, '09:00')}">`);
+    case 'once': return row('日期和时间', dateField('sf_date', s.date, '日期') + timeField('sf_time', s.time ?? '09:00', '时间'));
     case 'daily': case 'workdays': return timesRow;
     case 'weekly': return row('星期', [1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip u-m-0"><input type="checkbox" data-sf-wd="${d}" ${(s.weekdays || [1]).includes(d) ? 'checked' : ''}> 周${SCHED_WEEK[d]}</label>`).join('')) + timesRow;
     case 'monthly': return row('几号', `<input type="text" id="sf_days" value="${v((s.days || [1]).join(', '))}" placeholder="1, 15, -1（-1 = 最后一天）">`) + timesRow;
     case 'monthlyWeekday': return row('每月', `<select id="sf_nth">${[[1, '第 1 个'], [2, '第 2 个'], [3, '第 3 个'], [4, '第 4 个'], [5, '第 5 个'], [-1, '最后一个']].map(([n, l]) => `<option value="${n}" ${Number(s.nth ?? 1) === n ? 'selected' : ''}>${l}</option>`).join('')}</select><select id="sf_weekday">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}" ${Number(s.weekday ?? 6) === d ? 'selected' : ''}>周${SCHED_WEEK[d]}</option>`).join('')}</select>`) + timesRow;
     case 'yearly': return row('日期', `<input type="text" id="sf_dates" value="${v((s.dates || ['01-01']).join(', '))}" placeholder="10-21, 12-25（MM-DD）">`) + timesRow;
     case 'dates': return row('日期列表', `<textarea id="sf_items" rows="3">${v((s.items || []).map((x) => `${x.date} ${x.time}`).join('\n'))}</textarea>`, '每行一条：YYYY-MM-DD HH:mm');
-    case 'everyNDays': return row('每隔', `<input type="date" id="sf_start" value="${v(s.startDate)}"><span class="field-unit">起，每</span><input type="number" id="sf_every" min="2" value="${v(s.every, 3)}"><span class="field-unit">天</span>`) + timesRow;
+    case 'everyNDays': return row('每隔', dateField('sf_start', s.startDate, '开始日期') + '<span class="field-unit">起，每</span><input type="number" id="sf_every" min="2" value="' + v(s.every, 3) + '"><span class="field-unit">天</span>') + timesRow;
     case 'interval': return row('间隔', `<input type="number" id="sf_everyMin" min="10" value="${v(s.everyMinutes, 240)}"><span class="field-unit">分钟一次</span>`) + windowRow(s.window || ['08:00', '23:00']);
     case 'dailyRandom': return row('随机次数', `<input type="number" id="sf_count" min="1" value="${v(s.count, 3)}"><span class="field-unit">次，至少隔</span><input type="number" id="sf_gap" min="0" value="${v(s.minGapMin, 60)}"><span class="field-unit">分钟</span>`) + windowRow(s.window);
     case 'cron': return row('表达式', `<input class="u-flex-basis-220-mono" type="text" id="sf_cron" value="${v(s.expr, '0 9 * * 1-5')}" placeholder="0 9 * * 1-5">`, '5 段：分 时 日 月 周（周 0 和 7 都是周日，也可以写 MON-FRI）。例子：<code>0 9 * * 1-5</code> 工作日 9:00；<code>30 8 1 * *</code> 每月 1 号 8:30；<code>0 10,15 * * 6,0</code> 周末 10:00 和 15:00；<code>*/30 9-18 * * *</code> 9～18 点每半小时。日和周都限定时按「任一满足」。下面会实时显示接下来几次，写错会直接提示。cron 只能在控制台设置，AI 不能用。');
@@ -251,6 +268,9 @@ function openSchedEditor(task = null) {
   tzSet(schedEl('schedTaskTz'), task?.timezone || '');
   schedEl('schedType').value = s.type;
   schedEl('schedFields').innerHTML = schedFieldsHtml(s.type, s);
+  // 动态行里也有日期/时间字段，插入后要重新装一次组件（否则只有原生输入、没有按钮）。
+  initDateFields(schedEl('schedFields'));
+  initTimeFields(schedEl('schedFields'));
   schedEl('schedStartDate').value = s.type === 'everyNDays' ? '' : (s.startDate || '');
   schedEl('schedEndDate').value = s.endDate || '';
   schedEl('schedExclude').value = (s.excludeDates || []).join(', ');
@@ -302,7 +322,12 @@ export function init() {
   document.getElementById('schedTimezone').innerHTML = tzOptionsHtml(false);
   document.getElementById('schedTaskTz').innerHTML = tzOptionsHtml(true);
 
-  schedEl('schedType').addEventListener('change', () => { schedEl('schedFields').innerHTML = schedFieldsHtml(schedEl('schedType').value); schedPreview(); });
+  schedEl('schedType').addEventListener('change', () => {
+    schedEl('schedFields').innerHTML = schedFieldsHtml(schedEl('schedType').value);
+    initDateFields(schedEl('schedFields'));
+    initTimeFields(schedEl('schedFields'));
+    schedPreview();
+  });
 schedEl('schedEditor').addEventListener('input', (e) => { if (e.target.id !== 'schedContent' && e.target.id !== 'schedName') schedPreview(); });
 schedEl('schedEditor').addEventListener('change', (e) => {
   if (e.target.name === 'schedKind') schedEl('schedContent').placeholder = e.target.value === 'ai' ? '随便跟我聊一句，或者发个可爱的表情包' : '早上好';

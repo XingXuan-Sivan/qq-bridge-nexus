@@ -325,6 +325,15 @@
   color: var(--muted-soft);
 }
 
+/* 行内区间/连接符（「2026-01-01 ～ 2026-02-01」「09:00 到 18:00」）：
+   11px + muted-soft 在深色底上几乎看不见，放大一号并提对比，避免看起来像一条误触的横线。 */
+.field-inline > .field-unit {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 0 2px;
+  align-self: center;
+}
+
 .field-inline {
   display: flex;
   flex-wrap: wrap;

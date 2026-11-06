@@ -1273,10 +1273,10 @@ select,
 .brand {
   transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease,transform .18s ease
 }
-button:not(.nav-item):hover:not(:disabled) {
+button:not(.nav-item):not(.btn-icon):hover:not(:disabled) {
   transform:translateY(-1px)
 }
-button:active:not(:disabled) {
+button:not(.btn-icon):active:not(:disabled) {
   transform:translateY(0)
 }
 .tag:hover {

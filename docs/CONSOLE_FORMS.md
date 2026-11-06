@@ -169,12 +169,43 @@ span.select-wrap            ← 自动包一层（position:relative）
 - 展开态由 `pointerdown` / `Enter` / `Space` / `↑` / `↓` 触发，`change` / `blur` / `Esc` / `Tab` 收起；`prefers-reduced-motion` 下关掉过渡。
 - 动态生成的 select（例如定时任务的重复方式编辑器）不需要额外处理，观察器会自动补上。
 
+### 日期字段组件（2026-11-07 落地）
+
+原生 `<input type="date">` 的「年 / 月 / 日」是三段式输入：连续键入 `20261225` 会被年份段吃掉，得到 `202612-02-05`；用户以为「打不进去」。所以可见控件改成**文本框 + 日历按钮**，日历面板仍用浏览器自带的：
+
+```
+span.date-field
+  ├ input.date-field-text             ← 可见，id 就是业务 id（YYYY-MM-DD），可整段键入/粘贴
+  ├ button.date-field-btn             ← 30×30 图标按钮，点击调起下面这个原生输入的面板
+  └ input[data-date-native="<id>"]    ← 隐藏（1×1、opacity:0），只用来 showPicker()
+```
+
+- 页面只写这三个元素，`router.js` 启动时调 `initDateFields()`，切页时 `initDateFields(host)`；动态生成的日期行（例如定时任务的重复方式编辑器）渲染后调一次 `initDateFields(容器)`。
+- 文本框接受 `2026-12-25`、`2026/12/25`、`2026.12.25`、`2026年12月25日`，失焦/回车归一化成 ISO；面板选完回填文本框并派发 `input`/`change`，页面原有的监听不用改。
+- 区间分隔符写 `<span class="field-unit">～</span>`；`.field-inline > .field-unit` 已放大到 13px + `--muted`（11px + `--muted-soft` 在深色底上几乎看不见）。
+
+### 时间字段组件（2026-11-07 落地）
+
+原生 `<input type="time">` 同样是「时 / 分」两段式，用户想直接敲 `09:00` 时并不顺手。做法与日期一致：
+
+```
+span.time-field
+  ├ input.time-field-text             ← 可见，id 就是业务 id（HH:mm）
+  ├ button.time-field-btn.btn-icon    ← 30×30 时钟按钮，调起原生时间面板
+  └ input[data-time-native="<id>"]    ← 隐藏，只用来 showPicker()
+```
+
+- `initTimeFields()` 启动时装、切页 `initTimeFields(host)`、动态行渲染后 `initTimeFields(容器)`。
+- 接受 `9:5`、`09：00`、`0900`，失焦/回车归一化成 `HH:mm`；面板选完回填并派发事件。
+- 同一区间的两端合成一行：`<span class="time-field">…</span><span class="field-unit">～</span><span class="time-field">…</span>`，标签写「时间段」/「免打扰时间段」，不要拆成「开始」「结束」两行。
+- 图标按钮必须带 `.btn-icon`：`components.css` 的 `button:hover{transform:translateY(-1px)}` 会顶掉 `translateY(-50%)` 的居中（1.33）。
+
 ### 组件选择规则（2026-11-06 定）
 
 - 单个布尔状态（启用 / 允许 / 自动 / 关闭某能力）一律用 `switchField`：`role="switch"`，文案「开 / 关」，与输入框同高。**不要**用 0、1 两个单选项，也不要用复选框冒充开关。
 - 需要用户确认风险的勾选（「我已了解」「删除后不可恢复」）保留 `checkboxField`，语义是确认不是开关。
 - 多选集合用 `checkboxGroup`；单选集合用 `radioGroup`（卡片样式给互斥的模式选择）。
-- 日期 / 时间用原生 `type="date"` / `type="time"` / `type="datetime-local"`，让浏览器出日历与时间选择器；**不要**用文本框 + `YYYY-MM-DD` 占位符让用户手打。
+- 日期用上面的 `components/date` 组合控件（文本框 + 日历按钮 + 隐藏原生 date）；时间用 `components/time`（同结构）；`datetime-local` 暂未封装，需要时按同一模式补。**不要**用纯文本框 + `YYYY-MM-DD` / `HH:mm` 占位符让用户手打。
 - 下拉框直接写 `<select>`：`components/select/select.js` 会自动包一层 `.select-wrap` 并画自绘箭头（展开时翻转）。页面不要手写箭头、不要给 select 加倍率性的 `appearance` 覆盖。
 - 同排字段靠 `.cols` + `.col-*` 排布，控件区最小高度 40px、垂直居中，保证基线一致；长文本/提示词用 `span: 2` 占整行。
 ### 控件标尺与五类非字段控件（2026-11-06 落地）

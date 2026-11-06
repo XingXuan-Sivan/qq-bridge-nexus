@@ -1,0 +1,65 @@
+/* 时间字段：文本框 + 时钟按钮 + 隐藏的原生 time（用来弹浏览器自带面板）。
+   与 components/date/date.css 同一套外观契约：同高、同圆角、右侧留出按钮位置。 */
+
+.time-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.time-field > .time-field-text {
+  flex: 1 1 auto;
+  width: 100%;
+  padding-right: 38px;
+}
+
+.time-field > .time-field-btn {
+  position: absolute;
+  right: 4px;
+  top: 0;
+  bottom: 0;
+  /* 居中用 auto 外边距，不用 transform —— components.css 的
+     `button:hover{transform:translateY(-1px)}` 会顶掉 translateY(-50%)。 */
+  margin: auto 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.time-field > .time-field-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.time-field > .time-field-btn:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+.time-field > .time-field-btn svg {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}
+
+.time-field > input[data-time-native] {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}

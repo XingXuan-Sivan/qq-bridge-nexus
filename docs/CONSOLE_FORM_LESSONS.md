@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 三十个真实踩过的坑
+## 1. 三十三个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -131,7 +131,34 @@
 ### 1.30 选错控件的代价：布尔状态写成复选框，用户就得「勾上表示开启」
 「跳过法定节假日」原本是 `<label><input type="checkbox"> 跳过…</label>`：它既不是多选集合，也不是风险确认，就是一个开关。后来改成 `role="switch"` 时，读取代码仍写 `.checked`，于是又踩回 1.26 的坑。
 
-**规则**：单个布尔状态 → `switchField`（或手写 `role="switch"` + `bindSwitches`）；确认类（「我已了解」）→ checkbox；多选集合 → `checkboxGroup`。判断标准是「这个选项是一个状态，还是集合里的一项」。日期时间一律 `type="date"/"time"/"datetime-local"`，不要用文本框加 `YYYY-MM-DD` 占位符。
+**规则**：单个布尔状态 → `switchField`（或手写 `role="switch"` + `bindSwitches`）；确认类（「我已了解」）→ checkbox；多选集合 → `checkboxGroup`。判断标准是「这个选项是一个状态，还是集合里的一项」。
+
+### 1.31 原生 `type="date"` 能选不能打，纯文本 `HH:mm` 又没法选
+
+两件事一起暴露的：
+
+- **日期**：`<input type="date">` 的年 / 月 / 日是三段式，连续键入 `20261225` 会被年份段吞成 `202612-02-05`，用户会直接说「无法手动输入」。但它的日历面板又是浏览器自带、体验最好的。
+- **时间**：安全限制里的「免打扰开始 / 结束」原本是 `type="text"` + `placeholder="00:00"`，想改时间只能手打；换成 `type="time"` 后时/分自动进位，键盘输入和面板都正常。
+
+**规则**：日期用 `components/date` 的「文本框 + 日历按钮 + 隐藏原生 date」（可见控件可整段键入，按钮调起浏览器面板，见 `docs/CONSOLE_FORMS.md`）；时间直接用原生 `type="time"`。别再出现「纯文本框让用户手打日期时间」的字段，也别只留原生 date 让用户逐段敲。
+
+### 1.32 11px 的 `--muted-soft` 连接符在深色底上等于不存在
+
+日期区间的 `～` 用 `.field-unit`（11px、`--muted-soft`），截图里看起来像一条误触的细横线，用户直接问「中间是不是少了个符号」。
+
+**规则**：行内连接符（`～`、`到`、`起，每`）用 `.field-inline > .field-unit`——13px + `--muted`，并在两侧留 2px；它属于控件的一部分，不是说明文字，不要沿用说明文字的弱化色。
+
+### 1.33 图标按钮 hover 时「跳出输入框」：全局 `transform` 顶掉了居中
+
+日期框右侧的日历按钮用 `top:50%; transform:translateY(-50%)` 居中，看上去正常；一 hover 就往下掉半格、背景方块溢出输入框。原因不在组件，而是 `components.css` 里那条老规则：
+
+```css
+button:not(.nav-item):hover:not(:disabled) { transform: translateY(-1px) }
+```
+
+它的权重（0,3,1）比 `.date-field > .date-field-btn`（0,2,1）高，hover 时直接覆盖了 `-50%`。
+
+**规则**：绝对定位的图标按钮不要靠 `transform` 居中（用 `top:0; bottom:0; margin:auto 0`），并加 `.btn-icon` 类——全局 hover/active 的浮动位移已经用 `:not(.btn-icon)` 排除。改完 hover 前后 `getBoundingClientRect().y` 必须一致（探针量过：375 → 375）。
 
 
 ## 2. 迁移一个页面的检查清单
@@ -165,6 +192,9 @@
 - 表格：翻到第 2 页、搜一个词之后，`input[data-field]` 的总数还等于总行数吗？
 - 折叠分组（`<details>`）全部展开后，有没有行被裁掉/点不到（1.20 的测试也要先展开）？
 - 页面上每个开关点一下：`aria-checked` 和「开/关」文案是否同步翻转？保存后请求体里的布尔值是否跟着变（不是 `undefined`，也不是永远 `false`）？
+- 日期字段能否整段键入 `2026-12-25`（不是被年份段吞掉）？点日历按钮能否弹出面板、选完是否回填？
+- 时间字段能否整段键入 `9:5` 并归一化成 `09:05`？图标按钮 hover 前后 `getBoundingClientRect().y` 是否一致（1.33）？
+- 同一区间的两端是否合成了一行「起始 ～ 结束」，而不是「开始」「结束」两行？
 - 页面底部保存栏滚动时会不会盖住表格底栏或最后一行按钮？（已知遗留，见 `STATUS` 第 14 行的待办）
 - 每个「单个布尔状态」是不是开关（`role="switch"`）而不是复选框？多选集合、风险确认是不是各自用了 checkbox？
 - 有没有文本框在要求用户手打 `YYYY-MM-DD`（应该换成 `type="date"`）？

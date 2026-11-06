@@ -396,15 +396,36 @@ ok(html.includes('id="schedEditorOverlay"'), '定时任务编辑器弹窗挂在�
 ok(/import \{[^}]*openModal[^}]*\} from '\.\.\/\.\.\/components\/modal\/modal\.js'/.test(schedulerJs), '定时任务页用 modal 组件打开编辑器（不自己切 hidden）');
 ok(!/schedEditor'\)\.hidden/.test(schedulerJs), '定时任务页不再用 .hidden 控制编辑器显隐');
 
-// 下拉框统一由 components/select 装饰（原生箭头方向固定、贴边、无展开动画），
-// 日期用原生选择器而不是「文本框 + YYYY-MM-DD 占位符」。
+// 下拉框统一由 components/select 装饰（原生箭头方向固定、贴边、无展开动画）；
+// 日期用 components/date 的「文本框 + 日历按钮 + 隐藏原生 date」——
+// 原生 date 三段式输入不能整段键入（20261225 会变成 202612-02-05），所以可见控件是文本框。
 const selectJs = fs.readFileSync(path.join(ROOT, 'public/console/components/select/select.js'), 'utf8');
 const routerJs = fs.readFileSync(path.join(ROOT, 'public/console/js/router.js'), 'utf8');
+const dateJs = fs.readFileSync(path.join(ROOT, 'public/console/components/date/date.js'), 'utf8');
 ok(fs.existsSync(path.join(ROOT, 'public/console/components/select/select.css')), '下拉框组件有 select.css');
 ok(/export function decorateSelects/.test(selectJs) && /export function initSelects/.test(selectJs), '下拉框组件导出 decorateSelects / initSelects');
 ok(/initSelects/.test(routerJs), '路由器启动时调 initSelects（动态插入的 select 也会被装饰）');
 ok(html.includes('/console/components/select/select.css'), 'index.html 引入 select.css');
-ok(html.includes('type="date" id="schedStartDate"'), '定时任务编辑器用原生日期选择器（不是文本框 + 占位符）');
+ok(fs.existsSync(path.join(ROOT, 'public/console/components/date/date.css')), '日期字段组件有 date.css');
+ok(/export function initDateFields/.test(dateJs), '日期字段组件导出 initDateFields');
+ok(/initDateFields/.test(routerJs), '路由器启动时调 initDateFields');
+ok(html.includes('/console/components/date/date.css'), 'index.html 引入 date.css');
+ok(
+  html.includes('class="date-field-text" id="schedStartDate"') && html.includes('data-date-native="schedStartDate"'),
+  '定时任务编辑器用日期字段组件（文本框 + 日历按钮 + 隐藏原生 date）',
+);
+
+// 时间同理：原生 time 是两段式，不能整段键入；免打扰合并成「时间段 00:00 ～ 07:00」一行。
+const timeJs = fs.readFileSync(path.join(ROOT, 'public/console/components/time/time.js'), 'utf8');
+const schedFieldsJs = fs.readFileSync(path.join(ROOT, 'public/console/pages/scheduler/fields.js'), 'utf8');
+ok(fs.existsSync(path.join(ROOT, 'public/console/components/time/time.css')), '时间字段组件有 time.css');
+ok(/export function initTimeFields/.test(timeJs), '时间字段组件导出 initTimeFields');
+ok(/initTimeFields/.test(routerJs), '路由器启动时调 initTimeFields');
+ok(html.includes('/console/components/time/time.css'), 'index.html 引入 time.css');
+ok(
+  schedFieldsJs.includes('id="schedQuietStart"') && schedFieldsJs.includes('data-time-native="schedQuietStart"') && schedFieldsJs.includes('class="field-unit">～'),
+  '免打扰合并为「时间段 起始 ～ 结束」一行（时间字段组件）',
+);
 
 const rowHacks = [];
 for (const page of consolePageDirs(ROOT)) {

@@ -36,9 +36,25 @@ export const SCHED_FIELDS = {
         span: 2,
         html: '<div id="schedLimits" class="sched-limits"></div>',
       },
-      { name: 'schedQuietEnabled', type: 'switch', label: '定时任务免打扰', hint: '只拦定时任务发往群的消息，不影响 AI 平时被 @ 时回复。' },
-      { name: 'schedQuietStart', type: 'text', label: '免打扰开始', placeholder: '00:00', width: 120 },
-      { name: 'schedQuietEnd', type: 'text', label: '免打扰结束', placeholder: '07:00', width: 120 },
+      { name: 'schedQuietEnabled', type: 'switch', span: 2, label: '定时任务免打扰', hint: '只拦定时任务发往群的消息，不影响 AI 平时被 @ 时回复。' },
+      {
+        // 开始与结束合成一行「时间段 00:00 ～ 07:00」：它们是同一个区间的两端，拆成两行读起来像两个独立设置。
+        // 控件用 components/time（文本框 + 时钟按钮），和日期字段一致——原生 time 是两段式，整段键入不顺手。
+        name: 'schedQuietRange',
+        type: 'custom',
+        span: 2,
+        label: '免打扰时间段',
+        hint: '按北京时间，精确到分钟。',
+        html: '<div class="field-inline">'
+          + '<span class="time-field"><input type="text" class="time-field-text" id="schedQuietStart" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="免打扰开始时间">'
+          + '<button type="button" class="time-field-btn btn-icon" aria-label="选择免打扰开始时间"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
+          + '<input type="time" data-time-native="schedQuietStart" tabindex="-1" aria-hidden="true"></span>'
+          + '<span class="field-unit">～</span>'
+          + '<span class="time-field"><input type="text" class="time-field-text" id="schedQuietEnd" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="免打扰结束时间">'
+          + '<button type="button" class="time-field-btn btn-icon" aria-label="选择免打扰结束时间"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button>'
+          + '<input type="time" data-time-native="schedQuietEnd" tabindex="-1" aria-hidden="true"></span>'
+          + '</div>',
+      },
     ],
   },
   limitsActions: {

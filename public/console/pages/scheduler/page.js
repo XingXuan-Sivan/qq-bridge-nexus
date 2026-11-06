@@ -3,6 +3,9 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
+import { renderFields } from '../../components/form/form.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { SCHED_FIELDS } from './fields.js';
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────
 // 规则的计算、限额、到点执行都在桥接（src/scheduler/）；这里只负责编辑和展示。
@@ -19,7 +22,16 @@ let schedEditingId = null;
 let schedPreviewTimer = null;
 const schedEl = (id) => document.getElementById(id);
 const schedSplit = (v) => String(v ?? '').split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
-function schedMsg(id, text, ok) { const el = schedEl(id); el.textContent = text; el.className = ok == null ? 'meta' : (ok ? 'meta ok' : 'meta err'); }
+function schedMsg(id, text, ok) { const el = schedEl(id); el.textContent = text; el.className = ok == null ? 'form-actions-status' : (ok ? 'form-actions-status ok' : 'form-actions-status err'); }
+
+/** 把 fields.js 的规格渲染进每个 `<div data-sched-fields="…">`。init() 里第一件事。 */
+function renderSchedFieldGroups() {
+  document.querySelectorAll('[data-sched-fields]').forEach((host) => {
+    const spec = SCHED_FIELDS[host.dataset.schedFields];
+    if (!spec) return;
+    renderFields(host, spec.fields, { columns: Number(host.dataset.schedColumns) || 2, layout: host.dataset.schedLayout || 'grid' });
+  });
+}
 
 async function refreshScheduler() {
   try {
@@ -42,7 +54,7 @@ function renderScheduler() {
   if (document.activeElement !== schedEl('schedTimezone')) tzSet(schedEl('schedTimezone'), st.timezone);
   const pill = schedEl('schedStatePill');
   pill.textContent = st.enabled ? (r.writable === false ? '只读（数据文件读取失败）' : '运行中') : '已关闭';
-  pill.className = st.enabled && r.writable !== false ? 'pill g' : 'pill r';
+  pill.className = st.enabled && r.writable !== false ? 'status-badge is-pill ok' : 'status-badge is-pill err';
   schedEl('schedLimits').innerHTML = SCHED_LIMIT_FIELDS.map(([k, label, unit]) => `<div><label for="schedLim_${k}">${esc(label)}（${esc(unit)}）</label><input type="number" id="schedLim_${k}" min="0" value="${esc(st.limits[k])}" title="默认 ${esc(r.defaults?.limits?.[k] ?? '')}"></div>`).join('');
   schedEl('schedQuietEnabled').checked = !!st.limits.quietEnabled;
   schedEl('schedQuietStart').value = st.limits.quietStart;
@@ -50,24 +62,50 @@ function renderScheduler() {
   schedEl('schedCount').textContent = `${r.tasks.length} / ${st.limits.maxTasks}`;
   renderSchedPluginKinds();
   const targetLabel = (k) => (r.targets.find((t) => t.key === k)?.label) || k;
-  schedEl('schedList').innerHTML = r.tasks.length ? `<table class="sched-table"><tr><th>启用</th><th>任务</th><th>时间</th><th>发给</th><th>上次</th><th>操作</th></tr>${r.tasks.map((t) => {
+  const taskRows = r.tasks.map((t) => {
     const badges = [t.kindLabel ? `<span class="pill b">${esc(t.kindLabel)}</span>` : (t.kind === 'ai' ? '<span class="pill b">AI 来说</span>' : '<span class="pill">固定文字</span>'),
       `<span class="pill">来源：${esc({ console: '控制台', 'owner-command': '管理员命令', 'owner-chat-ai': '私聊 AI' }[t.createdBy] || t.createdBy)}</span>`,
       t.pendingConfirm ? '<span class="pill r">待你确认</span>' : ''].join(' ');
     const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta u-mt-2">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
-    return `<tr>
-      <td><input type="checkbox" data-sched-toggle="${t.id}" ${t.enabled ? 'checked' : ''} aria-label="启用 #${t.id}"></td>
-      <td><b>#${t.id} ${esc(t.name)}</b><div class="u-mt-4">${badges}</div><div class="meta u-mt-4">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div></td>
-      <td>${esc(t.scheduleText)}<div class="meta u-mt-2">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div></td>
-      <td>${t.targets.map((k) => `<span class="sched-chip u-cursor-default">${esc(targetLabel(k))}</span>`).join('')}</td>
-      <td>${last}</td>
-      <td class="row"><button class="small" data-sched-run="${t.id}" title="立即执行一次（计入今天的限额）">试发</button><button class="small" data-sched-edit="${t.id}">编辑</button><button class="small danger" data-sched-del="${t.id}">删</button></td>
-    </tr>`;
-  }).join('')}</table>` : '<div class="meta">还没有定时任务。点「＋ 新建任务」，或者在管理员私聊里发 /remind 看用法。</div>';
-  schedEl('schedHistory').innerHTML = r.history.length ? r.history.map((h) => {
+    return [
+      `<input type="checkbox" data-sched-toggle="${t.id}" ${t.enabled ? 'checked' : ''} aria-label="启用 #${t.id}">`,
+      `<b>#${t.id} ${esc(t.name)}</b><div class="u-mt-4">${badges}</div><div class="meta u-mt-4">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div>`,
+      `${esc(t.scheduleText)}<div class="meta u-mt-2">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div>`,
+      t.targets.map((k) => `<span class="sched-chip u-cursor-default">${esc(targetLabel(k))}</span>`).join(''),
+      last,
+      `<div class="row-actions"><button type="button" class="btn small" data-sched-run="${t.id}" title="立即执行一次（计入今天的限额）">试发</button><button type="button" class="btn small" data-sched-edit="${t.id}">编辑</button><button type="button" class="btn small danger" data-sched-del="${t.id}">删</button></div>`,
+    ];
+  });
+  schedEl('schedList').innerHTML = taskRows.length
+    ? dataTableHtml({
+      columns: [{ label: '启用', width: 64 }, { label: '任务' }, { label: '时间', width: 220 }, { label: '发给', width: 160 }, { label: '上次', width: 160 }, { label: '操作', width: 190 }],
+      rows: taskRows,
+      search: { placeholder: '搜索任务名或内容…' },
+      refresh: true,
+      empty: '没有匹配的任务。',
+    })
+    : '<div class="meta">还没有定时任务。点「＋ 新建任务」，或者在管理员私聊里发 /remind 看用法。</div>';
+  if (taskRows.length) initDataTables(schedEl('schedList'), { onRefresh: () => refreshScheduler() });
+  const historyRows = r.history.map((h) => {
     const [label, cls] = SCHED_STATUS[h.status] || [h.status, 'pill'];
-    return `<div><span class="${cls}">${esc(label)}</span> ${esc(new Date(h.at).toLocaleString('zh-CN', { hour12: false, timeZone: st.timezone }))} #${esc(h.taskId)} ${esc(h.name || '')}${h.target ? ' → ' + esc(targetLabel(h.target)) : ''}${h.manual ? '（试发）' : ''}${h.reason ? '：' + esc(h.reason) : ''}</div>`;
-  }).join('') + `<div>（时间按 ${esc(st.timezone === 'Asia/Shanghai' ? '北京时间' : st.timezone)} 显示）</div>` : '<div>暂无</div>';
+    const when = new Date(h.at).toLocaleString('zh-CN', { hour12: false, timeZone: st.timezone });
+    return [
+      esc(when),
+      `<span class="${cls}">${esc(label)}</span>`,
+      `#${esc(h.taskId)} ${esc(h.name || '')}${h.manual ? '（试发）' : ''}`,
+      h.target ? esc(targetLabel(h.target)) : '<span class="meta">—</span>',
+      h.reason ? `<span class="meta">${esc(h.reason)}</span>` : '<span class="meta">—</span>',
+    ];
+  });
+  schedEl('schedHistory').innerHTML = historyRows.length
+    ? dataTableHtml({
+      columns: [{ label: '时间', width: 190 }, { label: '状态', width: 110 }, { label: '任务', width: 240 }, { label: '目标', width: 160 }, { label: '说明' }],
+      rows: historyRows,
+      pageSize: 10,
+      empty: '暂无执行记录。',
+    })
+    : '<div class="meta">暂无执行记录。</div>';
+  if (historyRows.length) initDataTables(schedEl('schedHistory'));
   schedEl('schedList').querySelectorAll('[data-sched-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
     const res = await api(`/api/scheduler/tasks/${cb.dataset.schedToggle}/${cb.checked ? 'enable' : 'disable'}`, 'POST', {});
     if (!res.ok) alert(res.error || '操作失败');
@@ -239,6 +277,8 @@ function schedPreview() {
 }
 
 export function init() {
+  // 先按规格把控件渲染出来，后面所有 schedEl(id) 才取得到节点。
+  renderSchedFieldGroups();
   document.getElementById('schedTimezone').innerHTML = tzOptionsHtml(false);
   document.getElementById('schedTaskTz').innerHTML = tzOptionsHtml(true);
 

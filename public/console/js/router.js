@@ -4,6 +4,7 @@
 // 「被切进来时要做什么」，避免路由器反过来 import 十几个页面模块。
 
 import { showConsoleToast, applyPageA11y } from './ui.js';
+import { initGroups } from '../components/groups/groups.js';
 
 /** 页面元数据：[标题, 大标题, 说明]。新增页面必须同时加进 #mainNav 的 data-view。 */
 export const consolePages = {
@@ -113,6 +114,9 @@ function hydratePage(page) {
     }
     const module = await import(`/console/pages/${page}/page.js`);
     module.init?.();
+    // 折叠分组：默认展开第一组，之后按页面记忆用户展开过哪些（跨页一致的体验）。
+    // 必须放在 init() 之后——有些页面的分组是 init() 里渲染出来的。
+    initGroups(host, { pageId: page });
     applyPageA11y(host);
     // 就绪标记：字段由 fields.js 的规格在 init() 里渲染，片段 HTML 到位 ≠ 页面可用。
     // 浏览器回归（test-console-ui）与深链定位都等这个标记，避免量到「还没渲染」的空壳。

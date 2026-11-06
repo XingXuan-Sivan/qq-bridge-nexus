@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 二十三个真实踩过的坑
+## 1. 二十五个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -100,6 +100,14 @@
 `.form-actions--inline` 原本写在第 203 行，而 `.form-actions { justify-content: flex-end }` 在 553 行——同特异性、后者胜出，行内按钮条永远右对齐。
 **规则**：变体规则放在基类**之后**（或用更高特异性）；改完用 `getComputedStyle` 读一次真正生效的值，别只看类名写没写。
 
+### 1.24 `page-stack` 里的卡片不写 `span-all` 会掉进两列网格
+`scheduler` 改成多卡片后，5 张卡片变成「左一张右一张」：`section.page-stack` 是 `display:contents`，卡片直接成为 `main` 网格项，而 `main` 是两列网格（原本靠 `.card.span-all` 跨列）。
+**规则**：多卡片页面每张卡片都写 `<div class="card span-all">`；只有确实想并排的两张卡才留半宽。
+
+### 1.25 `custom` 字段默认只占半宽，整块内容要显式 `span: 2`
+`scheduler` 的任务编辑器、安全限制网格、任务列表插槽都是 `type:'custom'`，首版没写 `span`，于是被放进 `col-md-6`（实测 607px），编辑器挤成窄条、限制网格只有 4 个 144px 的格子。
+**规则**：`custom` 里装的是「整块内容」（表格、编辑器、网格）就写 `span: 2`；只有真正的小块（一个按钮、一个徽标）才留默认。判据：这块内容自己有没有内部的列布局？有就跨满。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -134,6 +142,8 @@
 
 ## 4. 剩余页面的迁移顺序与取舍
 
-1. `scheduler`（28 个控件，表单最规整，先立第二块样板）→ 2. `persona`（27）→ 3. `social-v1`（32，与 v2 同构，可复用字段清单）→ 4. `overview`（32，卡片式，注意裸 `button` 与 `metric`）→ 5. `slang`（36，表格 + 词条编辑）→ 6. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）。
+**骨架已经定了**（`docs/CONSOLE_FORMS.md`「一个页面的固定骨架」+ `scheduler` 样板）：`page-stack` 宿主 + 每张卡 `span-all` + 页头 `.form-inline-bar`（左字段 / 右状态徽标 + 动作）+ 列表卡 `.card-head` + 表格走 `dataTableHtml` + 折叠组走 `settings-group` + `initGroups` 记忆。逐页迁移只换内容，不再各自发明结构。
+
+1. `persona`（27）→ 2. `social-v1`（32，与 v2 同构，可复用字段清单）→ 3. `overview`（32，卡片式，注意裸 `button` 与 `metric`）→ 4. `slang`（36，表格 + 词条编辑）→ 5. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）。`scheduler` 已作为样板迁完（基线 0）。
 每迁一页：`BARE_CONTROL_BASELINE` 该页改 0、`STATUS` 第 14 行更新数字、截图存档；一页一提交，不要攒。
 `access` / `operations` / `sessions` / `usage` / `plugins` / `mcp` / `skills` 控件较少，随对应功能改动顺带迁，不单独立项。

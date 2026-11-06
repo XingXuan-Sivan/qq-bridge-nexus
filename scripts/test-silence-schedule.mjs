@@ -191,7 +191,9 @@ test('③ 控制台：静默开关卡片里有定时静默面板；任务表单�
   for (const tier of ['stop', 'direct', 'normal']) assert.ok(sec.includes(`name="silenceWakeTier" value="${tier}"`), `唤醒档位 ${tier}`);
   assert.match(sec, /只在被 @ 或私聊时唤醒/);
   assert.match(html, /<option value="skip">定时静默时段内：跳过这次<\/option><option value="run">定时静默时段内：照常执行<\/option>/);
-  assert.match(html, /定时任务免打扰（只拦定时任务发往群的消息/, '定时任务那边改名为「定时任务免打扰」');
+  // 迁移后标签与语义拆开了：标签只写「定时任务免打扰」，括号里的限定语进了 hint（UI 规范不允许把说明挂在标签上）。
+  assert.match(html, /定时任务免打扰/, '定时任务那边有「定时任务免打扰」开关');
+  assert.match(html, /只拦定时任务发往群的消息/, '免打扰只拦定时任务发往群的消息');
   assert.ok(!/#section-silent \.row \{\s*grid-column:2/.test(html), '静默卡片不再把每一行钉在第 2 栏');
 });
 

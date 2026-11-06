@@ -228,11 +228,14 @@ pre {
 .settings-group {
   border:1px solid var(--card-border);
   border-radius:11px;
-  margin-top:14px;
+  margin-top:12px;
   background:var(--surface)
 }
 .settings-group summary {
-  padding:16px 18px;
+  display:flex;
+  align-items:center;
+  min-height:44px;
+  padding:12px 42px 12px 18px;
   color:var(--text-secondary);
   font-size:13px;
   font-weight:500;
@@ -244,8 +247,19 @@ pre {
   border-radius:11px 11px 0 0
 }
 .settings-content {
-  padding:8px 20px 20px
+  padding:6px 20px 20px
 }
+/* 卡片头：左边标题、右边操作（新建/刷新这类不占一整行的按钮）。
+   与 .row 的区别：不收集字段、不参与表单栅格，只负责一行两端对齐。 */
+.card-head {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-bottom:10px
+}
+.card-head > h3 { margin:0 }
 .settings-content>.row {
   padding:10px 0;
   border-bottom:1px solid var(--border-subtle)
@@ -453,10 +467,22 @@ tr:last-child td {
 .sched-limits {
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:10px
+  gap:12px 10px
+}
+/* 每格是「标签 + 输入」的竖排；标签吃掉多余高度并底对齐，
+   这样同一行里折成两行和三行的标签不会把输入框推得高低不齐。 */
+.sched-limits>div {
+  display:flex;
+  flex-direction:column;
+  gap:4px
 }
 .sched-limits label {
-  margin:0 0 4px
+  display:flex;
+  align-items:flex-end;
+  flex:1 1 auto;
+  min-height:32px;
+  margin:0;
+  line-height:1.35
 }
 .sched-limits input {
   width:100%
@@ -1412,4 +1438,10 @@ button:active:not(:disabled) {
   padding:8px 10px;
   border-left:3px solid var(--warn,#d08700);
   background:rgba(208,135,0,.08);
+}
+
+/* 窄屏下的折叠分组：内边距收紧，标题不换行到箭头底下（箭头固定右 20px）。 */
+@media (max-width: 900px) {
+  .settings-group summary { padding:10px 40px 10px 14px; min-height:40px }
+  .settings-content { padding:4px 14px 16px }
 }

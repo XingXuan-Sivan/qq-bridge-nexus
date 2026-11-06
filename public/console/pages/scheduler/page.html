@@ -1,89 +1,40 @@
-<!-- 定时任务页：结构照搬迁移前的 index.html，样式全部复用公共样式。 -->
-<h2>定时任务</h2>
-<div class="row">
-  <label class="sched-chip u-m-0"><input type="checkbox" id="schedEnabled"> 启用定时任务</label>
-  <span id="schedStatePill" class="pill">—</span>
-  <span class="meta u-m-0">默认时区</span>
-  <select class="u-flex-basis-max-320" id="schedTimezone" aria-label="默认时区"></select>
-</div>
-<div class="row u-mt-8">
-  <label class="sched-chip u-m-0"><input type="checkbox" id="schedAllowAiPrivate"> 允许 AI 在管理员私聊里登记任务</label>
-  <label class="sched-chip u-m-0"><input type="checkbox" id="schedAllowAiGroup"> 允许 AI 登记发往群 / 其他好友的任务（登记后先暂停，需你确认）</label>
-  <button id="schedSettingsSave" class="small">保存</button>
-  <span class="meta u-m-0" id="schedSettingsMsg"></span>
-</div>
-<div class="meta">总开关和安全限制只能在这里或管理员命令里改，AI 改不了。时间一律按任务的时区计算，和这台电脑的时区无关。</div>
+<div class="card span-all">
+  <h2>定时任务</h2>
+  <div class="meta">总开关和安全限制只能在这里或管理员命令里改，AI 改不了。时间一律按任务的时区计算，和这台电脑的时区无关。</div>
 
-<h3 class="u-mt-22">安全限制</h3>
-<div class="sched-limits" id="schedLimits"></div>
-<div class="row u-mt-10">
-  <label class="sched-chip u-m-0"><input type="checkbox" id="schedQuietEnabled"> 定时任务免打扰（只拦定时任务发往群的消息，不影响 AI 平时被 @ 时回复）</label>
-  <input class="u-flex-basis-max-80" type="text" id="schedQuietStart" placeholder="00:00"> 到 <input class="u-flex-basis-max-80" type="text" id="schedQuietEnd" placeholder="07:00">
-  <button id="schedLimitsSave" class="small">保存限制</button>
-  <button id="schedLimitsReset" class="small">恢复默认</button>
-  <span class="meta u-m-0" id="schedLimitsMsg"></span>
-</div>
-
-<div class="row u-mt-22-between">
-  <h3 class="u-m-0">任务列表 <span class="meta" id="schedCount"></span></h3>
-  <button id="schedNew" class="small">＋ 新建任务</button>
-</div>
-<div id="schedList" class="u-overflow-auto"></div>
-
-<div class="sched-editor" id="schedEditor" hidden>
-  <h3 class="u-mt-0" id="schedEditorTitle">新建任务</h3>
-  <div class="grid u-gap-12">
-    <div><label for="schedName">名称</label><input type="text" id="schedName" placeholder="早安"></div>
-    <div><label for="schedTaskTz">时区</label><select id="schedTaskTz"></select></div>
-  </div>
-  <label for="schedType">重复方式</label>
-  <select id="schedType">
-    <option value="once">一次性</option>
-    <option value="daily">每天</option>
-    <option value="weekly">每周</option>
-    <option value="workdays">工作日（周一至周五，跳过法定节假日）</option>
-    <option value="monthly">每月几号</option>
-    <option value="monthlyWeekday">每月第几个周几</option>
-    <option value="yearly">每年</option>
-    <option value="dates">特殊日期</option>
-    <option value="everyNDays">每隔 N 天</option>
-    <option value="interval">每隔 N 分钟</option>
-    <option value="dailyRandom">每天随机几次</option>
-    <option value="monthlyRandom">每月随机几次</option>
-    <option value="cron">高级：cron 表达式</option>
-  </select>
-  <div class="sched-fields" id="schedFields"></div>
-  <div class="grid u-gap-12">
-    <div><label>有效期（可选）</label><div class="row"><input class="u-flex-basis-120" type="text" id="schedStartDate" placeholder="开始 YYYY-MM-DD"><input class="u-flex-basis-120" type="text" id="schedEndDate" placeholder="结束 YYYY-MM-DD"></div></div>
-    <div><label for="schedMaxRuns">共执行几次后停止（可选）</label><input type="number" id="schedMaxRuns" min="1" placeholder="不限"></div>
-  </div>
-  <div class="grid u-gap-12">
-    <div><label for="schedExclude">排除日期（可选，逗号分隔）</label><input type="text" id="schedExclude" placeholder="2026-12-25, 2027-01-01"></div>
-    <div><label>其它</label><div class="row"><label class="sched-chip u-m-0"><input type="checkbox" id="schedSkipHolidays"> 跳过法定节假日</label>
-      <select class="u-flex-basis-160" id="schedSilence" title="只对「叫 AI 来说」有效；固定文字在定时静默里照发"><option value="skip">定时静默时段内：跳过这次</option><option value="run">定时静默时段内：照常执行</option></select>
-      <select class="u-flex-basis-160" id="schedMissed"><option value="grace">错过了：补发时间内补发，否则跳过</option><option value="skip">错过了：直接跳过</option></select></div></div>
-  </div>
-  <label>发给谁（可多选）</label>
-  <div id="schedTargets"></div>
-  <label>内容</label>
-  <div class="row">
-    <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
-    <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
-  </div>
-  <div class="row u-mt-8" id="schedPluginKindRow" hidden>
-    <label class="field u-flex-basis-240">插件任务类型<select id="schedPluginKind"></select></label>
-    <span class="meta u-m-0">由插件注册；payload 见插件说明</span>
-  </div>
-  <textarea id="schedPayloadJson" rows="3" class="u-w-full u-mt-8" hidden placeholder='{"payload": {"week": "周一"}}'></textarea>
-  <textarea class="u-w-full-mt-8" id="schedContent" rows="3" placeholder="早上好"></textarea>
-  <div class="meta" id="schedPreview">接下来：—</div>
-  <div class="row u-mt-10">
-    <button id="schedSave">保存任务</button>
-    <button id="schedCancel" class="small">取消</button>
-    <span class="meta u-m-0" id="schedEditorMsg"></span>
+  <div class="form-inline-bar u-mt-10">
+    <div class="form-inline-fields" data-sched-fields="header" data-sched-layout="inline"></div>
+    <div class="form-inline-tail">
+      <span class="status-badge is-pill" id="schedStatePill">—</span>
+      <div data-sched-fields="headerActions"></div>
+    </div>
   </div>
 </div>
 
-<h3 class="u-mt-22">执行记录 <span class="meta">最近 100 条</span></h3>
-<div class="sched-history" id="schedHistory"><div>暂无</div></div>
-<div class="meta">管理员私聊里也可以用 <code>/remind</code> 管理（发 <code>/remind</code> 看用法）；在二代仿真里也可以直接跟 AI 说「每天六点给我发个早安」，AI 登记后桥接会另发一条确认给你。</div>
+<div class="card span-all">
+  <h3>谁可以登记</h3>
+  <div class="meta">AI 只能在下面允许的范围里登记任务；登记后先暂停，需要你确认。</div>
+  <div data-sched-fields="policy" data-sched-columns="1"></div>
+</div>
+
+<div class="card span-all">
+  <h3>安全限制</h3>
+  <div class="meta">每个账号最多能挂多少任务、多久跑一次，防止失控；免打扰只拦定时任务发往群的消息。</div>
+  <div data-sched-fields="limits"></div>
+  <div data-sched-fields="limitsActions"></div>
+</div>
+
+<div class="card span-all">
+  <div class="card-head">
+    <h3>任务列表</h3>
+    <div data-sched-fields="listActions"></div>
+  </div>
+  <div data-sched-fields="taskList"></div>
+  <div data-sched-fields="editor"></div>
+</div>
+
+<div class="card span-all">
+  <h3>执行记录</h3>
+  <div class="meta">最近 100 条；管理员私聊里也可以用 <code>/remind</code> 管理。在二代仿真里也可以直接跟 AI 说「每天六点给我发个早安」，AI 登记后桥接会另发一条确认给你。</div>
+  <div data-sched-fields="history"></div>
+</div>

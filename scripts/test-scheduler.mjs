@@ -299,7 +299,11 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.ok(nav.indexOf('data-view="slang"') < nav.indexOf('data-view="scheduler"') && nav.indexOf('data-view="scheduler"') < nav.indexOf('<div class="nav-label">管理</div>'), '位置在黑话词库下面、「管理」分组之前');
   assert.match(html, /scheduler: \['定时任务'/);
   assert.match(html, /<section id="section-scheduler" data-page="scheduler"/);
-  for (const id of ['schedEnabled', 'schedTimezone', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory', 'schedPluginKindRow', 'schedPluginKind', 'schedPayloadJson']) assert.ok(html.includes(`id="${id}"`), id);
+  // 控件已搬进 fields.js：静态 HTML 里只留占位 div，id 由 renderFields 在运行时生成。
+  // 所以这里认「模板里的 id」或「字段规格里的 name」两种写法（同 test-v2-initial-prompt 的 occurrences 思路）。
+  for (const id of ['schedEnabled', 'schedTimezone', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory', 'schedPluginKindRow', 'schedPluginKind', 'schedPayloadJson']) {
+    assert.ok(html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`), `${id} 出现在模板或字段规格中`);
+  }
   assert.match(html, /taskTypes/, '任务类型来自 /api/scheduler 的 taskTypes');
   assert.match(html, /renderSchedPluginKinds\(\)/, '编辑器会按注册类型重建下拉');
   assert.match(html, /api\('\/api\/scheduler\/preview', 'POST'/);

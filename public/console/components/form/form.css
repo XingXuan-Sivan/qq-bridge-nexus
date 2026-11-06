@@ -242,6 +242,20 @@
 .form-inline-bar .field-control {
   min-height: 0;
 }
+/* 右侧尾巴：状态徽标 + 行内动作（保存之类），和左侧字段同一条基线。 */
+.form-inline-bar .form-inline-tail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.form-inline-bar .form-actions {
+  padding-top: 0;
+  margin: 0;
+}
+.form-inline-bar .form-actions-status {
+  margin-left: 0;
+}
 
 @media (max-width: 760px) {
   .field-row {
@@ -584,6 +598,14 @@
   font-size: 12px;
   color: var(--muted);
 }
+
+/* 动作行的状态位：成功/失败都要能看见颜色，且不撑高行（保存按钮 40px，状态位只占文字行高）。 */
+.form-actions-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+.form-actions-status.ok { color: var(--ok, #137a4b); }
+.form-actions-status.err { color: var(--err, #b42318); }
 
 @media (max-width: 760px) {
   .field-inline-cols {

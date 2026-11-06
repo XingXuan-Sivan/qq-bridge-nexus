@@ -204,9 +204,50 @@ form.destroy();
 2. 给控件写 `height: 36px` 这类字面量，或给 `.field-switch` 单独定高。
 3. 用 `margin` / `padding` 把两个不同高的控件「凑齐」——对齐靠标尺，不靠微调。
 
+### 一个页面的固定骨架（2026-11-06 定，`scheduler` 为样板）
+
+一页由若干张卡片自上而下组成，宿主是 `section[data-page]`，class 用 `page-stack`（`display:contents`，让卡片直接成为 `main` 的网格项）。**卡片必须带 `span-all`**，否则会掉进 `main` 的两列网格里被挤成半宽——这是 `scheduler` 首版踩过的坑。
+
+```
+<card span-all>                     ← 页头
+  <h2>页标题</h2>
+  <div class="meta">一句话说明</div>
+  <div class="form-inline-bar">     ← 开关 + 输入 + 状态徽标 + 保存
+    <div class="form-inline-fields" data-x-fields="header" data-x-layout="inline"></div>
+    <div class="form-inline-tail">
+      <span class="status-badge is-pill" id="xStatePill">—</span>
+      <div data-x-fields="headerActions"></div>
+    </div>
+  </div>
+</card>
+
+<card span-all>                     ← 设置卡片：h3 + 说明 + 字段组
+  <h3>分组标题</h3>
+  <div class="meta">这一组在管什么</div>
+  <div data-x-fields="policy" data-x-columns="1"></div>
+</card>
+
+<card span-all>                     ← 列表卡片：卡片头右侧放主操作
+  <div class="card-head">
+    <h3>任务列表</h3>
+    <div data-x-fields="listActions"></div>
+  </div>
+  <div data-x-fields="taskList"></div>
+</card>
+```
+
+约定：
+
+1. 字段组由 `renderFields(host, spec, { columns, layout })` 渲染；`columns` 从 `host.dataset.xColumns` 读（默认 2），这样**同一页可以有的组两列、有的组一列**（开关类字段用一列才不松散）。
+2. 整块内容（编辑器、限制网格、表格插槽）用 `type: 'custom'` 字段，**必须写 `span: 2`**，否则默认 `span` 只有 1，会被放进半宽格（`scheduler` 的安全限制、任务列表、编辑器都踩过）。
+3. 卡片标题右侧的动作（新建、刷新）放进 `.card-head`，不要单独占一行。
+4. 只有本来就有保存语义的页面才加保存按钮；没有保存语义的页面不要为了统一硬塞。
+5. 折叠分组用 `<details class="settings-group">`，分组记忆由 `initGroups(root, { pageId })` 统一处理：首次只展开第一组，之后按 `localStorage['dsh.console.groups.<pageId>']` 恢复。路由在 `module.init()` 之后调用它（分组可能是 init 里渲染的）。
+6. 页面级 CSS 只允许写「这一页独有的装饰」（如 `.sched-limits` 的格宽、`.voice-list` 的行距），**不许覆盖 `.field-row` / `.field-control` / `.field-block` 的布局**——静态检查会拦。
+
 ## 5. 现有复杂表单的迁移
 
-按控件量排序（2026-11-06 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`scheduler` 28、`persona` 27、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**。
+按控件量排序（2026-11-06 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`persona` 27、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**、`scheduler` **0**。
 
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 

@@ -132,3 +132,11 @@
   text-align: center;
   color: var(--muted);
 }
+
+/* 行内操作按钮组：表格最后一列常用，避免用 .row（那是字段收集器，会给按钮加 margin）。 */
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

@@ -22,6 +22,7 @@
 | [CONSOLE_UI.md](CONSOLE_UI.md) | **控制台前端结构与组件约定**：零构建下的目录分层、`components/<name>/{js,css}` 规范、组件 css 自包含、页面专属组件何时上提，以及搜索框「漏写 `type` 导致退回浏览器默认外观」的根因与修法 | 🚧 约定已定、迁移进行中（2026-11-06 起，改 `public/console/` 前先看） |
 | [CONSOLE_UI_REWORK.md](CONSOLE_UI_REWORK.md) | **基础层与组件层改造清单**：主题映射（163 令牌 → 语义别名 + 间距/断点）、`grid.css` 与 input 选择器根因改造、`field`/`button`/`select`/`badge`/`empty-state`/`tabs`/`collapse` 的 API 与首批迁移页、**必须不变的 225 个 DOM id 与 25 条接口契约**、需要重录的门禁与截图 | 📋 清单已定、未动工（2026-11-06） |
 | [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂（文本/数字/密码/多行/下拉/单选组/多选组/复选/开关/文件/**日期/时间/日期时间/时间区间**/只读/动作区）、`createForm()` 内核（类型化取值、字段与跨字段校验、条件显示、提交态、脏值守卫）、**字段注解（说明/警告/危险/文档）与块级提示**、a11y 约定、以 `social-v2`（130 控件）为试点的两步迁移法 | 📋 规格已定、未动工（2026-11-06）；优先于其余组件 |
+| [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 控制台表单迁移踩坑与检查清单（迁页面前先读） |
 | [STATUS.md](STATUS.md) | **未完项清单**：每项写是什么 / 完成判据 / 依赖 / 优先级，状态为 Done、Partial（差什么）、Todo（已立项未开工）、Blocked（等什么）；阶段收尾先对这张表，防止把半成品说成已完成 | ✅ 现行（2026-11-05 起，每阶段收尾复核） |
 | [PARITY.md](PARITY.md) | **迁移评估**：nexus / enhanced 手改版 / enhanced 上游三条基线逐维度对照（按会话人格卡、切换入口、换人格是否换会话、注入位置与 token、可扩展性、soulkit 联动、会话管理页、标题、messages、切换与数据迁移），含待核实项与 4 个待拍板决策 | 🚧 评估中（2026-11-06 起，决定「保持/补齐/重设计」前先看这里） |
 

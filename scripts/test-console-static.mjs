@@ -375,6 +375,17 @@ const bareRegressed = Object.entries(bareByPage)
 ok(bareRegressed.length === 0, `页面手写控件只降不升（${bareRegressed.join('；') || '全部在基线内'}）`);
 ok(bareByPage['social-v2'] === 0, `社交二代页全部走字段规格（手写控件 ${bareByPage['social-v2'] ?? '缺失'} 个）`);
 
+// 开关是 <button role="switch">，值在 aria-checked 上：页面没有 createForm 就必须自己 bindSwitches，
+// 否则点击完全没反应、`.checked` 读出来是 undefined（scheduler 真踩过：开关点不动 + 保存把 enabled 写坏）。
+const unboundSwitchPages = [];
+for (const page of consolePageDirs(ROOT)) {
+  const spec = page.fields ? fs.readFileSync(page.fields, 'utf8') : '';
+  if (!/type:\s*'switch'|switchField\(/.test(spec)) continue;
+  const js = page.js ? fs.readFileSync(page.js, 'utf8') : '';
+  if (!/bindSwitches\(|createForm\(/.test(js)) unboundSwitchPages.push(page.id);
+}
+ok(unboundSwitchPages.length === 0, `用开关的页面都绑了点击委托（${unboundSwitchPages.join('、') || '全部已绑'}）`);
+
 const rowHacks = [];
 for (const page of consolePageDirs(ROOT)) {
   if (!page.css) continue;

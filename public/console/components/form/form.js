@@ -153,8 +153,38 @@ export function switchField({ id, label, checked = false, onLabel = '开', offLa
   return shell;
 }
 
-export function fileField({ id, label, accept, hint, warn, danger, docs, maxBytes, required = false }) {
-  const control = `<input${attrs({ id, type: 'file', accept, required })}${base({ id, hint, warn, danger, docs, required })}>`;
+/* 开关（switch 字段）渲染成 <button role="switch">，状态在 aria-checked 上，不在 .checked。
+   页面如果没走 createForm，就必须用下面三个函数读写，否则会像 scheduler 那样：
+   赋值 .checked 只加了个普通属性（视觉不变），读回来是 undefined（保存时把开关写坏）。 */
+export function getSwitch(el) {
+  if (!el) return false;
+  return el.tagName === 'BUTTON' ? el.getAttribute('aria-checked') === 'true' : Boolean(el.checked);
+}
+
+export function setSwitch(el, on) {
+  if (!el) return false;
+  const value = Boolean(on);
+  if (el.tagName !== 'BUTTON') { el.checked = value; return value; }
+  el.setAttribute('aria-checked', value ? 'true' : 'false');
+  const text = el.querySelector('span:last-child');
+  if (text) text.textContent = value ? (el.dataset.onLabel ?? '开') : (el.dataset.offLabel ?? '关');
+  return value;
+}
+
+/** 给一段 DOM 装上开关的点击委托（toggle + 文案）。返回解绑函数。 */
+export function bindSwitches(root) {
+  if (!root) return () => {};
+  const handler = (event) => {
+    const button = event.target.closest?.('[role="switch"][data-field]');
+    if (!button || !root.contains(button) || button.disabled) return;
+    event.preventDefault();
+    setSwitch(button, !getSwitch(button));
+  };
+  root.addEventListener('click', handler);
+  return () => root.removeEventListener('click', handler);
+}
+
+export function fileField({ id, label, accept, hint, warn, danger, docs, maxBytes, required = false }) {  const control = `<input${attrs({ id, type: 'file', accept, required })}${base({ id, hint, warn, danger, docs, required })}>`;
   const extra = maxBytes ? `<p class="field-hint" id="${esc(id)}-max">单个文件最大 ${esc(String(Math.round(maxBytes / 1024)))} KB</p>` : '';
   return fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra: extra });
 }
@@ -453,7 +483,7 @@ export function createForm(root, options = {}) {
   function readOne(name, element) {
     const rule = rules[name] ?? {};
     const type = rule.type ?? inferType(element);
-    if (element.tagName === 'BUTTON') return element.getAttribute('aria-checked') === 'true';
+    if (element.tagName === 'BUTTON') return getSwitch(element);
     if (type === 'array') {
       return control(name).filter((input) => input.type === 'checkbox' && input.checked).map((input) => input.value);
     }
@@ -533,9 +563,7 @@ export function createForm(root, options = {}) {
         continue;
       }
       if (first.tagName === 'BUTTON') {
-        first.setAttribute('aria-checked', value ? 'true' : 'false');
-        const textNode = first.querySelector('span:last-child');
-        if (textNode) textNode.textContent = value ? (first.dataset.onLabel ?? textNode.textContent) : (first.dataset.offLabel ?? textNode.textContent);
+        setSwitch(first, value);
         continue;
       }
       if (first.type === 'checkbox') {
@@ -675,10 +703,7 @@ export function createForm(root, options = {}) {
   }
 
   function toggleSwitch(button) {
-    const next = button.getAttribute('aria-checked') !== 'true';
-    button.setAttribute('aria-checked', next ? 'true' : 'false');
-    const text = button.querySelector('span:last-child');
-    if (text) text.textContent = next ? (button.dataset.onLabel ?? '开') : (button.dataset.offLabel ?? '关');
+    setSwitch(button, !getSwitch(button));
     emit(button.dataset.field);
   }
 

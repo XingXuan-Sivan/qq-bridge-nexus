@@ -189,6 +189,11 @@ form.destroy();
 
 开关（`switch`）**不再走「标签贴控件」的行内变体**：它和输入框共用 148px 标签列，这样两列栅格里的开关才和上下行对齐。只有页头 `.form-inline-bar` 里的开关收成紧凑的 `auto auto`（`.form-inline-bar .field-block--switch > .field-row`）。
 
+开关的**值在 `aria-checked` 上，不在 `.checked`**：渲染出来是 `<button role="switch" aria-checked>`，给 button 赋 `.checked` 只是加了个普通属性（视觉不变），读回来是 `undefined`。页面只有两种正确接法：
+
+- 走 `createForm`：`getValue/setValue` 已经处理好，点击委托也在组件里。
+- 不走 `createForm`（例如整页字段用 `renderFields` 渲染）：必须 `import { bindSwitches, getSwitch, setSwitch }`，在 `init()` 里 `bindSwitches(root)`，读写一律用 `getSwitch` / `setSwitch`。`test-console-static` 会检查「用了开关字段却没绑定」的页面并直接失败。
+
 `.control-row` 是「一行不是字段的东西」的唯一原语：`display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:var(--control-h)`。角色类四个：
 
 - `.control-label`：行内小标签（如「发送目标」），不是字段标签，不占 148px 列。

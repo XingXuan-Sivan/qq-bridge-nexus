@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 二十五个真实踩过的坑
+## 1. 二十六个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -108,6 +108,12 @@
 `scheduler` 的任务编辑器、安全限制网格、任务列表插槽都是 `type:'custom'`，首版没写 `span`，于是被放进 `col-md-6`（实测 607px），编辑器挤成窄条、限制网格只有 4 个 144px 的格子。
 **规则**：`custom` 里装的是「整块内容」（表格、编辑器、网格）就写 `span: 2`；只有真正的小块（一个按钮、一个徽标）才留默认。判据：这块内容自己有没有内部的列布局？有就跨满。
 
+### 1.26 开关不是 checkbox：值在 `aria-checked` 上，不绑委托就点不动
+`switchField()` 渲染的是 `<button type="button" role="switch" aria-checked>`，切换逻辑原本只挂在 `createForm()` 的点击委托里。`scheduler` 整页字段用 `renderFields` 渲染、没调 `createForm`，于是三个后果叠在一起：点击毫无反应；`el.checked = true` 只是给 button 加了个无意义的属性（视觉不变）；`el.checked` 读回来是 `undefined`，保存时把 `enabled` 写成了 `false`——而徽标仍按服务端的真实值显示「运行中」，看起来就像「开关是关的，却还显示运行中」。
+
+**规则**：开关只有两种接法——走 `createForm`（组件内已绑），或在 `init()` 里 `bindSwitches(root)` 并一律用 `getSwitch`/`setSwitch` 读写。`test-console-static` 现在会扫「用了 `type:'switch'` 却没绑定」的页面。判断一个控件是不是开关，看它是不是 `[role="switch"]`，不要看 `id` 像不像布尔。
+
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -138,6 +144,7 @@
 - 页面里每个 class 都能在某个 css 里找到定义吗（没有就是 1.22 的死类名）？
 - 表格：翻到第 2 页、搜一个词之后，`input[data-field]` 的总数还等于总行数吗？
 - 折叠分组（`<details>`）全部展开后，有没有行被裁掉/点不到（1.20 的测试也要先展开）？
+- 页面上每个开关点一下：`aria-checked` 和「开/关」文案是否同步翻转？保存后请求体里的布尔值是否跟着变（不是 `undefined`，也不是永远 `false`）？
 - 页面底部保存栏滚动时会不会盖住表格底栏或最后一行按钮？（已知遗留，见 `STATUS` 第 14 行的待办）
 
 ## 4. 剩余页面的迁移顺序与取舍

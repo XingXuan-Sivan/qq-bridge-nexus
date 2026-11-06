@@ -3,7 +3,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
-import { renderFields } from '../../components/form/form.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
 
@@ -48,15 +48,15 @@ function renderScheduler() {
   const r = schedState;
   if (!r) return;
   const st = r.settings;
-  schedEl('schedEnabled').checked = !!st.enabled;
-  schedEl('schedAllowAiPrivate').checked = !!st.allowAiPrivate;
-  schedEl('schedAllowAiGroup').checked = !!st.allowAiGroup;
+  setSwitch(schedEl('schedEnabled'), st.enabled);
+  setSwitch(schedEl('schedAllowAiPrivate'), st.allowAiPrivate);
+  setSwitch(schedEl('schedAllowAiGroup'), st.allowAiGroup);
   if (document.activeElement !== schedEl('schedTimezone')) tzSet(schedEl('schedTimezone'), st.timezone);
   const pill = schedEl('schedStatePill');
   pill.textContent = st.enabled ? (r.writable === false ? '只读（数据文件读取失败）' : '运行中') : '已关闭';
   pill.className = st.enabled && r.writable !== false ? 'status-badge is-pill ok' : 'status-badge is-pill err';
   schedEl('schedLimits').innerHTML = SCHED_LIMIT_FIELDS.map(([k, label, unit]) => `<div><label for="schedLim_${k}">${esc(label)}（${esc(unit)}）</label><input type="number" id="schedLim_${k}" min="0" value="${esc(st.limits[k])}" title="默认 ${esc(r.defaults?.limits?.[k] ?? '')}"></div>`).join('');
-  schedEl('schedQuietEnabled').checked = !!st.limits.quietEnabled;
+  setSwitch(schedEl('schedQuietEnabled'), st.limits.quietEnabled);
   schedEl('schedQuietStart').value = st.limits.quietStart;
   schedEl('schedQuietEnd').value = st.limits.quietEnd;
   schedEl('schedCount').textContent = `${r.tasks.length} / ${st.limits.maxTasks}`;
@@ -279,6 +279,8 @@ function schedPreview() {
 export function init() {
   // 先按规格把控件渲染出来，后面所有 schedEl(id) 才取得到节点。
   renderSchedFieldGroups();
+  // 开关是 <button role="switch">，点击委托必须显式绑；不绑就点不动（form.js 只在 createForm 里绑）。
+  bindSwitches(document.getElementById('section-scheduler'));
   document.getElementById('schedTimezone').innerHTML = tzOptionsHtml(false);
   document.getElementById('schedTaskTz').innerHTML = tzOptionsHtml(true);
 
@@ -306,10 +308,10 @@ schedEl('schedSave').addEventListener('click', async () => {
 });
 schedEl('schedSettingsSave').addEventListener('click', async () => {
   const r = await api('/api/scheduler/settings', 'POST', {
-    enabled: schedEl('schedEnabled').checked,
+    enabled: getSwitch(schedEl('schedEnabled')),
     timezone: schedEl('schedTimezone').value || 'Asia/Shanghai',
-    allowAiPrivate: schedEl('schedAllowAiPrivate').checked,
-    allowAiGroup: schedEl('schedAllowAiGroup').checked,
+    allowAiPrivate: getSwitch(schedEl('schedAllowAiPrivate')),
+    allowAiGroup: getSwitch(schedEl('schedAllowAiGroup')),
   });
   schedMsg('schedSettingsMsg', r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败'), r.ok);
   if (r.ok) refreshScheduler();
@@ -317,7 +319,7 @@ schedEl('schedSettingsSave').addEventListener('click', async () => {
 schedEl('schedLimitsSave').addEventListener('click', async () => {
   const limits = {};
   for (const [k] of SCHED_LIMIT_FIELDS) { const v = schedEl('schedLim_' + k).value; if (v !== '') limits[k] = Number(v); }
-  limits.quietEnabled = schedEl('schedQuietEnabled').checked;
+  limits.quietEnabled = getSwitch(schedEl('schedQuietEnabled'));
   limits.quietStart = schedEl('schedQuietStart').value.trim() || '00:00';
   limits.quietEnd = schedEl('schedQuietEnd').value.trim() || '07:00';
   const r = await api('/api/scheduler/settings', 'POST', { limits });

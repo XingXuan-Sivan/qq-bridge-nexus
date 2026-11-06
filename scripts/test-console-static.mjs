@@ -292,5 +292,29 @@ const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona
 const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
 ok(rawMsg.length === 0, `没有页面再手写 className='meta ok|err'（${rawMsg.join(', ') || '全部走 setMsg'}）`);
 
+// 基础层（CONSOLE_UI_REWORK.md §3）：栅格顺序、输入外观不按 type 属性、语义令牌齐全。
+const gridIndex = html.indexOf('/console/css/grid.css');
+ok(gridIndex > 0, 'index.html 引入 css/grid.css');
+ok(gridIndex < html.indexOf('/console/css/components.css'), 'grid.css 在 components.css 之前加载（栅格先于组件）');
+const tokensCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'tokens.css'), 'utf8');
+for (const token of ['--space-4', '--radius-md', '--color-surface', '--bp-sm']) {
+  ok(new RegExp(`${token}\\s*:`).test(tokensCss), `tokens.css 定义 ${token}`);
+}
+const gridCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'grid.css'), 'utf8');
+ok(/\.cols \{/.test(gridCss) && /\.col-6 \{/.test(gridCss), 'grid.css 提供 12 列栅格（.cols/.col-*）');
+ok(/@media \(min-width:760px\)/.test(gridCss) && /@media \(min-width:1180px\)/.test(gridCss), 'grid.css 带 sm/lg 两个响应式断点');
+const strictInputRules = [...layerText['components.css'].replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/input\[type=(text|search|password|number)\][^{]*\{[^}]*background:/g)].map((m) => m[0]);
+ok(strictInputRules.length === 0, `基础输入外观不再按 type 属性匹配（残留 ${strictInputRules.length} 处）`);
+ok(/:where\(input:not\(\[type=checkbox\]\)/.test(layerText['components.css']), '基础输入外观改为元素级 :where() 选择器');
+const barePageInputs = [];
+for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
+  const file = path.join(ROOT, 'public', 'console', 'pages', id, 'page.html');
+  if (!fs.existsSync(file)) continue;
+  for (const m of fs.readFileSync(file, 'utf8').matchAll(/<input\b[^>]*>/g)) {
+    if (!/\btype="/.test(m[0])) barePageInputs.push(`${id}: ${m[0].slice(0, 60)}`);
+  }
+}
+ok(barePageInputs.length === 0, `页面里的 <input> 都写明 type（缺 ${barePageInputs.length} 处：${barePageInputs.slice(0, 3).join(' | ')}）`);
+
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

@@ -5,6 +5,12 @@
 
 ## 未发布
 
+### 变更：控制台基础层（语义令牌、12 列栅格、输入外观改元素级）
+- `tokens.css` 新增语义别名与 `--space-1..8`/`--radius-md`/`--elevation-*`/`--text-*`/`--bp-*`；原 163 个令牌一个未改，别名用 `var()` 指向它们，深色主题自动跟随。
+- 新增 `css/grid.css`：`.cols` + `.col-1..12` + `.col-{sm,md,lg,xl}-*` + `.stack`/`.cluster`，断点与现有 760/900/1180/1500 对齐；`index.html` 中排在 `components.css` 之前。
+- 基础输入外观从 `input[type=text]` 一串改为 `:where(input:not([type=checkbox]):not([type=radio])…)`：漏写 `type` 不再退回浏览器默认描边（改名弹窗就是受害者），且特异性为 0，组件类可正常覆盖。
+- `scripts/test-console-static.mjs` 增 8 条断言（栅格顺序、语义令牌、`:where` 选择器、页面 `<input>` 必须写 `type`）；`console-ui-fixture` 与 `console-source` 同步 `grid.css`。
+
 ### 变更：控制台组件目录化，搜索框外观收口到组件
 - 新增 `public/console/components/<name>/{<name>.js,<name>.css}`：`message` / `modal` / `table` 从 `js/components/` 与 `css/components.css` 迁入，js 与 css 同住；`index.html` 逐个 `<link>` 组件样式，`src/bridge.js` 的静态放行加 `components`。
 - 新增 `search-box` 组件：`searchBoxHtml()` / `bindSearchBox()`；6 处搜索框统一成 `type="search" class="search-box"`，删掉 `components.css` 里的 `.search-wrap input,input.search-box` 组合规则。

@@ -124,6 +124,12 @@ form.destroy();
 - 错误：`role="alert"` + `aria-live="polite"`；聚焦首个错误字段。
 - 焦点环沿用 `--accent-ring`，不允许为了「好看」去掉 `:focus-visible`。
 
+### 组件选择规则（2026-11-06 定）
+
+- 单个布尔状态（启用 / 允许 / 自动 / 关闭某能力）一律用 `switchField`：`role="switch"`，文案「开 / 关」，与输入框同高。
+- 需要用户确认风险的勾选（「我已了解」「删除后不可恢复」）保留 `checkboxField`，语义是确认不是开关。
+- 多选集合用 `checkboxGroup`；单选集合用 `radioGroup`（卡片样式给互斥的模式选择）。
+- 同排字段靠 `.cols` + `.col-*` 排布，控件区最小高度 40px、垂直居中，保证基线一致；长文本/提示词用 `span: 2` 占整行。
 ## 5. 现有复杂表单的迁移
 
 按控件量排序（2026-11-06 实测）：`social-v2` 130（含 53 个 checkbox）、`slang` 36、`overview` 32、`social-v1` 32、`scheduler` 28、`persona` 27，其余 ≤16。

@@ -1,6 +1,28 @@
 // 二代仿真配置的字段规格：条目即字段，渲染由 components/form 的 renderFields 统一负责。
 // 由 page.html 的旧 .row 结构一次性抽取而来，后续改字段请改这里，不要再往 HTML 里手写控件。
 export const V2_FIELDS = {
+  "header": {
+    "label": "顶部开关与预设",
+    "fields": [
+      {
+        "name": "v2Enabled",
+        "type": "switch",
+        "label": "启用二代模式"
+      },
+      {
+        "name": "v2AgentPreset",
+        "type": "text",
+        "label": "agentPreset",
+        "placeholder": "qq-chat-v2"
+      },
+      {
+        "name": "v2ProvideRecommendations",
+        "type": "switch",
+        "label": "提供推荐值给 AI",
+        "hint": "关闭后 qq_get_prompt 不再返回推荐值，AI 完全自主判断。"
+      }
+    ]
+  },
   "2": {
     "label": "唤醒推荐值（仅参考，AI 可不遵守）",
     "fields": [
@@ -21,7 +43,7 @@ export const V2_FIELDS = {
       },
       {
         "name": "v2RecDefaultInfinite",
-        "type": "checkbox",
+        "type": "switch",
         "label": "默认下一次唤醒：无限期（永久）"
       },
       {
@@ -53,22 +75,22 @@ export const V2_FIELDS = {
       },
       {
         "name": "v2RecAt",
-        "type": "checkbox",
+        "type": "switch",
         "label": "推荐 @ 唤醒"
       },
       {
         "name": "v2RecName",
-        "type": "checkbox",
+        "type": "switch",
         "label": "推荐名字唤醒"
       },
       {
         "name": "v2RecQuestion",
-        "type": "checkbox",
+        "type": "switch",
         "label": "推荐提问唤醒"
       },
       {
         "name": "v2RecPoke",
-        "type": "checkbox",
+        "type": "switch",
         "label": "推荐拍一拍唤醒"
       }
     ]
@@ -121,7 +143,7 @@ export const V2_FIELDS = {
       },
       {
         "name": "v2PreSleepWaitEnabled",
-        "type": "checkbox",
+        "type": "switch",
         "label": "启用沉睡前强制等待"
       },
       {
@@ -138,7 +160,7 @@ export const V2_FIELDS = {
     "fields": [
       {
         "name": "v2BurstEnabled",
-        "type": "checkbox",
+        "type": "switch",
         "label": "允许多条发送"
       },
       {
@@ -263,7 +285,7 @@ export const V2_FIELDS = {
     "fields": [
       {
         "name": "v2ProactiveEnabled",
-        "type": "checkbox",
+        "type": "switch",
         "label": "启用主动机会"
       },
       {
@@ -299,7 +321,7 @@ export const V2_FIELDS = {
     "fields": [
       {
         "name": "v2StickerEnabled",
-        "type": "checkbox",
+        "type": "switch",
         "label": "启用表情包体系"
       },
       {
@@ -324,12 +346,12 @@ export const V2_FIELDS = {
       },
       {
         "name": "v2StickerIncludePrompt",
-        "type": "checkbox",
+        "type": "switch",
         "label": "在 prompt/唤醒里附带表情摘要"
       },
       {
         "name": "v2StickerCollectEnabled",
-        "type": "checkbox",
+        "type": "switch",
         "label": "AI 收藏表情"
       },
       {
@@ -387,7 +409,7 @@ export const V2_FIELDS = {
       },
       {
         "name": "v2FeedbackNotifyOwner",
-        "type": "checkbox",
+        "type": "switch",
         "label": "错误级通知 owner"
       }
     ]

@@ -1,14 +1,7 @@
       <h2>二代仿真模式（reserved2）控制台</h2>
       <div class="meta">配置保存后写入 config.json 并热更新；工具开关决定 AI 能调用哪些工具。已接入开关的工具在<b>重启 DSH 后</b>会从工具清单里彻底消失（少一份 schema 就少一份每次请求的 token）；发送类等跨模式共用的工具只在调用时被桥接拒绝，清单不变。</div>
 
-      <div class="row u-mt-10">
-        <label class="u-flex-1">启用二代模式</label><input class="u-w-auto" type="checkbox" id="v2Enabled">
-        <label class="u-flex-1">agentPreset</label><input class="u-maxw-200" type="text" id="v2AgentPreset" placeholder="qq-chat-v2">
-      </div>
-      <div class="row u-mt-6">
-        <label class="u-flex-1">提供推荐值给 AI</label><input class="u-w-auto" type="checkbox" id="v2ProvideRecommendations">
-        <span class="meta u-flex-2">关闭后 qq_get_prompt 不再返回推荐值，AI 完全自主判断。</span>
-      </div>
+      <div class="u-mt-10" data-v2-fields="header"></div>
       <div class="row u-mt-10">
         <button id="v2PauseBtn" class="danger">暂停二代 AI</button>
         <button id="v2ResumeBtn">恢复二代 AI</button>

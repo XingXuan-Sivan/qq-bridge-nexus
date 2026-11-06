@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 变更：表单开关统一为 switch，同排字段对齐
+- 单个布尔开关从复选框换成 `switchField`（`role="switch"` + 开/关文案），social-v2 共 12 处；确认类复选框（如「我已了解风险」）仍保留复选框语义。
+- 顶部「启用二代模式 / 提供推荐值 / agentPreset」并入字段规格（`V2_FIELDS.header`），不再手写行结构。
+- `.field-switch` 高度对齐输入框（40px）、`.form-cols .field-control` 垂直居中，同排字段基线一致。
+- 开关态同步：`setCheck()` 识别 `role="switch"`，写 `aria-checked` 与开/关文案（此前写 `checked`，对按钮无效，导致「启用二代模式」显示为关）。
 ### 变更：二代仿真配置页改为「字段规格 + 统一渲染」
 - 新增 `pages/social-v2/fields.js`（`V2_FIELDS`：8 组、57 字段），`page.html` 只保留分组外壳与说明；字段由 `renderFields(host, spec, { columns: 2 })` 渲染，默认两列、长文本用 `span: 2` 占整行。
 - 删除 `enhanceForm`（不再有页面使用）；取值统一 `fv/fc`（内核优先、DOM 兜底），写回仍落 DOM。

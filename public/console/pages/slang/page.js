@@ -4,7 +4,8 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
+import { bindSearchBox } from '../../components/search-box/search-box.js';
 
 let slangEntriesCache = [];
 let slangSelected = new Set();
@@ -251,9 +252,7 @@ function loadSlangConfig() {
 
 export function init() {
   document.querySelectorAll('.slang-tab').forEach((btn) => btn.addEventListener('click', () => setSlangTab(btn.dataset.slangTab)));
-  document.getElementById('slangSearchCand').addEventListener('input', renderSlangPanel);
-  document.getElementById('slangSearchConfirmed').addEventListener('input', renderSlangPanel);
-  document.getElementById('slangSearchRejected').addEventListener('input', renderSlangPanel);
+  for (const id of ['slangSearchCand', 'slangSearchConfirmed', 'slangSearchRejected']) bindSearchBox(id, renderSlangPanel);
   document.getElementById('slangLimitCand').addEventListener('change', renderSlangPanel);
   document.getElementById('slangLimitConfirmed').addEventListener('change', renderSlangPanel);
   document.getElementById('slangLimitRejected').addEventListener('change', renderSlangPanel);

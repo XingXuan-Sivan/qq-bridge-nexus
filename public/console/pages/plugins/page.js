@@ -4,7 +4,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 
 // ── 桥接插件 ────────────────────────────────────────────────────────────────
 // 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。

@@ -3,7 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { setMsg } from '../../js/components/message.js';
+import { setMsg } from '../../components/message/message.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
 // 为什么不用图表库：控制台 CSP 是 default-src 'self'，不能引外部脚本；

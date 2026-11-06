@@ -1,6 +1,6 @@
 import { api } from '../../js/api.js';
 import { onPageRefresh } from '../../js/router.js';
-import { setMsg } from '../../js/components/message.js';
+import { setMsg } from '../../components/message/message.js';
 
 const $ = (id) => document.getElementById(id);
 

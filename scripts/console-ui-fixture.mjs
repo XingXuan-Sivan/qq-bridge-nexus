@@ -478,6 +478,19 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
     };
     await walkJs(jsRoot);
+    // components/ 下的组件把 js 与 css 放在同一目录（docs/CONSOLE_UI.md）：两类都要按真实路径提供。
+    const componentRoot = resolve(dir, 'components');
+    const walkComponents = async (abs, rel = '') => {
+      for (const entry of await readdir(abs, { withFileTypes: true }).catch(() => [])) {
+        const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) { await walkComponents(resolve(abs, entry.name), relPath); continue; }
+        const type = entry.name.endsWith('.js') ? 'text/javascript; charset=utf-8'
+          : entry.name.endsWith('.css') ? 'text/css; charset=utf-8' : null;
+        if (!type) continue;
+        assets.set(`/console/components/${relPath}`, { body: await readFile(resolve(abs, entry.name)), type });
+      }
+    };
+    await walkComponents(componentRoot);
     // 图片与字体（favicon.svg、以后的自托管字体）：按真实路径提供，缺了会 404 打断资源断言。
     const binaryTypes = { svg: 'image/svg+xml', png: 'image/png', ico: 'image/x-icon', woff2: 'font/woff2', woff: 'font/woff' };
     const walkBinary = async (abs, urlBase, rel = '') => {

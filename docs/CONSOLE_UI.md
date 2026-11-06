@@ -2,7 +2,7 @@
 
 面向改 `public/console/` 的人。目标是让「同一个控件在五个地方长得不一样」不再发生，并且新增页面时先想「用哪个组件」，而不是先写一段 HTML。
 
-> 状态：**约定已定，迁移进行中**（2026-11-06）。目录与组件规范按本文执行；`components/` 目录与搜索框组件是**计划项**，见路线图 §8.9，尚未落地。
+> 状态：**组件目录已落地**（2026-11-06）：`components/{message,modal,table,search-box}/` 已迁移完成，`/console/components/` 已放行；后续新增控件按本文第 2 节的六条规则走。
 
 ---
 
@@ -17,7 +17,7 @@
 | `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
-| `public/console/js/components/*.js` | 现有组件（`message` / `modal` / `table`），**样式却散在 `css/components.css`** |
+| `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住（`message` / `modal` / `table` / `search-box`） |
 | `public/console/css/*.css` | `tokens`（设计令牌）→ `base` → `layout` → `components` → `utilities`，**顺序即层叠顺序** |
 | `public/console/pages/<name>/` | 页面片段：`page.html` + `page.js` + `page.css`，由路由按需加载 |
 
@@ -36,7 +36,6 @@ public/console/
 │  ├─ layout.css        # 骨架：侧栏、顶栏、工作区、滚动区
 │  └─ utilities.css     # 工具类（u-*），只做布局，不做外观
 ├─ components/          # 组件：一个组件一个目录，js 与 css 同住
-│  ├─ README.md         # 本约定的简版（新增组件前先看）
 │  ├─ message/{message.js,message.css}
 │  ├─ modal/{modal.js,modal.css}
 │  ├─ table/{table.js,table.css}
@@ -61,7 +60,7 @@ public/console/
 - 全局层：`index.html` 里按 `tokens → base → layout → utilities` 的顺序 `<link>`（顺序不能改）。
 - 组件层：在 `index.html` 里逐个 `<link href="/console/components/<name>/<name>.css">`，放在全局层之后、页面片段之前。**不做 `@import` 聚合**：串行加载更慢，出错时也更难定位是哪一层。
 - 页面层：由 `router.hydratePage()` 动态插入 `pages/<name>/page.css`，天然最后生效。
-- 服务端：`src/http/static.mjs` 的静态白名单目前只放行 `/console/{js,css,img,fonts,pages}`，**新增 `/console/components/` 需要改这一处**（属于服务端改动，改前先确认安全边界：仍然只读、仍然先鉴权后存在性、仍然拒绝路径穿越）。
+- 服务端：放行规则在 `src/bridge.js` 的 `GET /console/(css|components|js|img|fonts|pages|gate)/` 那一行（`src/http/static.mjs` 本身没有目录白名单，只校验前缀、穿越、符号链接与 MIME）。新增资源子目录时改这一处正则即可，安全边界不变。
 
 ---
 
@@ -71,13 +70,14 @@ public/console/
 
 **根因**（2026-11-06 定位）：页面里的五个搜索框写的是 `<input class="u-maxw-240 search-box">`，**没有 `type` 属性**；而输入框的基础外观规则是 `input[type=text],input[type=search],…`（`css/components.css` 第 137 行）。`[type]` 不匹配 → 基础规则整条不生效 → 只剩浏览器默认描边，于是出现白边、圆角与内距都和全局搜索不同。全局搜索带 `type="search"`，所以它才是「正确」的那一个。
 
-**做法**（计划，路线图 §8.9）：
+**做法**（2026-11-06 已实现）：
 
-1. 新建 `components/search-box/search-box.js`：导出 `searchBoxHtml({ id, placeholder, value, label, className })`，固定产出 `type="search"` + `class="searchbox"` + `aria-label`；再导出 `bindSearchBox(el, { onInput, debounceMs })`。
-2. 新建 `components/search-box/search-box.css`：`.searchbox` **自包含**——背景、描边、圆角、内距、字号、placeholder 色、focus 环全部显式声明，不依赖 `input[type=…]`，也不依赖文件顺序。
-3. 替换全部使用点：`index.html#consoleSearch`、`pages/behaviors`、`pages/sessions`、`pages/slang`（三个）。
-4. 删掉 `css/components.css` 里的 `.search-wrap input,input.search-box` 组合规则与 `.search-box` 残留；`.search-wrap` 只保留布局（宽度、定位）。
-5. `scripts/test-console-static.mjs` 加断言：不允许再手写 `class="… search-box"`；搜索输入必须带 `type="search"` 与 `class="searchbox"`。
+1. `components/search-box/search-box.js`：`searchBoxHtml({ id, placeholder, value, label, className })` 固定产出 `type="search"` + `class="search-box"` + `aria-label`；`bindSearchBox(input, onQuery, { onEnter })` 统一绑定 `input` / `search` / Enter / Esc。
+2. `components/search-box/search-box.css`：`input.search-box` **自包含**——背景、描边、圆角、内距、字号、placeholder、Safari 原生装饰全部显式声明，不依赖 `input[type=…]`，也不依赖文件顺序。
+3. 全部使用点已替换：`index.html#consoleSearch`、`pages/behaviors`、`pages/sessions`、`pages/slang`（三个），并统一改成 `type="search"`。
+4. `css/components.css` 里的 `.search-wrap input,input.search-box` 组合规则已删除；`.search-wrap` 只保留布局。
+5. **宽度陷阱**：基础输入规则的 `input[type=search]`（特异性 0,1,1）带 `max-width:100%`，会盖掉通用工具类 `.u-maxw-240`（0,1,0）。所以窄版写成组件自己的 `input.search-box--w240`（同样 0,1,1 且更晚），不要用工具类控制搜索框宽度。
+6. `scripts/test-console-static.mjs` 断言：组件目录存在、`input.search-box` 是唯一定义处、`components.css` 不再重复、页面内 5 个搜索框都带 `type="search"`、全局搜索框走 `search-box` 类。
 
 **判据**：1440 宽下三页与右上角的搜索框在描边、圆角、高度、字号上一致（截图比对）；`node scripts/test-console-static.mjs` 通过；把 `type` 或 class 删掉时断言能红。
 

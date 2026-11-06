@@ -1,0 +1,18 @@
+/* 静态表格（tableHtml）：滚动容器 + 固定表头。 */
+.tool-log-table {
+  overflow: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  margin-top: 12px;
+  max-height: 500px;
+}
+.tool-log-table table {
+  min-width: 1000px;
+  table-layout: fixed;
+}
+.tool-log-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-hover);
+  z-index: 1;
+}

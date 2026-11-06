@@ -4471,7 +4471,8 @@ async function main() {
       // 只放行资源子目录；页面本身（/ 与 /console/）仍走下面的令牌校验。
       // gate/ 是 401 门页自己的样式/脚本：页面被拒时浏览器仍要能取到它们，否则又会白屏。
       // 注意门页是整页文档，不能放进 pages/——那里会被 console-source 拼进控制台源码。
-      if (req.method === 'GET' && /^\/console\/(?:css|js|img|fonts|pages|gate)\//.test(url.pathname)) {
+      // components/ 是组件目录（js 与 css 同住），按 docs/CONSOLE_UI.md 的约定放行。
+      if (req.method === 'GET' && /^\/console\/(?:css|components|js|img|fonts|pages|gate)\//.test(url.pathname)) {
         serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
         return;
       }

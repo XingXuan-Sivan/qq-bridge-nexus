@@ -160,6 +160,11 @@ for (const name of layers) {
   layerText[name] = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 }
 ok(!fs.existsSync(path.join(cssDir, 'app.css')), 'app.css 已删除（拆成 base/layout/components 三件）');
+// 组件样式与 js 同住在 components/<name>/，从 components.css 拆出（docs/CONSOLE_UI.md）。
+const modalCssPath = path.join(ROOT, 'public', 'console', 'components', 'modal', 'modal.css');
+const modalCss = fs.existsSync(modalCssPath) ? fs.readFileSync(modalCssPath, 'utf8') : '';
+ok(/\.modal-overlay \{/.test(modalCss) && !/\.modal-overlay \{/.test(layerText['components.css']),
+  'modal 样式只在 components/modal/modal.css，components.css 不再重复');
 ok(!/\[data-theme="dark"\] \{/.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css'])
   && !/^:root \{/m.test(layerText['base.css'] + layerText['layout.css'] + layerText['components.css']),
 '三个分层文件都不持有设计令牌（令牌只在 tokens.css）');
@@ -187,7 +192,7 @@ ok(ccMissing.length === 0, `控制中心引用的 ${ccUsed.length} 个令牌都�
 ok(/^\* \{\n\s+box-sizing:border-box/m.test(layerText['base.css']) && /^html \{/m.test(layerText['base.css']),
   'base.css 承载盒模型重置与 html/body 基线');
 ok(/\.sidebar \{/.test(layerText['layout.css']) && /\.workspace \{/.test(layerText['layout.css']), 'layout.css 承载三容器外壳');
-ok(/\.card \{/.test(layerText['components.css']) && /\.modal-overlay \{/.test(layerText['components.css']), 'components.css 承载卡片与弹窗');
+ok(/\.card \{/.test(layerText['components.css']) && /\.modal-overlay \{/.test(modalCss), 'components.css 承载卡片，弹窗样式同住在 components/modal/');
 const linkOrder = ['tokens.css', 'base.css', 'layout.css', 'components.css', 'utilities.css']
   .map((name) => html.indexOf(`<link rel="stylesheet" href="/console/css/${name}">`));
 ok(linkOrder.every((at) => at >= 0) && linkOrder.every((at, i) => i === 0 || at > linkOrder[i - 1]),
@@ -252,21 +257,36 @@ ok(/document\.body\.appendChild\(overlay\)/.test(pluginsModule), '插件详情�
 ok(/wireModal\(document\.getElementById\('pluginDetailOverlay'\)/.test(pluginsModule), '插件详情弹窗走 components/modal.js 的 wireModal（Esc / 点遮罩统一）');
 
 console.log('## 组件层（3.2）');
-const componentDir = path.join(ROOT, 'public', 'console', 'js', 'components');
-for (const name of ['message.js', 'table.js', 'modal.js']) {
-  ok(fs.existsSync(path.join(componentDir, name)), `组件 ${name} 存在`);
+const componentDir = path.join(ROOT, 'public', 'console', 'components');
+for (const name of ['message', 'table', 'modal', 'search-box']) {
+  ok(fs.existsSync(path.join(componentDir, name, `${name}.js`)), `组件 ${name}.js 在 components/${name}/`);
+  ok(fs.existsSync(path.join(componentDir, name, `${name}.css`)), `组件 ${name}.css 与 js 同住 components/${name}/`);
 }
-const messageModule = fs.readFileSync(path.join(componentDir, 'message.js'), 'utf8');
+const messageModule = fs.readFileSync(path.join(componentDir, 'message', 'message.js'), 'utf8');
 ok(/export function setMsg\(target, text, kind = 'info'\)/.test(messageModule), 'setMsg 收口「文案 + 配色」');
-const modalModule = fs.readFileSync(path.join(componentDir, 'modal.js'), 'utf8');
+const modalModule = fs.readFileSync(path.join(componentDir, 'modal', 'modal.js'), 'utf8');
 for (const fn of ['openModal', 'closeModal', 'isModalOpen', 'wireModal']) {
   ok(new RegExp(`export function ${fn}\\(`).test(modalModule), `modal.js 导出 ${fn}`);
 }
 const uiModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'ui.js'), 'utf8');
 ok(!/function (simpleTable|renderTable)\(/.test(uiModule), 'ui.js 不再自带表格生成器（已搬到 components/table.js）');
+// 搜索框：外观只有一处（components/search-box），页面里每个搜索输入都必须写明 type="search"。
+const searchBoxCss = fs.readFileSync(path.join(componentDir, 'search-box', 'search-box.css'), 'utf8');
+ok(/input\.search-box \{/.test(searchBoxCss), 'search-box.css 用 input.search-box 定义外观（不依赖 type 属性选择器）');
+ok(!/\.search-wrap input\s*,?/.test(layerText['components.css']) && !/input\.search-box \{/.test(layerText['components.css']),
+  'components.css 不再重复定义搜索框外观');
+const searchInputs = [];
+for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) {
+  const file = path.join(ROOT, 'public', 'console', 'pages', id, 'page.html');
+  if (!fs.existsSync(file)) continue;
+  for (const m of fs.readFileSync(file, 'utf8').matchAll(/<input[^>]*search-box[^>]*>/g)) searchInputs.push({ id, tag: m[0] });
+}
+ok(searchInputs.length === 5, `页面内搜索框共 5 个（实际 ${searchInputs.length}）`);
+ok(searchInputs.every(({ tag }) => /type="search"/.test(tag)), `页面内搜索框都写明 type="search"（${searchInputs.filter(({ tag }) => !/type="search"/.test(tag)).map(({ id }) => id).join(', ') || '全部正确'}）`);
+ok(/class="[^"]*search-box/.test(html.match(/<input id="consoleSearch"[^>]*>/)?.[0] ?? ''), '全局搜索框也走 search-box 组件类');
 for (const id of ['skills', 'mcp', 'behaviors']) {
   const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
-  ok(/from '\.\.\/\.\.\/js\/components\/table\.js'/.test(module) && /tableHtml\(/.test(module), `${id} 页改用 components/table.js 的 tableHtml`);
+  ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的 tableHtml`);
 }
 const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
 const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));

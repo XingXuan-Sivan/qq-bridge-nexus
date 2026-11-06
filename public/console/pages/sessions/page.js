@@ -5,7 +5,8 @@
 // 会话 key 形如 `qq:group:123`、`qq:private:456`：平台前缀用于筛选，页面不假设只有一个平台。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
+import { bindSearchBox } from '../../components/search-box/search-box.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 
 const MODE_LABEL = {
@@ -234,7 +235,7 @@ export function init() {
   document.getElementById('pendingRefresh')?.addEventListener('click', refreshPending);
   document.getElementById('sessionsPlatform')?.addEventListener('change', renderSessions);
   document.getElementById('sessionsKind')?.addEventListener('change', renderSessions);
-  document.getElementById('sessionsSearch')?.addEventListener('input', renderSessions);
+  bindSearchBox('sessionsSearch', renderSessions);
   document.getElementById('sessionRenameSave')?.addEventListener('click', saveRename);
   document.getElementById('sessionRenameCancel')?.addEventListener('click', () => closeModal(overlay));
   document.getElementById('sessionRenameInput')?.addEventListener('keydown', (event) => {

@@ -3,7 +3,7 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { setMsg } from '../../js/components/message.js';
+import { setMsg } from '../../components/message/message.js';
 
 // ── 人格管理 ────────────────────────────────────────────────────────────────
 // 人格提示词 = roles/<名称>.md，桥接每条消息注入，保存即生效。

@@ -1,0 +1,9 @@
+/* 操作反馈（setMsg）：文案行与三档配色。配色规则自带，不依赖组件外 .ok/.err 的顺序。 */
+.meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.meta.ok { color: var(--ok); }
+.meta.err { color: var(--err); }

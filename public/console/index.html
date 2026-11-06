@@ -11,6 +11,11 @@
 <link rel="stylesheet" href="/console/css/base.css">
 <link rel="stylesheet" href="/console/css/layout.css">
 <link rel="stylesheet" href="/console/css/components.css">
+<!-- 组件自带样式：与 js 同住在 components/<name>/，顺序在通用样式之后、工具类之前。 -->
+<link rel="stylesheet" href="/console/components/modal/modal.css">
+<link rel="stylesheet" href="/console/components/message/message.css">
+<link rel="stylesheet" href="/console/components/search-box/search-box.css">
+<link rel="stylesheet" href="/console/components/table/table.css">
 <link rel="stylesheet" href="/console/css/utilities.css">
 </head>
 <body>
@@ -48,7 +53,7 @@
     </header>
     <main id="mainContent" tabindex="-1">
       <div class="page-heading"><div><div class="eyebrow">QQ BRIDGE / CONSOLE</div><h1 id="pageTitle">让每一次连接，都自然发生。</h1><p id="pageDescription">掌握桥接状态，轻松管理你的 QQ 智能伙伴。</p></div>
-        <div class="search-wrap"><label class="sr-only" for="consoleSearch">搜索功能或参数</label><input id="consoleSearch" type="search" placeholder="搜索功能或参数…" autocomplete="off" aria-controls="searchResults" aria-expanded="false"><div id="searchResults" class="search-results" hidden></div></div>
+        <div class="search-wrap"><label class="sr-only" for="consoleSearch">搜索功能或参数</label><input id="consoleSearch" type="search" class="search-box" placeholder="搜索功能或参数…" autocomplete="off" aria-controls="searchResults" aria-expanded="false"><div id="searchResults" class="search-results" hidden></div></div>
       </div>
       <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
       <div class="grid">

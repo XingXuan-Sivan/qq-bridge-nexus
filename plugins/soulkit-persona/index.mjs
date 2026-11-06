@@ -27,10 +27,21 @@ function clampTimeout(raw) {
   return Math.min(5000, Math.max(200, Math.trunc(n)));
 }
 
+// soulkit 的绑定按 `<group|private>:<id>` 存（它只服务 QQ，平台由 `platform` 参数表达），
+// 而桥接的会话 key 是 `<platform>:<kind>:<id>`。这里只做一次形态转换：
+// 认得出新形态就剥掉平台前缀，认不出（旧形态或别处传进来的自定义 key）就原样透传。
+const PLATFORM_KEY_RE = /^[a-z][a-z0-9-]{0,15}:(group|private):(\d+)$/;
+
+function soulkitKey(key) {
+  const raw = String(key ?? '');
+  const m = PLATFORM_KEY_RE.exec(raw);
+  return m ? `${m[1]}:${m[2]}` : raw;
+}
+
 function cardUrl(baseUrl, key) {
   const url = new URL(`${baseUrl}/api/persona/card`);
   url.searchParams.set('platform', 'qq');
-  url.searchParams.set('key', key);
+  url.searchParams.set('key', soulkitKey(key));
   return url.href;
 }
 

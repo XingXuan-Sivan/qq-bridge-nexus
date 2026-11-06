@@ -43,10 +43,39 @@
 | 单个复选 | `checkboxField()` | `id` `label` | `hint` |
 | 开关 | `switchField()` | `id` `label` | `onLabel` `offLabel` `hint`（`role="switch"`，键盘可切） |
 | 文件 | `fileField()` | `id` `label` | `accept` `maxBytes`（插件安装用） |
+| 日期 | `dateField()` | `id` `label` | `min` `max` `valueFormat`（默认 `YYYY-MM-DD`） |
+| 时间 | `timeField()` | `id` `label` | `step`（分钟粒度，默认 1）`valueFormat`（默认 `HH:mm`） |
+| 日期时间 | `datetimeField()` | `id` `label` | `min` `max` |
+| 时间区间 | `timeRangeField()` | `id` `label` | `from` `to` `allowEqual`（默认 true）——静默时段/免打扰就是它 |
 | 只读展示 | `readonlyField()` | `id` `label` `value` | `copy`（一键复制） |
 | 动作区 | `formActions()` | — | `primary` `secondary[]` `sticky` |
 
 所有工厂返回 **HTML 字符串**（与现有 `tableHtml` 一致），插入后再由 `createForm()` 绑定事件；不引入模板引擎。
+
+### 2.1 日期与时间
+
+用原生 `<input type="date|time|datetime-local">`，**不自绘日历/滚轮**：零构建、移动端与键盘可访问性原生最好、无第三方依赖。代价是弹层外观由浏览器控制，所以只统一「输入框外观 + 值格式 + 校验」，不假装能改弹层。
+
+- **值格式**：日期只接受 `YYYY-MM-DD`；时间只接受 `HH:mm`（`step` 只影响选择粒度，秒位一律丢弃）；空值是 `null`，不是空串。内部一律存字符串，提交原样发（后端现有字段就是这种形态）。
+- **时区**：全部按**北京时间**（Asia/Shanghai）解释与展示，字段说明里写明；不做时区下拉——当前所有配置都是本地时间。
+- **快捷项**（`quick: true`，可选）：日期给「今天 / 明天 / +7 天」，时间给「现在 / 00:00 / 08:00 / 22:00」。
+- **区间**：`timeRangeField()` 渲染两个输入 + 「到」，支持跨零点（`to < from` 表示次日）；校验 `after: 'quietFrom'`，跨零点场景用 `allowOvernight: true` 放行。静默时段、免打扰、定时任务的执行窗口都用它。
+- **校验**：`type: 'date'|'time'` 负责格式，`min`/`max` 负责范围，`before`/`after` 负责跨字段先后。
+
+### 2.2 字段上的说明与警告
+
+每个字段可以带四类注解，统一由工厂渲染，不允许页面手写文案块：
+
+| 注解 | 用途 | 视觉 | 无障碍 |
+| --- | --- | --- | --- |
+| `hint` | 解释「为什么/怎么生效」，例如「按北京时间；留空表示不限制」 | 灰色小字 `.field-hint` | 并入 `aria-describedby` |
+| `warn` | 会导致不生效/多花钱的坑，例如「超过上限的回复会被静默丢弃，不提示用户」 | 黄色 `.field-warn`（`--warn-bg/-border/-fg`） | `role="note"` |
+| `danger` | 不可逆或安全相关，例如「清空后本地记忆不可恢复」 | 红色 `.field-danger` | `role="alert"`（仅页面加载即需立刻注意时） |
+| `docs` | 指向文档/说明页的链接 | 行内链接 | 正常 `<a>` |
+
+块级提示用 `formCallout({ tone: 'info'|'warn'|'danger', title, body })` 渲染 `.form-callout`，放在分区顶部或一组字段之前（例如「以下参数只对二代仿真的群聊生效」）。
+
+**文案规范**：`hint` 写机制与来源，不写「请填写」这类废话；`warn` 必须同时写**触发条件**与**后果**；`danger` 必须写清**不可恢复的是什么**。
 
 ## 3. 内核 API
 
@@ -115,7 +144,7 @@ form.destroy();
 | 阶段 | 内容 | 工时 | 产出判据 |
 | --- | --- | --- | --- |
 | 1 | 令牌语义层 + `grid.css` + input 选择器改元素级（`CONSOLE_UI_REWORK.md` §3） | 0.5 天 | 三档截图无视觉变化；`test-console-static`/`test-console-ui` 全过 |
-| 2 | `components/form/` 内核（取值/校验/依赖/提交态）+ 12 个控件工厂 + 静态断言 | 2 天 | 单独的表单演示页（临时，不入导航）能把 12 种控件、条件显示、跨字段校验都跑通 |
+| 2 | `components/form/` 内核（取值/校验/依赖/提交态）+ 16 个控件工厂 + 字段注解（说明/警告/危险/文档）+ 静态断言 | 2 天 | 临时演示页能把 16 种控件、日期与时间区间、字段注解、条件显示、跨字段校验全部跑通 |
 | 3 | `social-v2` 试点：第一步只换壳（请求体逐字节一致） | 1.5 天 | 25 条契约不变；`social-v2` 页三档截图一致；保存后 `/api/socialV2/config` 请求体与改前 diff 为空 |
 | 4 | `social-v2` 第二步：条件显示 + 字段校验 + 脏值提示 | 1 天 | 关掉条件字段后不参与提交；错误文案人话；离开前有提示 |
 | 5 | `overview` / `scheduler` / `persona` / `social-v1` / `slang` 顺序迁移 | 1.5–2 天 | 每页迁完跑一次契约与截图 |

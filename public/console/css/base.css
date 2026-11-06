@@ -88,12 +88,21 @@ a {
 p {
   margin:0
 }
+/* 按钮与输入框同高：高度来自 --control-h，内边距只负责左右。
+   以前用 padding:9px 撑高（再继承 14px 字号），比 input 高 4–5px，行内对不齐。 */
 button {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  height:var(--control-h,40px);
+  padding:0 var(--control-px-btn,15px);
   background:var(--surface);
   border:1px solid var(--border);
   border-radius:9px;
   color:var(--text);
-  padding:9px 15px;
+  line-height:1.2;
+  white-space:nowrap;
   transition:background .15s,border-color .15s,color .15s
 }
 button:hover {
@@ -114,8 +123,9 @@ button.danger:hover {
   background:var(--danger-hover-bg)
 }
 button.small {
+  height:var(--control-h-sm,32px);
   font-size:12px;
-  padding:7px 11px
+  padding:0 11px
 }
 button.planned {
   border-style:dashed;

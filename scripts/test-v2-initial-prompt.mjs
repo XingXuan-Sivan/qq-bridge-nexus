@@ -290,9 +290,16 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
 await test('控制台有初始提示词面板，且事件/接口都已接线', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = readConsoleSource(root);
+  // 控件已搬进 pages/social-v2/fields.js：静态 id 直接写在标签里，动态生成的（keyRow / renderFields）写成规格项。
+  const occurrences = (id) => [
+    new RegExp(`id="${id}"`, 'g'),
+    new RegExp(`id: '${id}'`, 'g'),
+    new RegExp(`name: '${id}'`, 'g'),
+    new RegExp(`status: '${id}'`, 'g'),
+  ].reduce((sum, re) => sum + (html.match(re) ?? []).length, 0);
   for (const id of ['v2InitPromptKey', 'v2InitPromptText', 'v2InitPromptLoad', 'v2InitPromptSave', 'v2InitPromptClear', 'v2InitPromptMsg', 'v2InitPromptCount', 'v2InitPromptMax']) {
-    const n = (html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length;
-    assert.equal(n, 1, `控制台元素 ${id} 必须存在且唯一（实际 ${n} 处）`);
+    const n = occurrences(id);
+    assert.equal(n, 1, `控制台元素 ${id} 必须在源码里定义一次且唯一（实际 ${n} 处）`);
   }
   assert.match(html, /getElementById\('v2InitPromptSave'\)\.addEventListener/, '保存按钮已绑定事件');
   assert.match(html, /api\('\/api\/socialV2\/initial-prompt'/, '面板调用 /api/socialV2/initial-prompt');

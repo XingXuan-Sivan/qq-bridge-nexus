@@ -63,7 +63,7 @@ export function consolePageDirs(root = ROOT) {
     .map((id) => {
       const dir = path.join(pagesDir, id);
       const pick = (name) => (fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
-      return { id, dir, html: pick('page.html'), css: pick('page.css'), js: pick('page.js') };
+      return { id, dir, html: pick('page.html'), css: pick('page.css'), js: pick('page.js'), fields: pick('fields.js') };
     });
 }
 
@@ -78,7 +78,8 @@ export function readConsoleSource(root = ROOT) {
   const componentFiles = consoleComponentFiles(root);
   const styles = [...paths.css, ...componentFiles.css].map((file) => read(file, path.relative(paths.dir, file)));
   const scripts = [...consoleScriptPaths(root), ...componentFiles.js].map((file) => read(file, path.basename(file)));
-  const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js]
+  // fields.js 是「字段规格」而非页面逻辑：控件已经搬进规格文件，静态断言必须能读到它。
+  const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js, page.fields]
     .filter(Boolean)
     .map((file) => read(file, path.relative(paths.dir, file))));
   return [read(paths.index, 'index.html'), ...styles, ...scripts, ...pages].join('\n');

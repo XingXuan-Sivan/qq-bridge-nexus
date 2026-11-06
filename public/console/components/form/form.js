@@ -36,14 +36,14 @@ function fieldNotes(id, { hint, warn, danger, docs }) {
   return { html: out.join(''), ids: ['hint', 'warn', 'danger', 'docs'].filter((key) => Boolean({ hint, warn, danger, docs }[key])).map((key) => `${id}-${key}`) };
 }
 
-/** 字段外壳：label + 控件 + 注解 + 错误行。 */
-function fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra = '', className = '' }) {
+/** 字段外壳：label + 控件 + 注解 + 错误行。`labelFor` 只给「控件不是单个可标记元素」的自定义槽用。 */
+function fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra = '', className = '', labelFor = id }) {
   const notes = fieldNotes(id, { hint, warn, danger, docs });
   const errorId = `${id}-error`;
   const wrapClass = ['field-block', className].filter(Boolean).join(' ');
   return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
   <div class="field-row">
-    <label class="field-label" for="${esc(id)}">${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
+    <label class="field-label"${labelFor ? ` for="${esc(labelFor)}"` : ''}>${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
     <div class="field-control">${control}</div>
   </div>
   <div class="field-notes">${notes.html}${hintExtra}<p class="field-error" id="${esc(errorId)}" role="alert" hidden></p></div>
@@ -187,6 +187,64 @@ export function readonlyField({ id, label, value = '', hint, warn, danger, docs,
   return shell;
 }
 
+/**
+ * 自定义控件槽：外壳（标签列、行高、注解、错误行）仍由表单给，只有控件内容由页面决定。
+ * 用于「输入框 + 开关 + 按钮 + 说明」这类复合控件（语音库、会话 key 组），
+ * 让它们不必退回手写 `.row` 而破坏对齐。槽里的元素不参与 createForm 的取值。
+ */
+export function customField({ id, label, html = '', hint, warn, danger, docs, className = '' }) {
+  return fieldShell({
+    id,
+    label,
+    control: `<div class="field-custom" data-custom="${esc(id)}">${html}</div>`,
+    hint,
+    warn,
+    danger,
+    docs,
+    className: ['field-block--custom', className].filter(Boolean).join(' '),
+    labelFor: '',
+  });
+}
+
+/**
+ * 复选清单：一列可勾选的条目（工具开关、能力清单），值是一组字符串。
+ * 每项都带 data-field=id，createForm 视为数组字段（规则里写 type:'array'）。
+ */
+export function checkListField({ id, label, options = [], value = [], columns = 2, hint, warn, danger, docs }) {
+  const picked = new Set((Array.isArray(value) ? value : []).map(String));
+  const items = options.map((option) => `<label class="field-check-item">
+    <input type="checkbox"${attrs({ name: id, value: option.value, checked: picked.has(String(option.value)) || null, 'data-field': id })}>
+    <span><b>${esc(option.label)}</b>${option.desc ? `<span class="field-check-desc">${esc(option.desc)}</span>` : ''}</span>
+  </label>`).join('');
+  return fieldShell({
+    id,
+    label,
+    control: `<div class="field-checklist" id="${esc(id)}" data-columns="${esc(String(columns))}">${items}</div>`,
+    hint,
+    warn,
+    danger,
+    docs,
+    className: 'field-block--checklist',
+    labelFor: '',
+  });
+}
+
+/** 状态徽标：圆点 + 文字（默认）/ 药丸（pill）。页面状态文案统一用它，不要用裸 .meta。 */
+export function statusBadge({ id = '', text = '', tone = '', pill = true, dot = true }) {
+  const cls = ['status-badge', pill ? 'is-pill' : '', tone, dot ? '' : 'no-dot'].filter(Boolean).join(' ');
+  return `<span class="${cls}"${id ? ` id="${esc(id)}"` : ''} role="status">${esc(text)}</span>`;
+}
+
+/** 行内动作条：按钮组 + 右侧（或紧随）状态位，用于「加载 / 清空 / 提示」这类工具行。 */
+export function inlineActions({ items = [], status = '', statusText = '', className = '' }) {
+  const buttons = items.map((item) => {
+    const cls = [item.variant === 'danger' ? 'danger' : '', item.variant === 'primary' ? 'primary' : '', item.small === false ? '' : 'small', item.className ?? ''].filter(Boolean).join(' ');
+    return `<button type="button"${item.id ? ` id="${esc(item.id)}"` : ''}${cls ? ` class="${esc(cls)}"` : ''}>${esc(item.label)}</button>`;
+  }).join('');
+  const statusHtml = status ? `<span class="form-actions-status" id="${esc(status)}">${esc(statusText)}</span>` : '';
+  return `<div class="form-actions form-actions--inline${className ? ` ${esc(className)}` : ''}">${buttons}${statusHtml}</div>`;
+}
+
 export function formActions({ primary = '保存', secondary = [], sticky = false, meta = '' }) {
   const buttons = [
     ...secondary.map((item) => `<button type="button" class="btn" data-action="${esc(item.action ?? item.label)}">${esc(item.label)}</button>`),
@@ -215,29 +273,39 @@ const FIELD_FACTORIES = {
   datetime: datetimeField,
   timeRange: timeRangeField,
   readonly: readonlyField,
+  custom: customField,
+  checkList: checkListField,
 };
 
 /**
  * 规格渲染：把「字段数据」铺成统一的表单 HTML，再交给 createForm 接管。
  * 见 docs/CONSOLE_FORMS.md §4。spec 里每一项是工厂参数 + `name`（即控件 id）；
- * `type: 'section'` 开一个新分组，`type: 'callout'` / `'actions'` 直接插入对应块。
+ * `type: 'section'` 开一个新分组，`type: 'callout'` / `'actions'` / `'action'` / `'status'` 直接插入对应块。
  * `span` 表示占几列（默认 1；等于 columns 时整行）。
+ * options.layout = 'grid'（默认，铺 .cols 栅格）| 'inline'（不铺栅格，字段直接排在父级 flex 行里，用于工具栏条）。
  */
 export function renderFields(host, spec, options = {}) {
   if (!host) throw new Error('renderFields: 缺少容器');
   const columns = Math.max(1, Math.min(4, Number(options.columns) || 2));
+  const inlineLayout = options.layout === 'inline';
   const items = Array.isArray(spec) ? spec : [];
   const out = [];
   let inSection = false;
   let gridOpen = false;
   let count = 0;
-  const openGrid = () => { if (!gridOpen) { out.push('<div class="cols form-cols">'); gridOpen = true; } };
+  const openGrid = () => { if (!inlineLayout && !gridOpen) { out.push('<div class="cols form-cols">'); gridOpen = true; } };
   const closeGrid = () => { if (gridOpen) { out.push('</div>'); gridOpen = false; } };
   const closeSection = () => {
     if (!inSection) return;
     closeGrid();
     out.push('</fieldset>');
     inSection = false;
+  };
+  const spanClass = (span) => {
+    if (span >= columns) return 'col-12';
+    // 两列在 md（900）就分开，三/四列留到 lg（1180），窄屏一律整行。
+    const breakpoint = columns <= 2 ? 'md' : 'lg';
+    return `col-12 col-${breakpoint}-${Math.round((12 * span) / columns)}`;
   };
   for (const raw of items) {
     const item = raw ?? {};
@@ -258,14 +326,29 @@ export function renderFields(host, spec, options = {}) {
       out.push(formActions(item));
       continue;
     }
+    // 行内动作条与状态位不是字段：只排版，不参与取值。
+    if (item.type === 'action') {
+      closeGrid();
+      const html = inlineActions(item);
+      out.push(inlineLayout ? html : `<div class="col-12">${html}</div>`);
+      continue;
+    }
+    if (item.type === 'status') {
+      const html = statusBadge({ id: item.name, text: item.text, tone: item.tone, pill: item.pill !== false, dot: item.dot !== false });
+      if (inlineLayout) { out.push(html); continue; }
+      closeGrid();
+      out.push(`<div class="col-12">${html}</div>`);
+      continue;
+    }
     if (!item.name) throw new Error('renderFields: 字段缺少 name');
     const factory = FIELD_FACTORIES[item.type];
     if (!factory) throw new Error(`renderFields: 未知字段类型 ${item.type}`);
     const span = Math.max(1, Math.min(columns, Number(item.span) || 1));
-    const colClass = span >= columns ? 'col-12' : `col-12 col-lg-${Math.round((12 * span) / columns)}`;
+    const colClass = spanClass(span);
     const { name, span: _span, ...props } = item;
     openGrid();
-    out.push(`<div class="${colClass}">${factory({ ...props, id: name })}</div>`);
+    const html = factory({ ...props, id: name });
+    out.push(inlineLayout ? html : `<div class="${colClass}">${html}</div>`);
     count += 1;
   }
   closeSection();
@@ -345,6 +428,12 @@ export function createForm(root, options = {}) {
 
   function readField(name) {
     const rule = rules[name] ?? {};
+    const list = control(name);
+    // 多选清单（工具开关这类），值是「被勾选的全部 value」。必须先判，
+    // 否则只会读到第一个 checkbox 的布尔值。规则里不必写 type:'array'。
+    if (list.length > 1 && list[0].type === 'checkbox') {
+      return list.filter((input) => input.checked).map((input) => input.value);
+    }
     if (rule.type === 'timeRange' || rule.type === 'array') {
       if (rule.type === 'array') return readOne(name, control(name)[0]);
       const fromEl = control(name).find((input) => input.dataset.part === 'from');

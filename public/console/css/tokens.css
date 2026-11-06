@@ -152,6 +152,19 @@
   --text-lg:17px;
   --text-xl:20px;
 
+  /* ── 控件标尺（2026-11-06，docs/CONSOLE_FORMS.md §5）──────────────
+     输入框 / 下拉框 / 开关 / 按钮共用同一高度来源。
+     为什么不是 padding 撑高：input 的 9px padding + 13px 字号 ≈ 36px，
+     button 的 9px padding + 继承 14px 字号 ≈ 41px，两者靠巧合接近 40 而不是同源，
+     差 1–5px 就是「按钮和输入框对不齐」。控件一律写 height，垂直居中交给控件自身。 */
+  --control-h:40px;
+  --control-h-sm:32px;
+  --control-px:11px;      /* 输入框/下拉框左右内边距 */
+  --control-px-btn:15px;  /* 按钮左右内边距 */
+  --row-h:var(--control-h);
+  --field-label-w:148px;
+  --badge-h:22px;
+
   /* ── 断点常量：媒体查询里**不能**用 var()，`grid.css` 与页面断点仍写数值；
      这里定义一份是为了让 JS（图表的桶宽、截图脚本）能读到同一套值。 ── */
   --bp-sm:760px;

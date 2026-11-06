@@ -33,7 +33,10 @@ const pages = [...new Set([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m
 ok(JSON.stringify(views) === JSON.stringify(pages), 'data-view 与 data-page 一一对应', `${views.length} 个：${views.join(', ')}`);
 
 console.log('## 工具开关');
-const tools = [...html.matchAll(/data-v2-tool="([A-Za-z]+)"/g)].map((m) => m[1]);
+// 工具开关已从 page.html 搬进 fields.js 的规格里（V2_TOOLS），断言改读规格表。
+const toolsStart = html.indexOf('export const V2_TOOLS = [');
+const toolsBlock = toolsStart < 0 ? '' : html.slice(toolsStart, html.indexOf('\n];', toolsStart));
+const tools = [...toolsBlock.matchAll(/value: '([A-Za-z]+)'/g)].map((m) => m[1]);
 ok(tools.includes('sendVoice'), 'sendVoice 开关存在', `共 ${tools.length} 个开关`);
 ok(new Set(tools).size === tools.length, '工具开关无重复');
 
@@ -290,7 +293,7 @@ for (const id of ['skills', 'mcp', 'behaviors']) {
 }
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
-for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm', 'renderFields']) {
+for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'customField', 'checkListField', 'statusBadge', 'inlineActions', 'createForm', 'renderFields']) {
   ok(new RegExp(`export function ${fn}\\(`).test(formModule), `form.js 导出 ${fn}`);
 }
 ok(/type === 'section'/.test(formModule), 'renderFields 支持 section 分组');
@@ -331,6 +334,69 @@ for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) 
   }
 }
 ok(barePageInputs.length === 0, `页面里的 <input> 都写明 type（缺 ${barePageInputs.length} 处：${barePageInputs.slice(0, 3).join(' | ')}）`);
+
+// 控件标尺与页面收口（方案 A / L4）：尺寸只能来自令牌，手写控件只降不升，页面不许拆行原语。
+console.log('## 控件标尺与四类非字段控件');
+for (const token of ['--control-h', '--control-h-sm', '--badge-h', '--field-label-w']) {
+  ok(new RegExp(`${token}\\s*:`).test(tokensCss), `tokens.css 定义控件标尺 ${token}`);
+}
+const baseCssText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'base.css'), 'utf8');
+ok(/^button \{[\s\S]*?height:\s*var\(--control-h/m.test(baseCssText), '按钮高度取自 --control-h（不再靠 padding 撑高）');
+ok(/height:\s*var\(--control-h/.test(layerText['components.css']), '输入框/下拉框高度取自 --control-h');
+ok(/\.field-switch \{[\s\S]*?height: var\(--control-h/m.test(formCss), '开关高度与控件同标尺');
+ok(/\.control-row \{/.test(formCss) && /\.control-grow \{/.test(formCss), 'form.css 提供控件行原语 .control-row / .control-grow');
+ok(/\.field-checklist \{/.test(formCss) && /\.field-check-item \{/.test(formCss), 'form.css 提供复核清单 .field-checklist / .field-check-item');
+ok(/\.status-badge[\s\S]*?\.is-pill \{/.test(layerText['components.css']), '状态徽标 .status-badge / .is-pill 只在 components.css 定义一次');
+ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定义状态徽标外观');
+
+// 棘轮：social-v2 已清零，其余页面的手写控件数量只许下降；迁移一页就把基线改成该页的新值（最终全 0）。
+const BARE_CONTROL_BASELINE = {
+  slang: 36, overview: 32, 'social-v1': 32, scheduler: 28, persona: 27, plugins: 16, usage: 14,
+  access: 12, operations: 10, sessions: 10, behaviors: 4, mcp: 1, skills: 1, reference: 0, 'social-v2': 0,
+};
+const bareByPage = {};
+for (const page of consolePageDirs(ROOT)) {
+  if (!page.html) continue;
+  const text = fs.readFileSync(page.html, 'utf8');
+  bareByPage[page.id] = (text.match(/<(input|button|select|textarea)\b/g) || []).length;
+}
+const bareRegressed = Object.entries(bareByPage)
+  .filter(([id, count]) => count > (BARE_CONTROL_BASELINE[id] ?? 0))
+  .map(([id, count]) => `${id}: ${BARE_CONTROL_BASELINE[id] ?? 0} → ${count}`);
+ok(bareRegressed.length === 0, `页面手写控件只降不升（${bareRegressed.join('；') || '全部在基线内'}）`);
+ok(bareByPage['social-v2'] === 0, `社交二代页全部走字段规格（手写控件 ${bareByPage['social-v2'] ?? '缺失'} 个）`);
+
+const rowHacks = [];
+for (const page of consolePageDirs(ROOT)) {
+  if (!page.css) continue;
+  const text = fs.readFileSync(page.css, 'utf8');
+  for (const rule of text.matchAll(/\.field-(row|control|block)[^{]*\{[^}]*\}/g)) {
+    if (/display:\s*(flex|grid)|grid-template-columns|(min-)?height:\s*\d/.test(rule[0])) rowHacks.push(`${page.id}: ${rule[0].replace(/\s+/g, ' ').slice(0, 50)}`);
+  }
+}
+ok(rowHacks.length === 0, `页面样式不覆盖 .field-row/.field-control 布局（${rowHacks.length} 处：${rowHacks.slice(0, 2).join(' | ')}）`);
+
+// 页面里用到的类名必须有样式定义；3 个历史遗留（未见任何 CSS/JS 使用）先进白名单，迁移该页时删掉。
+const LEGACY_UNDEFINED_CLASSES = new Set(['dsh-model-row', 'u-overflow-auto', 'role-defaults']);
+const cssFilesAll = [...['tokens', 'base', 'layout', 'grid', 'components', 'utilities'].map((name) => path.join(cssDir, `${name}.css`))];
+for (const name of fs.readdirSync(componentDir)) {
+  const file = path.join(componentDir, name, `${name}.css`);
+  if (fs.existsSync(file)) cssFilesAll.push(file);
+}
+for (const page of consolePageDirs(ROOT)) if (page.css) cssFilesAll.push(page.css);
+const cssAllText = cssFilesAll.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+const definedClasses = new Set([...cssAllText.matchAll(/\.([A-Za-z][A-Za-z0-9_-]*)/g)].map((m) => m[1]));
+const undefinedClasses = [];
+for (const page of consolePageDirs(ROOT)) {
+  if (!page.html) continue;
+  const text = fs.readFileSync(page.html, 'utf8');
+  for (const m of text.matchAll(/class="([^"]+)"/g)) {
+    for (const name of m[1].split(/\s+/)) {
+      if (name && !definedClasses.has(name) && !LEGACY_UNDEFINED_CLASSES.has(name)) undefinedClasses.push(`${page.id}.${name}`);
+    }
+  }
+}
+ok(undefinedClasses.length === 0, `页面类名都有样式定义（未定义 ${undefinedClasses.length} 个：${[...new Set(undefinedClasses)].slice(0, 4).join(', ')}）`);
 
 console.log(bad === 0 ? '\n全部通过' : `\n${bad} 项失败`);
 if (bad > 0) process.exit(1);

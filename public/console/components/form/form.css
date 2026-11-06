@@ -106,6 +106,132 @@
   column-gap: 10px;
 }
 
+/* 行内控件簇：输入框 + 开关 + 按钮 + 说明落在同一行、同一标尺。
+   「非字段控件」用它，不要再退回老 .row —— .row 是任意子元素的收集器，
+   子元素高度靠内容撑，按钮和输入框必然差几个像素，也没有角色分工。 */
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3, 8px);
+  min-height: var(--control-h, 40px);
+  min-width: 0;
+  width: 100%;
+}
+.control-row > input:not([type=checkbox]):not([type=radio]),
+.control-row > select {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 0;
+}
+.control-row > button,
+.control-row > .field-switch,
+.control-row > .status-badge,
+.control-row > .control-fixed {
+  flex: 0 0 auto;
+}
+.control-row > .control-grow {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.control-row > .control-label,
+.control-row > .control-note {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.control-row > .control-label {
+  white-space: nowrap;
+}
+
+/* 自定义控件槽：外壳仍按字段排（标签列 + 控件 + 注解），槽内由页面自己竖排。 */
+.field-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 复选清单（工具开关、能力清单）：按列铺开，条目自带说明 */
+.field-block--checklist > .field-row {
+  align-items: start;
+}
+.field-block--checklist > .field-row > .field-label {
+  align-self: start;
+}
+.field-checklist {
+  display: grid;
+  grid-template-columns: repeat(var(--field-cols, 2), minmax(0, 1fr));
+  gap: 4px 14px;
+  width: 100%;
+}
+.field-check-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  /* 全局 label 带上下外边距（base.css），复核行必须清掉，否则每行之间会凭空多出一截空白 */
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  cursor: pointer;
+}
+.field-check-item:hover {
+  background: var(--surface-hover);
+}
+.field-check-item > input {
+  margin: 2px 0 0;
+}
+.field-check-item > span {
+  min-width: 0;
+}
+.field-check-item b {
+  font-weight: 600;
+}
+.field-check-desc {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* 行内动作条：按钮组 + 紧随其后的状态位（加载/清空/提示），替代 .row + button.small + .meta。
+   具体规则放在 .form-actions 之后，避免被后者的右对齐覆盖。 */
+
+/* 顶部状态条：左侧一组常用字段（renderFields layout:'inline'），右侧状态徽标 */
+.form-inline-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 8px) var(--space-8, 24px);
+  padding: 12px 16px;
+  border: 1px solid var(--accent-border-soft);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+.form-inline-bar .form-inline-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 6px) 28px;
+  min-width: 0;
+}
+.form-inline-bar .field-block {
+  width: auto;
+}
+.form-inline-bar .field-notes {
+  display: none;
+}
+.form-inline-bar .field-control {
+  min-height: 0;
+}
+
 @media (max-width: 760px) {
   .field-row {
     grid-template-columns: minmax(0, 1fr);
@@ -255,9 +381,9 @@
   outline-offset: 1px;
 }
 
-/* 开关：button[role=switch] */
+/* 开关：button[role=switch]。高度与输入框/按钮同源（--control-h）。 */
 .field-switch {
-  height: 40px;
+  height: var(--control-h, 40px);
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -432,6 +558,20 @@
 .form-actions button[aria-busy="true"] {
   opacity: 0.7;
   cursor: progress;
+}
+
+/* 行内动作条：左对齐、可换行，按钮与状态位同一行（工具行/日志行用） */
+.form-actions--inline {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding-top: 0;
+}
+
+.form-actions--inline .form-actions-status {
+  margin-left: 2px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 @media (max-width: 760px) {

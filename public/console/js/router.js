@@ -113,7 +113,10 @@ function hydratePage(page) {
     }
     const module = await import(`/console/pages/${page}/page.js`);
     module.init?.();
-      applyPageA11y(host);
+    applyPageA11y(host);
+    // 就绪标记：字段由 fields.js 的规格在 init() 里渲染，片段 HTML 到位 ≠ 页面可用。
+    // 浏览器回归（test-console-ui）与深链定位都等这个标记，避免量到「还没渲染」的空壳。
+    host.dataset.pageReady = '1';
   })().catch((error) => {
     host.innerHTML = `<div class="meta">页面加载失败：${error?.message || '未知错误'}（刷新重试）</div>`;
     console.error(`[console] 页面片段加载失败：${page}`, error);
@@ -127,7 +130,11 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   currentConsolePage = page;
   if (persist) rememberPage(page);
-  document.querySelectorAll('[data-page]').forEach((el) => { el.hidden = el.dataset.page !== page; });
+  document.querySelectorAll('[data-page]').forEach((el) => {
+    el.hidden = el.dataset.page !== page;
+    // 非片段页（参考页）的 DOM 直接在 index.html 里，切到即就绪；片段页由 hydratePage 标记。
+    if (el.dataset.page === page && !PAGE_FRAGMENTS.has(page)) el.dataset.pageReady = '1';
+  });
   void hydratePage(page);
   document.querySelectorAll('#mainNav [data-view]').forEach((button) => {
     const selected = button.dataset.view === page;

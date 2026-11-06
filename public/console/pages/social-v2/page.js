@@ -5,7 +5,7 @@ import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { createForm, renderFields } from '../../components/form/form.js';
-import { V2_FIELDS } from './fields.js';
+import { V2_FIELDS, V2_TOOLS } from './fields.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
 let stickerDescribeTimer = null;
@@ -97,8 +97,8 @@ async function loadV2Config() {
     setCheck('v2Enabled', c.enabled !== false);
     setValue('v2AgentPreset', c.agentPreset || '');
     setCheck('v2ProvideRecommendations', c.provideRecommendations !== false);
-    document.querySelectorAll('[data-v2-tool]').forEach(el => {
-      el.checked = (c.tools && c.tools[el.dataset.v2Tool] !== false);
+    v2Form.setValues({
+      v2Tools: V2_TOOLS.filter((t) => !c.tools || c.tools[t.value] !== false).map((t) => t.value),
     });
     const w = c.wake || {};
     setValue('v2WakeDefaultMode', w.defaultMode === 'active' ? 'active' : 'diving');
@@ -171,8 +171,9 @@ async function loadV2Config() {
 }
 
 async function saveV2Config() {
-  const tools = {};
-  document.querySelectorAll('[data-v2-tool]').forEach(el => { tools[el.dataset.v2Tool] = el.checked; });
+  // 工具开关现在是 checkList 字段：值是一组「开启的 key」，写回 config 时补全成完整对象。
+  const enabled = new Set(v2Form.getValue('v2Tools') || []);
+  const tools = Object.fromEntries(V2_TOOLS.map((t) => [t.value, enabled.has(t.value)]));
   const body = {
     enabled: fc('v2Enabled'),
     agentPreset: fv('v2AgentPreset').trim(),
@@ -580,7 +581,7 @@ async function refreshV2Activity() {
     const r = await api('/api/socialV2/activity');
     const el = document.getElementById('v2ActivityStatus');
     el.textContent = r.paused ? '已暂停' : '运行中';
-    el.className = r.paused ? 'meta err' : 'meta ok';
+    el.className = r.paused ? 'status-badge is-pill err' : 'status-badge is-pill ok';
   } catch {}
 }
 
@@ -780,13 +781,16 @@ const setValue = (id, value) => {
 export function init() {
   if (pageInitialized) return;
   pageInitialized = true;
-  v2InitPromptTextEl = document.getElementById('v2InitPromptText');
+  v2InitPromptTextEl = null;
   const formRoot = document.getElementById('section-social-v2') ?? document;
   // 字段由 fields.js 的规格渲染，页面 HTML 只保留分组外壳与说明文字。
+  // layout:'inline' 用于顶部状态条这类「字段直接排在一条 flex 行里」的场景。
   for (const host of formRoot.querySelectorAll('[data-v2-fields]')) {
     const spec = V2_FIELDS[host.dataset.v2Fields];
-    if (spec) renderFields(host, spec.fields, { columns: 2 });
+    if (spec) renderFields(host, spec.fields, { columns: 2, layout: host.dataset.v2Layout || 'grid' });
   }
+  // 必须在 renderFields 之后取：长文本/输入框都是刚渲染出来的，提前取会拿到 null。
+  v2InitPromptTextEl = document.getElementById('v2InitPromptText');
   v2Form = createForm(formRoot, {});
   bindEvents();
   // 原 app.js 启动批次里的页面加载顺序：配置 → 活动状态 → 工具日志 → 会话选项。

@@ -52,6 +52,9 @@
   display:flex;
   flex-direction:column;
   position:relative;
+  height:auto;
+  align-items:stretch;
+  justify-content:flex-start;
   padding:18px 16px;
   text-align:left;
   min-height:99px;
@@ -140,13 +143,18 @@ label {
   background:var(--surface);
   border:1px solid var(--border-input);
   border-radius:8px;
-  padding:9px 11px;
   color:var(--text-input);
   width:100%;
   max-width:100%;
   font-size:13px;
   min-width:0;
   transition:border-color .15s,box-shadow .15s
+}
+/* 单行控件：高度与按钮同源，文字由控件自身垂直居中；左右内边距只留 --control-px。 */
+:where(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color])),
+:where(select) {
+  height:var(--control-h,40px);
+  padding:0 var(--control-px,11px)
 }
 /* 搜索框外观在 components/search-box/search-box.css（input.search-box）。 */
 input:focus,textarea:focus,select:focus {
@@ -157,6 +165,7 @@ input::placeholder,textarea::placeholder {
   color:var(--placeholder)
 }
 textarea {
+  padding:9px 11px;
   resize:vertical;
   min-height:100px;
   line-height:1.7;
@@ -1261,14 +1270,69 @@ button:active:not(:disabled) {
 .search-results:not([hidden]) {
   animation:pageIn .18s ease both
 }
-.status-badge:before {
+/* 状态徽标：圆点 + 文字（默认）/ 药丸（.is-pill）。顶栏与页面共用这一份，
+   页面状态文案统一用它，不要再用裸 <span class="meta ok"> 或自造小徽标。 */
+.status-badge {
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  font-size:12px;
+  line-height:1.2;
+  color:var(--muted);
+  white-space:nowrap;
+  vertical-align:middle
+}
+.status-badge::before {
+  content:"";
+  width:6px;
+  height:6px;
+  flex:0 0 auto;
+  border-radius:50%;
+  background:var(--dot-offline);
   transition:background .25s ease,box-shadow .25s ease
 }
-.status-badge.online:before {
+.status-badge.no-dot::before {
+  display:none
+}
+.status-badge.online::before,
+.status-badge.ok::before {
+  background:var(--ok);
   box-shadow:0 0 0 3px var(--pill-green-bg)
 }
-.status-badge.offline:before {
+.status-badge.offline::before,
+.status-badge.err::before {
+  background:var(--err);
   box-shadow:0 0 0 3px var(--pill-red-bg)
+}
+.status-badge.warn::before {
+  background:var(--warn-fg-strong)
+}
+/* 药丸：固定高度、横向内边距，用在工具条/表格单元格里，避免文字忽高忽低 */
+.status-badge.is-pill {
+  height:var(--badge-h,22px);
+  padding:0 9px;
+  border:1px solid var(--border-chip);
+  border-radius:999px;
+  background:var(--surface-chip);
+  color:var(--text)
+}
+.status-badge.is-pill::before {
+  box-shadow:none
+}
+.status-badge.is-pill.ok {
+  border-color:transparent;
+  background:var(--pill-green-bg);
+  color:var(--pill-green-fg)
+}
+.status-badge.is-pill.warn {
+  border-color:var(--warn-border);
+  background:var(--warn-bg);
+  color:var(--warn-fg)
+}
+.status-badge.is-pill.err {
+  border-color:transparent;
+  background:var(--pill-red-bg);
+  color:var(--pill-red-fg)
 }
 @media(prefers-reduced-motion:reduce) {
   .bg-decor::before,

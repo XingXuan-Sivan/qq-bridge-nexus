@@ -69,7 +69,9 @@ try {
   const allPages = await page.evaluate(() => [...document.querySelectorAll('#mainNav [data-view]')].map(node => node.dataset.view));
   async function hydrate(view) {
     await page.evaluate(v => { if (location.hash !== `#${v}`) location.hash = `#${v}`; }, view);
+    // 片段 HTML 到位 ≠ 页面可用：字段由 fields.js 的规格在 init() 里渲染（router 在 init 之后打 pageReady）。
     await page.waitForFunction(v => (document.querySelector(`[data-page="${v}"]`)?.children.length ?? 0) > 0, view);
+    await page.waitForFunction(v => document.querySelector(`[data-page="${v}"]`)?.dataset.pageReady === '1', view);
   }
   for (const view of allPages) await hydrate(view);
   await hydrate('overview');
@@ -154,6 +156,9 @@ try {
       const rows = Array.from(document.querySelectorAll('#section-social-v2 [data-field-wrap]'));
       let worst = 0;
       for (const w of rows) {
+        // 清单行（checkList）刻意顶对齐：38 项清单高 1000+px，标签居中会飘在清单中间。
+        // 这里只量「单行字段」；清单行的对齐由截图验收负责。
+        if (w.classList.contains('field-block--checklist')) continue;
         const l = w.querySelector('.field-label');
         const c = w.querySelector('.field-control');
         if (!l || !c) continue;
@@ -246,8 +251,10 @@ try {
     await fill('v2WaitDefaultQuietMs', 0);
     await fill('v2MaxSendMin', 0);
     await check('v2ProvideRecommendations', false);
-    const firstTool = page.locator('[data-v2-tool]').first();
-    await reveal('[data-v2-tool]');
+    // 工具开关已搬进字段规格：每个复选框 data-field="v2Tools"，value 就是工具名。
+    const firstTool = page.locator('[data-field="v2Tools"]').first();
+    await reveal('[data-field="v2Tools"]');
+    const firstToolName = await firstTool.getAttribute('value');
     await firstTool.setChecked(false);
     const body = await clickWrite('#v2ConfigSave', '/api/socialV2/config');
     assert.equal(body.wake.recommendedSleepMinMs, 420000);
@@ -259,7 +266,7 @@ try {
     assert.equal(body.wait.defaultQuietMs, 0);
     assert.equal(body.send.maxSendPerMinute, 0);
     assert.equal(body.provideRecommendations, false);
-    assert.equal(body.tools[await firstTool.getAttribute('data-v2-tool')], false);
+    assert.equal(body.tools[firstToolName], false);
     // The lower save button must submit the same complete configuration.
     await page.waitForFunction(() => document.getElementById('v2AgentPreset').value === 'contract-v2');
     assert.deepEqual(await clickWrite('#v2ConfigSave', '/api/socialV2/config'), body);

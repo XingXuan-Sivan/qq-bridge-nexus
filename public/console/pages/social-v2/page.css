@@ -1,50 +1,16 @@
-/* social-v2 页面样式暂全部沿用公共 css/app.css；后续如需页面专属样式再放这里。 */
+/* social-v2 页面专属样式。
+   顶栏、动作条、复选清单等通用结构已经由 components/form 与 css/components.css 提供，
+   这里只放本页独有的内容（语音库列表、日志输出区），不要再写控件对齐类规则。 */
 
-/* 顶部状态条：三个常用开关横向排布，不做成表单 */
-.v2-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  flex-wrap: wrap;
-  padding: 12px 16px;
-  border: 1px solid var(--accent-border-soft);
-  border-radius: 12px;
-  background: var(--surface-subtle);
+/* 语音库列表：多行文本 + 单选，跟在 .control-row 下面 */
+.voice-list {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
 }
 
-.v2-head-fields,
-.v2-head-fields .cols {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  flex-wrap: wrap;
-}
-
-.v2-head-fields .field-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: auto;
-}
-
-.v2-head-fields .field-label {
-  padding-top: 0;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.v2-head-fields .field-control {
-  min-height: 0;
-}
-
-.v2-head-state {
-  margin: 0;
-}
-
-/* 状态条里不展示字段注解，避免一行里塞满说明文字 */
-.v2-head .field-hint,
-.v2-head .field-warn,
-.v2-head .field-docs {
-  display: none;
+.voice-list label {
+  display: block;
+  margin: 2px 0;
 }

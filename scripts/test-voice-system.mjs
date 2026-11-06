@@ -167,7 +167,7 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
 console.log('## qq-bridge 语音系统：控制台与 preset');
 {
   const html = readConsoleSource();
-  ok(html.includes('data-v2-tool="sendVoice"'), '控制台有 sendVoice 工具开关');
+  ok(html.includes('data-v2-tool="sendVoice"') || /value: 'sendVoice'/.test(html), '控制台有 sendVoice 工具开关');
   ok(html.includes('id="voiceList"') && html.includes('id="voiceSendBtn"'), '控制台有语音库调试面板');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
   const preset = read(path.join('dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'));

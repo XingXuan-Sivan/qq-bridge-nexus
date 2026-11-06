@@ -282,6 +282,7 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
     });
   }
   const html = readConsoleSource();
-  assert.match(html, /data-v2-tool="handoverMemory"/, '二代工具开关里有这一项');
-  assert.match(html, /data-v2-tool="schedule"/, '定时任务工具也有开关');
+  // 工具开关已搬进 pages/social-v2/fields.js 的 V2_TOOLS（value 即开关名）。
+  assert.match(html, /(data-v2-tool="handoverMemory"|value: 'handoverMemory')/, '二代工具开关里有这一项');
+  assert.match(html, /(data-v2-tool="schedule"|value: 'schedule')/, '定时任务工具也有开关');
 });

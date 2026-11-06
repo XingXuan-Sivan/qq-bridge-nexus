@@ -48,20 +48,32 @@
 `Set-Content -Encoding UTF8` 会带 BOM、把 `\n` 改 `\r\n`；`node -e` 里嵌模板字符串的转义极易写坏。
 **规则**：改源码用 `edit`/`write`，批量改动用临时 `.mjs` 脚本（跑完删）。
 
+### 1.11 全局 `label` 的 margin 会漏进复核清单
+工具开关清单用 `.field-check-item` 承载每一行，而它是 `<label>`——`base.css` 里全局的 `label { margin: 17px 0 7px }` 直接生效，两行之间凭空多出 24px，看起来像「栅格坏了」，其实是外边距。
+**规则**：任何用 `<label>` 当行容器的自定义清单，都要显式 `margin: 0`；改完用 `getComputedStyle` 读一次 `margin`，别只看截图猜。
+
+### 1.12 `checkList` 忘了 `span: 2` 只占半宽
+`renderFields` 默认 `span: 1`，两列布局下就是 `col-12 col-md-6`。工具开关 38 项挤在 586px 的半宽格里，每列只有 207px，checkbox 和说明文字互相挤压。
+**规则**：清单、长文本、整行说明一律写 `span: 2`；迁完量一次 `.field-checklist` 的宽度，应该接近控件列宽（约 1000px）。
+
+### 1.13 「不是字段的一行」硬塞进字段格就会错位
+语音库那一行是「按钮 + 小标签 + 输入框 + 开关 + 说明 + 按钮」，没有字段标签的语义。上一版塞进 `.field-row` 后标签列空着，行内控件从左缘开始，按钮和输入框各自按自己的 padding 撑高，差 5px。
+**规则**：这类行用 `type:'custom'` + `.control-row`，角色类 `control-label`/`control-grow`/`control-fixed`/`control-note`；高度由 `--control-h` 统一，不许用 padding 凑。
+
 ## 2. 迁移一个页面的检查清单
 
-1. **盘点**：该页有几个直接手写的控件？哪些是字段、哪些是按钮条（toolbar）？哪些控件由 JS 动态生成（如 38 个工具开关）——动态列表不进 spec。
-2. **抽 spec**：新建 `pages/<id>/fields.js`，每项 `{ name: 控件 id, type, label, hint?, warn?, danger?, span?, width? }`；分组用 `type:'section'` + `legend`。
-3. **换宿主**：`page.html` 里字段区域换成 `<div data-v2-fields="<key>"></div>`，**保留**分组外壳、说明文字、动态列表与按钮条。
-4. **接线**：`page.js` 里 `renderFields(host, FIELDS[key].fields, { columns: 2 })` 再 `createForm(root, {})`；读取统一走 `form.getValue(id)`，写回仍落 DOM。
+1. **盘点**：该页有几个直接手写的控件？哪些是字段、哪些是按钮条（toolbar）？哪些控件由 JS 动态生成（如 38 个工具开关）——动态列表现在**进** spec（`checkList` 的 `options`），不再留在 HTML。
+2. **抽 spec**：新建 `pages/<id>/fields.js`，每项 `{ name: 控件 id, type, label, hint?, warn?, danger?, span?, width? }`；分组用 `type:'section'` + `legend`；非字段块用 `custom` / `checkList` / `action` / `status`。
+3. **换宿主**：`page.html` 里字段区域换成 `<div data-v2-fields="<key>"></div>`，**保留**分组外壳与说明文字；页头工具条用 `data-v2-layout="inline"`。
+4. **接线**：`page.js` 里 `renderFields(host, FIELDS[key].fields, { columns: 2, layout: host.dataset.v2Layout || 'grid' })` 再 `createForm(root, {})`；读取统一走 `form.getValue(id)`，写回仍落 DOM。
 5. **保持契约**：所有旧 DOM id 不变（改名会破 25 条接口契约与 224 个 legacy id 断言）；保存载荷必须**逐字节一致**。
 6. **补注解**：每个字段问三件事——单位是什么（`hint`）、什么情况下会出问题（`warn`）、误操作后果（`danger`）。
 7. **门禁**：
-   - `node scripts/test-console-static.mjs`（结构/样式归属/标签规则）
-   - `PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`（几何 + 契约 + 载荷）
-   - `node scripts/test-audit.mjs`（90/90 基线）
+   - `node scripts/test-console-static.mjs`（结构/样式归属/标签规则/控件棘轮/类名定义）
+   - `PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`（几何 + 契约 + 载荷；本机没装 playwright 时用 CDP 截图代替，见第 11 条）
+   - `node scripts/test-audit.mjs`（基线随脚本增减更新，当前 90 个脚本）
    - 1600 / 1180 / 760 三档截图
-8. **提交**：一次只迁一个页面；提交信息写清「换壳、载荷未变」。
+8. **提交**：一次只迁一个页面；提交信息写清「换壳、载荷未变」，并把 `BARE_CONTROL_BASELINE` 里该页改成 0。
 
 ## 3. 提交前的自检问句
 
@@ -70,3 +82,4 @@
 - 页面里还有没有 `class="row"` 兼作字段容器的残留？
 - 保存一次后，请求体与迁移前是否逐字节相同？
 - 注解是否都在行外、左缘与控件对齐？
+- 同一行里按钮、输入框、开关、徽标的 `getBoundingClientRect().height` 是否都等于 40（徽标为 22 且垂直居中）？

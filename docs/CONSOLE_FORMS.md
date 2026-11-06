@@ -137,9 +137,49 @@ form.destroy();
 - 需要用户确认风险的勾选（「我已了解」「删除后不可恢复」）保留 `checkboxField`，语义是确认不是开关。
 - 多选集合用 `checkboxGroup`；单选集合用 `radioGroup`（卡片样式给互斥的模式选择）。
 - 同排字段靠 `.cols` + `.col-*` 排布，控件区最小高度 40px、垂直居中，保证基线一致；长文本/提示词用 `span: 2` 占整行。
+### 控件标尺与四类非字段控件（2026-11-06 落地）
+
+尺寸只有一个来源：`tokens.css` 的标尺令牌。输入框、下拉框、按钮、开关全部用 `height` 取值，**不许再用 padding 撑高**（padding 撑高会随字号和字体各自漂 3–4px，就是「按钮和输入框差一截」的根因）。
+
+| 令牌 | 值 | 用途 |
+| --- | --- | --- |
+| `--control-h` | 40px | 输入框 / 下拉框 / 按钮 / 开关 / `.control-row` 的统一行高 |
+| `--control-h-sm` | 32px | `button.small`（表格行内、清单里的次级按钮） |
+| `--badge-h` | 22px | 药丸徽标 `.status-badge.is-pill`；比 40px 矮，才能和同行控件垂直居中 |
+| `--field-label-w` | 148px | 标签列宽 |
+| `--row-h` | `var(--control-h)` | 兼容旧写法 |
+
+例外只有 `textarea`：多行控件不设 `height`，仍用 `padding: 9px 11px`。
+
+**页面不许改原语布局**：`.field-row` / `.field-control` / `.field-block` 的 `display`、`grid-template-columns`、`height` 只能由 `components/form/form.css` 决定；页面 css 里出现这类覆盖会被静态检查拦下（`test-console-static` 的「页面样式不覆盖 .field-row 布局」）。
+
+不是所有东西都是「字段」。以下四类走 `renderFields` 的新类型，不要再手写一行 HTML：
+
+| 类型 | 工厂 | 何时用 | 关键点 |
+| --- | --- | --- | --- |
+| `custom` | `customField({ id, label, html })` | 一段复合控件（语音库面板、key + 按钮 + 状态位） | 内部排版用 `.control-row`；`label` 仍参与左列对齐 |
+| `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（工具开关、权限项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
+| `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位 |
+| `status` | `statusBadge({ text, tone, pill })` | 只读状态（`运行中`） | 页头固定高度位置用 `pill: true` |
+
+`.control-row` 是「一行不是字段的东西」的唯一原语：`display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:var(--control-h)`。角色类四个：
+
+- `.control-label`：行内小标签（如「发送目标」），不是字段标签，不占 148px 列。
+- `.control-grow`：吃掉剩余宽度的输入框（`flex:1 1 160px`）。
+- `.control-fixed`：固定宽度的按钮或选择器。
+- `.control-note`：行内说明文字（12px、muted），跟在控件后面，不换行到下一行。
+
+页头那一条「开关 + 输入 + 开关 + 状态」用 `layout: 'inline'`：`renderFields(host, spec, { layout: 'inline' })` 不铺 `.cols` 栅格，外层是 `.form-inline-bar`（条内隐藏 `.field-notes`、`.field-control` 取消最小高度）。
+
+三条反模式，评审时直接打回：
+
+1. 在 `page.html` 里写 `<button>` / `<input>` / `<select>` / `<textarea>`（该页还没迁移就按棘轮只降不升，迁移时清零）。
+2. 给控件写 `height: 36px` 这类字面量，或给 `.field-switch` 单独定高。
+3. 用 `margin` / `padding` 把两个不同高的控件「凑齐」——对齐靠标尺，不靠微调。
+
 ## 5. 现有复杂表单的迁移
 
-按控件量排序（2026-11-06 实测）：`social-v2` 130（含 53 个 checkbox）、`slang` 36、`overview` 32、`social-v1` 32、`scheduler` 28、`persona` 27，其余 ≤16。
+按控件量排序（2026-11-06 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`scheduler` 28、`persona` 27、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**。
 
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 
@@ -154,6 +194,14 @@ form.destroy();
 > 方式 A 的三个坑留作历史教训：`.settings-content > .row label` 的 `flex-basis:100px!important` 会把字段标题撑成 100px 高（已改 `:not(.field-label)`）；`appendChild` 后不要再 `remove()`；搬完控件再 `insertBefore` 会报 `HierarchyRequestError`。
 
 其余页面按「一页一次迁完」推进：`overview` → `scheduler` → `persona` → `social-v1` → `slang` → 小页面。
+
+> **2026-11-06 收口（方式 C：控件零手写）**：`social-v2/page.html` 里已经没有任何 `<input>/<button>/<select>/<textarea>`——顶部状态条、38 个工具开关、语音库面板、8 组动作行、保存栏、3 个长文本全部由 `fields.js` 的 `V2_FIELDS` + `renderFields` 生成。三条硬规则同时进静态检查：
+>
+> 1. **手写控件棘轮**：`test-console-static.mjs` 里 `BARE_CONTROL_BASELINE` 记录每页当前手写控件数，只许降不许升；迁完一页就把该页基线改成 0。`social-v2` 单独断言必须为 0。
+> 2. **类名必须有定义**：`page.html` 里出现的 class 必须能在某个 css 里找到（`btn-secondary`、`u-bold-pad-md` 这类死类名就是被这条挡住的）。三个历史遗留先放白名单：`dsh-model-row`、`u-overflow-auto`、`role-defaults`，迁到对应页面时删掉。
+> 3. **页面不许拆原语**：`page.css` 里对 `.field-row` / `.field-control` / `.field-block` 写 `display` / `grid-template-columns` / `height` 一律失败。
+>
+> 验收方式（本机没有 playwright 时）：`node scripts/test-console-static.mjs` 全过；再用 CDP 截图核对三档宽度下「按钮 / 输入框 / 开关 / 徽标」是否同高居中（见 `docs/CONSOLE_FORM_LESSONS.md` 第 11 条）。
 
 ## 6. 与契约的关系（硬约束）
 

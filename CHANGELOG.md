@@ -5,6 +5,16 @@
 
 ## 未发布
 
+### 变更：控件标尺统一与四类非字段控件（social-v2 表单零手写）
+- 新增控件标尺令牌 `--control-h`(40px) / `--control-h-sm`(32px) / `--badge-h` / `--field-label-w`：输入框、下拉框、按钮、开关、状态徽标同源高度，不再靠 padding 撑出约 36–41px 的偏差；`button.small` 走 32px 次级高度。
+- 新增 `.control-row` 行原语（`align-items:center` + `min-height:var(--control-h)`）与角色类 `.control-grow`/`.control-fixed`/`.control-label`/`.control-note`，按钮与输入框混排不再手写 `.row` 平行结构。
+- `renderFields` 新增四种渲染类型：`custom`（复合控件槽）、`checkList`（多选清单，取值为字符串数组）、`action`（按钮行 + 状态位）、`status`（只读徽标），并支持 `layout:'inline'` 的页头条布局；栅格按断点分列（两列在 md 分开，三四列在 lg 分开）。
+- `.status-badge` 收敛到 `components.css`（`layout.css` 不再定义），新增 `.is-pill` 药丸态；social-v2 顶部「运行中」改用该徽标，文字与同行控件垂直居中。
+- social-v2 的 `page.html` 做到**零手写控件**：38 个工具开关、语音库调试行、8 组动作行、保存栏、3 个长文本全部由 `public/console/pages/social-v2/fields.js` 的规格生成；`[data-v2-tool]` 改走表单值 `v2Tools`（数组），旧 `id="v2Tools"` 由清单容器保留。
+- 浏览器回归：`router.hydratePage` 在 `init()` 之后给页面打 `data-page-ready="1"`，`test-console-ui` 等待该标记，避免量到「片段到位但字段还没渲染」的空壳；几何断言只量单行字段（清单行刻意顶对齐）。
+- 防回归：`test-console-static` 增加控件标尺、四类原语、`.status-badge` 唯一定义、页面不得改原语布局、页面 class 必须有定义等断言，并把手写控件数量做成只降不升的棘轮（social-v2 基线 0）。
+- 门禁：`npm run test:audit` 90/90，`PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` 25/25。
+
 ### 变更：表单标签右对齐、顶部状态条、保存条吸底与语音开关
 - 标签列改为右对齐、与控件首行对齐；多列表单列间距加到 32px。
 - social-v2 顶部三个常用项（启用二代模式 / agentPreset / 提供推荐值）收成一条状态条（不再占三行表单），右侧显示运行状态。

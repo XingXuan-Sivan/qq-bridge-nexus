@@ -444,7 +444,54 @@ public/console/
 
 
 
+### 8.9 控制台前端组件化（计划，2026-11-06 立项）
+
+**问题**：同一个控件在多处长得不一样，且组件「js 在 `js/components/`、样式在 `css/components.css`」分家。搜索框是最典型的例子——页面里的五个搜索框漏写 `type` 属性，`input[type=text]` 的基础外观规则整条不命中，退回浏览器默认描边；全局搜索有 `type="search"` 所以是「正确」的那一个。**这不是审美问题，是选择器写法的坑**。
+
+**做什么**（约定详见 [CONSOLE_UI.md](CONSOLE_UI.md)）：
+
+1. 建 `public/console/components/<name>/{<name>.js,<name>.css}` 目录，`js` 与 `css` 同住；迁移现有 `message` / `modal` / `table` 三个组件，并把 `components.css` 里属于它们的段落拆到各自 css。
+2. `src/http/static.mjs` 白名单加 `/console/components/`（服务端一行；仍只读、仍先鉴权后存在性、仍拒绝穿越）。
+3. 搜索框做成组件：`searchBoxHtml()` 固定产出 `type="search"` + `class="searchbox"`，`search-box.css` 自包含（背景/描边/圆角/内距/字号/placeholder/focus 全显式，不依赖标签属性与文件顺序）；替换全局搜索 + `behaviors` / `sessions` / `slang`（三个）共 6 处。
+4. `scripts/test-console-static.mjs` 加断言：不许再手写 `search-box` 类、搜索输入必须带 `type="search"` 与 `class="searchbox"`。
+5. 约定「页面专属组件先留在页内，第二次复用才上提」，避免 `components/` 变杂物间。
+
+**顺序**：先 1–2（骨架与白名单）→ 再 3（组件落在新目录）→ 再 4。只有一次搬迁。
+
+**判据**：全站页面零 404（Network 无红）；三页与右上角搜索框在 1440 宽下描边/圆角/高度/字号一致（截图比对）；`test-console-static` 通过、`test-console-ui` 契约基线不变（说明只是搬家）。
+
+**不做**：不引框架与打包器，不引 CSS 预处理器，不做运行时组件注册（插件 UI 是另一条线，见 §8.4）。
+
 ---
+
+### 8.10 统一注入块来源与记忆注入（计划，2026-11-06 立项）
+
+**问题**：现在加一个新的注入块必须改 `src/bridge.js`（`registerCoreBlock` + 配置白名单 + 控制台目录），三处都得动；记忆更是没有通道——`core-digest` 渲染的是 nexus 自己的轻量记忆（`formatMemoryV2`：话题/想说的话/印象），**不是 soulkit 的长期记忆**，所以真机上「看不到记忆注入」是真实缺口。
+
+**做什么**（契约见 [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) §5.5）：
+
+1. **统一模型**：所有块进同一个注册表，用 `owner` 区分 `core` / `plugin:<id>` / `declared`；渲染管线、限额、失败隔离只有一套。
+2. **声明式块**：`config.json` 的 `promptBlocks` 支持 `{ enabled, label, priority, maxChars, source }`，`source.type` 支持 `builtin` / `text` / `file` / `http` / `memory`；新增这类块只改配置、不碰源码。
+3. **memory provider**：内核加权限 `memory:provide` 与 `ctx.memory.registerProvider({ id, label, fetch })`，与 `persona:provide` 同构（staging → commit → 按 pluginId 注销），同一时刻一个 provider 生效（`memory.provider`）。
+4. **soulkit 适配器**：新插件 `plugins/soulkit-memory/`，POST `http://127.0.0.1:3110/api/recall`（`view:'self'` 免令牌），body `{ world, holder|character, chat, query, history, limit }`，把返回行拼成块文本；key 剥平台前缀复用 `soulkitKey()`；按 `(key, query)` 做 60s 缓存。**soulkit 不改**（只读 `/api/recall`）。
+5. **内置块收编**：`core-stickers` / `core-skills` / `core-digest` 逐步改成 `source.type = "builtin"` 的声明项；新增 `core-memory`（priority 120）走 `source.type = "memory"`。
+6. 控制台「内置注入块」区按 `owner` 分组，显示每个块的 `calls / lastChars / truncated / skipped`。
+
+**判据**：
+
+- 新增一个 `source.type = "file"` 的块只改 `config.json`，重启后出现在块表、唤醒提示里能看到，源码零改动；
+- 该块路径写错时唤醒照常完成（日志一条 warn、审计一条 `error`），其它块不受影响；
+- 关块后提示词里整段消失、预算立即回收；
+- soulkit 停机时 `core-memory` 为空、不阻塞唤醒；
+- `test-prompt-blocks` 覆盖「正常 / 文件缺失 / 超预算 / 热关」四个用例。
+
+**顺序**：先 1–2（注册表与声明式 source，纯离线可测）→ 再 3（memory provider 权限）→ 再 4（soulkit 插件）→ 再 5–6（收编内置块与控制台分组）。
+
+**不做**：不做 `source.type = "script"`（声明式块不许执行任意脚本；要计算能力就写成插件走钩子与权限）。
+
+---
+
+
 
 ## 9. 桥接之外的扩展面
 
@@ -530,3 +577,5 @@ public/console/
 6. 控制台列表与工具栏统一：卡片列表用 `.tile-list` + `.tile`（人格卡与插件卡同一套间距，`gap:10px`、`margin:10px 0 4px`、tile 内距 `13px 15px`）；表格列表用 `.tool-log-table`（自带 `margin-top:12px`），外层不要再叠加内联 `margin-top`；h2 下与列表前的工具栏行用 `class="row" style="margin-top:8px"`。新增页面先对照人格页的间距，不要自造网格或 padding。
 7. 阶段收尾先对 [STATUS.md](STATUS.md)：未完项、`Partial` 差什么、`Blocked` 等什么都写在那张表里；只有判据全部满足才改成 `Done`，不允许只在汇报里说「已完成」。
 8. 控制台搜索框统一用 `class="search-box"`（宽度仍用 `u-maxw-240` / `u-flex-1` 之类的工具类）：它与右上角全局搜索共用 `components.css` 里的 `.search-wrap input,input.search-box` 一条规则（`10px` 圆角、`12px` 字号）。不要再用裸 `<input>` 走默认外观——那是给普通表单字段的 8px/13px。
+   **过渡期说明**：这条规则是临时方案，`search-box` 组件（路线图 §8.9）落地后会改成 `searchBoxHtml()` + `class="searchbox"`，届时本条的类名与写法一并替换，不要再新增手写的 `search-box`。
+9. 新增控件先查 `components/` 有没有现成的；没有就先在页内实现，出现第二个使用者再上提到 `components/<name>/`（js 与 css 同住、css 自包含、不自带全局重置）。写外观样式时**不要用 `input[type=…]` 这类靠标签属性命中的选择器当组件外观来源**——漏写属性就会退回浏览器默认样式（搜索框就是这么坏的）。

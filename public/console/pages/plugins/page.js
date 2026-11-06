@@ -5,6 +5,23 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { PLUGINS_FIELDS } from './fields.js';
+
+// 渲染工具行、设置块与详情弹窗的控件；开关由 bindSwitches 统一接管（值在 aria-checked 上）。
+// 必须在 init() 最前面跑：下面的 getElementById 依赖这些节点。
+function renderPluginsFields() {
+  document.querySelectorAll('[data-plugins-fields]').forEach((host) => {
+    const spec = PLUGINS_FIELDS[host.dataset.pluginsFields];
+    if (!spec) return;
+    if (spec.html) host.innerHTML = spec.html;
+    if (!spec.fields) return;
+    const mount = spec.mount ? document.getElementById(spec.mount) : host;
+    if (!mount) return;
+    renderFields(mount, spec.fields, { columns: spec.columns || 2 });
+    bindSwitches(mount);
+  });
+}
 
 // ── 桥接插件 ────────────────────────────────────────────────────────────────
 // 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。
@@ -72,7 +89,7 @@ async function openPluginDetail(id) {
     body.textContent = lines.join('\n');
     pluginDetailId = plugin.id;
     const persist = document.getElementById('pluginPersistEnabled');
-    if (persist) persist.checked = plugin.config?.enabled !== false;
+    if (persist) setSwitch(persist, plugin.config?.enabled !== false);
     const persistMsg = document.getElementById('pluginPersistMsg');
     if (persistMsg) persistMsg.textContent = '';
   } catch (error) {
@@ -178,11 +195,13 @@ function renderPluginSettings(data) {
   if (rows && !document.activeElement?.closest('#promptBlockRows')) {
     rows.innerHTML = catalog.length
       ? catalog.map((item) => `
-        <div class="row u-row-12">
-          <label class="field u-row-6 u-minw-180">
+        <div class="control-row">
+          <label class="field-check-item">
             <input type="checkbox" data-core-enabled="${esc(item.id)}" ${item.enabled ? 'checked' : ''}> ${esc(item.label)}
           </label>
-          <label class="field">上限 <input type="number" data-core-max="${esc(item.id)}" min="1" max="100000" step="100" class="u-w-130" value="${item.maxChars ?? ''}" placeholder="默认"></label>
+          <span class="control-grow"></span>
+          <span class="control-label">上限</span>
+          <input class="control-fixed u-w-130" type="number" data-core-max="${esc(item.id)}" min="1" max="100000" step="100" value="${item.maxChars ?? ''}" placeholder="默认">
           <span class="meta">${item.registered ? `已注册 · 调用 ${Number(item.calls) || 0} 次` : '已关闭'}</span>
         </div>`).join('')
       : '<div class="meta">没有可配置的内置块。</div>';
@@ -195,11 +214,11 @@ function renderPluginSettings(data) {
     const timeout = document.getElementById('pluginHookTimeout');
     const append = document.getElementById('pluginAppendLimit');
     const install = document.getElementById('pluginInstallEnabled');
-    if (filter) filter.checked = data?.filters?.inbound === true;
-    if (watch) watch.checked = data?.watch === true;
+    if (filter) setSwitch(filter, data?.filters?.inbound === true);
+    if (watch) setSwitch(watch, data?.watch === true);
     if (timeout) timeout.value = data?.limits?.hookTimeoutMs ?? '';
     if (append) append.value = data?.limits?.maxPromptAppendChars ?? '';
-    if (install) install.checked = data?.install?.enabled !== false;
+    if (install) setSwitch(install, data?.install?.enabled !== false);
   }
 }
 
@@ -228,9 +247,9 @@ async function savePluginRuntimeSettings() {
   const msg = document.getElementById('pluginSettingsMsg');
   if (msg) msg.textContent = '保存中…';
   const patch = {
-    filters: { inbound: document.getElementById('pluginFilterInbound')?.checked === true },
-    watch: document.getElementById('pluginWatch')?.checked === true,
-    install: { enabled: document.getElementById('pluginInstallEnabled')?.checked === true },
+    filters: { inbound: getSwitch(document.getElementById('pluginFilterInbound')) },
+    watch: getSwitch(document.getElementById('pluginWatch')),
+    install: { enabled: getSwitch(document.getElementById('pluginInstallEnabled')) },
   };
   // 空输入不发：内核把 0 当越界并拒绝整份保存，留空应该表示「不改」。
   const timeoutRaw = document.getElementById('pluginHookTimeout')?.value?.trim() ?? '';
@@ -251,7 +270,7 @@ async function savePluginRuntimeSettings() {
 async function savePluginPersistEnabled() {
   if (!pluginDetailId) return;
   const msg = document.getElementById('pluginPersistMsg');
-  const enabled = document.getElementById('pluginPersistEnabled')?.checked === true;
+  const enabled = getSwitch(document.getElementById('pluginPersistEnabled'));
   if (msg) msg.textContent = '保存中…';
   try {
     const data = await api('/api/plugins/settings', 'PATCH', { plugins: { [pluginDetailId]: { enabled } } });
@@ -264,6 +283,7 @@ async function savePluginPersistEnabled() {
 
 /** 绑定事件、注册刷新回调，并做首次加载。入口脚本启动时调一次。 */
 export function init() {
+  renderPluginsFields();
   // 详情弹窗的遮罩必须挂在 body 上：片段注入在 .card 里，而 .card 有动画/滤镜，
   // 会给 position:fixed 造出包含块，遮罩就只盖住卡片、盖不住整页。
   const overlay = document.getElementById('pluginDetailOverlay');

@@ -325,7 +325,7 @@ span.time-field
 
 ## 5. 现有复杂表单的迁移
 
-按控件量排序（2026-11-07 收口后实测，`page.html` 里的手写控件数）：`plugins` 16、`usage` 14、`behaviors` **0**、`sessions` **0**、`operations` **0**、`access` **0**、`reference` **0**、`mcp` **0**、`skills` **0**、`overview` **0**、`social-v1` **0**、`social-v2` **0**、`scheduler` **0**、`persona` **0**、`slang` **0**。
+按控件量排序（2026-11-07 收口后实测，`page.html` 里的手写控件数）：`plugins` **0**、`usage` 14、`behaviors` **0**、`sessions` **0**、`operations` **0**、`access` **0**、`reference` **0**、`mcp` **0**、`skills` **0**、`overview` **0**、`social-v1` **0**、`social-v2` **0**、`scheduler` **0**、`persona` **0**、`slang` **0**。
 
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 

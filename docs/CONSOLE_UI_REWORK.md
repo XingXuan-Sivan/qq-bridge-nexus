@@ -62,10 +62,11 @@
 
 计数来自 `public/console/**`（2026-11-06）：207 个 `<label>`、210 个 `<input>`、162 个 `<button>`（其中 77 个小号、17 个危险、仅 1 个"主按钮"类）、31 个 `<select>`、38 处 `class="pill…"`、30 处 `settings-group`、7 处 `empty-state`、2 处 `page-tabs`。
 
+**表单是重点**：`field` 不再单独做，统一并入表单系统——12 个控件工厂与 `createForm()` 内核的规格见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md)，含文本/数字/密码/多行/下拉/单选组/多选组/复选/开关/文件/只读/动作区、类型化取值、字段与跨字段校验、条件显示、提交态与脏值守卫。首个重写目标是 `social-v2`（130 个控件），分「只换壳（请求体逐字节一致）→ 再加校验与条件显示」两步。
+
 | 顺序 | 组件 | 现状问题 | API（`components/<name>/<name>.js`） | 首批迁移 |
 | --- | --- | --- | --- | --- |
-| 1 | `field` | label 间距/必填/错误态各写一遍；有的 label 与控件不成对 | `fieldHtml({ label, control, hint, error, required, forId })` 返回 `<label class="field">…` 片段；`bindFieldError(root, msg)` | `sessions`（改名弹窗）、`behaviors`、`access` |
-| 2 | `button` | 162 个按钮靠零散 class，小号/危险/主按钮不统一 | `buttonHtml({ label, variant: 'primary'\|'secondary'\|'danger'\|'ghost', size: 'md'\|'sm', attrs })` | 同上 |
+| 1 | `field` | label 间距/必填/错误态各写一遍；有的 label 与控件不成对 | `fieldHtml({ label, control, hint, error, required, forId })` 返回 `<label class="field">…` 片段；`bindFieldError(root, msg)` | `sessions`（改名弹窗）、`behaviors`、`access` || 2 | `button` | 162 个按钮靠零散 class，小号/危险/主按钮不统一 | `buttonHtml({ label, variant: 'primary'\|'secondary'\|'danger'\|'ghost', size: 'md'\|'sm', attrs })` | 同上 |
 | 3 | `select` | 31 处，箭头/宽度/内距各写 | `selectHtml({ id, options: [{value,label}], value })` | `persona`、`social-v2` |
 | 4 | `badge` | 38 处手写 `pill g/b/r` | `badgeHtml({ text, tone: 'blue'\|'green'\|'red'\|'muted' })` | 全站逐步替换 |
 | 5 | `empty-state` | 7 处各写一段虚线框 | `emptyStateHtml({ title, hint })` | 列表页 |

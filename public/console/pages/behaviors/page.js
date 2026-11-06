@@ -4,8 +4,8 @@
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { tableHtml } from '../../components/table/table.js';
-import { bindSearchBox } from '../../components/search-box/search-box.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { BEHAVIORS_FIELDS } from './fields.js';
 
 const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
 const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
@@ -91,11 +91,16 @@ async function refreshBehaviors() {
 }
 
 export function init() {
+  // 先渲染工具条与三块表格宿主，下面才取得到节点；select 的装饰由路由器在 init() 之后统一做。
+  document.querySelectorAll('[data-behaviors-fields]').forEach((host) => {
+    const spec = BEHAVIORS_FIELDS[host.dataset.behaviorsFields];
+    if (spec?.html) host.innerHTML = spec.html;
+  });
   document.getElementById('behaviorsRefresh')?.addEventListener('click', () => { refreshBehaviors().catch(() => {}); });
   document.getElementById('behaviorsFilter')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });
   document.getElementById('behaviorsPermission')?.addEventListener('change', () => { refreshBehaviors().catch(() => {}); });
   let searchTimer = null;
-  bindSearchBox('behaviorsSearch', () => {
+  document.getElementById('behaviorsSearch')?.addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { refreshBehaviors().catch(() => {}); }, 180);
   });

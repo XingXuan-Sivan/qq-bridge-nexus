@@ -262,15 +262,14 @@ summary {
   cursor:pointer
 }
 .save-bar {
-  position:sticky;
-  bottom:12px;
-  margin-top:20px;
-  padding:12px 18px;
-  background:var(--save-bar-bg);
+  position:static;
+  margin-top:28px;
+  padding:14px 18px;
+  background:var(--surface);
   border:1px solid var(--accent-border-soft);
   border-radius:12px;
   z-index:5;
-  box-shadow:var(--shadow-md)
+  box-shadow:var(--shadow-md, 0 2px 8px rgba(15,23,42,.06))
 }
 .save-bar .row {
   margin-top:0!important

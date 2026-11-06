@@ -44,15 +44,61 @@
 
 /* 栅格：复用 grid.css 的 .cols / .col-*，这里只补行距 */
 .form-grid {
-  row-gap: 12px;
+  row-gap: 18px;
+  column-gap: 28px;
 }
 
 /* 字段 */
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: var(--field-label-w, 148px) minmax(0, 1fr);
+  column-gap: var(--space-4, 20px);
+  row-gap: 4px;
+  align-items: start;
   min-width: 0;
+}
+
+/* 标签列：与控件首行文字对齐 */
+.field > .field-label {
+  grid-column: 1;
+  padding-top: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.field > .field-control {
+  grid-column: 2;
+}
+
+.field > .field-hint,
+.field > .field-warn,
+.field > .field-danger,
+.field > .field-docs,
+.field > .field-error {
+  grid-column: 2;
+  margin: 0;
+}
+
+/* 窄屏退回「标签在上」 */
+@media (max-width: 760px) {
+  .field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .field > .field-label {
+    grid-column: 1;
+    padding-top: 0;
+  }
+  .field > .field-control,
+  .field > .field-hint,
+  .field > .field-warn,
+  .field > .field-danger,
+  .field > .field-docs,
+  .field > .field-error {
+    grid-column: 1;
+  }
 }
 
 .field[hidden] {
@@ -66,7 +112,7 @@
 }
 
 .field-req {
-  margin-left: 2px;
+  margin-right: 2px;
   color: var(--danger-fg, #cf222e);
 }
 
@@ -432,7 +478,14 @@
   height: 100%;
 }
 .form-cols .field-control {
-  min-height: 40px;
   display: flex;
   align-items: center;
+  min-height: 40px;
+}
+
+/* 开关/单复选框：控件不拉伸，紧跟标签 */
+.field > .field-control:has(> .field-switch),
+.field > .field-control:has(> input[type="checkbox"]) {
+  justify-content: flex-start;
+  gap: 10px;
 }

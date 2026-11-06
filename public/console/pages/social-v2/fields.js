@@ -44,24 +44,24 @@ export const V2_FIELDS = {
       {
         "name": "v2RecDefaultInfinite",
         "type": "switch",
-        "label": "默认下一次唤醒：无限期（永久）"
+        "label": "无限期（永久）"
       },
       {
         "name": "v2RecSleepMin",
         "type": "number",
-        "label": "推荐潜水时长（分）",
+        "label": "潜水时长（分）",
         "min": 1
       },
       {
         "name": "v2RecSleepMax",
         "type": "number",
-        "label": "推荐潜水时长 · 上限（分）",
+        "label": "时长上限（分）",
         "min": 1
       },
       {
         "name": "v2RecProb",
         "type": "number",
-        "label": "推荐普通消息概率",
+        "label": "普通消息概率",
         "min": 0,
         "max": 1,
         "step": 0.05
@@ -70,28 +70,28 @@ export const V2_FIELDS = {
         "name": "v2RecKeywords",
         "type": "text",
         "span": 2,
-        "label": "推荐关键词（逗号分隔）",
+        "label": "关键词（逗号分隔）",
         "placeholder": "小鲸鱼, DeepSeek"
       },
       {
         "name": "v2RecAt",
         "type": "switch",
-        "label": "推荐 @ 唤醒"
+        "label": "@ 唤醒"
       },
       {
         "name": "v2RecName",
         "type": "switch",
-        "label": "推荐名字唤醒"
+        "label": "名字唤醒"
       },
       {
         "name": "v2RecQuestion",
         "type": "switch",
-        "label": "推荐提问唤醒"
+        "label": "提问唤醒"
       },
       {
         "name": "v2RecPoke",
         "type": "switch",
-        "label": "推荐拍一拍唤醒"
+        "label": "拍一拍唤醒"
       }
     ]
   },

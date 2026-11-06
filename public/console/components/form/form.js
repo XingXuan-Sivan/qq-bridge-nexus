@@ -197,6 +197,73 @@ export function formCallout({ tone = 'info', title = '', body = '' }) {
   return `<div class="form-callout" data-tone="${esc(tone)}"${tone === 'danger' ? ' role="alert"' : ''}>${title ? `<strong>${esc(title)}</strong>` : ''}${body ? `<span>${esc(body)}</span>` : ''}</div>`;
 }
 
+const FIELD_FACTORIES = {
+  text: textField,
+  number: numberField,
+  password: passwordField,
+  textarea: textareaField,
+  select: selectField,
+  radio: radioGroup,
+  checkboxGroup,
+  checkbox: checkboxField,
+  switch: switchField,
+  file: fileField,
+  date: dateField,
+  time: timeField,
+  datetime: datetimeField,
+  timeRange: timeRangeField,
+  readonly: readonlyField,
+};
+
+/**
+ * 规格渲染：把「字段数据」铺成统一的表单 HTML，再交给 createForm 接管。
+ * 见 docs/CONSOLE_FORMS.md §4。spec 里每一项是工厂参数 + `name`（即控件 id）；
+ * `type: 'section'` 开一个新分组，`type: 'callout'` / `'actions'` 直接插入对应块。
+ * `span` 表示占几列（默认 1；等于 columns 时整行）。
+ */
+export function renderFields(host, spec, options = {}) {
+  if (!host) throw new Error('renderFields: 缺少容器');
+  const columns = Math.max(1, Math.min(4, Number(options.columns) || 2));
+  const items = Array.isArray(spec) ? spec : [];
+  const out = [];
+  let inSection = false;
+  let count = 0;
+  const closeSection = () => {
+    if (inSection) {
+      out.push('</div></fieldset>');
+      inSection = false;
+    }
+  };
+  for (const raw of items) {
+    const item = raw ?? {};
+    if (item.type === 'section') {
+      closeSection();
+      out.push(`<fieldset class="form-section"><legend>${esc(item.label ?? '')}</legend>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}<div class="cols form-cols">`);
+      inSection = true;
+      continue;
+    }
+    if (item.type === 'callout') {
+      out.push(formCallout(item));
+      continue;
+    }
+    if (item.type === 'actions') {
+      out.push(formActions(item));
+      continue;
+    }
+    if (!item.name) throw new Error('renderFields: 字段缺少 name');
+    const factory = FIELD_FACTORIES[item.type];
+    if (!factory) throw new Error(`renderFields: 未知字段类型 ${item.type}`);
+    const span = Math.max(1, Math.min(columns, Number(item.span) || 1));
+    const colClass = span >= columns ? 'col-12' : `col-12 col-lg-${Math.round((12 * span) / columns)}`;
+    const { name, span: _span, ...props } = item;
+    out.push(`<div class="${colClass}">${factory({ ...props, id: name })}</div>`);
+    count += 1;
+  }
+  closeSection();
+  host.innerHTML = out.join('');
+  return count;
+}
+
 /* ---------------------------------------------------------------- 内核 */
 
 const DEFAULT_MESSAGES = {

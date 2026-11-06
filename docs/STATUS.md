@@ -2,15 +2,16 @@
 
 目的：把「没做完的、只做了一半的、卡在别人身上的」收敛到一页，避免它们散落在路线图、提交信息与口头汇报里，最后被当成「已完成」。
 
-用法：每个阶段收尾时先对这张表；新增项写清判据与依赖，改动项更新状态与「差什么」。**状态只有三种**：
+用法：每个阶段收尾时先对这张表；新增项写清判据与依赖，改动项更新状态与「差什么」。**状态只有四种**：
 
 | 状态 | 含义 |
 | --- | --- |
 | `Done` | 有可复核的证据（测试、命令输出、截图），判据全部满足 |
 | `Partial` | 已经开始或部分可用，括号里写「差什么」——差的部分必须能作为一个具体动作写出来 |
+| `Todo` | 已立项、判据已写清，但**一行代码都还没动**；与 `Partial` 的区别是「有没有开工」 |
 | `Blocked` | 不是我们没做，而是等外部条件（DSH 能力、平台验证、用户拍板），括号里写「等什么」 |
 
-规则：`Partial` 不允许写成 `Done`；`Blocked` 每次阶段收尾都要重新确认一次外部条件是否已变；判据里要给出复核方式（命令或文件），不能只写「已完成」。
+规则：`Partial` 不允许写成 `Done`；`Todo` 在开工当天改成 `Partial` 并写「差什么」；`Blocked` 每次阶段收尾都要重新确认一次外部条件是否已变；判据里要给出复核方式（命令或文件），不能只写「已完成」。
 
 ---
 
@@ -18,7 +19,7 @@
 
 | # | 项 | 状态 | 是什么 | 完成判据 | 依赖 | 优先级 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 真机端到端联调 | `Partial`（差：回复发送没验到——DSH profile 的 MCP server 仍指向 `qq-bridge-enhanced` 的脚本，读它的 `config.json` 走 3100，会话里 `mcp__snowluma__*` 发送必然 `fetch failed`；`operator` 只读令牌边界、插件任务类型按时触发、`onReplyDecorate` 真实生效也未验） | 用真实账号跑一遍：唤醒提示里能看到 `core-stickers` / `core-digest` 两段、人格 provider 取卡与回落、`onReplyDecorate` 与 `inbound:filter` 在真实事件上生效、插件任务类型按时触发、`operator` 只读令牌边界 | 留下一份跑通记录：每步的命令/响应或截图，落在 `docs/` 或提交信息里；未通过的项转入本表 | 真实 QQ 账号、SnowLuma（需扫码）、DSH 运行中；回复链路还需把 DSH profile 的 MCP 指向 nexus 并重启 DSH（用户已自定义过 enhanced 的 MCP/插件，需其确认） | 高 |
+| 1 | 真机端到端联调 | `Partial`（差：① 群聊路径未验（目前只验了私聊）；② 审批闭环未验（`/approve`、`通过 #编号`、超时回落）；③ 唤醒提示里三个注入块的计数与截断；④ `onReplyDecorate` 与 `inbound:filter` 在真实事件上的生效；⑤ `operator` 只读令牌边界；⑥ 插件任务类型按时触发。**2026-11-06 已验**：DSH profile 的 MCP 已指向 nexus（`setup-dsh` 重写 3 条），`qq_status` 返回「星苒 online」，唤醒后日志 `工具统一发送 qq:private:2897715886: 成功 2/2 条`，人格卡取到 `provider/魅魔2`） | 用真实账号按上面 ①–⑥ 逐条跑通，并把结果落成一份可复核记录 | 真实 QQ 账号、SnowLuma 在线（需扫码）、DSH 运行中 | 高 |
 | 2 | MCP 清单（路线图 §9.1） | `Blocked`（等：验证 DSH 是否支持运行时增删 MCP，见路线图 §11 第 1 条） | 三个写死的 stdio server 变成 `mcp.json` 清单 + 控制台「MCP 服务」页，插件可贡献 server 定义 | 加一个 server 后不重启 DSH 能出现在工具表；否则只能降级为「写配置 + 提示重启」，需要用户先接受这个体验 | DSH 侧能力验证（读 MCP 配置加载路径 + 一次「加了不重启」实验） | 中 |
 | 3 | Agent 工具注册（路线图 §8.5） | `Blocked`（等：DSH 支持运行时更新工具表） | `qq_*` 工具现在写死在 preset 补丁里，改一次要重启 DSH；想做成插件可注册 | 注册后模型当轮就能看到新工具；做不到就不做（避免「注册了但模型看不到」的假功能） | 同 2，DSH 侧能力 | 中 |
 | 4 | 插件控制台面板（路线图 §8.4） | `Partial`（差：`/plugin-ui/<id>/` 静态路由、按插件隔离的鉴权、页面容器；目前 0 行代码） | 插件可以在控制台里拥有一小块自己的界面，只能拿自己的数据 | 未启用插件的面板返回 404；面板读不到其它插件与会话数据；CSP 不被放宽 | 无 | 低 |
@@ -31,6 +32,8 @@
 | 11 | 迁移评估与实施（`docs/PARITY.md`） | `Partial`（差：2026-11-06 已落定 D-1=B（`persona-bind/1` 插件能力）、D-3=B（会话页 + 可配置切换 + 平台解耦 + 删改同步）；D-2/D-4 仍调研；被判定「补齐/重设计」的项尚未动工） | 见 `PARITY.md` §3 维度表：11 个维度全部有「保持/补齐/重设计」结论；被判定补齐的项拆成可验收小项 | 各小项的判据与依赖见 `PARITY.md` §7；顺序：会话标识平台化 → 会话页（含删改同步）→ `persona-bind/1` → 会话标题 → 切换/迁移脚本 | 高 |
 | 12 | 扩展便利性（`PARITY.md` §7.6） | `Partial`（差：插件 UI 面板、配置 schema 化表单、manifest 静态 `commands`、i18n、依赖约束、安装来源校验） | 新增一个插件时，不改控制台 HTML 就能有配置界面与面板；清单见 `PARITY.md` §7.6 | 需要先定「插件面板」的鉴权与静态路由（等 D-3 的会话页做完再排） | 中 |
 | 13 | 会话标识平台解耦 | `Done`（2026-11-06：`src/session/key.mjs` 统一组装/解析/判等，产出与解析两侧全部迁移，7 个业务模块 + 桥接 18 处构造 + 43 处解析 + 54 处接口入参归一；`platform.keyedFormat` 开关已彻底删除；死代码 `src/core/session-router.mjs` 已删除） | 新增一个平台（如 TG）时，会话/绑定/模式/任务无需改内核代码 | 复核：`node scripts/test-session-key.mjs`（11/11）、`node scripts/test-integration-v030.mjs`（31/31）、`npm run test:audit`（90/90） | — |
+| 14 | 控制台前端组件化（路线图 §8.9） | `Todo`（2026-11-06 立项，约定见 `docs/CONSOLE_UI.md`；根因已定位：页面搜索框漏写 `type` 属性，`input[type=text]` 规则不命中而退回浏览器默认外观） | `public/console/components/<name>/{<name>.js,<name>.css}` 目录与约定、迁移 `message`/`modal`/`table`、搜索框组件替换 6 处、静态白名单加 `/console/components/` | 1440 宽下三页与右上角搜索框外观一致（截图比对）；`node scripts/test-console-static.mjs` 通过；`PLAYWRIGHT_MODULE=playwright-core npm run test-console-ui` 契约基线不变；全站页面零 404 | 需用户批准改 `src/http/static.mjs` 白名单一行（服务端改动） | 中 |
+| 15 | 统一注入块来源与记忆注入（路线图 §8.10） | `Todo`（2026-11-06 立项，契约见 `PLUGIN_KERNEL.md` §5.5；现状：`core-digest` 是 nexus 自己的轻量记忆，soulkit 长期记忆没有通道） | 所有块统一注册表（`owner` = `core` / `plugin:<id>` / `declared`）、声明式 `source`（`builtin`/`text`/`file`/`http`/`memory`）、`memory:provide` 权限与 `ctx.memory.registerProvider`、`plugins/soulkit-memory/` 适配 `POST /api/recall`、新增 `core-memory`（priority 120） | 新增 `file` 类型块只改 `config.json` 即生效（源码零改动）；块取数失败只跳过该块且唤醒照常完成；soulkit 停机时 `core-memory` 为空不阻塞；`test-prompt-blocks` 覆盖「正常 / 文件缺失 / 超预算 / 热关」四个用例 | soulkit `POST /api/recall` 可用（2026-11-06 已验证路由存在、`view:'self'` 免令牌）；不改 soulkit，不改它的绑定 | 高 |
 
 ---
 

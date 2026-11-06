@@ -216,7 +216,71 @@ ctx.prompt.registerBlock({
 - 单块 `render` 抛错只跳过该块（记 `error`），不影响其它块与主链路。
 - `status().promptBlocks` 返回 `{ total, maxTotalChars, renders, injected, skipped, blocks: [...] }`，控制台插件详情能看到每个块的状态；`/api/plugins` 的条目带 `blocks`（注册的 id 列表）。
 - 与 `onPromptBuild` 的分工：钩子适合「改别人的文本、加前后缀」，注入块适合「稳定贡献一段有归属的内容」；两者共用同一个总预算。
-- 内置段落也用同一套语义：贴纸参考（`core-stickers`）与记忆摘要（`core-digest`）已迁到 bridge 自建的注册表，可用 `config.json` 的 `promptBlocks` 单独关闭或收紧限额（`{ "core-digest": { "enabled": false } }`）。**它与插件块分账**：插件块仍受 `plugins.json` 的 `limits.maxPromptAppendChars` 约束，内置段落维持原有长度，避免互挤；`/api/plugins` 的 `coreBlocks` 返回这两块的上限与调用次数。
+- 内置段落也用同一套语义：贴纸参考（`core-stickers`）、技能清单（`core-skills`）与记忆摘要（`core-digest`）已迁到 bridge 自建的注册表，可用 `config.json` 的 `promptBlocks` 单独关闭或收紧限额（`{ "core-digest": { "enabled": false } }`）。**它与插件块分账**：插件块仍受 `plugins.json` 的 `limits.maxPromptAppendChars` 约束，内置段落维持原有长度，避免互挤；`/api/plugins` 的 `coreBlocks` 返回这几块的上限与调用次数。
+
+### 5.5 统一注入块来源（计划，未实现）
+
+> 本节描述**目标形态**，当前代码只有「插件注册 + 三个写死的内置块」。落地顺序与判据见 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) §8.10。写在这里是为了先把契约定死，避免上线时又分成两套。
+
+**要解决的问题**：现在加一个新的注入块（例如长期记忆、群规、天气）必须改 `src/bridge.js`——加一行 `registerCoreBlock(...)`、加一份配置白名单、再改控制台目录。希望做到「声明一个块」或「插件注册一个块」即可，源码不动。
+
+**统一模型**：所有块进同一个 `promptBlocks` 注册表，用 `owner` 区分来源，渲染管线只有一条。
+
+| `owner` | 谁注册 | 生命周期 |
+| --- | --- | --- |
+| `core` | 桥接自身（`registerCoreBlock`） | 随桥接启动，`config.json` 的 `promptBlocks` 可开关 |
+| `plugin:<id>` | 插件 `ctx.prompt.registerBlock`（已有） | 随插件 activate/commit/reload/dispose |
+| `declared` | 配置声明（新增） | 随配置热加载，无需重启 |
+
+**`source` 四种（声明式块用它选数据来源）**：
+
+| `source.type` | 取数方式 | 典型用途 |
+| --- | --- | --- |
+| `builtin` | 由桥接内部函数提供（`builtin: stickers` / `skills` / `digest` / `memory`） | 需要运行时状态的块 |
+| `text` | 配置里的静态文本，支持 `{{date}}` 等少量占位 | 固定提醒、群规摘要 |
+| `file` | 读一个文件，带 TTL 与最大字节数 | 外部维护的记忆/规则文件 |
+| `http` | `GET`/`POST` 一个本地地址，JSON 取文本字段，带超时与 TTL 缓存 | soulkit 这类外部记忆服务 |
+| `memory` | 走 memory provider（§9.4） | 长期记忆，与 `persona:provide` 同构 |
+
+**声明写法**（`config.json`，与现有 `promptBlocks` 合并为一节）：
+
+```jsonc
+{
+  "promptBlocks": {
+    "core-digest": { "enabled": true },
+    "group-rules": {
+      "enabled": true,
+      "label": "群规",
+      "priority": 140,
+      "maxChars": 600,
+      "source": { "type": "file", "path": "state/group-rules.md", "ttlMs": 60000 }
+    },
+    "soulkit-memory": {
+      "enabled": true,
+      "label": "长期记忆",
+      "priority": 120,
+      "maxChars": 900,
+      "source": { "type": "memory", "provider": "soulkit", "timeoutMs": 1500 }
+    }
+  }
+}
+```
+
+**渲染与隔离（沿用 §5.4 的既有语义，不新增规则）**：
+
+- 排序按 `priority` 升序、同优先级按 `id`；单块 `maxChars` 截断记 `truncated`；总预算超限**整块跳过**记 `budget`。
+- 单块取数失败（文件不存在、HTTP 非 2xx、provider 抛错、超时）→ 只跳过该块并记 `error`，写审计，不影响其它块与主链路。
+- 声明式块与内置块**共用同一预算**；账号级总预算仍由 `limits.maxPromptAppendChars` 控制，内置块可用 `maxChars` 单独收紧。
+- `status().promptBlocks` 与 `/api/plugins` 的 `coreBlocks` 合并成一张表：`{ id, owner, label, priority, maxChars, calls, lastChars, truncated, skipped }`，控制台「内置注入块」区按 owner 分组展示。
+
+**明确不做**：不允许声明式块执行任意脚本（不做 `source.type = "script"`）；需要计算能力的块必须写成插件，走已定义的钩子与权限。
+
+**验收判据**（落地时按此验收）：
+
+1. 新增一个 `source.type = "file"` 的块只改 `config.json`，重启后出现在 `/api/plugins` 的块表里、唤醒提示里能看到，源码无改动。
+2. 该块路径写错时唤醒照常完成，日志一条 warn、审计一条 `error`，其它块不受影响。
+3. 关掉块后提示词里整段消失、字数预算立即回收。
+4. `test-prompt-blocks` 增加「声明式块：正常 / 文件缺失 / 超预算 / 热关」四个用例。
 
 ---
 

@@ -290,9 +290,11 @@ for (const id of ['skills', 'mcp', 'behaviors']) {
 }
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
-for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm']) {
+for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'createForm', 'enhanceForm', 'renderFields']) {
   ok(new RegExp(`export function ${fn}\\(`).test(formModule), `form.js 导出 ${fn}`);
 }
+ok(/type === 'section'/.test(formModule), 'renderFields 支持 section 分组');
+ok(/form-cols/.test(formModule), 'renderFields 输出走 12 列栅格');
 const formCss = fs.readFileSync(path.join(componentDir, 'form', 'form.css'), 'utf8');
 ok(/.field-error {/.test(formCss) && /.form-actions {/.test(formCss), 'form.css 自带字段错误行与动作区样式');
 ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');

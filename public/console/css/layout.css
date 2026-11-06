@@ -247,12 +247,7 @@ h1 {
   position:relative;
   flex:0 0 238px
 }
-.search-wrap input {
-  background:var(--surface);
-  padding:10px 14px;
-  border-radius:10px;
-  font-size:12px
-}
+/* 输入框外观与页面内搜索框共用同一条规则：components.css 的 `.search-wrap input,input.search-box`。 */
 .search-results {
   /* 候选框会由 JS 挂到 body 上并改 fixed：`.page-heading` 有 transform，
      留在原地会被困在它的层叠上下文里，永远盖不过后面的卡片。 */

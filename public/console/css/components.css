@@ -146,6 +146,14 @@ input[type=text],input[type=search],input[type=password],input[type=number],text
   min-width:0;
   transition:border-color .15s,box-shadow .15s
 }
+/* 统一的搜索框外观：右上角全局搜索（.search-wrap input）与页面内的搜索框（.search-box）用同一套。
+   必须写在上面那条基础输入规则之后：两者特异性相同，靠顺序覆盖 8px/13px 的默认外观。 */
+.search-wrap input,input.search-box {
+  background:var(--surface);
+  padding:10px 14px;
+  border-radius:10px;
+  font-size:12px
+}
 input:focus,textarea:focus,select:focus {
   border-color:var(--accent-border-focus);
   box-shadow:0 0 0 3px var(--accent-ring)

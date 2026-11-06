@@ -1,0 +1,99 @@
+/* 12 列栅格与堆叠/簇布局（2026-11-06，见 docs/CONSOLE_UI_REWORK.md §3.2）。
+   断点与 tokens.css 的 --bp-* 一一对应，但媒体查询不能读自定义属性，这里写数值：
+     sm 760 / md 900 / lg 1180 / xl 1500（与现有 layout/components 的断点一致）
+   命名避开已完成的两套：`.grid` 是卡片两列网格、`.row` 是工具栏行。 */
+.cols {
+  display:grid;
+  grid-template-columns:repeat(12,minmax(0,1fr));
+  gap:var(--space-4);
+  align-items:start
+}
+.cols>* { min-width:0 }
+
+.col-1 { grid-column:span 1 }
+.col-2 { grid-column:span 2 }
+.col-3 { grid-column:span 3 }
+.col-4 { grid-column:span 4 }
+.col-5 { grid-column:span 5 }
+.col-6 { grid-column:span 6 }
+.col-7 { grid-column:span 7 }
+.col-8 { grid-column:span 8 }
+.col-9 { grid-column:span 9 }
+.col-10 { grid-column:span 10 }
+.col-11 { grid-column:span 11 }
+.col-12 { grid-column:span 12 }
+
+@media (min-width:760px) {
+  .col-sm-1 { grid-column:span 1 }
+  .col-sm-2 { grid-column:span 2 }
+  .col-sm-3 { grid-column:span 3 }
+  .col-sm-4 { grid-column:span 4 }
+  .col-sm-5 { grid-column:span 5 }
+  .col-sm-6 { grid-column:span 6 }
+  .col-sm-7 { grid-column:span 7 }
+  .col-sm-8 { grid-column:span 8 }
+  .col-sm-9 { grid-column:span 9 }
+  .col-sm-10 { grid-column:span 10 }
+  .col-sm-11 { grid-column:span 11 }
+  .col-sm-12 { grid-column:span 12 }
+}
+
+@media (min-width:900px) {
+  .col-md-1 { grid-column:span 1 }
+  .col-md-2 { grid-column:span 2 }
+  .col-md-3 { grid-column:span 3 }
+  .col-md-4 { grid-column:span 4 }
+  .col-md-5 { grid-column:span 5 }
+  .col-md-6 { grid-column:span 6 }
+  .col-md-7 { grid-column:span 7 }
+  .col-md-8 { grid-column:span 8 }
+  .col-md-9 { grid-column:span 9 }
+  .col-md-10 { grid-column:span 10 }
+  .col-md-11 { grid-column:span 11 }
+  .col-md-12 { grid-column:span 12 }
+}
+
+@media (min-width:1180px) {
+  .col-lg-1 { grid-column:span 1 }
+  .col-lg-2 { grid-column:span 2 }
+  .col-lg-3 { grid-column:span 3 }
+  .col-lg-4 { grid-column:span 4 }
+  .col-lg-5 { grid-column:span 5 }
+  .col-lg-6 { grid-column:span 6 }
+  .col-lg-7 { grid-column:span 7 }
+  .col-lg-8 { grid-column:span 8 }
+  .col-lg-9 { grid-column:span 9 }
+  .col-lg-10 { grid-column:span 10 }
+  .col-lg-11 { grid-column:span 11 }
+  .col-lg-12 { grid-column:span 12 }
+}
+
+@media (min-width:1500px) {
+  .col-xl-1 { grid-column:span 1 }
+  .col-xl-2 { grid-column:span 2 }
+  .col-xl-3 { grid-column:span 3 }
+  .col-xl-4 { grid-column:span 4 }
+  .col-xl-5 { grid-column:span 5 }
+  .col-xl-6 { grid-column:span 6 }
+  .col-xl-7 { grid-column:span 7 }
+  .col-xl-8 { grid-column:span 8 }
+  .col-xl-9 { grid-column:span 9 }
+  .col-xl-10 { grid-column:span 10 }
+  .col-xl-11 { grid-column:span 11 }
+  .col-xl-12 { grid-column:span 12 }
+}
+
+/* 纵向堆叠：一列、统一间距，用于表单分区内部 */
+.stack {
+  display:grid;
+  gap:var(--space-4);
+  align-items:start
+}
+
+/* 横向成簇：自动换行的一组小控件（按钮组、筛选组） */
+.cluster {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:var(--space-3)
+}

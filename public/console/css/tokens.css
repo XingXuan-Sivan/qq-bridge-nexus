@@ -101,6 +101,63 @@
   --danger-solid:#cf222e;
   --radius:16px;
   --radius-sm:10px;
+
+  /* ── 语义别名层（2026-11-06，CONSOLE_UI_REWORK.md §2）────────────────
+     规则：下面这批只做「指向现有令牌」的别名，原变量一个不动。
+     新组件只写别名；老样式继续用原变量，逐步收敛。
+     别名用 var() 定义，所以深色主题覆盖原变量后会自动跟着变，不需要在这里再写一遍。 */
+  --color-bg:var(--bg);
+  --color-surface:var(--surface);
+  --color-surface-2:var(--surface-subtle);
+  --color-surface-3:var(--surface-sunken);
+  --color-text:var(--text);
+  --color-text-muted:var(--text-secondary);
+  --color-text-faint:var(--placeholder);
+  --color-border:var(--border);
+  --color-border-strong:var(--border-strong);
+  --color-accent:var(--accent);
+  --color-accent-hover:var(--accent-hover);
+  --color-accent-soft:var(--accent-soft-bg);
+  --color-ok:var(--ok);
+  --color-danger:var(--err);
+  --color-warn:var(--warn-fg);
+  --badge-blue-bg:var(--pill-blue-bg);
+  --badge-blue-fg:var(--pill-blue-fg);
+  --badge-green-bg:var(--pill-green-bg);
+  --badge-green-fg:var(--pill-green-fg);
+  --badge-red-bg:var(--pill-red-bg);
+  --badge-red-fg:var(--pill-red-fg);
+  --radius-md:12px;
+  --radius-pill:999px;
+  --elevation-1:var(--shadow-card);
+  --elevation-2:var(--shadow-md);
+  --elevation-3:var(--shadow-pop);
+  --elevation-4:var(--shadow-modal);
+
+  /* ── 间距（此前各处手写 4/6/8/10/12/16/20/24，这里收成一套刻度）── */
+  --space-1:4px;
+  --space-2:6px;
+  --space-3:8px;
+  --space-4:10px;
+  --space-5:12px;
+  --space-6:16px;
+  --space-7:20px;
+  --space-8:24px;
+
+  /* ── 字号（新组件用；老样式仍写死，逐步收敛）── */
+  --text-xs:12px;
+  --text-sm:13px;
+  --text-base:14px;
+  --text-md:15px;
+  --text-lg:17px;
+  --text-xl:20px;
+
+  /* ── 断点常量：媒体查询里**不能**用 var()，`grid.css` 与页面断点仍写数值；
+     这里定义一份是为了让 JS（图表的桶宽、截图脚本）能读到同一套值。 ── */
+  --bp-sm:760px;
+  --bp-md:900px;
+  --bp-lg:1180px;
+  --bp-xl:1500px;
   color-scheme:light
 }
 

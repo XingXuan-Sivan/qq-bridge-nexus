@@ -131,7 +131,12 @@ label {
   color:var(--label);
   margin:17px 0 7px
 }
-input[type=text],input[type=search],input[type=password],input[type=number],textarea,select {
+/* 基础输入外观：按元素匹配，不按 type 属性匹配（2026-11-06）。
+   以前写成 input[type=text]/[type=search]…，页面漏写 type 就整条不命中、退回浏览器默认描边
+   （改名弹窗与五个搜索框都中过这个招）。:where() 特异性为 0，组件类可以正常覆盖，
+   不会再出现「必须靠文件顺序压过去」的情况。 */
+:where(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color])),
+:where(textarea),:where(select) {
   background:var(--surface);
   border:1px solid var(--border-input);
   border-radius:8px;

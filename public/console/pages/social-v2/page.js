@@ -763,7 +763,15 @@ const fc = (id) => Boolean(fv(id));
 // 写回仍是直接落到 DOM（表单内核按需读 DOM，不缓存取值）。
 const setCheck = (id, value) => {
   const element = document.getElementById(id);
-  if (element) element.checked = Boolean(value);
+  if (!element) return;
+  if (element.getAttribute('role') === 'switch') {
+    const on = Boolean(value);
+    element.setAttribute('aria-checked', on ? 'true' : 'false');
+    const text = element.querySelector('span:last-child');
+    if (text) text.textContent = on ? (element.dataset.onLabel || '开') : (element.dataset.offLabel || '关');
+    return;
+  }
+  element.checked = Boolean(value);
 };
 const setValue = (id, value) => {
   const element = document.getElementById(id);

@@ -1,15 +1,22 @@
-/* 静态表格（tableHtml）：滚动容器 + 固定表头。 */
+/* 静态表格（tableHtml）：滚动容器 + 固定表头。
+   .table-wrap 是通用容器（不限制高度，表单里嵌表格用）；
+   .tool-log-table 是工具日志的折叠版（500px 上限）。 */
+.table-wrap,
 .tool-log-table {
   overflow: auto;
   border: 1px solid var(--card-border);
   border-radius: 10px;
   margin-top: 12px;
+}
+.tool-log-table {
   max-height: 500px;
 }
+.table-wrap table,
 .tool-log-table table {
   min-width: 1000px;
   table-layout: fixed;
 }
+.table-wrap thead th,
 .tool-log-table thead th {
   position: sticky;
   top: 0;

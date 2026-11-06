@@ -99,12 +99,21 @@
   display: none !important;
 }
 
-/* 行内变体（开关/单选）：标签紧贴控件，不占满标签列 */
-.field-block--inline > .field-row {
+/* 无标签字段（例如自带表头的表格）：没有标签列可对齐，整行铺满控件列。 */
+.field-row:has(> .field-control:only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 开关默认仍走标准「标签列 + 控件列」：两列栅格里贴着单元格左边缘会和其他字段错位。
+   只有页头工具条（.form-inline-bar，字段不铺栅格）才收成紧凑的 auto/auto。 */
+.form-inline-bar .field-block--switch > .field-row {
   grid-template-columns: auto auto;
   justify-content: start;
   column-gap: 10px;
 }
+
+/* 可勾选表格：表格本身走 components/table 的 tableHtml + .table-wrap，
+   这里只声明「表格行和清单行一样顶对齐」，不重复定义表格外观。 */
 
 /* 行内控件簇：输入框 + 开关 + 按钮 + 说明落在同一行、同一标尺。
    「非字段控件」用它，不要再退回老 .row —— .row 是任意子元素的收集器，
@@ -154,10 +163,12 @@
 }
 
 /* 复选清单（工具开关、能力清单）：按列铺开，条目自带说明 */
-.field-block--checklist > .field-row {
+.field-block--checklist > .field-row,
+.field-block--table > .field-row {
   align-items: start;
 }
-.field-block--checklist > .field-row > .field-label {
+.field-block--checklist > .field-row > .field-label,
+.field-block--table > .field-row > .field-label {
   align-self: start;
 }
 .field-checklist {

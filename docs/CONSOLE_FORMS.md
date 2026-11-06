@@ -137,7 +137,7 @@ form.destroy();
 - 需要用户确认风险的勾选（「我已了解」「删除后不可恢复」）保留 `checkboxField`，语义是确认不是开关。
 - 多选集合用 `checkboxGroup`；单选集合用 `radioGroup`（卡片样式给互斥的模式选择）。
 - 同排字段靠 `.cols` + `.col-*` 排布，控件区最小高度 40px、垂直居中，保证基线一致；长文本/提示词用 `span: 2` 占整行。
-### 控件标尺与四类非字段控件（2026-11-06 落地）
+### 控件标尺与五类非字段控件（2026-11-06 落地）
 
 尺寸只有一个来源：`tokens.css` 的标尺令牌。输入框、下拉框、按钮、开关全部用 `height` 取值，**不许再用 padding 撑高**（padding 撑高会随字号和字体各自漂 3–4px，就是「按钮和输入框差一截」的根因）。
 
@@ -151,16 +151,21 @@ form.destroy();
 
 例外只有 `textarea`：多行控件不设 `height`，仍用 `padding: 9px 11px`。
 
+**40px 只挂在 `.btn` 上，不挂在裸 `button` 上**：概览指标卡、侧栏导航、运行模式卡都是 `<button>`，被强制 40px 会压扁裁切（2026-11-06 就是这么把概览首页和左侧菜单弄错位的）。裸 `button` 只保留通用外观（背景 / 边框 / 圆角 / `padding: 9px 15px` / hover）；需要和输入框同行的按钮加 `class="btn"` —— `inlineActions` 和 `custom` 里的按钮已经自动带。
+
 **页面不许改原语布局**：`.field-row` / `.field-control` / `.field-block` 的 `display`、`grid-template-columns`、`height` 只能由 `components/form/form.css` 决定；页面 css 里出现这类覆盖会被静态检查拦下（`test-console-static` 的「页面样式不覆盖 .field-row 布局」）。
 
-不是所有东西都是「字段」。以下四类走 `renderFields` 的新类型，不要再手写一行 HTML：
+不是所有东西都是「字段」。以下五类走 `renderFields` 的新类型，不要再手写一行 HTML：
 
 | 类型 | 工厂 | 何时用 | 关键点 |
 | --- | --- | --- | --- |
 | `custom` | `customField({ id, label, html })` | 一段复合控件（语音库面板、key + 按钮 + 状态位） | 内部排版用 `.control-row`；`label` 仍参与左列对齐 |
-| `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（工具开关、权限项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
+| `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（权限项、少量选项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
+| `checkTable` | `checkTableField({ id, label, options, nameHeader, descHeader })` | 条目多、需要逐条扫读的开关清单（工具清单） | 复用 `components/table` 的 `tableHtml()` + `.table-wrap` 容器（sticky 表头、横向滚动都在组件里，表单不自带表格样式）；取值同样为字符串数组；`id` 落在容器 `div` 上；字段写 `span: 2`；表格行同样顶对齐 |
 | `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位 |
 | `status` | `statusBadge({ text, tone, pill })` | 只读状态（`运行中`） | 页头固定高度位置用 `pill: true` |
+
+开关（`switch`）**不再走「标签贴控件」的行内变体**：它和输入框共用 148px 标签列，这样两列栅格里的开关才和上下行对齐。只有页头 `.form-inline-bar` 里的开关收成紧凑的 `auto auto`（`.form-inline-bar .field-block--switch > .field-row`）。
 
 `.control-row` 是「一行不是字段的东西」的唯一原语：`display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:var(--control-h)`。角色类四个：
 

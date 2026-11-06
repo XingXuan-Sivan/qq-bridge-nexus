@@ -156,9 +156,9 @@ try {
       const rows = Array.from(document.querySelectorAll('#section-social-v2 [data-field-wrap]'));
       let worst = 0;
       for (const w of rows) {
-        // 清单行（checkList）刻意顶对齐：38 项清单高 1000+px，标签居中会飘在清单中间。
-        // 这里只量「单行字段」；清单行的对齐由截图验收负责。
-        if (w.classList.contains('field-block--checklist')) continue;
+        // 清单/表格行刻意顶对齐：几十行高的控件里标签居中会飘在中间。
+        // 这里只量「单行字段」；这类长控件行的对齐由截图验收负责。
+        if (w.classList.contains('field-block--checklist') || w.classList.contains('field-block--table')) continue;
         const l = w.querySelector('.field-label');
         const c = w.querySelector('.field-control');
         if (!l || !c) continue;

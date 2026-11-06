@@ -88,22 +88,26 @@ a {
 p {
   margin:0
 }
-/* 按钮与输入框同高：高度来自 --control-h，内边距只负责左右。
-   以前用 padding:9px 撑高（再继承 14px 字号），比 input 高 4–5px，行内对不齐。 */
+/* 裸 button 只给通用外观（卡片、导航、工具条都能用），高度仍由内容撑。
+   40px 控件标尺只给 .btn：.metric-link / .nav-item 这类卡片式按钮若被强制 40px 会压扁裁切。 */
 button {
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:9px;
+  color:var(--text);
+  padding:9px 15px;
+  transition:background .15s,border-color .15s,color .15s
+}
+/* 表单与工具栏里的标准按钮：与输入框同高（高度来自 --control-h，内边距只负责左右）。 */
+.btn {
   display:inline-flex;
   align-items:center;
   justify-content:center;
   gap:6px;
   height:var(--control-h,40px);
   padding:0 var(--control-px-btn,15px);
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:9px;
-  color:var(--text);
   line-height:1.2;
-  white-space:nowrap;
-  transition:background .15s,border-color .15s,color .15s
+  white-space:nowrap
 }
 button:hover {
   background:var(--surface-hover);
@@ -123,6 +127,11 @@ button.danger:hover {
   background:var(--danger-hover-bg)
 }
 button.small {
+  font-size:12px;
+  padding:7px 11px
+}
+/* 次级控件按钮：32px，仍与输入框同标尺（用于清单/表格行内）。 */
+.btn.small {
   height:var(--control-h-sm,32px);
   font-size:12px;
   padding:0 11px

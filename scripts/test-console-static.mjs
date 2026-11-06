@@ -293,7 +293,7 @@ for (const id of ['skills', 'mcp', 'behaviors']) {
 }
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
-for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'customField', 'checkListField', 'statusBadge', 'inlineActions', 'createForm', 'renderFields']) {
+for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'customField', 'checkListField', 'checkTableField', 'statusBadge', 'inlineActions', 'createForm', 'renderFields']) {
   ok(new RegExp(`export function ${fn}\\(`).test(formModule), `form.js 导出 ${fn}`);
 }
 ok(/type === 'section'/.test(formModule), 'renderFields 支持 section 分组');
@@ -304,7 +304,7 @@ ok(/.field-row {/.test(formCss), 'form.css 定义行原语 .field-row');
 ok(/.field-block > .field-notes {/.test(formCss), '注解区在行外的 .field-notes 里');
 ok(!/\.field-row > \.field-label \{[^}]*\b(min-)?height:/.test(formCss), '标签列不许自己写 height/min-height（高度由行决定）');
 ok(/\.field-row > \.field-label \{[^}]*margin: 0 !important/.test(formCss), '标签列必须清空继承来的 margin');
-ok(/\.field-block--inline/.test(formCss) && /field-block--inline/.test(formModule), '开关/单选行走 .field-block--inline 变体');
+ok(/\.field-block--switch/.test(formCss) && /field-block--switch/.test(formModule), '开关行走 .field-block--switch（仅页头工具条收成紧凑 auto/auto）');
 ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');
 
 const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
@@ -336,16 +336,20 @@ for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) 
 ok(barePageInputs.length === 0, `页面里的 <input> 都写明 type（缺 ${barePageInputs.length} 处：${barePageInputs.slice(0, 3).join(' | ')}）`);
 
 // 控件标尺与页面收口（方案 A / L4）：尺寸只能来自令牌，手写控件只降不升，页面不许拆行原语。
-console.log('## 控件标尺与四类非字段控件');
+console.log('## 控件标尺与五类非字段控件');
 for (const token of ['--control-h', '--control-h-sm', '--badge-h', '--field-label-w']) {
   ok(new RegExp(`${token}\\s*:`).test(tokensCss), `tokens.css 定义控件标尺 ${token}`);
 }
 const baseCssText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'base.css'), 'utf8');
-ok(/^button \{[\s\S]*?height:\s*var\(--control-h/m.test(baseCssText), '按钮高度取自 --control-h（不再靠 padding 撑高）');
+ok(/^\.btn \{[\s\S]*?height:\s*var\(--control-h/m.test(baseCssText), '控件按钮 .btn 高度取自 --control-h（裸 button 保持通用外观，不挂标尺）');
 ok(/height:\s*var\(--control-h/.test(layerText['components.css']), '输入框/下拉框高度取自 --control-h');
 ok(/\.field-switch \{[\s\S]*?height: var\(--control-h/m.test(formCss), '开关高度与控件同标尺');
 ok(/\.control-row \{/.test(formCss) && /\.control-grow \{/.test(formCss), 'form.css 提供控件行原语 .control-row / .control-grow');
 ok(/\.field-checklist \{/.test(formCss) && /\.field-check-item \{/.test(formCss), 'form.css 提供复核清单 .field-checklist / .field-check-item');
+const tableComponentCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'table', 'table.css'), 'utf8');
+ok(/\.table-wrap,[\s\S]*?\.tool-log-table \{/.test(tableComponentCss), '表格容器 .table-wrap / .tool-log-table 由 components/table/table.css 提供');
+ok(!/\.field-table\b/.test(formCss), 'form.css 不自带表格外观（checkTable 复用 tableHtml）');
+ok(/import \{ tableHtml \}/.test(formModule) && /tableHtml\(columns, rows\)/.test(formModule), 'checkTableField 调用 components/table 的 tableHtml');
 ok(/\.status-badge[\s\S]*?\.is-pill \{/.test(layerText['components.css']), '状态徽标 .status-badge / .is-pill 只在 components.css 定义一次');
 ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定义状态徽标外观');
 

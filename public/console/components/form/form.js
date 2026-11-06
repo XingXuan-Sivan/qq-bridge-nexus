@@ -2,6 +2,7 @@
 // 设计口径见 docs/CONSOLE_FORMS.md。所有工厂返回 HTML 字符串，与 components/table 的 tableHtml 一致；
 // 事件绑定、校验、回填交给 createForm()，页面不再自己读 DOM。
 import { esc } from '../../js/ui.js';
+import { tableHtml } from '../table/table.js';
 
 /* ---------------------------------------------------------------- 基础工具 */
 
@@ -41,9 +42,13 @@ function fieldShell({ id, label, required, control, hint, warn, danger, docs, hi
   const notes = fieldNotes(id, { hint, warn, danger, docs });
   const errorId = `${id}-error`;
   const wrapClass = ['field-block', className].filter(Boolean).join(' ');
+  // 没有标签的字段（例如自带表头的表格）不渲染空标签列，整行让给控件。
+  const labelHtml = label
+    ? `<label class="field-label"${labelFor ? ` for="${esc(labelFor)}"` : ''}>${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>`
+    : '';
   return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
   <div class="field-row">
-    <label class="field-label"${labelFor ? ` for="${esc(labelFor)}"` : ''}>${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>
+    ${labelHtml}
     <div class="field-control">${control}</div>
   </div>
   <div class="field-notes">${notes.html}${hintExtra}<p class="field-error" id="${esc(errorId)}" role="alert" hidden></p></div>
@@ -138,7 +143,7 @@ export function checkboxField({ id, label, checked = false, hint, warn, danger, 
 
 export function switchField({ id, label, checked = false, onLabel = '开', offLabel = '关', hint, warn, danger, docs, disabled = false }) {
   const control = `<button type="button" class="field-switch" role="switch" id="${esc(id)}" data-field="${esc(id)}" data-on-label="${esc(onLabel)}" data-off-label="${esc(offLabel)}" aria-checked="${checked ? 'true' : 'false'}"${disabled ? ' disabled' : ''}><span class="field-switch-track" aria-hidden="true"></span><span>${esc(checked ? onLabel : offLabel)}</span></button>`;
-  const shell = `<div class="field-block field-block--inline" data-field-wrap="${esc(id)}">
+  const shell = `<div class="field-block field-block--switch" data-field-wrap="${esc(id)}">
   <div class="field-row">
     <span class="field-label" id="${esc(id)}-label">${esc(label)}</span>
     <div class="field-control">${control}</div>
@@ -229,6 +234,25 @@ export function checkListField({ id, label, options = [], value = [], columns = 
   });
 }
 
+/** 可勾选的表格：一行一个条目，三列（启用 / 名称 / 说明）。
+ *  复用 components/table 的 tableHtml + .table-wrap 容器（sticky 表头、横向滚动都在组件里），
+ *  这里只把每个单元格拼成「复选框 / 名称 / 说明」，不再自带一套表格样式。 */
+export function checkTableField({ id, label, options = [], value = [], hint, warn, danger, docs, nameHeader = '名称', descHeader = '说明' }) {
+  const picked = new Set((Array.isArray(value) ? value : []).map(String));
+  const columns = [
+    { label: '启用', width: '80px' },
+    { label: nameHeader, width: '220px' },
+    { label: descHeader },
+  ];
+  const rows = options.map((option) => [
+    `<input type="checkbox"${attrs({ name: id, value: option.value, checked: picked.has(String(option.value)) || null, 'data-field': id, 'aria-label': option.label })}>`,
+    `<b>${esc(option.label)}</b>`,
+    esc(option.desc ?? ''),
+  ]);
+  const table = `<div class="table-wrap" id="${esc(id)}">${tableHtml(columns, rows)}</div>`;
+  return fieldShell({ id, label, control: table, hint, warn, danger, docs, className: 'field-block--table', labelFor: '' });
+}
+
 /** 状态徽标：圆点 + 文字（默认）/ 药丸（pill）。页面状态文案统一用它，不要用裸 .meta。 */
 export function statusBadge({ id = '', text = '', tone = '', pill = true, dot = true }) {
   const cls = ['status-badge', pill ? 'is-pill' : '', tone, dot ? '' : 'no-dot'].filter(Boolean).join(' ');
@@ -238,7 +262,7 @@ export function statusBadge({ id = '', text = '', tone = '', pill = true, dot = 
 /** 行内动作条：按钮组 + 右侧（或紧随）状态位，用于「加载 / 清空 / 提示」这类工具行。 */
 export function inlineActions({ items = [], status = '', statusText = '', className = '' }) {
   const buttons = items.map((item) => {
-    const cls = [item.variant === 'danger' ? 'danger' : '', item.variant === 'primary' ? 'primary' : '', item.small === false ? '' : 'small', item.className ?? ''].filter(Boolean).join(' ');
+    const cls = ['btn', item.variant === 'danger' ? 'danger' : '', item.variant === 'primary' ? 'primary' : '', item.small === false ? '' : 'small', item.className ?? ''].filter(Boolean).join(' ');
     return `<button type="button"${item.id ? ` id="${esc(item.id)}"` : ''}${cls ? ` class="${esc(cls)}"` : ''}>${esc(item.label)}</button>`;
   }).join('');
   const statusHtml = status ? `<span class="form-actions-status" id="${esc(status)}">${esc(statusText)}</span>` : '';
@@ -275,6 +299,7 @@ const FIELD_FACTORIES = {
   readonly: readonlyField,
   custom: customField,
   checkList: checkListField,
+  checkTable: checkTableField,
 };
 
 /**

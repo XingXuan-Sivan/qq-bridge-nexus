@@ -286,6 +286,20 @@ h1 {
 .metric:last-child {
   border:0
 }
+/* 卡片式指标按钮：标签、数值、说明排成一行（普通 .metric 是 div，天然竖排三行）。 */
+button.metric {
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:8px;
+  text-align:left
+}
+button.metric>span,button.metric>strong,button.metric>small {
+  display:inline-block
+}
+button.metric>strong {
+  margin:0
+}
 .metric>span {
   font-size:12px;
   color:var(--muted);

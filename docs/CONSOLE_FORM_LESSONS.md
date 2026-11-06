@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` 之前先读这一页，按清单逐项过。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 十个真实踩过的坑
+## 1. 十六个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -59,6 +59,18 @@
 ### 1.13 「不是字段的一行」硬塞进字段格就会错位
 语音库那一行是「按钮 + 小标签 + 输入框 + 开关 + 说明 + 按钮」，没有字段标签的语义。上一版塞进 `.field-row` 后标签列空着，行内控件从左缘开始，按钮和输入框各自按自己的 padding 撑高，差 5px。
 **规则**：这类行用 `type:'custom'` + `.control-row`，角色类 `control-label`/`control-grow`/`control-fixed`/`control-note`；高度由 `--control-h` 统一，不许用 padding 凑。
+
+### 1.14 把 40px 挂到裸 `button` 上，会压扁卡片式按钮
+「控件统一 40px」这条本身没错，但写成了 `button { height: var(--control-h) }`——概览指标卡（`<button class="metric metric-link">`）、左侧导航（`<button data-view>`）、运行模式卡全是 `<button>`，一起被压到 40px：指标卡内容裁切、菜单行距变化、`button` 从 `inline-flex` 变成块级后指标里的「标签 / 数值 / 说明」从一行变三行。
+**规则**：标尺只给 `.btn`；裸 `button` 只保留通用外观。要参与同行对齐的按钮显式加 `class="btn"`。判断方法：`grep '<button' pages/*/page.html`，凡是不在表单行里的按钮都不该有 40px。
+
+### 1.15 表单内的开关不要「标签贴控件」
+`switchField` 曾经走 `field-block--inline`（`grid-template-columns: auto auto`），标签紧跟开关。在单列里看着没问题，一进两列栅格，开关就从 148px 标签列的右边缘缩到单元格左边缘——和上面的输入框差出 40px，用户一眼就说「开关没和其他行对齐」。
+**规则**：表单里的开关走标准 `.field-row`（148px 标签列 + 控件列），只有页头工具条（`.form-inline-bar`）允许 `auto auto`。改完量一次 `.field-row` 的 `grid-template-columns`，应当是 `148px …`。
+
+### 1.16 条目多、名字长的开关清单用表格，不用复选框网格
+38 个工具名长短不一，两列复选框网格里说明文字左边缘参差，扫读成本高。改成 `checkTable`（三列：启用 / 名称 / 说明，表头 sticky、行 hover）后，列对齐、对比清楚，也顺手解决了「两列网格里标签对不齐」的观感问题。
+**规则**：同一组条目的名称长度差异大、或超过约 12 条时用 `checkTable`；少量短选项仍用 `checkList`。表格字段写 `span: 2`，容器直接用 `components/table` 的 `tableHtml()` + `.table-wrap`，**不要**再在 `form.css` 里另写一套 `.field-table` 外观（第一版就这么干了，等于给同一个东西维护两份表格样式）。
 
 ## 2. 迁移一个页面的检查清单
 

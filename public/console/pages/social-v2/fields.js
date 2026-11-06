@@ -46,12 +46,12 @@ export const V2_TOOLS = [
 
 // 语音库调试簇：输入框 + 开关 + 按钮共处一行，靠 .control-row 保证同高同基线。
 const VOICE_PANEL = `<div class="control-row">
-  <button id="voiceRefreshBtn" type="button">刷新语音库</button>
+  <button id="voiceRefreshBtn" type="button" class="btn">刷新语音库</button>
   <span class="control-label">发送目标</span>
   <input class="control-grow" type="text" id="voiceSendTarget" placeholder="group:100005" aria-label="语音发送目标">
   <button type="button" class="field-switch" role="switch" id="voiceSendDryRun" aria-checked="false" data-on-label="开" data-off-label="关"><span class="field-switch-track" aria-hidden="true"></span><span>关</span></button>
   <span class="control-note">只校验不发送</span>
-  <button id="voiceSendBtn" type="button">试发选中语音</button>
+  <button id="voiceSendBtn" type="button" class="btn">试发选中语音</button>
   <span id="voiceMsg" class="control-note"></span>
 </div>
 <div id="voiceList" class="voice-list">点「刷新语音库」加载…</div>`;
@@ -59,7 +59,7 @@ const VOICE_PANEL = `<div class="control-row">
 // 「输入框 + 若干动作按钮」的行，用于日志/记忆/唤醒/初始提示词这类调试工具。
 const keyRow = ({ id, placeholder, buttons, status }) => `<div class="control-row">
   <input class="control-grow" type="text" id="${id}" placeholder="${placeholder}" aria-label="${placeholder}">
-  ${buttons.map((b) => `<button id="${b.id}" type="button"${b.variant ? ` class="${b.variant}"` : ''}>${b.label}</button>`).join('\n  ')}
+  ${buttons.map((b) => `<button id="${b.id}" type="button" class="btn${b.variant ? ` ${b.variant}` : ''}">${b.label}</button>`).join('\n  ')}
   ${status ? `<span class="control-note" id="${status}"></span>` : ''}
 </div>`;
 
@@ -93,14 +93,14 @@ const INIT_PROMPT_ROW = keyRow({
 
 const SESSION_ROW = `<div class="control-row">
   <select class="control-grow" id="v2SessionSelect"><option value="">选择白名单群/私聊…</option></select>
-  <button id="v2SessionRefresh" type="button">刷新</button>
+  <button id="v2SessionRefresh" type="button" class="btn">刷新</button>
 </div>`;
 
 const STATE_ROW = `<div class="control-row">
   <input class="control-grow" type="text" id="v2StateKey" placeholder="group:123456789" aria-label="要查看的会话 key">
-  <button id="v2StateView" type="button">查看</button>
-  <button id="v2ForceWake" type="button">立即唤醒</button>
-  <button id="v2StatesList" type="button">列出全部会话状态</button>
+  <button id="v2StateView" type="button" class="btn">查看</button>
+  <button id="v2ForceWake" type="button" class="btn">立即唤醒</button>
+  <button id="v2StatesList" type="button" class="btn">列出全部会话状态</button>
 </div>`;
 
 export const V2_FIELDS = {
@@ -108,14 +108,14 @@ export const V2_FIELDS = {
     label: '顶部开关与预设',
     fields: [
       { name: 'v2Enabled', type: 'switch', label: '启用二代模式' },
-      { name: 'v2AgentPreset', type: 'text', label: 'agentPreset', placeholder: 'qq-chat-v2' },
       { name: 'v2ProvideRecommendations', type: 'switch', label: '提供推荐值给 AI', hint: '关闭后 qq_get_prompt 不再返回推荐值，AI 完全自主判断。' },
+      { name: 'v2AgentPreset', type: 'text', label: 'agentPreset', placeholder: 'qq-chat-v2' },
     ],
   },
   tools: {
     label: '工具开关',
     fields: [
-      { name: 'v2Tools', type: 'checkList', label: '可用工具', span: 2, columns: 2, options: V2_TOOLS },
+      { name: 'v2Tools', type: 'checkTable', span: 2, options: V2_TOOLS },
     ],
   },
   voice: {

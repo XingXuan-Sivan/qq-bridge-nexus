@@ -133,5 +133,14 @@ npm run test:console-ui
 - **复测**：重启后 `消息已入未读` 正常、`/api/sessions` 有真实数据（`qq:private:2897715886`、`mode: reserved2`、`preset: qq-chat-v2`）、强制唤醒生成 `session-8031d170-…`。
 - **教训**：改主键形态必须**同时**改「产出」和「解析」，并且要用真机跑一遍私聊链路 —— 单元测试全绿也可能整条消息链静默断掉。
 
+### 6.3 已修复：soulkit 人格卡的 key 形态（2026-11-06）
+
+- **现象**：key 改成 `qq:private:…` 后，`/api/persona/sources` 里该会话一直是 `source: "none"`（会话页显示「未挂卡」），日志 `⚠️ 人格卡刷新失败（保留旧缓存）：fetch failed`。
+- **根因**：soulkit 的绑定按 `<group|private>:<id>` 存（平台由 `platform` 查询参数表达），`GET /api/persona/card?key=qq:private:2897715886` 返回 `mode: "none"`；同样的会话用旧形态 `private:2897715886` 能拿到 `mode: "card"`（魅魔2、`sha: 159bdbe855`）。桥接把平台前缀原样传给了它。
+- **处置（已完成）**：`plugins/soulkit-persona/index.mjs` 的 `cardUrl()` 增加 `soulkitKey()`：认得出 `<platform>:<kind>:<id>` 就剥成 `<kind>:<id>` 再请求，认不出则原样透传（旧形态与自定义 key 行为不变）。**soulkit 侧未改**，它的绑定与其它入口不受影响。
+- **验证**：`scripts/test-soulkit-persona.mjs` 8/8（新增「新形态 key 剥前缀」用例）；真机复测 `/api/persona/sources` → `{key:'qq:private:2897715886', source:'provider', name:'魅魔2', stale:false}`，注入块正常。
+- **遗留**：soulkit 仍然是「读通了、写没通」（PARITY D2/D6）——桥接没有 `persona-bind/1` 的写绑定能力，换角色仍只能走 soulkit 自己的入口。
+
+
 
 

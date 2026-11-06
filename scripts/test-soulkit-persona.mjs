@@ -67,6 +67,22 @@ test('卡片：platform+key 参数、剥掉标题行、ETag 透传', async () =>
   assert.deepEqual(seen[0].options.headers, { 'if-none-match': 'W/"0"' });
 });
 
+test('新形态 key：发给 soulkit 时剥掉平台前缀', async () => {
+  const seen = [];
+  const { ctx, registered } = makeCtx({
+    requestJson: async (url, options) => {
+      seen.push({ url, options });
+      return { status: 200, etag: 'W/"1"', json: { mode: 'card', name: '魅魔2', text: '# 魅魔2\n\n正文' } };
+    },
+  });
+  await activate(ctx);
+  await registered[0].get('qq:private:2897715886');
+  await registered[0].get('qq:group:1047096216');
+  assert.equal(new URL(seen[0].url).searchParams.get('key'), 'private:2897715886');
+  assert.equal(new URL(seen[1].url).searchParams.get('key'), 'group:1047096216');
+  assert.equal(new URL(seen[0].url).searchParams.get('platform'), 'qq');
+});
+
 test('304：条件请求命中，返回 not-modified 并带新 ETag', async () => {
   const { ctx, registered } = makeCtx({ requestJson: async () => ({ status: 304, etag: 'W/"9"', json: null }) });
   await activate(ctx);

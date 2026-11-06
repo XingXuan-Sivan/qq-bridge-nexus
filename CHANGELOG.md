@@ -5,6 +5,11 @@
 
 ## 未发布
 
+### 修复：soulkit 人格卡按 key 形态读不到
+- soulkit 的绑定按 `<group|private>:<id>` 存，而桥接的会话 key 是 `<platform>:<kind>:<id>`；`plugins/soulkit-persona` 直接把带平台前缀的 key 传过去，`/api/persona/card` 一律回 `mode: "none"`（表现是会话页「未挂卡」、日志 `人格卡刷新失败`）。
+- 适配器新增 `soulkitKey()`：认得出新形态就剥成 `<kind>:<id>` 再请求，认不出原样透传；**soulkit 侧未改**。
+- 真机复测 `/api/persona/sources` 恢复 `source: "provider"`、`name: "魅魔2"`；`test-soulkit-persona` 新增对应用例（8/8）。
+
 ### 变更：会话页按「会话映射」呈现，搜索框外观统一
 - 「会话与审批」页的会话签改名为「会话映射」：只呈现平台侧身份与状态（key 里的平台前缀加了 `qq` 徽章），去掉「DSH 会话」列，不再在这一页暴露 DSH 侧 id。
 - 新增「平台」筛选（按 key 前缀现算选项，不写死 `qq`），与原有「类型」筛选、关键词搜索一起收窄列表。

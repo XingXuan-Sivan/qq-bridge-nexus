@@ -176,3 +176,14 @@ test('缺少安全基线段落时给出警告（但不阻断保存）', () => {
   assert.match(warnings[0], /安全规则/);
   assert.ok(presetPromptWarnings('').some((w) => /内容为空/.test(w)));
 });
+
+// 回归：软校验（warnings）同样必须按代次取清单。
+// 曾经两代共用一份「二代」清单，切到一代时永远报「缺少二代仿真模式段落」，
+// 而一代的段落本来就叫「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」。
+test('提示词软校验按代次取清单：一代不该被要求二代段落', () => {
+  const v1 = '【QQ 群聊模式 —— 安全规则（最高优先级，不可违反）】\n【发送与汇报禁令（违反即严重违规）】';
+  const v2 = '【二代仿真模式 —— 安全规则】\n【二代仿真模式 —— 工具协议】';
+  assert.deepEqual(presetPromptWarnings(v1, 'v1'), [], '一代内容按一代校验不应报缺段');
+  assert.deepEqual(presetPromptWarnings(v2, 'v2'), [], '二代内容按二代校验不应报缺段');
+  assert.equal(presetPromptWarnings(v1, 'v2').length, 2, '一代内容按二代校验应报两段缺失');
+});

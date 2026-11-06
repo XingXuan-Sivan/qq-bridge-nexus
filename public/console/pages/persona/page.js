@@ -497,6 +497,12 @@ export function init() {
   document.getElementById('simPromptEdit').addEventListener('click', () => {
     setSimEditing(true);
     setSimMsg('编辑中：改完点「保存并同步到 DSH」。保存会先备份，并做 YAML 与安全不变量校验。');
+    // 进入编辑后把焦点交给文本框：用户点「编辑」就是准备打字，
+    // 还要再点一次框才聚焦是多余的一步；长文本顺手滚到可见处。
+    const area = document.getElementById('simPromptText');
+    area.focus({ preventScroll: true });
+    area.setSelectionRange(0, 0);
+    area.scrollIntoView({ block: 'center', behavior: 'smooth' });
   });
   document.getElementById('simPromptCancel').addEventListener('click', () => {
     document.getElementById('simPromptText').value = simPromptOriginal;

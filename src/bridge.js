@@ -5136,7 +5136,7 @@ async function main() {
               content: prefix,
               chars: prefix.length,
               bytes: Buffer.byteLength(prefix, 'utf8'),
-              warnings: presetPromptWarnings(prefix),
+              warnings: presetPromptWarnings(prefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2'),
               status: presetStatus(preset),
               presets: Object.values(PRESET_NAMES).map((n) => presetStatus(n)),
             });
@@ -5156,7 +5156,7 @@ async function main() {
             // 让一次"打开又保存"把整个提示词块变成全删全加的 diff，失去可复审性。
             const normalized = String(body.content ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
             if (normalized === prefix) {
-              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix), synced: fs.existsSync(installedPresetYaml(preset)), requiresRestart: false, status: presetStatus(preset) });
+              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2'), synced: fs.existsSync(installedPresetYaml(preset)), requiresRestart: false, status: presetStatus(preset) });
               return;
             }
             nextText = renderPresetPromptYaml(text, body.content, preset === PRESET_NAMES.v1 ? 'v1' : 'v2');
@@ -5164,7 +5164,7 @@ async function main() {
             sendJson({ ok: false, error: error?.message ?? '校验失败' }, 400);
             return;
           }
-          const warnings = presetPromptWarnings(body.content);
+          const warnings = presetPromptWarnings(body.content, preset === PRESET_NAMES.v1 ? 'v1' : 'v2');
           let sourceBackup = null;
           try {
             sourceBackup = backupPresetFile(preset);

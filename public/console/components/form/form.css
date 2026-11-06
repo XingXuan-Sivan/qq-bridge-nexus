@@ -370,7 +370,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* 全局 label 带 17px/7px 上下外边距：不清掉的话每个选项都带着一串外边距，
+     整组会被推到行的偏下方，看起来就是「单选框和标签不齐」。 */
+  margin: 0;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text);
   cursor: pointer;
 }

@@ -13,7 +13,15 @@ export const PRESET_PERSONA_ID = 'persona';
 export const PRESET_PROMPT_MAX_BYTES = 128 * 1024;
 
 // 安全基线段落：缺失说明 AI 的权限边界可能被削弱，保存时警告（不阻断，管理员有最终决定权）。
+// 两代预设的段落名不一样：一代是「QQ 群聊模式 / 发送与汇报禁令」，二代是「二代仿真模式 —— 安全规则 / 工具协议」。
+// 早先只有二代的清单，切到一代时就会一直报「缺少【二代仿真模式…】」，看着像内容被改坏。
 export const PRESET_REQUIRED_MARKERS = ['【二代仿真模式 —— 安全规则', '【二代仿真模式 —— 工具协议'];
+export const PRESET_REQUIRED_MARKERS_V1 = ['【QQ 群聊模式 —— 安全规则', '【发送与汇报禁令'];
+
+/** 取某个预设对应的软校验标记（未知代次按二代处理）。 */
+export function presetPromptMarkers(preset = 'v2') {
+  return preset === 'v1' ? PRESET_REQUIRED_MARKERS_V1 : PRESET_REQUIRED_MARKERS;
+}
 
 // 硬性不变量：这些串是本项目自己的测试与安全边界所依赖的（test-qq-preset-contract.mjs / verify-persona-config.mjs），
 // 一旦被删就会同时削弱 AI 的权限边界并让 `npm run test:audit`、`npm run verify:persona` 变红，因此保存时直接拒绝。
@@ -105,12 +113,12 @@ export function extractPresetPrefix(text) {
   return typeof prefix === 'string' ? prefix : null;
 }
 
-/** 保存前的软校验：只提示，不阻断。 */
-export function presetPromptWarnings(content) {
+/** 保存前的软校验：只提示，不阻断。preset 取 'v1' / 'v2'，决定按哪一代的段落清单检查。 */
+export function presetPromptWarnings(content, preset = 'v2') {
   const text = String(content ?? '');
   const warnings = [];
   if (!text.trim()) warnings.push('内容为空');
-  for (const marker of PRESET_REQUIRED_MARKERS) {
+  for (const marker of presetPromptMarkers(preset)) {
     if (!text.includes(marker)) warnings.push(`缺少「${marker}…】段落：AI 的权限与工具边界可能被削弱`);
   }
   return warnings;

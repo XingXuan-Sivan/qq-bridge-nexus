@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 三十六个真实踩过的坑
+## 1. 三十七个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -191,6 +191,10 @@ return fieldShell({ id, label, required, control: `<div class="field-inline" rol
 
 控制台 CSP 是 `style-src 'self'`，内联 style 会被浏览器拒绝（控制台刷 `Applying inline style violates the following Content Security Policy directive`），控件静默退回默认样式。宽度/间距用工具类（`.u-w-140`）或外层 `<span class="u-flex-basis-max-220">` 收窄；行布局用类名，不要在 JS 里 `el.style.marginTop = …`。迁移 `persona` 时清掉 `page.js` 里 5 处 `.style.` 后才恢复对齐。
 
+### 1.37 一个页面服务两代时，校验和文案都要跟着当前代次走
+
+仿真提示词只有一份文本框，但一代（`qq-chat`）和二代（`qq-chat-v2`）的段落名完全不同：一代是「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」，二代是「【二代仿真模式 —— 安全规则】」「【二代仿真模式 —— 工具协议】」。服务端的 `presetPromptWarnings(content)` 原先只认二代段落且不接 `preset` 参数，切到一代就永远报「缺少二代段落」。`presetPromptBlockers` 早已按代次取清单，warnings 却没跟上——**同一个「按代次取清单」的约定要覆盖所有校验/提示，不能只改一处**。现在的签名是 `presetPromptWarnings(content, preset = 'v2')`，`bridge.js` 三个调用点都传 `preset === PRESET_NAMES.v1 ? 'v1' : 'v2'`。`scripts/test-preset-prompt.mjs` 有一条回归钉住「一代内容按二代校验必须报两段缺失、按一代校验必须为空」。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -223,6 +227,7 @@ return fieldShell({ id, label, required, control: `<div class="field-inline" rol
 - 单选/复选组的标签是否也在 148px 标签列（而不是贴左边缘、控件另起一行）？
 - 长文本/代码块是不是只有一层边框（`.field-block` 上有没有误挂 `.code-area` 这类容器类）？
 - 页面源码里还有没有 `style="` 或 JS 里的 `.style.`（CSP 会拒绝，静默失效）？
+- 一个控件服务多代时（如仿真提示词两代共用一份文本框），校验清单/提示文案是否跟着当前代次变（1.37）？
 - 折叠分组（`<details>`）全部展开后，有没有行被裁掉/点不到（1.20 的测试也要先展开）？
 - 页面上每个开关点一下：`aria-checked` 和「开/关」文案是否同步翻转？保存后请求体里的布尔值是否跟着变（不是 `undefined`，也不是永远 `false`）？
 - 日期字段能否整段键入 `2026-12-25`（不是被年份段吞掉）？点日历按钮能否弹出面板、选完是否回填？

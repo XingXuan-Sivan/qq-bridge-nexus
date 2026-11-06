@@ -171,10 +171,13 @@ textarea {
   line-height:1.7;
   font-family:inherit
 }
-input[type=checkbox] {
+/* 勾选/单选同一个尺子：同尺寸、同强调色、不吃外边距（否则和文字的基线对不齐）。 */
+input[type=checkbox],
+input[type=radio] {
   accent-color:var(--accent);
   width:16px;
   height:16px;
+  margin:0;
   flex-shrink:0;
   cursor:pointer
 }

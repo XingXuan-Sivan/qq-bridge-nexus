@@ -4,6 +4,8 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
+import { renderFields } from '../../components/form/form.js';
+import { USAGE_FIELDS } from './fields.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
 // 为什么不用图表库：控制台 CSP 是 default-src 'self'，不能引外部脚本；
@@ -409,7 +411,22 @@ function refreshUsagePage() {
   loadCompactConfig();
 }
 
+// 渲染指标块、图表控件、表格宿主与压缩设置。必须在 init() 最前面跑：
+// 下面的标题 note 与各处 getElementById 都依赖这些节点。
+function renderUsageFields() {
+  document.querySelectorAll('[data-usage-fields]').forEach((host) => {
+    const spec = USAGE_FIELDS[host.dataset.usageFields];
+    if (!spec) return;
+    if (spec.html) host.innerHTML = spec.html;
+    if (!spec.fields) return;
+    const mount = spec.mount ? document.getElementById(spec.mount) : host;
+    if (!mount) return;
+    renderFields(mount, spec.fields, { columns: spec.columns || 2 });
+  });
+}
+
 export function init() {
+  renderUsageFields();
   // 标题旁的小字提示原先是 index.html 里的 data-note；片段化后在这里补（与 app.js 对静态 section 的做法一致）。
   document.querySelector('#section-usage-ledger h2').dataset.note = '每 3 秒自动同步';
   document.querySelector('#section-compact h2').dataset.note = '保存后下一轮结束时生效';
@@ -447,7 +464,7 @@ export function init() {
     try {
       const r = await api('/api/tokens/reset', 'POST', {});
       msg.textContent = r.ok ? '✅ 账本已清空' : ('❌ ' + (r.error || '失败'));
-      msg.className = r.ok ? 'meta ok' : 'meta err';
+      msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
     } catch (error) {
       setMsg(msg, '❌ ' + (error?.message || '失败'), 'err');
     }
@@ -464,7 +481,7 @@ export function init() {
     if (!mode) { setMsg(msg, '请先选一种压缩方式', 'err'); return; }
     const r = await api('/api/compact/config', 'POST', { mode, thresholdWan: Number(document.getElementById('compactWan').value) });
     msg.textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
-    msg.className = r.ok ? 'meta ok' : 'meta err';
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
     if (r.ok) loadCompactConfig();
   });
   document.getElementById('compactWan').addEventListener('focus', () => { const e = document.querySelector('input[name="compactMode"][value="early"]'); if (e) e.checked = true; });

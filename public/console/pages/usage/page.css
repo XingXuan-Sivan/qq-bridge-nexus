@@ -1,6 +1,5 @@
-/* 用量与花费页：当前完全复用公共样式（#section-usage 下的图表 / 表格 / 图例样式都在 css/app.css 里，片段嵌进宿主后后代选择器照常命中）；这一页若出现私有样式，写在这里，不要回流 css/app.css。 */
-
-/* 用量与花费页私有：账本表格的数字对齐、进度条、手写 SVG 图表与图例。 */
+/* 用量与花费页私有：账本表格的数字对齐、进度条、手写 SVG 图表与图例。
+   注意选择器用 #section-usage（页面宿主），片段里的 .usage-* 都在它下面。 */
 #section-usage .usage-h3 { font-size:13px; font-weight:600; color:var(--text); margin:20px 0 8px }
 #section-usage .usage-h3:first-of-type { margin-top:16px }
 #section-usage .metric strong { font-variant-numeric:tabular-nums }
@@ -13,42 +12,10 @@
 #section-usage .usage-bar-track { flex:1; height:7px; border-radius:4px; background:var(--surface-chip-strong); overflow:hidden }
 #section-usage .usage-bar-fill { display:block; height:100%; border-radius:4px; background:var(--accent); min-width:2px }
 #section-usage .usage-tier { font-size:11px }
-#section-usage .row.usage-controls { margin-top:10px; gap:10px }
-#section-usage select { max-width:260px }
-#section-usage .usage-chart-controls { margin:14px 0 6px }
-#section-usage .usage-chart-controls .tag { margin:0 }
-#section-usage .usage-chart-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; margin:10px 0 4px }
-#section-usage .usage-chart-head strong { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums }
-#section-usage .usage-chart svg { display:block; width:100%; height:auto }
-#section-usage .usage-chart .usage-bar-peak { fill:var(--warn-fg-strong) }
-#section-usage .usage-chart .usage-bar-off { fill:var(--accent) }
-#section-usage .usage-chart .usage-bar-mixed { fill:var(--accent-hover) }
-#section-usage .usage-chart .usage-grid { stroke:var(--border-subtle); stroke-width:1 }
-#section-usage .usage-chart .usage-axis { fill:var(--muted); font-size:10px }
-#section-usage .usage-chart .usage-hit { fill:transparent; cursor:default }
-#section-usage .usage-chart .usage-hit:hover { fill:var(--surface-hover) }
-#section-usage .usage-chart .usage-col-hover { fill:var(--text-strong); opacity:.10 }
-#section-usage .usage-legend { display:flex; flex-wrap:wrap; gap:14px; margin-top:8px }
-#section-usage .usage-legend span { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--muted) }
-#section-usage .usage-legend i { width:10px; height:10px; border-radius:3px; display:inline-block }
-#section-usage .usage-legend i.peak { background:var(--warn-fg-strong) }
-#section-usage .usage-legend i.off { background:var(--accent) }
-#section-usage .usage-legend i.mixed { background:var(--accent-hover) }
-
-/* 用量与花费页私有：账本表格的数字对齐、进度条、手写 SVG 图表与图例。 */
-#section-usage .usage-h3 { font-size:13px; font-weight:600; color:var(--text); margin:20px 0 8px }
-#section-usage .usage-h3:first-of-type { margin-top:16px }
-#section-usage .metric strong { font-variant-numeric:tabular-nums }
-#section-usage td.num, #section-usage th.num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
-#section-usage td.usage-key { white-space:nowrap }
-#section-usage .usage-key-button { background:none; border:0; padding:0; color:var(--accent); cursor:pointer; font:inherit }
-#section-usage .usage-key-button:hover { text-decoration:underline }
-#section-usage .usage-key-button[aria-pressed="true"] { color:var(--text-strong); font-weight:600 }
-#section-usage .usage-bar-wrap { display:flex; align-items:center; gap:8px; min-width:96px }
-#section-usage .usage-bar-track { flex:1; height:7px; border-radius:4px; background:var(--surface-chip-strong); overflow:hidden }
-#section-usage .usage-bar-fill { display:block; height:100%; border-radius:4px; background:var(--accent); min-width:2px }
-#section-usage .usage-tier { font-size:11px }
-#section-usage .row.usage-controls { margin-top:10px; gap:10px }
+#section-usage .row.usage-controls { display:flex; align-items:center; flex-wrap:wrap; margin-top:10px; gap:10px }
+/* 下拉框被 initSelects 包成 .select-wrap（默认 display:block; width:100%）：这一行要按内容收窄，
+   否则箭头跑到整行最右、按钮被挤到下一行（2026-11-07 与表格工具栏同一类坑）。 */
+#section-usage .usage-controls .select-wrap { width:auto; min-width:190px; max-width:280px; flex:0 0 auto }
 #section-usage select { max-width:260px }
 #section-usage .usage-chart-controls { margin:14px 0 6px }
 #section-usage .usage-chart-controls .tag { margin:0 }

@@ -173,7 +173,11 @@ test('⑤ 控制台：令牌与花费页有「上下文压缩」卡片', () => {
   const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-compact"'), html.indexOf('</section>', html.indexOf('<section id="section-compact"')));
   assert.match(sec, /data-page="usage"/);
-  for (const v of ['early', 'dsh']) assert.ok(sec.includes(`name="compactMode" value="${v}"`), v);
-  assert.match(sec, /id="compactWan" min="5" max="80"/);
-  assert.match(sec, /id="compactSave"/);
+  // 控件已搬进 pages/usage/fields.js：卡片片段只断言宿主，控件在整份源码里找。
+  assert.match(sec, /data-usage-fields="compactMode"/);
+  assert.match(sec, /data-usage-fields="compactActions"/);
+  for (const v of ['early', 'dsh']) assert.ok(html.includes(`name="compactMode" value="${v}"`), v);
+  assert.match(html, /id="compactWan" min="5" max="80"/);
+  // 按钮 id 由 action 规格生成（源码里是 id: 'compactSave'），按 id 名匹配即可。
+  assert.match(html, /compactSave/);
 });

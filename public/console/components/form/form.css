@@ -1,0 +1,378 @@
+/* 表单组件：字段外壳、注解、控件外观与动作区。
+   约定：外观只在本文件定义；页面不写 padding/font-size，只写栅格类（col-*）。 */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 分块：用 fieldset 语义，视觉上是浅卡片 */
+.form-section {
+  margin: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+
+.form-section > legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.form-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.form-section-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.form-section-head .meta {
+  margin: 0;
+}
+
+/* 栅格：复用 grid.css 的 .cols / .col-*，这里只补行距 */
+.form-grid {
+  row-gap: 12px;
+}
+
+/* 字段 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field[hidden] {
+  display: none !important;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.field-req {
+  margin-left: 2px;
+  color: var(--danger-fg, #cf222e);
+}
+
+.field-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 带计数器的控件（文本框/多行文本）改成纵向：计数器单独一行靠右，不再挤输入框 */
+.field-control:has(> .field-counter) {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* 卡片式单选：让栅格拿到确定宽度（flex 子项的 auto 宽度会让 auto-fit 退化成一列） */
+.field-control > .field-cards {
+  flex: 1 1 100%;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* 计数器独占一行，靠右 */
+.field-control > .field-counter {
+  align-self: flex-end;
+}
+
+.field-control > input:not([type=checkbox]):not([type=radio]),
+.field-control > select,
+.field-control > textarea {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.field-unit {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+.field-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.field-inline label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.field-textarea-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 多选组的列数：由工厂写 data-columns，不用内联 style（CSP style-src 'self'） */
+[data-columns="2"] { --field-cols: 2; }
+[data-columns="3"] { --field-cols: 3; }
+[data-columns="4"] { --field-cols: 4; }
+
+.field-inline-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--field-cols, 2), minmax(0, 1fr));
+  gap: 6px 14px;
+}
+
+/* 单选卡片（运行模式那种四选一） */
+.field-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.field-card {
+  position: relative;
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.field-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.field-card-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.field-card-desc {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.field-card:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(77, 107, 254, 0.08));
+}
+
+.field-card:has(input:focus-visible) {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+
+/* 开关：button[role=switch] */
+.field-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.field-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-chip-strong);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.field-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
+  transition: transform 0.15s ease;
+}
+
+.field-switch[aria-checked="true"] .field-switch-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.field-switch[aria-checked="true"] .field-switch-track::after {
+  transform: translateX(16px);
+}
+
+.field-switch:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* 密码显示切换 */
+.field-reveal {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.field-reveal:hover {
+  color: var(--text);
+}
+
+/* 计数器 */
+.field-counter {
+  align-self: flex-end;
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+.field-counter[data-over="true"] {
+  color: var(--danger-solid, #cf222e);
+}
+
+/* 只读展示 */
+.field-readonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-readonly code {
+  word-break: break-all;
+}
+
+/* 字段注解 */
+.field-hint,
+.field-warn,
+.field-danger {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.field-hint {
+  color: var(--muted-soft);
+}
+
+.field-warn {
+  padding: 6px 9px;
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.field-danger {
+  padding: 6px 9px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger);
+  color: var(--danger-solid, #cf222e);
+}
+
+.field-error {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--danger-solid, #cf222e);
+}
+
+.field-docs {
+  font-size: 11px;
+}
+
+/* 块级提示 */
+.form-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.form-callout strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.form-callout[data-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-fg);
+}
+
+.form-callout[data-tone="danger"] {
+  border-color: var(--danger-border);
+  background: var(--danger);
+  color: var(--danger-solid, #cf222e);
+}
+
+/* 动作区：主按钮靠右 */
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.form-actions .meta {
+  margin: 0 auto 0 0;
+}
+
+.form-actions button[aria-busy="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+@media (max-width: 760px) {
+  .field-inline-cols {
+    --field-cols: 1;
+  }
+
+  .form-actions {
+    flex-wrap: wrap;
+  }
+}

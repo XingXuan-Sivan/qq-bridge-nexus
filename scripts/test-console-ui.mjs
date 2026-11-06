@@ -606,6 +606,62 @@ try {
     await page.waitForFunction(() => document.getElementById('dshProviderText').textContent === 'deepseek-official' && document.getElementById('dshEffortSelect').value === 'max');
   });
 
+  await test('Form component: typed values, depends, cross-field validation, switch and reset', async () => {
+    await page.goto(`${fixture.url}/console/components/form/demo.html`);
+    await page.waitForFunction(() => Boolean(window.__demoForm));
+    const result = await page.evaluate(() => {
+      const form = window.__demoForm;
+      const presetWrap = document.querySelector('[data-field-wrap="demoPreset"]');
+      const out = {};
+      out.fieldCount = document.querySelectorAll('[data-field-wrap]').length;
+      out.values = form.getValues();
+      out.initialMode = form.getValue('demoMode');
+      out.presetVisibleOnReserved2 = !presetWrap.hidden;
+      form.setValues({ demoMode: 'chat' });
+      out.presetVisibleOnChat = !presetWrap.hidden;
+      document.querySelector('input[name="demoMode"][value="reserved2"]').click();
+      out.presetVisibleAfterClick = !presetWrap.hidden;
+      out.modeAfterClick = form.getValue('demoMode');
+      form.setValues({ demoText: '' });
+      out.requiredError = form.validate().errors.demoText ?? null;
+      form.setValues({ demoText: '星苒', demoNumber: 999 });
+      out.rangeError = form.validate().errors.demoNumber ?? null;
+      form.setValues({ demoNumber: 20, demoQuiet: { from: '08:00', to: '08:00' } });
+      out.equalRangeError = form.validate().errors.demoQuiet ?? null;
+      form.setValues({ demoQuiet: { from: '23:00', to: '07:00' } });
+      out.overnightOk = form.validate().ok;
+      out.switchBefore = form.getValue('demoSwitch');
+      document.querySelector('[role="switch"][data-field="demoSwitch"]').click();
+      out.switchAfter = form.getValue('demoSwitch');
+      out.dirtyBeforeReset = form.dirty();
+      form.reset();
+      out.dirtyAfterReset = form.dirty();
+      out.textareaMono = document.getElementById('demoTextarea').className;
+      return out;
+    });
+    assert.equal(result.fieldCount, 17, '演示页应渲染 17 个字段');
+    assert.equal(typeof result.values.demoNumber, 'number');
+    assert.deepEqual(result.values.demoKinds, ['text', 'image']);
+    assert.deepEqual(result.values.demoQuiet, { from: '23:00', to: '07:00' });
+    assert.equal(result.values.demoSwitch, true);
+    assert.equal(result.initialMode, 'reserved2');
+    assert.equal(result.presetVisibleOnReserved2, false, 'reserved2 下预设字段应隐藏');
+    assert.equal(result.presetVisibleOnChat, true, 'chat 下预设字段应显示');
+    assert.equal(result.presetVisibleAfterClick, false, '点回 reserved2 应立即隐藏');
+    assert.equal(result.modeAfterClick, 'reserved2');
+    assert.equal(result.requiredError, '不能为空');
+    assert.equal(result.rangeError, '不能大于 200');
+    assert.equal(result.equalRangeError, '开始与结束不能相同');
+    assert.equal(result.overnightOk, true, '跨零点的时间段应通过校验');
+    assert.equal(result.switchBefore, true);
+    assert.equal(result.switchAfter, false);
+    assert.equal(result.dirtyBeforeReset, true);
+    assert.equal(result.dirtyAfterReset, false);
+    assert.equal(result.textareaMono, 'field-textarea-mono');
+    await page.goto(fixture.url);
+    await page.waitForSelector('#metricSessions');
+  });
+
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });

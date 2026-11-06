@@ -1,0 +1,607 @@
+// 表单组件：16 个控件工厂 + createForm 内核（取值/校验/条件显示/提交态/脏值）。
+// 设计口径见 docs/CONSOLE_FORMS.md。所有工厂返回 HTML 字符串，与 components/table 的 tableHtml 一致；
+// 事件绑定、校验、回填交给 createForm()，页面不再自己读 DOM。
+import { esc } from '../../js/ui.js';
+
+/* ---------------------------------------------------------------- 基础工具 */
+
+const has = (value) => value !== undefined && value !== null && value !== false && value !== '';
+
+function attrs(map) {
+  const parts = [];
+  for (const [key, value] of Object.entries(map)) {
+    if (!has(value)) continue;
+    if (value === true) parts.push(key);
+    else parts.push(`${key}="${esc(String(value))}"`);
+  }
+  return parts.length ? ` ${parts.join(' ')}` : '';
+}
+
+function describedBy(ids) {
+  const list = ids.filter(Boolean);
+  return list.length ? list.join(' ') : '';
+}
+
+/** 字段注解（hint/warn/danger/docs）——统一渲染，页面不许手写文案块。 */
+function fieldNotes(id, { hint, warn, danger, docs }) {
+  const out = [];
+  if (hint) out.push(`<p class="field-hint" id="${esc(id)}-hint">${esc(hint)}</p>`);
+  if (warn) out.push(`<p class="field-warn" id="${esc(id)}-warn" role="note">${esc(warn)}</p>`);
+  if (danger) out.push(`<p class="field-danger" id="${esc(id)}-danger" role="alert">${esc(danger)}</p>`);
+  if (docs) {
+    const href = esc(docs.href ?? docs);
+    const text = esc(docs.text ?? '查看说明');
+    out.push(`<p class="field-docs field-hint" id="${esc(id)}-docs"><a href="${href}" target="_blank" rel="noreferrer">${text}</a></p>`);
+  }
+  return { html: out.join(''), ids: ['hint', 'warn', 'danger', 'docs'].filter((key) => Boolean({ hint, warn, danger, docs }[key])).map((key) => `${id}-${key}`) };
+}
+
+/** 字段外壳：label + 控件 + 注解 + 错误行。 */
+function fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra = '', className = '' }) {
+  const notes = fieldNotes(id, { hint, warn, danger, docs });
+  const errorId = `${id}-error`;
+  const wrapClass = ['field', className].filter(Boolean).join(' ');
+  return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
+  <label class="field-label" for="${esc(id)}">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</label>
+  <div class="field-control">${control}</div>
+  ${notes.html}${hintExtra}
+  <p class="field-error" id="${esc(errorId)}" role="alert" hidden></p>
+</div>`;
+}
+
+const base = ({ id, hint, warn, danger, docs, extraDesc = [], required }) => {
+  const desc = describedBy([...extraDesc, hint ? `${id}-hint` : '', warn ? `${id}-warn` : '', danger ? `${id}-danger` : '', docs ? `${id}-docs` : '', required ? `${id}-error` : '']);
+  return attrs({ 'aria-describedby': desc, 'aria-invalid': null, 'data-field': id });
+};
+
+/* ---------------------------------------------------------------- 控件工厂 */
+
+export function textField({ id, label, value = '', placeholder, hint, warn, danger, docs, maxlength, counter = false, readonly = false, disabled = false, required = false, autocomplete = 'off', inputmode }) {
+  const counterHtml = counter
+    ? `<span class="field-counter" data-counter-for="${esc(id)}" data-max="${esc(String(maxlength ?? ''))}">${esc(String(value ?? '').length)}${maxlength ? ` / ${esc(String(maxlength))}` : ''}</span>`
+    : '';
+  const control = `<input${attrs({ id, type: 'text', value, placeholder, maxlength, readonly, disabled, autocomplete, inputmode, required })}${base({ id, hint, warn, danger, docs, required })}>${counterHtml}`;
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+}
+
+export function numberField({ id, label, value, placeholder, hint, warn, danger, docs, min, max, step = 1, unit, integer = false, disabled = false, required = false }) {
+  const control = `<input${attrs({ id, type: 'number', value: value ?? '', placeholder, min, max, step, disabled, required })}${base({ id, hint, warn, danger, docs, required })}>${unit ? `<span class="field-unit">${esc(unit)}</span>` : ''}`;
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+}
+
+export function passwordField({ id, label, value = '', placeholder, hint, warn, danger, docs, reveal = true, required = false, autocomplete = 'new-password' }) {
+  const control = `<input${attrs({ id, type: 'password', value, placeholder, autocomplete, required })}${base({ id, hint, warn, danger, docs, required })}>${reveal ? `<button type="button" class="field-reveal" data-reveal-for="${esc(id)}" aria-label="显示或隐藏内容">显示</button>` : ''}`;
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+}
+
+export function textareaField({ id, label, value = '', placeholder, hint, warn, danger, docs, rows = 4, maxlength, counter = false, mono = false, required = false, autosize = false }) {
+  const counterHtml = counter
+    ? `<span class="field-counter" data-counter-for="${esc(id)}" data-max="${esc(String(maxlength ?? ''))}">${esc(String(value ?? '').length)}${maxlength ? ` / ${esc(String(maxlength))}` : ''}</span>`
+    : '';
+  const control = `<textarea${attrs({ id, rows, placeholder, maxlength, required, class: mono ? 'field-textarea-mono' : null })}${base({ id, hint, warn, danger, docs, required })}>${esc(value ?? '')}</textarea>${counterHtml}`;
+  void autosize;
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+}
+
+export function selectField({ id, label, options = [], value, placeholder, hint, warn, danger, docs, disabled = false, required = false }) {
+  const render = (option) => (option.group
+    ? `<optgroup label="${esc(option.group)}">${option.options.map(render).join('')}</optgroup>`
+    : `<option value="${esc(option.value)}"${String(option.value) === String(value ?? '') ? ' selected' : ''}>${esc(option.label)}</option>`);
+  const head = placeholder ? `<option value=""${has(value) ? '' : ' selected'}>${esc(placeholder)}</option>` : '';
+  const control = `<select${attrs({ id, disabled, required })}${base({ id, hint, warn, danger, docs, required })}>${head}${options.map(render).join('')}</select>`;
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs });
+}
+
+export function radioGroup({ id, label, options = [], value, inline = true, cards = false, hint, warn, danger, docs, required = false, disabled = false }) {
+  const name = id;
+  const items = options.map((option) => {
+    const checked = String(option.value) === String(value ?? '');
+    if (cards) {
+      return `<label class="field-card"><input${attrs({ type: 'radio', name, value: option.value, 'data-field': id, checked: checked || null, disabled })}><span class="field-card-title">${esc(option.label)}</span>${option.desc ? `<span class="field-card-desc">${esc(option.desc)}</span>` : ''}</label>`;
+    }
+    return `<label><input${attrs({ type: 'radio', name, value: option.value, 'data-field': id, checked: checked || null, disabled })}>${esc(option.label)}</label>`;
+  }).join('');
+  const cls = cards ? 'field-cards' : `field-inline${inline ? '' : ' field-inline-cols'}`;
+  const control = `<div class="${cls}" role="radiogroup" aria-labelledby="${esc(id)}-label">${items}</div>`;
+  return `<div class="field" data-field-wrap="${esc(id)}">
+  <span class="field-label" id="${esc(id)}-label">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</span>
+  <div class="field-control">${control}</div>
+  ${fieldNotes(id, { hint, warn, danger, docs }).html}
+  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
+</div>`;
+}
+
+export function checkboxGroup({ id, label, options = [], value = [], inline = true, columns, hint, warn, danger, docs, selectAll = false, required = false, disabled = false }) {
+  const picked = new Set((value ?? []).map(String));
+  const items = options.map((option) => `<label><input${attrs({ type: 'checkbox', name: id, value: option.value, 'data-field': id, checked: picked.has(String(option.value)) || null, disabled })}>${esc(option.label)}</label>`).join('');
+  const style = columns ? ` data-columns="${Number(columns) || 2}"` : '';
+  const cls = inline ? 'field-inline' : 'field-inline-cols';
+  const control = `<div class="${cls}" role="group" aria-labelledby="${esc(id)}-label"${style}>${items}</div>${selectAll ? `<label class="field-hint"><input type="checkbox" data-check-all="${esc(id)}"> 全选</label>` : ''}`;
+  return `<div class="field" data-field-wrap="${esc(id)}">
+  <span class="field-label" id="${esc(id)}-label">${esc(label)}${required ? ' <span class="field-req" aria-hidden="true">*</span>' : ''}</span>
+  <div class="field-control">${control}</div>
+  ${fieldNotes(id, { hint, warn, danger, docs }).html}
+  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
+</div>`;
+}
+
+export function checkboxField({ id, label, checked = false, hint, warn, danger, docs, disabled = false }) {
+  const control = `<label class="field-inline"><input${attrs({ id, type: 'checkbox', 'data-field': id, checked: checked || null, disabled })}>${esc(label)}</label>`;
+  const notes = fieldNotes(id, { hint, warn, danger, docs });
+  return `<div class="field" data-field-wrap="${esc(id)}">
+  <div class="field-control">${control}</div>
+  ${notes.html}
+  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
+</div>`;
+}
+
+export function switchField({ id, label, checked = false, onLabel = '开', offLabel = '关', hint, warn, danger, docs, disabled = false }) {
+  const control = `<button type="button" class="field-switch" role="switch" id="${esc(id)}" data-field="${esc(id)}" data-on-label="${esc(onLabel)}" data-off-label="${esc(offLabel)}" aria-checked="${checked ? 'true' : 'false'}"${disabled ? ' disabled' : ''}><span class="field-switch-track" aria-hidden="true"></span><span>${esc(checked ? onLabel : offLabel)}</span></button>`;
+  const shell = `<div class="field" data-field-wrap="${esc(id)}">
+  <span class="field-label" id="${esc(id)}-label">${esc(label)}</span>
+  <div class="field-control">${control}</div>
+  ${fieldNotes(id, { hint, warn, danger, docs }).html}
+  <p class="field-error" id="${esc(id)}-error" role="alert" hidden></p>
+</div>`;
+  return shell;
+}
+
+export function fileField({ id, label, accept, hint, warn, danger, docs, maxBytes, required = false }) {
+  const control = `<input${attrs({ id, type: 'file', accept, required })}${base({ id, hint, warn, danger, docs, required })}>`;
+  const extra = maxBytes ? `<p class="field-hint" id="${esc(id)}-max">单个文件最大 ${esc(String(Math.round(maxBytes / 1024)))} KB</p>` : '';
+  return fieldShell({ id, label, required, control, hint, warn, danger, docs, hintExtra: extra });
+}
+
+export function dateField({ id, label, value = '', min, max, hint, warn, danger, docs, quick = false, required = false }) {
+  const control = `<input${attrs({ id, type: 'date', value, min, max, required })}${base({ id, hint, warn, danger, docs, required })}>${quick ? `<span class="field-inline" data-quick-for="${esc(id)}"><button type="button" class="field-reveal" data-quick="today">今天</button><button type="button" class="field-reveal" data-quick="tomorrow">明天</button><button type="button" class="field-reveal" data-quick="+7">+7 天</button></span>` : ''}`;
+  return fieldShell({ id, label, required, control, hint: hint ?? '按北京时间', warn, danger, docs });
+}
+
+export function timeField({ id, label, value = '', min, max, step = 60, hint, warn, danger, docs, quick = false, required = false }) {
+  const control = `<input${attrs({ id, type: 'time', value, min, max, step, required })}${base({ id, hint, warn, danger, docs, required })}>${quick ? `<span class="field-inline" data-quick-for="${esc(id)}"><button type="button" class="field-reveal" data-quick="now">现在</button><button type="button" class="field-reveal" data-quick="00:00">00:00</button><button type="button" class="field-reveal" data-quick="22:00">22:00</button></span>` : ''}`;
+  return fieldShell({ id, label, required, control, hint: hint ?? '按北京时间，精确到分钟', warn, danger, docs });
+}
+
+export function datetimeField({ id, label, value = '', min, max, hint, warn, danger, docs, required = false }) {
+  const control = `<input${attrs({ id, type: 'datetime-local', value, min, max, required })}${base({ id, hint, warn, danger, docs, required })}>`;
+  return fieldShell({ id, label, required, control, hint: hint ?? '按北京时间', warn, danger, docs });
+}
+
+export function timeRangeField({ id, label, from = '', to = '', hint, warn, danger, docs, allowEqual = true, overnight = true, required = false }) {
+  const control = `<input${attrs({ id: `${id}From`, type: 'time', value: from, step: 60, required })}${base({ id, hint, warn, danger, docs, required })} data-part="from">
+    <span class="field-unit">到</span>
+    <input${attrs({ id: `${id}To`, type: 'time', value: to, step: 60, required })} data-field="${esc(id)}" data-part="to">`;
+  const note = hint ?? `按北京时间${overnight ? '；结束早于开始表示跨到次日' : ''}${allowEqual ? '' : '；结束必须晚于开始'}`;
+  return fieldShell({ id, label, required, control, hint: note, warn, danger, docs });
+}
+
+export function readonlyField({ id, label, value = '', hint, warn, danger, docs, copy = true }) {
+  const control = `<span class="field-readonly"><code id="${esc(id)}-value">${esc(String(value ?? ''))}</code>${copy ? `<button type="button" class="field-reveal" data-copy-from="${esc(id)}-value">复制</button>` : ''}</span>`;
+  const shell = `<div class="field" data-field-wrap="${esc(id)}">
+  <span class="field-label" id="${esc(id)}-label">${esc(label)}</span>
+  <div class="field-control">${control}</div>
+  ${fieldNotes(id, { hint, warn, danger, docs }).html}
+</div>`;
+  return shell;
+}
+
+export function formActions({ primary = '保存', secondary = [], sticky = false, meta = '' }) {
+  const buttons = [
+    ...secondary.map((item) => `<button type="button" class="btn" data-action="${esc(item.action ?? item.label)}">${esc(item.label)}</button>`),
+    `<button type="submit" class="btn primary" data-action="submit">${esc(primary)}</button>`,
+  ];
+  return `<div class="form-actions${sticky ? ' form-actions-sticky' : ''}">${meta ? `<p class="meta">${esc(meta)}</p>` : ''}${buttons.join('')}</div>`;
+}
+
+export function formCallout({ tone = 'info', title = '', body = '' }) {
+  return `<div class="form-callout" data-tone="${esc(tone)}"${tone === 'danger' ? ' role="alert"' : ''}>${title ? `<strong>${esc(title)}</strong>` : ''}${body ? `<span>${esc(body)}</span>` : ''}</div>`;
+}
+
+/* ---------------------------------------------------------------- 内核 */
+
+const DEFAULT_MESSAGES = {
+  required: '不能为空',
+  integer: '必须是整数',
+  number: '必须是数字',
+  min: (rule) => `不能小于 ${rule.min}`,
+  max: (rule) => `不能大于 ${rule.max}`,
+  minItems: (rule) => `最多 ${rule.maxItems} 项`,
+  minLength: (rule) => `至少 ${rule.minLength} 个字符`,
+  maxLength: (rule) => `最多 ${rule.maxLength} 个字符`,
+  pattern: '格式不正确',
+  time: '时间格式应为 HH:mm',
+  date: '日期格式应为 YYYY-MM-DD',
+  greaterThan: (rule) => `必须晚于「${rule.label ?? rule.greaterThan}」`,
+  lessThan: (rule) => `必须早于「${rule.label ?? rule.lessThan}」`,
+};
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function toMinutes(value) {
+  if (!TIME_RE.test(String(value ?? ''))) return null;
+  const [hour, minute] = String(value).split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+/**
+ * 表单内核：取值类型化、字段与跨字段校验、条件显示、提交态、脏值。
+ * 见 docs/CONSOLE_FORMS.md §3。
+ */
+export function createForm(root, options = {}) {
+  if (!root) throw new Error('createForm: 缺少根节点');
+  const { rules = {}, depends = {}, onSubmit } = options;
+  const wraps = () => [...root.querySelectorAll('[data-field-wrap]')];
+  const wrapOf = (name) => root.querySelector(`[data-field-wrap="${cssEscape(name)}"]`);
+  const control = (name) => [...root.querySelectorAll(`[data-field="${cssEscape(name)}"]`)];
+  const listeners = new Set();
+  let initial = null;
+  let busy = false;
+
+  const isVisible = (name) => {
+    const wrap = wrapOf(name);
+    return Boolean(wrap) && !wrap.hidden;
+  };
+
+  function readOne(name, element) {
+    const rule = rules[name] ?? {};
+    const type = rule.type ?? inferType(element);
+    if (element.tagName === 'BUTTON') return element.getAttribute('aria-checked') === 'true';
+    if (type === 'array') {
+      return control(name).filter((input) => input.type === 'checkbox' && input.checked).map((input) => input.value);
+    }
+    if (type === 'boolean') return Boolean(element.checked);
+    if (type === 'integer') return element.value === '' ? null : Number.parseInt(element.value, 10);
+    if (type === 'number') return element.value === '' ? null : Number(element.value);
+    if (type === 'time' || type === 'date') return element.value ? element.value : null;
+    return element.value;
+  }
+
+  function inferType(element) {
+    if (!element) return 'string';
+    if (element.tagName === 'BUTTON') return 'boolean';
+    if (element.type === 'checkbox') return element.dataset.checkAll ? 'string' : 'boolean';
+    if (element.type === 'radio') return 'string';
+    if (element.type === 'number') return 'number';
+    return 'string';
+  }
+
+  function readField(name) {
+    const rule = rules[name] ?? {};
+    if (rule.type === 'timeRange' || rule.type === 'array') {
+      if (rule.type === 'array') return readOne(name, control(name)[0]);
+      const fromEl = control(name).find((input) => input.dataset.part === 'from');
+      const toEl = control(name).find((input) => input.dataset.part === 'to');
+      return { from: fromEl?.value || null, to: toEl?.value || null };
+    }
+    const element = control(name)[0];
+    if (!element) return undefined;
+    // 单选组：值来自被选中的那个，而不是 DOM 里第一个 radio
+    if (element.type === 'radio') {
+      const picked = control(name).find((input) => input.checked);
+      return picked ? picked.value : null;
+    }
+    return readOne(name, element);
+  }
+
+  function getValues() {
+    const values = {};
+    for (const name of Object.keys(rules)) {
+      if (!isVisible(name)) continue;
+      const value = readField(name);
+      if (value !== undefined) values[name] = value;
+    }
+    // 没有规则但存在的字段也一并带上，避免「表单里有的但没配规则」时丢值。
+    for (const wrap of wraps()) {
+      const name = wrap.dataset.fieldWrap;
+      if (name in values) continue;
+      const value = readField(name);
+      if (value !== undefined) values[name] = value;
+    }
+    return values;
+  }
+
+  function setValues(partial = {}) {
+    for (const [name, value] of Object.entries(partial)) {
+      const rule = rules[name] ?? {};
+      if (rule.type === 'timeRange' && value && typeof value === 'object') {
+        const fromEl = control(name).find((input) => input.dataset.part === 'from');
+        const toEl = control(name).find((input) => input.dataset.part === 'to');
+        if (fromEl) fromEl.value = value.from ?? '';
+        if (toEl) toEl.value = value.to ?? '';
+        continue;
+      }
+      const list = control(name);
+      if (!list.length) continue;
+      const first = list[0];
+      if (rule.type === 'array' || (first.type === 'checkbox' && list.length > 1)) {
+        const picked = new Set((Array.isArray(value) ? value : []).map(String));
+        for (const input of list) input.checked = picked.has(String(input.value));
+        continue;
+      }
+      if (first.tagName === 'BUTTON') {
+        first.setAttribute('aria-checked', value ? 'true' : 'false');
+        const textNode = first.querySelector('span:last-child');
+        if (textNode) textNode.textContent = value ? (first.dataset.onLabel ?? textNode.textContent) : (first.dataset.offLabel ?? textNode.textContent);
+        continue;
+      }
+      if (first.type === 'checkbox') {
+        first.checked = Boolean(value);
+        continue;
+      }
+      if (first.type === 'radio') {
+        for (const input of list) input.checked = String(input.value) === String(value ?? '');
+        continue;
+      }
+      first.value = value ?? '';
+      updateCounter(first);
+    }
+    applyDepends();
+  }
+
+  function updateCounter(element) {
+    const counter = root.querySelector(`[data-counter-for="${cssEscape(element.id)}"]`);
+    if (!counter) return;
+    const max = counter.dataset.max;
+    counter.textContent = max ? `${element.value.length} / ${max}` : String(element.value.length);
+    counter.dataset.over = max && element.value.length > Number(max) ? 'true' : 'false';
+  }
+
+  function applyDepends() {
+    for (const [name, condition] of Object.entries(depends)) {
+      const wrap = wrapOf(name);
+      if (!wrap) continue;
+      const source = condition.on;
+      const current = readField(source);
+      let visible = true;
+      if ('equals' in condition) visible = String(current) === String(condition.equals);
+      else if ('in' in condition) visible = (condition.in ?? []).map(String).includes(String(current));
+      else if ('notEquals' in condition) visible = String(current) !== String(condition.notEquals);
+      else if ('truthy' in condition) visible = Boolean(current);
+      wrap.hidden = !visible;
+    }
+  }
+
+  function clearError(name) {
+    const error = root.querySelector(`#${cssEscape(name)}-error`);
+    if (!error) return;
+    error.hidden = true;
+    error.textContent = '';
+    for (const input of control(name)) input.removeAttribute('aria-invalid');
+  }
+
+  function writeError(name, message) {
+    const error = root.querySelector(`#${cssEscape(name)}-error`);
+    if (error) {
+      error.hidden = false;
+      error.textContent = message;
+    }
+    for (const input of control(name)) input.setAttribute('aria-invalid', 'true');
+  }
+
+  function validateField(name) {
+    const rule = rules[name] ?? {};
+    if (!isVisible(name)) return null;
+    const value = readField(name);
+    const empty = value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0) || (rule.type === 'timeRange' && !value?.from && !value?.to);
+    if (empty) {
+      if (rule.required) return rule.message ?? DEFAULT_MESSAGES.required;
+      return null;
+    }
+    if (rule.type === 'integer' && !Number.isInteger(Number(value))) return rule.message ?? DEFAULT_MESSAGES.integer;
+    if (rule.type === 'number' && Number.isNaN(Number(value))) return rule.message ?? DEFAULT_MESSAGES.number;
+    if (rule.min !== undefined && Number(value) < Number(rule.min)) return rule.message ?? DEFAULT_MESSAGES.min(rule);
+    if (rule.max !== undefined && Number(value) > Number(rule.max)) return rule.message ?? DEFAULT_MESSAGES.max(rule);
+    if (rule.type === 'time' && !TIME_RE.test(String(value))) return rule.message ?? DEFAULT_MESSAGES.time;
+    if (rule.type === 'date' && !DATE_RE.test(String(value))) return rule.message ?? DEFAULT_MESSAGES.date;
+    if (rule.type === 'array' && rule.maxItems !== undefined && value.length > rule.maxItems) return rule.message ?? DEFAULT_MESSAGES.minItems(rule);
+    if (rule.minLength !== undefined && String(value).length < rule.minLength) return rule.message ?? DEFAULT_MESSAGES.minLength(rule);
+    if (rule.maxLength !== undefined && String(value).length > rule.maxLength) return rule.message ?? DEFAULT_MESSAGES.maxLength(rule);
+    if (rule.pattern && !(rule.pattern instanceof RegExp ? rule.pattern : new RegExp(rule.pattern)).test(String(value))) return rule.message ?? DEFAULT_MESSAGES.pattern;
+    if (rule.lessThan) {
+      const other = readField(rule.lessThan);
+      if (other != null && String(value) >= String(other)) return rule.message ?? DEFAULT_MESSAGES.lessThan(rule);
+    }
+    if (rule.greaterThan) {
+      const other = readField(rule.greaterThan);
+      if (other != null && String(value) <= String(other)) return rule.message ?? DEFAULT_MESSAGES.greaterThan(rule);
+    }
+    if (rule.type === 'timeRange' && value.from && value.to) {
+      const from = toMinutes(value.from);
+      const to = toMinutes(value.to);
+      if (from !== null && to !== null) {
+        const overnight = rule.allowOvernight !== false;
+        if (!overnight && to <= from) return rule.message ?? '结束时间必须晚于开始时间';
+        if (rule.allowEqual === false && to === from) return rule.message ?? '开始与结束不能相同';
+      }
+    }
+    return null;
+  }
+
+  function validate() {
+    const errors = {};
+    for (const name of Object.keys(rules)) {
+      const message = validateField(name);
+      if (message) {
+        errors[name] = message;
+        writeError(name, message);
+      } else clearError(name);
+    }
+    const first = Object.keys(errors)[0];
+    if (first) {
+      const input = control(first)[0];
+      input?.focus?.();
+      input?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    }
+    return { ok: !first, errors };
+  }
+
+  function setErrors(errors = {}) {
+    for (const [name, message] of Object.entries(errors)) writeError(name, message);
+  }
+
+  function snapshot() {
+    return JSON.stringify(getValues());
+  }
+
+  function dirty() {
+    if (initial === null) initial = snapshot();
+    return snapshot() !== initial;
+  }
+
+  function reset() {
+    if (initial === null) initial = snapshot();
+    setValues(JSON.parse(initial));
+    for (const name of Object.keys(rules)) clearError(name);
+    initial = snapshot();
+  }
+
+  function emit(name) {
+    const payload = { name, value: readField(name), values: getValues() };
+    for (const handler of listeners) handler(payload);
+  }
+
+  function toggleSwitch(button) {
+    const next = button.getAttribute('aria-checked') !== 'true';
+    button.setAttribute('aria-checked', next ? 'true' : 'false');
+    const text = button.querySelector('span:last-child');
+    if (text) text.textContent = next ? (button.dataset.onLabel ?? '开') : (button.dataset.offLabel ?? '关');
+    emit(button.dataset.field);
+  }
+
+  function onClick(event) {
+    const reveal = event.target.closest('[data-reveal-for]');
+    if (reveal) {
+      const input = root.querySelector(`#${cssEscape(reveal.dataset.revealFor)}`);
+      if (input) {
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        reveal.textContent = show ? '隐藏' : '显示';
+      }
+      return;
+    }
+    const copy = event.target.closest('[data-copy-from]');
+    if (copy) {
+      const source = root.querySelector(`#${cssEscape(copy.dataset.copyFrom)}`);
+      if (source) navigator.clipboard?.writeText(source.textContent ?? '');
+      return;
+    }
+    const quick = event.target.closest('[data-quick]');
+    if (quick) {
+      const holder = quick.closest('[data-quick-for]');
+      const input = holder ? root.querySelector(`#${cssEscape(holder.dataset.quickFor)}`) : null;
+      if (!input) return;
+      const today = new Date();
+      const iso = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      if (quick.dataset.quick === 'today') input.value = iso(today);
+      else if (quick.dataset.quick === 'tomorrow') input.value = iso(new Date(today.getTime() + 86400000));
+      else if (quick.dataset.quick === '+7') input.value = iso(new Date(today.getTime() + 7 * 86400000));
+      else if (quick.dataset.quick === 'now') input.value = `${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}`;
+      else input.value = quick.dataset.quick;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    const toggle = event.target.closest('[role="switch"][data-field]');
+    if (toggle && !toggle.disabled) {
+      toggleSwitch(toggle);
+      return;
+    }
+    const all = event.target.closest('[data-check-all]');
+    if (all) {
+      const name = all.dataset.checkAll;
+      for (const input of control(name)) if (input.type === 'checkbox') input.checked = all.checked;
+      emit(name);
+    }
+  }
+
+  function onInput(event) {
+    const target = event.target;
+    if (target.matches('[data-field]')) {
+      if (target.type !== 'checkbox' && target.type !== 'radio') updateCounter(target);
+      emit(target.dataset.field);
+      applyDepends();
+    }
+  }
+
+  function onBlur(event) {
+    const target = event.target;
+    if (!target.matches?.('[data-field]')) return;
+    const name = target.dataset.field;
+    if (!(name in rules)) return;
+    const message = validateField(name);
+    if (message) writeError(name, message);
+    else clearError(name);
+  }
+
+  function onKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const toggle = event.target.closest?.('[role="switch"][data-field]');
+    if (!toggle) return;
+    event.preventDefault();
+    toggleSwitch(toggle);
+  }
+
+  async function onSubmitEvent(event) {
+    event.preventDefault();
+    if (busy) return;
+    const { ok } = validate();
+    if (!ok) return;
+    if (!onSubmit) return;
+    const button = root.querySelector('[data-action="submit"]');
+    busy = true;
+    if (button) {
+      button.dataset.label = button.textContent;
+      button.textContent = '保存中…';
+      button.setAttribute('aria-busy', 'true');
+    }
+    try {
+      await onSubmit(getValues(), { form: api, event });
+      initial = snapshot();
+    } finally {
+      busy = false;
+      if (button) {
+        button.textContent = button.dataset.label ?? '保存';
+        button.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  root.addEventListener('click', onClick);
+  root.addEventListener('input', onInput);
+  root.addEventListener('change', onInput);
+  root.addEventListener('focusout', onBlur);
+  root.addEventListener('keydown', onKeydown);
+  root.addEventListener('submit', onSubmitEvent);
+
+  applyDepends();
+  initial = snapshot();
+
+  const api = {
+    getValues,
+    getValue: (name) => readField(name),
+    setValues,
+    validate,
+    setErrors,
+    dirty,
+    reset,
+    on(event, handler) {
+      if (event === 'change') listeners.add(handler);
+      return () => listeners.delete(handler);
+    },
+    destroy() {
+      root.removeEventListener('click', onClick);
+      root.removeEventListener('input', onInput);
+      root.removeEventListener('change', onInput);
+      root.removeEventListener('focusout', onBlur);
+      root.removeEventListener('keydown', onKeydown);
+      root.removeEventListener('submit', onSubmitEvent);
+      listeners.clear();
+    },
+  };
+  return api;
+}
+
+function cssEscape(value) {
+  if (globalThis.CSS?.escape) return globalThis.CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, '\\$&');
+}

@@ -1,0 +1,26 @@
+/* 临时演示页样式：控制台 body 是侧栏 + 工作区的网格，演示页要退回普通文档流。 */
+body {
+  display: block;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg, #f4f6fb);
+}
+
+.demo-wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.demo-wrap .card {
+  width: 100%;
+  padding: 20px 22px;
+}
+
+.demo-wrap h1 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+
+.demo-wrap .meta {
+  margin: 0 0 16px;
+}

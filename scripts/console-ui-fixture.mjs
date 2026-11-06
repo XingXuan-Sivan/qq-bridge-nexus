@@ -485,7 +485,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         const relPath = rel ? `${rel}/${entry.name}` : entry.name;
         if (entry.isDirectory()) { await walkComponents(resolve(abs, entry.name), relPath); continue; }
         const type = entry.name.endsWith('.js') ? 'text/javascript; charset=utf-8'
-          : entry.name.endsWith('.css') ? 'text/css; charset=utf-8' : null;
+          : entry.name.endsWith('.css') ? 'text/css; charset=utf-8'
+            : entry.name.endsWith('.html') ? 'text/html; charset=utf-8' : null;
         if (!type) continue;
         assets.set(`/console/components/${relPath}`, { body: await readFile(resolve(abs, entry.name)), type });
       }

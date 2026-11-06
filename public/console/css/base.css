@@ -140,3 +140,23 @@ button.planned {
   border-style:dashed;
   color:var(--muted)
 }
+/* 原生日期/时间选择器：改成 type=date 后由浏览器弹日历，指示器默认颜色跟 color-scheme 走，
+   暗色下再反相一点，避免图标糊在深色输入框里看不见。 */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  opacity:.55;
+  cursor:pointer;
+  transition:opacity .15s
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity:.9
+}
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter:invert(1);
+  opacity:.7
+}

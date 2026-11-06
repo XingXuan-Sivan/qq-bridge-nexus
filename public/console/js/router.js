@@ -5,6 +5,11 @@
 
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { initGroups } from '../components/groups/groups.js';
+import { decorateSelects, initSelects } from '../components/select/select.js';
+
+// 下拉框统一外观：启动时装一次，之后动态插入的 select 由 MutationObserver 补。
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initSelects, { once: true });
+else initSelects();
 
 /** 页面元数据：[标题, 大标题, 说明]。新增页面必须同时加进 #mainNav 的 data-view。 */
 export const consolePages = {
@@ -117,6 +122,7 @@ function hydratePage(page) {
     // 折叠分组：默认展开第一组，之后按页面记忆用户展开过哪些（跨页一致的体验）。
     // 必须放在 init() 之后——有些页面的分组是 init() 里渲染出来的。
     initGroups(host, { pageId: page });
+    decorateSelects(host);
     applyPageA11y(host);
     // 就绪标记：字段由 fields.js 的规格在 init() 里渲染，片段 HTML 到位 ≠ 页面可用。
     // 浏览器回归（test-console-ui）与深链定位都等这个标记，避免量到「还没渲染」的空壳。

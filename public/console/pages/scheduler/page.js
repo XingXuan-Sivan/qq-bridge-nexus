@@ -140,22 +140,27 @@ function renderScheduler() {
 function schedFieldsHtml(type, s = {}) {
   const v = (x, d = '') => esc(x ?? d);
   const times = (s.times || ['09:00']).join(', ');
-  const timesRow = `<div class="row"><span class="meta u-m-0">时间</span><input class="u-flex-basis-200" type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00"></div>`;
-  const windowRow = (w) => `<div class="row"><span class="meta u-m-0">时间段</span><input type="time" id="sf_w0" value="${v((w || [])[0], '09:00')}"> 到 <input type="time" id="sf_w1" value="${v((w || [])[1], '22:00')}"></div>`;
+  // 统一行结构：标签在左、控件在右，和 fields.js 渲染出来的行完全一致。
+  // 动态编辑器最容易写成「标签在上」，那样看起来和弹窗其它行不是一套表单。
+  const row = (label, control, hint = '') => `<div class="field-block"><div class="field-row">`
+    + `<span class="field-label">${label}</span>`
+    + `<div class="field-control field-inline">${control}</div>`
+    + `</div>${hint ? `<div class="field-notes"><p class="field-hint">${hint}</p></div>` : ''}</div>`;
+  const timesRow = row('时间', `<input type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00">`);
+  const windowRow = (w) => row('时间段', `<input type="time" id="sf_w0" value="${v((w || [])[0], '09:00')}"><span class="field-unit">到</span><input type="time" id="sf_w1" value="${v((w || [])[1], '22:00')}">`);
   switch (type) {
-    case 'once': return `<div class="row"><span class="meta u-m-0">日期和时间</span><input type="date" id="sf_date" value="${v(s.date)}"><input type="time" id="sf_time" value="${v(s.time, '09:00')}"></div>`;
+    case 'once': return row('日期和时间', `<input type="date" id="sf_date" value="${v(s.date)}"><input type="time" id="sf_time" value="${v(s.time, '09:00')}">`);
     case 'daily': case 'workdays': return timesRow;
-    case 'weekly': return `<div class="row">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip u-m-0"><input type="checkbox" data-sf-wd="${d}" ${(s.weekdays || [1]).includes(d) ? 'checked' : ''}> 周${SCHED_WEEK[d]}</label>`).join('')}</div>${timesRow}`;
-    case 'monthly': return `<div class="row"><span class="meta u-m-0">几号</span><input class="u-flex-basis-200" type="text" id="sf_days" value="${v((s.days || [1]).join(', '))}" placeholder="1, 15, -1（-1 = 最后一天）"></div>${timesRow}`;
-    case 'monthlyWeekday': return `<div class="row"><span class="meta u-m-0">每月</span><select id="sf_nth">${[[1, '第 1 个'], [2, '第 2 个'], [3, '第 3 个'], [4, '第 4 个'], [5, '第 5 个'], [-1, '最后一个']].map(([n, l]) => `<option value="${n}" ${Number(s.nth ?? 1) === n ? 'selected' : ''}>${l}</option>`).join('')}</select><select id="sf_weekday">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}" ${Number(s.weekday ?? 6) === d ? 'selected' : ''}>周${SCHED_WEEK[d]}</option>`).join('')}</select></div>${timesRow}`;
-    case 'yearly': return `<div class="row"><span class="meta u-m-0">日期</span><input class="u-flex-basis-200" type="text" id="sf_dates" value="${v((s.dates || ['01-01']).join(', '))}" placeholder="10-21, 12-25（MM-DD）"></div>${timesRow}`;
-    case 'dates': return `<div class="meta">每行一条：YYYY-MM-DD HH:mm</div><textarea id="sf_items" rows="3" class="u-w-full">${v((s.items || []).map((x) => `${x.date} ${x.time}`).join('\n'))}</textarea>`;
-    case 'everyNDays': return `<div class="row"><span class="meta u-m-0">从</span><input type="date" id="sf_start" value="${v(s.startDate)}"><span class="meta u-m-0">起，每</span><input class="u-flex-basis-max-80" type="number" id="sf_every" min="2" value="${v(s.every, 3)}"><span class="meta u-m-0">天</span></div>${timesRow}`;
-    case 'interval': return `<div class="row"><span class="meta u-m-0">每</span><input class="u-flex-basis-max-90" type="number" id="sf_everyMin" min="10" value="${v(s.everyMinutes, 240)}"><span class="meta u-m-0">分钟</span></div>${windowRow(s.window || ['08:00', '23:00'])}`;
-    case 'dailyRandom': return `<div class="row"><span class="meta u-m-0">每天</span><input class="u-flex-basis-max-80" type="number" id="sf_count" min="1" value="${v(s.count, 3)}"><span class="meta u-m-0">次，至少隔</span><input class="u-flex-basis-max-80" type="number" id="sf_gap" min="0" value="${v(s.minGapMin, 60)}"><span class="meta u-m-0">分钟</span></div>${windowRow(s.window)}`;
-    case 'cron': return `<div class="row"><span class="meta u-m-0">表达式</span><input class="u-flex-basis-220-mono" type="text" id="sf_cron" value="${v(s.expr, '0 9 * * 1-5')}" placeholder="0 9 * * 1-5"></div>
-      <div class="meta">5 段：分 时 日 月 周（周 0 和 7 都是周日，也可以写 MON-FRI）。例子：<code>0 9 * * 1-5</code> 工作日 9:00；<code>30 8 1 * *</code> 每月 1 号 8:30；<code>0 10,15 * * 6,0</code> 周末 10:00 和 15:00；<code>*/30 9-18 * * *</code> 9～18 点每半小时。日和周都限定时按「任一满足」。下面会实时显示接下来几次，写错会直接提示。cron 只能在控制台设置，AI 不能用。</div>`;
-    case 'monthlyRandom': return `<div class="row"><span class="meta u-m-0">每月</span><input class="u-flex-basis-max-80" type="number" id="sf_mcount" min="1" value="${v(s.count, 4)}"><span class="meta u-m-0">次，限</span><input class="u-flex-basis-max-70" type="number" id="sf_d0" min="1" max="31" value="${v((s.dayRange || [])[0], 1)}"><span class="meta u-m-0">～</span><input class="u-flex-basis-max-70" type="number" id="sf_d1" min="1" max="31" value="${v((s.dayRange || [])[1], 28)}"><span class="meta u-m-0">号</span></div>${windowRow(s.window)}`;
+    case 'weekly': return row('星期', [1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip u-m-0"><input type="checkbox" data-sf-wd="${d}" ${(s.weekdays || [1]).includes(d) ? 'checked' : ''}> 周${SCHED_WEEK[d]}</label>`).join('')) + timesRow;
+    case 'monthly': return row('几号', `<input type="text" id="sf_days" value="${v((s.days || [1]).join(', '))}" placeholder="1, 15, -1（-1 = 最后一天）">`) + timesRow;
+    case 'monthlyWeekday': return row('每月', `<select id="sf_nth">${[[1, '第 1 个'], [2, '第 2 个'], [3, '第 3 个'], [4, '第 4 个'], [5, '第 5 个'], [-1, '最后一个']].map(([n, l]) => `<option value="${n}" ${Number(s.nth ?? 1) === n ? 'selected' : ''}>${l}</option>`).join('')}</select><select id="sf_weekday">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}" ${Number(s.weekday ?? 6) === d ? 'selected' : ''}>周${SCHED_WEEK[d]}</option>`).join('')}</select>`) + timesRow;
+    case 'yearly': return row('日期', `<input type="text" id="sf_dates" value="${v((s.dates || ['01-01']).join(', '))}" placeholder="10-21, 12-25（MM-DD）">`) + timesRow;
+    case 'dates': return row('日期列表', `<textarea id="sf_items" rows="3">${v((s.items || []).map((x) => `${x.date} ${x.time}`).join('\n'))}</textarea>`, '每行一条：YYYY-MM-DD HH:mm');
+    case 'everyNDays': return row('每隔', `<input type="date" id="sf_start" value="${v(s.startDate)}"><span class="field-unit">起，每</span><input type="number" id="sf_every" min="2" value="${v(s.every, 3)}"><span class="field-unit">天</span>`) + timesRow;
+    case 'interval': return row('间隔', `<input type="number" id="sf_everyMin" min="10" value="${v(s.everyMinutes, 240)}"><span class="field-unit">分钟一次</span>`) + windowRow(s.window || ['08:00', '23:00']);
+    case 'dailyRandom': return row('随机次数', `<input type="number" id="sf_count" min="1" value="${v(s.count, 3)}"><span class="field-unit">次，至少隔</span><input type="number" id="sf_gap" min="0" value="${v(s.minGapMin, 60)}"><span class="field-unit">分钟</span>`) + windowRow(s.window);
+    case 'cron': return row('表达式', `<input class="u-flex-basis-220-mono" type="text" id="sf_cron" value="${v(s.expr, '0 9 * * 1-5')}" placeholder="0 9 * * 1-5">`, '5 段：分 时 日 月 周（周 0 和 7 都是周日，也可以写 MON-FRI）。例子：<code>0 9 * * 1-5</code> 工作日 9:00；<code>30 8 1 * *</code> 每月 1 号 8:30；<code>0 10,15 * * 6,0</code> 周末 10:00 和 15:00；<code>*/30 9-18 * * *</code> 9～18 点每半小时。日和周都限定时按「任一满足」。下面会实时显示接下来几次，写错会直接提示。cron 只能在控制台设置，AI 不能用。');
+    case 'monthlyRandom': return row('随机次数', `<input type="number" id="sf_mcount" min="1" value="${v(s.count, 4)}"><span class="field-unit">次，限</span><input type="number" id="sf_d0" min="1" max="31" value="${v((s.dayRange || [])[0], 1)}"><span class="field-unit">～</span><input type="number" id="sf_d1" min="1" max="31" value="${v((s.dayRange || [])[1], 28)}"><span class="field-unit">号</span>`) + windowRow(s.window);
     default: return '';
   }
 }
@@ -195,7 +200,7 @@ function schedPayload() {
   if (schedEl('schedStartDate').value.trim() && type !== 'everyNDays') schedule.startDate = schedEl('schedStartDate').value.trim();
   if (schedEl('schedEndDate').value.trim()) schedule.endDate = schedEl('schedEndDate').value.trim();
   schedule.excludeDates = schedSplit(schedEl('schedExclude').value);
-  schedule.excludeHolidays = schedEl('schedSkipHolidays').checked;
+  schedule.excludeHolidays = getSwitch(schedEl('schedSkipHolidays'));
   const pluginKind = schedEl('schedPluginKind')?.value || '';
   const kind = pluginKind || document.querySelector('input[name="schedKind"]:checked')?.value || 'text';
   const content = schedEl('schedContent').value.trim();
@@ -249,7 +254,7 @@ function openSchedEditor(task = null) {
   schedEl('schedStartDate').value = s.type === 'everyNDays' ? '' : (s.startDate || '');
   schedEl('schedEndDate').value = s.endDate || '';
   schedEl('schedExclude').value = (s.excludeDates || []).join(', ');
-  schedEl('schedSkipHolidays').checked = !!s.excludeHolidays;
+  setSwitch(schedEl('schedSkipHolidays'), !!s.excludeHolidays);
   schedEl('schedMaxRuns').value = task?.maxRuns ?? '';
   schedEl('schedMissed').value = task?.missedPolicy || 'grace';
   schedEl('schedSilence').value = task?.runDuringSilence ? 'run' : 'skip';

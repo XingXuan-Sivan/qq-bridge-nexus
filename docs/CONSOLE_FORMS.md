@@ -124,9 +124,11 @@ form.destroy();
 - 错误：`role="alert"` + `aria-live="polite"`；聚焦首个错误字段。
 - 焦点环沿用 `--accent-ring`，不允许为了「好看」去掉 `:focus-visible`。
 
-### 布局规范（2026-11-06 定）
+### 布局规范（2026-11-06 定，2026-11-07 补「什么时候才竖排」）
 
-- 默认「标签在左、控件在右」：`.field` 是两列网格，标签列宽 `--field-label-w`（默认 132px），控件列自适应；注解（hint/warn/danger/error）都落在控件列，不压到标签下。
+- 默认「标签在左、控件在右」：`.field-row` 是两列网格，标签列宽 `--field-label-w`（默认 148px），控件列自适应；注解（hint/warn/danger/error）都落在控件列，不压到标签下。
+- **只有「同一行要放 3 列以上」时才改成标签在上、控件在下**（如安全限制的 4 列数字网格）。2 列、单列一律左右布局——竖排会让弹窗里的表单看起来「一列一列散着」，也让每行高度变得不可控。
+- 手写的表单（弹窗主体、动态生成的重复方式编辑器）也必须用 `.field-block > .field-row > .field-label` 这套结构；自己写 `<label/> + <input/>` 的上下堆叠不会自动获得 148px 标签列。
 - 必填星号放在标签**左侧**（`* 名称`），颜色用 danger；标签**右对齐**、与控件首行对齐。
 - 开关、单个复选框与输入框同一水平线（控件列内左对齐、40px 行高），不再单独占一行控件区。
 - 窄屏（≤760px）自动退回「标签在上、控件在下」的单列。
@@ -153,11 +155,27 @@ form.destroy();
 - 关闭回调里清掉「正在编辑的 id」，否则下次点「新建」会带着上一条记录的 id 走 PATCH。
 - JS 动态建弹窗时用 `modalHtml({ id, title, body, footer, wide })` 生成同样的结构，不要手拼。
 
+### 下拉框组件（2026-11-07 落地）
+
+原生 `<select>` 的箭头由浏览器画：方向固定、贴右边缘、没有展开动画，且在暗色主题下颜色不可控。统一由组件接管：
+
+```
+span.select-wrap            ← 自动包一层（position:relative）
+  ├ select                  ← appearance:none，右侧留 32px 给箭头
+  └ span.select-chevron     ← 8×8 折线，right:12px，45°；.is-open 时 -135°
+```
+
+- 页面只写 `<select>`，不用手动包：`router.js` 启动时调 `initSelects()`（装饰现有 + `MutationObserver` 观察后续插入），切页时再 `decorateSelects(host)`。
+- 展开态由 `pointerdown` / `Enter` / `Space` / `↑` / `↓` 触发，`change` / `blur` / `Esc` / `Tab` 收起；`prefers-reduced-motion` 下关掉过渡。
+- 动态生成的 select（例如定时任务的重复方式编辑器）不需要额外处理，观察器会自动补上。
+
 ### 组件选择规则（2026-11-06 定）
 
-- 单个布尔状态（启用 / 允许 / 自动 / 关闭某能力）一律用 `switchField`：`role="switch"`，文案「开 / 关」，与输入框同高。
+- 单个布尔状态（启用 / 允许 / 自动 / 关闭某能力）一律用 `switchField`：`role="switch"`，文案「开 / 关」，与输入框同高。**不要**用 0、1 两个单选项，也不要用复选框冒充开关。
 - 需要用户确认风险的勾选（「我已了解」「删除后不可恢复」）保留 `checkboxField`，语义是确认不是开关。
 - 多选集合用 `checkboxGroup`；单选集合用 `radioGroup`（卡片样式给互斥的模式选择）。
+- 日期 / 时间用原生 `type="date"` / `type="time"` / `type="datetime-local"`，让浏览器出日历与时间选择器；**不要**用文本框 + `YYYY-MM-DD` 占位符让用户手打。
+- 下拉框直接写 `<select>`：`components/select/select.js` 会自动包一层 `.select-wrap` 并画自绘箭头（展开时翻转）。页面不要手写箭头、不要给 select 加倍率性的 `appearance` 覆盖。
 - 同排字段靠 `.cols` + `.col-*` 排布，控件区最小高度 40px、垂直居中，保证基线一致；长文本/提示词用 `span: 2` 占整行。
 ### 控件标尺与五类非字段控件（2026-11-06 落地）
 

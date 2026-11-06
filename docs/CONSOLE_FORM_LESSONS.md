@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 二十七个真实踩过的坑
+## 1. 三十个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -118,6 +118,21 @@
 
 **规则**：弹窗用组件的三段式（`.modal-head` / `.modal-body` / `.modal-foot`，`.modal[data-modal-panel]`），**只有 body 滚动**；关闭/打开一律 `openModal`/`closeModal`，关闭按钮写 `[data-modal-close]` 让 `wireModal` 统一绑定；动作按钮放 foot，不要放进滚动主体，也不要靠 sticky 打补丁。同一动作条里按钮同高——`inlineActions` 默认 40px，紧凑处显式 `small: true`（32px），混档看起来就是没对齐。
 
+### 1.28 手写的表单不会自动获得「148px 标签列」
+定时任务编辑器搬进弹窗后仍是 `<div class="grid u-gap-12">` + `<div><label/><input/></div>`，标签在上、控件在下。看起来像「表单组件坏了」，其实是这段 HTML 从来没进过 `.field-row` —— 组件只对走 `renderFields`（或自己写 `.field-block > .field-row`）的字段负责。
+
+**规则**：弹窗主体、动态生成的重复行（`schedFieldsHtml()` 的 13 个分支）也必须是 `.field-block > .field-row > .field-label + .field-control`。行距用容器自己的 `gap`（`.form-grid` 是 18px，手写容器自己补），别指望 `.field-block` 自带外边距。多行文本行加 `.field-block--textarea`，标签才会对齐第一行而不是整块居中。
+
+### 1.29 原生 `select` 的箭头改不了，只能整个换掉
+`:where(select)` 设了高度和内边距，但 `appearance` 仍是 `auto`：箭头方向固定、贴右边缘、无展开动画，暗色主题下还常常是黑箭头。给 select 写 `appearance:none` 又会把箭头彻底删掉，看起来像「下拉框坏了」。
+
+**规则**：下拉框一律交给 `components/select/`（`initSelects()` 启动时装、`decorateSelects(host)` 切页时补、`MutationObserver` 兜动态插入）。页面只写 `<select>`，不要自己画箭头，也不要在页面 CSS 里覆盖 `appearance`。
+
+### 1.30 选错控件的代价：布尔状态写成复选框，用户就得「勾上表示开启」
+「跳过法定节假日」原本是 `<label><input type="checkbox"> 跳过…</label>`：它既不是多选集合，也不是风险确认，就是一个开关。后来改成 `role="switch"` 时，读取代码仍写 `.checked`，于是又踩回 1.26 的坑。
+
+**规则**：单个布尔状态 → `switchField`（或手写 `role="switch"` + `bindSwitches`）；确认类（「我已了解」）→ checkbox；多选集合 → `checkboxGroup`。判断标准是「这个选项是一个状态，还是集合里的一项」。日期时间一律 `type="date"/"time"/"datetime-local"`，不要用文本框加 `YYYY-MM-DD` 占位符。
+
 
 ## 2. 迁移一个页面的检查清单
 
@@ -151,6 +166,9 @@
 - 折叠分组（`<details>`）全部展开后，有没有行被裁掉/点不到（1.20 的测试也要先展开）？
 - 页面上每个开关点一下：`aria-checked` 和「开/关」文案是否同步翻转？保存后请求体里的布尔值是否跟着变（不是 `undefined`，也不是永远 `false`）？
 - 页面底部保存栏滚动时会不会盖住表格底栏或最后一行按钮？（已知遗留，见 `STATUS` 第 14 行的待办）
+- 每个「单个布尔状态」是不是开关（`role="switch"`）而不是复选框？多选集合、风险确认是不是各自用了 checkbox？
+- 有没有文本框在要求用户手打 `YYYY-MM-DD`（应该换成 `type="date"`）？
+- 页面上的 `<select>` 是否都已经包在 `.select-wrap` 里、箭头不贴边、展开时会翻转（1.29）？
 
 ## 4. 剩余页面的迁移顺序与取舍
 

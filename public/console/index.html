@@ -17,6 +17,7 @@
 <link rel="stylesheet" href="/console/components/message/message.css">
 <link rel="stylesheet" href="/console/components/form/form.css">
 <link rel="stylesheet" href="/console/components/search-box/search-box.css">
+<link rel="stylesheet" href="/console/components/select/select.css">
 <link rel="stylesheet" href="/console/components/table/table.css">
 <link rel="stylesheet" href="/console/css/utilities.css">
 </head>
@@ -127,12 +128,18 @@
           <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
         </header>
         <div class="modal-body" id="schedEditor">
-          <div class="grid u-gap-12">
-            <div><label for="schedName">名称</label><input type="text" id="schedName" placeholder="早安"></div>
-            <div><label for="schedTaskTz">时区</label><select id="schedTaskTz"></select></div>
-          </div>
-          <label for="schedType">重复方式</label>
-          <select id="schedType">
+          <div class="sched-form">
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedName">名称</label>
+              <div class="field-control"><input type="text" id="schedName" placeholder="早安"></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedTaskTz">时区</label>
+              <div class="field-control"><select id="schedTaskTz"></select></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedType">重复方式</label>
+              <div class="field-control"><select id="schedType">
             <option value="once">一次性</option>
             <option value="daily">每天</option>
             <option value="weekly">每周</option>
@@ -146,32 +153,64 @@
             <option value="dailyRandom">每天随机几次</option>
             <option value="monthlyRandom">每月随机几次</option>
             <option value="cron">高级：cron 表达式</option>
-          </select>
-          <div class="sched-fields" id="schedFields"></div>
-          <div class="grid u-gap-12">
-            <div><label>有效期（可选）</label><div class="row"><input class="u-flex-basis-120" type="text" id="schedStartDate" placeholder="开始 YYYY-MM-DD"><input class="u-flex-basis-120" type="text" id="schedEndDate" placeholder="结束 YYYY-MM-DD"></div></div>
-            <div><label for="schedMaxRuns">共执行几次后停止（可选）</label><input type="number" id="schedMaxRuns" min="1" placeholder="不限"></div>
-          </div>
-          <div class="grid u-gap-12">
-            <div><label for="schedExclude">排除日期（可选，逗号分隔）</label><input type="text" id="schedExclude" placeholder="2026-12-25, 2027-01-01"></div>
-            <div><label>其它</label><div class="row"><label class="sched-chip u-m-0"><input type="checkbox" id="schedSkipHolidays"> 跳过法定节假日</label>
-              <select class="u-flex-basis-160" id="schedSilence" title="只对「叫 AI 来说」有效；固定文字在定时静默里照发"><option value="skip">定时静默时段内：跳过这次</option><option value="run">定时静默时段内：照常执行</option></select>
-              <select class="u-flex-basis-160" id="schedMissed"><option value="grace">错过了：补发时间内补发，否则跳过</option><option value="skip">错过了：直接跳过</option></select></div></div>
-          </div>
-          <label>发给谁（可多选）</label>
-          <div id="schedTargets"></div>
-          <label>内容</label>
-          <div class="row">
-            <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
-            <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
-          </div>
-          <div class="row u-mt-8" id="schedPluginKindRow" hidden>
-            <label class="field u-flex-basis-240">插件任务类型<select id="schedPluginKind"></select></label>
-            <span class="meta u-m-0">由插件注册；payload 见插件说明</span>
-          </div>
+          </select></div>
+            </div></div>
+            <div class="sched-fields" id="schedFields"></div>
+            <div class="field-block"><div class="field-row">
+              <span class="field-label">有效期（可选）</span>
+              <div class="field-control field-inline">
+                <input type="date" id="schedStartDate" aria-label="开始日期">
+                <input type="date" id="schedEndDate" aria-label="结束日期">
+              </div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedMaxRuns">共执行几次后停止</label>
+              <div class="field-control"><input type="number" id="schedMaxRuns" min="1" placeholder="不限（可选）"></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedExclude">排除日期</label>
+              <div class="field-control"><input type="text" id="schedExclude" placeholder="可选，逗号分隔：2026-12-25, 2027-01-01"></div>
+            </div></div>
+            <div class="field-block field-block--switch"><div class="field-row">
+              <span class="field-label">跳过法定节假日</span>
+              <div class="field-control">
+                <button type="button" class="field-switch" role="switch" id="schedSkipHolidays" data-field="schedSkipHolidays" data-on-label="开" data-off-label="关" aria-checked="false"><span class="field-switch-track" aria-hidden="true"></span><span>关</span></button>
+              </div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedSilence">定时静默时段</label>
+              <div class="field-control"><select id="schedSilence"><option value="skip">跳过这次</option><option value="run">照常执行</option></select></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <label class="field-label" for="schedMissed">错过了</label>
+              <div class="field-control"><select id="schedMissed"><option value="grace">补发时间内补发，否则跳过</option><option value="skip">直接跳过</option></select></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <span class="field-label">发给谁（可多选）</span>
+              <div class="field-control" id="schedTargets"></div>
+            </div></div>
+            <div class="field-block"><div class="field-row">
+              <span class="field-label">内容形式</span>
+              <div class="field-control field-inline">
+                <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="text" checked> 固定文字（桥接直接发）</label>
+                <label class="sched-chip u-m-0"><input type="radio" name="schedKind" value="ai"> 叫 AI 来说（到点唤醒 AI）</label>
+              </div>
+            </div></div>
+            <div class="field-block" id="schedPluginKindRow" hidden><div class="field-row">
+              <span class="field-label">插件任务类型</span>
+              <div class="field-control field-inline">
+                <select id="schedPluginKind"></select>
+                <span class="field-unit">由插件注册；payload 见插件说明</span>
+              </div>
+            </div></div>
           <textarea id="schedPayloadJson" rows="3" class="u-w-full u-mt-8" hidden placeholder='{"payload": {"week": "周一"}}'></textarea>
-          <textarea class="u-w-full-mt-8" id="schedContent" rows="3" placeholder="早上好"></textarea>
-          <div class="meta" id="schedPreview">接下来：—</div>
+            <div class="field-block field-block--textarea"><div class="field-row">
+              <label class="field-label" for="schedContent">内容</label>
+              <div class="field-control"><textarea id="schedContent" rows="3" placeholder="早上好"></textarea></div>
+            </div>
+              <div class="field-notes"><p class="field-hint" id="schedPreview">接下来：—</p></div>
+            </div>
+          </div>
         </div>
         <footer class="modal-foot">
           <span class="modal-status" id="schedEditorMsg"></span>

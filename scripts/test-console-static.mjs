@@ -396,6 +396,16 @@ ok(html.includes('id="schedEditorOverlay"'), '定时任务编辑器弹窗挂在�
 ok(/import \{[^}]*openModal[^}]*\} from '\.\.\/\.\.\/components\/modal\/modal\.js'/.test(schedulerJs), '定时任务页用 modal 组件打开编辑器（不自己切 hidden）');
 ok(!/schedEditor'\)\.hidden/.test(schedulerJs), '定时任务页不再用 .hidden 控制编辑器显隐');
 
+// 下拉框统一由 components/select 装饰（原生箭头方向固定、贴边、无展开动画），
+// 日期用原生选择器而不是「文本框 + YYYY-MM-DD 占位符」。
+const selectJs = fs.readFileSync(path.join(ROOT, 'public/console/components/select/select.js'), 'utf8');
+const routerJs = fs.readFileSync(path.join(ROOT, 'public/console/js/router.js'), 'utf8');
+ok(fs.existsSync(path.join(ROOT, 'public/console/components/select/select.css')), '下拉框组件有 select.css');
+ok(/export function decorateSelects/.test(selectJs) && /export function initSelects/.test(selectJs), '下拉框组件导出 decorateSelects / initSelects');
+ok(/initSelects/.test(routerJs), '路由器启动时调 initSelects（动态插入的 select 也会被装饰）');
+ok(html.includes('/console/components/select/select.css'), 'index.html 引入 select.css');
+ok(html.includes('type="date" id="schedStartDate"'), '定时任务编辑器用原生日期选择器（不是文本框 + 占位符）');
+
 const rowHacks = [];
 for (const page of consolePageDirs(ROOT)) {
   if (!page.css) continue;

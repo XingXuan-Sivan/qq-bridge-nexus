@@ -538,6 +538,12 @@ tr:last-child td {
 .sched-editor {
   display:block
 }
+/* 这些行是手写的（没有 .form-grid 的 row-gap），在这里补行距。 */
+.sched-form {
+  display:flex;
+  flex-direction:column;
+  gap:14px
+}
 .sched-history div {
   font-size:12px;
   color:var(--muted);

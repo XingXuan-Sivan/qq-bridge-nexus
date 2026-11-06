@@ -1,0 +1,51 @@
+/* 下拉框：统一成「自绘箭头 + 展开时翻转」。
+   原生 select 的箭头由浏览器画，方向固定、贴右边、无法加动画；这里用 appearance:none
+   去掉原生箭头，外面包一层 .select-wrap 放一个可旋转的箭头（CSS 画，不引图片）。 */
+
+.select-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.select-wrap > select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 100%;
+  /* 右侧留出箭头的位置：箭头中心在 16px，半径 5px，再留一点呼吸 */
+  padding-right: 32px;
+}
+
+.select-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -6px;
+  border-right: 1.6px solid var(--muted);
+  border-bottom: 1.6px solid var(--muted);
+  transform: rotate(45deg);
+  transform-origin: 50% 50%;
+  transition: transform .18s ease, margin-top .18s ease, border-color .18s ease;
+  pointer-events: none;
+}
+
+.select-wrap.is-open .select-chevron {
+  /* 向上：同一条折线翻 180° */
+  transform: rotate(-135deg);
+  margin-top: -2px;
+}
+
+.select-wrap:has(select:disabled) .select-chevron {
+  opacity: .45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select-chevron {
+    transition: none;
+  }
+}

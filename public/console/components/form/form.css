@@ -332,6 +332,28 @@
   gap: 8px 14px;
 }
 
+/* 一行多个控件（两个日期、日期+次数）：每个给个基准宽度再均分剩余空间。
+   不写 width:auto 的话会吃到全局 :where(input){width:100%}，变成每个各占一整行。 */
+.field-inline > input,
+.field-inline > select,
+.field-inline > textarea,
+.field-inline > .select-wrap {
+  flex: 1 1 140px;
+  width: auto;
+  min-width: 0;
+}
+
+/* 多行文本：标签跟着第一行走，不要垂直居中在整块中间。 */
+.field-block--textarea > .field-row {
+  align-items: start;
+}
+
+.field-block--textarea > .field-row > .field-label {
+  /* 标签自己写了 align-self:center，这里必须显式改回 start，否则整块 100px 高时标签仍居中。 */
+  align-self: start;
+  padding-top: 11px;
+}
+
 .field-inline label {
   display: inline-flex;
   align-items: center;

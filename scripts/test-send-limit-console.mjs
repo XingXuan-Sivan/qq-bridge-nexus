@@ -61,7 +61,10 @@ test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了�
 test('② 控制台：总览页有「发言上限」卡片', () => {
   const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-sendlimit"'), html.indexOf('</section>', html.indexOf('<section id="section-sendlimit"')));
-  assert.match(sec, /data-page="overview"/);
-  for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitSave', 'sendLimitHits']) assert.ok(sec.includes(`id="${id}"`), id);
+  // 控件已搬进 pages/overview/fields.js：卡片里只剩宿主 div，控件 id 要在整份控制台源码里找。
+  // 工厂生成的控件只有 `name: 'x'`（渲染时才变成 id），手写 HTML 里的才是 `id="x"`。
+  assert.match(sec, /data-overview-fields="sendLimit"/);
+  const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
+  for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitSave', 'sendLimitHits']) assert.ok(hasId(id), id);
   assert.match(html, /renderSendLimitHits\(s\.sendLimit\)/, '状态刷新时显示被拦次数');
 });

@@ -1,78 +1,55 @@
-/* 运行总览：六个块复用公共样式；摘要卡现在是 .grid 的第一个网格项，间距交给网格 gap，去掉原来的 margin-bottom 避免 24px + 22px 叠成双倍。 */
-.overview-summary { margin-bottom: 0; }
+/* 运行总览：六个块都按页面骨架排（page-stack + 每块 span-all），私有样式只补网格占位和两处内容形态。 */
 
-/* 概览页私有：三块在 main 网格里的占位与顺序（app.css 只留通用布局）。 */
-#section-activity {
-  grid-column:1/-1;
-  order:3
+/* 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），宿主是 main 网格的直接子项
+   （#section-overview 是 display:contents），所以要给宿主也铺满整行。 */
+[data-overview-fields="metrics"] {
+  grid-column: 1 / -1;
 }
-#section-mode {
-  order:0
-}
-/* 静默开关：原来是「标题 + 两个按钮」的紧凑两栏；加了定时静默面板后改成普通块布局（.row 不能再钉在第 2 栏） */
-#section-silent {
-  grid-column:1/-1;
-  order:2;
-  display:block;
-  padding-top:20px;
-  padding-bottom:20px
-}
-#section-silent h2 {
-  margin:0
+.overview-summary {
+  margin-bottom: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-/* 窄屏：静默块从两栏改回块布局，标题与说明的间距单独收紧。 */
+@media (max-width: 1180px) {
+  .overview-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* 活动日志是等宽文本：限高滚动，别把一个页面撑到几屏。 */
+.activity-log {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+/* 静默时段行由 page.js 动态生成：行内第一列是「启用」勾选，别让它被 label 的上下边距顶歪。 */
+.silence-row .sched-chip {
+  margin: 0;
+}
+
+/* 发言上限：两个数字框是固定宽度的小格子，不要被 .field-inline 的 flex:1 拉满整行。 */
+#section-sendlimit .field-inline { gap: 10px; }
+#section-sendlimit .field-inline > label { white-space: nowrap; }
+#section-sendlimit .field-inline > input[type="number"] {
+  flex: 0 0 auto;
+  width: 88px;
+}
+
 @media (max-width:760px) {
-  #section-silent {
-    display:block
+  /* 窄屏下指标与时段行都改两列堆叠，时间输入各占一行。 */
+  .overview-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  #section-silent h2 {
-    margin-bottom:14px
+  .silence-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
-  #section-silent .meta {
-    margin-top:10px
+  .silence-row.h {
+    display: none;
   }
-}
-
-/* 后置覆盖（保持在原文件里的顺序语义）。 */
-#section-silent {
-  grid-column:1/-1
-}
-
-/* 概览页私有：三块在 main 网格里的占位与顺序（app.css 只留通用布局）。 */
-#section-activity {
-  grid-column:1/-1;
-  order:3
-}
-#section-mode {
-  order:0
-}
-/* 静默开关：原来是「标题 + 两个按钮」的紧凑两栏；加了定时静默面板后改成普通块布局（.row 不能再钉在第 2 栏） */
-#section-silent {
-  grid-column:1/-1;
-  order:2;
-  display:block;
-  padding-top:20px;
-  padding-bottom:20px
-}
-#section-silent h2 {
-  margin:0
-}
-
-/* 窄屏：静默块从两栏改回块布局，标题与说明的间距单独收紧。 */
-@media (max-width:760px) {
-  #section-silent {
-    display:block
-  }
-  #section-silent h2 {
-    margin-bottom:14px
-  }
-  #section-silent .meta {
-    margin-top:10px
-  }
-}
-
-/* 后置覆盖（保持在原文件里的顺序语义）。 */
-#section-silent {
-  grid-column:1/-1
 }

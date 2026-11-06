@@ -235,7 +235,7 @@ const inlineWidthInHtml = (() => {
 })();
 ok(inlineWidthInHtml === 0, `HTML 里不再用内联 style 写固定宽度（剩 ${inlineWidthInHtml} 处）`);
 const overviewPageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'overview', 'page.css'), 'utf8');
-ok(/#section-silent \{/.test(overviewPageCss) && /@media \(max-width:760px\) \{/.test(overviewPageCss), '概览页私有规则（含窄屏覆盖）在 pages/overview/page.css');
+ok(/\.overview-summary/.test(overviewPageCss) && /@media \(max-width:760px\) \{/.test(overviewPageCss), '概览页私有规则（含窄屏覆盖）在 pages/overview/page.css');
 const usagePageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'usage', 'page.css'), 'utf8');
 ok(/#section-usage \.usage-chart/.test(usagePageCss) && !/#section-usage/.test(layerText['components.css']),
   '用量页私有规则在 pages/usage/page.css，组件层不再含页面选择器');
@@ -360,7 +360,7 @@ ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定�
 
 // 棘轮：social-v2 已清零，其余页面的手写控件数量只许下降；迁移一页就把基线改成该页的新值（最终全 0）。
 const BARE_CONTROL_BASELINE = {
-  slang: 0, overview: 32, 'social-v1': 0, plugins: 16, usage: 14,
+  slang: 0, overview: 0, 'social-v1': 0, plugins: 16, usage: 14,
   access: 12, operations: 10, sessions: 10, behaviors: 4, mcp: 1, skills: 1, reference: 0,
   'social-v2': 0, scheduler: 0, persona: 0,
 };

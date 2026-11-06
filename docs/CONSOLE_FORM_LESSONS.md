@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十个真实踩过的坑
+## 1. 四十二个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -225,6 +225,24 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 `social-v1` 迁移时把 `<span class="status-badge" id="socialStatus">` 放在 `.card-head` 里，而它的内容是「摘要缓冲: 无 / 状态: 暂无（发过消息的群会显示状态）」这种长文本——`.card-head` 是 `flex + justify-content:space-between`，于是标题被挤到左边、状态块自己换行占满右侧，卡头高了一倍。状态类文本要么是短徽标（`is-pill` + 两三个字），要么单独一行 `<div class="meta">`，不要放进卡头。
 
 同一页还有 5 个超过 148px 标签列宽度的字段名（「普通消息触发概率（观望期）」之类），实测在标签列里折成两行、把整行撑高，视觉上像错位。约定：**标签只写名词，限定条件放 `hint`**（「触发概率」+ hint「观望期收到普通消息时，按这个概率决定是否回应」），单位放控件后缀（`.field-unit`）而不是标签括号里。
+
+### 1.41 自带卡片外观的块不能再套 `.card`；它的宿主才是网格项
+
+`overview` 的摘要指标 `.overview-summary` 自己就有 `background/border/radius`（它本身就是一张卡），迁移时如果外面再包一层 `<div class="card">`，会出现「卡里套卡」的双边框。正确做法是让它裸着放进 `page-stack`，只给**宿主 div** 指定跨列：
+
+```css
+[data-overview-fields="metrics"] { grid-column: 1 / -1; }
+```
+
+`page-stack` 是 `display:contents`，宿主 div 才是 `main` 网格的直接子项；把 `grid-column` 写在内层 `.overview-summary` 上不生效——实测被挤到半宽（627px），5 个指标挤成两列、文案全折行。
+
+### 1.42 断言按 `<section id="…">` 切片，控件搬进 `fields.js` 后必然失败
+
+`test-silence-schedule.mjs` / `test-send-limit-console.mjs` 原来把页面 HTML 从 `<section id="section-silent"` 切到下一个 `</section>`，再在片断里找 `id="silentOn"`。控件搬进 `pages/<page>/fields.js` 后，section 里只剩下 `<div data-overview-fields="silence">`，切片里当然找不到。
+
+约定：
+- 切片只用来断言**页面结构**（宿主 div、卡片标题），控件是否存在改在整份 `readConsoleSource()` 里找；
+- 工厂生成的控件源码里只有 `name: 'x'`（渲染时才变成 id），断言要接受 `id="x"` / `name: 'x'` / `id: 'x'` 三种写法（与 1.18 同一个坑，这里是切片版本）。
 
 ## 2. 迁移一个页面的检查清单
 

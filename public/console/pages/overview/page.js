@@ -7,9 +7,22 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { OVERVIEW_FIELDS } from './fields.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
+
+// 静态块按字段规格渲染：页面只留卡片与宿主，控件不再手写。
+// bare 块（摘要指标）自带卡片外观，直接灌 HTML，不套字段外壳。
+function renderOverviewFieldGroups() {
+  document.querySelectorAll('[data-overview-fields]').forEach((host) => {
+    const spec = OVERVIEW_FIELDS[host.dataset.overviewFields];
+    if (!spec) return;
+    if (spec.bare) { host.innerHTML = spec.html; return; }
+    renderFields(host, spec.fields, { columns: 2 });
+  });
+}
 
 // ── 运行模式 ────────────────────────────────────────────────────────────────
 function setActiveMode(mode) {
@@ -227,7 +240,7 @@ function renderSilenceRanges() {
 function renderSilence() {
   const r = silenceState;
   if (!r) return;
-  $('silenceEnabled').checked = !!r.config.enabled;
+  setSwitch($('silenceEnabled'), !!r.config.enabled);
   tzSet($('silenceTz'), r.config.timezone);
   document.querySelectorAll('[data-silence-opt]').forEach((c) => { c.checked = !!r.config.options[c.dataset.silenceOpt]; });
   const tier = r.config.options.stopWakes === false ? 'normal' : (r.config.options.directWakes ? 'direct' : 'stop');
@@ -266,6 +279,10 @@ async function loadSendLimit() {
 
 // ── 初始化 ──────────────────────────────────────────────────────────────────
 export function init() {
+  // 先把字段规格渲染成 DOM，后面所有 $(id) 才取得到节点。
+  renderOverviewFieldGroups();
+  // 开关是 <button role="switch">，点击委托要显式绑（不绑就点不动、值也读不对）。
+  bindSwitches(document.getElementById('section-overview'));
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
 
@@ -351,7 +368,7 @@ export function init() {
     const tier = document.querySelector('input[name="silenceWakeTier"]:checked')?.value || 'stop';
     options.stopWakes = tier !== 'normal';
     options.directWakes = tier === 'direct';
-    const r = await api('/api/silence', 'POST', { enabled: $('silenceEnabled').checked, timezone: $('silenceTz').value, ranges: readSilenceRows(), options });
+    const r = await api('/api/silence', 'POST', { enabled: getSwitch($('silenceEnabled')), timezone: $('silenceTz').value, ranges: readSilenceRows(), options });
     $('silenceMsg').textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
     $('silenceMsg').className = r.ok ? 'meta ok' : 'meta err';
     if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }

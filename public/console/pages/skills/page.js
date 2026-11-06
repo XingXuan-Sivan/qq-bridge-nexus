@@ -6,6 +6,8 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { tableHtml } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { renderFields } from '../../components/form/form.js';
+import { SKILLS_FIELDS } from './fields.js';
 
 async function refreshSkills() {
   const meta = document.getElementById('skillsMeta');
@@ -24,6 +26,11 @@ async function refreshSkills() {
 }
 
 export function init() {
+  // 先渲染字段规格，后面 getElementById('skillsRefresh'/'skillsMeta'/'skillsList') 才取得到。
+  document.querySelectorAll('[data-skills-fields]').forEach((host) => {
+    const spec = SKILLS_FIELDS[host.dataset.skillsFields];
+    if (spec) renderFields(host, spec.fields, { columns: 2 });
+  });
   document.getElementById('skillsRefresh')?.addEventListener('click', () => { refreshSkills().catch(() => {}); });
   onPageRefresh('skills', () => { refreshSkills().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'skills' && !document.hidden) refreshSkills().catch(() => {}); }, 30_000);

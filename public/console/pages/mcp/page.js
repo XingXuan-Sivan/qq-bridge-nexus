@@ -5,6 +5,8 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { tableHtml } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { renderFields } from '../../components/form/form.js';
+import { MCP_FIELDS } from './fields.js';
 
 async function refreshMcp() {
   const meta = document.getElementById('mcpMeta');
@@ -23,6 +25,11 @@ async function refreshMcp() {
 }
 
 export function init() {
+  // 先把字段规格渲染出来，后面 getElementById('mcpRefresh'/'mcpMeta'/'mcpList') 才取得到。
+  document.querySelectorAll('[data-mcp-fields]').forEach((host) => {
+    const spec = MCP_FIELDS[host.dataset.mcpFields];
+    if (spec) renderFields(host, spec.fields, { columns: 2 });
+  });
   document.getElementById('mcpRefresh')?.addEventListener('click', () => { refreshMcp().catch(() => {}); });
   onPageRefresh('mcp', () => { refreshMcp().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'mcp' && !document.hidden) refreshMcp().catch(() => {}); }, 30_000);

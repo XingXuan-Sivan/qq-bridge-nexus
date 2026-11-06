@@ -361,7 +361,7 @@ ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定�
 // 棘轮：social-v2 已清零，其余页面的手写控件数量只许下降；迁移一页就把基线改成该页的新值（最终全 0）。
 const BARE_CONTROL_BASELINE = {
   slang: 0, overview: 0, 'social-v1': 0, plugins: 16, usage: 14,
-  access: 12, operations: 10, sessions: 10, behaviors: 4, mcp: 1, skills: 1, reference: 0,
+  access: 12, operations: 10, sessions: 10, behaviors: 4, mcp: 0, skills: 0, reference: 0,
   'social-v2': 0, scheduler: 0, persona: 0,
 };
 const bareByPage = {};

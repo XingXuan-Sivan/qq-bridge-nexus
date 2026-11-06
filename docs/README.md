@@ -20,6 +20,7 @@
 | [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表（P3a）：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands`、管理行为页与 P3b 预留 | ✅ 与当前实现同步（2026-11-03） |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界约定**：静态资源路径穿越守卫、未启用=404 与先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复顺序、插件 UI 沙箱与样式隔离、验收清单 | ✅ 现行约定（2026-11-04 起，改路由/静态资源/插件 UI 前必读） |
 | [CONSOLE_UI.md](CONSOLE_UI.md) | **控制台前端结构与组件约定**：零构建下的目录分层、`components/<name>/{js,css}` 规范、组件 css 自包含、页面专属组件何时上提，以及搜索框「漏写 `type` 导致退回浏览器默认外观」的根因与修法 | 🚧 约定已定、迁移进行中（2026-11-06 起，改 `public/console/` 前先看） |
+| [CONSOLE_UI_REWORK.md](CONSOLE_UI_REWORK.md) | **基础层与组件层改造清单**：主题映射（163 令牌 → 语义别名 + 间距/断点）、`grid.css` 与 input 选择器根因改造、`field`/`button`/`select`/`badge`/`empty-state`/`tabs`/`collapse` 的 API 与首批迁移页、**必须不变的 225 个 DOM id 与 25 条接口契约**、需要重录的门禁与截图 | 📋 清单已定、未动工（2026-11-06） |
 | [STATUS.md](STATUS.md) | **未完项清单**：每项写是什么 / 完成判据 / 依赖 / 优先级，状态为 Done、Partial（差什么）、Todo（已立项未开工）、Blocked（等什么）；阶段收尾先对这张表，防止把半成品说成已完成 | ✅ 现行（2026-11-05 起，每阶段收尾复核） |
 | [PARITY.md](PARITY.md) | **迁移评估**：nexus / enhanced 手改版 / enhanced 上游三条基线逐维度对照（按会话人格卡、切换入口、换人格是否换会话、注入位置与 token、可扩展性、soulkit 联动、会话管理页、标题、messages、切换与数据迁移），含待核实项与 4 个待拍板决策 | 🚧 评估中（2026-11-06 起，决定「保持/补齐/重设计」前先看这里） |
 

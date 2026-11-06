@@ -1,7 +1,8 @@
-// 会话与审批页：会话清单（桥接会话 → DSH 会话）与只读的挂起审批 / 提问，两块在同一页用标签页切换。
+// 会话与审批页：会话映射（平台侧身份 → DSH 会话）与只读的挂起审批 / 提问，两块在同一页用标签页切换。
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
-// 数据来源只有两个接口：/api/sessions（会话清单，已含模式/人格/未读/最近唤醒）与 /api/pending。
+// 数据来源只有两个接口：/api/sessions（会话清单，已含平台/模式/人格/未读/最近唤醒）与 /api/pending。
+// 会话 key 形如 `qq:group:123`、`qq:private:456`：平台前缀用于筛选，页面不假设只有一个平台。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../js/components/modal.js';
@@ -17,6 +18,10 @@ const MODE_LABEL = {
 let activeTab = 'sessions';
 let sessionsCache = [];
 let renameTarget = null;
+
+function platformOf(entry) {
+  return String(entry.key || '').split(':')[0] || 'unknown';
+}
 
 function kindPill(entry) {
   return entry.kind === 'group' ? '<span class="pill g">群</span>' : '<span class="pill b">私聊</span>';
@@ -45,10 +50,24 @@ function whenCell(ts) {
   return esc(`${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
 }
 
+// 平台下拉按数据现算：出现哪些平台就列哪些，不写死 qq。
+function syncPlatformOptions() {
+  const select = document.getElementById('sessionsPlatform');
+  if (!select) return;
+  const current = select.value || 'all';
+  const platforms = [...new Set(sessionsCache.map(platformOf))].sort();
+  const options = ['<option value="all">全部平台</option>']
+    .concat(platforms.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`));
+  select.innerHTML = options.join('');
+  select.value = current === 'all' || platforms.includes(current) ? current : 'all';
+}
+
 function filteredSessions() {
+  const platform = document.getElementById('sessionsPlatform')?.value || 'all';
   const kind = document.getElementById('sessionsKind')?.value || 'all';
   const keyword = (document.getElementById('sessionsSearch')?.value || '').trim().toLowerCase();
   return sessionsCache.filter((entry) => {
+    if (platform !== 'all' && platformOf(entry) !== platform) return false;
     if (kind !== 'all' && entry.kind !== kind) return false;
     if (!keyword) return true;
     return [entry.key, entry.id, entry.mode, entry.persona?.name, MODE_LABEL[entry.mode]]
@@ -67,38 +86,29 @@ function renderSessions() {
     return;
   }
   if (!rows.length) {
-    box.innerHTML = '<div class="empty-state"><strong>没有匹配的会话</strong><p>换个类型或关键词试试。</p></div>';
+    box.innerHTML = '<div class="empty-state"><strong>没有匹配的会话</strong><p>换个平台、类型或关键词试试。</p></div>';
     return;
   }
-  const head = '<thead><tr><th data-w="230">会话</th><th data-w="150">模式</th>'
-    + '<th data-w="170">人格</th><th data-w="70">未读</th><th data-w="90">最近唤醒</th>'
-    + '<th>DSH 会话</th><th data-w="150">操作</th></tr></thead>';
+  const head = '<thead><tr><th data-w="250">会话</th><th data-w="150">模式</th>'
+    + '<th data-w="170">人格</th><th data-w="70">未读</th><th data-w="100">最近唤醒</th>'
+    + '<th data-w="110">操作</th></tr></thead>';
   const body = rows.map((entry) => {
     const ownerTag = entry.owner ? ' <span class="pill r">管理员</span>' : '';
+    const platformTag = `<span class="pill">${esc(platformOf(entry))}</span>`;
     const unread = entry.unread ? `<span class="pill r">${entry.unread}</span>` : '<span class="meta">0</span>';
     return `<tr>`
-      + `<td><strong>${esc(entry.key)}</strong> ${kindPill(entry)}${ownerTag}</td>`
+      + `<td><strong>${esc(entry.key)}</strong> ${platformTag}${kindPill(entry)}${ownerTag}</td>`
       + `<td>${modeCell(entry)}</td>`
       + `<td>${personaCell(entry)}</td>`
       + `<td>${unread}</td>`
       + `<td>${whenCell(entry.lastWakeAt)}</td>`
-      + `<td><code>${esc(entry.sessionId)}</code></td>`
-      + `<td><button class="small" data-rename-key="${esc(entry.key)}">改名</button>`
-      + ` <button class="small" data-reset-key="${esc(entry.key)}">清除上下文</button></td>`
+      + `<td><button class="small" data-rename-key="${esc(entry.key)}">改名</button></td>`
       + `</tr>`;
   }).join('');
   box.innerHTML = `<table>${head}<tbody>${body}</tbody></table>`;
 
   box.querySelectorAll('[data-rename-key]').forEach((btn) => btn.addEventListener('click', () => {
     openRename(btn.dataset.renameKey);
-  }));
-  box.querySelectorAll('[data-reset-key]').forEach((btn) => btn.addEventListener('click', async () => {
-    const key = btn.dataset.resetKey;
-    if (!confirm(`确定清除会话 ${key} 的上下文？下次消息将开新会话，本地记忆与人物库不受影响。`)) return;
-    const r = await api('/api/session/reset', 'POST', { key });
-    if (r.ok) showConsoleToast('已清除上下文');
-    else showConsoleToast(`清除失败：${r.error || '未知原因'}`);
-    refreshSessions();
   }));
 }
 
@@ -110,6 +120,7 @@ async function refreshSessions() {
     if (metric) metric.textContent = sessionsCache.length;
     const tabCount = document.getElementById('sessionsTabCount');
     if (tabCount) tabCount.textContent = String(sessionsCache.length);
+    syncPlatformOptions();
     renderSessions();
   } catch (error) {
     const box = document.getElementById('sessionList');
@@ -126,7 +137,7 @@ function renderPending(rows) {
     box.innerHTML = '<div class="empty-state"><strong>暂时没有待处理请求</strong><p>AI 的提问或工具审批会出现在这里，请前往对应 QQ 会话回复。</p></div>';
     return;
   }
-  const head = '<thead><tr><th data-w="230">会话</th><th data-w="90">类型</th><th>详情</th></tr></thead>';
+  const head = '<thead><tr><th data-w="250">会话</th><th data-w="90">类型</th><th>详情</th></tr></thead>';
   const body = rows.map((x) => {
     const kind = x.kind === 'approval' ? '<span class="pill r">审批</span>' : '<span class="pill b">提问</span>';
     let detail = '';
@@ -221,6 +232,7 @@ export function init() {
   });
   document.getElementById('sessionsRefresh')?.addEventListener('click', refreshSessions);
   document.getElementById('pendingRefresh')?.addEventListener('click', refreshPending);
+  document.getElementById('sessionsPlatform')?.addEventListener('change', renderSessions);
   document.getElementById('sessionsKind')?.addEventListener('change', renderSessions);
   document.getElementById('sessionsSearch')?.addEventListener('input', renderSessions);
   document.getElementById('sessionRenameSave')?.addEventListener('click', saveRename);

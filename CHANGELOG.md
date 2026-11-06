@@ -5,6 +5,13 @@
 
 ## 未发布
 
+### 变更：会话页按「会话映射」呈现，搜索框外观统一
+- 「会话与审批」页的会话签改名为「会话映射」：只呈现平台侧身份与状态（key 里的平台前缀加了 `qq` 徽章），去掉「DSH 会话」列，不再在这一页暴露 DSH 侧 id。
+- 新增「平台」筛选（按 key 前缀现算选项，不写死 `qq`），与原有「类型」筛选、关键词搜索一起收窄列表。
+- 操作只留「改名」：清除上下文等会改动会话配置的按钮从这一页移除（改名仍然写回 DSH 侧栏标题）。
+- 搜索框统一：新增 `class="search-box"`，与右上角全局搜索共用 `components.css` 的一条规则（`10px` 圆角 / `12px` 字号）；`behaviors`、`sessions`、`slang` 三页五个输入框都套上了，`layout.css` 里重复的 `.search-wrap input` 外观声明删除。
+- 约定写进 [docs/PLUGIN_ROADMAP.md](docs/PLUGIN_ROADMAP.md) §12 第 8 条，避免以后新页面又用裸 `<input>`。
+
 ### 变更：会话 key 只剩一种形态，删除 `platform.keyedFormat` 开关
 - 会话 key 统一为 `<platform>:<group|private>:<id>`（qq 即 `qq:group:1`）。旧的 `group:1` 只在**读取侧**由 `parseKey()` 兼容，不再有任何产出路径，也不再有任何开关。
 - 解析侧全面迁移：`mode-gate`、`prompt-blocks`、`role-per-key`、`role-refresh`、`mode-handover`、`voice-core`、`memory-policy`、`cross-group`、`scheduler/engine` 里只认旧形态的正则 / `split(':')` / `startsWith('group:')` 一律换成 `parseKey()` / `isGroupKey()` / `isPrivateKey()`。

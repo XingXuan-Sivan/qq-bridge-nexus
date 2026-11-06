@@ -1,11 +1,12 @@
 // 黑话词库页：候选（待研究/已研究）、已确认、已拒绝四栏与批量操作。
-// 确认/编辑模态的 DOM 留在 index.html（共享 modal 宿主，不属于页面片段）；本模块只搬逻辑。
-// 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用一次。
+// 表格统一走 dataTableHtml（工具栏 + 搜索 + 分页），参数区走字段规格，新增/编辑走弹窗。
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
-import { bindSearchBox } from '../../components/search-box/search-box.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { SLANG_FIELDS } from './fields.js';
 
 let slangEntriesCache = [];
 let slangSelected = new Set();
@@ -14,7 +15,6 @@ let slangModalId = null;
 let slangModalMode = 'confirm'; // confirm | edit
 
 // 「候选词-待研究 / 已研究」只是页面上的分栏：数据里都还是 status=candidate（确认、拒绝、研究接口都不变）。
-// 有含义、用法或示例之一就算已研究（DSH 研究结果或手填都算）。
 function slangIsResearched(e) {
   return !!(String(e?.meaning ?? '').trim() || String(e?.usage ?? '').trim() || String(e?.example ?? '').trim());
 }
@@ -44,10 +44,9 @@ function slangEvidenceHtml(e) {
 function slangSourcesHtml(e) {
   return Array.isArray(e.sources) && e.sources.length
     ? e.sources.slice(0, 5).map((s) => `<span class="meta">🔗 ${esc(s)}</span>`).join('<br>')
-    : '';
+    : '<span class="meta">—</span>';
 }
-// 研究「未确认」时 AI 给的推测（lastGuess）：只是给管理员参考，不是含义——
-// 不算「已研究」、不能凭它确认，也不会注入提示词；「采用为含义」只是填进编辑框，保存仍由管理员点。
+// 研究「未确认」时 AI 给的推测（lastGuess）：只作参考，不是含义，不能凭它确认。
 function slangGuessHtml(e) {
   const g = e?.lastGuess;
   if (!g || !(g.meaning || g.usage || g.example)) return '';
@@ -55,16 +54,12 @@ function slangGuessHtml(e) {
   return `<span class="meta slang-guess">AI 推测（未确认${when ? '，' + esc(when) : ''}）：${esc(g.meaning || '—')}`
     + (g.usage ? '；用法：' + esc(g.usage) : '') + (g.example ? '；例：' + esc(g.example) : '') + '</span>';
 }
-function slangSearchFields(e) {
-  return [e.content, e.meaning, e.usage, e.example, e.risk, e.lastGuess?.meaning || '', Array.isArray(e.sources) ? e.sources.join(' ') : '', Array.isArray(e.evidence) ? e.evidence.map((x) => x.text || '').join(' ') : ''].join(' ').toLowerCase();
+function slangHostId(status) {
+  return status === 'candidate' ? 'slangCandidateList' : status === 'confirmed' ? 'slangConfirmedList' : 'slangRejectedList';
 }
-function getSlangLimit() {
-  const id = slangTabStatus(slangActiveTab) === 'candidate' ? 'slangLimitCand' : slangActiveTab === 'confirmed' ? 'slangLimitConfirmed' : 'slangLimitRejected';
-  return Math.max(10, Number(document.getElementById(id)?.value) || 100);
-}
-function getSlangSearch() {
-  const id = slangTabStatus(slangActiveTab) === 'candidate' ? 'slangSearchCand' : slangActiveTab === 'confirmed' ? 'slangSearchConfirmed' : 'slangSearchRejected';
-  return String(document.getElementById(id)?.value || '').trim().toLowerCase();
+function slangPanelOf(tab) {
+  const key = slangTabStatus(tab);
+  return 'slangPanel' + key[0].toUpperCase() + key.slice(1);
 }
 function selectedIdsForStatus(status) {
   return [...slangSelected].filter((id) => slangEntriesCache.some((e) => e.id === id && e.status === status && (status !== 'candidate' || slangInTab(e, slangActiveTab))));
@@ -73,7 +68,7 @@ function setSlangMsg(text, ok = true) {
   const msg = document.getElementById('slangMsg');
   if (!msg) return;
   msg.textContent = text;
-  msg.className = ok ? 'meta ok' : 'meta err';
+  msg.className = ok ? 'form-actions-status ok' : 'form-actions-status err';
 }
 function setSlangTab(tab) {
   slangActiveTab = tab;
@@ -82,20 +77,51 @@ function setSlangTab(tab) {
     const e = slangEntriesCache.find((x) => x.id === id);
     if (e && e.status === 'candidate' && !slangInTab(e, tab)) slangSelected.delete(id);
   }
-  const panelKey = slangTabStatus(tab);
   document.querySelectorAll('.slang-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.slangTab === tab));
-  document.querySelectorAll('.slang-panel').forEach((panel) => panel.classList.toggle('active', panel.id === 'slangPanel' + panelKey[0].toUpperCase() + panelKey.slice(1)));
+  document.querySelectorAll('.slang-panel').forEach((panel) => panel.classList.toggle('active', panel.id === slangPanelOf(tab)));
   renderSlangPanel();
 }
-function updateSlangSelectAll(status) {
-  const id = status === 'candidate' ? 'slangCandidateSelectAll' : status === 'confirmed' ? 'slangConfirmedSelectAll' : 'slangRejectedSelectAll';
-  const el = document.getElementById(id);
-  if (!el) return;
-  const list = slangEntriesCache.filter((e) => slangInTab(e, slangActiveTab));
-  const q = getSlangSearch();
-  const filtered = q ? list.filter((e) => slangSearchFields(e).includes(q)) : list;
-  el.checked = filtered.length > 0 && filtered.every((e) => slangSelected.has(e.id));
-  el.indeterminate = filtered.some((e) => slangSelected.has(e.id)) && !el.checked;
+
+/** 一行 = 一个单元格数组；表格组件负责 thead/tbody 与分页、搜索。 */
+function slangRowCells(e, status) {
+  const checked = slangSelected.has(e.id) ? ' checked' : '';
+  const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
+  const meaning = e.meaning ? esc(e.meaning) : (status === 'candidate'
+    ? '<span class="meta">待研究</span>' + (guessHtml ? `<br>${guessHtml}<br><button class="btn small" type="button" data-slang-adopt="${esc(e.id)}" title="把推测填进编辑框，改好后再保存">采用为含义</button>` : '')
+    : '<span class="meta">无</span>');
+  const meaningCell = meaning
+    + (e.usage ? '<br><span class="meta">用法：' + esc(e.usage) + '</span>' : '')
+    + (e.example ? '<br><span class="meta">例：' + esc(e.example) + '</span>' : '')
+    + (e.risk ? '<br><span class="meta">风险：' + esc(e.risk) + '</span>' : '');
+  const actions = [];
+  if (status === 'candidate') {
+    actions.push(`<button class="btn small" type="button" data-slang-confirm="${esc(e.id)}">确认</button>`);
+    actions.push(`<button class="btn small" type="button" data-slang-edit="${esc(e.id)}">编辑</button>`);
+    actions.push(`<button class="btn small" type="button" data-slang-reject="${esc(e.id)}">拒绝</button>`);
+  } else if (status === 'confirmed') {
+    actions.push(`<button class="btn small" type="button" data-slang-edit="${esc(e.id)}">编辑</button>`);
+  } else {
+    actions.push(`<button class="btn small" type="button" data-slang-restore="${esc(e.id)}">恢复候选</button>`);
+  }
+  actions.push(`<button class="btn small danger" type="button" data-slang-del="${esc(e.id)}">删</button>`);
+  return [
+    `<input type="checkbox" data-slang-select="${esc(e.id)}"${checked} aria-label="选择 ${esc(e.content)}">`,
+    `<b>${esc(e.content)}</b><br><span class="${slangStatusClass(status)}">${slangStatusLabel(status)}</span>`,
+    esc(e.count),
+    esc(slangSourceLabel(e)),
+    meaningCell,
+    slangSourcesHtml(e),
+    slangEvidenceHtml(e),
+    `<div class="row-actions">${actions.join('')}</div>`,
+  ];
+}
+
+function slangEmptyText(tab, status) {
+  return tab === 'researched'
+    ? '暂无已研究的候选：送 DSH 深度研究、或在「编辑」里填写含义后会出现在这里'
+    : status === 'candidate'
+      ? '暂无待研究的候选，等 DSH 自动提取、AI 提交或手动添加'
+      : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条';
 }
 
 function renderSlangPanel() {
@@ -105,65 +131,66 @@ function renderSlangPanel() {
   const researchedN = slangEntriesCache.filter((e) => slangInTab(e, 'researched')).length;
   const cp = document.getElementById('slangCountPending'); if (cp) cp.textContent = pendingN ? `(${pendingN})` : '';
   const cr = document.getElementById('slangCountResearched'); if (cr) cr.textContent = researchedN ? `(${researchedN})` : '';
-  const containerId = status === 'candidate' ? 'slangCandidateList' : status === 'confirmed' ? 'slangConfirmedList' : 'slangRejectedList';
-  const box = document.getElementById(containerId);
-  if (!box) return;
+  const host = document.getElementById(slangHostId(status));
+  if (!host) return;
   const list = slangEntriesCache.filter((e) => slangInTab(e, tab));
-  const q = getSlangSearch();
-  const filtered = q ? list.filter((e) => slangSearchFields(e).includes(q)) : list;
-  if (!filtered.length) {
-    box.innerHTML = '<div class="meta u-p-8">' + (list.length ? '没有符合条件的词条' : (tab === 'researched' ? '暂无已研究的候选：送 DSH 深度研究、或在「编辑」里填写含义后会出现在这里' : status === 'candidate' ? '暂无待研究的候选，等 DSH 自动提取、AI 提交或手动添加' : status === 'confirmed' ? '暂无已确认黑话' : '暂无已拒绝词条')) + '</div>';
-    updateSlangSelectAll(status);
-    return;
-  }
-  const limit = getSlangLimit();
-  const shown = filtered.slice(0, limit);
-  let html = `<div class="meta u-p-6-8">共 ${filtered.length} 条，显示 ${shown.length} 条（可滚动查找）</div>`;
-  html += '<table><tr><th>选择</th><th>词条</th><th>次数</th><th>来源</th><th>含义 / 用法 / 示例</th><th>参考来源</th><th>语境证据</th><th>操作</th></tr>';
-  for (const e of shown) {
-    const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
-    const meaning = e.meaning ? esc(e.meaning) : (status === 'candidate'
-      ? '<span class="meta">待研究</span>' + (guessHtml ? `<br>${guessHtml}<br><button class="small" data-slang-adopt="${esc(e.id)}" title="把推测填进编辑框，改好后再保存">采用为含义</button>` : '')
-      : '<span class="meta">无</span>');
-    const checked = slangSelected.has(e.id) ? ' checked' : '';
-    const actions = [];
-    if (status === 'candidate') {
-      actions.push(`<button class="small" data-slang-confirm="${esc(e.id)}">确认</button>`);
-      actions.push(`<button class="small" data-slang-edit="${esc(e.id)}">编辑</button>`);
-      actions.push(`<button class="small" data-slang-reject="${esc(e.id)}">拒绝</button>`);
-    } else if (status === 'confirmed') {
-      actions.push(`<button class="small" data-slang-edit="${esc(e.id)}">编辑</button>`);
-    } else {
-      actions.push(`<button class="small" data-slang-restore="${esc(e.id)}">恢复候选</button>`);
-    }
-    actions.push(`<button class="small danger" data-slang-del="${esc(e.id)}">删</button>`);
-    html += `<tr>
-      <td><input type="checkbox" data-slang-select="${esc(e.id)}"${checked}></td>
-      <td><b>${esc(e.content)}</b><br><span class="${slangStatusClass(status)}">${slangStatusLabel(status)}</span></td>
-      <td>${esc(e.count)}</td>
-      <td>${esc(slangSourceLabel(e))}</td>
-      <td>${meaning}${e.usage ? '<br><span class="meta">用法：' + esc(e.usage) + '</span>' : ''}${e.example ? '<br><span class="meta">例：' + esc(e.example) + '</span>' : ''}${e.risk ? '<br><span class="meta">风险：' + esc(e.risk) + '</span>' : ''}</td>
-      <td>${slangSourcesHtml(e) || '<span class="meta">—</span>'}</td>
-      <td>${slangEvidenceHtml(e)}</td>
-      <td class="row">${actions.join('')}</td>
-    </tr>`;
-  }
-  box.innerHTML = html + '</table>';
-  box.querySelectorAll('[data-slang-select]').forEach((cb) => cb.addEventListener('change', () => {
+  host.innerHTML = dataTableHtml({
+    columns: [
+      { label: '选择', width: 56 },
+      { label: '词条', width: 170 },
+      { label: '次数', width: 70 },
+      { label: '来源', width: 100 },
+      { label: '含义 / 用法 / 示例' },
+      { label: '参考来源', width: 150 },
+      { label: '语境证据', width: 190 },
+      { label: '操作', width: 200 },
+    ],
+    rows: list.map((e) => slangRowCells(e, status)),
+    pageSize: 20,
+    sizes: [20, 50, 100],
+    search: { placeholder: tab === 'rejected' ? '搜索词条 / 拒绝原因' : '搜索词条 / 含义 / 用法 / 示例 / 来源' },
+    refresh: true,
+    empty: slangEmptyText(tab, status),
+  });
+  initDataTables(host, { onRefresh: () => { void refreshSlang(); } });
+  bindSlangRowEvents(host, status);
+  updateSlangSelectAll(status);
+}
+
+function visibleSelectedIds(host) {
+  // 只认「当前页可见」的勾选：分页只是 hidden，所以按 hidden 过滤一遍，
+  // 避免「全选本页」把别的页里的行也带上。
+  return [...host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')]
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.dataset.slangSelect);
+}
+
+function updateSlangSelectAll(status) {
+  const id = status === 'candidate' ? 'slangCandidateSelectAll' : status === 'confirmed' ? 'slangConfirmedSelectAll' : 'slangRejectedSelectAll';
+  const el = document.getElementById(id);
+  const host = document.getElementById(slangHostId(status));
+  if (!el || !host) return;
+  const boxes = [...host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')];
+  el.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
+  el.indeterminate = boxes.some((cb) => cb.checked) && !el.checked;
+}
+
+function bindSlangRowEvents(host, status) {
+  host.querySelectorAll('[data-slang-select]').forEach((cb) => cb.addEventListener('change', () => {
     const id = cb.dataset.slangSelect;
     if (cb.checked) slangSelected.add(id); else slangSelected.delete(id);
     updateSlangSelectAll(status);
   }));
-  box.querySelectorAll('[data-slang-confirm]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangConfirm, 'confirm')));
-  box.querySelectorAll('[data-slang-edit]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangEdit, 'edit')));
-  box.querySelectorAll('[data-slang-adopt]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangAdopt, 'edit', { adoptGuess: true })));
-  box.querySelectorAll('[data-slang-reject]').forEach((btn) => btn.addEventListener('click', async () => {
+  host.querySelectorAll('[data-slang-confirm]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangConfirm, 'confirm')));
+  host.querySelectorAll('[data-slang-edit]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangEdit, 'edit')));
+  host.querySelectorAll('[data-slang-adopt]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangAdopt, 'edit', { adoptGuess: true })));
+  host.querySelectorAll('[data-slang-reject]').forEach((btn) => btn.addEventListener('click', async () => {
     const r2 = await api('/api/slang/' + btn.dataset.slangReject + '/reject', 'POST', {});
     if (!r2.ok) alert(r2.error || '拒绝失败');
     setSlangMsg(r2.ok ? '✅ 已拒绝' : ('❌ ' + (r2.error || '失败')), r2.ok);
     refreshSlang();
   }));
-  box.querySelectorAll('[data-slang-restore]').forEach((btn) => btn.addEventListener('click', async () => {
+  host.querySelectorAll('[data-slang-restore]').forEach((btn) => btn.addEventListener('click', async () => {
     const e = slangEntriesCache.find((x) => x.id === btn.dataset.slangRestore);
     if (!e) return;
     const r2 = await api('/api/slang/' + e.id, 'PATCH', { status: 'candidate' });
@@ -171,7 +198,7 @@ function renderSlangPanel() {
     setSlangMsg(r2.ok ? '✅ 已恢复为候选' : ('❌ ' + (r2.error || '失败')), r2.ok);
     refreshSlang();
   }));
-  box.querySelectorAll('[data-slang-del]').forEach((btn) => btn.addEventListener('click', async () => {
+  host.querySelectorAll('[data-slang-del]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!confirm('确定删除该黑话？')) return;
     const r2 = await api('/api/slang/' + btn.dataset.slangDel, 'DELETE', {});
     if (!r2.ok) alert(r2.error || '删除失败');
@@ -179,7 +206,6 @@ function renderSlangPanel() {
     slangSelected.delete(btn.dataset.slangDel);
     refreshSlang();
   }));
-  updateSlangSelectAll(status);
 }
 
 async function refreshSlang() {
@@ -188,8 +214,8 @@ async function refreshSlang() {
     slangEntriesCache = r.entries || [];
     renderSlangPanel();
   } catch (e) {
-    const box = document.getElementById('slangCandidateList');
-    if (box) box.innerHTML = '<span class="meta">加载失败</span>';
+    const box = document.getElementById(slangHostId(slangTabStatus(slangActiveTab)));
+    if (box) box.innerHTML = '<div class="meta u-p-8">加载失败</div>';
   }
 }
 
@@ -200,7 +226,7 @@ function openSlangModal(id, mode, { adoptGuess = false } = {}) {
   slangModalMode = mode;
   document.getElementById('slangModalTitle').textContent = mode === 'confirm' ? `确认黑话：${e.content}` : `编辑黑话：${e.content}`;
   document.getElementById('slangModalContent').textContent = mode === 'confirm'
-    ? '你可以直接填写含义/用法并转正，也可以先送 DSH 深度联网研究，研究结果回来后在此处删改再确认。'
+    ? '可以直接填写含义/用法并转正，也可以先送 DSH 深度联网研究，研究结果回来后在此处删改再确认。'
     : '修改后保存；候选不会转正，已确认仍保持已确认。';
   document.getElementById('slangModalMeaning').value = e.meaning || '';
   document.getElementById('slangModalUsage').value = e.usage || '';
@@ -212,7 +238,6 @@ function openSlangModal(id, mode, { adoptGuess = false } = {}) {
   guessBox.innerHTML = guessHtml ? guessHtml + '<br>' + (adoptGuess ? '已把推测填进空着的栏位：请核对、修改后再保存（推测不一定对）。' : '可以参考它填写含义。') : '';
   guessBox.hidden = !guessHtml;
   if (adoptGuess && guessHtml) {
-    // 只填空着的栏位，不覆盖管理员已经写的内容
     for (const [field, inputId] of [['meaning', 'slangModalMeaning'], ['usage', 'slangModalUsage'], ['example', 'slangModalExample']]) {
       const input = document.getElementById(inputId);
       if (!input.value.trim() && e.lastGuess[field]) input.value = e.lastGuess[field];
@@ -232,51 +257,58 @@ function readSlangModalPayload() {
     usage: document.getElementById('slangModalUsage').value.trim(),
     example: document.getElementById('slangModalExample').value.trim(),
     risk: document.getElementById('slangModalRisk').value.trim(),
-    sources: document.getElementById('slangModalSources').value.split(/\n/).map((s) => s.trim()).filter(Boolean)
+    sources: document.getElementById('slangModalSources').value.split(/\n/).map((s) => s.trim()).filter(Boolean),
   };
 }
 
 function loadSlangConfig() {
-  api('/api/slang').then(r => {
+  api('/api/slang').then((r) => {
     const c = r.config || {};
-    document.getElementById('slangEnabled').checked = c.enabled !== false;
+    setSwitch(document.getElementById('slangEnabled'), c.enabled !== false);
     document.getElementById('slangExtractMin').value = c.extractMinMessages ?? 10;
     document.getElementById('slangCooldown').value = c.extractCooldownMs ?? 300000;
     document.getElementById('slangThresholds').value = (c.inferenceThresholds || [2, 4, 8]).join(', ');
     document.getElementById('slangInjectMax').value = c.injectMax ?? 8;
     document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'qq-chat';
     document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || 'QQ 黑话学习';
-    document.getElementById('slangAutoResearch').checked = c.autoResearch !== false;
+    setSwitch(document.getElementById('slangAutoResearch'), c.autoResearch !== false);
   }).catch(() => {});
 }
 
 export function init() {
+  const root = document.getElementById('section-slang');
+  // 字段规格先渲染，后面所有 getElementById 才取得到节点。
+  root.querySelectorAll('[data-slang-fields]').forEach((host) => {
+    const spec = SLANG_FIELDS[host.dataset.slangFields];
+    if (!spec) return;
+    // 分栏切换与批量操作条不是字段：规格里给 html，整段注入（控件仍写在 fields.js，页面不手写）。
+    if (spec.html) { host.innerHTML = spec.html; return; }
+    renderFields(host, spec.fields, { columns: 2 });
+  });
+  const addHost = document.getElementById('slangAddFields');
+  if (addHost) renderFields(addHost, SLANG_FIELDS.add.fields, { columns: 1 });
+  // 开关是 <button role="switch">，点击委托必须显式绑。
+  bindSwitches(root);
+  bindSwitches(document.getElementById('slangAddOverlay'));
+
   document.querySelectorAll('.slang-tab').forEach((btn) => btn.addEventListener('click', () => setSlangTab(btn.dataset.slangTab)));
-  for (const id of ['slangSearchCand', 'slangSearchConfirmed', 'slangSearchRejected']) bindSearchBox(id, renderSlangPanel);
-  document.getElementById('slangLimitCand').addEventListener('change', renderSlangPanel);
-  document.getElementById('slangLimitConfirmed').addEventListener('change', renderSlangPanel);
-  document.getElementById('slangLimitRejected').addEventListener('change', renderSlangPanel);
-  document.getElementById('slangCandidateSelectAll').addEventListener('change', (e) => {
-    const list = slangEntriesCache.filter((x) => slangInTab(x, slangActiveTab));
-    const q = getSlangSearch();
-    const filtered = q ? list.filter((x) => slangSearchFields(x).includes(q)) : list;
-    for (const x of filtered) { if (e.target.checked) slangSelected.add(x.id); else slangSelected.delete(x.id); }
-    renderSlangPanel();
-  });
-  document.getElementById('slangConfirmedSelectAll').addEventListener('change', (e) => {
-    const list = slangEntriesCache.filter((x) => x.status === 'confirmed');
-    const q = getSlangSearch();
-    const filtered = q ? list.filter((x) => slangSearchFields(x).includes(q)) : list;
-    for (const x of filtered) { if (e.target.checked) slangSelected.add(x.id); else slangSelected.delete(x.id); }
-    renderSlangPanel();
-  });
-  document.getElementById('slangRejectedSelectAll').addEventListener('change', (e) => {
-    const list = slangEntriesCache.filter((x) => x.status === 'rejected');
-    const q = getSlangSearch();
-    const filtered = q ? list.filter((x) => slangSearchFields(x).includes(q)) : list;
-    for (const x of filtered) { if (e.target.checked) slangSelected.add(x.id); else slangSelected.delete(x.id); }
-    renderSlangPanel();
-  });
+
+  const selectAll = {
+    candidate: 'slangCandidateSelectAll',
+    confirmed: 'slangConfirmedSelectAll',
+    rejected: 'slangRejectedSelectAll',
+  };
+  for (const [status, id] of Object.entries(selectAll)) {
+    document.getElementById(id).addEventListener('change', (ev) => {
+      const host = document.getElementById(slangHostId(status));
+      for (const cb of host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')) {
+        cb.checked = ev.target.checked;
+        if (cb.checked) slangSelected.add(cb.dataset.slangSelect); else slangSelected.delete(cb.dataset.slangSelect);
+      }
+      ev.target.indeterminate = false;
+    });
+  }
+
   document.getElementById('slangBatchResearch').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');
     if (!ids.length) { alert('请先勾选要研究的候选词'); return; }
@@ -335,6 +367,57 @@ export function init() {
     setSlangMsg(`✅ 已恢复 ${okCount}/${ids.length} 条为候选`);
     if (okCount) { slangSelected.clear(); refreshSlang(); }
   });
+
+  // 手动添加：弹窗打开 → 填词条/含义 → 保存（旧的「添加入库」按钮改为弹窗里的提交）。
+  const addOverlay = document.getElementById('slangAddOverlay');
+  document.getElementById('slangAddOpen').addEventListener('click', () => {
+    for (const id of ['slangContent', 'slangMeaning', 'slangUsage', 'slangExample']) document.getElementById(id).value = '';
+    openModal(addOverlay);
+    document.getElementById('slangContent').focus();
+  });
+  document.getElementById('slangAddCancel').addEventListener('click', () => closeModal(addOverlay));
+  wireModal(addOverlay, { onClose: () => {} });
+  document.getElementById('slangAdd').addEventListener('click', async () => {
+    const content = document.getElementById('slangContent').value.trim();
+    const meaning = document.getElementById('slangMeaning').value.trim();
+    const usage = document.getElementById('slangUsage').value.trim();
+    const example = document.getElementById('slangExample').value.trim();
+    const msg = document.getElementById('slangAddMsg');
+    if (!content) { msg.textContent = '词条不能为空'; msg.className = 'modal-status err'; return; }
+    const r = await api('/api/slang', 'POST', { content, meaning, usage, example });
+    if (!r.ok) { msg.textContent = '❌ ' + (r.error || '失败'); msg.className = 'modal-status err'; return; }
+    msg.textContent = '';
+    closeModal(addOverlay);
+    setSlangMsg(`✅ 已添加「${content}」`, true);
+    refreshSlang();
+  });
+
+  document.getElementById('slangExtract').addEventListener('click', async () => {
+    const r = await api('/api/slang/extract', 'POST', {});
+    setSlangMsg(r.ok ? '✅ 已触发提取' : ('❌ ' + (r.error || '失败')), r.ok);
+  });
+  document.getElementById('slangResearch').addEventListener('click', async () => {
+    const r = await api('/api/slang/research', 'POST', {});
+    setSlangMsg(r.ok ? ('✅ 已触发研究 ' + r.count + ' 条') : ('❌ ' + (r.error || '失败')), r.ok);
+  });
+  document.getElementById('slangConfigSave').addEventListener('click', async () => {
+    const r = await api('/api/slang/config', 'POST', {
+      enabled: getSwitch(document.getElementById('slangEnabled')),
+      extractMinMessages: Number(document.getElementById('slangExtractMin').value) || 10,
+      extractCooldownMs: Number(document.getElementById('slangCooldown').value) || 300000,
+      inferenceThresholds: document.getElementById('slangThresholds').value.split(/[,，\s]+/).map(Number).filter(Boolean),
+      injectMax: Number(document.getElementById('slangInjectMax').value) || 8,
+      learnerPreset: document.getElementById('slangLearnerPreset').value.trim(),
+      workspaceTitle: document.getElementById('slangWorkspaceTitle').value.trim(),
+      autoResearch: getSwitch(document.getElementById('slangAutoResearch')),
+    });
+    const msg = document.getElementById('slangConfigMsg');
+    msg.textContent = r.ok ? '✅ 已保存' : ('❌ ' + (r.error || '失败'));
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
+    if (r.ok) loadSlangConfig();
+  });
+
+  // 编辑/确认弹窗：DOM 在 index.html，启动即存在；init 只跑一次。
   document.getElementById('slangModalDirectConfirm').addEventListener('click', async () => {
     if (!slangModalId) return;
     const payload = readSlangModalPayload();
@@ -357,68 +440,7 @@ export function init() {
   });
   document.getElementById('slangModalCancel').addEventListener('click', closeSlangModal);
   wireModal(document.getElementById('slangModalOverlay'), { closeOnEscape: false });
-  document.getElementById('slangAdd').addEventListener('click', async () => {
-    const content = document.getElementById('slangContent').value.trim();
-    const meaning = document.getElementById('slangMeaning').value.trim();
-    const usage = document.getElementById('slangUsage').value.trim();
-    const example = document.getElementById('slangExample').value.trim();
-    if (!content) { alert('词条不能为空'); return; }
-    const r = await api('/api/slang', 'POST', { content, meaning, usage, example });
-    document.getElementById('slangMsg').textContent = r.ok ? '✅ 已添加' : ('❌ ' + (r.error || '失败'));
-    document.getElementById('slangMsg').className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) {
-      document.getElementById('slangContent').value = '';
-      document.getElementById('slangMeaning').value = '';
-      document.getElementById('slangUsage').value = '';
-      document.getElementById('slangExample').value = '';
-      refreshSlang();
-    }
-  });
-  document.getElementById('slangExtract').addEventListener('click', async () => {
-    const r = await api('/api/slang/extract', 'POST', {});
-    setSlangMsg(r.ok ? '✅ 已触发提取' : ('❌ ' + (r.error || '失败')), r.ok);
-  });
-  document.getElementById('slangResearch').addEventListener('click', async () => {
-    const r = await api('/api/slang/research', 'POST', {});
-    setSlangMsg(r.ok ? ('✅ 已触发研究 ' + r.count + ' 条') : ('❌ ' + (r.error || '失败')), r.ok);
-  });
-  document.getElementById('slangConfigSave').addEventListener('click', async () => {
-    const r = await api('/api/slang/config', 'POST', {
-      enabled: document.getElementById('slangEnabled').checked,
-      extractMinMessages: Number(document.getElementById('slangExtractMin').value) || 10,
-      extractCooldownMs: Number(document.getElementById('slangCooldown').value) || 300000,
-      inferenceThresholds: document.getElementById('slangThresholds').value.split(/[,，\s]+/).map(Number).filter(Boolean),
-      injectMax: Number(document.getElementById('slangInjectMax').value) || 8,
-      learnerPreset: document.getElementById('slangLearnerPreset').value.trim(),
-      workspaceTitle: document.getElementById('slangWorkspaceTitle').value.trim(),
-      autoResearch: document.getElementById('slangAutoResearch').checked
-    });
-    const msg = document.getElementById('slangConfigMsg');
-    msg.textContent = r.ok ? '✅ 已保存' : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) loadSlangConfig();
-  });
 
-  // 模态的键盘支持（DOM 在 index.html，启动即存在；init 只会跑一次，不会重复绑定）。
-  let modalPreviousFocus;
-  const slangOverlay = document.getElementById('slangModalOverlay');
-  new MutationObserver(() => {
-    if (slangOverlay.classList.contains('open')) {
-      modalPreviousFocus = document.activeElement;
-      document.getElementById('slangModalMeaning').focus();
-    } else modalPreviousFocus?.focus();
-  }).observe(slangOverlay, { attributes: true, attributeFilter: ['class'] });
-  slangOverlay.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.preventDefault(); closeSlangModal(); }
-    if (event.key === 'Tab') {
-      const controls = [...slangOverlay.querySelectorAll('button,input,textarea,select')].filter(el => !el.disabled && el.getClientRects().length);
-      const first = controls[0], last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }
-  });
-
-  // 被切回本页时重读词库；定时轮询只在本页可见时跑（原来 3 秒一次，搬过来后不再拖累其它页）。
   onPageRefresh('slang', () => { refreshSlang(); });
   setInterval(() => { if (getCurrentPage() === 'slang' && !document.hidden) refreshSlang(); }, 3000);
   refreshSlang();

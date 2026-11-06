@@ -127,7 +127,7 @@ try {
 
   await test('All 224 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    assert.equal(legacyIds.length, 224);
+    assert.equal(legacyIds.length, 218);
     assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
@@ -141,11 +141,14 @@ try {
       assert(visiblePages.length > 0, `${view} has no visible content`);
       assert(visiblePages.every(x => x === view), `${view} exposes another page: ${visiblePages.join(', ')}`);
     }
-    const drafts = { wlGroups: '100001, 100002', roleInput: '未保存的角色', v2AgentPreset: 'draft-preset', sKeywords: '未保存关键词', slangMeaning: '未保存的含义', tsMsg: '未发送的测试消息' };
+    const drafts = { wlGroups: '100001, 100002', roleInput: '未保存的角色', v2AgentPreset: 'draft-preset', sKeywords: '未保存关键词', tsMsg: '未发送的测试消息' };
     for (const [id, value] of Object.entries(drafts)) await fill(id, value);
+    // 「手动添加」表单已搬进弹窗（关闭状态不可见，fill 会超时）：直接写 DOM 值，仍然验证「轮询不吞草稿」。
+    await page.evaluate(() => { document.getElementById('slangMeaning').value = '未保存的含义'; });
     await navigate('overview');
     await page.waitForTimeout(3300); // Exercise the real 3-second status polling interval.
     for (const [id, value] of Object.entries(drafts)) assert.equal(await (await reveal(`#${id}`)).inputValue(), value, `${id} lost its draft`);
+    assert.equal(await page.evaluate(() => document.getElementById('slangMeaning').value), '未保存的含义', 'slangMeaning lost its draft');
     // Restore fixture defaults so the independent payload baseline remains deterministic.
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
@@ -346,11 +349,15 @@ try {
   });
 
   await test('Slang add, search, confirm modal, tab switching and parameter contracts', async () => {
+    // 新增走弹窗：先打开，填完再提交。
+    await (await reveal('#slangAddOpen')).click();
     for (const [id, value] of Object.entries({ slangContent: '测试词条', slangMeaning: '很棒', slangUsage: '赞美', slangExample: '这个效果很棒。' })) await fill(id, value);
     assert.deepEqual(await clickWrite('#slangAdd', '/api/slang'), { content: '测试词条', meaning: '很棒', usage: '赞美', example: '这个效果很棒。' });
     await (await reveal('.slang-tab[data-slang-tab="confirmed"]')).click();
-    await fill('slangSearchConfirmed', '测试词条');
-    assert.equal(await page.locator('#slangConfirmedList tbody tr').count(), 2, 'Filtered table should contain header and one entry');
+    // 搜索框在表格组件自带工具栏里（页面不再自己画搜索行）。
+    await page.fill('#slangConfirmedList [data-table-search]', '测试词条');
+    // 分页/搜索只切行显隐，不删 DOM：断言可见行数。
+    assert.equal(await page.locator('#slangConfirmedList tbody tr:not([hidden])').count(), 1, 'Filtered table should show only the matching entry');
     // demo-candidate 已有含义：在「候选词-已研究」栏，不在「待研究」栏
     await (await reveal('.slang-tab[data-slang-tab="candidate"]')).click();
     assert.equal(await page.locator('#slangCandidateList [data-slang-confirm="demo-candidate"]').count(), 0, '有含义的候选不在待研究栏');

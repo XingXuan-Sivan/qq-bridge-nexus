@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 三十七个真实踩过的坑
+## 1. 三十九个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -195,6 +195,31 @@ return fieldShell({ id, label, required, control: `<div class="field-inline" rol
 
 仿真提示词只有一份文本框，但一代（`qq-chat`）和二代（`qq-chat-v2`）的段落名完全不同：一代是「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」，二代是「【二代仿真模式 —— 安全规则】」「【二代仿真模式 —— 工具协议】」。服务端的 `presetPromptWarnings(content)` 原先只认二代段落且不接 `preset` 参数，切到一代就永远报「缺少二代段落」。`presetPromptBlockers` 早已按代次取清单，warnings 却没跟上——**同一个「按代次取清单」的约定要覆盖所有校验/提示，不能只改一处**。现在的签名是 `presetPromptWarnings(content, preset = 'v2')`，`bridge.js` 三个调用点都传 `preset === PRESET_NAMES.v1 ? 'v1' : 'v2'`。`scripts/test-preset-prompt.mjs` 有一条回归钉住「一代内容按二代校验必须报两段缺失、按一代校验必须为空」。
 
+### 1.38 分栏页的标签条必须和内容同一张卡；工具条也要进规格文件
+
+`slang` 页第一次重写时，把 4 个 `.slang-tab` 留在页头卡、三个分栏面板放进下一张「词库」卡。功能没问题，但视觉上标签被卡片边界切断，用户第一眼就是「标签页和内容断开了」。分栏页的正确结构是：**标题卡只放 h2/说明，标签条和它的面板同卡**，并用页内样式把标签条贴到内容顶部（`.card > .slang-tabs { margin: 10px 0 0 }`）。
+
+另一个坑：分栏标签、批量操作条、「手动添加」这类工具条也是手写控件，留在 `page.html` 会被棘轮拦住（slang 第一次重写后仍是 17 个）。做法是把它写进 `fields.js` 的 `html` 规格，由 `renderFields` 注入：
+
+```js
+export const SLANG_FIELDS = {
+  tabs: { html: TABS_HTML },
+  barCandidate: { html: bar('slangCandidate', '...') },
+};
+```
+
+页面里只留 `<div data-slang-fields="tabs"></div>` 宿主。「不是字段、但是页面结构」的东西，落点仍然是规格文件，而不是回到 HTML。
+
+### 1.39 表格的「搜索/翻页」只切显隐，断言要数可见行
+
+`dataTableHtml` 分页与搜索都是给 `<tr>` 加 `hidden`（这是为了翻页不丢表单勾选值，见 1.17）。迁移前的断言常写成 `tbody tr` 总数等于 2（旧表把表头也放在 `tbody` 里）。换组件后总数不变，必须改成：
+
+```js
+await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
+```
+
+同理，「全选本页」要按 `tbody tr:not([hidden])` 取行，否则会把其它页/被筛掉的行一起勾上。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**
@@ -237,11 +262,14 @@ return fieldShell({ id, label, required, control: `<div class="field-inline" rol
 - 每个「单个布尔状态」是不是开关（`role="switch"`）而不是复选框？多选集合、风险确认是不是各自用了 checkbox？
 - 有没有文本框在要求用户手打 `YYYY-MM-DD`（应该换成 `type="date"`）？
 - 页面上的 `<select>` 是否都已经包在 `.select-wrap` 里、箭头不贴边、展开时会翻转（1.29）？
+- 分栏页的标签条是否和它的面板在同一张卡里、中间没有卡片边界（1.38）？
+- 分栏标签、批量操作条、卡片头按钮这些「非字段控件」是否写进了 `fields.js` 的 `html` 规格，`page.html` 里只剩宿主 div？
+- 表格的搜索/翻页断言是否数的是可见行（`tbody tr:not([hidden])`），「全选本页」是否也只勾可见行（1.39）？
 
 ## 4. 剩余页面的迁移顺序与取舍
 
 **骨架已经定了**（`docs/CONSOLE_FORMS.md`「一个页面的固定骨架」+ `scheduler` 样板）：`page-stack` 宿主 + 每张卡 `span-all` + 页头 `.form-inline-bar`（左字段 / 右状态徽标 + 动作）+ 列表卡 `.card-head` + 表格走 `dataTableHtml` + 折叠组走 `settings-group` + `initGroups` 记忆。逐页迁移只换内容，不再各自发明结构。
 
-1. `persona`（27）→ 2. `social-v1`（32，与 v2 同构，可复用字段清单）→ 3. `overview`（32，卡片式，注意裸 `button` 与 `metric`）→ 4. `slang`（36，表格 + 词条编辑）→ 5. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）。`scheduler` 已作为样板迁完（基线 0）。
+1. `social-v1`（32，与 v2 同构，可复用字段清单）→ 2. `overview`（32，卡片式，注意裸 `button` 与 `metric`）→ 3. `behaviors`（4 个控件但有三张手写表，按 1.17 换 `dataTableHtml`）→ 4. `plugins`（16，四组折叠 + 详情弹窗）→ 5. `usage`（14，三张手写表 + 两个图表）→ 6. `access`（12）→ 7. `operations`（10）→ 8. `sessions`（10，两张表 + 重命名弹窗）→ 9. `mcp` / `skills` / `reference`（0–1 个控件，随功能顺带）。
+`persona`（27→0）、`slang`（36→0）、`scheduler`（28→0）已迁完。
 每迁一页：`BARE_CONTROL_BASELINE` 该页改 0、`STATUS` 第 14 行更新数字、截图存档；一页一提交，不要攒。
-`access` / `operations` / `sessions` / `usage` / `plugins` / `mcp` / `skills` 控件较少，随对应功能改动顺带迁，不单独立项。

@@ -284,7 +284,7 @@ for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) 
   if (!fs.existsSync(file)) continue;
   for (const m of fs.readFileSync(file, 'utf8').matchAll(/<input[^>]*search-box[^>]*>/g)) searchInputs.push({ id, tag: m[0] });
 }
-ok(searchInputs.length === 5, `页面内搜索框共 5 个（实际 ${searchInputs.length}）`);
+ok(searchInputs.length === 2, `页面级搜索框共 2 个（表格的搜索框在 table 组件工具栏里，不计入页面；实际 ${searchInputs.length}）`);
 ok(searchInputs.every(({ tag }) => /type="search"/.test(tag)), `页面内搜索框都写明 type="search"（${searchInputs.filter(({ tag }) => !/type="search"/.test(tag)).map(({ id }) => id).join(', ') || '全部正确'}）`);
 ok(/class="[^"]*search-box/.test(html.match(/<input id="consoleSearch"[^>]*>/)?.[0] ?? ''), '全局搜索框也走 search-box 组件类');
 for (const id of ['skills', 'mcp', 'behaviors']) {
@@ -360,7 +360,7 @@ ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定�
 
 // 棘轮：social-v2 已清零，其余页面的手写控件数量只许下降；迁移一页就把基线改成该页的新值（最终全 0）。
 const BARE_CONTROL_BASELINE = {
-  slang: 36, overview: 32, 'social-v1': 32, plugins: 16, usage: 14,
+  slang: 0, overview: 32, 'social-v1': 32, plugins: 16, usage: 14,
   access: 12, operations: 10, sessions: 10, behaviors: 4, mcp: 1, skills: 1, reference: 0,
   'social-v2': 0, scheduler: 0, persona: 0,
 };

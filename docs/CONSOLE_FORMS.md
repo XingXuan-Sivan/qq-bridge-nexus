@@ -257,6 +257,8 @@ span.time-field
 4. `search` / `refresh` / `filters` 都是可选项：短表只给表体、或只给分页，不必凑齐。
 5. 分页默认每页 20 条、可选 10/20/50；页码 ≤ 7 页全列，更多时首尾 + 当前页 ±1 + 省略号。
 6. 表格在折叠的 `<details>` 里时，行有布局但被祖先裁掉——浏览器回归里点击前必须先展开分组（`reveal('#id')`），这不是组件问题。
+7. **分栏页（tab）的标签条要和它的内容在同一张卡里**，且标签条紧贴内容顶部（`slang` 页的 `.card > .slang-tabs { margin: 10px 0 0 }`）。标签留在页头卡、表格在下一张卡时，视觉上会被卡片边界切断，用户会当成「标签和内容断开」。
+8. 分栏切换、批量操作条这类**页面结构**也算「控件」：它们写在 `fields.js` 的 `html` 规格里、由 `renderFields` 注入（`SLANG_FIELDS.tabs` / `barCandidate` …），`page.html` 只留 `<div data-slang-fields="...">` 宿主，手写控件棘轮才会归零。
 
 开关（`switch`）**不再走「标签贴控件」的行内变体**：它和输入框共用 148px 标签列，这样两列栅格里的开关才和上下行对齐。只有页头 `.form-inline-bar` 里的开关收成紧凑的 `auto auto`（`.form-inline-bar .field-block--switch > .field-row`）。
 
@@ -323,7 +325,7 @@ span.time-field
 
 ## 5. 现有复杂表单的迁移
 
-按控件量排序（2026-11-07 收口后实测，`page.html` 里的手写控件数）：`slang` 36、`overview` 32、`social-v1` 32、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**、`scheduler` **0**、`persona` **0**。
+按控件量排序（2026-11-07 收口后实测，`page.html` 里的手写控件数）：`overview` 32、`social-v1` 32、`plugins` 16、`usage` 14、`access` 12、`operations` 10、`sessions` 10、`behaviors` 4、`mcp` 1、`skills` 1、`reference` 0、`social-v2` **0**、`scheduler` **0**、`persona` **0**、`slang` **0**。
 
 **试点选 `social-v2`**（最复杂，能验证规格是否够用），分两步走，避免一次改太多：
 

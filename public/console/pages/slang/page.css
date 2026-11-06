@@ -1,1 +1,27 @@
-/* slang 页面样式暂全部沿用公共 css/app.css（.slang-tabs/.slang-panel/.modal 等都在那里）。 */
+/* 黑话页私有样式：只排「批量操作条」，表格与参数区全部走公共组件。 */
+.slang-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 12px;
+}
+.slang-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+/* 把「立即提取 / 研究全部」推到右侧，和批量操作分开 */
+.slang-bar-sep { flex: 1 1 auto; }
+/* 表格宿主要给空态留出高度，避免切栏时卡片高度跳一下 */
+.slang-list { min-height: 48px; }
+
+/* 分栏标签跟内容在同一张卡里：标签条紧贴卡片标题，下沿细线直接接到操作条 */
+.card > .slang-tabs { margin: 10px 0 0; }
+.slang-panel > .slang-bar:first-child { padding-top: 12px; }

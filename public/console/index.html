@@ -75,7 +75,7 @@
     <section id="section-social-v2" data-page="social-v2" class="card span-all">
       <!-- 页面片段由路由器按需注入：pages/social-v2/page.html -->
     </section>
-    <section id="section-slang" data-page="slang" class="card span-all">
+    <section id="section-slang" data-page="slang" class="page-stack">
       <!-- 页面片段由路由器按需注入：pages/slang/page.html -->
     </section>
 <section id="section-scheduler" data-page="scheduler" class="page-stack">
@@ -118,6 +118,22 @@
           <button id="slangModalSendResearch" class="btn">送 DSH 深度研究</button>
           <button id="slangModalCancel" class="btn" type="button">取消</button>
           <button id="slangModalDirectConfirm" class="btn primary" type="button">直接确认（转正）</button>
+        </footer>
+      </div>
+    </div>
+
+
+    <div class="modal-overlay" id="slangAddOverlay" aria-hidden="true">
+      <div class="modal" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="slangAddTitle" tabindex="-1">
+        <header class="modal-head">
+          <h3 id="slangAddTitle">手动添加黑话</h3>
+          <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
+        </header>
+        <div class="modal-body" id="slangAddFields"></div>
+        <footer class="modal-foot">
+          <span class="modal-status" id="slangAddMsg"></span>
+          <button class="btn" id="slangAddCancel" type="button">取消</button>
+          <button class="btn primary" id="slangAdd" type="button">添加入库</button>
         </footer>
       </div>
     </div>

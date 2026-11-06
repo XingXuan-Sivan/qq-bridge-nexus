@@ -1,115 +1,38 @@
-      <h2>群聊黑话 / 网络用语库</h2>
-      <div class="meta">DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；确认后的词条会写入“黑话提示词”，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。</div>
-
-      <div class="slang-tabs">
-        <button class="slang-tab active" data-slang-tab="candidate" title="还没有含义 / 用法 / 示例的候选">候选词-待研究 <span class="meta" id="slangCountPending"></span></button>
-        <button class="slang-tab" data-slang-tab="researched" title="已有含义 / 用法 / 示例（研究结果或手填），等你确认或拒绝">候选词-已研究 <span class="meta" id="slangCountResearched"></span></button>
-        <button class="slang-tab" data-slang-tab="confirmed">已确认</button>
-        <button class="slang-tab" data-slang-tab="rejected">已拒绝</button>
-      </div>
-      <span class="meta" id="slangMsg"></span>
-
-      <!-- 候选词面板 -->
-      <div class="slang-panel active" id="slangPanelCandidate">
-        <div class="row u-mt-8">
-          <label class="u-row-6 u-m-0"><input type="checkbox" id="slangCandidateSelectAll"> 全选</label>
-          <button id="slangBatchResearch" class="small">批量送 DSH 深度研究</button>
-          <button id="slangBatchConfirm" class="small">批量确认（有含义）</button>
-          <button id="slangBatchReject" class="small">批量拒绝</button>
-          <button id="slangBatchDeleteCand" class="small danger">批量删除候选</button>
-          <button id="slangExtract" class="small">立即提取候选</button>
-          <button id="slangResearch" class="small">研究全部候选</button>
+      <div class="card span-all">
+        <div class="card-head">
+          <h2>群聊黑话 / 网络用语库</h2>
+          <span class="form-actions-status" id="slangMsg"></span>
         </div>
-        <div class="row u-mt-8">
-          <input type="search" class="u-flex-1 search-box" id="slangSearchCand" placeholder="搜索词条 / 草稿含义 / 语境证据">
-          <select class="u-w-110" id="slangLimitCand">
-            <option value="50">每页 50</option>
-            <option value="100" selected>每页 100</option>
-            <option value="200">每页 200</option>
-            <option value="500">每页 500</option>
-          </select>
-        </div>
-        <div class="slang-scroll" id="slangCandidateList">加载中…</div>
+        <div class="meta">DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；确认后的词条会写入「黑话提示词」，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。</div>
       </div>
 
-      <!-- 已确认面板 -->
-      <div class="slang-panel" id="slangPanelConfirmed">
-        <div class="row u-mt-8">
-          <label class="u-row-6 u-m-0"><input type="checkbox" id="slangConfirmedSelectAll"> 全选</label>
-          <button id="slangBatchDeleteConfirmed" class="small danger">批量删除已确认</button>
+      <div class="card span-all">
+        <div class="card-head">
+          <h3>词库</h3>
+          <div data-slang-fields="listActions"></div>
         </div>
-        <div class="row u-mt-8">
-          <input type="search" class="u-flex-1 search-box" id="slangSearchConfirmed" placeholder="搜索词条 / 含义 / 用法 / 示例 / 来源">
-          <select class="u-w-110" id="slangLimitConfirmed">
-            <option value="50">每页 50</option>
-            <option value="100" selected>每页 100</option>
-            <option value="200">每页 200</option>
-            <option value="500">每页 500</option>
-          </select>
+
+        <div data-slang-fields="tabs"></div>
+
+        <div class="slang-panel active" id="slangPanelCandidate">
+          <div data-slang-fields="barCandidate"></div>
+          <div id="slangCandidateList" class="slang-list"></div>
         </div>
-        <div class="slang-scroll" id="slangConfirmedList">加载中…</div>
+
+        <div class="slang-panel" id="slangPanelConfirmed">
+          <div data-slang-fields="barConfirmed"></div>
+          <div id="slangConfirmedList" class="slang-list"></div>
+        </div>
+
+        <div class="slang-panel" id="slangPanelRejected">
+          <div data-slang-fields="barRejected"></div>
+          <div id="slangRejectedList" class="slang-list"></div>
+        </div>
       </div>
 
-      <!-- 已拒绝面板 -->
-      <div class="slang-panel" id="slangPanelRejected">
-        <div class="row u-mt-8">
-          <label class="u-row-6 u-m-0"><input type="checkbox" id="slangRejectedSelectAll"> 全选</label>
-          <button id="slangBatchRestore" class="small">恢复为候选</button>
-          <button id="slangBatchDeleteRejected" class="small danger">批量删除已拒绝</button>
-        </div>
-        <div class="row u-mt-8">
-          <input type="search" class="u-flex-1 search-box" id="slangSearchRejected" placeholder="搜索词条 / 拒绝原因">
-          <select class="u-w-110" id="slangLimitRejected">
-            <option value="50">每页 50</option>
-            <option value="100" selected>每页 100</option>
-            <option value="200">每页 200</option>
-            <option value="500">每页 500</option>
-          </select>
-        </div>
-        <div class="slang-scroll" id="slangRejectedList">加载中…</div>
-      </div>
-
-      <div class="divider"></div>
-      <div class="meta u-mb-6">手动添加黑话</div>
-      <div class="row">
-        <input class="u-flex-1" type="text" id="slangContent" placeholder="词条，如：绝绝子">
-        <input class="u-flex-1" type="text" id="slangMeaning" placeholder="含义，如：很好、很棒">
-      </div>
-      <div class="row u-mt-6">
-        <input class="u-flex-1" type="text" id="slangUsage" placeholder="用法（可选）">
-        <input class="u-flex-1" type="text" id="slangExample" placeholder="示例（可选）">
-      </div>
-      <div class="row u-mt-8">
-        <button id="slangAdd" class="small">添加入库（确认）</button>
-      </div>
-      <details class="u-mt-10">
-        <summary class="meta">黑话系统参数（可调）</summary>
-        <div class="row">
-          <label class="u-flex-1">启用黑话学习</label><input class="u-w-auto" type="checkbox" id="slangEnabled">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">触发提取最少消息数</label><input class="u-w-90" type="number" id="slangExtractMin" min="1">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">提取冷却（毫秒）</label><input class="u-w-110" type="number" id="slangCooldown" min="0" step="1000">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">研究触发阈值（逗号分隔）</label><input class="u-w-120" type="text" id="slangThresholds" placeholder="2,4,8">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">注入最大条数</label><input class="u-w-90" type="number" id="slangInjectMax" min="1" max="30">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">学习会话 preset</label><input class="u-w-120" type="text" id="slangLearnerPreset" placeholder="qq-chat">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">学习工作区名</label><input class="u-w-120" type="text" id="slangWorkspaceTitle" placeholder="QQ 黑话学习">
-        </div>
-        <div class="row">
-          <label class="u-flex-1">自动联网研究</label><input class="u-w-auto" type="checkbox" id="slangAutoResearch">
-        </div>
-        <div class="row u-mt-8">
-          <button id="slangConfigSave" class="small">保存黑话参数</button>
-          <span class="meta" id="slangConfigMsg"></span>
+      <details class="settings-group span-all" data-group="config">
+        <summary>黑话系统参数（可调）</summary>
+        <div class="settings-content">
+          <div data-slang-fields="config"></div>
         </div>
       </details>

@@ -90,7 +90,7 @@ test('④ 研究流程：未确认写 lastGuess 不写含义；研究确认、�
 
 test('⑤ 控制台：推测只在「待研究」显示且转义；「采用为含义」只填空栏位、不直接保存', () => {
   const html = readConsoleSource();
-  const fnSrc = html.slice(html.indexOf('function slangGuessHtml(e) {'), html.indexOf('function slangSearchFields(e) {'));
+  const fnSrc = html.slice(html.indexOf('function slangGuessHtml(e) {'), html.indexOf('function slangHostId(status) {'));
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ctx = vm.createContext({ esc, Date });
   vm.runInContext(`${fnSrc}; globalThis.slangGuessHtml = slangGuessHtml;`, ctx);

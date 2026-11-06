@@ -23,3 +23,112 @@
   background: var(--surface-hover);
   z-index: 1;
 }
+
+/* ---------- 完整表格（dataTableHtml）：工具栏 + 表体 + 分页 ----------
+   一个「表格整体」的固定结构：上面是操作区（刷新/筛选/搜索 + 条数），中间表体，
+   下面分页（区间/页码/每页条数）。表格外框仍复用 .table-wrap，页面不再自己拼。 */
+.data-table {
+  display: flex;
+  flex-direction: column;
+}
+.data-table > .table-wrap:first-child {
+  margin-top: 0;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.table-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* 工具栏里的输入框/按钮与表单同一标尺（40px） */
+.table-toolbar .search-box {
+  height: var(--control-h, 40px);
+}
+.table-toolbar-meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 12px);
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.table-footer-summary {
+  min-width: 140px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-sm, 32px);
+  height: var(--control-h-sm, 32px);
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.pager-btn:hover:not(:disabled):not(.is-current) {
+  background: var(--surface-hover);
+}
+.pager-btn.is-current {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.pager-btn:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.pager-step {
+  font-size: 15px;
+}
+.pager-gap {
+  min-width: 20px;
+  text-align: center;
+}
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pager-size select {
+  height: var(--control-h-sm, 32px);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.table-empty {
+  padding: 28px 12px;
+  font-size: 13px;
+  text-align: center;
+  color: var(--muted);
+}

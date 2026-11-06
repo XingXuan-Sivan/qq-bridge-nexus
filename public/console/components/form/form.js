@@ -1,8 +1,8 @@
 // 表单组件：16 个控件工厂 + createForm 内核（取值/校验/条件显示/提交态/脏值）。
-// 设计口径见 docs/CONSOLE_FORMS.md。所有工厂返回 HTML 字符串，与 components/table 的 tableHtml 一致；
+// 设计口径见 docs/CONSOLE_FORMS.md。所有工厂返回 HTML 字符串，与 components/table 的 dataTableHtml 一致；
 // 事件绑定、校验、回填交给 createForm()，页面不再自己读 DOM。
 import { esc } from '../../js/ui.js';
-import { tableHtml } from '../table/table.js';
+import { dataTableHtml } from '../table/table.js';
 
 /* ---------------------------------------------------------------- 基础工具 */
 
@@ -235,9 +235,24 @@ export function checkListField({ id, label, options = [], value = [], columns = 
 }
 
 /** 可勾选的表格：一行一个条目，三列（启用 / 名称 / 说明）。
- *  复用 components/table 的 tableHtml + .table-wrap 容器（sticky 表头、横向滚动都在组件里），
- *  这里只把每个单元格拼成「复选框 / 名称 / 说明」，不再自带一套表格样式。 */
-export function checkTableField({ id, label, options = [], value = [], hint, warn, danger, docs, nameHeader = '名称', descHeader = '说明' }) {
+ *  复用 components/table 的 dataTableHtml（工具栏 + 表体 + 分页都在组件里），
+ *  这里只把每个单元格拼成「复选框 / 名称 / 说明」，不再自带一套表格样式。
+ *  `search`/`refresh`/`pageSize` 透传给 dataTableHtml；分页只隐藏行，勾选值随表单一起读。 */
+export function checkTableField({
+  id,
+  label,
+  options = [],
+  value = [],
+  hint,
+  warn,
+  danger,
+  docs,
+  nameHeader = '名称',
+  descHeader = '说明',
+  search = null,
+  refresh = false,
+  pageSize = 20,
+}) {
   const picked = new Set((Array.isArray(value) ? value : []).map(String));
   const columns = [
     { label: '启用', width: '80px' },
@@ -249,7 +264,14 @@ export function checkTableField({ id, label, options = [], value = [], hint, war
     `<b>${esc(option.label)}</b>`,
     esc(option.desc ?? ''),
   ]);
-  const table = `<div class="table-wrap" id="${esc(id)}">${tableHtml(columns, rows)}</div>`;
+  const table = `<div id="${esc(id)}">${dataTableHtml({
+    columns,
+    rows,
+    pageSize,
+    search,
+    refresh,
+    empty: '没有匹配的工具。',
+  })}</div>`;
   return fieldShell({ id, label, control: table, hint, warn, danger, docs, className: 'field-block--table', labelFor: '' });
 }
 

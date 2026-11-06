@@ -5,6 +5,7 @@ import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { createForm, renderFields } from '../../components/form/form.js';
+import { initDataTables } from '../../components/table/table.js';
 import { V2_FIELDS, V2_TOOLS } from './fields.js';
 
 // ── 一键补表情说明 ─────────────────────────────────────────────
@@ -792,6 +793,8 @@ export function init() {
   // 必须在 renderFields 之后取：长文本/输入框都是刚渲染出来的，提前取会拿到 null。
   v2InitPromptTextEl = document.getElementById('v2InitPromptText');
   v2Form = createForm(formRoot, {});
+  // 表格字段（工具开关）的搜索/分页/刷新由组件统一绑定；页面只提供「刷新=重读配置」。
+  initDataTables(formRoot, { onRefresh: () => { void loadV2Config(); } });
   bindEvents();
   // 原 app.js 启动批次里的页面加载顺序：配置 → 活动状态 → 工具日志 → 会话选项。
   void loadV2Config();

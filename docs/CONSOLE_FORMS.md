@@ -161,9 +161,31 @@ form.destroy();
 | --- | --- | --- | --- |
 | `custom` | `customField({ id, label, html })` | 一段复合控件（语音库面板、key + 按钮 + 状态位） | 内部排版用 `.control-row`；`label` 仍参与左列对齐 |
 | `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（权限项、少量选项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
-| `checkTable` | `checkTableField({ id, label, options, nameHeader, descHeader })` | 条目多、需要逐条扫读的开关清单（工具清单） | 复用 `components/table` 的 `tableHtml()` + `.table-wrap` 容器（sticky 表头、横向滚动都在组件里，表单不自带表格样式）；取值同样为字符串数组；`id` 落在容器 `div` 上；字段写 `span: 2`；表格行同样顶对齐 |
+| `checkTable` | `checkTableField({ id, label, options, nameHeader, descHeader, search, refresh, pageSize })` | 条目多、需要逐条扫读的开关清单（工具清单） | 复用 `components/table` 的 `dataTableHtml()`（工具栏 + 表体 + 分页都在组件里，表单不自带表格样式）；取值同样为字符串数组；`id` 落在容器 `div` 上；字段写 `span: 2`；表格行同样顶对齐 |
 | `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位 |
 | `status` | `statusBadge({ text, tone, pill })` | 只读状态（`运行中`） | 页头固定高度位置用 `pill: true` |
+
+### 一个「表格整体」的固定结构（2026-11-06 落地）
+
+表格分两层，按需要选：
+
+- **只有表体**：`tableHtml(columns, rows)`，适合卡片里嵌一张小表、或日志这类只读短表。样式仍来自 `components/table/table.css`，页面不要自己写 `<table>` 的边框/表头样式。
+- **完整表格**：`dataTableHtml({ columns, rows, search, refresh, filters, pageSize, meta, empty })`，出一个自上而下的固定骨架，页面只提供数据：
+
+```
+.table-toolbar        ← 左侧：刷新(.btn) / 筛选(select) / 搜索(.search-box--w240)；右侧：meta 统计
+.table-wrap > table   ← 表体（复用 tableHtml，sticky 表头、横向滚动）
+.table-footer         ← 左：第 x–y 条，共 N 条；中：.pager 页码；右：每页 10/20/50 条
+```
+
+约定：
+
+1. 工具栏、分页、空态都由组件产出，**页面（含表单字段工厂）不再自己拼**「刷新 + 搜索 + 条数」那一行。
+2. 分页**只给 `<tr>` 加 `hidden`，不重建 DOM**。表单里的 checkbox 因此始终在文档里，翻页不会把「当前页之外的工具」写成关闭；勾选态、折叠行、行内事件也不会丢。
+3. 交互统一由 `initDataTables(root, { onRefresh })` 绑定（幂等，重复调用不会重复绑）。`onRefresh` 是页面提供的「重读数据」动作，默认什么都不做。
+4. `search` / `refresh` / `filters` 都是可选项：短表只给表体、或只给分页，不必凑齐。
+5. 分页默认每页 20 条、可选 10/20/50；页码 ≤ 7 页全列，更多时首尾 + 当前页 ±1 + 省略号。
+6. 表格在折叠的 `<details>` 里时，行有布局但被祖先裁掉——浏览器回归里点击前必须先展开分组（`reveal('#id')`），这不是组件问题。
 
 开关（`switch`）**不再走「标签贴控件」的行内变体**：它和输入框共用 148px 标签列，这样两列栅格里的开关才和上下行对齐。只有页头 `.form-inline-bar` 里的开关收成紧凑的 `auto auto`（`.form-inline-bar .field-block--switch > .field-row`）。
 

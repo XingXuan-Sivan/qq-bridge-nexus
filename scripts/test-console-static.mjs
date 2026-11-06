@@ -348,8 +348,13 @@ ok(/\.control-row \{/.test(formCss) && /\.control-grow \{/.test(formCss), 'form.
 ok(/\.field-checklist \{/.test(formCss) && /\.field-check-item \{/.test(formCss), 'form.css 提供复核清单 .field-checklist / .field-check-item');
 const tableComponentCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'table', 'table.css'), 'utf8');
 ok(/\.table-wrap,[\s\S]*?\.tool-log-table \{/.test(tableComponentCss), '表格容器 .table-wrap / .tool-log-table 由 components/table/table.css 提供');
-ok(!/\.field-table\b/.test(formCss), 'form.css 不自带表格外观（checkTable 复用 tableHtml）');
-ok(/import \{ tableHtml \}/.test(formModule) && /tableHtml\(columns, rows\)/.test(formModule), 'checkTableField 调用 components/table 的 tableHtml');
+ok(!/\.field-table\b/.test(formCss), 'form.css 不自带表格外观（checkTable 复用表格组件）');
+ok(/import \{ dataTableHtml \}/.test(formModule) && /dataTableHtml\(\{/.test(formModule), 'checkTableField 调用 components/table 的 dataTableHtml');
+const tableComponentJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'table', 'table.js'), 'utf8');
+ok(/export function dataTableHtml\(/.test(tableComponentJs) && /export function initDataTables\(/.test(tableComponentJs), '表格组件导出 dataTableHtml / initDataTables');
+ok(/\.table-toolbar \{/.test(tableComponentCss) && /\.table-toolbar-main \{/.test(tableComponentCss), '表格工具栏 .table-toolbar 由表格组件提供');
+ok(/\.table-footer \{/.test(tableComponentCss) && /\.pager \{/.test(tableComponentCss) && /\.pager-btn \{/.test(tableComponentCss), '分页 .table-footer / .pager /.pager-btn 由表格组件提供');
+ok(/initDataTables\(/.test(fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'social-v2', 'page.js'), 'utf8')), 'social-v2 绑定 initDataTables（工具表搜索/分页）');
 ok(/\.status-badge[\s\S]*?\.is-pill \{/.test(layerText['components.css']), '状态徽标 .status-badge / .is-pill 只在 components.css 定义一次');
 ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定义状态徽标外观');
 

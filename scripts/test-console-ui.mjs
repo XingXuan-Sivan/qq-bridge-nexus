@@ -185,6 +185,49 @@ try {
     assert.ok(geom.cellW > 400, 'expected two columns, got ' + geom.cellW + 'px');
   });
 
+  await test('Tool table paginates, searches and keeps every checkbox in the form', async () => {
+    await hydrate('social-v2');
+    // 工具表在折叠分组里：先展开，否则行有布局但被祖先裁掉，点击不可达。
+    await reveal('#v2Tools');
+    const snapshot = () => page.evaluate(() => {
+      const table = document.querySelector('#v2Tools [data-table]');
+      if (!table) return null;
+      const rows = [...table.querySelectorAll('tbody tr')];
+      return {
+        total: rows.length,
+        shown: rows.filter((row) => !row.hidden).length,
+        pages: [...table.querySelectorAll('[data-pager] [data-page]')].map((el) => el.dataset.page),
+        summary: table.querySelector('[data-table-summary]')?.textContent ?? '',
+        boxes: table.querySelectorAll('input[data-field="v2Tools"]').length,
+      };
+    });
+    const first = await snapshot();
+    assert.ok(first, '#v2Tools must render the shared data-table');
+    assert.equal(first.shown, Math.min(20, first.total), 'page 1 should show at most 20 rows, got ' + first.shown);
+    // 分页只隐藏行：所有 checkbox 必须仍在文档里，否则保存时会把翻页外的工具写成关闭。
+    assert.equal(first.boxes, first.total, 'pagination must keep every checkbox in the form');
+    if (first.total > 20) {
+      assert.ok(first.pages.includes('2'), 'pager should offer page 2');
+      // 底部保存栏是 sticky 的：先把分页滚到视口中间，否则点击会被浮条挡住。
+      await page.locator('#v2Tools [data-table-footer]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      await page.locator('#v2Tools [data-pager] [data-page="2"]').first().click();
+      const second = await snapshot();
+      assert.equal(second.shown, Math.min(20, second.total - 20), 'page 2 should show the remaining rows, got ' + second.shown);
+      assert.ok(second.summary.includes(String(21)), 'summary should start at row 21: ' + second.summary);
+      // 刷新按钮由组件接到页面的「重读配置」，不是空按钮。
+      const [response] = await Promise.all([
+        page.waitForResponse((r) => new URL(r.url()).pathname === '/api/socialV2/config' && r.request().method() === 'GET'),
+        page.locator('#v2Tools [data-table-refresh]').click(),
+      ]);
+      assert.equal(response.status(), 200, 'refresh should reload the config');
+    }
+    await page.locator('#v2Tools [data-table-search]').fill('voice');
+    const searched = await snapshot();
+    assert.ok(searched.shown > 0 && searched.shown < first.total, 'search should narrow the table, got ' + searched.shown);
+    assert.equal(searched.boxes, first.total, 'search must keep every checkbox in the form');
+    await page.locator('#v2Tools [data-table-search]').fill('');
+  });
+
   await test('Mode and preset contracts', async () => {
     // closed-agent 分级是改版后的能力：切到该模式时载荷会多带 level（默认 L2）。
     for (const mode of ['chat', 'reserved', 'reserved2', 'closed-agent']) {

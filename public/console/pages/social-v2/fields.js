@@ -115,7 +115,14 @@ export const V2_FIELDS = {
   tools: {
     label: '工具开关',
     fields: [
-      { name: 'v2Tools', type: 'checkTable', span: 2, options: V2_TOOLS },
+      {
+        name: 'v2Tools',
+        type: 'checkTable',
+        span: 2,
+        options: V2_TOOLS,
+        search: { placeholder: '搜索工具名或说明…' },
+        refresh: true,
+      },
     ],
   },
   voice: {

@@ -3729,6 +3729,29 @@ async function main() {
     });
   }
 
+  // ── P0 会话稳定性：DSH 健康度 ──────────────────────────────────────────────
+  // 只放内存：它是「这个 DSH 实例此刻还能不能用这个 sessionId」的观测结果，
+  // 不是会话档案，也不能写进 sessions.json —— 否则重启后会把上一轮的判断当成事实。
+  // status: online（对账/创建/投递成功过）| missing（对账确认 DSH 侧没有）| unknown（未对账或对账失败）。
+  const dshSessionHealth = new Map(); // sessionId -> { key, status, checkedAt, error }
+  function markDshHealth(key, sessionId, status, error = '') {
+    if (!sessionId) return null;
+    const record = { key, status, checkedAt: Date.now(), error: String(error ?? '').slice(0, 200) };
+    dshSessionHealth.set(sessionId, record);
+    return record;
+  }
+  function getDshHealth(key, sessionId) {
+    const record = sessionId ? dshSessionHealth.get(sessionId) : null;
+    if (record) return record;
+    return { key, status: 'unknown', checkedAt: 0, error: '' };
+  }
+  function forgetDshHealth(key) {
+    // sessionId 可能已经被覆盖：按 key 兜底扫一遍，避免留下孤儿记录。
+    for (const [sid, record] of dshSessionHealth) {
+      if (record.key === key) dshSessionHealth.delete(sid);
+    }
+  }
+
   /**
    * 让 DSH 停下一个已经不再属于桥接的会话：先清队列再取消在途 turn，最后归档。
    * 拆出来是因为所有「撤销映射」的路径都必须做同样的事（retireSession / session-reset /
@@ -3775,6 +3798,7 @@ async function main() {
       state.dormantSessions[key] = { sessionId, policy: sessions.policyOf(key), dormantAt: Date.now() };
     }
     sessions.unbind(key);
+    forgetDshHealth(key);
     // 按 key 记账的内存态在**有映射和无映射时都要清**：一条被移出白名单、
     // 但从未成功建过会话的 key 同样会留下限流时间戳与失败标记。
     forgetConversationCaches(key);
@@ -4044,6 +4068,9 @@ async function main() {
         dshReady = true;
         lastMode = currentMode;
         log(`DSH 已就绪（模式: ${currentMode}）`);
+        // 启动/DSH 重启后对账一次：把 DSH 侧已经不存在的绑定标成 missing，
+        // 详情页能看到、也能点重建；真正重建仍由下一条消息或用户触发。
+        void reconcileDshSessions().catch((error) => log(`⚠️ DSH 会话对账异常：${error?.message ?? error}`));
         if (currentMode === 'reserved2') {
           // 首次确定模式为 reserved2 后再恢复持久化的有限睡眠定时器，
           // 避免在 initial chat 模式下设置定时器导致 timeout 唤醒被模式守卫吞掉。
@@ -5641,9 +5668,48 @@ async function main() {
                 : { source: 'none', name: null, stale: false },
               unread: Array.isArray(conv?.unread) ? conv.unread.length : 0,
               lastWakeAt: Number(conv?.wakeConfig?.lastWakeAt) || 0,
+              // P0：DSH 侧健康度（online / missing / unknown）。只读，重建走 /rebuild。
+              dsh: getDshHealth(key, sessionId),
             });
           }
           sendJson({ sessions: list });
+          return;
+        }
+        // 手动对账：DSH 卡顿或长时间运行时，控制台可以主动刷新一次，不必重启桥接。
+        if (req.method === 'POST' && url.pathname === '/api/sessions/reconcile') {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          const result = await reconcileDshSessions();
+          sendJson(result, result.ok ? 200 : 502);
+          return;
+        }
+        // P0 会话稳定性：详情页只读状态 + 手动重建。路径里的 key 是 encodeURIComponent 过的
+        // `qq:group:123`；只允许控制台调用，AI 不能通过 agent token 重建会话。
+        const dshSessionMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/(dsh|rebuild)$/);
+        if (dshSessionMatch) {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          let key;
+          try {
+            key = apiKey(decodeURIComponent(dshSessionMatch[1]));
+          } catch {
+            sendJson({ ok: false, error: '会话 key 无效' }, 400);
+            return;
+          }
+          const sessionId = sessions.get(key);
+          if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          if (req.method === 'GET' && dshSessionMatch[2] === 'dsh') {
+            sendJson({ ok: true, key, sessionId, health: getDshHealth(key, sessionId) });
+            return;
+          }
+          if (req.method === 'POST' && dshSessionMatch[2] === 'rebuild') {
+            try {
+              const r = await rebuildSession(key);
+              sendJson({ ok: true, key, ...r, health: getDshHealth(key, r.sessionId) });
+            } catch (error) {
+              sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status === 404 ? 404 : 502);
+            }
+            return;
+          }
+          sendJson({ ok: false, error: '不支持的请求' }, 405);
           return;
         }
         // ── 挂起审批 / 提问 ───────────────────────────────────────────────────
@@ -10262,6 +10328,27 @@ async function main() {
     return 'failed';
   }
 
+  // 确定性标题：只用平台 + 类型 + 数字 id，不猜群名/昵称（那些要额外 RPC，失败还会让
+  // 创建变慢）。用户之后在会话页改名时，DSH 侧标题优先，桥接不另存一份副本。
+  function sessionTitleForKey(rawKey) {
+    const key = apiKey(rawKey);
+    const kind = isGroupKey(key) ? '群' : '私聊';
+    return `QQ·${kind} ${idOfKey(key)}`.slice(0, 60);
+  }
+
+  async function nameCreatedSession(key, sessionId) {
+    try {
+      await withTimeout(
+        api.callUnary('session.rename', { sessionId, title: sessionTitleForKey(key) }),
+        DSH_CONTROL_TIMEOUT_MS,
+        'session.rename',
+      );
+    } catch (error) {
+      // 命名失败不影响聊天；详情页仍能看到 sessionId，用户可手动改名。
+      log(`⚠️ 新会话命名失败 ${key} → ${sessionId}：${error?.message ?? error}`);
+    }
+  }
+
   async function ensureSession(rawKey) {
     // 老调用方/老状态里可能是 `group:1` 形态：入口归一，避免同一个会话两种 key 并存。
     const key = apiKey(rawKey);
@@ -10282,6 +10369,7 @@ async function main() {
           retireSession(key);
         } else {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
+          markDshHealth(key, existing, 'online');
           return existing;
         }
       }
@@ -10304,6 +10392,7 @@ async function main() {
           reverse.set(sid, key);
           saveState();
           api.events.follow(sid);
+          markDshHealth(key, sid, 'online');
           const applied = await ensureChatModel(sid);
           if (applied === 'not-found') {
             log(`休眠会话 ${key} -> ${sid} 在 DSH 侧已不存在，改为新建`);
@@ -10357,6 +10446,9 @@ async function main() {
           if (withPreset && preset) params.agentPreset = preset;
           const value = unwrap(await api.sessions.create(params), 'session.create');
           sessionId = value.sessionId;
+          markDshHealth(key, sessionId, 'online');
+          // DSH 默认用首条消息/时间命名，侧栏里分不清是哪个群；创建后立刻钉一个确定性标题。
+          await nameCreatedSession(key, sessionId);
           if (withPreset && preset) {
             log(`会话 ${key} 已挂载 preset ${preset}`);
           } else if (preset) {
@@ -10406,6 +10498,7 @@ async function main() {
       reverse.set(sessionId, key);
       saveState();
       await ensureChatModel(sessionId);
+      markDshHealth(key, sessionId, 'online');
       if (epoch !== sessionEpoch || !isCurrentSession(key, sessionId)) {
         if (sessions.get(key) === sessionId) retireSession(key);
         throw new Error('会话创建期间已重置或权限已变化');
@@ -11295,6 +11388,94 @@ async function main() {
   }
 
   // 实际的 DSH prompt 投递（不再直接对外暴露，统一走 promptQueues 串行队列）。
+  // 自愈只认 session 级 not-found：模型/preset 的 not-found 不能被当成会话丢了，
+  // 否则一次配置错误会把整条会话重建一遍。
+  function isSessionNotFoundError(error) {
+    const code = String(error?.code ?? '').toLowerCase();
+    const message = String(error?.message ?? error ?? '');
+    return code === 'session/not-found' || /session[\/\s_-]*not[-\s]?found/i.test(message);
+  }
+  const SESSION_HEAL_WINDOW_MS = 60_000;
+  const SESSION_HEAL_MAX = 3;
+  const sessionHealAttempts = new Map(); // key -> 重建时间戳
+  const sessionHealPaused = new Set();
+  function allowSessionHeal(key) {
+    const now = Date.now();
+    const hits = (sessionHealAttempts.get(key) ?? []).filter((ts) => now - ts < SESSION_HEAL_WINDOW_MS);
+    if (hits.length >= SESSION_HEAL_MAX) {
+      sessionHealAttempts.set(key, hits);
+      if (!sessionHealPaused.has(key)) {
+        sessionHealPaused.add(key);
+        log(`⛔ 会话 ${key} 60 秒内已重建 ${hits.length} 次，暂停自愈 60 秒`);
+        ext.audit.append('session.heal_paused', { key, attempts: hits.length });
+        void sendOwnerDirect(`⚠️ 会话 ${key} 的 DSH 会话反复失效，已暂停自动重建 60 秒；请检查 DSH。`).catch(() => {});
+        const timer = setTimeout(() => sessionHealPaused.delete(key), SESSION_HEAL_WINDOW_MS);
+        timer.unref?.();
+      }
+      return false;
+    }
+    hits.push(now);
+    sessionHealAttempts.set(key, hits);
+    return true;
+  }
+  async function healDshSession(key, oldSessionId, error) {
+    log(`会话 ${key} 的 DSH 会话已不存在（${String(error?.message ?? error ?? '').slice(0, 120)}），退役并重建后重试一次`);
+    ext.audit.append('session.self_heal', { key, sessionId: oldSessionId });
+    retireSession(key);
+    const sessionId = await ensureSession(key);
+    markDshHealth(key, sessionId, 'online');
+    return sessionId;
+  }
+  const sessionRebuilds = new Map(); // key -> Promise，避免连点两次并发重建
+  function rebuildSession(rawKey) {
+    const key = apiKey(rawKey);
+    if (!sessions.get(key)) {
+      const error = new Error('会话不存在');
+      error.status = 404;
+      return Promise.reject(error);
+    }
+    if (sessionRebuilds.has(key)) return sessionRebuilds.get(key);
+    const promise = (async () => {
+      const oldSessionId = sessions.get(key);
+      retireSession(key);
+      const sessionId = await ensureSession(key);
+      markDshHealth(key, sessionId, 'online');
+      ext.audit.append('session.rebuild', { key, oldSessionId, sessionId });
+      log(`控制台：重建会话 ${key}（${oldSessionId} → ${sessionId}）`);
+      return { oldSessionId, sessionId };
+    })();
+    sessionRebuilds.set(key, promise);
+    return promise.finally(() => {
+      if (sessionRebuilds.get(key) === promise) sessionRebuilds.delete(key);
+    });
+  }
+  async function reconcileDshSessions() {
+    let list;
+    try {
+      list = unwrap(await withTimeout(api.sessions.list({}), 30_000, 'sessions.list'), 'session.list');
+    } catch (error) {
+      for (const [key, sessionId] of sessions.entries()) markDshHealth(key, sessionId, 'unknown', error?.message);
+      log(`⚠️ DSH 会话对账失败：${error?.message ?? error}`);
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+    const byId = new Map((list.items ?? []).map((item) => [item.sessionId, item]));
+    let online = 0;
+    let missing = 0;
+    for (const [key, sessionId] of sessions.entries()) {
+      const item = byId.get(sessionId);
+      if (!item || item.archivedAt) {
+        missing += 1;
+        markDshHealth(key, sessionId, 'missing', item ? '会话已归档' : 'DSH 侧找不到该会话');
+        log(`⚠️ DSH 对账：${key} → ${sessionId} 不存在${item ? '（已归档）' : ''}`);
+      } else {
+        online += 1;
+        markDshHealth(key, sessionId, 'online');
+      }
+    }
+    log(`DSH 会话对账完成：在线 ${online}，缺失 ${missing}`);
+    return { ok: true, online, missing };
+  }
+
   async function deliverPromptNow(key, promptText, opts = {}) {
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
     // Recheck queued wakes at dispatch time: no model call while paused/disabled
@@ -11394,17 +11575,30 @@ async function main() {
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
     if (opts.farewell) social.exitingSessions.add(sessionId);
     let accepted;
-    try {
-      accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
-    } catch (error) {
+    let healAttempted = false;
+    for (;;) {
+      if (opts.farewell) social.exitingSessions.add(sessionId);
+      try {
+        accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
+      } catch (error) {
+        if (opts.farewell) social.exitingSessions.delete(sessionId);
+        if (!isSessionNotFoundError(error) || healAttempted || !allowSessionHeal(key)) throw error;
+        healAttempted = true;
+        sessionId = await healDshSession(key, sessionId, error);
+        continue;
+      }
+      if (accepted.result.ok) break;
       if (opts.farewell) social.exitingSessions.delete(sessionId);
-      throw error;
-    }
-    if (!accepted.result.ok) {
-      if (opts.farewell) social.exitingSessions.delete(sessionId);
+      // DSH 可能在排队期间丢了会话：accepted 形态的错误也要走同一条自愈路径。
+      if (isSessionNotFoundError(accepted.result.error) && !healAttempted && allowSessionHeal(key)) {
+        healAttempted = true;
+        sessionId = await healDshSession(key, sessionId, accepted.result.error);
+        continue;
+      }
       const d = await reportAgentError(key, accepted.result.error, '消息未被接受', { silent: !!opts.silent });
       return { ok: false, error: `${d.code}: ${d.detail}` };
     }
+    markDshHealth(key, sessionId, 'online');
     // 这次唤醒提示已经带着（或本来就是）当前这一版角色卡，记下来，下次不再重复给
     if (roleFpAtBuild) roleRefresh.markSeen(key, sessionId, roleFpAtBuild);
     if (opts.wakeReason) { tokenMiss.clearNotice(key); backfillNotices.delete(key); }

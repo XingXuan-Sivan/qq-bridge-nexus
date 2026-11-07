@@ -1,6 +1,6 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**方案已定，代码未动**（2026-11-08）。本轮先落文档与偏差登记，确认后再按 P0 → P3 开工。
+状态：**P0 已实现，P1–P3 代码未动**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表（详情子页在 P1 才建，见 D13）。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D12；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
@@ -391,12 +391,12 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 
 **P0 稳定性**
 
-- [ ] 统一 RPC 错误分类：识别 `session/not-found`（code 与 message 两种形态），其它错误不触发重建。
-- [ ] `ensureSession` 创建后写标题；标题规则集中在一处，详情页改标题复用。
-- [ ] 自愈：prompt / selectModel / follow 失败 → 退役 → 重建 → 重试一次；同会话 60 秒 3 次失败暂停并告警。
-- [ ] 启动对账：`sessions.list` 与所有档案的 `binding` 比对，缺失标 `missing`、超时标 `unknown`，不阻断启动。
-- [ ] `POST /api/sessions/<key>/rebuild`、`GET /api/sessions/<key>/dsh`；控制台只读状态 + 重建按钮。
-- [ ] `scripts/test-session-lifecycle.mjs`：删除后自愈、对账、标题、只重试一次。
+- [x] 统一 RPC 错误分类：识别 `session/not-found`（code 与 message 两种形态），其它错误不触发重建。
+- [x] `ensureSession` 创建后写标题；标题规则集中在一处，详情页改标题复用。
+- [x] 自愈：prompt 返回 not-found → 退役 → 重建 → 重试一次；同会话 60 秒 3 次失败暂停并告警。（follow 失败仍由事件流重连续流，不触发会话重建；留到 P1 的事件流错误分类。）
+- [x] 启动对账：`sessions.list` 与所有绑定比对，缺失标 `missing`、超时标 `unknown`，不阻断启动；另提供 `POST /api/sessions/reconcile` 手动重跑。
+- [x] `POST /api/sessions/<key>/rebuild`、`GET /api/sessions/<key>/dsh`；控制台会话表显示状态 + 重建按钮（临时落在列表，见 D13）。
+- [x] `scripts/test-session-lifecycle.mjs`：删除后自愈、对账、标题、熔断。
 
 **P1 档案与详情页**
 
@@ -471,3 +471,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 
 - 2026-11-07：初稿。确定双轴三态、会话级运行模式、P1/P2 覆盖清单、v2 单文件、无备份/无旧读、双清空动作、owner+管理员。
 - 2026-11-08：按用户建议把存储从单文件改为 `state/sessions/` 目录（`defaults.json` + 每会话文件）；补充路径/字符集、启动扫描与损坏隔离、单文件原子写、`migratedAt` 迁移提交点与目录级判据。
+- 2026-11-08：P0 落地（D13）：`ensureSession` 创建后确定性命名；`sessions.list` 启动/手动对账标 `online/missing/unknown`；prompt not-found 退役重建重试一次 + 60 秒 3 次熔断；`GET /api/sessions/<key>/dsh`、`POST /api/sessions/<key>/rebuild`、`POST /api/sessions/reconcile`；会话表 DSH 列与行内重建。

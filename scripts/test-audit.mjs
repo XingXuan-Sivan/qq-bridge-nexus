@@ -95,6 +95,8 @@ const tests = [
   'test-session-store.mjs',
   // 会话映射表（P7 第三步收尾）：映射与策略指纹成对维护、isCurrent 三条件、state 被替换后仍有效。
   'test-session-registry.mjs',
+  // 会话稳定性（P0）：新建即命名、启动对账标 missing、prompt not-found 退役重建一次、60 秒 3 次熔断。
+  'test-session-lifecycle.mjs',
   // 会话策略指纹（P7 第三步收尾）：级别进指纹（提权要退役旧会话）、非 closed-agent 不进指纹、isCurrent 三条件。
   'test-session-policy.mjs',
   // 会话标识平台化：key 组装/解析、新旧形态互认、非法输入不产出半成品 key。

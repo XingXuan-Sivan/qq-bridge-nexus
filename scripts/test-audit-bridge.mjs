@@ -145,10 +145,10 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     h.calls.cancelled.length = 0;
     const ok = await postRename({ key: 'private:123', title: '  群聊·喵喵屋\n｜星苒  ' });
     assert.equal(ok.status, 200);
-    const call = h.calls.cancelled.find((x) => x.method === 'session.rename');
+    const call = h.calls.renames.at(-1);
     assert.ok(call, 'rename must call DSH session.rename');
-    assert.equal(call.params.sessionId, sessionId);
-    assert.equal(call.params.title, '群聊·喵喵屋 ｜星苒', '换行与多余空白要折叠成单空格');
+    assert.equal(call.sessionId, sessionId);
+    assert.equal(call.title, '群聊·喵喵屋 ｜星苒', '换行与多余空白要折叠成单空格');
     assert.equal(ok.body.title, '群聊·喵喵屋 ｜星苒');
     console.log('PASS console rename normalizes the title and only asks DSH to rename');
   } finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }

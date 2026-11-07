@@ -53,6 +53,17 @@ function whenCell(ts) {
   return esc(`${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
 }
 
+// DSH 健康度只存在桥接内存里：online=对账/投递成功过，missing=对账确认 DSH 侧没有，
+// unknown=还没对账或对账失败（桥接刚启动时就是它）。
+function dshCell(entry) {
+  const health = entry.dsh || {};
+  const status = health.status || 'unknown';
+  const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
+  const pill = status === 'online' ? 'pill g' : status === 'missing' ? 'pill r' : 'pill';
+  const when = health.checkedAt ? ` <span class="meta">${whenCell(health.checkedAt)}</span>` : '';
+  return `<span class="${pill}">${esc(label)}</span>${when}`;
+}
+
 // 平台下拉按数据现算：出现哪些平台就列哪些，不写死 qq。筛选本身交给 dataTableHtml 的 filters。
 function platformOptions() {
   const platforms = [...new Set(sessionsCache.map(platformOf))].sort();
@@ -72,9 +83,11 @@ function renderSessions() {
         `<strong>${esc(entry.key)}</strong> ${platformTag}${kindPill(entry)}${ownerTag}`,
         modeCell(entry),
         personaCell(entry),
+        dshCell(entry),
         unread,
         whenCell(entry.lastWakeAt),
-        `<button type="button" class="btn small" data-rename-key="${esc(entry.key)}">改名</button>`,
+        `<button type="button" class="btn small" data-rename-key="${esc(entry.key)}">改名</button>`
+          + ` <button type="button" class="btn small" data-rebuild-key="${esc(entry.key)}">重建</button>`,
       ],
       attrs: { 'data-filter-platform': platformOf(entry), 'data-filter-kind': entry.kind || '' },
     };
@@ -84,9 +97,10 @@ function renderSessions() {
       { label: '会话', width: '250px' },
       { label: '模式', width: '150px' },
       { label: '人格', width: '170px' },
+      { label: 'DSH', width: '130px' },
       { label: '未读', width: '70px' },
       { label: '最近唤醒', width: '100px' },
-      { label: '操作', width: '110px' },
+      { label: '操作', width: '170px' },
     ],
     rows,
     pageSize: 20,
@@ -115,6 +129,21 @@ function renderSessions() {
   box.querySelectorAll('[data-rename-key]').forEach((btn) => btn.addEventListener('click', () => {
     openRename(btn.dataset.renameKey);
   }));
+  box.querySelectorAll('[data-rebuild-key]').forEach((btn) => btn.addEventListener('click', () => {
+    void rebuildSession(btn.dataset.rebuildKey);
+  }));
+}
+
+async function rebuildSession(key) {
+  if (!window.confirm(`重建会归档当前 DSH 会话并新建一个（${key}），继续？`)) return;
+  try {
+    const r = await api(`/api/sessions/${encodeURIComponent(key)}/rebuild`, 'POST');
+    if (!r?.ok) throw new Error(r?.error || '重建失败');
+    showConsoleToast('已重建 DSH 会话');
+    await refreshSessions();
+  } catch (error) {
+    showConsoleToast(`重建失败：${error?.message ?? error}`);
+  }
 }
 
 async function refreshSessions() {

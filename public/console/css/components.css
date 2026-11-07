@@ -580,33 +580,8 @@ tr:last-child td {
   margin-top:16px;
   padding-top:14px
 }
-.silence-row {
-  display:grid;
-  grid-template-columns:78px minmax(90px,1fr) 270px minmax(0,2.4fr) 44px;
-  gap:8px;
-  align-items:center;
-  padding:8px 0;
-  border-top:1px solid var(--card-border)
-}
-.silence-row.h {
-  border-top:none;
-  color:var(--muted);
-  font-size:11px;
-  padding-bottom:0
-}
-.silence-row.off {
-  opacity:.55
-}
-/* 时段行的时间列改用项目自带时间组件（components/time），原生 time 输入只是组件内部的隐藏控件，
-   不要再给它定宽——否则会把 .time-field 撑变形。 */
-@media (max-width:1100px) {
-  .silence-row {
-    grid-template-columns:60px minmax(0,1fr) minmax(0,1fr)
-  }
-  .silence-row.h {
-    display:none
-  }
-}
+/* 静默时段已改成表格（.silence-table，样式在 pages/overview/page.css），
+   原来的 .silence-row 网格规则已删除，避免两套布局并存。 */
 .silence-options {
   border:1px solid var(--card-border);
   border-radius:var(--radius);
@@ -625,9 +600,7 @@ tr:last-child td {
   margin:0 0 0 22px
 }
 @media (max-width:900px) {
-  .silence-row {
-    grid-template-columns:60px minmax(0,1fr) minmax(0,1fr)
-  }
+  .silence-table col.c-name { width: 150px; }
 }
 .slang-guess {
   font-style:italic;

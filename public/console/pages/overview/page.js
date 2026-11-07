@@ -237,18 +237,26 @@ function readSilenceRows() {
 function renderSilenceRanges() {
   const box = $('silenceRanges');
   if (!silenceDraft.length) { box.innerHTML = '<div class="meta">还没有时间段。点「＋ 添加时间段」，或者「一键填入 DeepSeek 高峰时段」。</div>'; return; }
-  box.innerHTML = `<div class="silence-row h"><span>启用</span><span>名称</span><span>时间段</span><span>哪些天</span><span></span></div>` + silenceDraft.map((r) => `
-    <div class="silence-row ${r.enabled ? '' : 'off'}" data-sil-row="${esc(r.id || '')}">
-      ${silenceSwitch('silEnabled', 'enabled', !!r.enabled, '开', '关')}
-      <input type="text" data-sil="name" value="${esc(r.name || '')}" placeholder="上午高峰">
-      <div class="silence-time">${silenceTime(`silStart_${r.id}`, 'start', r.start, '开始时间')}<span class="field-unit">–</span>${silenceTime(`silEnd_${r.id}`, 'end', r.end, '结束时间')}</div>
-      <div class="silence-days">
-        <select data-sil="days">${[['every', '每天'], ['workdays', '工作日'], ['weekend', '周末'], ['custom', '自选']].map(([v, l]) => `<option value="${v}" ${r.days === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        ${silenceSwitch('silSkipHolidays', 'skipHolidays', !!r.skipHolidays, '跳过节假日', '不跳过')}
-        <span data-sil-custom ${r.days === 'custom' ? '' : 'hidden'}>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip ${(r.weekdays || []).includes(d) ? 'on' : ''} tight"><input type="checkbox" data-sil-wd="${d}" ${(r.weekdays || []).includes(d) ? 'checked' : ''}> ${SILENCE_W[d]}</label>`).join('')}</span>
-      </div>
-      <button type="button" class="btn-icon" data-sil-del aria-label="删除这个时间段" title="删除这个时间段">${SILENCE_TRASH}</button>
-    </div>`).join('');
+  // 用表格而不是 grid：窄屏时各列不会互相挤成三行，列宽也随表头固定下来（2026-11-07 用户反馈）。
+  const head = '<thead><tr><th>启用</th><th>名称</th><th>开始</th><th>结束</th><th>哪些天</th><th>跳过节假日</th><th>操作</th></tr></thead>';
+  const body = silenceDraft.map((r) => `
+      <tr class="${r.enabled ? '' : 'off'}" data-sil-row="${esc(r.id || '')}">
+        <td>${silenceSwitch('silEnabled', 'enabled', !!r.enabled, '开', '关')}</td>
+        <td><input type="text" data-sil="name" value="${esc(r.name || '')}" placeholder="上午高峰" aria-label="时段名称"></td>
+        <td>${silenceTime(`silStart_${r.id}`, 'start', r.start, '开始时间')}</td>
+        <td>${silenceTime(`silEnd_${r.id}`, 'end', r.end, '结束时间')}</td>
+        <td>
+          <div class="silence-days">
+            <select data-sil="days" aria-label="哪些天">${[['every', '每天'], ['workdays', '工作日'], ['weekend', '周末'], ['custom', '自选']].map(([v, l]) => `<option value="${v}" ${r.days === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <span data-sil-custom ${r.days === 'custom' ? '' : 'hidden'}>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip ${(r.weekdays || []).includes(d) ? 'on' : ''} tight"><input type="checkbox" data-sil-wd="${d}" ${(r.weekdays || []).includes(d) ? 'checked' : ''}> ${SILENCE_W[d]}</label>`).join('')}</span>
+          </div>
+        </td>
+        <td>${silenceSwitch('silSkipHolidays', 'skipHolidays', !!r.skipHolidays, '跳过节假日', '不跳过')}</td>
+        <td><button type="button" class="btn-icon" data-sil-del aria-label="删除这个时间段" title="删除这个时间段">${SILENCE_TRASH}</button></td>
+      </tr>`).join('');
+  box.innerHTML = `<div class="table-wrap"><table class="silence-table">
+      <colgroup><col class="c-enable"><col class="c-name"><col class="c-time"><col class="c-time"><col class="c-days"><col class="c-skip"><col class="c-act"></colgroup>
+      ${head}<tbody>${body}</tbody></table></div>`;
   initTimeFields(box);
   box.querySelectorAll('[data-sil-row]').forEach((row) => {
     row.querySelector('[data-sil="days"]').addEventListener('change', (e) => { row.querySelector('[data-sil-custom]').hidden = e.target.value !== 'custom'; });

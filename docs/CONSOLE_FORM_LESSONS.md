@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十六个真实踩过的坑
+## 1. 四十七个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -267,6 +267,12 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 插件页与二代仿真页按用户要求把每个 `<details class="settings-group">` 拆成独立卡片（`section.card.span-all.is-group`），一开始给 `.card.is-group summary` 覆写了 `font-size:15px/padding:17px 44px/color:var(--text)`，结果和站内其它页的折叠标题（13px、`var(--text-secondary)`、12px 42px 12px 18px）明显不一致，用户当即指出两处。
 
 **规则**：`.card.is-group` 只做结构性去壳（`.settings-group{margin:0;border:0;border-radius:0;background:none}`、`[open] summary` 只留一条分隔线、`.settings-content` 给卡片内边距），**不要**碰字号/颜色/内边距；需要视觉区分就换个类名，别覆写 summary。同理：`input[type=file]` 这种原生控件要在 `css/base.css` 里统一 `::file-selector-button`，不要在每个页面各写一套。
+
+### 1.47 一行里塞 5+ 个控件不要用 grid 自适应，窄屏必然挤乱
+
+「运行总览 → 静默时段」的时段行原来是 `display:grid` 五列（启用/名称/时间段/哪些天/删），列宽用 `minmax()` 和比例分配。1600 宽看着正常，但窗口缩到 900 左右时每列都低于内容最小宽度，浏览器只能把控件挤成三行：开关+名称一行、时间+下拉+节假日一行、垃圾桶单独一行居中，完全不可读（2026-11-07 用户截图）。给开关定宽只解决了“两行下拉长度不一致”，没有解决窄屏折行。
+
+**规则**：这种「固定几列的编辑行」直接写成表格——`.table-wrap` + `<table class="silence-table">` + `<colgroup>` 固定列宽 + `min-width` 兜底，窄屏横向滚动而不是折行；单元格内控件 `width:100%`，表头文字就是列名。表格天然保证各列上下对齐，也顺带解决了“同一列长度不一致”。改完记得量 `scrollWidth > clientWidth` 才算真的可滚动，而不是把页面撑出横向溢出。
 
 ## 2. 迁移一个页面的检查清单
 

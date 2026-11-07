@@ -52,11 +52,31 @@ const PRICES_HTML = `<details class="settings-group"><summary>当前生效的价
 <div id="usagePrices" class="meta">读取中…</div>
 </div></details>`;
 
-const COMPACT_MODE_HTML = `<div class="u-mt-10">
-  <label class="sched-chip u-m-0"><input type="radio" name="compactMode" value="early"> 提前压缩：上一步读到 <input class="u-w-70" type="number" id="compactWan" min="5" max="80" step="1" aria-label="压缩阈值（万 token）"> 万 token 时压缩</label>
-  <div class="meta u-ml-indent">默认 30 万。数字越小越省钱，很早以前的聊天细节也越早变成摘要；可以填 5～80。每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。</div>
-  <label class="sched-chip u-m-0"><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩（约 80 万 token 时）</label>
-  <div class="meta u-ml-indent-tight">deepseek-flash 的上下文窗口是 100 万，DSH 在窗口的 80% 左右自己压缩；保留细节最多，但每一步读得最多、最贵。</div>
+const COMPACT_MODE_HTML = `<div class="usage-compact">
+  <div class="field-block">
+    <div class="field-row">
+      <span class="field-label">压缩方式</span>
+      <div class="field-control">
+        <div class="field-inline">
+          <label><input type="radio" name="compactMode" value="early"> 提前压缩（桥接自己压，最省）</label>
+          <label><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩</label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="field-block">
+    <div class="field-row">
+      <span class="field-label">提前压缩阈值</span>
+      <div class="field-control">
+        <span class="field-inline">
+          <input id="compactWan" type="number" min="5" max="80" step="1" aria-label="提前压缩阈值（万 token）">
+          <span class="field-unit">万 token</span>
+        </span>
+      </div>
+    </div>
+    <div class="field-notes"><p class="field-hint">默认 30；数字越小越省钱，很早的聊天细节也越早变成摘要（可填 5～80）。</p></div>
+  </div>
+  <p class="meta usage-compact-note">提前压缩：桥接把较早的历史换成一段摘要，最近约 15 万 token 原样保留；每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。交给 DSH：deepseek-flash 的窗口是 100 万，DSH 在窗口的 80% 左右自己压缩，保留细节最多，但每一步读得最多、最贵。</p>
 </div>`;
 
 export const USAGE_FIELDS = {

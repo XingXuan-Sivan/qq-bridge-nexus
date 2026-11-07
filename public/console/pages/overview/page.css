@@ -28,9 +28,66 @@
   color: var(--muted);
 }
 
-/* 静默时段行由 page.js 动态生成：行内第一列是「启用」勾选，别让它被 label 的上下边距顶歪。 */
+/* 静默时段行由 page.js 动态生成：行内第一列是「启用」开关，别让它被 label 的上下边距顶歪。 */
 .silence-row .sched-chip {
   margin: 0;
+}
+
+/* 时段行：开关 + 名称 + 时间段 + 哪些天/节假日 + 删，全部同一行。
+   时间段用项目自带 .time-field（文本框 + 时钟按钮），两个时段等分；下拉被 initSelects 包成
+   .select-wrap（默认 width:100%），这里必须按内容收窄，否则会把「跳过节假日」开关挤到下一行。 */
+.silence-row .silence-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.silence-row .silence-time .time-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.silence-row .silence-days {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.silence-row .silence-days .select-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.silence-row .silence-days .field-switch,
+.silence-row > .field-switch {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.silence-row > .btn-icon {
+  justify-self: end;
+}
+
+/* 删除按钮：项目里没有 .btn-icon 的通用样式（时间/日期组件的类名是 .time-field-btn），
+   这里给时段行的垃圾桶单独定义一块方形图标按钮，避免出现「空边框方块」。 */
+.silence-row > button[data-sil-del] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: var(--control-h, 40px);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.silence-row > button[data-sil-del] svg {
+  width: 16px;
+  height: 16px;
+}
+.silence-row > button[data-sil-del]:hover {
+  color: var(--err);
+  border-color: var(--danger-border);
+  background: var(--danger);
 }
 
 /* 发言上限：两个数字框是固定宽度的小格子，不要被 .field-inline 的 flex:1 拉满整行。 */

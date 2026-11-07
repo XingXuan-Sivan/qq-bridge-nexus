@@ -104,7 +104,11 @@ async function refreshSessionMetrics() {
     const pendingEl = document.getElementById('metricPending');
     if (pendingEl) pendingEl.textContent = p.pending.length;
     const countEl = document.getElementById('pendingCount');
-    if (countEl) countEl.textContent = p.pending.length;
+    // 侧栏角标只表示「有待处理」：为 0 时整个藏起来，不显示 0 也不显示占位符。
+    if (countEl) {
+      countEl.textContent = p.pending.length ? String(p.pending.length) : '';
+      countEl.hidden = !p.pending.length;
+    }
   } catch {}
 }
 

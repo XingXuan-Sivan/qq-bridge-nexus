@@ -8,6 +8,7 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { initTimeFields } from '../../components/time/time.js';
 import { OVERVIEW_FIELDS } from './fields.js';
 
 const $ = (id) => document.getElementById(id);
@@ -197,19 +198,38 @@ const SILENCE_W = ['', '一', '二', '三', '四', '五', '六', '日'];
 let silenceState = null;
 let silenceDraft = [];
 
+// 时段行的三个小图标/开关片段：时间用项目自带的时间组件（文本框 + 时钟按钮 + 隐藏原生输入），
+// 启用与「跳过法定节假日」都用 role=switch（点击委托由 init() 里对 #section-overview 的 bindSwitches 负责）。
+const SILENCE_CLOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+const SILENCE_TRASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.6h10M6.3 4.6V3.1h3.4v1.5M4.9 4.6l.6 8.3h5l.6-8.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function silenceSwitch(field, silKey, on, onLabel, offLabel) {
+  return `<button type="button" class="field-switch" role="switch" data-field="${field}" data-sil="${silKey}"`
+    + ` data-on-label="${esc(onLabel)}" data-off-label="${esc(offLabel)}" aria-checked="${on ? 'true' : 'false'}">`
+    + `<span class="field-switch-track" aria-hidden="true"></span><span>${esc(on ? onLabel : offLabel)}</span></button>`;
+}
+
+function silenceTime(id, silKey, value, label) {
+  return `<span class="time-field">`
+    + `<input type="text" class="time-field-text" id="${id}" data-sil="${silKey}" value="${esc(value || '')}" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="${esc(label)}">`
+    + `<button type="button" class="time-field-btn btn-icon" aria-label="选择${esc(label)}">${SILENCE_CLOCK}</button>`
+    + `<input type="time" data-time-native="${id}" tabindex="-1" aria-hidden="true">`
+    + '</span>';
+}
+
 function readSilenceRows() {
   return [...document.querySelectorAll('#silenceRanges [data-sil-row]')].map((row) => {
     const q = (sel) => row.querySelector(sel);
     const days = q('[data-sil="days"]').value;
     return {
       id: row.dataset.silRow,
-      enabled: q('[data-sil="enabled"]').checked,
+      enabled: getSwitch(q('[data-sil="enabled"]')),
       name: q('[data-sil="name"]').value.trim(),
       start: q('[data-sil="start"]').value,
       end: q('[data-sil="end"]').value,
       days,
       weekdays: [...row.querySelectorAll('[data-sil-wd]')].filter((c) => c.checked).map((c) => Number(c.dataset.silWd)),
-      skipHolidays: q('[data-sil="skipHolidays"]').checked,
+      skipHolidays: getSwitch(q('[data-sil="skipHolidays"]')),
     };
   });
 }
@@ -219,19 +239,22 @@ function renderSilenceRanges() {
   if (!silenceDraft.length) { box.innerHTML = '<div class="meta">还没有时间段。点「＋ 添加时间段」，或者「一键填入 DeepSeek 高峰时段」。</div>'; return; }
   box.innerHTML = `<div class="silence-row h"><span>启用</span><span>名称</span><span>时间段</span><span>哪些天</span><span></span></div>` + silenceDraft.map((r) => `
     <div class="silence-row ${r.enabled ? '' : 'off'}" data-sil-row="${esc(r.id || '')}">
-      <label class="sched-chip u-m-0"><input type="checkbox" data-sil="enabled" ${r.enabled ? 'checked' : ''}> 启用</label>
+      ${silenceSwitch('silEnabled', 'enabled', !!r.enabled, '开', '关')}
       <input type="text" data-sil="name" value="${esc(r.name || '')}" placeholder="上午高峰">
-      <div class="row u-gap-6-nowrap"><input type="time" data-sil="start" value="${esc(r.start)}"><span>–</span><input type="time" data-sil="end" value="${esc(r.end)}"></div>
-      <div class="row u-gap-6">
+      <div class="silence-time">${silenceTime(`silStart_${r.id}`, 'start', r.start, '开始时间')}<span class="field-unit">–</span>${silenceTime(`silEnd_${r.id}`, 'end', r.end, '结束时间')}</div>
+      <div class="silence-days">
         <select data-sil="days">${[['every', '每天'], ['workdays', '工作日'], ['weekend', '周末'], ['custom', '自选']].map(([v, l]) => `<option value="${v}" ${r.days === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        ${silenceSwitch('silSkipHolidays', 'skipHolidays', !!r.skipHolidays, '跳过节假日', '不跳过')}
         <span data-sil-custom ${r.days === 'custom' ? '' : 'hidden'}>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip ${(r.weekdays || []).includes(d) ? 'on' : ''} tight"><input type="checkbox" data-sil-wd="${d}" ${(r.weekdays || []).includes(d) ? 'checked' : ''}> ${SILENCE_W[d]}</label>`).join('')}</span>
-        <label class="sched-chip u-m-0"><input type="checkbox" data-sil="skipHolidays" ${r.skipHolidays ? 'checked' : ''}> 跳过法定节假日</label>
       </div>
-      <button class="small danger" data-sil-del aria-label="删除这个时间段">删</button>
+      <button type="button" class="btn-icon" data-sil-del aria-label="删除这个时间段" title="删除这个时间段">${SILENCE_TRASH}</button>
     </div>`).join('');
+  initTimeFields(box);
   box.querySelectorAll('[data-sil-row]').forEach((row) => {
     row.querySelector('[data-sil="days"]').addEventListener('change', (e) => { row.querySelector('[data-sil-custom]').hidden = e.target.value !== 'custom'; });
-    row.querySelector('[data-sil="enabled"]').addEventListener('change', (e) => row.classList.toggle('off', !e.target.checked));
+    // 开关的 aria-checked 由 bindSwitches 切换；这里只在点击瞬间读旧值，决定整行要不要变灰。
+    const enabled = row.querySelector('[data-sil="enabled"]');
+    enabled.addEventListener('click', () => row.classList.toggle('off', getSwitch(enabled)));
     row.querySelectorAll('[data-sil-wd]').forEach((c) => c.addEventListener('change', () => c.parentElement.classList.toggle('on', c.checked)));
     row.querySelector('[data-sil-del]').addEventListener('click', () => { silenceDraft = readSilenceRows().filter((x) => x.id !== row.dataset.silRow); renderSilenceRanges(); });
   });

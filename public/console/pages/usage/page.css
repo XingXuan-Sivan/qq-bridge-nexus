@@ -36,3 +36,24 @@
 #section-usage .usage-legend i.peak { background:var(--warn-fg-strong) }
 #section-usage .usage-legend i.off { background:var(--accent) }
 #section-usage .usage-legend i.mixed { background:var(--accent-hover) }
+
+/* 上下文压缩：两行表单（方式 / 阈值）+ 一段说明，别再让单选和数字框挤在同一行文字里。 */
+#section-usage .usage-compact {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}
+#section-usage .usage-compact .field-inline {
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+#section-usage .usage-compact input[type=number] {
+  flex: 0 0 auto;
+  width: 96px;
+}
+#section-usage .usage-compact-note {
+  max-width: 960px;
+  line-height: 1.7;
+  margin: 0;
+}
+

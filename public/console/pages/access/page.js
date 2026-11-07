@@ -99,7 +99,7 @@ export function init() {
   // 「显示令牌」按钮：挂在输入框后面，避免在输入框里直接显示明文。
   const toggle = document.createElement('button');
   toggle.id = 'consoleTokenToggle';
-  toggle.className = 'small';
+  toggle.className = 'btn small';
   toggle.type = 'button';
   toggle.textContent = '显示令牌';
   toggle.setAttribute('aria-pressed', 'false');

@@ -70,7 +70,7 @@ export const ACCESS_FIELDS = {
         type: 'custom',
         label: '新令牌',
         span: 2,
-        html: `<input type="password" id="consoleTokenInput" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password">
+        html: `<span class="field-inline"><input type="password" id="consoleTokenInput" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password"></span>
 <div class="meta">用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌；修改后当前页面会自动使用新令牌。</div>`,
       },
       {

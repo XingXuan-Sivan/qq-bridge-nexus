@@ -177,7 +177,7 @@ test('⑤ 控制台：令牌与花费页有「上下文压缩」卡片', () => {
   assert.match(sec, /data-usage-fields="compactMode"/);
   assert.match(sec, /data-usage-fields="compactActions"/);
   for (const v of ['early', 'dsh']) assert.ok(html.includes(`name="compactMode" value="${v}"`), v);
-  assert.match(html, /id="compactWan" min="5" max="80"/);
+  assert.match(html, /id="compactWan"[^>]*min="5"[^>]*max="80"/);
   // 按钮 id 由 action 规格生成（源码里是 id: 'compactSave'），按 id 名匹配即可。
   assert.match(html, /compactSave/);
 });

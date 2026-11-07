@@ -42,16 +42,24 @@ function fieldShell({ id, label, required, control, hint, warn, danger, docs, hi
   const notes = fieldNotes(id, { hint, warn, danger, docs });
   const errorId = `${id}-error`;
   const wrapClass = ['field-block', className].filter(Boolean).join(' ');
-  // 没有标签的字段（例如自带表头的表格）不渲染空标签列，整行让给控件。
+  // 没有标签的字段（例如自带表头的表格、整块警示文案）不渲染空标签列，也不给它包 .field-row：
+  // .field-row 有 min-height:40px，空壳会白白占掉一行高度（access 页两个隐藏警示块曾多出 102px）。
   const labelHtml = label
     ? `<label class="field-label"${labelFor ? ` for="${esc(labelFor)}"` : ''}>${required ? '<span class="field-req" aria-hidden="true">*</span>' : ''}${esc(label)}</label>`
     : '';
-  return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
-  <div class="field-row">
+  const rowHtml = label
+    ? `<div class="field-row">
     ${labelHtml}
     <div class="field-control">${control}</div>
-  </div>
-  <div class="field-notes">${notes.html}${hintExtra}<p class="field-error" id="${esc(errorId)}" role="alert" hidden></p></div>
+  </div>`
+    : control;
+  const notesHtml = [notes.html, hintExtra].filter(Boolean).join('');
+  const errorHtml = `<p class="field-error" id="${esc(errorId)}" role="alert" hidden></p>`;
+  // 有标签的字段保留注解区（错误文案要和控件左边缘对齐）；无标签字段没有注解就不必留空壳。
+  const notesBlock = (label || notesHtml) ? `<div class="field-notes">${notesHtml}${errorHtml}</div>` : errorHtml;
+  return `<div class="${wrapClass}" data-field-wrap="${esc(id)}">
+  ${rowHtml}
+  ${notesBlock}
 </div>`;
 }
 

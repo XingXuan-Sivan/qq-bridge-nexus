@@ -1,7 +1,12 @@
+      <section class="card span-all">
       <h2>桥接插件</h2>
       <div class="meta">可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
       <div data-plugins-fields="toolbar"></div>
       <div data-plugins-fields="list"></div>
+      <div data-plugins-fields="detail"></div>
+      </section>
+
+      <section class="card span-all is-group">
       <details class="settings-group">
         <summary>内置注入块</summary>
         <div class="settings-content">
@@ -10,12 +15,18 @@
           <div data-plugins-fields="promptBlockActions"></div>
         </div>
       </details>
+      </section>
+
+      <section class="card span-all is-group">
       <details class="settings-group" id="pluginRuntimeGroup">
         <summary>运行设置</summary>
         <div class="settings-content">
           <div data-plugins-fields="runtime"></div>
         </div>
       </details>
+      </section>
+
+      <section class="card span-all is-group">
       <details class="settings-group">
         <summary>安装插件</summary>
         <div class="settings-content">
@@ -24,6 +35,5 @@
           <div data-plugins-fields="installPath"></div>
         </div>
       </details>
-      <div data-plugins-fields="detail"></div>
-    </section>
+      </section>
     <!-- 页面片段由路由器按需注入（pages/<id>/page.html）：这里只留容器，不放内容。 -->

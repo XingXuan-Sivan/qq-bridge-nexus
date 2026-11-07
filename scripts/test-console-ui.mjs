@@ -125,9 +125,11 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 224 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 217 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    assert.equal(legacyIds.length, 218);
+    // 暂停/恢复合并成一个开关后，清单从 218 变 217（-2 +1）。数字写死是为了防止「悄悄删 id」，
+    // 需要增减时连同 pages/*/fields.js 的改动一起改这里。
+    assert.equal(legacyIds.length, 217);
     assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
@@ -331,8 +333,10 @@ try {
     // The lower save button must submit the same complete configuration.
     await page.waitForFunction(() => document.getElementById('v2AgentPreset').value === 'contract-v2');
     assert.deepEqual(await clickWrite('#v2ConfigSave', '/api/socialV2/config'), body);
-    assert.deepEqual(await clickWrite('#v2PauseBtn', '/api/socialV2/activity'), { paused: true });
-    assert.deepEqual(await clickWrite('#v2ResumeBtn', '/api/socialV2/activity'), { paused: false });
+    // 暂停/恢复是一个按钮：先按当前状态暂停，刷新后文案变「恢复」，再点一次恢复运行。
+    assert.deepEqual(await clickWrite('#v2PauseToggle', '/api/socialV2/activity'), { paused: true });
+    await page.waitForFunction(() => document.getElementById('v2PauseToggle')?.textContent === '恢复二代 AI');
+    assert.deepEqual(await clickWrite('#v2PauseToggle', '/api/socialV2/activity'), { paused: false });
   });
 
   await test('First-generation social parameter and phase contracts', async () => {

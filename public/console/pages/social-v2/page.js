@@ -583,6 +583,14 @@ async function refreshV2Activity() {
     const el = document.getElementById('v2ActivityStatus');
     el.textContent = r.paused ? '已暂停' : '运行中';
     el.className = r.paused ? 'status-badge is-pill err' : 'status-badge is-pill ok';
+    // 暂停/恢复合成一个按钮：文案与配色跟着当前状态走，未拿到状态前保持禁用。
+    const toggle = document.getElementById('v2PauseToggle');
+    if (toggle) {
+      v2Paused = r.paused === true;
+      toggle.textContent = v2Paused ? '恢复二代 AI' : '暂停二代 AI';
+      toggle.classList.toggle('danger', !v2Paused);
+      toggle.disabled = false;
+    }
   } catch {}
 }
 
@@ -683,13 +691,14 @@ function bindEvents() {
   document.getElementById('v2ConfigSaveTop')?.addEventListener('click', saveV2Config);
   document.getElementById('voiceRefreshBtn').addEventListener('click', () => loadVoiceLibrary(true));
   document.getElementById('voiceSendBtn').addEventListener('click', sendVoiceFromConsole);
-  document.getElementById('v2PauseBtn').addEventListener('click', async () => {
-    await api('/api/socialV2/activity', 'POST', { paused: true });
-    refreshV2Activity();
-  });
-  document.getElementById('v2ResumeBtn').addEventListener('click', async () => {
-    await api('/api/socialV2/activity', 'POST', { paused: false });
-    refreshV2Activity();
+  document.getElementById('v2PauseToggle').addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      await api('/api/socialV2/activity', 'POST', { paused: !v2Paused });
+    } finally {
+      await refreshV2Activity();
+    }
   });
   document.getElementById('v2ResetBtn').addEventListener('click', async () => {
     if (!confirm('确定重置二代 AI 状态？\n将清空所有二代会话、唤醒配置、未读消息和定时器；工具调用日志会保留。')) return;
@@ -749,6 +758,7 @@ function bindEvents() {
 
 let pageInitialized = false;
 let v2Form = null;
+let v2Paused = null;
 
 // 字段读取统一走表单内核（DOM 兜底，保证未纳入规格的控件行为不变）。
 const domValue = (id) => {

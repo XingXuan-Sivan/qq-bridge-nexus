@@ -159,8 +159,12 @@ async function refreshPending() {
     const metric = document.getElementById('metricPending');
     if (metric) metric.textContent = rows.length;
     const navCount = document.getElementById('pendingCount');
-    // 侧栏角标只表示「有待处理」，为 0 时不显示 0，回到占位符。
-    if (navCount) { navCount.textContent = rows.length ? String(rows.length) : '—'; navCount.dataset.empty = rows.length ? '0' : '1'; }
+    // 侧栏角标只表示「有待处理」：为 0 时整个藏起来（与 js/app.js 的写法保持一致）。
+    if (navCount) {
+      navCount.textContent = rows.length ? String(rows.length) : '';
+      navCount.hidden = !rows.length;
+      navCount.dataset.empty = rows.length ? '0' : '1';
+    }
     const tabCount = document.getElementById('pendingTabCount');
     if (tabCount) tabCount.textContent = rows.length ? String(rows.length) : '';
     renderPending(rows);

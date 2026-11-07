@@ -258,6 +258,24 @@ pre {
 .settings-content {
   padding:6px 20px 20px
 }
+/* 折叠组独立成卡（social-v2 / plugins）：<summary> 当卡头，details 不再自带边框与圆角，
+   否则会出现「卡中卡」的双层描边（2026-11-07 拆分）。
+   标题的字号/颜色/内边距**不覆写**——直接沿用其它页面 .settings-group summary 的那套，
+   只把「组自己的框」去掉，让外面那张 .card 成为唯一的框。 */
+.card.is-group {
+  padding:0;
+  overflow:hidden
+}
+.card.is-group .settings-group {
+  margin:0;
+  border:0;
+  border-radius:0;
+  background:none
+}
+.card.is-group .settings-group[open] summary {
+  border-radius:0;
+  background:none
+}
 /* 卡片头：左边标题、右边操作（新建/刷新这类不占一整行的按钮）。
    与 .row 的区别：不收集字段、不参与表单栅格，只负责一行两端对齐。 */
 .card-head {
@@ -579,9 +597,15 @@ tr:last-child td {
 .silence-row.off {
   opacity:.55
 }
-.silence-row input[type=time] {
-  width:100%;
-  min-width:118px
+/* 时段行的时间列改用项目自带时间组件（components/time），原生 time 输入只是组件内部的隐藏控件，
+   不要再给它定宽——否则会把 .time-field 撑变形。 */
+@media (max-width:1100px) {
+  .silence-row {
+    grid-template-columns:60px minmax(0,1fr) minmax(0,1fr)
+  }
+  .silence-row.h {
+    display:none
+  }
 }
 .silence-options {
   border:1px solid var(--card-border);

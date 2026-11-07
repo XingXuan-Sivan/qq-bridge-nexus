@@ -283,8 +283,7 @@ export const V2_FIELDS = {
     label: '保存',
     fields: [
       { type: 'action', items: [
-        { id: 'v2PauseBtn', label: '暂停二代 AI', variant: 'danger', small: false },
-        { id: 'v2ResumeBtn', label: '恢复二代 AI', small: false },
+        { id: 'v2PauseToggle', label: '暂停二代 AI', variant: 'danger', small: false },
         { id: 'v2ResetBtn', label: '重置二代状态', variant: 'danger', small: false },
         { id: 'v2ConfigSave', label: '保存当前参数（写入 config.json）', variant: 'primary', small: false },
       ], status: 'v2ConfigMsg' },

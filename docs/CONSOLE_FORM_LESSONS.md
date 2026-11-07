@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十二个真实踩过的坑
+## 1. 四十六个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -255,6 +255,18 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 同一个坑在**非表格的普通行**里也会犯：令牌与花费页的「逐轮花费」行是 .row.usage-controls（一个 select#usageKeySelect + 一个「加载逐轮明细」按钮）。.select-wrap 默认 display:block;width:100%，下拉先占满整行，按钮被挤到下一行，箭头还贴在整行最右（2026-11-07 实测）。
 
 **规则**：任何「一行里放 select + 其它控件」的自定义行，都要给 .select-wrap 写 width:auto + flex:0 0 auto（usage 的做法是 width:auto; min-width:190px; max-width:280px），并让父行 display:flex; align-items:center; flex-wrap:wrap。不要指望 select { width:auto } 单独生效——被包起来的永远是 .select-wrap。
+
+### 1.45 `custom` 字段没有 label 时别留 `.field-row` 空壳
+
+访问与安全页的两个警示块（state 目录权限、SnowLuma 收不到数据）是 `custom` 字段、没有 label。`fieldShell` 原先不管有没有 label 都包一层 `.field-block > .field-row`，而 `.field-row` 有 `min-height:40px`——两个空壳就多出约 102px 空白，看着像「卡片下边距不一致」（2026-11-07 用户报的第 ⑤ 条，实际是第 ⑥ 个空壳问题）。
+
+**规则**：`components/form/form.js` 的 `fieldShell` 里，无 label 时不要生成 `.field-row`；有 label 或需要缩进的注解时保留 `.field-notes`，否则 `.field-error` 直接挂 `.field-block`。迁移时遇到 `{ type:'custom', span:2, html }` 且没有 label 的，先量一下这个字段的高度是不是 0。
+
+### 1.46 折叠组单独成卡时不要另写 summary 样式
+
+插件页与二代仿真页按用户要求把每个 `<details class="settings-group">` 拆成独立卡片（`section.card.span-all.is-group`），一开始给 `.card.is-group summary` 覆写了 `font-size:15px/padding:17px 44px/color:var(--text)`，结果和站内其它页的折叠标题（13px、`var(--text-secondary)`、12px 42px 12px 18px）明显不一致，用户当即指出两处。
+
+**规则**：`.card.is-group` 只做结构性去壳（`.settings-group{margin:0;border:0;border-radius:0;background:none}`、`[open] summary` 只留一条分隔线、`.settings-content` 给卡片内边距），**不要**碰字号/颜色/内边距；需要视觉区分就换个类名，别覆写 summary。同理：`input[type=file]` 这种原生控件要在 `css/base.css` 里统一 `::file-selector-button`，不要在每个页面各写一套。
 
 ## 2. 迁移一个页面的检查清单
 

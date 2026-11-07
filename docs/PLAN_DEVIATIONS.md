@@ -35,6 +35,7 @@
 | D14 | 2026-11-08 | P1 会话档案 | `SESSION_SUBSYSTEM.md` §8 要求详情用独立子页 `#sessions/<url-encoded key>` | 实际做成列表页上的宽弹窗（`#sessionDetailOverlay` + 七张卡），路由仍只有 `#sessions` | 与全站「增改操作用弹窗」的既有约定一致；独立子页要再补路由、返回态与深链刷新，本轮收益低于成本 | 详情不可直接分享/刷新恢复；P2 若要深链再升级为子页，弹窗内容可原样搬 | 已改计划 | — |
 | D15 | 2026-11-08 | P1 会话档案 | 计划拆 `src/session/store.mjs`（目录存储）与 `src/session/profiles.mjs`（schema/合并/三态） | 合并为 `src/session/directory.mjs`：加载、校验、写入、`createProfile`/`normalizeProfile`/`applyPatch` 同文件；旧的 `src/session/store.mjs` 仍留给迁移读旧单文件 | 档案 schema 与目录读写强耦合（路径即 key、binding 回填、损坏隔离都依赖同一份 normalize），拆开只会多一层转发 | 后续若 P2 加模型/预设字段，仍在 `directory.mjs` 内扩展；测试从 `test-session-directory` 覆盖 | 已改计划 | — |
 | D16 | 2026-11-08 | P2b 会话模型 | 只改本会话的 DSH 模型，不动全局默认 | 保存会话模型时同步写 DSH 全局默认（`selectModel` 本身的语义），控制台提示会影响 Web GUI 新会话 | 用户明确选择「接受全局副作用（推荐）」；DSH 的 `session.selectModel` 没有“仅本次会话”参数 | 全局默认会被会话保存意外改写；必须在详情弹窗明示，且会话按自己的模型能力决定看图 | 接受现状 | — |
+| D17 | 2026-11-08 | P2b 主动检查点 | 主动行为统一受准入的主动轴约束；未授权时任务跳过并通知创建者 | **方案 A**：收紧现有入口（scheduler、v1/v2 主动发言、跨会话发送），拒绝时记「跳过（主动未授权）」并通知；**方案 B**（开放 AI 跨会话工具）本轮不做，列入后续计划 | 用户选择「采用方案 a，并将方案 b 加入将来待办的计划」；方案 B 会新增一套跨会话发送能力与风险面，不能与检查点混做 | 当前 AI 跨会话发送一律拒绝并说明「跨会话能力尚未实现」；等方案 B 立项时再打开，并复用同一主动轴 | 已改计划 | — |
 
 ## 模板
 

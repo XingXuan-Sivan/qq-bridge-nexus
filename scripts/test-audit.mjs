@@ -95,6 +95,8 @@ const tests = [
   'test-session-mode.mjs',
   // 会话级模型（P2b）：模型签名进指纹、档案优先、看图能力与全局参数回退。
   'test-session-model.mjs',
+  // 主动检查点（P2b）：调度器跳过通知去重/落盘、方案 A 的 v1 主动轴门禁。
+  'test-session-proactive.mjs',
   // sessions.json 读写（P7 第三步续）：损坏/读失败降级为只读不写、缺字段补齐、可写才落盘。
   'test-session-store.mjs',
   // 会话映射表（P7 第三步收尾）：映射与策略指纹成对维护、isCurrent 三条件、state 被替换后仍有效。

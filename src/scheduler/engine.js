@@ -94,9 +94,10 @@ export function inQuietHours(ms, limits, tz) {
  *   log?: (msg) => void,
  *   audit?: (event, detail) => void,
  *   sensitive?: (text) => boolean,
+ *   onOutcome?: (payload: { task: object, outcomes: Array<{target:string,status:string,reason?:string}>, manual: boolean, source: string }) => void,
  * }} deps
  */
-export function createScheduler({ file, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false, taskKinds = null }) {
+export function createScheduler({ file, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false, taskKinds = null, onOutcome = null }) {
   const holidaySet = new Set(holidays);
   let data = { version: 1, settings: normalizeSettings(), tasks: [], history: [], counters: {}, nextId: 1 };
   let timer = null;
@@ -358,6 +359,19 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       return { schedule, scheduleText: describeSchedule(schedule), timezone: tz, next: times.map((t) => ({ at: t, text: describeInstant(t, tz) })) };
     },
 
+    /**
+     * 记录「主动未授权跳过」已经通知过创建者，按任务+日期去重。
+     * 返回 true 表示这是当天第一次，调用方应发通知；false 表示已通知过。
+     */
+    noteSkipNotice(id, day) {
+      const task = api.getTask(id);
+      if (!task || !day) return false;
+      if (task.skipNoticeDay === day) return false;
+      task.skipNoticeDay = String(day);
+      save();
+      return true;
+    },
+
     /** 立即执行一次（测试用；照样计入每日限额）。 */
     async runNow(id, { source }) {
       const task = api.getTask(id);
@@ -462,6 +476,10 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       }
     }
     save();
+    if (typeof onOutcome === 'function' && outcomes.length > 0) {
+      try { onOutcome({ task, outcomes, manual, source }); }
+      catch (error) { log(`⚠️ 定时任务结果回调失败 #${task.id}：${error?.message ?? error}`); }
+    }
     return { taskId: task.id, outcomes };
   }
 

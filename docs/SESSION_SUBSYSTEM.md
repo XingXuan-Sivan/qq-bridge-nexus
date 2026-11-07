@@ -1,6 +1,6 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分已实现（主动检查点未开工）；P3 未开工**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）。
+状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 未开工**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
@@ -384,7 +384,7 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 | --- | --- | --- | --- |
 | P0 稳定性 | DSH 自愈、启动对账、确定性命名、详情页只读 DSH 状态与重建按钮 | `src/bridge.js`、`src/session/registry.mjs`、`src/session/store.mjs`、`pages/sessions/` | 手动删 DSH 会话后下一条消息自动重建并回复；启动对账把缺失标 `missing`；新会话标题为 `QQ·群/私聊 …`；`scripts/test-session-lifecycle.mjs` 全过 |
 | P1 档案与详情页 | `state/sessions/` 目录（`defaults.json` + 每会话文件）、迁移、准入双轴、列表并集、详情页 P1、入口迁移、双清空动作 | `src/session/store.mjs`、`src/session/profiles.mjs`（新）、`src/session/access.mjs`（新）、`src/bridge.js`、`pages/sessions/`、`pages/persona/`、`pages/social-v2/`、`pages/access/` | 迁移样例判定与旧配置一致；旧文件/旧键不存在；目录可被启动扫描完整读回；列表显示无 DSH 映射的会话；详情页每卡独立保存；删除档案不影响其它会话；`test-session-profiles` + UI 全过 |
-| P2 运行模式与模型 | 会话级 mode/model/preset、全量 `currentMode` 调用点改 `effectiveMode`、主动检查点（scheduler/AI 跨会话工具）、任务跳过通知 | `src/session/profiles.mjs`、`src/session/mode-gate.mjs`、`src/bridge.js`、`src/scheduler/`、`pages/sessions/` | 同一时刻两个群可分别跑 v1/v2；改运行模式后下一次唤醒重建且工具集正确；主动被拒时任务跳过并通知；`test-session-mode` 全过 |
+| P2 运行模式与模型 | 会话级 mode/model/preset、全量 `currentMode` 调用点改 `effectiveMode`、主动检查点（scheduler/v1/v2 主动发言；AI 跨会话工具作为方案 B 后续）、任务跳过通知 | `src/session/{mode,directory,access}.mjs`、`src/session/policy.mjs`、`src/scheduler/`、`src/bridge.js`、`pages/sessions/` | 同一时刻两个群可分别跑 v1/v2；改运行模式后下一次唤醒重建且工具集正确；主动被拒时任务跳过并通知；AI 跨会话发送明确拒绝并说明「尚未实现」（方案 B，D17）；`test-session-mode`/`test-session-model`/`test-session-proactive` 全过 |
 | P3 多管理员 | `admins[]`、capability、审批多人、通知、closed-agent 级别、审计 actor、访问页 | `src/admin/`、`src/bridge.js`、`pages/access/`、`pages/sessions/` | 管理员能审批但不能改全局模式/权限/名单；owner 可增删管理员；审计有 actor；`test-admins` 全过 |
 
 ### 11.1 任务清单（执行时逐项勾，防止跳步）
@@ -421,13 +421,14 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [x] `test-session-mode.mjs`：`resolveEffectiveMode` 5/5（closed-agent 排他、非 owner inactive、覆盖、非法值）。
 - [ ] `test-session-mode.mjs` 的集成用例：两群 v1/v2 并存、真实重建、主动拒绝（当前只有 resolver 单测）。
 
-**P2b 会话模型（已完成）与主动检查点（未开工）**
+**P2b 会话模型与主动检查点（已完成，方案 B 留后续）**
 
 - [x] 会话级 model/thinking 保存校验与重建指纹（`profileModelSignature` 只在指定模型时进 `policyOf`）。
 - [x] `ensureChatModel` 按会话模型 `selectModel`；看图能力按该会话模型降级；详情模型/提供方/思考强度控件。
 - [x] `test-session-model.mjs` 5/5（签名进指纹、档案优先、全局回退、看图能力）。
-- [ ] 主动检查点：v1/v2 主动发言、scheduler、AI 跨会话工具。
-- [ ] 主动被拒的通知与活动日志（任务跳过原因回给创建者）。
+- [x] 主动检查点方案 A：v1/v2 主动发言、scheduler 都受主动轴约束；调度器拒绝时标记「跳过（主动未授权）」并按任务+日期去重通知创建者（`src/scheduler/skip-notice.js`、`noteSkipNotice`）。
+- [x] 主动被拒的通知与活动日志（任务跳过原因回给创建者；跨会话发送明确拒绝并说明「跨会话能力尚未实现」）。
+- [ ] 方案 B：开放 AI 跨会话工具（独立立项，复用主动轴；见 D17）。
 
 **P3 多管理员**
 
@@ -454,7 +455,7 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [ ] 单文件损坏只隔离该会话，不阻断启动，也不回写空档案。
 - [ ] 会话级写入没有回写全局配置。
 - [ ] 迁移幂等；`migratedAt` 之前失败不覆盖旧来源，之后崩溃能继续清理旧键。
-- [ ] 主动检查点覆盖 scheduler、AI 跨会话工具、v1/v2 主动发言。
+- [x] 主动检查点覆盖 scheduler 与 v1/v2 主动发言；AI 跨会话工具当前明确拒绝，作为方案 B 后续立项（D17）。
 - [ ] `currentMode === …` 的调用点清单全部过一遍，没有漏用 `effectiveMode`。
 - [ ] 控制台权限在服务端校验，不只隐藏按钮。
 - [ ] 门禁数字与 `STATUS.md` 一致；偏差表没有 `未处理` 条目。
@@ -481,4 +482,5 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-08：P0 落地（D13）：`ensureSession` 创建后确定性命名；`sessions.list` 启动/手动对账标 `online/missing/unknown`；prompt not-found 退役重建重试一次 + 60 秒 3 次熔断；`GET /api/sessions/<key>/dsh`、`POST /api/sessions/<key>/rebuild`、`POST /api/sessions/reconcile`；会话表 DSH 列与行内重建。
 - 2026-11-08：P1 主体落地：`state/sessions/` 目录与启动迁移（`migratedAt` 提交点、损坏隔离、旧文件/旧键清理）、`src/session/{directory,access,migrate}.mjs`、`/api/sessions` 并集、`GET/PATCH/DELETE /api/sessions/<key>/profile`、会话详情宽弹窗七卡（D14）、删除档案、列表行「管理/删档案」、双清空；persona/social-v2/access 三处按会话入口迁走；`test-session-directory` 7/7，static 全过、UI 28/28、audit 91/91。剩：profile 端点专项单测。
 - 2026-11-08：P2a 落地：`src/session/mode.mjs`（`resolveEffectiveMode`/`normalizeSessionMode`/`isUsableMode`）；桥接全部单会话门禁改 `effectiveMode(key)`（scheduler、压缩、静默补唤醒、入站/唤醒/内部输出、v2-only 端点、agent-token 全局门）；`modePreset` 支持档案 `presetId` 并进 policy 指纹；`GET/PATCH .../profile` 增 `mode/effectiveMode/presetId/presets`；详情加「运行」卡与「定时任务」只读卡；`test-session-mode` 5/5，static 全过、UI 28/28、audit 92/92。模型与主动检查点留 P2b。
-- 2026-11-08：P2b 模型部分落地（D16）：档案 `model` + `profileModelSignature` 进 policy 指纹；`ensureChatModel(sessionId,key)` 按会话模型 `selectModel`；`GET/PATCH .../profile` 增 `model/effectiveModel`（PATCH 走 `validateModelSelection`，目录不可用 503、非法 400）；`resolveMediaList`/`fetchMediaData` 与表情/形象/web 图按 `sessionCanSeeImages(key)` 降级；详情运行卡加提供方/模型/思考强度（保存同步全局默认）；`test-session-model` 5/5，static 全过、UI 28/28、audit 93/93。主动检查点未开工。
+- 2026-11-08：P2b 模型部分落地（D16）：档案 `model` + `profileModelSignature` 进 policy 指纹；`ensureChatModel(sessionId,key)` 按会话模型 `selectModel`；`GET/PATCH .../profile` 增 `model/effectiveModel`（PATCH 走 `validateModelSelection`，目录不可用 503、非法 400）；`resolveMediaList`/`fetchMediaData` 与表情/形象/web 图按 `sessionCanSeeImages(key)` 降级；详情运行卡加提供方/模型/思考强度（保存同步全局默认）；`test-session-model` 5/5，static 全过、UI 28/28、audit 93/93。
+- 2026-11-08：P2b 主动检查点方案 A 落地（D17）：scheduler 跳过项标记「未授权主动行为」并生成通知（`src/scheduler/skip-notice.js`），引擎按任务+日期去重（`noteSkipNotice`），桥接写活动/审计并私聊创建者；v1 仿真改 `socialEnabledForKey(key)` 逐会话启用，循环与随机触发都先过 `proactiveAllowed(key)`，主动被拒即退出活跃；跨会话 agent token 返回明确拒绝文案「跨会话能力尚未实现」。`test-session-proactive` 3/3，static 全过、UI 28/28、audit 94/94；方案 B（AI 跨会话工具）留后续。

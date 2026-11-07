@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十七个真实踩过的坑
+## 1. 四十八个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -273,6 +273,15 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 「运行总览 → 静默时段」的时段行原来是 `display:grid` 五列（启用/名称/时间段/哪些天/删），列宽用 `minmax()` 和比例分配。1600 宽看着正常，但窗口缩到 900 左右时每列都低于内容最小宽度，浏览器只能把控件挤成三行：开关+名称一行、时间+下拉+节假日一行、垃圾桶单独一行居中，完全不可读（2026-11-07 用户截图）。给开关定宽只解决了“两行下拉长度不一致”，没有解决窄屏折行。
 
 **规则**：这种「固定几列的编辑行」直接写成表格——`.table-wrap` + `<table class="silence-table">` + `<colgroup>` 固定列宽 + `min-width` 兜底，窄屏横向滚动而不是折行；单元格内控件 `width:100%`，表头文字就是列名。表格天然保证各列上下对齐，也顺带解决了“同一列长度不一致”。改完记得量 `scrollWidth > clientWidth` 才算真的可滚动，而不是把页面撑出横向溢出。
+
+### 1.48 表格迁移时，页面级的表结构 class 与折叠样式会一起丢
+
+「管理行为」页的可折叠分组表（`tr.group-row` + `tr.group-child`）在迁移后不能折叠、样式也没了。原因是折叠的交互与样式都挂在 `.tool-log-table` 这个页面级作用域上（`css/components.css` 里 `.tool-log-table tr.group-row {…}`、`.tool-log-table tr.group-child.hidden { display:none }`），而迁移后的 `#behaviorsBridge` 是组件产出的裸 `<table>`，既没有 `.table-wrap` 也没有 `.tool-log-table`：类名不匹配 → 组行没有底色/三角旋转，`.hidden` 也没有 `display:none`，点了等于没反应。原来自写的 click 处理器还在，但切的是 `hidden` 类，而类被样式忽略。
+
+**规则**：凡是「表格结构 + 交互」的能力，都归 `components/table`，页面只提供数据。
+- 分组折叠用 `groupedTableHtml({ columns, groups, openIndex })` + `initGroupedTables(root)`，组行带 `role="button"` / `aria-expanded`，键盘回车与空格也能切换；页面不要再手拼 `tr.group-row`、不要再写 `.hidden` 切换。
+- 样式写在组件自己的 `table.css` 里，用 `.table-wrap tr.group-row` 这种与页面无关的选择器；页面级 class（`.tool-log-table` 之类）只用来调列宽，不承载结构。
+- 迁移检查清单里加一问：**这张表原来的 class 和 CSS 是不是被留在了页面侧？** 搬 `page.html` 时把表结构一起搬进组件，别只搬数据。
 
 ## 2. 迁移一个页面的检查清单
 

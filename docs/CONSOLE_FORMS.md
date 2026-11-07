@@ -241,6 +241,7 @@ span.time-field
 表格分两层，按需要选：
 
 - **只有表体**：`tableHtml(columns, rows)`，适合卡片里嵌一张小表、或日志这类只读短表。样式仍来自 `components/table/table.css`，页面不要自己写 `<table>` 的边框/表头样式。
+- **分组可折叠**：`groupedTableHtml({ columns, groups, openIndex })` + `initGroupedTables(root)`。`groups` 是 `[{ label, key, rows }]`，每个组产出一行 `<tr class="group-row">`（整行 colspan、可点、可回车/空格）加若干 `<tr class="group-child" hidden>`；`initGroupedTables` 用事件委托绑一次即可（重新渲染 innerHTML 不用重绑），调用方不要再自己写 `tr.group-row` 的点击/样式。
 - **完整表格**：`dataTableHtml({ columns, rows, search, refresh, filters, pageSize, meta, empty })`，出一个自上而下的固定骨架，页面只提供数据：
 
 ```

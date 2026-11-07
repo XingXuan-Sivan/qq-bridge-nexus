@@ -1431,13 +1431,8 @@ button:not(.btn-icon):active:not(:disabled) {
   color:var(--muted-soft);
   background:none
 }
-/* 管理行为：表格容器与单元格全部复用框架的 .tool-log-table / table / .pill，这里只补分组行的展开状态 */
-.tool-log-table tr.group-row { cursor:pointer; user-select:none; background:var(--surface-sunken); }
-.tool-log-table tr.group-row td { color:var(--text-secondary); }
-.tool-log-table .caret { display:inline-block; width:14px; color:var(--muted); transition:transform .15s ease; }
-.tool-log-table tr.group-row.open .caret { transform:rotate(90deg); }
-.tool-log-table tr.group-child.hidden { display:none; }
-.tool-log-table tr.group-child td:first-child { padding-left:28px; }
+/* 管理行为：分组可折叠表格的样式已收进 components/table/table.css（.table-wrap tr.group-row），
+   页面只负责数据；这里不再保留页面级 group 样式。 */
 
 /* 警告块：状态类提示统一样式（原来写在 HTML 的内联 style 里，CSP 会拦）。
    显隐一律用 hidden 属性，由 base.css 的 [hidden]{display:none!important} 兜住。 */

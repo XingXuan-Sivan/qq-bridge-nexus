@@ -26,6 +26,62 @@ export function tableHtml(columns, rows) {
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
 
+/**
+ * 分组可折叠表格：一个组 = 一行组头（整行 colspan）+ 若干子行。
+ * 组头点击/回车折叠，子行用 hidden 属性显隐（不重建 DOM，筛选后重新渲染仍然可用）。
+ * @param {{columns: Array<{label:string, width?:number|string}>, groups: Array<{label:string, key?:string, rows: Array<Array<string>>}>, openIndex?: number}} options
+ */
+export function groupedTableHtml({ columns = [], groups = [], openIndex = 0 } = {}) {
+  const width = (column) => (column.width ? ` data-w="${String(column.width).replace('px', '')}"` : '');
+  const head = `<thead><tr>${columns.map((column) => `<th${width(column)}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const body = groups.map((group, index) => {
+    const key = group.key ?? group.label ?? String(index);
+    const open = index === openIndex;
+    const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(key)}" tabindex="0" role="button" aria-expanded="${open ? 'true' : 'false'}">`
+      + `<td colspan="${columns.length}"><span class="caret" aria-hidden="true">▸</span> ${esc(group.label || '')}`
+      + `${group.rows.length ? ` <span class="meta">${group.rows.length} 条</span>` : ''}</td></tr>`;
+    const childRows = group.rows.map((cells) => `<tr class="group-child" data-group="${esc(key)}"${open ? '' : ' hidden'}>`
+      + cells.map((cell) => `<td>${cell}</td>`).join('') + '</tr>').join('');
+    return groupRow + childRows;
+  }).join('');
+  return `<div class="table-wrap"><table class="table-grouped">${head}<tbody>${body}</tbody></table></div>`;
+}
+
+/**
+ * 给 groupedTableHtml 生成的组头绑定折叠：点击或回车/空格切换。
+ * 返回解绑函数；同一个容器只绑一次即可（重新渲染 innerHTML 不影响委托）。
+ */
+export function initGroupedTables(root = document) {
+  if (!root) return () => {};
+  const toggle = (row) => {
+    const open = !row.classList.contains('open');
+    row.classList.toggle('open', open);
+    row.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const key = row.dataset.group;
+    root.querySelectorAll('tr.group-child').forEach((child) => {
+      if (child.dataset.group === key) child.hidden = !open;
+    });
+  };
+  const onClick = (event) => {
+    const row = event.target.closest?.('tr.group-row');
+    if (!row || !root.contains(row)) return;
+    toggle(row);
+  };
+  const onKey = (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest?.('tr.group-row');
+    if (!row || !root.contains(row)) return;
+    event.preventDefault();
+    toggle(row);
+  };
+  root.addEventListener('click', onClick);
+  root.addEventListener('keydown', onKey);
+  return () => {
+    root.removeEventListener('click', onClick);
+    root.removeEventListener('keydown', onKey);
+  };
+}
+
 /** 页码序列：页数少时全列，多时首尾 + 当前页 ±1，中间用省略号。 */
 function pageNumbers(page, pages) {
   if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);

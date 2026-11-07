@@ -3,7 +3,7 @@
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
-import { tableHtml } from '../../components/table/table.js';
+import { groupedTableHtml, initGroupedTables, tableHtml } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { BEHAVIORS_FIELDS } from './fields.js';
 
@@ -23,31 +23,41 @@ function behaviorTable(rows) {
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(entry);
   }
-  const head = '<thead><tr><th data-w="200">指令</th><th data-w="92">类型</th>'
-    + '<th data-w="118">所属</th><th>描述</th><th data-w="84">权限</th>'
-    + '<th data-w="84">状态</th><th data-w="70">操作</th></tr></thead>';
-  const body = [...groups.entries()].map(([name, items], index) => {
-    const open = index === 0;
-    const groupRow = `<tr class="group-row${open ? ' open' : ''}" data-group="${esc(name)}">`
-      + `<td colspan="7"><span class="caret">▸</span> ${esc(name)} <span class="meta">${items.length} 条</span></td></tr>`;
-    const childRows = items.map((entry) => {
-      const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
-      const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
-      const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
-      const action = entry.source === 'plugin'
-        ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
-        : '<span class="meta">—</span>';
-      const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
-      return `<tr class="group-child${open ? '' : ' hidden'}" data-group="${esc(name)}">`
-        + `<td><code>${esc(entry.name)}</code>${aliases}</td>`
-        + `<td>${migrated}</td><td>${esc(source)}</td>`
-        + `<td>${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span></td>`
-        + `<td>${esc(BEHAVIOR_PERMISSION_LABEL[entry.permission] || entry.permission)}</td>`
-        + `<td>${status}</td><td>${action}</td></tr>`;
-    }).join('');
-    return groupRow + childRows;
-  }).join('');
-  return `<table>${head}<tbody>${body}</tbody></table>`;
+  // 分组可折叠表格交给表格组件（groupedTableHtml），页面只负责每组的单元格内容。
+  return groupedTableHtml({
+    openIndex: 0,
+    columns: [
+      { label: '指令', width: 200 },
+      { label: '类型', width: 92 },
+      { label: '所属', width: 118 },
+      { label: '描述' },
+      { label: '权限', width: 84 },
+      { label: '状态', width: 84 },
+      { label: '操作', width: 70 },
+    ],
+    groups: [...groups.entries()].map(([name, items]) => ({
+      label: name,
+      key: name,
+      rows: items.map((entry) => {
+        const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
+        const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
+        const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
+        const action = entry.source === 'plugin'
+          ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
+          : '<span class="meta">—</span>';
+        const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
+        return [
+          `<code>${esc(entry.name)}</code>${aliases}`,
+          migrated,
+          esc(source),
+          `${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span>`,
+          esc(BEHAVIOR_PERMISSION_LABEL[entry.permission] || entry.permission),
+          status,
+          action,
+        ];
+      }),
+    })),
+  });
 }
 
 async function refreshBehaviors() {
@@ -104,15 +114,8 @@ export function init() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { refreshBehaviors().catch(() => {}); }, 180);
   });
-  // 组行点击折叠/展开：层级由 group 派生，展开状态只在前端。
-  document.getElementById('behaviorsBridge')?.addEventListener('click', (event) => {
-    const row = event.target.closest?.('tr.group-row');
-    if (!row) return;
-    row.classList.toggle('open');
-    const name = row.dataset.group;
-    document.querySelectorAll(`#behaviorsBridge tr.group-child[data-group="${CSS.escape(name)}"]`)
-      .forEach((child) => child.classList.toggle('hidden'));
-  });
+  // 组行折叠由表格组件的 initGroupedTables 负责（事件委托绑在容器上，重新渲染 innerHTML 不用重绑）。
+  initGroupedTables(document.getElementById('behaviorsBridge'));
   onPageRefresh('behaviors', () => { refreshBehaviors().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
   refreshBehaviors().catch(() => {});

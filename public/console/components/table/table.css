@@ -24,6 +24,34 @@
   z-index: 1;
 }
 
+/* 分组可折叠表格（groupedTableHtml + initGroupedTables）：
+   组头是整行 colspan 的一行，可点/可回车；子行用 hidden 属性显隐（base.css 兜底 display:none）。 */
+.table-wrap tr.group-row {
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface-sunken);
+}
+.table-wrap tr.group-row td {
+  color: var(--text);
+  font-weight: 600;
+}
+.table-wrap tr.group-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.table-wrap .caret {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.table-wrap tr.group-row.open .caret {
+  transform: rotate(90deg);
+}
+.table-wrap tr.group-child td:first-child {
+  padding-left: 28px;
+}
+
 /* ---------- 完整表格（dataTableHtml）：工具栏 + 表体 + 分页 ----------
    一个「表格整体」的固定结构：上面是操作区（刷新/筛选/搜索 + 条数），中间表体，
    下面分页（区间/页码/每页条数）。表格外框仍复用 .table-wrap，页面不再自己拼。 */

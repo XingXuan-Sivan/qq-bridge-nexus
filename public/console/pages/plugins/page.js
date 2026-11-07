@@ -157,7 +157,9 @@ async function refreshPlugins() {
       list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
       return;
     }
-    list.innerHTML = `<div class="tile-list">${plugins.map((plugin) => {
+    // #pluginsList 本身已是 .tile-list（grid 容器），卡片直接作为它的子项；
+    // 再包一层 .tile-list 会让内层只占外层的一个网格列，卡片被迫单列。
+    list.innerHTML = plugins.map((plugin) => {
       const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
       const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
@@ -180,7 +182,7 @@ async function refreshPlugins() {
         ${error}
         <div class="row">${toggle}<button class="small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
       </div>`;
-    }).join('')}</div>`;
+    }).join('');
   } catch (error) {
     meta.textContent = '';
     list.innerHTML = `<div class="meta err">读取失败：${esc(error?.message || '未知错误')}</div>`;

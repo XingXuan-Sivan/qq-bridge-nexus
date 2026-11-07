@@ -407,7 +407,7 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [x] 迁移幂等与失败保护：写入 `.tmp`、回读校验、失败清理本次新目录内容并保留旧来源，不产生 `.bak`。
 - [x] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动（`scripts/test-session-directory.mjs` 7/7）。
 - [x] 控制台列表改并集数据源；筛选、搜索、行操作（管理/改名/重建/删档案）。
-- [x] 详情（`#sessions` 宽弹窗，见 D14）：七卡、每卡独立保存、显示无 DSH 映射的会话；**未做**关闭时的脏值确认。
+- [x] 详情（`#sessions` 宽弹窗，见 D14）：七卡、每卡独立保存、关闭前未保存确认、显示无 DSH 映射的会话。
 - [x] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
 - [x] 双清空动作：重建 DSH 会话 / 重置会话状态（复用 `/api/session/reset`）。
 - [ ] `test-session-profiles.mjs` + `test-session-migrate.mjs` + UI 用例；目前只有 `test-session-directory` 与真机探针覆盖。
@@ -472,4 +472,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-07：初稿。确定双轴三态、会话级运行模式、P1/P2 覆盖清单、v2 单文件、无备份/无旧读、双清空动作、owner+管理员。
 - 2026-11-08：按用户建议把存储从单文件改为 `state/sessions/` 目录（`defaults.json` + 每会话文件）；补充路径/字符集、启动扫描与损坏隔离、单文件原子写、`migratedAt` 迁移提交点与目录级判据。
 - 2026-11-08：P0 落地（D13）：`ensureSession` 创建后确定性命名；`sessions.list` 启动/手动对账标 `online/missing/unknown`；prompt not-found 退役重建重试一次 + 60 秒 3 次熔断；`GET /api/sessions/<key>/dsh`、`POST /api/sessions/<key>/rebuild`、`POST /api/sessions/reconcile`；会话表 DSH 列与行内重建。
-- 2026-11-08：P1 主体落地：`state/sessions/` 目录与启动迁移（`migratedAt` 提交点、损坏隔离、旧文件/旧键清理）、`src/session/{directory,access,migrate}.mjs`、`/api/sessions` 并集、`GET/PATCH/DELETE /api/sessions/<key>/profile`、会话详情宽弹窗七卡（D14）、删除档案、列表行「管理/删档案」、双清空；persona/social-v2/access 三处按会话入口迁走；`test-session-directory` 7/7，static 全过、UI 28/28、audit 91/91。剩：弹窗关闭脏值确认、profile 端点专项单测。
+- 2026-11-08：P1 主体落地：`state/sessions/` 目录与启动迁移（`migratedAt` 提交点、损坏隔离、旧文件/旧键清理）、`src/session/{directory,access,migrate}.mjs`、`/api/sessions` 并集、`GET/PATCH/DELETE /api/sessions/<key>/profile`、会话详情宽弹窗七卡（D14）、删除档案、列表行「管理/删档案」、双清空；persona/social-v2/access 三处按会话入口迁走；`test-session-directory` 7/7，static 全过、UI 28/28、audit 91/91。剩：profile 端点专项单测。

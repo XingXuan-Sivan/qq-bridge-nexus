@@ -304,6 +304,7 @@ async function saveRename() {
 // 一卡一件事、每卡独立保存：改准入不会顺手把没保存的提示词一起写掉。
 let detailKey = null;
 let detailCache = null;
+let detailDirty = false;
 
 function detailRow(label, control, hint = '') {
   return `<div class="control-row"><span class="control-label">${esc(label)}</span>`
@@ -328,6 +329,7 @@ function detailDshLabel(health, sessionId) {
 function renderDetail(data) {
   const body = document.getElementById('sessionDetailBody');
   if (!body) return;
+  detailDirty = false; // 重新渲染后表单与缓存一致，脏标记清零
   const wake = data.wake && typeof data.wake === 'object' ? data.wake : {};
   const triggers = wake.triggers && typeof wake.triggers === 'object' ? wake.triggers : {};
   const access = data.access || {};
@@ -569,8 +571,13 @@ export function init() {
 
   const detailOverlay = document.getElementById('sessionDetailOverlay');
   if (detailOverlay && detailOverlay.parentElement !== document.body) document.body.appendChild(detailOverlay);
-  wireModal(detailOverlay, { onClose: () => { detailKey = null; detailCache = null; } });
+  wireModal(detailOverlay, {
+    onBeforeClose: () => !detailDirty || window.confirm('详情里有未保存的改动，确定关闭？'),
+    onClose: () => { detailKey = null; detailCache = null; detailDirty = false; },
+  });
 
+  document.getElementById('sessionDetailBody')?.addEventListener('input', () => { detailDirty = true; });
+  document.getElementById('sessionDetailBody')?.addEventListener('change', () => { detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
     const save = event.target.closest('[data-detail-save]');
     if (save) { void saveDetail(save.dataset.detailSave); return; }

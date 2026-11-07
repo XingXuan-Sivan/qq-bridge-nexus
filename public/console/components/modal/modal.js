@@ -60,13 +60,15 @@ export function modalHtml({ id, title, body = '', footer = '', wide = false, tit
 /**
  * 绑定一次关闭行为（Esc、点遮罩、右上角 ×、任何 [data-modal-close]）。
  * @param {Element} overlay
- * @param {{ onClose?: () => void, closeOnBackdrop?: boolean, closeOnEscape?: boolean }} options
+ * @param {{ onClose?: () => void, onBeforeClose?: () => boolean, closeOnBackdrop?: boolean, closeOnEscape?: boolean }} options
  * @returns {() => void} 手动关闭函数（内部会跑 onClose）
  */
-export function wireModal(overlay, { onClose = null, closeOnBackdrop = true, closeOnEscape = true } = {}) {
+export function wireModal(overlay, { onClose = null, onBeforeClose = null, closeOnBackdrop = true, closeOnEscape = true } = {}) {
   if (!overlay) return () => {};
   const close = () => {
     if (!isModalOpen(overlay)) return;
+    // onBeforeClose 返回 false 时保持打开（例如详情里还有未保存的改动）。
+    if (typeof onBeforeClose === 'function' && onBeforeClose() === false) return;
     closeModal(overlay);
     onClose?.();
   };

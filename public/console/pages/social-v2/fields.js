@@ -236,25 +236,7 @@ export const V2_FIELDS = {
       { type: 'action', items: [{ id: 'v2ToolLogLoad', label: '加载工具日志' }, { id: 'v2ToolLogClear', label: '清空工具日志', variant: 'danger' }], status: 'v2ToolLogMsg' },
     ],
   },
-  wakeStatus: {
-    label: '唤醒状态',
-    fields: [
-      { name: 'v2WakeKeyField', type: 'custom', span: 2, label: '会话 key', html: WAKE_STATUS_ROW },
-    ],
-  },
-  initPrompt: {
-    label: '初始提示词',
-    fields: [
-      { name: 'v2InitPromptKeyField', type: 'custom', span: 2, label: '会话 key', html: INIT_PROMPT_ROW },
-      { name: 'v2InitPromptText', type: 'textarea', span: 2, rows: 5, label: '提示词正文', placeholder: '例如：这是一个偏技术的闲聊群，群友喜欢玩梗、聊模型和本地部署；氛围轻松，别长篇大论，遇到配置问题直接给结论。' },
-    ],
-  },
-  sessionPick: {
-    label: '白名单会话',
-    fields: [
-      { name: 'v2SessionPickField', type: 'custom', span: 2, label: '会话', html: SESSION_ROW },
-    ],
-  },
+  // 唤醒状态 / 初始提示词 / 白名单快选已迁到会话页（每会话的档案），这里不再生成控件。
   stateView: {
     label: '会话状态',
     fields: [

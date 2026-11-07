@@ -249,8 +249,8 @@ await test('R8 wake-config 丢弃未知 triggers 键（不落盘、不回传模�
       assert.equal('another' in res.json.wakeConfig.triggers, false);
       assert.equal(st.wakeConfig.triggers.junkKey, undefined, '内存态不得被污染');
       assert.equal(st.wakeConfig.triggers.atMention, true, '已知字段仍需生效');
-      const file = JSON.parse(fs.readFileSync(path.join(h.temp, 'state', 'social-v2.json'), 'utf8'));
-      assert.equal(file.conversations['qq:group:456'].wakeConfig.triggers.junkKey, undefined, '落盘文件不得含垃圾键');
+      const file = JSON.parse(fs.readFileSync(path.join(h.temp, 'state', 'sessions', 'qq', 'group', '456.json'), 'utf8'));
+      assert.equal(file.wake.config.triggers.junkKey, undefined, '落盘档案不得含垃圾键');
     });
   } finally { await h.close(); }
 });

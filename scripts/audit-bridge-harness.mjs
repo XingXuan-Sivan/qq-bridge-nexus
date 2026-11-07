@@ -49,6 +49,10 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 // bridge.js 以 `sessionAllowed` 的别名引用它，sandbox 里要用同名键。
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
+// 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
+import { createProfile, createSessionDirectoryWriter, loadSessionDirectory } from '../src/session/directory.mjs';
+import { resolveAccess } from '../src/session/access.mjs';
+import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
@@ -197,6 +201,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ownerTranscript, pendingHandover, reconcileSessionPolicies, recordOwnerTranscript, recordSentMessagesV2,
     scheduler, scheduledNotes, handleRemindCommand, silence, scheduledSilenceFor, silenceTick, shouldBlockSilentReply,
     roleRefresh, currentRoleFingerprintV2, roleRefreshBlockV2, refreshRoleNowV2, currentRoleHintV2, currentRoleHint, roleNameForKey, readRoleState,
+    writeRoleStateFull,
     stickerDescribeJob, learnerWaiters, stickerDescribeBlocker,
     tokenMiss, rotateAgentTokenV2, promptBlocks, stickerBlockTextV2, slangBlockText,
     sessionLastInput, maybeAutoCompact, compactConversation, compactAttemptAt, recordSessionUsage, noteSendLimitedV2, sendLimitSummaryV2, runBackfill, scheduleBackfill, backfillNotices, seenMsgIds, backfillUnfinished, upstreamGap, noteUpstreamPacket,
@@ -257,6 +262,11 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // sessions.json 读写（P7 第三步续）：同样被 bridge.js import，夹具剥 import 后要补回。
     loadSessionState,
     saveSessionState,
+    createProfile,
+    createSessionDirectoryWriter,
+    loadSessionDirectory,
+    resolveAccess,
+    migrateSessionProfiles,
     createSessionRegistry,
     createSessionPolicy,
     createSnowlumaHealth,

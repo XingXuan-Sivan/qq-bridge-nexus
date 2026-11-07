@@ -115,46 +115,7 @@ export const PERSONA_FIELDS = {
     ],
   },
 
-  // ── 按会话设置人格 ────────────────────────────────────────────────────────
-  assign: {
-    fields: [
-      {
-        type: 'custom',
-        name: 'roleAssignList',
-        span: 2,
-        html: '<div id="roleAssignList" class="u-mt-8">加载中…</div>',
-      },
-      {
-        type: 'custom',
-        name: 'roleAssignAddPanel',
-        label: '会话',
-        span: 2,
-        html: `<div class="control-row">
-  <input class="control-grow" type="text" id="roleAssignKey" placeholder="group:群号 或 private:QQ号" autocomplete="off">
-  <span class="control-fixed u-flex-basis-max-220"><select id="roleAssignNewUse"></select></span>
-  <button type="button" class="btn" id="roleAssignAdd">添加</button>
-</div>`,
-      },
-      {
-        type: 'radio',
-        name: 'roleAssignApply',
-        label: '保存后',
-        value: 'nextWake',
-        options: [
-          { value: 'nextWake', label: '下次唤醒时重新读卡' },
-          { value: 'immediate', label: '立即切换（现在就唤醒这个会话读新卡）' },
-        ],
-        span: 2,
-        hint: '生效方式只看这一组，和上面「切换当前启用的人格」的选项各管各的。',
-      },
-      {
-        type: 'custom',
-        name: 'roleAssignMsg',
-        span: 2,
-        html: '<div class="meta" id="roleAssignMsg"></div>',
-      },
-    ],
-  },
+  // ── 按会话设置人格（入口已迁到会话与审批页，这里不再生成控件） ────────────
 
   // ── 人格来源（只读） ──────────────────────────────────────────────────────
   sources: {

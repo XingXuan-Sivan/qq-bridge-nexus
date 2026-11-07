@@ -125,12 +125,14 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 212 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 202 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    // 暂停/恢复合并成一个开关后 218→217（-2 +1）；二代「轻量记忆」整组收进记忆页后 217→212（-5）。数字写死是为了防止「悄悄删 id」，
-    // 需要增减时连同 pages/*/fields.js 的改动一起改这里。
-    assert.equal(legacyIds.length, 212);
-    assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
+    // 暂停/恢复合并成一个开关后 218→217（-2 +1）；二代「轻量记忆」整组收进记忆页后 217→212（-5）；
+    // 会话级准入/人格/唤醒/提示词迁到会话详情后 212→202（-10：访问页四个白名单框、二代唤醒与会话快选）。
+    // 数字写死是为了防止「悄悄删 id」，需要增减时连同 pages/*/fields.js 的改动一起改这里。
+    assert.equal(legacyIds.length, 202);
+    const missing = legacyIds.filter(x => !ids.includes(x));
+    assert.deepEqual(missing, []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
 
@@ -143,7 +145,7 @@ try {
       assert(visiblePages.length > 0, `${view} has no visible content`);
       assert(visiblePages.every(x => x === view), `${view} exposes another page: ${visiblePages.join(', ')}`);
     }
-    const drafts = { wlGroups: '100001, 100002', roleInput: '未保存的角色', v2AgentPreset: 'draft-preset', sKeywords: '未保存关键词', tsMsg: '未发送的测试消息' };
+    const drafts = { ownerQQ: '100999', roleInput: '未保存的角色', v2AgentPreset: 'draft-preset', sKeywords: '未保存关键词', tsMsg: '未发送的测试消息' };
     for (const [id, value] of Object.entries(drafts)) await fill(id, value);
     // 「手动添加」表单已搬进弹窗（关闭状态不可见，fill 会超时）：直接写 DOM 值，仍然验证「轮询不吞草稿」。
     await page.evaluate(() => { document.getElementById('slangMeaning').value = '未保存的含义'; });
@@ -274,8 +276,8 @@ try {
   });
 
   await test('Whitelist numeric parsing and security contracts', async () => {
-    for (const [id, value] of Object.entries({ wlGroups: '123456789，100003', wlPrivate: '100001 100002', dnGroups: '800001,800002', dnPrivate: '900001', ownerQQ: '100001' })) await fill(id, value);
-    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: [100001, 100002], groups: [123456789, 100003] }, deny: { private: [900001], groups: [800001, 800002] }, ownerQQ: '100001' });
+    await fill('ownerQQ', '100001');
+    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: [100001], groups: [123456789, 100003] }, deny: { private: [], groups: [] }, ownerQQ: '100001' });
     await check('secInterceptNotify', false);
     assert.deepEqual(await clickWrite('#secSave', '/api/security'), { interceptNotify: false });
   });

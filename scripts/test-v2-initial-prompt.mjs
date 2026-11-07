@@ -59,6 +59,7 @@ const ENV_TEXT = '这是一个二次元 + 技术混合的群：群友喜欢玩�
 await test('保存后可读回、key 归一化，并在重启后从文件恢复', async () => {
   const h = await bridgeHarness();
   let persisted = '';
+  let persistedDefaults = '';
   let savedKey = '';
   try {
     await withServer(h, async (port) => {
@@ -86,20 +87,24 @@ await test('保存后可读回、key 归一化，并在重启后从文件恢复'
       assert.ok(list.json.entries[0].preview.length <= 80, '列表只给预览，不回整段内容');
       assert.ok(Number.isInteger(list.json.maxChars) && list.json.maxChars > 0, '列表返回当前字数上限');
 
-      // 落盘：键是归一后的 key，内容是原文
-      const file = path.join(h.temp, 'state', 'initial-prompts.json');
-      assert.ok(fs.existsSync(file), '必须写入 state/initial-prompts.json');
+      // 落盘：提示词在会话档案里（state/sessions/<platform>/<kind>/<id>.json）
+      const file = path.join(h.temp, 'state', 'sessions', 'qq', 'group', '456.json');
+      assert.ok(fs.existsSync(file), '必须写入会话档案 state/sessions/qq/group/456.json');
       persisted = fs.readFileSync(file, 'utf8');
+      persistedDefaults = fs.readFileSync(path.join(h.temp, 'state', 'sessions', 'defaults.json'), 'utf8');
       const onDisk = JSON.parse(persisted);
-      assert.equal(onDisk['qq:group:456'].text, ENV_TEXT);
-      assert.ok(onDisk['qq:group:456'].updatedAt > 0, '记录更新时间');
+      assert.equal(onDisk.prompt.initialText, ENV_TEXT);
+      assert.ok(onDisk.prompt.updatedAt > 0, '记录更新时间');
     });
   } finally { await h.close(); }
 
-  // 重启：用上一次落盘的文件新建一个桥接实例
-  const h2 = await bridgeHarness({ files: { 'state/initial-prompts.json': persisted } });
+  // 重启：目录连同 defaults 一起还原（真实重启的形态）
+  const h2 = await bridgeHarness({ files: {
+    'state/sessions/defaults.json': persistedDefaults,
+    'state/sessions/qq/group/456.json': persisted,
+  } });
   try {
-    assert.equal(h2.getInitialPrompt(savedKey)?.text, ENV_TEXT, '重启后从 state/initial-prompts.json 恢复');
+    assert.equal(h2.getInitialPrompt(savedKey)?.text, ENV_TEXT, '重启后从会话档案恢复');
   } finally { await h2.close(); }
 });
 
@@ -208,20 +213,23 @@ await test('initialPromptMaxChars 的越界配置被收敛到 100~8000', async (
   }
 });
 
-// ── 6. 文件损坏时只读降级，绝不覆盖原文件 ────────────────────────────────────
-await test('initial-prompts.json 损坏时降级为只读，保存失败且原文件保持不变', async () => {
+// ── 6. 单个会话档案损坏时隔离，不影响其它会话写入 ────────────────────────────
+await test('会话档案损坏时被隔离，保存新提示词仍可用且原文件原样保留', async () => {
   const broken = '{ this is not json';
-  const h = await bridgeHarness({ files: { 'state/initial-prompts.json': broken } });
+  const brokenFile = 'state/sessions/qq/group/456.json';
+  const h = await bridgeHarness({ files: { [brokenFile]: broken } });
   try {
-    assert.equal(h.getInitialPrompt('qq:group:456'), null, '损坏文件不产生条目');
+    assert.equal(h.getInitialPrompt('qq:group:456'), null, '损坏档案不产生条目');
     await withServer(h, async (port) => {
       const list = await call(port, '/api/socialV2/initial-prompt', { headers: ADMIN });
-      assert.equal(list.json.writable, false, '损坏时应标记为不可写');
+      assert.equal(list.json.writable, true, '单个档案损坏不应让整个目录只读');
       const save = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: 'abc' } });
-      assert.equal(save.status, 500, '只读降级下保存必须失败');
-      assert.equal(h.getInitialPrompt('qq:group:456'), null, '失败后内存也要回滚');
-      const onDisk = fs.readFileSync(path.join(h.temp, 'state', 'initial-prompts.json'), 'utf8');
-      assert.equal(onDisk, broken, '原文件必须原样保留，等待人工修复');
+      assert.equal(save.status, 200, '损坏档案被隔离后应能正常保存');
+      assert.equal(h.getInitialPrompt('qq:group:456')?.text, 'abc');
+      const dir = path.join(h.temp, 'state', 'sessions', 'qq', 'group');
+      const quarantined = fs.readdirSync(dir).filter((name) => name.includes('.corrupt-'));
+      assert.equal(quarantined.length, 1, '损坏文件应被改名为 .corrupt-*');
+      assert.equal(fs.readFileSync(path.join(dir, quarantined[0]), 'utf8'), broken, '隔离文件必须原样保留');
     });
   } finally { await h.close(); }
 });
@@ -287,25 +295,15 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
 });
 
 // ── 9. 控制台静态接线（无浏览器环境下的替代回归） ────────────────────────────
-await test('控制台有初始提示词面板，且事件/接口都已接线', async () => {
+await test('初始提示词已迁到会话详情，persona/二代旧面板不再重复', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = readConsoleSource(root);
-  // 控件已搬进 pages/social-v2/fields.js：静态 id 直接写在标签里，动态生成的（keyRow / renderFields）写成规格项。
-  const occurrences = (id) => [
-    new RegExp(`id="${id}"`, 'g'),
-    new RegExp(`id: '${id}'`, 'g'),
-    new RegExp(`name: '${id}'`, 'g'),
-    new RegExp(`status: '${id}'`, 'g'),
-  ].reduce((sum, re) => sum + (html.match(re) ?? []).length, 0);
-  for (const id of ['v2InitPromptKey', 'v2InitPromptText', 'v2InitPromptLoad', 'v2InitPromptSave', 'v2InitPromptClear', 'v2InitPromptMsg', 'v2InitPromptCount', 'v2InitPromptMax']) {
-    const n = occurrences(id);
-    assert.equal(n, 1, `控制台元素 ${id} 必须在源码里定义一次且唯一（实际 ${n} 处）`);
-  }
-  assert.match(html, /getElementById\('v2InitPromptSave'\)\.addEventListener/, '保存按钮已绑定事件');
-  assert.match(html, /api\('\/api\/socialV2\/initial-prompt'/, '面板调用 /api/socialV2/initial-prompt');
-  assert.match(html, /仅在首次唤醒|只在.*首次唤醒/, '面板要说明"仅首次唤醒生效"这一关键行为');
-  // 面板不得在页面加载时自动请求接口（否则离线 fixture 与请求基线都会变）
-  assert.ok(!/window\.addEventListener\('load'[\s\S]{0,400}initial-prompt/.test(html), '面板不应在页面加载时自动拉取');
+  // P1 起初始提示词只在「会话与审批 → 管理 → 初始提示词」里维护。
+  assert.ok(html.includes('data-detail-save="prompt"'), '会话详情有提示词保存按钮');
+  assert.match(html, /\/profile`, 'PATCH'/, '提示词走档案 PATCH');
+  assert.match(html, /prompt\.maxChars/, '提示词卡显示上限');
+  assert.ok(html.includes('只在 AI 第一次进入这个会话时读一次'), '说明仅首次唤醒生效');
+  assert.ok(!html.includes('v2InitPromptText'), '二代页不再保留旧提示词面板');
 });
 
 if (failures) {

@@ -122,8 +122,13 @@ async function withHarness(run, files = {}) {
     await h.close();
   }
 }
-const writeRoleFile = (h, obj) => fs.writeFileSync(path.join(h.temp, 'state/current-role.json'), JSON.stringify(obj));
-const readRoleFile = (h) => JSON.parse(fs.readFileSync(path.join(h.temp, 'state/current-role.json'), 'utf8'));
+// 人格按会话的设置已迁到 state/sessions/ 档案；测试通过真实写入路径（写档案）模拟，读取时再投影成旧的 byKey 形状。
+const writeRoleFile = (h, obj) => h.writeRoleStateFull(obj);
+const readRoleFile = (h) => {
+  const s = h.readRoleState();
+  const byKey = s.byKey && Object.keys(s.byKey).length ? s.byKey : undefined;
+  return { role: s.role, mode: s.mode, ...(byKey ? { byKey } : {}) };
+};
 
 test('② 注入：各会话拿到自己的卡；不挂卡的会话没有角色；穿越名字读不到外面的文件', async () => {
   await withHarness(async (h) => {
@@ -308,22 +313,13 @@ test('④ QQ 命令 /role 只改当前会话', async () => {
   });
 });
 
-test('⑤ 控制台：人格页有「按会话设置人格」', () => {
-  // 控件已搬进 pages/persona/fields.js（readConsoleSource 会把 page.html/css/js/fields 拼在一起），
-  // 所以这里不再按 <details> 切片找 id，而是对整份源码断言；id/name 允许出现在 HTML 或字段规格里。
+test('⑤ 控制台：人格页把按会话设置人格迁到会话详情', () => {
+  // P1 起，单会话人格不再写在 persona 页，而是会话详情的「人格」卡；persona 页只留指路说明。
   const html = readConsoleSource();
-  const i = html.indexOf('data-group="assign"');
-  assert.ok(i > html.indexOf('<section id="section-persona"'), '在人格与角色页里');
-  for (const id of ['roleAssignList', 'roleAssignKey', 'roleAssignNewUse', 'roleAssignAdd', 'roleAssignMsg']) {
-    assert.ok(html.includes(`id="${id}"`) || html.includes(`id: '${id}'`) || html.includes(`name: '${id}'`), id);
-  }
-  assert.match(html, /api\('\/api\/roles\/assign', 'POST'/);
-  assert.match(html, /renderRoleAssignments\(r\)/, '刷新人格列表时一起刷新');
-  assert.match(html, /onPageRefresh\('persona', \(\) => \{/, '进入人格页自动刷新（路由回调）');
-  assert.match(html, /getCurrentPage\(\) === 'persona' && !document\.hidden\) refreshRoleAssignments\(\)/, '停在人格页定时刷新');
-  assert.match(html, /box\.contains\(document\.activeElement\)\) return/, '正在操作下拉框时不打断');
-  assert.match(html, /const roleAssignDirty = new Map\(\)/, '没保存的选择单独记着');
-  assert.match(html, /textContent = '未保存'/, '标出未保存');
-  assert.ok(html.includes('name="roleAssignApply"') || html.includes(`name: 'roleAssignApply'`), '按会话设置有自己的一组生效方式');
-  assert.match(html, /function roleAssignBody\(key, value\) \{\n  const apply = roleAssignApplyMode\(\);/, '保存时只看这一组');
+  assert.match(html, /data-group="assign"/, 'persona 页保留入口卡');
+  assert.ok(html.includes('去会话与审批'), 'persona 页说明已迁移');
+  assert.match(html, /href="#sessions"/, 'persona 页给出跳转');
+  assert.ok(html.includes('data-detail-save="persona"'), '会话详情有人格保存按钮');
+  assert.match(html, /\/profile`, 'PATCH'/, '人格走档案 PATCH');
+  assert.match(html, /data-detail-save="prompt"/, '提示词也在会话详情');
 });

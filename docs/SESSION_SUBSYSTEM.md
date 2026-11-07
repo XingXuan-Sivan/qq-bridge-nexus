@@ -1,7 +1,7 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0 已实现，P1–P3 代码未动**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表（详情子页在 P1 才建，见 D13）。
-关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D12；未完成项见 `STATUS.md` #16。
+状态：**P0 已实现；P1 主体已实现（剩脏值确认与 profile 专项用例）；P2–P3 代码未动**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）。
+关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
 
@@ -400,17 +400,17 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 
 **P1 档案与详情页**
 
-- [ ] `src/session/store.mjs` 改目录存储：扫描/校验/缓存、单文件 `.tmp` + rename、损坏隔离、删除顺序。
-- [ ] `src/session/profiles.mjs`：schema、默认值、读取/合并、三态解析、`blocked` 优先。
-- [ ] `src/session/access.mjs`：被动/主动判定唯一入口；替换旧 `allowed()` 调用。
-- [ ] `state/sessions/` 迁移：旧绑定、人格、提示词、唤醒、allow/deny → `defaults.json` + 每会话文件；提交点 `migratedAt` 后再删旧文件/旧键。
-- [ ] 迁移幂等与失败保护：写入 `.tmp`、回读校验、失败清理本次新目录内容并保留旧来源，不产生 `.bak`。
-- [ ] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动。
-- [ ] 控制台列表改并集数据源；筛选、搜索、新增会话、行操作。
-- [ ] 详情子页 `#sessions/<key>`：P1 八卡、每卡独立保存、脏值守卫、返回保留筛选。
-- [ ] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
-- [ ] 双清空动作：重建 DSH 会话 / 重置会话状态（文案、勾选项、权限）。
-- [ ] `test-session-profiles.mjs` + `test-session-migrate.mjs` + UI 用例。
+- [x] 目录存储（落在 `src/session/directory.mjs`）：扫描/校验/缓存、单文件 `.tmp` + rename、损坏隔离、删除顺序。
+- [x] schema 与默认值（同文件 `createProfile`/`normalizeProfile`/`applyPatch`）：读取/合并、三态解析、`blocked` 优先。
+- [x] `src/session/access.mjs`：被动/主动判定唯一入口；替换旧 `allowed()` 调用。
+- [x] `state/sessions/` 迁移：旧绑定、人格、提示词、唤醒、allow/deny → `defaults.json` + 每会话文件；提交点 `migratedAt` 后再删旧文件/旧键。
+- [x] 迁移幂等与失败保护：写入 `.tmp`、回读校验、失败清理本次新目录内容并保留旧来源，不产生 `.bak`。
+- [x] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动（`scripts/test-session-directory.mjs` 7/7）。
+- [x] 控制台列表改并集数据源；筛选、搜索、行操作（管理/改名/重建/删档案）。
+- [x] 详情（`#sessions` 宽弹窗，见 D14）：七卡、每卡独立保存、显示无 DSH 映射的会话；**未做**关闭时的脏值确认。
+- [x] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
+- [x] 双清空动作：重建 DSH 会话 / 重置会话状态（复用 `/api/session/reset`）。
+- [ ] `test-session-profiles.mjs` + `test-session-migrate.mjs` + UI 用例；目前只有 `test-session-directory` 与真机探针覆盖。
 
 **P2 运行模式与模型**
 
@@ -472,3 +472,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-07：初稿。确定双轴三态、会话级运行模式、P1/P2 覆盖清单、v2 单文件、无备份/无旧读、双清空动作、owner+管理员。
 - 2026-11-08：按用户建议把存储从单文件改为 `state/sessions/` 目录（`defaults.json` + 每会话文件）；补充路径/字符集、启动扫描与损坏隔离、单文件原子写、`migratedAt` 迁移提交点与目录级判据。
 - 2026-11-08：P0 落地（D13）：`ensureSession` 创建后确定性命名；`sessions.list` 启动/手动对账标 `online/missing/unknown`；prompt not-found 退役重建重试一次 + 60 秒 3 次熔断；`GET /api/sessions/<key>/dsh`、`POST /api/sessions/<key>/rebuild`、`POST /api/sessions/reconcile`；会话表 DSH 列与行内重建。
+- 2026-11-08：P1 主体落地：`state/sessions/` 目录与启动迁移（`migratedAt` 提交点、损坏隔离、旧文件/旧键清理）、`src/session/{directory,access,migrate}.mjs`、`/api/sessions` 并集、`GET/PATCH/DELETE /api/sessions/<key>/profile`、会话详情宽弹窗七卡（D14）、删除档案、列表行「管理/删档案」、双清空；persona/social-v2/access 三处按会话入口迁走；`test-session-directory` 7/7，static 全过、UI 28/28、audit 91/91。剩：弹窗关闭脏值确认、profile 端点专项单测。

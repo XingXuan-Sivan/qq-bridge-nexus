@@ -4,3 +4,65 @@
   /* 会话行里「DSH 会话」是最长的一列，窄屏优先让操作列可点，别把按钮挤出屏幕。 */
   #sessionList table { table-layout:auto }
 }
+
+/* 会话详情：宽弹窗里按「一卡一件事」排，每卡自己保存。 */
+.session-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.session-detail-key {
+  font-weight: 600;
+}
+.session-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+.detail-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 12px);
+  padding: 16px;
+  background: var(--surface);
+  min-width: 0;
+}
+.detail-card--wide {
+  grid-column: 1 / -1;
+}
+.detail-card h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.detail-card .meta {
+  margin-bottom: 12px;
+}
+.detail-card .field-row + .field-row {
+  margin-top: 10px;
+}
+.detail-card .control-row + .control-row {
+  margin-top: 10px;
+}
+.detail-card textarea {
+  min-height: 120px;
+}
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.detail-readonly {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.detail-danger .btn.danger {
+  margin-right: 8px;
+}
+@media (max-width: 900px) {
+  .session-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}

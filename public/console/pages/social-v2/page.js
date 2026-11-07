@@ -372,157 +372,6 @@ function loadV2ToolLog() {
     .catch(() => { renderV2ToolLog([]); });
 }
 
-function formatWakeStatus(r) {
-  if (!r || !r.ok) return '<span class="meta">加载失败</span>';
-  const wc = r.wakeConfig || {};
-  const lines = [];
-  const mode = wc.mode === 'active' ? '活跃（任何消息都会唤醒）' : (wc.mode === 'diving' ? '潜水' : (wc.mode || '未知'));
-  lines.push(`<div><b>模式：</b>${esc(mode)}</div>`);
-  lines.push(`<div><b>无限期：</b>${wc.infinite ? '是' : '否'}</div>`);
-  const safety = r.wakeSafety || {};
-  const badge = safety.guaranteed ? '🟢 已保证' : '🔴 无保证';
-  lines.push(`<div><b>唤醒保证：</b>${badge}${safety.stale ? '（配置较旧，未确认）' : ''}</div>`);
-  let next = '';
-  if (wc.mode === 'active' || wc.triggers?.anyMessage) {
-    next = '任何新消息都会唤醒';
-  } else if (wc.sleepUntil) {
-    const until = new Date(wc.sleepUntil).getTime();
-    const remain = until - Date.now();
-    if (!Number.isFinite(remain)) next = '时间格式无效';
-    else if (remain > 0) next = `约 ${Math.max(1, Math.round(remain / 1000))} 秒后（${new Date(wc.sleepUntil).toLocaleString()}）`;
-    else next = '已到期，等待下一次唤醒';
-  } else if (wc.infinite) {
-    next = '无限期潜水，等待指定条件';
-  } else {
-    next = '未设置时间';
-  }
-  lines.push(`<div><b>下次唤醒：</b>${esc(next)}</div>`);
-  const tr = wc.triggers || {};
-  const conds = [];
-  if (tr.atMention) conds.push('@');
-  if (tr.nameMention) conds.push('名字');
-  if (Array.isArray(tr.keywords) && tr.keywords.length) conds.push('关键词：' + tr.keywords.join('、'));
-  if (Array.isArray(tr.speakerIds) && tr.speakerIds.length) conds.push('指定成员：' + tr.speakerIds.join('、'));
-  if (tr.question) conds.push('提问');
-  if (tr.poke) conds.push('拍一拍');
-  if (tr.anyMessage) conds.push('任何消息');
-  if (Number(tr.probability) > 0) conds.push('普通消息概率 ' + Number(tr.probability));
-  lines.push(`<div><b>提前唤醒条件：</b>${conds.length ? esc(conds.join('；')) : '（无）'}</div>`);
-  lines.push(`<div><b>最近唤醒原因：</b>${esc(r.lastWakeReason || '-')}</div>`);
-  lines.push(`<div><b>唤醒次数：</b>${Number(wc.wakeCount) || 0}</div>`);
-  if (wc.confirmedAt) {
-    const ago = Math.max(0, Math.round((Date.now() - wc.confirmedAt) / 60000));
-    lines.push(`<div><b>配置确认：</b>${ago} 分钟前（${esc(wc.confirmedBy || 'unknown')}）</div>`);
-  }
-  if (r.lastAiReplyAt) {
-    const ago = Math.max(0, Math.round((Date.now() - r.lastAiReplyAt) / 60000));
-    lines.push(`<div><b>上次发言：</b>${ago} 分钟前</div>`);
-  }
-  lines.push(`<div><b>未读：</b>${Number(r.unreadCount) || 0} 条</div>`);
-  return '<div class="u-p-8">' + lines.join('') + '</div>';
-}
-function loadV2WakeStatus() {
-  const key = fv('v2WakeKey').trim();
-  const msg = document.getElementById('v2WakeStatusMsg');
-  if (!key) { setMsg(msg, '请输入会话 key', 'err'); return; }
-  msg.textContent = '加载中…';
-  msg.className = 'meta';
-  return api('/api/socialV2/state?key=' + encodeURIComponent(key))
-    .then(r => {
-      document.getElementById('v2WakeStatusOutput').innerHTML = formatWakeStatus(r);
-      msg.textContent = r.ok ? '✅ 已加载' : ('❌ ' + (r.error || '失败'));
-      msg.className = r.ok ? 'meta ok' : 'meta err';
-    })
-    .catch(e => {
-      setMsg(msg, '❌ ' + (e.message || e), 'err');
-    });
-}
-
-// ── 初始提示词（每个会话一份，只在 AI 首次唤醒时注入一次） ────────────────────
-let v2InitPromptTextEl = null;
-function v2InitPromptKeyValue() { return fv('v2InitPromptKey').trim(); }
-function setV2InitPromptMsg(text, kind) {
-  const msg = document.getElementById('v2InitPromptMsg');
-  msg.textContent = text;
-  msg.className = 'meta' + (kind ? ' ' + kind : '');
-}
-function updateV2InitPromptCount() {
-  document.getElementById('v2InitPromptCount').textContent = String(v2InitPromptTextEl.value.length);
-}
-function applyV2InitPromptMax(maxChars) {
-  const max = Math.round(Number(maxChars));
-  if (!Number.isFinite(max) || max <= 0) return;
-  document.getElementById('v2InitPromptMax').textContent = String(max);
-  v2InitPromptTextEl.maxLength = max;
-}
-function renderV2InitPromptEntries(entries) {
-  const box = document.getElementById('v2InitPromptList');
-  if (!Array.isArray(entries) || !entries.length) { box.textContent = '（还没有任何会话设置初始提示词）'; return; }
-  box.innerHTML = entries.map((e) => {
-    const when = Number(e.updatedAt) > 0 ? new Date(Number(e.updatedAt)).toLocaleString() : '未知时间';
-    return `<div class="u-my-3"><code>${esc(e.key)}</code> · ${Number(e.chars) || 0} 字符 · ${esc(when)} <button class="small" data-init-prompt-key="${esc(e.key)}">编辑</button></div>`;
-  }).join('');
-}
-async function loadV2InitialPrompt() {
-  const key = v2InitPromptKeyValue();
-  setV2InitPromptMsg('加载中…');
-  try {
-    const r = await api('/api/socialV2/initial-prompt' + (key ? '?key=' + encodeURIComponent(key) : ''));
-    if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
-    applyV2InitPromptMax(r.maxChars);
-    const readOnly = r.writable === false;
-    if (!key) {
-      renderV2InitPromptEntries(r.entries);
-      setV2InitPromptMsg(readOnly ? '⚠️ 文件不可写（只读降级），只显示已有内容' : `✅ 共 ${(r.entries || []).length} 条`, readOnly ? 'err' : 'ok');
-      return;
-    }
-    v2InitPromptTextEl.value = r.text || '';
-    updateV2InitPromptCount();
-    document.getElementById('v2InitPromptList').textContent = r.exists
-      ? '该会话已设置初始提示词；再点「保存」会覆盖。'
-      : '该会话还没有设置初始提示词；填写后点「保存」新建。';
-    if (readOnly) setV2InitPromptMsg('⚠️ 文件不可写（只读降级）：能看不能存', 'err');
-    else setV2InitPromptMsg(r.exists ? '✅ 已加载' : '（空）', r.exists ? 'ok' : '');
-  } catch (e) {
-    setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
-  }
-}
-async function saveV2InitialPrompt() {
-  const key = v2InitPromptKeyValue();
-  if (!key) { setV2InitPromptMsg('请输入会话 key（group:群号 或 private:QQ号）', 'err'); return; }
-  setV2InitPromptMsg('保存中…');
-  try {
-    const r = await api('/api/socialV2/initial-prompt', 'POST', { key, text: v2InitPromptTextEl.value });
-    if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
-    applyV2InitPromptMax(r.maxChars);
-    if (r.deleted) {
-      v2InitPromptTextEl.value = '';
-      updateV2InitPromptCount();
-      setV2InitPromptMsg('✅ 内容为空，已删除该会话的初始提示词', 'ok');
-    } else {
-      setV2InitPromptMsg(`✅ 已保存（${r.chars} 字符），该会话下一次首次唤醒时注入`, 'ok');
-    }
-  } catch (e) {
-    setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
-  }
-}
-
-async function loadV2SessionOptions() {
-  const sel = document.getElementById('v2SessionSelect');
-  const prev = sel.value;
-  try {
-    const r = await api('/api/status');
-    const groups = Array.isArray(r.allowGroups) ? r.allowGroups : [];
-    const privates = Array.isArray(r.allowPrivate) ? r.allowPrivate : [];
-    const options = [{ value: '', label: '选择白名单群/私聊…' }];
-    for (const g of groups) options.push({ value: 'group:' + g, label: '群 ' + g });
-    for (const p of privates) options.push({ value: 'private:' + p, label: '私聊 ' + p });
-    sel.innerHTML = options.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
-    if (prev && options.some((o) => o.value === prev)) sel.value = prev;
-  } catch (e) {
-    sel.innerHTML = '<option value="">无法加载白名单</option>';
-  }
-}
 
 async function refreshV2Activity() {
   try {
@@ -558,38 +407,6 @@ function bindEvents() {
       cell.classList.add('expanded');
       cell.textContent = full;
     }
-  });
-  document.getElementById('v2WakeStatusLoad').addEventListener('click', loadV2WakeStatus);
-  document.getElementById('v2InitPromptLoad').addEventListener('click', loadV2InitialPrompt);
-  document.getElementById('v2InitPromptSave').addEventListener('click', saveV2InitialPrompt);
-  document.getElementById('v2InitPromptClear').addEventListener('click', async () => {
-    const key = v2InitPromptKeyValue();
-    if (!key) { setV2InitPromptMsg('请输入会话 key', 'err'); return; }
-    if (!confirm(`确定删除 ${key} 的初始提示词？`)) return;
-    try {
-      const r = await api('/api/socialV2/initial-prompt', 'POST', { key, delete: true });
-      if (!r.ok) { setV2InitPromptMsg('❌ ' + (r.error || '失败'), 'err'); return; }
-      v2InitPromptTextEl.value = '';
-      updateV2InitPromptCount();
-      setV2InitPromptMsg('✅ 已删除', 'ok');
-    } catch (e) {
-      setV2InitPromptMsg('❌ ' + (e.message || e), 'err');
-    }
-  });
-  v2InitPromptTextEl.addEventListener('input', updateV2InitPromptCount);
-  document.getElementById('v2InitPromptList').addEventListener('click', (ev) => {
-    const btn = ev.target.closest('button[data-init-prompt-key]');
-    if (!btn) return;
-    setValue('v2InitPromptKey', btn.dataset.initPromptKey || '');
-    loadV2InitialPrompt();
-  });
-  document.getElementById('v2SessionRefresh').addEventListener('click', loadV2SessionOptions);
-  document.getElementById('v2SessionSelect').addEventListener('change', (ev) => {
-    const key = ev.target.value;
-    if (!key) return;
-    setValue('v2StateKey', key);
-    setValue('v2WakeKey', key);
-    setValue('v2InitPromptKey', key);
   });
   document.getElementById('v2ConfigSave').addEventListener('click', saveV2Config);
   document.getElementById('v2ConfigSaveTop')?.addEventListener('click', saveV2Config);
@@ -696,7 +513,6 @@ const setValue = (id, value) => {
 export function init() {
   if (pageInitialized) return;
   pageInitialized = true;
-  v2InitPromptTextEl = null;
   const formRoot = document.getElementById('section-social-v2') ?? document;
   // 字段由 fields.js 的规格渲染，页面 HTML 只保留分组外壳与说明文字。
   // layout:'inline' 用于顶部状态条这类「字段直接排在一条 flex 行里」的场景。
@@ -705,7 +521,6 @@ export function init() {
     if (spec) renderFields(host, spec.fields, { columns: 2, layout: host.dataset.v2Layout || 'grid' });
   }
   // 必须在 renderFields 之后取：长文本/输入框都是刚渲染出来的，提前取会拿到 null。
-  v2InitPromptTextEl = document.getElementById('v2InitPromptText');
   v2Form = createForm(formRoot, {});
   // 表格字段（工具开关）的搜索/分页/刷新由组件统一绑定；页面只提供「刷新=重读配置」。
   initDataTables(formRoot, { onRefresh: () => { void loadV2Config(); } });
@@ -714,7 +529,6 @@ export function init() {
   void loadV2Config();
   void refreshV2Activity();
   void loadV2ToolLog();
-  void loadV2SessionOptions();
   // 语音库首次进入按需拉取（会逐个 ffprobe，不能放进轮询）。
   void loadVoiceLibrary(false);
   void refreshStickerDescribe();
@@ -723,6 +537,5 @@ export function init() {
     // 不重拉整份配置：那会把用户还没保存的草稿（如 agentPreset 下拉）冲掉。
     // 配置只在首次进入与保存成功后加载。
     void refreshV2Activity();
-    if (fv('v2WakeKey').trim()) void loadV2WakeStatus();
   });
 }

@@ -136,8 +136,11 @@ import { buildCommandsPayload } from './commands/payload.mjs';
 import { createSessionResetter } from './session/reset.mjs';
 // 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from './session/mode-gate.mjs';
-// sessions.json 的读写与「损坏后不覆盖」不变量（P7 第三步续），见模块头。
-import { loadSessionState, saveSessionState } from './session/store.mjs';
+// 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
+import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
+import { resolveAccess, resolveAccessSummary } from './session/access.mjs';
+import { migrateSessionProfiles } from './session/migrate.mjs';
+import { loadSessionState } from './session/store.mjs';
 import { createSessionRegistry } from './session/registry.mjs';
 import { createSessionPolicy } from './session/policy.mjs';
 // 人格三层解析（会话覆盖 → provider → 全局本地卡），见 docs/PERSONA_PROVIDER.md。
@@ -150,6 +153,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const STATE_DIR = path.join(ROOT, 'state');
 const STATE_FILE = path.join(STATE_DIR, 'sessions.json');
+// 会话档案目录（SESSION_SUBSYSTEM.md §3）：默认策略 + 每会话一个文件。
+const SESSION_DIR = path.join(STATE_DIR, 'sessions');
 // 版本号（控制中心与 /api/status 显示）。
 const BRIDGE_VERSION = (() => {
   try { return String(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version ?? 'unknown'); } catch { return 'unknown'; }
@@ -717,15 +722,45 @@ function appendActivity(line) {
 // 读取角色/模式状态：{"role": "傲娇助手", "mode": "active"|"silent", "byKey"?: { "group:123": "名字" | null }}
 // byKey 是按会话单独设置的人格卡（见 src/role-per-key.js）；读的时候人格名和会话 key 都重新校验。
 function readRoleState() {
-  return normalizeRoleState(readJsonSafe(ROLE_STATE_FILE, { role: null, mode: 'active' }));
+  const base = normalizeRoleState(readJsonSafe(ROLE_STATE_FILE, { role: null, mode: 'active' }));
+  // 按会话的人格已迁到 state/sessions/ 档案；这里只做内存投影，调用方（roleNameFor/roleSourceFor）无需改签名。
+  const byKey = {};
+  for (const [key, profile] of Object.entries(state?.profiles ?? {})) {
+    if (profile?.persona?.mode === 'card' && profile.persona.name) byKey[key] = profile.persona.name;
+    else if (profile?.persona?.mode === 'off') byKey[key] = null;
+  }
+  return { ...base, byKey };
 }
-// 只改全局人格 / 静默状态：各会话单独的设置原样保留
+// 只改全局人格 / 静默状态：各会话单独的设置原样保留（现在保存在会话档案里）。
 function writeRoleState(role, mode) {
-  const cur = readRoleState();
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', byKey: cur.byKey }));
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', byKey: {} }));
 }
 function writeRoleStateFull(next) {
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState(next));
+  const normalized = normalizeRoleState(next);
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: normalized.role, mode: normalized.mode, byKey: {} }));
+  applyRoleAssignmentsToProfiles(normalized.byKey);
+  saveState();
+}
+/** 把 `byKey`（null=off、名字=card）写回会话档案；未出现的 key 表示跟随全局。 */
+function applyRoleAssignmentsToProfiles(byKey = {}) {
+  const profiles = state?.profiles ?? {};
+  const seen = new Set();
+  for (const [rawKey, value] of Object.entries(byKey)) {
+    const canonical = canonicalConversationKey(rawKey);
+    if (!canonical) continue;
+    seen.add(canonical);
+    const profile = profiles[canonical];
+    if (!profile) continue;
+    profile.persona = value === null ? { mode: 'off', name: null } : { mode: 'card', name: value };
+    profile.updatedAt = Date.now();
+  }
+  for (const [key, profile] of Object.entries(profiles)) {
+    if (seen.has(key)) continue;
+    if (profile.persona?.mode === 'card' || profile.persona?.mode === 'off') {
+      profile.persona = { mode: 'inherit', name: null };
+      profile.updatedAt = Date.now();
+    }
+  }
 }
 /** 这个会话实际用哪张卡（null = 不挂卡）；不传 key 时是全局默认。 */
 function roleNameForKey(key) {
@@ -1240,19 +1275,71 @@ const sessions = createSessionRegistry(() => state);
 // saveState() 会把这份空映射原子写回磁盘 —— 一次截断/占用/写满就变成永久丢失。
 // 与表情库、黑话库一样走「只读不写」降级：保留原文件，等人来处理。
 let stateWritable = true;
+let sessionDirectory = null;
 function loadState() {
-  const loaded = loadSessionState({
-    file: STATE_FILE,
-    readFile: (file) => fs.readFileSync(file, 'utf8'),
-    log,
-    normalizeDormant,
-  });
+  const loaded = loadSessionDirectory({ dir: SESSION_DIR, fs, path, log });
   state = loaded.state;
   stateWritable = loaded.writable;
+  sessionDirectory = null;
+  // 迁移前不能投影：投影会把 config 里的旧 allow/deny 覆盖成「目录里的空集合」，
+  // 迁移就读不到旧白名单了。迁移完成后由 runSessionDirectoryMigration() 再刷新。
+  if (Number(state.migratedAt) > 0) refreshAccessProjection();
 }
 function saveState() {
-  // 统一走原子写；`stateWritable:false`（读失败/损坏）时绝不回写 —— 见 src/session/store.mjs 文件头。
-  saveSessionState({ file: STATE_FILE, atomicWriteJson, state, writable: stateWritable });
+  // 统一走原子写；`stateWritable:false`（读失败/损坏）时绝不回写 —— 见 src/session/directory.mjs 文件头。
+  if (!stateWritable) return;
+  if (!sessionDirectory) {
+    sessionDirectory = createSessionDirectoryWriter({ dir: SESSION_DIR, fs, path, atomicWriteJson, log });
+  }
+  sessionDirectory.save(state);
+  refreshAccessProjection();
+}
+
+/** 确保某个会话有档案（自动发现的会话也留一条空档案，方便控制台直接看到/编辑）。 */
+function ensureSessionProfile(rawKey, patch = {}) {
+  const parsed = parseKey(rawKey);
+  if (!parsed) return null;
+  const canonical = buildKey(parsed.kind, parsed.id);
+  if (!state.profiles) state.profiles = {};
+  if (!state.profiles[canonical]) {
+    state.profiles[canonical] = createProfile(canonical, patch);
+    return state.profiles[canonical];
+  }
+  return state.profiles[canonical];
+}
+
+/**
+ * 把 `state.profiles` 的被动轴投影成旧的 `cfg.allow/deny` 形状，供现有 `allowed()` / `modeAllowed()`
+ * 调用点继续使用（P1 只替换真相来源，不重写 20 多处调用点；P2 再改成显式 access 参数）。
+ * 投影只存在内存，不写回 config.json；`defaults.passive=allow` 时用「空 allow + deny 例外」表达黑名单。
+ */
+function refreshAccessProjection() {
+  // 迁移完成前，config 里的 allow/deny 才是真相；此时投影会把旧白名单冲掉。
+  if (!(Number(state?.migratedAt) > 0)) return;
+  const cfg = bridgeCfg;
+  if (!cfg || typeof cfg !== 'object') return;
+  const ownerKey = cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null;
+  const groups = [];
+  const privates = [];
+  const denyGroups = [];
+  const denyPrivates = [];
+  const defaultAllow = state?.defaults?.passive === 'allow';
+  for (const [key, profile] of Object.entries(state?.profiles ?? {})) {
+    const parsed = parseKey(key);
+    if (!parsed) continue;
+    const id = String(parsed.id);
+    const target = parsed.kind === 'group' ? groups : privates;
+    const denied = parsed.kind === 'group' ? denyGroups : denyPrivates;
+    if (profile.blocked || profile.access?.passive === 'deny') denied.push(id);
+    else if (profile.access?.passive === 'allow') target.push(id);
+  }
+  if (!defaultAllow && ownerKey) {
+    const ownerId = idOfKey(ownerKey);
+    if (ownerId && !privates.includes(String(ownerId)) && !denyPrivates.includes(String(ownerId))) privates.push(String(ownerId));
+  }
+  cfg.allow = { groups, private: privates };
+  cfg.deny = { groups: denyGroups, private: denyPrivates };
+  cfg.allowAllWhenEmpty = defaultAllow;
 }
 
 // ── 单实例锁 ─────────────────────────────────────────────────────────────────
@@ -5634,8 +5721,16 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/sessions') {
           // 控制台「会话」页的唯一数据源：把桥接知道的、和这个会话有关的东西一次给全，
           // 页面不再为了凑一行去依次打 4 个接口。**这里只读**——改名走 /api/session/rename。
+          //
+          // P1：数据源是「档案目录 ∪ 现有绑定」。只建了档案、还没有 DSH 会话的群/私聊
+          // 也要出现在列表里（sessionId=null，页面显示「未建」），否则在详情页改完准入
+          // 就找不到这个会话了。
+          const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
+          const keys = new Set([...sessions.keys(), ...Object.keys(state.profiles ?? {})]);
           const list = [];
-          for (const [key, sessionId] of sessions.entries()) {
+          for (const key of [...keys].sort()) {
+            const sessionId = sessions.get(key) ?? null;
+            const profile = state.profiles?.[key] ?? null;
             const policy = typeof sessions.policyOf === 'function' ? sessions.policyOf(key) : null;
             // policyOf() 返回的是指纹 JSON 数组字符串（[mode, preset, ownerQQ, level?, preset?]），
             // 不是对象；早期版本这里当成对象取字段，结果三个字段永远是 null。
@@ -5652,20 +5747,38 @@ async function main() {
             }
             const resolved = personaResolver ? personaResolver.resolve(key) : null;
             const conv = socialV2?.conversations?.get(key) ?? null;
+            const personaOverride = profile?.persona ?? null;
+            let persona;
+            if (personaOverride?.mode === 'off') {
+              persona = { source: 'none', name: null, stale: false };
+            } else if (personaOverride?.mode === 'card' && personaOverride.name) {
+              persona = { source: 'session', name: personaOverride.name, stale: false };
+            } else if (resolved) {
+              persona = { source: resolved.source ?? 'none', name: resolved.name ?? null, stale: Boolean(resolved.stale) };
+            } else {
+              persona = { source: 'none', name: null, stale: false };
+            }
             list.push({
               key,
               sessionId,
-              owner: key === sessionKey('private', String(cfg.ownerQQ ?? '')),
+              owner: key === ownerKey,
               kind: isGroupKey(key) ? 'group' : 'private',
               id: idOfKey(key),
               mode: policyMode,
               preset: policyPreset,
               level: policyLevel,
-              // 人格卡的来源：card=全局卡、provider=外部来源（如 soulkit）、none=没挂卡。
+              displayName: profile?.displayName ?? null,
+              blocked: profile?.blocked === true,
+              hasProfile: Boolean(profile),
+              // P1：两根轴各自「显式值 + 生效值」，详情页据此渲染三态与来源。
+              access: {
+                ...resolveAccessSummary(key, state, { ownerPrivate: key === ownerKey }),
+                passiveValue: profile?.access?.passive ?? 'inherit',
+                proactiveValue: profile?.access?.proactive ?? 'inherit',
+              },
+              // 人格卡的来源：card=全局卡、provider=外部来源（如 soulkit）、session=档案里固定的人格、none=没挂卡。
               // stale 表示 provider 这次没取到、用的是上一版缓存。
-              persona: resolved
-                ? { source: resolved.source ?? 'none', name: resolved.name ?? null, stale: Boolean(resolved.stale) }
-                : { source: 'none', name: null, stale: false },
+              persona,
               unread: Array.isArray(conv?.unread) ? conv.unread.length : 0,
               lastWakeAt: Number(conv?.wakeConfig?.lastWakeAt) || 0,
               // P0：DSH 侧健康度（online / missing / unknown）。只读，重建走 /rebuild。
@@ -5707,6 +5820,108 @@ async function main() {
             } catch (error) {
               sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status === 404 ? 404 : 502);
             }
+            return;
+          }
+          sendJson({ ok: false, error: '不支持的请求' }, 405);
+          return;
+        }
+        // P1 会话档案：详情页读取/保存「显示名、准入、人格、提示词」四张卡。
+        // 唤醒卡继续走 socialV2 的既有唤醒接口（它已经写档案）；记忆卡走记忆子系统。
+        const profileSessionMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/profile$/);
+        if (profileSessionMatch) {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          let key;
+          try { key = apiKey(decodeURIComponent(profileSessionMatch[1])); }
+          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
+          const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
+          const profile = state.profiles?.[key] ?? null;
+          const sessionId = sessions.get(key) ?? null;
+          if (req.method === 'GET') {
+            if (!profile && !sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+            const resolved = personaResolver ? personaResolver.resolve(key) : null;
+            const wake = profile?.wake?.config ?? socialV2?.conversations?.get(key)?.wakeConfig ?? null;
+            sendJson({
+              ok: true,
+              key,
+              sessionId,
+              displayName: profile?.displayName ?? null,
+              blocked: profile?.blocked === true,
+              access: {
+                ...resolveAccessSummary(key, state, { ownerPrivate: key === ownerKey }),
+                passiveValue: profile?.access?.passive ?? 'inherit',
+                proactiveValue: profile?.access?.proactive ?? 'inherit',
+                defaults: { ...(state.defaults ?? {}) },
+              },
+              persona: {
+                mode: profile?.persona?.mode ?? 'inherit',
+                name: profile?.persona?.name ?? null,
+                resolved: resolved ? { source: resolved.source ?? 'none', name: resolved.name ?? null, stale: Boolean(resolved.stale) } : null,
+              },
+              prompt: {
+                text: profile?.prompt?.initialText ?? '',
+                updatedAt: Number(profile?.prompt?.updatedAt) || 0,
+                maxChars: Number(cfg.socialV2?.initialPromptMaxChars) || 2000,
+              },
+              wake,
+              dsh: getDshHealth(key, sessionId),
+            });
+            return;
+          }
+          if (req.method === 'PATCH') {
+            if (!profile) { sendJson({ ok: false, error: '会话档案不存在，请先建立会话' }, 404); return; }
+            const body = await readBody();
+            const patch = {};
+            if (Object.hasOwn(body, 'displayName')) {
+              const name = String(body.displayName ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
+              patch.displayName = name || null;
+            }
+            if (Object.hasOwn(body, 'blocked')) patch.blocked = body.blocked === true;
+            if (body.access && typeof body.access === 'object') {
+              patch.access = {};
+              for (const axis of ['passive', 'proactive']) {
+                if (!Object.hasOwn(body.access, axis)) continue;
+                const v = body.access[axis];
+                if (!['inherit', 'allow', 'deny'].includes(v)) { sendJson({ ok: false, error: `准入取值无效：${axis}` }, 400); return; }
+                patch.access[axis] = v;
+              }
+            }
+            if (body.persona && typeof body.persona === 'object') {
+              patch.persona = {};
+              if (Object.hasOwn(body.persona, 'mode')) {
+                const mode = body.persona.mode;
+                if (!['inherit', 'card', 'off'].includes(mode)) { sendJson({ ok: false, error: '人格模式无效' }, 400); return; }
+                patch.persona.mode = mode;
+                if (mode !== 'card') patch.persona.name = null;
+              }
+              if (Object.hasOwn(body.persona, 'name')) {
+                const name = sanitizeRoleName(body.persona.name);
+                if (!name) { sendJson({ ok: false, error: '人格名不能为空' }, 400); return; }
+                patch.persona.mode = 'card';
+                patch.persona.name = name;
+              }
+            }
+            if (body.prompt && typeof body.prompt === 'object' && Object.hasOwn(body.prompt, 'text')) {
+              const max = Number(cfg.socialV2?.initialPromptMaxChars) || 2000;
+              const text = String(body.prompt.text ?? '');
+              if (text.length > max) { sendJson({ ok: false, error: `提示词超过上限（${max} 字）` }, 400); return; }
+              patch.prompt = { initialText: text, updatedAt: Date.now() };
+            }
+            if (!Object.keys(patch).length) { sendJson({ ok: false, error: '没有要保存的字段' }, 400); return; }
+            const next = normalizeProfile(applyPatch(profile, patch), { key });
+            state.profiles[key] = next;
+            saveState();
+            refreshAccessProjection();
+            log(`控制台：会话档案已更新 ${key}`);
+            sendJson({ ok: true, key, profile: next });
+            return;
+          }
+          if (req.method === 'DELETE') {
+            if (!profile) { sendJson({ ok: false, error: '会话档案不存在' }, 404); return; }
+            delete state.profiles[key];
+            saveState();
+            refreshAccessProjection();
+            log(`控制台：会话档案已删除 ${key}`);
+            sendJson({ ok: true, key });
             return;
           }
           sendJson({ ok: false, error: '不支持的请求' }, 405);
@@ -6748,7 +6963,8 @@ async function main() {
             }
           }
           // 沉睡前强制观察窗口：除非对方明确结束、或已经安静/等待足够时间，否则不允许 AI 聊两句就设置潜水。
-          if (isSleepingConfigV2(next) && preSleepWaitBlockedV2(st)) {
+          // 控制台是人在操作，不受这条「AI 自律」约束（否则详情页改唤醒永远被拦）。
+          if (isSleepingConfigV2(next) && preSleepWaitBlockedV2(st) && req.headers['x-agent-token']) {
             const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
             const remaining = Math.max(0, preSleepMs - ((st.lastIncomingAt || 0) ? Date.now() - st.lastIncomingAt : 0));
             const remainMin = Math.ceil(remaining / 60000);
@@ -10818,12 +11034,14 @@ async function main() {
             agentToken = crypto.randomBytes(16).toString('hex');
           }
           seenTokens.add(agentToken);
+          const profile = state.profiles?.[key] ?? null;
+          if (profile && !profile.wake) profile.wake = { config: null };
           const st = {
             wakeConfig: {
               ...defaultWc,
-              ...(val.wakeConfig ?? {}),
+              ...(profile?.wake?.config ?? val.wakeConfig ?? {}),
               // 加载时也按已知字段过滤：旧状态文件里可能残留任意键（见 WAKE_TRIGGER_KEYS）。
-              triggers: pickWakeTriggersV2((val.wakeConfig?.triggers) ?? {}, defaultWc.triggers)
+              triggers: pickWakeTriggersV2(((profile?.wake?.config ?? val.wakeConfig)?.triggers) ?? {}, defaultWc.triggers)
             },
             recentMessages: Array.isArray(val.recentMessages) ? val.recentMessages : [],
             unread: Array.isArray(val.unread) ? val.unread : [],
@@ -10905,8 +11123,12 @@ async function main() {
     try {
       const obj = { paused: socialV2.paused, conversations: Object.create(null) };
       for (const [key, st] of socialV2.conversations) {
+        const profile = ensureSessionProfile(key);
+        if (profile) {
+          profile.wake = { config: st.wakeConfig };
+          profile.updatedAt = Date.now();
+        }
         obj.conversations[key] = {
-          wakeConfig: st.wakeConfig,
           recentMessages: st.recentMessages.slice(-200),
           unread: st.unread.slice(-100),
           lastWakeReason: st.lastWakeReason,
@@ -10927,6 +11149,7 @@ async function main() {
         };
       }
       atomicWriteJson(SOCIAL_V2_FILE, obj);
+      saveState();
     } catch (error) {
       log('保存 socialV2 状态失败:', error?.message ?? error);
     }
@@ -10964,44 +11187,15 @@ async function main() {
    * 否则内存里的空映射会在下一次保存时把原文件覆盖掉，操作者写的内容永久丢失。
    */
   function loadInitialPrompts() {
-    let raw;
-    try {
-      raw = fs.readFileSync(INITIAL_PROMPTS_FILE, 'utf8');
-    } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        initialPromptsWritable = false;
-        log(`⚠️ initial-prompts.json 读取失败，已降级为「只读不写」（不会覆盖原文件）：${error?.message ?? error}`);
-      }
-      return;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw);
-    } catch (error) {
-      initialPromptsWritable = false;
-      log(`⚠️ initial-prompts.json 内容损坏，已降级为「只读不写」（请先备份再修复）：${error?.message ?? error}`);
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      initialPromptsWritable = false;
-      log('⚠️ initial-prompts.json 结构异常（期望 { "key": { "text": … } } 对象），已降级为「只读不写」');
-      return;
-    }
-    for (const [key, value] of Object.entries(parsed)) {
-      // 只接受规范 key；__proto__/constructor 这类脏键在这里就被过滤掉。
-      const canonical = canonicalV2Key(key);
-      if (!canonical) continue;
-      // 注意：这里**不按上限截断**。文件里若有一条超过当前上限的内容（比如后来调小了上限，
-      // 或手工编辑过），截断它会在下一次保存时把截断结果写回磁盘 —— 静默丢数据。
-      // 上限只在「保存」和「注入」两个出口生效。
-      const text = normalizeInitialPromptText(value && typeof value === 'object' ? value.text : value);
+    initialPrompts.clear();
+    initialPromptsWritable = stateWritable;
+    for (const [key, profile] of Object.entries(state?.profiles ?? {})) {
+      const text = normalizeInitialPromptText(profile?.prompt?.initialText);
       if (!text) continue;
-      const createdAt = Number(value && typeof value === 'object' ? value.createdAt : 0);
-      const updatedAt = Number(value && typeof value === 'object' ? value.updatedAt : 0);
-      initialPrompts.set(canonical, {
+      initialPrompts.set(key, {
         text,
-        createdAt: Number.isFinite(createdAt) ? createdAt : 0,
-        updatedAt: Number.isFinite(updatedAt) ? updatedAt : 0
+        createdAt: 0,
+        updatedAt: Number(profile.prompt.updatedAt) || 0,
       });
     }
     if (initialPrompts.size) log(`已加载 ${initialPrompts.size} 条会话初始提示词`);
@@ -11009,20 +11203,161 @@ async function main() {
 
   function saveInitialPrompts() {
     if (!initialPromptsWritable) {
-      log('⚠️ initial-prompts.json 处于只读降级状态，本次修改不会落盘');
+      log('⚠️ 会话档案处于只读降级状态，本次初始提示词修改不会落盘');
       return false;
     }
     try {
-      const obj = Object.create(null);
-      for (const [key, entry] of initialPrompts) {
-        obj[key] = { text: entry.text, createdAt: entry.createdAt || 0, updatedAt: entry.updatedAt || 0 };
+      for (const [key, profile] of Object.entries(state?.profiles ?? {})) {
+        const entry = initialPrompts.get(key);
+        const text = entry ? normalizeInitialPromptText(entry.text) : '';
+        profile.prompt = { initialText: text, updatedAt: entry?.updatedAt || 0 };
+        profile.updatedAt = Date.now();
       }
-      atomicWriteJson(INITIAL_PROMPTS_FILE, obj);
+      saveState();
       return true;
     } catch (error) {
       log('保存会话初始提示词失败:', error?.message ?? error);
       return false;
     }
+  }
+
+  /**
+   * 一次性把旧的会话配置迁进 `state/sessions/`（SESSION_SUBSYSTEM.md §9）。
+   *
+   * 顺序：写 defaults(migratedAt=0) + 全部会话文件 → 回读校验 → 把 migratedAt 写成当前时间
+   * → 删除旧 sessions.json / initial-prompts.json / 人格 byKey / config allow-deny / social wakeConfig。
+   * 提交点之前失败：保留旧文件，清理本次写出的目录内容，启动失败；提交点之后失败：旧源已可删。
+   */
+  function runSessionDirectoryMigration() {
+    const configFile = path.join(ROOT, 'config.json');
+    const legacyFile = STATE_FILE;
+    const cleanupLegacy = () => {
+      try { fs.rmSync(legacyFile, { force: true }); } catch (error) { log(`⚠️ 删除旧 sessions.json 失败：${error?.message ?? error}`); }
+      try { fs.rmSync(INITIAL_PROMPTS_FILE, { force: true }); } catch (error) { log(`⚠️ 删除旧 initial-prompts.json 失败：${error?.message ?? error}`); }
+      try {
+        const roleRaw = readJsonSafe(ROLE_STATE_FILE, { role: null, mode: 'active' });
+        if (roleRaw && typeof roleRaw === 'object' && Object.hasOwn(roleRaw, 'byKey')) {
+          const { byKey, ...rest } = roleRaw;
+          atomicWriteJson(ROLE_STATE_FILE, rest);
+        }
+      } catch (error) { log(`⚠️ 清理人格 byKey 失败：${error?.message ?? error}`); }
+      try {
+        const file = readConfigObject(configFile);
+        let changed = false;
+        for (const key of ['allow', 'deny', 'allowAllWhenEmpty']) {
+          if (Object.hasOwn(file, key)) { delete file[key]; changed = true; }
+        }
+        if (changed) atomicWriteJson(configFile, file);
+      } catch (error) { log(`⚠️ 清理旧白名单键失败：${error?.message ?? error}`); }
+      try {
+        if (fs.existsSync(SOCIAL_V2_FILE)) {
+          const raw = JSON.parse(fs.readFileSync(SOCIAL_V2_FILE, 'utf8'));
+          let changed = false;
+          for (const value of Object.values(raw.conversations ?? {})) {
+            if (value && typeof value === 'object' && Object.hasOwn(value, 'wakeConfig')) {
+              delete value.wakeConfig;
+              changed = true;
+            }
+          }
+          if (changed) atomicWriteJson(SOCIAL_V2_FILE, raw);
+        }
+      } catch (error) { log(`⚠️ 清理 social-v2 wakeConfig 失败：${error?.message ?? error}`); }
+    };
+
+    if (Number(state.migratedAt) > 0) {
+      cleanupLegacy();
+      refreshAccessProjection();
+      return;
+    }
+
+    const legacyExists = fs.existsSync(legacyFile) || fs.existsSync(INITIAL_PROMPTS_FILE);
+    const legacyConfigKeys = Object.hasOwn(cfg, 'allow') || Object.hasOwn(cfg, 'deny') || Object.hasOwn(cfg, 'allowAllWhenEmpty');
+    if (!legacyExists && !legacyConfigKeys && Object.keys(state.profiles ?? {}).length === 0) {
+      // 全新安装：直接落一份空目录（默认拒绝），不制造旧来源。
+      state.defaults = { passive: 'deny', proactive: 'deny' };
+      state.migratedAt = Date.now();
+      sessionDirectory = null;
+      saveState();
+      log('会话档案目录已初始化：state/sessions/（默认拒绝，按会话授权）');
+      return;
+    }
+
+    let legacyState = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
+    try {
+      legacyState = loadSessionState({
+        file: legacyFile,
+        readFile: (file) => fs.readFileSync(file, 'utf8'),
+        log,
+        normalizeDormant,
+      }).state;
+    } catch (error) {
+      log(`⚠️ 旧 sessions.json 读取失败，迁移将按空绑定继续：${error?.message ?? error}`);
+    }
+    let roleByKey = {};
+    try {
+      const raw = readJsonSafe(ROLE_STATE_FILE, {});
+      roleByKey = raw?.byKey && typeof raw.byKey === 'object' ? raw.byKey : {};
+    } catch { roleByKey = {}; }
+    let initialPromptsRaw = {};
+    try {
+      initialPromptsRaw = JSON.parse(fs.readFileSync(INITIAL_PROMPTS_FILE, 'utf8'));
+    } catch { initialPromptsRaw = {}; }
+    const wakeConfigs = {};
+    for (const [key, st] of socialV2.conversations) {
+      if (st?.wakeConfig && typeof st.wakeConfig === 'object') wakeConfigs[key] = st.wakeConfig;
+    }
+
+    const migrated = migrateSessionProfiles({
+      platform: platformOfConfig(cfg),
+      allowGroups: cfg.allow?.groups ?? [],
+      allowPrivate: cfg.allow?.private ?? [],
+      denyGroups: cfg.deny?.groups ?? [],
+      denyPrivate: cfg.deny?.private ?? [],
+      allowAllWhenEmpty: cfg.allowAllWhenEmpty === true,
+      sessions: legacyState.sessions,
+      policies: legacyState.sessionPolicies,
+      dormant: legacyState.dormantSessions,
+      roleByKey,
+      initialPrompts: initialPromptsRaw,
+      wakeConfigs,
+      now: () => Date.now(),
+    });
+
+    const previous = state;
+    state = {
+      sessions: migrated.sessions,
+      sessionPolicies: migrated.sessionPolicies,
+      dormantSessions: migrated.dormantSessions,
+      profiles: migrated.profiles,
+      defaults: migrated.defaults,
+      migratedAt: 0,
+    };
+    sessionDirectory = null;
+    try {
+      saveState();
+      const verify = loadSessionDirectory({ dir: SESSION_DIR, fs, path, log });
+      const expected = Object.keys(migrated.profiles).length;
+      const actual = Object.keys(verify.state.profiles).length;
+      if (verify.writable !== true || actual !== expected) {
+        throw new Error(`迁移回读校验失败（期望 ${expected} 个会话，读到 ${actual} 个）`);
+      }
+      state = verify.state;
+      state.migratedAt = Date.now();
+      state.defaults = migrated.defaults;
+      sessionDirectory = null;
+      saveState();
+    } catch (error) {
+      state = previous;
+      sessionDirectory = null;
+      try { fs.rmSync(SESSION_DIR, { recursive: true, force: true }); } catch {}
+      loadState();
+      throw new Error(`会话档案迁移失败，已保留旧配置并停止启动：${error?.message ?? error}`);
+    }
+
+    cleanupLegacy();
+    loadInitialPrompts();
+    refreshAccessProjection();
+    log(`会话档案迁移完成：${migrated.report.keys} 个会话（允许 ${migrated.report.allowed}、拒绝 ${migrated.report.blocked}、人格 ${migrated.report.persona}、提示词 ${migrated.report.prompt}、唤醒 ${migrated.report.wake}、绑定 ${migrated.report.binding}）`);
   }
 
   function getInitialPrompt(key) {
@@ -11128,6 +11463,8 @@ async function main() {
   loadSocialV2State();
   // 操作者预写的会话初始提示词（与控制台入口同样在 main() 里；损坏时只读降级，不阻塞启动）。
   loadInitialPrompts();
+  // 旧配置 → state/sessions/ 目录的一次性迁移（提交点后删旧源；失败则拒绝启动）。
+  runSessionDirectoryMigration();
 
   // v0.3.0 保留策略（默认关闭）：continuity.pruneListedAfterDays > 0 时，定期删除长期未出现、
   // 且没有任何记忆/管理员设定的「只在名单里见过」的人物记录。

@@ -24,8 +24,12 @@ const SNOW_WARN = `<div id="snowlumaWarn" class="warn-box" hidden>
 export const ACCESS_FIELDS = {
   whitelist: {
     fields: [
-      { name: 'wlGroups', type: 'text', label: '允许的群号', placeholder: '123456789, 123456', hint: '多个用逗号分隔；留空表示不限制。' },
-      { name: 'wlPrivate', type: 'text', label: '允许的私聊 QQ', placeholder: '123456789', hint: '多个用逗号分隔。' },
+      {
+        name: 'wlSummary',
+        type: 'custom',
+        span: 2,
+        html: `<div class="meta" id="wlSummary">按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里只保留管理员。</div>`,
+      },
       {
         name: 'ownerQQ',
         type: 'text',
@@ -34,15 +38,13 @@ export const ACCESS_FIELDS = {
         hint: 'ownerQQ，最高权限：唯一可执行管理命令 / 审批 / closed-agent 的 QQ；可留空清除（清除后无管理员，fail-closed）。',
         span: 2,
       },
-      { name: 'dnGroups', type: 'text', label: '拒绝的群号', placeholder: '黑名单，逗号分隔' },
-      { name: 'dnPrivate', type: 'text', label: '拒绝的私聊 QQ', placeholder: '黑名单，逗号分隔' },
       {
         type: 'action',
         id: 'accessWhitelistActions',
-        items: [{ id: 'wlSave', label: '保存白名单', variant: 'primary' }],
+        items: [{ id: 'wlSave', label: '保存管理员', variant: 'primary' }],
         status: 'wlMsg',
       },
-      { name: 'wlNote', type: 'custom', span: 2, html: '<div class="meta">保存后立即生效并写入 config.json。</div>' },
+      { name: 'wlNote', type: 'custom', span: 2, html: '<div class="meta">保存后立即生效并写入 config.json。会话准入请看 <a href="#sessions">会话与审批</a>。</div>' },
     ],
   },
   security: {

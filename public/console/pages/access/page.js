@@ -14,15 +14,17 @@ function renderAccessFieldGroups() {
   });
 }
 
-// 数据都是「读一次填表单」：进入本页时拉一次，保存后再拉一次。
+// 白名单 / 黑名单现在按会话存在档案里，这里不再编辑；保存管理员时把现值原样带回。
+let wlSnapshot = { allow: { groups: [], private: [] }, deny: { groups: [], private: [] } };
+
 export async function refreshWhitelist() {
   try {
     const w = await api('/api/whitelist');
-    $('wlGroups').value = (w.allow.groups || []).join(', ');
-    $('wlPrivate').value = (w.allow.private || []).join(', ');
+    wlSnapshot = {
+      allow: { groups: w.allow?.groups || [], private: w.allow?.private || [] },
+      deny: { groups: w.deny?.groups || [], private: w.deny?.private || [] },
+    };
     $('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
-    $('dnGroups').value = (w.deny.groups || []).join(', ');
-    $('dnPrivate').value = (w.deny.private || []).join(', ');
   } catch {}
 }
 
@@ -66,13 +68,11 @@ export function init() {
   renderAccessFieldGroups();
   bindSwitches(document.getElementById('section-access'));
   $('wlSave').addEventListener('click', async () => {
-    const parse = (s) => s.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean).map(Number).filter(Number.isFinite);
     const r = await api('/api/whitelist', 'POST', {
-      allow: { private: parse($('wlPrivate').value), groups: parse($('wlGroups').value) },
-      deny: { private: parse($('dnPrivate').value), groups: parse($('dnGroups').value) },
+      ...wlSnapshot,
       ownerQQ: $('ownerQQ').value.trim(),
     });
-    if (r.ok) { refreshWhitelist(); alert('白名单已保存并生效'); }
+    if (r.ok) { refreshWhitelist(); alert('管理员已保存并生效'); }
     else alert(r.error || '保存失败');
   });
 

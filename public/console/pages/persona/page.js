@@ -79,101 +79,6 @@ function resetRoleForm() {
   setRoleMsg('');
 }
 
-/** 按会话设置人格：下拉框选项（跟随全局 / 不挂卡 / 各人格）。value 形如 default、off、role:名字。 */
-function roleAssignOptions(select, current, globalRole) {
-  select.replaceChildren();
-  const add = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; select.appendChild(o); };
-  add('default', '跟随全局默认' + (globalRole ? '（' + globalRole + '）' : '（不挂卡）'));
-  add('off', '不挂角色卡');
-  for (const role of roleCache) add('role:' + role.name, role.name);
-  if (current && current.startsWith('role:') && ![...select.options].some((o) => o.value === current)) add(current, current.slice(5) + '（文件不存在）');
-  select.value = current || 'default';
-}
-function roleAssignApplyMode() {
-  const el = document.querySelector('input[name="roleAssignApply"]:checked');
-  return el ? el.value : 'nextWake';
-}
-function roleAssignBody(key, value) {
-  const apply = roleAssignApplyMode();
-  if (value === 'default' || value === 'off') return { key, use: value, apply };
-  return { key, use: 'role', role: value.slice(5), apply };
-}
-// 下拉框改了还没点「保存」的会话：key -> 选的值。列表重新加载时保留这些选择，并标出「未保存」。
-const roleAssignDirty = new Map();
-async function saveRoleAssign(key, value) {
-  const x = await api('/api/roles/assign', 'POST', roleAssignBody(key, value));
-  if (x.ok) roleAssignDirty.delete(x.key);
-  const msg = document.getElementById('roleAssignMsg');
-  msg.className = x.ok ? 'control-note ok' : 'control-note err';
-  msg.textContent = !x.ok ? '❌ ' + (x.error || '保存失败')
-    : '✅ ' + x.key + (x.source === 'global' ? ' 跟随全局默认' : x.source === 'off' ? ' 不挂角色卡' : ' 单独使用「' + x.role + '」') + roleSaveRefreshText(x.refresh);
-  if (x.ok) refreshRoles();
-  return x.ok;
-}
-function renderRoleAssignments(r) {
-  const box = document.getElementById('roleAssignList');
-  if (!box) return;
-  const globalRole = r.current || null;
-  const list = Array.isArray(r.assignments) ? r.assignments : [];
-  box.replaceChildren();
-  if (!list.length) box.textContent = '还没有会话。有群或私聊和 AI 聊过之后会出现在这里，也可以在下面直接填会话添加。';
-  for (const a of list) {
-    const row = document.createElement('div');
-    // 行内布局走类名（页内 css），不再写内联 style：内联样式会被 CSP 拦，也没法统一间距。
-    row.className = 'assign-row';
-    row.dataset.roleAssignKey = a.key;
-    const label = document.createElement('code');
-    label.className = 'assign-key';
-    label.textContent = a.key;
-    row.appendChild(label);
-    const sel = document.createElement('select');
-    sel.setAttribute('aria-label', a.key + ' 的人格');
-    const saved = a.source === 'off' ? 'off' : a.source === 'key' ? 'role:' + a.role : 'default';
-    roleAssignOptions(sel, saved, globalRole);
-    // 之前改了没保存：保留那个选择（选项还在的话）
-    const pending = roleAssignDirty.get(a.key);
-    if (pending !== undefined) {
-      if (pending !== saved && [...sel.options].some((o) => o.value === pending)) sel.value = pending;
-      else roleAssignDirty.delete(a.key);
-    }
-    row.appendChild(sel);
-    if (a.source !== 'global') { const p = document.createElement('span'); p.className = 'pill b'; p.textContent = '单独设置'; row.appendChild(p); }
-    if (a.missing) { const p = document.createElement('span'); p.className = 'pill r'; p.textContent = '人格文件不存在，现在不挂卡'; row.appendChild(p); }
-    const dirtyPill = document.createElement('span');
-    dirtyPill.className = 'pill r';
-    dirtyPill.textContent = '未保存';
-    dirtyPill.dataset.roleAssignDirty = '1';
-    dirtyPill.hidden = !roleAssignDirty.has(a.key);
-    row.appendChild(dirtyPill);
-    sel.addEventListener('change', () => {
-      if (sel.value === saved) roleAssignDirty.delete(a.key); else roleAssignDirty.set(a.key, sel.value);
-      dirtyPill.hidden = !roleAssignDirty.has(a.key);
-    });
-    const btn = document.createElement('button');
-    btn.className = 'btn small';
-    btn.textContent = '保存';
-    btn.addEventListener('click', () => saveRoleAssign(a.key, sel.value));
-    row.appendChild(btn);
-    box.appendChild(row);
-  }
-  const newSel = document.getElementById('roleAssignNewUse');
-  if (newSel) {
-    const keep = newSel.value;
-    const valid = (v) => v === 'default' || v === 'off' || roleCache.some((role) => 'role:' + role.name === v);
-    roleAssignOptions(newSel, valid(keep) ? keep : (roleCache[0] ? 'role:' + roleCache[0].name : 'off'), globalRole);
-  }
-}
-
-/** 只刷新「按会话设置人格」列表（进入人格页、以及停在人格页时定时调用）；正在操作下拉框时不打断。 */
-async function refreshRoleAssignments() {
-  const box = document.getElementById('roleAssignList');
-  if (!box || box.contains(document.activeElement)) return;
-  const r = await api('/api/roles');
-  if (!r || !Array.isArray(r.assignments)) return;
-  if (Array.isArray(r.summaries) && r.summaries.length === (r.roles || []).length) roleCache = r.summaries;
-  renderRoleAssignments(r);
-}
-
 const PERSONA_SOURCE_LABEL = { session: '会话', provider: '外部', global: '全局', off: '不挂卡', none: '无' };
 
 // 只读：每个会话实际落在哪一层（会话覆盖 → provider → 全局）。不改任何状态。
@@ -245,7 +150,6 @@ async function refreshRoles() {
     roleCache = Array.isArray(r.summaries) && r.summaries.length === names.length
       ? r.summaries
       : names.map((name) => ({ name, chars: 0, bytes: 0, excerpt: '', truncated: false }));
-    renderRoleAssignments(r);
     const box = document.getElementById('roleList');
     box.replaceChildren();
     if (!roleCache.length) {
@@ -437,12 +341,6 @@ export function init() {
     const r = await api('/api/role', 'POST', { role: document.getElementById('roleInput').value.trim(), apply: roleApplyMode() });
     if (r.ok) { showRoleApplyResult(r); refreshRoles(); refreshPersonaStatus(); } else alert(r.error || '设置失败');
   });
-  document.getElementById('roleAssignAdd').addEventListener('click', async () => {
-    const input = document.getElementById('roleAssignKey');
-    const key = input.value.trim();
-    if (!key) { input.focus(); return; }
-    if (await saveRoleAssign(key, document.getElementById('roleAssignNewUse').value)) input.value = '';
-  });
   document.getElementById('roleClear').addEventListener('click', async () => { const r = await api('/api/role', 'POST', { role: null, apply: roleApplyMode() }); showRoleApplyResult(r); refreshRoles(); refreshPersonaStatus(); });
   document.getElementById('roleCreate').addEventListener('click', async () => {
     const name = document.getElementById('newRoleName').value.trim();
@@ -549,21 +447,18 @@ export function init() {
 
   document.getElementById('personaSourceRefresh').addEventListener('click', () => refreshPersonaSources().catch(() => {}));
 
-  // 停在人格页时，每 15 秒同步一次「按会话设置人格」和「人格来源」。
-  setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshRoleAssignments().catch(() => {}); }, 15_000);
+  // 停在人格页时，每 15 秒同步一次「人格来源」。
   setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
 
   onPageRefresh('persona', () => {
     // 每次进入都重读一次：全局人格可能在别处改过、新会话可能刚建好。
     refreshPersonaStatus();
-    refreshRoleAssignments().catch(() => {});
     refreshPersonaSources().catch(() => {});
   });
-  // 首次进入时片段刚注入，延后一拍再拉数据，避免在 DOM 就绪前空转。
+  // 首次进入时片段刚注入，延后一拍再拉数据，避免 DOM 就绪前空转。
   setTimeout(() => {
     refreshPersonaStatus();
     refreshRoles();
-    refreshRoleAssignments().catch(() => {});
     refreshPersonaSources().catch(() => {});
     refreshSimPrompt();
   }, 0);

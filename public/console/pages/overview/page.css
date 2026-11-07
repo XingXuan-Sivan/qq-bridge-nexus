@@ -56,7 +56,13 @@
   flex: 1 1 auto;
   min-width: 0;
 }
-.silence-row .silence-days .field-switch,
+/* 「跳过节假日」开关的文案随状态在「跳过节假日 / 不跳过」之间切换，宽度会变；
+   给它定宽，否则同一列里每行的「哪些天」下拉长度不一样（2026-11-07 截图反馈）。 */
+.silence-row .silence-days .field-switch {
+  flex: 0 0 120px;
+  width: 120px;
+  white-space: nowrap;
+}
 .silence-row > .field-switch {
   flex: 0 0 auto;
   white-space: nowrap;

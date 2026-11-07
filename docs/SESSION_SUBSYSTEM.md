@@ -1,6 +1,6 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0 已实现；P1 主体已实现（剩脏值确认与 profile 专项用例）；P2–P3 代码未动**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）。
+状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b（模型 + 主动检查点）与 P3 未开工**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
@@ -412,15 +412,20 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [x] 双清空动作：重建 DSH 会话 / 重置会话状态（复用 `/api/session/reset`）。
 - [ ] `test-session-profiles.mjs` + `test-session-migrate.mjs` + UI 用例；目前只有 `test-session-directory` 与真机探针覆盖。
 
-**P2 运行模式与模型**
+**P2a 运行模式与预设（已完成）**
 
-- [ ] 列出全部 `currentMode === …`、`modeAllowed(`、`modePreset(` 调用点，形成清单后再改。
-- [ ] `effectiveMode(key)`：会话覆盖、closed-agent 排他、inactive 语义。
-- [ ] 会话级 preset/model 保存校验（安全清单、DSH 目录）与指纹变化重建。
+- [x] 列出全部 `currentMode === …`、`modeAllowed(`、`modePreset(` 调用点，形成清单后再改。
+- [x] `effectiveMode(key)`：会话覆盖、closed-agent 排他、inactive 语义（`src/session/mode.mjs`）。
+- [x] 会话级 preset 保存校验（DSH 安全清单）与指纹变化重建（`modePreset` + `policy.getMode`）。
+- [x] 详情页运行模式/预设控件与「下次唤醒按指纹重建」提示。
+- [x] `test-session-mode.mjs`：`resolveEffectiveMode` 5/5（closed-agent 排他、非 owner inactive、覆盖、非法值）。
+- [ ] `test-session-mode.mjs` 的集成用例：两群 v1/v2 并存、真实重建、主动拒绝（当前只有 resolver 单测）。
+
+**P2b 模型与主动检查点（未开工）**
+
+- [ ] 会话级 model/thinking 保存校验与重建指纹。
 - [ ] 主动检查点：v1/v2 主动发言、scheduler、AI 跨会话工具。
 - [ ] 主动被拒的通知与活动日志（任务跳过原因回给创建者）。
-- [ ] 详情页 P2 控制项与「下次唤醒生效」提示。
-- [ ] `test-session-mode.mjs`：两群 v1/v2 并存、重建、主动拒绝、closed-agent 排他。
 
 **P3 多管理员**
 
@@ -473,3 +478,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-08：按用户建议把存储从单文件改为 `state/sessions/` 目录（`defaults.json` + 每会话文件）；补充路径/字符集、启动扫描与损坏隔离、单文件原子写、`migratedAt` 迁移提交点与目录级判据。
 - 2026-11-08：P0 落地（D13）：`ensureSession` 创建后确定性命名；`sessions.list` 启动/手动对账标 `online/missing/unknown`；prompt not-found 退役重建重试一次 + 60 秒 3 次熔断；`GET /api/sessions/<key>/dsh`、`POST /api/sessions/<key>/rebuild`、`POST /api/sessions/reconcile`；会话表 DSH 列与行内重建。
 - 2026-11-08：P1 主体落地：`state/sessions/` 目录与启动迁移（`migratedAt` 提交点、损坏隔离、旧文件/旧键清理）、`src/session/{directory,access,migrate}.mjs`、`/api/sessions` 并集、`GET/PATCH/DELETE /api/sessions/<key>/profile`、会话详情宽弹窗七卡（D14）、删除档案、列表行「管理/删档案」、双清空；persona/social-v2/access 三处按会话入口迁走；`test-session-directory` 7/7，static 全过、UI 28/28、audit 91/91。剩：profile 端点专项单测。
+- 2026-11-08：P2a 落地：`src/session/mode.mjs`（`resolveEffectiveMode`/`normalizeSessionMode`/`isUsableMode`）；桥接全部单会话门禁改 `effectiveMode(key)`（scheduler、压缩、静默补唤醒、入站/唤醒/内部输出、v2-only 端点、agent-token 全局门）；`modePreset` 支持档案 `presetId` 并进 policy 指纹；`GET/PATCH .../profile` 增 `mode/effectiveMode/presetId/presets`；详情加「运行」卡与「定时任务」只读卡；`test-session-mode` 5/5，static 全过、UI 28/28、audit 92/92。模型与主动检查点留 P2b。

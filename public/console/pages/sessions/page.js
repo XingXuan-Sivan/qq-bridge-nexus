@@ -359,6 +359,14 @@ function renderDetail(data) {
       </div>
 
       <div class="detail-card">
+        <h4>运行</h4>
+        <div class="meta">默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。</div>
+        ${detailRow('模式', detailSelect('detailMode', data.mode || 'inherit', [['inherit', '跟随全局'], ['chat', '聊天模式'], ['reserved', '一代仿真'], ['reserved2', '二代仿真']]), `当前生效：${esc(data.effectiveMode || '—')}`)}
+        ${detailRow('DSH 预设', detailSelect('detailPresetId', data.presetId || '', [['', '跟随模式默认'], ...(Array.isArray(data.presets) ? data.presets : []).map((id) => [id, id])]), '只影响这个会话的 DSH 会话；保存后下次唤醒按指纹自动重建。')}
+        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="run">保存运行</button></div>
+      </div>
+
+      <div class="detail-card">
         <h4>人格</h4>
         <div class="meta">继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。</div>
         ${detailRow('模式', detailSelect('detailPersonaMode', persona.mode || 'inherit', [['inherit', '继承全局'], ['card', '指定人格卡'], ['off', '不挂卡']]))}
@@ -398,6 +406,13 @@ function renderDetail(data) {
         </div>
       </div>
 
+      <div class="detail-card">
+        <h4>定时任务</h4>
+        <div class="meta">指向这个会话的定时任务（只读）；增删改仍在「定时任务」页。</div>
+        <div class="detail-readonly" id="detailTasks"><span class="meta">读取中…</span></div>
+        <div class="detail-actions"><a class="btn small" href="#scheduler">去定时任务</a></div>
+      </div>
+
       <div class="detail-card detail-card--wide detail-danger">
         <h4>危险操作</h4>
         <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话。</div>
@@ -416,6 +431,24 @@ function renderDetail(data) {
     if (counter) counter.textContent = String(promptEl.value.length);
   });
   void loadDetailMemory(data.key);
+  void loadDetailTasks(data.key);
+}
+
+async function loadDetailTasks(key) {
+  const box = document.getElementById('detailTasks');
+  if (!box) return;
+  try {
+    const r = await api('/api/scheduler');
+    const tasks = (r?.tasks || []).filter((t) => Array.isArray(t.targets) && t.targets.includes(key));
+    if (!tasks.length) { box.innerHTML = '<span class="meta">没有指向这个会话的定时任务</span>'; return; }
+    box.innerHTML = tasks.slice(0, 10).map((t) => `<div class="u-mt-2">`
+      + `<span class="pill ${t.enabled === false ? '' : 'g'}">${t.enabled === false ? '暂停' : '启用'}</span> `
+      + `<strong>${esc(t.name || t.id || '未命名')}</strong> `
+      + `<span class="meta">${esc(t.scheduleText || '')}${t.nextRunText ? ' · 下次 ' + esc(t.nextRunText) : ''}</span>`
+      + `</div>`).join('');
+  } catch {
+    box.innerHTML = '<span class="meta">定时任务读取失败</span>';
+  }
 }
 
 async function loadDetailMemory(key) {
@@ -488,6 +521,11 @@ async function saveDetail(kind) {
           proactive: document.getElementById('detailProactive')?.value || 'inherit',
         },
         blocked: document.getElementById('detailBlocked')?.checked === true,
+      };
+    } else if (kind === 'run') {
+      patch = {
+        mode: document.getElementById('detailMode')?.value || 'inherit',
+        presetId: document.getElementById('detailPresetId')?.value || '',
       };
     } else if (kind === 'persona') {
       patch = {

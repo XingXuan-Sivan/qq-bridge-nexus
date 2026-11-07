@@ -135,7 +135,8 @@ import { buildCommandsPayload } from './commands/payload.mjs';
 // 会话重置的清理序列（P7 第三步），deps 见 src/session/reset.mjs 的文件头。
 import { createSessionResetter } from './session/reset.mjs';
 // 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
-import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from './session/mode-gate.mjs';
+import { allowed, modeAllowed } from './session/mode-gate.mjs';
+import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
 import { resolveAccess, resolveAccessSummary } from './session/access.mjs';
@@ -3237,6 +3238,47 @@ async function main() {
   // v0.3.0 权限级别：L0 = 群友模式；closed-agent 下为 L1/L2/L3（见 src/admin/mode-control.js）。
   // 只由 applyModeChange() 修改 —— 它是 ModeController 唯一的执行回调。
   let currentLevel = 'L0';
+  // 有效运行模式：全局模式是默认值，档案里的 mode 可以覆盖（closed-agent 全局排他）。
+  // closed-agent 开启时只保留管理员私聊，其余会话是 inactive——不参与任何发送/唤醒。
+  const ownerPrivateKeyOf = () => (cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null);
+  function isOwnerPrivate(key) {
+    return Boolean(key) && key === ownerPrivateKeyOf();
+  }
+  function effectiveMode(key) {
+    return resolveEffectiveMode(currentMode, state.profiles?.[key]?.mode, { owner: isOwnerPrivate(key) });
+  }
+  /** 是否还有任何会话会跑二代仿真（全局 v2，或有人固定 v2）。用于全局接口的总开关。 */
+  function anyV2Session() {
+    if (currentMode === 'closed-agent') return false;
+    if (currentMode === 'reserved2') return true;
+    return Object.values(state.profiles ?? {}).some((p) => p?.mode === 'reserved2');
+  }
+  /** 档案双轴准入的生效值；显式 deny/黑名单优先，未显式拒绝时兼容尚未清理的旧白名单。 */
+  function profileAccessAllowed(axis, key) {
+    if (!key || typeof key !== 'string') return false;
+    const profile = state.profiles?.[key];
+    if (profile?.blocked === true) return false;
+    const verdict = resolveAccess(axis, key, state, { ownerPrivate: isOwnerPrivate(key) }) === 'allow';
+    if (verdict) return true;
+    if (profile?.access?.[axis] === 'deny') return false;
+    if (!(Number(state.migratedAt) > 0)) {
+      const parsed = parseKey(key);
+      return parsed ? allowed(parsed.kind, parsed.id, cfg) : false;
+    }
+    // 迁移完成后 profile 是唯一事实来源；这里再给一次旧白名单兜底，避免升级当次
+    // 因 config 尚未清理而把所有会话判成拒绝。
+    const parsed = parseKey(key);
+    return parsed ? allowed(parsed.kind, parsed.id, cfg) : false;
+  }
+  function passiveAllowed(key) {
+    if (!isUsableMode(effectiveMode(key))) return false;
+    return profileAccessAllowed('passive', key);
+  }
+  function proactiveAllowed(key) {
+    const mode = effectiveMode(key);
+    if (mode === 'inactive' || mode === 'closed-agent') return false;
+    return profileAccessAllowed('proactive', key);
+  }
   let permissionCatalog = null;  // DSH permissionPresets/catalog 的预设名列表；null = 未知
   let lastObservedDshMode = null; // 上一次从 DSH settings 读到的 qq-mode（用于识别「外部变更」）
   let controllerReady = false;    // ModeController 完成启动校验之前，不把 DSH 值当作外部变更
@@ -3375,7 +3417,7 @@ async function main() {
     // 插件任务类型：交给插件自己执行，桥接只负责限额、免打扰与会话可用性判断。
     if (task.kind !== 'text' && task.kind !== 'ai') {
       if (!plugins?.hasTaskType(task.kind)) return { status: 'failed', reason: `任务类型「${task.kind}」未注册（插件未启用或已卸载）` };
-      if (!isSessionAllowedInCurrentMode(target)) return { status: 'skipped', reason: `当前模式（${currentMode}）下这个会话暂停` };
+      if (target !== schedulerOwnerKey() && !proactiveAllowed(target)) return { status: 'skipped', reason: '目标会话未授权主动行为（会话详情 → 准入）' };
       try {
         const r = await withTimeout(
           plugins.runTaskType(task.kind, { ...task, target }, { target, manual, scheduledAt, whenText }),
@@ -3393,20 +3435,20 @@ async function main() {
         // 发给管理员：走管理通道专用发送，任何模式下都能发（文字是管理员自己登记的）
         await sendOwnerDirect(task.text);
       } else {
-        if (!isSessionAllowedInCurrentMode(target)) return { status: 'skipped', reason: `当前模式（${currentMode}）下这个会话暂停` };
+        if (target !== schedulerOwnerKey() && !proactiveAllowed(target)) return { status: 'skipped', reason: '目标会话未授权主动行为（会话详情 → 准入）' };
         await sendToQQ(target, task.text);
         if (!lastSendSucceeded(target)) return { status: 'failed', reason: 'QQ 发送失败' };
       }
-      if (currentMode === 'reserved2' && socialV2.conversations.has(target)) recordSentMessagesV2(target, [`（定时任务）${task.text}`]);
+      if (effectiveMode(target) === 'reserved2' && socialV2.conversations.has(target)) recordSentMessagesV2(target, [`（定时任务）${task.text}`]);
       return { status: 'sent', reason: manual ? '手动试发' : '' };
     }
     // 叫 AI 来说：唤醒这个会话自己的 AI（权限不变，只是多一个唤醒原因）
-    if (!isSessionAllowedInCurrentMode(target)) return { status: 'skipped', reason: `当前模式（${currentMode}）下这个会话暂停` };
+    if (target !== schedulerOwnerKey() && !proactiveAllowed(target)) return { status: 'skipped', reason: '目标会话未授权主动行为（会话详情 → 准入）' };
     const sw = scheduledSilenceFor(target);
     if (sw && silence.config().options.pauseAiTasks && !task.runDuringSilence) return { status: 'skipped', reason: silenceReason(sw) };
     if (sw) silenceBypass.set(target, Date.now() + 10 * 60_000); // 这个任务设了「静默时段内照常执行」：临时放行 10 分钟
     const note = { taskId: task.id, name: task.name, instruction: task.instruction, whenText };
-    if (currentMode === 'reserved2') {
+    if (effectiveMode(target) === 'reserved2') {
       if (socialV2.paused) return { status: 'skipped', reason: '二代仿真已暂停' };
       scheduledNotes.add(target, note);
       await sendWakePromptV2(target, 'scheduled');
@@ -3505,7 +3547,7 @@ async function main() {
   const compactTimers = new Map();
   /** 一轮结束后调用：超过阈值就在会话空闲后压缩一次。 */
   function maybeAutoCompact(key, sessionId) {
-    if (currentMode !== 'reserved2' || compactTimers.has(key)) return;
+    if (effectiveMode(key) !== 'reserved2' || compactTimers.has(key)) return;
     const config = cfg.socialV2?.compact;
     const d = decideCompact({ inputTokens: sessionLastInput.get(sessionId) ?? 0, lastAttemptAt: compactAttemptAt.get(key) ?? 0, config });
     if (!d.compact) return;
@@ -3561,8 +3603,9 @@ async function main() {
       log('定时静默结束，恢复正常');
       appendActivity('定时静默结束');
       // 静默期间有人 @ / 叫名字 / 提问 / 拍一拍 / 私聊找过 AI：结束时补一次唤醒，让它看看未读
-      if (silence.config().options.catchUpOnEnd && currentMode === 'reserved2') {
+      if (silence.config().options.catchUpOnEnd) {
         for (const [key, st] of socialV2.conversations) {
+          if (effectiveMode(key) !== 'reserved2') continue;
           if (!st.silenceMissedDirect) continue;
           st.silenceMissedDirect = false;
           if (scheduledSilenceFor(key)) continue;
@@ -3777,15 +3820,19 @@ async function main() {
       const plan = closedAgentPlan();
       return plan.ok ? (plan.agentPreset || undefined) : undefined;
     }
-    // 二代仿真模式优先使用 socialV2.agentPreset；未配置时回退到默认聊天预设。
-    // 非 closed-agent 一律 strict：宁可建不出会话，也不给群聊套上带本地工具的默认 preset。
+    // 会话档案可以固定 preset；否则按模式推导。
+    const override = state.profiles?.[key]?.presetId;
+    if (override && mode !== 'closed-agent') {
+      const picked = resolvePresetName(override, { strict: true });
+      if (picked) return picked;
+    }
     const wanted = mode === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
     return resolvePresetName(wanted, { strict: true }) || undefined;
   }
 
   /** 判断一个会话 key 是否仍被当前模式/白名单允许（供唤醒调度与 HTTP 路由共用）。 */
   function isSessionAllowedInCurrentMode(key) {
-    return sessionAllowed(key, cfg, currentMode);
+    return passiveAllowed(key);
   }
 
   /** closed-agent 当前级别的落地计划（agent preset + DSH 权限预设）。 */
@@ -3796,7 +3843,7 @@ async function main() {
 
   // 指纹怎么拼、什么算「当前会话」在 session/policy.mjs（三条件：准入 + 映射 + 指纹）。
   const sessionPolicyImpl = createSessionPolicy({
-    getMode: () => currentMode,
+    getMode: (key) => effectiveMode(key),
     modePreset: (key, mode) => modePreset(key, mode, cfg),
     getOwnerQQ: () => cfg.ownerQQ,
     getLevel: () => currentLevel,
@@ -4064,7 +4111,7 @@ async function main() {
           const item = items[i];
           try {
             const { kind, id } = parseKey(key) ?? {};
-            if (!modeAllowed(key, kind, id, cfg, currentMode)) {
+            if (!passiveAllowed(key)) {
               log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
               continue;
             }
@@ -4786,7 +4833,7 @@ async function main() {
           return;
         }
         // 模式隔离：带 agent token 的 v2 接口只允许在 reserved2 模式下使用
-        if (req.headers['x-agent-token'] && url.pathname.startsWith('/api/socialV2/') && currentMode !== 'reserved2') {
+        if (req.headers['x-agent-token'] && url.pathname.startsWith('/api/socialV2/') && !anyV2Session()) {
           sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403);
           return;
         }
@@ -5151,9 +5198,10 @@ async function main() {
         // onlyKeys：只看这些会话（按会话设置人格时只管保存的那一个，不顺带叫醒别的还没读新卡的会话）
         const applyRoleChange = (apply, onlyKeys = null) => {
           const mode = normalizeApplyMode(apply);
-          if (currentMode !== 'reserved2') return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
+          const v2Active = currentMode === 'reserved2' || (onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session());
+          if (!v2Active) return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
           if (mode !== 'immediate') {
-            const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k))).length;
+            const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k))).length;
             return { apply: mode, mode: currentMode, woke: 0, pending };
           }
           const r = refreshRoleNowV2(onlyKeys);
@@ -5863,6 +5911,10 @@ async function main() {
                 maxChars: Number(cfg.socialV2?.initialPromptMaxChars) || 2000,
               },
               wake,
+              mode: profile?.mode ?? 'inherit',
+              effectiveMode: effectiveMode(key),
+              presetId: profile?.presetId ?? null,
+              presets: dshPresetIds.slice(),
               dsh: getDshHealth(key, sessionId),
             });
             return;
@@ -5876,6 +5928,20 @@ async function main() {
               patch.displayName = name || null;
             }
             if (Object.hasOwn(body, 'blocked')) patch.blocked = body.blocked === true;
+            if (Object.hasOwn(body, 'mode')) {
+              if (!['inherit', 'chat', 'reserved', 'reserved2'].includes(body.mode)) { sendJson({ ok: false, error: '运行模式取值无效' }, 400); return; }
+              patch.mode = body.mode;
+            }
+            if (Object.hasOwn(body, 'presetId')) {
+              const raw = String(body.presetId ?? '').trim();
+              if (!raw) patch.presetId = null;
+              else {
+                if (raw.length > 80) { sendJson({ ok: false, error: 'preset 名过长' }, 400); return; }
+                if (dshPresetIds.length === 0) { sendJson({ ok: false, error: 'DSH preset 清单还没就绪，请等 DSH 连接后再保存' }, 409); return; }
+                if (!dshPresetIds.includes(raw)) { sendJson({ ok: false, error: `preset "${raw}" 不在 DSH 可用清单里` }, 400); return; }
+                patch.presetId = raw;
+              }
+            }
             if (body.access && typeof body.access === 'object') {
               patch.access = {};
               for (const axis of ['passive', 'proactive']) {
@@ -6240,7 +6306,8 @@ async function main() {
           if (!message) { sendJson({ ok: false, error: '消息不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(message)) { sendJson({ ok: false, error: '消息含敏感信息，已阻止发送' }, 403); return; }
           if (!allowed(kind, id, cfg)) { sendJson({ ok: false, error: `目标不在白名单内（${kind} ${id}），请先加入白名单` }, 403); return; }
-          if (!modeAllowed(convKey(kind, id), kind, id, cfg, currentMode)) { sendJson({ ok: false, error: `当前模式（${currentMode}）不允许向 ${kind}:${id} 发送测试消息` }, 403); return; }
+          const testKey = convKey(kind, id);
+          if (!passiveAllowed(testKey)) { sendJson({ ok: false, error: `会话 ${testKey} 未授权被动行为（会话详情 → 准入）` }, 403); return; }
           try {
             const safeMessage = escapeCqText(redactKnownTokensOnly(message));
             const result = kind === 'private'
@@ -6357,7 +6424,7 @@ async function main() {
             sendJson({ ok: false, error: 'id 无效' }, 400);
             return;
           }
-          if (!modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!passiveAllowed(key)) {
             sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
             return;
           }
@@ -6369,7 +6436,7 @@ async function main() {
             sendJson({ ok: false, error: 'DSH 当前不可用，请稍后再试' }, 503);
             return;
           }
-          const isV2 = currentMode === 'reserved2';
+          const isV2 = effectiveMode(key) === 'reserved2';
           const roleName = currentRoleName(key);
           const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
           // 二代必须带会话令牌，否则 AI 调用任何 MCP 状态/发送工具都会被拒。
@@ -6678,9 +6745,9 @@ async function main() {
           }
           // 按这个会话取卡：各会话可以单独指定人格、不挂卡，或由 provider 提供
           const roleNameForPrompt = currentRoleName(key);
-          const roleHintForPrompt = currentMode === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key);
+          const roleHintForPrompt = effectiveMode(key) === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key);
           // AI 自己读了卡：记下这一版（只认带令牌的调用，控制台查看不算）
-          if (req.headers['x-agent-token'] && currentMode === 'reserved2' && sessions.get(key)) {
+          if (req.headers['x-agent-token'] && effectiveMode(key) === 'reserved2' && sessions.get(key)) {
             roleRefresh.markSeen(key, sessions.get(key), currentRoleFingerprintV2(key));
           }
           const toolMap = {
@@ -7022,12 +7089,12 @@ async function main() {
           const key = apiKey(body.key);
           const reason = String(body.reason ?? 'admin').trim() || 'admin';
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -7148,7 +7215,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('sendBurst')) { sendJson({ ok: false, error: '工具未启用：qq_send_burst' }, 403); return; }
-          if (currentMode !== 'reserved2') {
+          if (effectiveMode(key) !== 'reserved2') {
             sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403);
             return;
           }
@@ -7160,7 +7227,7 @@ async function main() {
           }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -7277,13 +7344,13 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('sendMessage')) { sendJson({ ok: false, error: '工具未启用：qq_send_message' }, 403); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -7385,7 +7452,7 @@ async function main() {
           const key = apiKey(body.key);
           const targetUserId = String(body.targetUserId ?? body.userId ?? '').trim();
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送拍一拍必须携带 agent token' }, 403); return; }
           if (!agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
@@ -7395,7 +7462,7 @@ async function main() {
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '当前模式不允许操作该会话' }, 403);
             return;
           }
@@ -7671,7 +7738,7 @@ async function main() {
           const key = String(body.target ?? body.key ?? '').trim();
           const parsedTarget = parseTargetKey(key);
           if (!parsedTarget) { sendJson({ ok: false, error: 'target 格式应为 group:群号 或 private:QQ号' }, 400); return; }
-          if (!modeAllowed(key, parsedTarget.kind, Number(parsedTarget.id), cfg, currentMode)) {
+          if (!passiveAllowed(key) || !proactiveAllowed(convKey(parsedTarget.kind, parsedTarget.id))) {
             const a = cfg.allow ?? {};
             sendJson({
               ok: false,
@@ -7771,7 +7838,7 @@ async function main() {
           const voice = voiceCfg();
           if (!voice.enabled) { sendJson({ ok: false, error: '语音功能已关闭' }, 403); return; }
           if (!key) { sendJson({ ok: false, error: 'key 不能为空（格式 group:群号 或 private:QQ号）' }, 400); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!token) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           if (!agentTokenOk(key, token)) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (!v2ToolEnabled('sendVoice')) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
@@ -7781,7 +7848,7 @@ async function main() {
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -7846,13 +7913,13 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('sendSticker')) { sendJson({ ok: false, error: '工具未启用：qq_send_sticker' }, 403); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -8248,7 +8315,7 @@ async function main() {
           }
           const waitedMs = Date.now() - start;
           if (socialV2.conversations.get(canonicalV2Key(key)) !== st ||
-              (req.headers['x-agent-token'] && (currentMode !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false
+              (req.headers['x-agent-token'] && (effectiveMode(key) !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false
                 || !agentTokenOk(key, req.headers['x-agent-token']) || !v2SessionAllowed(key) || !v2ToolEnabled('waitMessages')))) {
             finishWait();
             sendJson({ ok: false, error: '等待期间会话已重置或权限已变化，请重新读取会话' }, 403);
@@ -8585,7 +8652,7 @@ async function main() {
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!id) { sendJson({ ok: false, error: 'id 不能为空' }, 400); return; }
-          if (currentMode !== 'reserved2') {
+          if (effectiveMode(key) !== 'reserved2') {
             sendJson({ ok: false, error: '合并转发查看仅 reserved2 模式可用' }, 403);
             return;
           }
@@ -8599,7 +8666,7 @@ async function main() {
           }
           const kind = keyMatch.kind;
           const num = Number(keyMatch.id);
-          if (!Number.isFinite(num) || num <= 0 || !modeAllowed(key, kind, num, cfg, currentMode)) {
+          if (!Number.isFinite(num) || num <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -8655,7 +8722,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getForwardMsg')) { sendJson({ ok: false, error: '工具未启用：qq_get_forward_msg' }, 403); return; }
-          if (currentMode !== 'reserved2') { sendJson({ ok: false, error: '转发媒体读取仅 reserved2 模式可用' }, 403); return; }
+          if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '转发媒体读取仅 reserved2 模式可用' }, 403); return; }
           if (!media.length) { sendJson({ ok: true, key, media: [], images: [] }); return; }
           try {
             const images = await fetchMediaData(media);
@@ -9241,7 +9308,7 @@ async function main() {
           }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -9256,7 +9323,7 @@ async function main() {
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!messageId) { sendJson({ ok: false, error: 'messageId 不能为空' }, 400); return; }
-          if (currentMode === 'reserved2' && !agentToken) {
+          if (effectiveMode(key) === 'reserved2' && !agentToken) {
             sendJson({ ok: false, error: 'reserved2 模式读取图片必须携带 agent token' }, 403);
             return;
           }
@@ -9270,7 +9337,7 @@ async function main() {
           }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
             return;
           }
@@ -9327,7 +9394,7 @@ async function main() {
             sendJson({ ok: false, error: 'replyToMessageId 不能为空' }, 400);
             return;
           }
-          if (currentMode === 'reserved2' && !token) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
+          if (effectiveMode(key) === 'reserved2' && !token) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           if (token && !agentTokenOk(key, token)) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           const flag = isPrivate ? 'sendPrivate' : (isReply ? 'reply' : 'sendGroup');
           if (token && !v2ToolEnabled(flag)) { sendJson({ ok: false, error: `工具未启用：${flag}` }, 403); return; }
@@ -9339,7 +9406,7 @@ async function main() {
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式无效' }, 400); return; }
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !modeAllowed(key, kind, id, cfg, currentMode)) {
+          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -10355,7 +10422,7 @@ async function main() {
 
   function mediaHintFor(key, messageRef, mediaList) {
     if (!Array.isArray(mediaList) || mediaList.length === 0 || !messageRef) return '';
-    if (currentMode === 'reserved2') {
+    if (effectiveMode(key) === 'reserved2') {
       return `\n【图片/表情】本条消息包含 ${mediaList.length} 个图片/表情（消息ID=${messageRef}）。如需要查看/识别，请调用 mcp__snowluma__qq_get_message_images，参数 key="${key}", messageId="${messageRef}"。`;
     }
     return `\n【图片/表情】本条消息包含 ${mediaList.length} 个图片/表情（消息ID=${messageRef}）。`;
@@ -10365,7 +10432,7 @@ async function main() {
     const refStr = String(ref ?? '').trim();
     if (!refStr) return [];
     // 二代：消息对象上直接带 media（仅在确实存在二代会话状态时读取，避免为 gen1 创建影子状态）
-    if (currentMode === 'reserved2' || socialV2.conversations.has(key)) {
+    if (effectiveMode(key) === 'reserved2' || socialV2.conversations.has(key)) {
       try {
         const st = getSocialV2State(key);
         if (st) {
@@ -10628,7 +10695,7 @@ async function main() {
       fs.mkdirSync(dir, { recursive: true });
       let sessionId;
       let lastError = null;
-      const preset = modePreset(key, currentMode, cfg);
+      const preset = modePreset(key, effectiveMode(key), cfg);
       // 非 closed-agent（chat / reserved / reserved2，会话可能属于 QQ 群）必须 fail-closed：
       // 拿不到 qq-chat* 就拒绝建会话，绝不让 DSH 用默认 preset（standard）顶上——那会把
       // bash/文件读写等本地工具暴露给 QQ 群里的任何人（见 RULES.md「无本地工具」）。
@@ -10719,7 +10786,7 @@ async function main() {
         if (sessions.get(key) === sessionId) retireSession(key);
         throw new Error('会话创建期间已重置或权限已变化');
       }
-      log(`新会话 ${key} -> ${sessionId}（模式 ${currentMode}，preset: ${modePreset(key, currentMode, cfg) ?? '默认'}）`);
+      log(`新会话 ${key} -> ${sessionId}（模式 ${effectiveMode(key)}，preset: ${modePreset(key, effectiveMode(key), cfg) ?? '默认'}）`);
       return sessionId;
     })();
     sessionPromises.set(key, promise);
@@ -11817,7 +11884,7 @@ async function main() {
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
     // Recheck queued wakes at dispatch time: no model call while paused/disabled
     // and no reserved2 prompt leaking into an ordinary chat after a mode switch.
-    const wakeBlocked = () => opts.wakeReason && (currentMode !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false);
+    const wakeBlocked = () => opts.wakeReason && (effectiveMode(key) !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false);
     const skipWake = () => {
       pendingWakeKeys.delete(key);
       disarmPendingWakeLease(key);
@@ -11947,7 +12014,7 @@ async function main() {
       // rejected/stale deliveries must not be cleared by an old cursor.
       noteModelMessagesV2(wakeState, [...wakeSnapshot.messages, ...wakeSnapshot.recent]);
     }
-    if (accepted.result.value.command?.text && !opts.silent && currentMode !== 'reserved2') {
+    if (accepted.result.value.command?.text && !opts.silent && effectiveMode(key) !== 'reserved2') {
       if (opts.farewell) social.exitingSessions.delete(sessionId);
       await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
     } else if (accepted.result.value.command?.text && opts.silent && opts.farewell) {
@@ -13037,8 +13104,9 @@ async function main() {
    * 定时静默里的会话照旧不唤醒（下一次唤醒时再带上新卡）。
    */
   function refreshRoleNowV2(onlyKeys = null) {
-    if (currentMode !== 'reserved2' || cfg.socialV2?.enabled === false || socialV2.paused) return { woke: [], skipped: 'notV2' };
-    const keys = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => isSessionAllowedInCurrentMode(k) && (!onlyKeys || onlyKeys.includes(k)));
+    if (cfg.socialV2?.enabled === false || socialV2.paused) return { woke: [], skipped: 'notV2' };
+    if (!anyV2Session()) return { woke: [], skipped: 'notV2' };
+    const keys = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k)));
     const woke = [];
     for (const k of keys) {
       if (silence.config().options.stopWakes && scheduledSilenceFor(k)) continue;
@@ -13197,7 +13265,7 @@ async function main() {
 
   async function sendWakePromptV2(key, reason) {
     if (cfg.socialV2?.enabled === false) return;
-    if (currentMode !== 'reserved2' || socialV2.paused) return;
+    if (effectiveMode(key) !== 'reserved2' || socialV2.paused) return;
     // 定时静默：时段内一律不唤醒（被 @、主动冒泡、睡醒、回复检查），省 token。
     // 定时任务自己已经按「跳过 / 照常执行」判断过，所以 scheduled 原因放行。
     if (reason !== 'scheduled' && silence.config().options.stopWakes) {
@@ -13345,7 +13413,7 @@ async function main() {
 
   function scheduleReplyCheckV2(key) {
     if (cfg.socialV2?.enabled === false) return;
-    if (socialV2.paused || currentMode !== 'reserved2') return;
+    if (socialV2.paused || effectiveMode(key) !== 'reserved2') return;
     const st = getSocialV2State(key);
     // 已有真实唤醒/有限睡眠/回复检查在排队时不再重复安排，避免 AI 被连环唤醒。
     if (st.pendingWakeTimer || st.sleepTimer || st.replyCheckTimer) return;
@@ -13584,8 +13652,8 @@ async function main() {
 
   function scheduleProactiveCheckV2(key) {
     if (cfg.socialV2?.proactive?.enabled === false) return;
-    if (socialV2.paused || currentMode !== 'reserved2') return;
-    if (!isSessionAllowedInCurrentMode(key)) return;
+    if (socialV2.paused || !proactiveAllowed(key)) return;
+    if (effectiveMode(key) !== 'reserved2') return;
     const st = getSocialV2State(key);
     if (st.proactiveTimer) return;
     const p = cfg.socialV2?.proactive ?? {};
@@ -13732,7 +13800,7 @@ async function main() {
     await sendToQQ(key, textToSay);
     if (!lastSendSucceeded(key)) return `发送到群 ${gid} 失败（可能当前模式不允许该群，或 QQ 侧发送失败）。`;
     try {
-      if (socialV2.conversations.has(key) || currentMode === 'reserved2') recordSentMessagesV2(key, [`（受管理员之托转述）${textToSay}`]);
+      if (socialV2.conversations.has(key) || effectiveMode(key) === 'reserved2') recordSentMessagesV2(key, [`（受管理员之托转述）${textToSay}`]);
     } catch {}
     return `已在群 ${gid} 发送。`;
   }
@@ -13863,7 +13931,7 @@ async function main() {
       }
       if (currentLevel !== 'L0') ext.controller.touch();
     }
-    if (!modeAllowed(key, kind, id, cfg, currentMode)) {
+    if (!passiveAllowed(key)) {
       log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.user_id}）`);
       return;
     }
@@ -13998,7 +14066,7 @@ async function main() {
           silenceBypass.set(key, Date.now() + DIRECT_PASS_MS);
           log(`${silenceReason(sw)}，${key} 被直接找了，放行 ${Math.round(DIRECT_PASS_MS / 60_000)} 分钟`);
         } else {
-          if (currentMode === 'reserved2' && silence.config().options.recordMessages) {
+          if (effectiveMode(key) === 'reserved2' && silence.config().options.recordMessages) {
             const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
             appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
             if (directed) getSocialV2State(key).silenceMissedDirect = true;
@@ -14054,7 +14122,7 @@ async function main() {
     }
 
     // 二代仿真模式（reserved2）：唤醒调度
-    if (currentMode === 'reserved2') {
+    if (effectiveMode(key) === 'reserved2') {
       const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
       appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), backfill ? { time: backfill.timeMs, backfill: true } : {});
       if (backfill?.tooOld) {
@@ -14228,7 +14296,7 @@ async function main() {
       if (accepted.result.value.command.text) await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
       return;
     }
-    if (cfg.ackMessage && currentMode !== 'reserved2') await sendToQQ(key, cfg.ackMessage);
+    if (cfg.ackMessage && effectiveMode(key) !== 'reserved2') await sendToQQ(key, cfg.ackMessage);
     log(`已投递 ${key}: ${promptText.slice(0, 80)}${promptText.length > 80 ? '…' : ''}`);
   }
 
@@ -14337,8 +14405,8 @@ async function main() {
       id = String(peer);
       key = convKey('private', id);
     }
-    if (!modeAllowed(key, kind, id, cfg, currentMode)) return;
-    if (currentMode !== 'reserved2') {
+    if (!passiveAllowed(key)) return;
+    if (effectiveMode(key) !== 'reserved2') {
       appendActivity(`${key} 收到拍一拍事件（非 reserved2，仅记录）：${senderId} -> ${targetId}`);
       return;
     }
@@ -14361,7 +14429,7 @@ async function main() {
       suffix: event.suffix
     });
     appendActivity(`${key} 拍一拍事件：${msg.text.slice(0, 80)}`);
-    if (currentMode !== 'reserved2') return;
+    if (effectiveMode(key) !== 'reserved2') return;
     if (socialV2.paused) return;
     const st = getSocialV2State(key);
     if (!st.bootstrapSent) {
@@ -14416,7 +14484,7 @@ async function main() {
     if (!r.handled) return r;
     if (ev.kind === 'join' || ev.kind === 'leave' || ev.kind === 'card') { groupMemberNameCache.delete(`${ev.groupId}:${ev.userId}`); groupMemberIdsCache.delete(ev.groupId); }
     if (r.streamText) appendActivity(`${key} ${r.streamText}`);
-    if (currentMode !== 'reserved2' || !r.streamText || !isSessionAllowedInCurrentMode(key)) return r;
+    if (effectiveMode(key) !== 'reserved2' || !r.streamText || !isSessionAllowedInCurrentMode(key)) return r;
     appendSocialV2Notice(key, { text: r.streamText, userId: ev.userId });
     if (r.wake && !socialV2.paused && cfg.socialV2?.enabled !== false) {
       const st = getSocialV2State(key);
@@ -14635,7 +14703,7 @@ async function main() {
               // 则累计 noActionCount；达到阈值后自动重置 WakeConfig，避免 AI 卡死。
               const silentQueueNow = social.silentTurns.get(frame.sessionId) ?? [];
               const isSilentTurn = silentQueueNow.length > 0;
-              if (currentMode === 'reserved2' && key && !isSilentTurn) {
+              if (effectiveMode(key) === 'reserved2' && key && !isSilentTurn) {
                 const st = getSocialV2State(key);
                 const turnStart = v2TurnStartAt.get(frame.sessionId) ?? 0;
                 const sendToolHit = sendToolSucceededSessions.has(frame.sessionId);
@@ -14773,7 +14841,7 @@ async function main() {
                   appendActivity(`${key} agent 回复被拦截（疑似敏感信息${hasKnownToken ? '/会话令牌' : ''}）`);
                   // 二代仿真里 AI 的文字本来就不会转发到 QQ，被拦的只是它的内部输出：只记日志，不往群里发拦截通知
                   // （以前会把「本条回复因疑似包含敏感信息…被拦截」发到群里，群友看到一条莫名其妙的提示）。
-                  if (cfg.security?.interceptNotify !== false && currentMode !== 'reserved2') {
+                  if (cfg.security?.interceptNotify !== false && effectiveMode(key) !== 'reserved2') {
                     await sendToQQ(key, '⚠️ 本条回复因疑似包含敏感信息（路径/凭据/会话令牌）被安全策略拦截，已记录并通知管理员。');
                   }
                   if (isFarewell) {
@@ -14837,7 +14905,7 @@ async function main() {
                       log(`社交模式：${key} 本轮发言未送达（QQ 发送失败），不刷新活跃时间`);
                     }
                   }
-                } else if (currentMode === 'reserved2') {
+                } else if (effectiveMode(key) === 'reserved2') {
                   log(`[reserved2] AI 内部输出（不自动转发）(${key}): ${plain.slice(0, 80)}`);
                   appendActivity(`${key} [reserved2] AI 内部输出：${plain.slice(0, 80)}${plain.length > 80 ? '…' : ''}`);
                 } else {

@@ -43,7 +43,9 @@ await test('session creation crossing a mode change never accepts stale permissi
 });
 await test('queued send rechecks allowlist at actual transport time', async (h) => {
   const sending = h.sendToQQ('qq:group:456', 'fixture');
-  h.cfg.allow.groups = [];
+  // P1 起准入以会话档案为准：让档案显式拒绝，才等价于「发送途中被移出白名单」。
+  const profile = h.state.profiles['qq:group:456'];
+  profile.access.passive = 'deny';
   await sending;
   assert.equal(h.calls.sent.length, 0);
 });

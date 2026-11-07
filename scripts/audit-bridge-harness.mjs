@@ -53,6 +53,7 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 import { createProfile, createSessionDirectoryWriter, loadSessionDirectory } from '../src/session/directory.mjs';
 import { resolveAccess } from '../src/session/access.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
+import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
@@ -267,6 +268,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     loadSessionDirectory,
     resolveAccess,
     migrateSessionProfiles,
+    resolveEffectiveMode,
+    isUsableMode,
     createSessionRegistry,
     createSessionPolicy,
     createSnowlumaHealth,

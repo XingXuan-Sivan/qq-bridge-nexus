@@ -113,5 +113,5 @@ test('③ 控制台换令牌只给控制台；二代里不往群里发拦截通�
     assert.equal(missing.status, 404);
   });
   const src = fs.readFileSync(new URL('../src/bridge.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(cfg\.security\?\.interceptNotify !== false && currentMode !== 'reserved2'\) \{\s*\n\s*await sendToQQ\(key, '⚠️ 本条回复因疑似包含敏感信息/, '二代仿真里被拦的内部输出不发拦截通知');
+  assert.match(src, /if \(cfg\.security\?\.interceptNotify !== false && effectiveMode\(key\) !== 'reserved2'\) \{\s*\n\s*await sendToQQ\(key, '⚠️ 本条回复因疑似包含敏感信息/, '二代仿真里被拦的内部输出不发拦截通知');
 });

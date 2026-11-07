@@ -191,7 +191,8 @@ await test('another conversation token, pause, mode and allowlist guards still r
   h.setMode('chat');
   assert.equal((await request('wake-config', { body })).status, 403);
   h.setMode('reserved2');
-  h.cfg.allow.groups = [];
+  // P1 起准入以会话档案为准：显式拒绝，才等价于「被移出白名单」。
+  h.state.profiles[KEY].access.passive = 'deny';
   assert.equal((await request('wake-config', { body })).status, 403);
   assert.deepEqual(seqs(st.unread), [1]);
 });
@@ -312,7 +313,7 @@ await test('an in-flight wait rechecks paused, feature, tool and allowlist permi
     ['pause', () => { h.socialV2.paused = true; }, () => { h.socialV2.paused = false; }],
     ['feature disable', () => { h.cfg.socialV2.enabled = false; }, () => { h.cfg.socialV2.enabled = true; }],
     ['tool disable', () => { h.cfg.socialV2.tools.waitMessages = false; }, () => { h.cfg.socialV2.tools.waitMessages = true; }],
-    ['allowlist removal', () => { h.cfg.allow.groups = []; }, () => { h.cfg.allow.groups = ['456']; }],
+    ['allowlist removal', () => { h.state.profiles[KEY].access.passive = 'deny'; }, () => { h.state.profiles[KEY].access.passive = 'inherit'; }],
   ];
   const before = () => plain({ unread: st.unread, wakeConfig: st.wakeConfig, lastReadThroughSeq: st.lastReadThroughSeq,
     observedAt: st.preSleepWaitObservedAt, satisfiedAt: st.preSleepWaitSatisfiedAt });

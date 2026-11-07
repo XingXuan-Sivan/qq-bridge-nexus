@@ -30,7 +30,7 @@ export function createSessionPolicy({ getMode, modePreset, getOwnerQQ, getLevel,
    * 其它模式里它们不影响 AI 能做什么，算进去只会造成无谓重建。
    */
   function policyOf(key) {
-    const mode = getMode();
+    const mode = getMode(key);
     const closed = mode === 'closed-agent';
     const plan = closed ? getClosedAgentPlan() : null;
     return JSON.stringify([

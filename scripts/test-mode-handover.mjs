@@ -257,7 +257,8 @@ test('⑤ 安全：L1→L2 的高权限会话不休眠；确认码不进交接�
 
 test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取管理员私聊、不含群、已脱敏）；关掉就不带', async () => {
   for (const on of [true, false]) {
-    await withHarness(on ? {} : { socialV2: { tools: { handoverMemory: false } } }, async (h) => {
+    // 交接开关已从二代工具开关搬到记忆页（memory.handover.enabled）。
+    await withHarness(on ? {} : { memory: { handover: { enabled: false } } }, async (h) => {
       h.setMode('reserved2');
       const ownerSt = h.getSocialV2State(OWNER_KEY);
       ownerSt.activeTopics = [{ text: '帮管理员修电脑，日志在 /Users/alice/log.txt', lastMentionAt: Date.now() }];
@@ -282,7 +283,8 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
     });
   }
   const html = readConsoleSource();
-  // 工具开关已搬进 pages/social-v2/fields.js 的 V2_TOOLS（value 即开关名）。
-  assert.match(html, /(data-v2-tool="handoverMemory"|value: 'handoverMemory')/, '二代工具开关里有这一项');
+  // 交接开关已从二代工具开关收进记忆页（memory.handover.enabled），原处不再留入口。
+  assert.ok(!/handoverMemory/.test(html), '二代工具开关里不再有 handoverMemory');
+  assert.match(html, /name: 'memHandover'/, '记忆页有交接开关');
   assert.match(html, /(data-v2-tool="schedule"|value: 'schedule')/, '定时任务工具也有开关');
 });

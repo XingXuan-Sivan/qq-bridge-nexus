@@ -37,6 +37,10 @@ export function normalizeMemoryConfig(raw) {
     if (value.maxChars === null || value.maxChars === 0) conf.maxChars = 0;
     else if (Number.isInteger(Number(value.maxChars))) conf.maxChars = clampInt(value.maxChars, 0, 100000, MEMORY_INJECT_DEFAULT_CHARS);
     if (Number.isInteger(Number(value.timeoutMs))) conf.timeoutMs = clampInt(value.timeoutMs, 100, 10000, MEMORY_TIMEOUT_MS);
+    // 本机轻量记忆的四个 qq_memory_* 工具：显式配置优先，缺省仍回落到旧的 socialV2.tools.memory。
+    if (value.tools && typeof value.tools === 'object' && !Array.isArray(value.tools) && typeof value.tools.enabled === 'boolean') {
+      conf.tools = { enabled: value.tools.enabled };
+    }
     if (value.limits && typeof value.limits === 'object' && !Array.isArray(value.limits)) {
       const limits = {};
       for (const [k, [min, max]] of Object.entries({
@@ -71,12 +75,24 @@ export function normalizeMemoryConfig(raw) {
       note: tools.note === true,
     },
     handover: { enabled: handover.enabled !== false },
-    ingest: { enabled: ingest.enabled === true },
+    ingest: {
+      enabled: ingest.enabled === true,
+      baseUrl: typeof ingest.baseUrl === 'string' ? ingest.baseUrl.trim().slice(0, 300) : '',
+      maxQueue: clampInt(ingest.maxQueue, 10, 2000, 200),
+      batchSize: clampInt(ingest.batchSize, 1, 200, 40),
+      flushIntervalMs: clampInt(ingest.flushIntervalMs, 500, 60000, 1500),
+      timeoutMs: clampInt(ingest.timeoutMs, 300, 30000, 5000),
+    },
   };
 }
 
 export function createMemoryRegistry({ log = () => {}, config = null, now = () => Date.now() } = {}) {
   const providers = new Map();
+  const history = []; // 注入/回忆的最近记录（控制台「最近回忆」用），最多 20 条
+  function recordHistory(entry) {
+    history.push({ at: now(), ...entry });
+    if (history.length > 20) history.splice(0, history.length - 20);
+  }
   const cache = new Map(); // `${provider}\u0000${key}\u0000${query}` -> { at, text, truncated, chars }
   const stats = new Map(); // providerId -> { calls, warms, hits, failures, lastError, lastAt, lastChars, lastStatus }
   let cfg = normalizeMemoryConfig(config);
@@ -253,6 +269,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
       st.lastAt = now();
       st.lastStatus = cut.truncated ? 'truncated' : (cut.text ? 'injected' : 'empty');
       st.lastError = null;
+      recordHistory({ kind: 'inject', provider: provider.id, key, query, chars: cut.text.length, status: st.lastStatus });
       return { provider: provider.id, text: cut.text, status: st.lastStatus, chars: cut.text.length, truncated: cut.truncated };
     } catch (error) {
       st.failures += 1;
@@ -271,6 +288,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
       handover: { ...cfg.handover },
       ingest: { ...cfg.ingest },
       cacheEntries: cache.size,
+      history: history.slice(-20),
     };
   }
 
@@ -322,6 +340,14 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
       }
       if (total >= totalCap) break;
     }
+    recordHistory({
+      kind: 'recall',
+      provider: results.map((r) => r.provider).join('+') || 'none',
+      key,
+      query,
+      chars: total,
+      status: results.some((r) => r.status === 'error') ? 'error' : (total ? 'ok' : 'empty'),
+    });
     return { query: String(query ?? ''), totalChars: total, results };
   }
 

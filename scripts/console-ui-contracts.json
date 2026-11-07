@@ -148,7 +148,6 @@
         "getActiveMembers": true,
         "setWakeConfig": true,
         "markRead": true,
-        "memory": true,
         "slangQuery": true,
         "slangSubmit": true,
         "listStickers": true,
@@ -165,8 +164,7 @@
         "setStickerRemark": true,
         "sendVoice": true,
         "webImage": true,
-        "schedule": true,
-        "handoverMemory": true
+        "schedule": true
       },
       "wake": {
         "defaultMode": "diving",
@@ -276,7 +274,6 @@
         "getActiveMembers": true,
         "setWakeConfig": true,
         "markRead": true,
-        "memory": true,
         "slangQuery": true,
         "slangSubmit": true,
         "listStickers": true,
@@ -293,8 +290,7 @@
         "setStickerRemark": true,
         "sendVoice": true,
         "webImage": true,
-        "schedule": true,
-        "handoverMemory": true
+        "schedule": true
       },
       "wake": {
         "defaultMode": "diving",

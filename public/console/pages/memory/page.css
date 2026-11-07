@@ -1,0 +1,86 @@
+/* 记忆页：provider 卡片、本机记忆列表与最近活动表。表格与表单复用通用组件，这里只补布局。 */
+
+/* 注入源单选：一行一个 provider，名字后面跟 id，避免“两个都叫记忆”时分不清。 */
+.memory-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+}
+.memory-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.memory-radio code {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* provider 卡片：一张卡里一行标题 + 一行配置，状态直接写在标题右侧。 */
+.memory-providers {
+  display: grid;
+  gap: 12px;
+}
+.memory-provider {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+}
+.memory-provider-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-bottom: 10px;
+}
+.memory-provider-head strong { font-size: 14px; }
+.memory-provider-head code { font-size: 12px; color: var(--muted); }
+.memory-provider-head .meta { margin-left: auto; }
+.memory-provider-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+.memory-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.memory-field input[type="number"] { width: 108px; }
+.memory-field input[type="text"] { width: 228px; }
+
+/* 本机轻量记忆：分区标题 + 一列条目；条目里的按钮贴在同一行，不换行撑高。 */
+.memory-list { display: grid; gap: 14px; }
+.memory-section b { font-size: 13px; }
+.memory-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.memory-item .btn.small { margin-left: 2px; }
+.memory-output {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface-sunken);
+}
+
+@media (max-width: 1100px) {
+  .memory-provider-head .meta { margin-left: 0; }
+  .memory-field input[type="text"] { width: 100%; }
+  .memory-field { flex: 1 1 220px; }
+}

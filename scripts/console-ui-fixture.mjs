@@ -291,9 +291,39 @@ function usageRecentFixture() {
   return rows;
 }
 
+function memoryStatusOf(state) {
+  const cfg = state.memoryConfig;
+  const mk = (id, label, sync, write) => ({
+    id, label,
+    enabled: cfg.providers?.[id]?.enabled !== false,
+    capabilities: { sync, write, listable: true },
+    maxChars: cfg.providers?.[id]?.maxChars ?? null,
+    timeoutMs: cfg.providers?.[id]?.timeoutMs ?? 900,
+    calls: 0, failures: 0, lastStatus: 'idle', lastChars: 0, cache: { hits: 0, misses: 0 },
+  });
+  return {
+    inject: { provider: cfg.inject.provider, maxChars: cfg.inject.maxChars, timeoutMs: cfg.inject.timeoutMs, cacheTtlMs: cfg.inject.cacheTtlMs },
+    maxChars: 2400,
+    providers: [mk('local-digest', '本机轻量记忆', true, true), mk('soulkit', 'soulkit 长期记忆', false, false)],
+    history: [],
+  };
+}
+
+function ingestStatusOf(state) {
+  const config = state.memoryConfig.ingest;
+  return { config, enabled: config.enabled === true, baseUrl: config.baseUrl, pending: 0, enqueued: 0, sent: 0, accepted: 0, batches: 0, failed: 0, lastError: null, lastAt: null, lastStatus: 'idle' };
+}
+
 export function makeFixtureState() {
   return {
     mode: 'reserved2', role: '小鲸鱼', roleMode: 'active', closedAgentPreset: '', paused: false,
+    memoryConfig: {
+      inject: { provider: 'soulkit', maxChars: 2400, timeoutMs: 900, cacheTtlMs: 60000 },
+      providers: { 'local-digest': { enabled: true }, soulkit: { enabled: true, baseUrl: 'http://127.0.0.1:3110', timeoutMs: 900, maxChars: 1200 } },
+      tools: { recall: true, note: false },
+      handover: { enabled: true },
+      ingest: { enabled: false, baseUrl: 'http://127.0.0.1:3110', maxQueue: 200, batchSize: 40, flushIntervalMs: 1500, timeoutMs: 5000 },
+    },
     roles: ['小鲸鱼', '温柔助手', '技术伙伴'],
     // 按会话设置人格（假群号）：null = 不挂卡
     roleByKey: { 'group:123456789': '技术伙伴', 'group:987654321': null },
@@ -671,6 +701,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               globalSideEffect: true,
             });
           }
+          case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
           case '/api/whitelist': return json(state.whitelist);
           case '/api/sessions': return json({ sessions: state.sessions });
           case '/api/pending': return json({ pending: [{ key: 'group:123456789', kind: 'approval', toolName: '演示工具', reason: '等待管理员确认（离线示例）' }] });
@@ -796,6 +827,14 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (ids.length && body.reasoningEffort && !ids.includes(body.reasoningEffort)) return json({ ok: false, error: `${body.provider}/${body.model} 只支持思考强度 ${ids.join(' / ')}` }, 400);
             Object.assign(state, { dshProvider: body.provider, dshModel: body.model, dshEffort: ids.length ? (body.reasoningEffort || '') : '', dshVision: body.vision || 'auto' });
             return json({ ok: true, provider: state.dshProvider, model: state.dshModel, reasoningEffort: state.dshEffort, vision: state.dshVision });
+          }
+          case '/api/memory': {
+            const next = state.memoryConfig;
+            for (const key of ['inject', 'tools', 'handover', 'ingest']) if (body[key] && typeof body[key] === 'object') next[key] = { ...next[key], ...body[key] };
+            if (body.providers && typeof body.providers === 'object') {
+              for (const [id, patch] of Object.entries(body.providers)) if (patch && typeof patch === 'object') next.providers[id] = { ...(next.providers[id] || {}), ...patch };
+            }
+            return json({ ok: true, memory: next, status: memoryStatusOf(state), ingest: ingestStatusOf(state) });
           }
           case '/api/role-mode': state.roleMode = body.mode; return json({ ok: true });
           case '/api/whitelist': state.whitelist = body; return json({ ok: true });

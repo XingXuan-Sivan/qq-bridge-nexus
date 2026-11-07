@@ -23,7 +23,6 @@ export const V2_TOOLS = [
   { value: 'getActiveMembers', label: 'qq_get_active_members', desc: '查看最近活跃成员列表' },
   { value: 'setWakeConfig', label: 'qq_set_wake_config', desc: '设置唤醒/潜水条件：无限期、有限时间、@/名字/关键词/概率等' },
   { value: 'markRead', label: 'qq_mark_read', desc: '标记当前未读为已读（看过但决定不回复）' },
-  { value: 'memory', label: 'qq_memory_append / qq_memory_query', desc: '轻量记忆：话题/想说的话/群友印象' },
   { value: 'slangQuery', label: 'qq_slang_query', desc: '查询已确认黑话/梗/网络表达' },
   { value: 'slangSubmit', label: 'qq_slang_submit', desc: 'AI 提交陌生词/黑话给管理员筛选' },
   { value: 'listStickers', label: 'qq_list_stickers', desc: '查看/搜索 QQ 收藏表情（含备注和本地笔记）' },
@@ -41,7 +40,6 @@ export const V2_TOOLS = [
   { value: 'sendVoice', label: 'qq_send_voice / qq_list_voices', desc: '发送语音条（只能发语音库里的音频；偶然而为的强表达）' },
   { value: 'webImage', label: 'qq_search_images / qq_preview_image / qq_send_web_image', desc: '搜图并发送（默认关）：只在管理员私聊里用，「找一张 xxx 的图发我」；必须先看图再发，搜索词会发给 Bing；改后重启 DSH 才会出现在工具列表' },
   { value: 'schedule', label: 'qq_schedule_create / list / update / delete', desc: '定时任务：只在管理员私聊里能用，AI 替你登记提醒、到点由桥接执行；默认只能发给你，登记后桥接另发确认（详见「定时任务」页面）' },
-  { value: 'handoverMemory', label: '切到 agent 时带上私聊长期记忆', desc: '不是工具：切到 agent L1～L3 时，把二代仿真里 AI 在管理员私聊记下的话题、想说的话、印象一并交接给 agent（只取管理员私聊的，不含任何群；已脱敏）。关掉后只交接最近的私聊往来' },
 ];
 
 // 语音库调试簇：输入框 + 开关 + 按钮共处一行，靠 .control-row 保证同高同基线。
@@ -62,16 +60,6 @@ const keyRow = ({ id, placeholder, buttons, status }) => `<div class="control-ro
   ${buttons.map((b) => `<button id="${b.id}" type="button" class="btn${b.variant ? ` ${b.variant}` : ''}">${b.label}</button>`).join('\n  ')}
   ${status ? `<span class="control-note" id="${status}"></span>` : ''}
 </div>`;
-
-const MEMORY_ROW = keyRow({
-  id: 'v2MemoryKey',
-  placeholder: 'group:123456789',
-  buttons: [
-    { id: 'v2MemoryLoad', label: '加载记忆' },
-    { id: 'v2MemoryClearAll', label: '清空全部', variant: 'danger' },
-  ],
-  status: 'v2MemoryMsg',
-});
 
 const WAKE_STATUS_ROW = keyRow({
   id: 'v2WakeKey',
@@ -246,12 +234,6 @@ export const V2_FIELDS = {
     label: '工具调用日志',
     fields: [
       { type: 'action', items: [{ id: 'v2ToolLogLoad', label: '加载工具日志' }, { id: 'v2ToolLogClear', label: '清空工具日志', variant: 'danger' }], status: 'v2ToolLogMsg' },
-    ],
-  },
-  memory: {
-    label: '轻量记忆',
-    fields: [
-      { name: 'v2MemoryKeyField', type: 'custom', span: 2, label: '会话 key', html: MEMORY_ROW },
     ],
   },
   wakeStatus: {

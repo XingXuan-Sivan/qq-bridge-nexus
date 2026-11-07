@@ -49,7 +49,12 @@
       "enabled": true
     },
     "ingest": {
-      "enabled": false
+      "enabled": false,
+      "baseUrl": "http://127.0.0.1:3110",
+      "maxQueue": 200,
+      "batchSize": 40,
+      "flushIntervalMs": 1500,
+      "timeoutMs": 5000
     }
   },
   "skills": {
@@ -246,7 +251,6 @@
       "getActiveMembers": true,
       "setWakeConfig": true,
       "markRead": true,
-      "memory": true,
       "slangQuery": true,
       "slangSubmit": true,
       "getImages": true,

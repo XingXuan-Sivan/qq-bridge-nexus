@@ -141,7 +141,7 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -362,7 +362,7 @@ ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定�
 const BARE_CONTROL_BASELINE = {
   slang: 0, overview: 0, 'social-v1': 0, plugins: 0, usage: 0,
   access: 0, operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0, reference: 0,
-  'social-v2': 0, scheduler: 0, persona: 0,
+  'social-v2': 0, scheduler: 0, persona: 0, memory: 0,
 };
 const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {

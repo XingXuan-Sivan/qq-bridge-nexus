@@ -21,7 +21,8 @@
 | D1 | 2026-11-07 | 记忆 S2 设计 | `PLUGIN_ROADMAP.md` §8.10 把记忆写成声明式块（`source.type='memory'`，走 `config.promptBlocks`） | 记忆注册成 core 的 `core-memory` 块，配置独立放 `memory.*`，由记忆页管理 | 声明式块的配置与「记忆预算独立」冲突：放 `promptBlocks` 会被块总预算与块表口径混在一起，出现两套预算 | 块表仍能看到 `core-memory` 一行（owner=core），但它的上限来自 `memory.inject.maxChars`；`promptBlocks` 不再管记忆 | 已改计划 | — |
 | D2 | 2026-11-07 | 记忆 S2 设计 | 计划里 `core-memory` 的 priority 写 120 | 用 **200**（与旧 `core-digest` 同槽位） | 保持未改动前的提示词顺序（stickers 100 → skills 150 → digest 200）；改成 120 会把记忆段插到 skills 之前，属于无收益的结构变更 | 提示词布局与现状一致，迁移可对比 | 已改计划 | — |
 | D3 | 2026-11-07 | 记忆 S2 设计 | 计划保留 `core-digest` 作为独立块，另加 `core-memory` | 删除 `core-digest` 块，改为 `local-digest` provider 的渲染函数；旧 `promptBlocks['core-digest']` 只做兼容读 | 两个块渲染同一份数据会出现「双份记忆」与双份预算，无法解释截断 | 需要一次性迁移旧配置；迁移前跑 `test-prompt-blocks` 做基线对比 | 已改计划 | — |
-| D4 | 2026-11-07 | 记忆 S4 工具 | `MEMORY_SUBSYSTEM.md` §2.3 写「写回只写主 provider」 | 主 provider 不可写时退到第一个 `write:true` 的 provider，并在结果里返回实际写入源 | `soulkit` 只读（`write:false`），而注入源已切到 soulkit；严格只写主源会让 `qq_memory_note` 在默认配置下永远失败 | 写回可能落到 `local-digest`（记成进行中的话题），用户在结果里能看到 `provider`；S5 接入 soulkit `/api/ingest` 后会重新收敛到主源 | 已改计划 | — |
+| D4 | 2026-11-07 | 记忆 S4 工具 | `MEMORY_SUBSYSTEM.md` §2.3 写「写回只写主 provider」 | 主 provider 不可写时退到第一个 `write:true` 的 provider，并在结果里返回实际写入源 | `soulkit` 只读（`write:false`），而注入源已切到 soulkit；严格只写主源会让 `qq_memory_note` 在默认配置下永远失败 | 写回可能落到 `local-digest`（记成进行中的话题），用户在结果里能看到 `provider`；S5 的 `/api/ingest` 是独立队列，不改变这条回退 | 已改计划 | — |
+| D5 | 2026-11-07 | 记忆 S5 写回 | 计划只写「`/api/ingest` 队列（默认关）」 | 只采两类事件：入站的非命令用户文本 + 出站由模型生成的回复（`opts.decorate`）；系统通知、`/` 命令、peek 与工具输出都不入队 | 写回的目的是给长期记忆沉淀「人说了什么、AI 回了什么」；把系统通知或命令塞进去会污染记忆，也会把令牌类文本带出去 | 写回的覆盖范围小于「全量聊天记录」；关闭时 `enqueue` 直接返回 false 且不落盘 | 已改计划 | — |
 
 ## 模板
 

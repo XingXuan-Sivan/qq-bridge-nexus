@@ -125,11 +125,11 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 217 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 212 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    // 暂停/恢复合并成一个开关后，清单从 218 变 217（-2 +1）。数字写死是为了防止「悄悄删 id」，
+    // 暂停/恢复合并成一个开关后 218→217（-2 +1）；二代「轻量记忆」整组收进记忆页后 217→212（-5）。数字写死是为了防止「悄悄删 id」，
     // 需要增减时连同 pages/*/fields.js 的改动一起改这里。
-    assert.equal(legacyIds.length, 217);
+    assert.equal(legacyIds.length, 212);
     assert.deepEqual(legacyIds.filter(x => !ids.includes(x)), []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });

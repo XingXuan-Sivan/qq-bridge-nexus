@@ -125,6 +125,7 @@ import { createPluginKernel } from './plugins/kernel.mjs';
 import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from './plugins/prompt-blocks.mjs';
 // 记忆 provider 注册表（docs/MEMORY_SUBSYSTEM.md）：注入只选一个 provider，同步直取、异步读预热缓存。
 import { createMemoryRegistry, normalizeMemoryConfig } from './memory/registry.mjs';
+import { createMemoryIngest } from './memory/ingest.mjs';
 import { LOCAL_DIGEST_LIMITS } from './memory/defaults.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
@@ -1655,6 +1656,17 @@ async function main() {
       return { ok: true, category: 'activeTopic' };
     },
   }, 'core');
+  // 记忆写回（S5，默认关）：QQ 会话里的 user / assistant 文本攒成事件，批量写给记忆服务。
+  // 关闭时 enqueue 直接返回 false，不发请求、不建队列文件。
+  const memoryIngest = createMemoryIngest({
+    log,
+    config: {
+      ...cfg.memory.ingest,
+      baseUrl: cfg.memory.ingest?.baseUrl || cfg.memory.providers?.soulkit?.baseUrl || 'http://127.0.0.1:3110',
+    },
+    stateFile: path.join(STATE_DIR, 'memory-ingest-pending.json'),
+  });
+  memoryIngest.start();
   // 技能索引（§9.2）：技能目录只读扫描，结果缓存 60s；额外目录来自 config.json 的 skills.dirs。
   // 根顺序 = 额外目录 → DSH_HOME/skills → 仓库 skills/，同名技能以先出现的为准。
   const skillIndex = createSkillIndex({
@@ -3887,7 +3899,7 @@ async function main() {
       // 只取管理员私聊这一个会话的，不取任何群的；开关是二代工具开关里的 handoverMemory（默认开）。
       // 从休眠恢复的私聊会话不用带：它自己的唤醒提示里本来就有这些。
       let memoryText = '';
-      if (!p.resumed && p.to?.mode === 'closed-agent' && cfg.socialV2?.tools?.handoverMemory !== false) {
+      if (!p.resumed && p.to?.mode === 'closed-agent' && (cfg.memory?.handover?.enabled ?? cfg.socialV2?.tools?.handoverMemory !== false)) {
         const ownerSt = socialV2.conversations.get(ownerKeyOf());
         if (ownerSt) {
           memoryText = formatMemoryV2(ownerSt).split('\n')
@@ -4312,6 +4324,12 @@ async function main() {
   // ── 本地控制台（独立 Web 面板，不依赖 DSH WebUI） ───────────────────────────
   // 模式/角色/静默状态都存 state/*.json，桥接即时感知；此服务只读写这些文件。
   function v2ToolEnabled(flag) {
+    // 记忆工具已收编到记忆页（S5）：memory.providers['local-digest'].tools.enabled 优先，
+    // 未显式配置时才回落到旧的 socialV2.tools.memory（兼容旧配置，不丢开关）。
+    if (flag === 'memory') {
+      const explicit = cfg.memory?.providers?.['local-digest']?.tools?.enabled;
+      if (typeof explicit === 'boolean') return explicit;
+    }
     return cfg.socialV2?.tools?.[flag] !== false;
   }
 
@@ -4868,6 +4886,7 @@ async function main() {
             config: memoryRegistry.getConfig(),
             status: memoryRegistry.status(),
             promptBlocks: corePromptBlocks.status(),
+            ingest: memoryIngest.status(),
           });
           return;
         }
@@ -4893,8 +4912,13 @@ async function main() {
             const normalized = normalizeMemoryConfig(next);
             cfg.memory = normalized;
             memoryRegistry.setConfig(normalized);
+            // 写回队列与 memory.ingest 同步：地址缺省跟随 soulkit provider，避免两处配置打架。
+            memoryIngest.setConfig({
+              ...normalized.ingest,
+              baseUrl: normalized.ingest?.baseUrl || normalized.providers?.soulkit?.baseUrl || 'http://127.0.0.1:3110',
+            });
             atomicWriteJson(file, { ...raw, memory: normalized });
-            sendJson({ ok: true, memory: normalized, status: memoryRegistry.status() });
+            sendJson({ ok: true, memory: normalized, status: memoryRegistry.status(), ingest: memoryIngest.status() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
           }
@@ -9376,6 +9400,17 @@ async function main() {
           else await withTimeout(bot.sendGroupMessage(Number(id), text(escapeCqText(outgoing))), SEND_TIMEOUT_MS, `QQ发送 ${kind}:${id}`);
           // 插件只能看到实际发出去的那一段（已做 CQ 转义与令牌脱敏），用于落盘/统计类插件。
           plugins?.notify('onAfterSend', { key, text: outgoing, ok: true });
+          // 记忆写回（S5）：只收模型回复（decorate），系统通知/确认语不进记忆。
+          if (opts.decorate) {
+            memoryIngest.enqueue({
+              key,
+              role: 'assistant',
+              text: outgoing,
+              ts: Date.now(),
+              sender: 'self',
+              id: `${key}:${Date.now()}:${index}`,
+            });
+          }
         })
         .catch((error) => {
           lastSendFailed.set(key, true);
@@ -13526,6 +13561,19 @@ async function main() {
       } catch (error) {
         log(`⚠️ 入站过滤失败，已按原文继续：${error?.message ?? error}`);
       }
+    }
+    // 记忆写回（S5）：只收通过模式/空文本过滤、且没被插件丢弃的真实消息；
+    // backfill 的补收消息也算（它们本来就是要进记忆的历史），但命令不写回。
+    if (!plainContent.startsWith('/')) {
+      memoryIngest.enqueue({
+        key,
+        role: 'user',
+        text: plainContent,
+        ts: Date.now(),
+        sender: String(event.user_id ?? ''),
+        name: String(event.sender?.card || event.sender?.nickname || ''),
+        id: messageRef,
+      });
     }
     const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
     // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截

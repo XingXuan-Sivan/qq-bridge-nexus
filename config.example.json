@@ -33,6 +33,12 @@
     "providers": {
       "local-digest": {
         "enabled": true
+      },
+      "soulkit": {
+        "enabled": false,
+        "baseUrl": "http://127.0.0.1:3110",
+        "timeoutMs": 900,
+        "maxChars": 1200
       }
     },
     "tools": {

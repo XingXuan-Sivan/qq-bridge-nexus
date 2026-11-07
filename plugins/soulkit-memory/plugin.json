@@ -1,0 +1,10 @@
+{
+  "id": "soulkit-memory",
+  "name": "soulkit 记忆适配器",
+  "version": "0.1.0",
+  "description": "把 soulkit 的 POST /api/recall 接成 memory-provider/1，作为唤醒时的记忆来源；soulkit 不可用时静默为空",
+  "main": "index.mjs",
+  "apiVersion": 1,
+  "permissions": ["memory:provide", "net:http"],
+  "hooks": []
+}

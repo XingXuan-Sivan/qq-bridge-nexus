@@ -138,7 +138,7 @@ ctx.memory.registerProvider({
 
 每阶段收尾固定动作：`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`、`npm run test:audit`、更新 `STATUS.md` 与 `PLAN_DEVIATIONS.md`、一阶段一提交。
 
-**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3–S5 未开工。
+**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3 已完成（`plugins/soulkit-memory/` 适配器 + `memory:provide` 权限 + 真机 `POST /api/recall` 命中，`scripts/test-soulkit-memory.mjs` 6/6，注入源已切到 `soulkit`，旧 `promptBlocks['core-digest']` 键已从运行配置删除）；S4–S5 未开工。
 
 ## 7. 风险与对策
 

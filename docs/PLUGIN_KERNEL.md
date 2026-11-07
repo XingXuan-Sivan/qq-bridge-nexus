@@ -46,6 +46,10 @@ plugins/
     plugin.json          # 清单（唯一权威描述）
     index.mjs            # 入口：export function activate(ctx)
     README.md            # 可选，给使用者看
+  soulkit-memory/        # 记忆 provider（memory:provide，见 docs/MEMORY_SUBSYSTEM.md）
+    plugin.json
+    index.mjs
+    README.md
 src/plugins/
   kernel.mjs             # 发现、加载、钩子分发、人格注册表
   manifest.mjs           # 清单校验（纯函数，可单测）
@@ -369,6 +373,8 @@ undefined                      // 不干预
 | `ctx.state.write(name, value)` | `state` | 原子写（临时文件 + rename），值必须可 JSON 序列化 |
 | `ctx.persona.register(provider)` | `persona:provide` | 注册人格 provider（§8），同时只能有一个生效 |
 | `ctx.persona.unregister()` | `persona:provide` | 注销自己注册的 provider |
+| `ctx.memory.registerProvider(provider)` | `memory:provide` | 注册记忆 provider（[MEMORY_SUBSYSTEM.md](MEMORY_SUBSYSTEM.md) §2.1）；同一时刻可以有多个，注入源由 `memory.inject.provider` 单选 |
+| `ctx.memory.unregisterProvider()` | `memory:provide` | 注销自己注册的记忆 provider |
 | `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.scheduler.registerTaskType(def)` | `task-type:provide` | 注册一种定时任务类型（见 §8.1）；任务存在 `state/scheduler.json`，重启后仍在 |

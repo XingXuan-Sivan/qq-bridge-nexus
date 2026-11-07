@@ -217,6 +217,35 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     };
   }
 
+  // 会话清单：列出本地记忆里已有的 key（含空桶，便于新增后立即可见）。
+  function sessions() {
+    const rows = [];
+    for (const key of Object.keys(state.keys)) {
+      const row = list({ key });
+      if (row) rows.push({ key: row.key, counts: row.counts, limits: row.limits });
+    }
+    rows.sort((a, b) => a.key.localeCompare(b.key));
+    return { ok: true, sessions: rows };
+  }
+
+  function ensure({ key }) {
+    const k = String(key ?? '').trim();
+    if (!k) return { ok: false, status: 400, error: 'key 不能为空' };
+    if (!/^(qq:)?(group|private):[^:\s]+$/.test(k)) return { ok: false, status: 400, error: 'key 形如 qq:group:123 或 private:456' };
+    bucket(k);
+    save();
+    return { ok: true, key: k };
+  }
+
+  function drop({ key }) {
+    const k = String(key ?? '').trim();
+    if (!k) return { ok: false, status: 400, error: 'key 不能为空' };
+    const existed = Boolean(state.keys[k]);
+    delete state.keys[k];
+    if (existed) save();
+    return { ok: true, key: k, removed: existed };
+  }
+
   function add({ key, category, content, extra = {} }) {
     const b = bucket(key);
     if (!b) return { ok: false, status: 400, error: 'key 不能为空' };
@@ -424,6 +453,9 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     update,
     remove,
     clear,
+    sessions,
+    ensure,
+    drop,
     touch,
     limits: limitsNow,
   };

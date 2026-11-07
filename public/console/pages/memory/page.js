@@ -5,7 +5,7 @@ import { esc } from '../../js/ui.js';
 import { tableHtml, dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
-import { openModal, wireModal } from '../../components/modal/modal.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { MEMORY_FIELDS } from './fields.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
@@ -166,18 +166,17 @@ async function renderSessionTable() {
   if (!host) return;
   host.innerHTML = '<div class="meta">正在读取会话…</div>';
   try {
-    const data = await api('/api/sessions');
+    const data = await api('/api/memory/sessions');
     const sessions = Array.isArray(data.sessions) ? data.sessions : [];
     sessionCache = sessions;
-    const counts = await Promise.all(sessions.map((s) => sessionMemoryCounts(s.key)));
     const platformSet = new Set();
     const kindSet = new Set();
-    const rows = sessions.map((s, i) => {
+    const rows = sessions.map((s) => {
       const { platform, kind } = platformOf(s.key);
       platformSet.add(platform);
       kindSet.add(kind);
-      const c = counts[i] || {};
-      const action = `<button type="button" class="btn small" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button>`;
+      const c = s.counts || {};
+      const action = `<button type="button" class="btn small" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button> <button type="button" class="btn small danger" data-mem-session-del="${esc(s.key)}">删除</button>`;
       const cells = [
         `<span class="mono">${esc(s.key)}</span>`,
         esc(platform),
@@ -194,10 +193,10 @@ async function renderSessionTable() {
       columns: [
         { label: '会话' }, { label: '平台', width: 90 }, { label: '类型', width: 80 },
         { label: '话题', width: 80 }, { label: '想法', width: 80 }, { label: '印象', width: 80 }, { label: '规则', width: 80 },
-        { label: '操作', width: 160 },
+        { label: '操作', width: 210 },
       ],
       rows,
-      empty: '桥接还没有会话；在 QQ 里聊一句再回来。',
+      empty: '还没有会话记忆；点「新增会话」填一个 key，或在 QQ 里先聊一句。',
       pageSize: 20,
       sizes: [10, 20, 50],
       search: { placeholder: '搜索会话…' },
@@ -216,6 +215,7 @@ async function renderSessionTable() {
           options: [{ value: 'all', label: '全部类型' }, ...[...kindSet].map((k) => ({ value: k, label: kindText(k) }))],
         },
       ],
+      actions: '<button type="button" class="btn primary" data-mem-session-add>新增会话</button>',
       meta: `${sessions.length} 个会话`,
     });
     initDataTables(host, { onRefresh: renderSessionTable });
@@ -347,6 +347,47 @@ async function clearSessionMemory(key) {
       localView = null;
       if (document.getElementById('memMemoryModal')?.classList.contains('open')) loadLocalMemory({ quiet: true });
     }
+    renderSessionTable();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function deleteSessionMemory(key) {
+  if (!key) return;
+  if (!window.confirm(`删除会话 ${key} 及其全部记忆？删除后这一行会消失，之后在 QQ 里再产生记忆时会重新出现。`)) return;
+  try {
+    const data = await api('/api/memory/sessions', 'DELETE', { key });
+    if (!data.ok) { window.alert(data.error || '删除失败'); return; }
+    if (localSessionKey === key) localSessionKey = '';
+    renderSessionTable();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+function openSessionAdd() {
+  const form = document.getElementById('memSessionAddForm');
+  if (!form) return;
+  renderFields(form, [{
+    name: 'memSessionKey',
+    type: 'text',
+    label: '会话 key',
+    span: 2,
+    placeholder: 'qq:group:123456789 或 private:…',
+    hint: '支持 qq:group:… / group:… / qq:private:… / private:…；建好后在「管理」里加条目。',
+  }], { columns: 1 });
+  openModal(document.getElementById('memSessionAddModal'));
+}
+
+async function saveSessionAdd() {
+  const input = document.getElementById('memSessionKey');
+  const key = (input?.value || '').trim();
+  if (!key) { window.alert('会话 key 不能为空'); return; }
+  try {
+    const data = await api('/api/memory/sessions', 'POST', { key });
+    if (!data.ok) { window.alert(data.error || '新增失败'); return; }
+    closeModal(document.getElementById('memSessionAddModal'));
     renderSessionTable();
   } catch (error) {
     window.alert(error.message);
@@ -609,6 +650,10 @@ export function init() {
   });
 
   document.getElementById('memorySessionTable')?.addEventListener('click', (event) => {
+    const add = event.target.closest('[data-mem-session-add]');
+    if (add) { openSessionAdd(); return; }
+    const drop = event.target.closest('[data-mem-session-del]');
+    if (drop) { deleteSessionMemory(drop.dataset.memSessionDel); return; }
     const clear = event.target.closest('[data-mem-clear]');
     if (clear) { clearSessionMemory(clear.dataset.memClear); return; }
     const open = event.target.closest('[data-mem-open]');
@@ -626,6 +671,11 @@ export function init() {
       },
     });
   }
+  const sessionAddModal = document.getElementById('memSessionAddModal');
+  if (sessionAddModal && sessionAddModal.parentElement !== document.body) document.body.appendChild(sessionAddModal);
+  if (sessionAddModal) wireModal(sessionAddModal, { onClose: () => {} });
+  document.getElementById('memSessionAddSave')?.addEventListener('click', saveSessionAdd);
+  document.getElementById('memSessionAddCancel')?.addEventListener('click', () => closeModal('memSessionAddModal'));
   document.getElementById('memEntrySave')?.addEventListener('click', saveEntry);
   document.getElementById('memEntryBack')?.addEventListener('click', () => { localEdit = null; showSessionView(); });
 

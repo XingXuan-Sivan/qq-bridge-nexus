@@ -1653,6 +1653,9 @@ async function main() {
       update: (params) => localMemory.update(params),
       remove: (params) => localMemory.remove(params),
       clear: (params) => localMemory.clear(params),
+      sessions: () => localMemory.sessions(),
+      ensure: (params) => localMemory.ensure(params),
+      drop: (params) => localMemory.drop(params),
     },
   }, 'core');
   // 记忆写回（S5，默认关）：QQ 会话里的 user / assistant 文本攒成事件，批量写给记忆服务。
@@ -8674,6 +8677,26 @@ async function main() {
         };
         const MEM_FIELDS = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
         const memCategory = (value) => String(value ?? '').trim();
+        // 记忆会话：控制台可以新建/删除本地记忆键；AI 不提供这条路径（不需要凭空造会话）。
+        if (url.pathname === '/api/memory/sessions') {
+          if (!memConsole) { memDeny('仅控制台可用'); return; }
+          if (req.method === 'GET') {
+            const r = await memCall(memProvider(''), 'sessions', {});
+            if (!r) return;
+            sendJson({ ok: true, provider: r.provider, sessions: r.result?.sessions ?? [] });
+            return;
+          }
+          if (req.method === 'POST' || req.method === 'DELETE') {
+            const body = await readBody();
+            const key = apiKey(body.key);
+            if (!key) { memDeny('key 不能为空', 400); return; }
+            const r = await memCall(memProvider(body.provider), req.method === 'POST' ? 'ensure' : 'drop', { key });
+            if (!r) return;
+            ext.audit.append(req.method === 'POST' ? 'memory.session.add' : 'memory.session.drop', { key, source: 'console' });
+            sendJson({ ok: true, provider: r.provider, key, removed: r.result?.removed === true });
+            return;
+          }
+        }
         if (req.method === 'GET' && url.pathname === '/api/memory/entries') {
           const key = apiKey(url.searchParams.get('key'));
           const category = memCategory(url.searchParams.get('category'));

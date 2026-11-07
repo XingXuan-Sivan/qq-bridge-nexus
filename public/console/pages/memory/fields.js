@@ -30,6 +30,13 @@ const MEM_MODAL = modalHtml({
   <button type="button" class="btn" id="memEntryBack" hidden>返回列表</button>
   <button type="button" class="btn primary" id="memEntrySave" hidden>保存</button>`,
 });
+const SESSION_ADD_MODAL = modalHtml({
+  id: 'memSessionAddModal',
+  title: '新增会话',
+  body: '<div id="memSessionAddForm" class="form-grid"></div>',
+  footer: `<button type="button" class="btn" id="memSessionAddCancel" data-modal-close>取消</button>
+  <button type="button" class="btn primary" id="memSessionAddSave">保存</button>`,
+});
 const INGEST_STATS = '<div id="memoryIngestStats" class="meta">写回未开启：不会向任何外部服务发送对话内容。</div>';
 const HISTORY = '<div id="memoryHistory">（还没有注入或回忆记录）</div>';
 
@@ -75,6 +82,7 @@ export const MEMORY_FIELDS = {
     { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存上限设置' }], status: 'memLocalLimitsMsg' },
     { name: 'memLocalSessionsBlock', type: 'custom', html: SESSION_HOST, span: 2 },
     { name: 'memLocalModalBlock', type: 'custom', html: MEM_MODAL, span: 2 },
+    { name: 'memSessionAddModalBlock', type: 'custom', html: SESSION_ADD_MODAL, span: 2 },
   ],
   tools: [
     { name: 'memToolRecall', type: 'switch', label: 'qq_memory_recall', onLabel: '开', offLabel: '关', hint: '让 AI 主动翻旧事；默认开。' },

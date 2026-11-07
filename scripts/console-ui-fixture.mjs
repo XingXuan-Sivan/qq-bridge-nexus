@@ -318,6 +318,11 @@ function memoryEntryList(state, key) {
   };
 }
 
+function memorySessions(state) {
+  const keys = Object.keys(state.memoryEntries || {}).sort();
+  return keys.map((key) => ({ key, counts: memoryEntryList(state, key).counts, limits: memoryEntryList(state, key).limits }));
+}
+
 function memoryStatusOf(state) {
   const cfg = state.memoryConfig;
   const mk = (id, label, sync, write) => ({
@@ -729,6 +734,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             });
           }
           case '/api/memory/entries': return json({ ok: true, provider: 'local-digest', key: url.searchParams.get('key') || '', data: memoryEntryList(state, url.searchParams.get('key') || '') });
+        case '/api/memory/sessions': return json({ ok: true, provider: 'local-digest', sessions: memorySessions(state) });
           case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
           case '/api/whitelist': return json(state.whitelist);
           case '/api/sessions': return json({ sessions: state.sessions });
@@ -795,6 +801,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         }
       }
       if (method === 'PATCH' || method === 'DELETE') {
+        if (path === '/api/memory/sessions' && method === 'DELETE') {
+          const key = String(body.key || '');
+          const existed = Boolean(state.memoryEntries && state.memoryEntries[key]);
+          if (existed) delete state.memoryEntries[key];
+          return json({ ok: true, key, removed: existed });
+        }
         if (path === '/api/memory/entries') {
           const key = String(body.key || '');
           const bucket = memoryBucket(state, key);
@@ -904,6 +916,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                   : { id: ++bucket.seq, text: String(body.content || ''), at: Date.now() };
             bucket[field].push(item);
             return json({ ok: true, item, duplicate: false });
+          }
+          case '/api/memory/sessions': {
+            const key = String(body.key || '');
+            if (!key) return json({ ok: false, error: 'key 不能为空' }, 400);
+            memoryBucket(state, key);
+            return json({ ok: true, key });
           }
           case '/api/memory/entries/clear': {
             const bucket = memoryBucket(state, String(body.key || ''));

@@ -419,6 +419,11 @@ try {
 
   await test('Memory page: session modal with tabs, entry add/edit/delete and limits', async () => {
     await navigate('memory');
+    await page.waitForSelector('#memorySessionTable [data-mem-session-add]');
+    await page.click('#memorySessionTable [data-mem-session-add]');
+    await page.waitForFunction(() => document.getElementById('memSessionAddModal')?.classList.contains('open'));
+    await fill('memSessionKey', 'group:123456789');
+    await page.click('#memSessionAddSave');
     await page.waitForSelector('#memorySessionTable [data-mem-open]');
     await page.click('#memorySessionTable [data-mem-open]');
     await page.waitForFunction(() => document.getElementById('memMemoryModal')?.classList.contains('open'));
@@ -450,6 +455,9 @@ try {
 
     await page.click('#memMemoryModal [data-modal-close]');
     await page.waitForFunction(() => !document.getElementById('memMemoryModal')?.classList.contains('open'));
+
+    await page.click('#memorySessionTable [data-mem-session-del]');
+    await page.waitForFunction(() => (document.getElementById('memorySessionTable')?.textContent || '').includes('还没有会话记忆'));
   });
 
   if (!original) await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {

@@ -132,7 +132,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     const manage = capabilities.manage === true ? provider.manage : null;
     if (capabilities.manage === true) {
       if (!manage || typeof manage !== 'object') throw new Error(`memory provider 声明 manage 但没有 manage 实现：${id}`);
-      for (const fn of ['list', 'add', 'update', 'remove', 'clear']) {
+      for (const fn of ['list', 'add', 'update', 'remove', 'clear', 'sessions', 'ensure', 'drop']) {
         if (typeof manage[fn] !== 'function') throw new Error(`memory provider ${id} 的 manage 缺少 ${fn}()`);
       }
     }

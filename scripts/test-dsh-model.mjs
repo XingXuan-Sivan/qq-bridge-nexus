@@ -242,6 +242,6 @@ test('⑤ 不能看图时：聊天图片、工具图片都降级成文字，不�
   for (const marker of ["url.pathname === '/api/socialV2/sticker-image'", "url.pathname === '/api/socialV2/self-image'"]) {
     const i = src.indexOf(marker);
     const block = src.slice(i, src.indexOf('try {', i));
-    assert.match(block, /if \(req\.headers\['x-agent-token'\] && !modelCanSeeImages\(\)\)/, marker);
+    assert.match(block, /if \(req\.headers\['x-agent-token'\] && !sessionCanSeeImages\(key\)\)/, marker);
   }
 });

@@ -3049,6 +3049,27 @@ async function main() {
   // 当前模型能不能看图（决定 QQ 图片是交给模型还是降级成文字占位）。
   const modelCanSeeImages = () => canSeeImages(cfg.dsh ?? {});
   const currentModelLabel = () => `${cfg.dsh?.provider || 'deepseek-official'}/${cfg.dsh?.model || 'deepseek-flash'}`;
+  // 会话级模型：档案 model 非空时按它判断看图能力与标签；未指定则沿用全局。
+  const profileModelOf = (key) => {
+    const m = key ? state.profiles?.[key]?.model : null;
+    if (!m || !m.provider || !m.model) return null;
+    return { provider: String(m.provider), model: String(m.model), reasoning: m.reasoning ? String(m.reasoning) : '' };
+  };
+  const profileModelSignature = (key) => {
+    const m = profileModelOf(key);
+    return m ? `${m.provider}/${m.model}/${m.reasoning || '-'}` : '';
+  };
+  const modelLabelForKey = (key) => {
+    const m = profileModelOf(key);
+    return m ? `${m.provider}/${m.model}` : currentModelLabel();
+  };
+  const sessionCanSeeImages = (key) => {
+    const m = profileModelOf(key);
+    if (!m) return modelCanSeeImages();
+    // 全局显式「不能看图」仍然优先；否则按该模型公布的能力判断。
+    if (normalizeVisionSetting(cfg.dsh?.vision) === 'no') return false;
+    return canSeeImages({ provider: m.provider, model: m.model, vision: normalizeVisionSetting(cfg.dsh?.vision) === 'yes' ? 'yes' : 'auto' });
+  };
   const collectors = new Map(); // sessionId -> turn collector
   const sendToolSucceededSessions = new Set(); // sessionId：当前 turn 内 MCP 发送类工具至少成功一次
   const v2TurnStartAt = new Map(); // sessionId -> timestamp：reserved2 turn 开始时间，用于判断是否“无行动”
@@ -3845,6 +3866,7 @@ async function main() {
   const sessionPolicyImpl = createSessionPolicy({
     getMode: (key) => effectiveMode(key),
     modePreset: (key, mode) => modePreset(key, mode, cfg),
+    getModel: (key) => profileModelSignature(key),
     getOwnerQQ: () => cfg.ownerQQ,
     getLevel: () => currentLevel,
     getClosedAgentPlan: () => closedAgentPlan(),
@@ -5915,6 +5937,12 @@ async function main() {
               effectiveMode: effectiveMode(key),
               presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
+              model: profile?.model ?? null,
+              effectiveModel: profileModelOf(key) ?? {
+                provider: cfg.dsh?.provider || 'deepseek-official',
+                model: cfg.dsh?.model || 'deepseek-flash',
+                reasoning: cfg.dsh?.reasoningEffort || '',
+              },
               dsh: getDshHealth(key, sessionId),
             });
             return;
@@ -5928,6 +5956,22 @@ async function main() {
               patch.displayName = name || null;
             }
             if (Object.hasOwn(body, 'blocked')) patch.blocked = body.blocked === true;
+            if (Object.hasOwn(body, 'model')) {
+              if (body.model === null) patch.model = null;
+              else {
+                const raw = body.model && typeof body.model === 'object' ? body.model : null;
+                if (!raw || !raw.provider || !raw.model) { sendJson({ ok: false, error: '模型需要 provider 和 model' }, 400); return; }
+                const got = await modelCatalogCache.get();
+                if (!got.ok) { sendJson({ ok: false, error: `读取 DSH 模型目录失败，无法校验，未保存：${got.error}` }, 503); return; }
+                let selection;
+                try {
+                  selection = validateModelSelection(got.catalog, {
+                    provider: raw.provider, model: raw.model, reasoningEffort: raw.reasoning ?? '', vision: cfg.dsh?.vision,
+                  });
+                } catch (error) { sendJson({ ok: false, error: error?.message ?? '模型选择无效' }, 400); return; }
+                patch.model = { provider: selection.provider, model: selection.model, reasoning: selection.reasoningEffort || null };
+              }
+            }
             if (Object.hasOwn(body, 'mode')) {
               if (!['inherit', 'chat', 'reserved', 'reserved2'].includes(body.mode)) { sendJson({ ok: false, error: '运行模式取值无效' }, 400); return; }
               patch.mode = body.mode;
@@ -7579,7 +7623,7 @@ async function main() {
           const c = webImageCandidates.get(key, n);
           if (!c) { sendJson({ ok: false, error: '没有这个编号的候选（候选只保留 15 分钟），请先用 qq_search_images 重新搜' }, 404); return; }
           if (url.pathname === '/api/socialV2/image-preview') {
-            if (!modelCanSeeImages()) { sendJson({ ok: false, error: `当前模型 ${currentModelLabel()} 不能看图，没法先确认内容，所以不能发网上的图` }, 409); return; }
+            if (!sessionCanSeeImages(key)) { sendJson({ ok: false, error: `当前模型 ${modelLabelForKey(key)} 不能看图，没法先确认内容，所以不能发网上的图` }, 409); return; }
             try {
               const img = await fetchCandidateImage(c, { preferThumb: true, maxBytes: IMAGE_PREVIEW_MAX_BYTES });
               webImageCandidates.markPreviewed(key, n);
@@ -7632,7 +7676,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getStickerImage')) { sendJson({ ok: false, error: '工具未启用：qq_get_sticker_image' }, 403); return; }
-          if (req.headers['x-agent-token'] && !modelCanSeeImages()) { sendJson({ ok: false, error: `当前模型 ${currentModelLabel()} 不能看图，表情图片不返回；请按表情的备注和标签使用` }, 409); return; }
+          if (req.headers['x-agent-token'] && !sessionCanSeeImages(key)) { sendJson({ ok: false, error: `当前模型 ${modelLabelForKey(key)} 不能看图，表情图片不返回；请按表情的备注和标签使用` }, 409); return; }
           try {
             const entry = await getStickerImageData(stickerId);
             const fetched = await safeFetchBuffer(entry.url, MAX_MEDIA_BYTES);
@@ -7666,7 +7710,7 @@ async function main() {
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2ToolEnabled('getSelfImage')) { sendJson({ ok: false, error: '工具未启用：qq_get_self_image' }, 403); return; }
-          if (req.headers['x-agent-token'] && !modelCanSeeImages()) { sendJson({ ok: false, error: `当前模型 ${currentModelLabel()} 不能看图，形象图片不返回` }, 409); return; }
+          if (req.headers['x-agent-token'] && !sessionCanSeeImages(key)) { sendJson({ ok: false, error: `当前模型 ${modelLabelForKey(key)} 不能看图，形象图片不返回` }, 409); return; }
           const selfPath = path.join(ROOT, 'assets', 'deepseek娘.png');
           try {
             if (!fs.existsSync(selfPath)) { sendJson({ ok: false, error: '未找到 AI 形象图片 assets/deepseek娘.png' }, 404); return; }
@@ -8725,7 +8769,7 @@ async function main() {
           if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '转发媒体读取仅 reserved2 模式可用' }, 403); return; }
           if (!media.length) { sendJson({ ok: true, key, media: [], images: [] }); return; }
           try {
-            const images = await fetchMediaData(media);
+            const images = await fetchMediaData(media, key);
             sendJson({ ok: true, key, media, images });
           } catch (error) {
             log(`转发媒体读取失败 ${key}:`, error?.message ?? error);
@@ -9355,7 +9399,7 @@ async function main() {
             return;
           }
           try {
-            const images = await fetchMediaData(media);
+            const images = await fetchMediaData(media, key);
             sendJson({ ok: true, messageId, media, images });
           } catch (error) {
             log(`图片查询失败 ${key} ${messageId}: ${error?.message ?? error}`);
@@ -10308,9 +10352,9 @@ async function main() {
     return { text: fallbackText };
   }
 
-  async function resolveMediaList(mediaList) {
+  async function resolveMediaList(mediaList, key = null) {
     // 当前模型不能看图（或未知）：不下载图片，直接换成文字占位，避免整条消息被 DSH 拒绝
-    if (!modelCanSeeImages()) return mediaTextParts(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], currentModelLabel());
+    if (!sessionCanSeeImages(key)) return mediaTextParts(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], modelLabelForKey(key));
     const parts = [];
     let index = 0;
     let totalBytes = 0;
@@ -10355,9 +10399,9 @@ async function main() {
     return parts;
   }
 
-  async function fetchMediaData(mediaList) {
+  async function fetchMediaData(mediaList, key = null) {
     // 工具查询图片同理：不能看图时只返回文字条目（不带 data），MCP 端会显示成文字
-    if (!modelCanSeeImages()) return mediaTextEntries(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], currentModelLabel());
+    if (!sessionCanSeeImages(key)) return mediaTextEntries(Array.isArray(mediaList) ? mediaList.slice(0, MAX_MEDIA_COUNT) : [], modelLabelForKey(key));
     const out = [];
     let index = 0;
     let totalBytes = 0;
@@ -10578,22 +10622,30 @@ async function main() {
   // 四种 QQ 模式共用 DSH 会话，统一强制使用多模态模型 DeepSeek-V41-Flash（id: deepseek-flash）；
   // 它同时支持 text/image 输入，取代已下线的 deepseek-v4-flash-vision-exp。
   const modelAppliedSessions = new Map(); // sessionId -> 已应用的 modelSelectionEpoch
+  const modelAppliedSignature = new Map(); // sessionId -> 已应用的 provider/model/reasoning 签名
   // 返回 'applied' | 'not-found' | 'failed'。
   // 'not-found' 表示 DSH 侧会话已经不存在（DSH 重启、异常退出、归档竞态），
   // 本地映射已失效，调用方必须退役重建，否则每条消息都会对着一个不存在的会话重试。
   const modelParamWarnings = new Set(); // 同一条档位修正提示只记一次
-  async function ensureChatModel(sessionId) {
-    if (modelAppliedSessions.get(sessionId) === modelSelectionEpoch) return 'applied';
-    // 按 DSH 模型目录修正参数：无档位模型不带 reasoningEffort、不被支持的档位交给模型默认。
-    // 目录取不到（超时 / 旧 DSH）时按配置原样传，不阻塞聊天。
+  async function ensureChatModel(sessionId, key = null) {
+    // 会话级模型优先；未指定时沿用全局 dsh 配置。全局改动靠 epoch 失效，档案改动靠指纹重建。
     const got = await modelCatalogCache.get();
-    const { params, warning } = resolveSelectModelParams(cfg.dsh ?? {}, got.ok ? got.catalog : null);
+    const perSession = profileModelOf(key);
+    const { params, warning } = perSession
+      ? resolveSelectModelParams(
+        { provider: perSession.provider, model: perSession.model, reasoningEffort: perSession.reasoning },
+        got.ok ? got.catalog : null,
+      )
+      : resolveSelectModelParams(cfg.dsh ?? {}, got.ok ? got.catalog : null);
     if (warning && !modelParamWarnings.has(warning)) { modelParamWarnings.add(warning); log(`⚠️ ${warning}`); }
+    const signature = JSON.stringify(params);
+    if (modelAppliedSessions.get(sessionId) === modelSelectionEpoch && modelAppliedSignature.get(sessionId) === signature) return 'applied';
     let lastError = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
         const result = unwrap(await api.sessions.selectModel({ sessionId, ...params }), 'session.selectModel');
         modelAppliedSessions.set(sessionId, modelSelectionEpoch);
+        modelAppliedSignature.set(sessionId, signature);
         log(`已设置会话模型 ${sessionId} -> ${result.selected.provider}/${result.selected.model} (${result.selected.reasoningEffort ?? '默认'})`);
         return 'applied';
       } catch (error) {
@@ -10644,7 +10696,7 @@ async function main() {
       if (!isCurrentSession(key, existing)) {
         retireSession(key);
       } else {
-        const applied = await ensureChatModel(existing);
+        const applied = await ensureChatModel(existing, key);
         // DSH 侧会话已不存在（DSH 重启、异常退出、归档竞态）：本地映射已经失效，
         // 必须退役并重建，否则每条消息都会对着一个不存在的会话重试 selectModel。
         if (applied === 'not-found') {
@@ -10676,7 +10728,7 @@ async function main() {
           saveState();
           api.events.follow(sid);
           markDshHealth(key, sid, 'online');
-          const applied = await ensureChatModel(sid);
+          const applied = await ensureChatModel(sid, key);
           if (applied === 'not-found') {
             log(`休眠会话 ${key} -> ${sid} 在 DSH 侧已不存在，改为新建`);
             retireSession(key);
@@ -10780,7 +10832,7 @@ async function main() {
       sessions.setPolicy(key, policy);
       reverse.set(sessionId, key);
       saveState();
-      await ensureChatModel(sessionId);
+      await ensureChatModel(sessionId, key);
       markDshHealth(key, sessionId, 'online');
       if (epoch !== sessionEpoch || !isCurrentSession(key, sessionId)) {
         if (sessions.get(key) === sessionId) retireSession(key);
@@ -11962,7 +12014,7 @@ async function main() {
         const injected = await plugins.promptBlocks({
           key,
           sessionId,
-          mode: currentMode,
+          mode: effectiveMode(key),
           persona: currentRoleName(key),
         });
         if (injected?.text) modelText = `${modelText}\n\n${injected.text}`;
@@ -11972,7 +12024,7 @@ async function main() {
     }
     let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(opts.media) && opts.media.length > 0) {
-      const imageParts = await resolveMediaList(opts.media);
+      const imageParts = await resolveMediaList(opts.media, key);
       content = [{ type: 'text', text: modelText }, ...imageParts];
     }
     // 媒体解析成功后再标记退场，避免解析异常时残留退场标记。
@@ -14278,7 +14330,7 @@ async function main() {
     const modelText = withSlangContext(withHandover(key, promptText));
     let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(mediaList) && mediaList.length > 0) {
-      const imageParts = await resolveMediaList(mediaList);
+      const imageParts = await resolveMediaList(mediaList, key);
       content = [{ type: 'text', text: modelText }, ...imageParts];
     }
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');

@@ -94,7 +94,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, typeof content === 'string' ? content : JSON.stringify(content));
   }
-  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], cancelled: [], images: [], faces: [], http: [], commands: [], settings: [], responds: [], renames: [] };
+  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], cancelled: [], images: [], faces: [], http: [], commands: [], settings: [], responds: [], renames: [], selectModels: [] };
   // 语音发送在桥接里是**直接 fetch 网关**（与文本/表情共用 sendChain，但要自己带 record 段），
   // 所以这里给 VM 注入一个记录型 fetch：既不让测试真的发 QQ 消息，又能断言发出的段内容。
   const fakeFetch = async (url, init = {}) => {
@@ -135,7 +135,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       create: async (params) => { calls.created.push(params); return success({ sessionId: `fixture-${calls.created.length}` }); },
       // P0 对账：默认把本进程创建过的会话都算在线；测试可覆盖成空列表模拟 DSH 侧丢失。
       list: async () => success({ items: calls.created.map((_, index) => ({ sessionId: `fixture-${index + 1}` })) }),
-      selectModel: async () => success({ selected: { provider: 'fixture', model: 'fixture' } }),
+      selectModel: async (params) => { calls.selectModels.push(params); return success({ selected: { provider: params?.provider ?? 'fixture', model: params?.model ?? 'fixture' } }); },
       prompt: async (params) => { calls.prompts.push(params); return success({}); },
     },
     respond: async (msg) => { calls.responds.push(msg); return success({}); },
@@ -218,6 +218,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       selfNickname = selfDisplayName.toLowerCase() || 'deepseek';
     },
     flushQueue, retireSession, sessions, getDshHealth, reconcileDshSessions, rebuildSession,
+    profileModelOf, profileModelSignature, modelLabelForKey, sessionCanSeeImages, ensureChatModel,
+    effectiveMode, passiveAllowed, proactiveAllowed,
     ext, handleMemberNotice, reconcileGroupMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
     setLevel(value) { currentLevel = value; },
     getMode() { return { mode: currentMode, level: currentLevel }; },

@@ -14,11 +14,12 @@
  * @param {object} deps
  * @param {() => string} deps.getMode                    当前模式
  * @param {(key: string, mode: string) => string|null|undefined} deps.modePreset  模式预设（chat/reserved 用）
+ * @param {(key: string) => string|null|undefined} [deps.getModel] 会话级模型签名（未指定返回空）
  * @param {() => string|number|null} deps.getOwnerQQ      管理员 QQ（只有 closed-agent 进指纹）
  * @param {() => string} deps.getLevel                    当前权限级别（L0/L1/L2/L3）
  * @param {() => { ok: boolean, permissionPreset?: string, error?: string }|null} deps.getClosedAgentPlan
  */
-export function createSessionPolicy({ getMode, modePreset, getOwnerQQ, getLevel, getClosedAgentPlan } = {}) {
+export function createSessionPolicy({ getMode, modePreset, getModel, getOwnerQQ, getLevel, getClosedAgentPlan } = {}) {
   if (typeof getMode !== 'function') throw new TypeError('createSessionPolicy: getMode 必须是函数');
   if (typeof modePreset !== 'function') throw new TypeError('createSessionPolicy: modePreset 必须是函数');
   if (typeof getOwnerQQ !== 'function') throw new TypeError('createSessionPolicy: getOwnerQQ 必须是函数');
@@ -33,11 +34,14 @@ export function createSessionPolicy({ getMode, modePreset, getOwnerQQ, getLevel,
     const mode = getMode(key);
     const closed = mode === 'closed-agent';
     const plan = closed ? getClosedAgentPlan() : null;
+    const model = typeof getModel === 'function' ? (getModel(key) || '') : '';
+    // 未指定会话级模型时不把空值写进指纹，避免升级后所有旧绑定因数组长度变化被重建一次。
     return JSON.stringify([
       mode,
       modePreset(key, mode) ?? '',
       closed ? (getOwnerQQ() ?? null) : null,
       ...(closed ? [getLevel(), plan?.ok ? plan.permissionPreset : ''] : []),
+      ...(model ? [model] : []),
     ]);
   }
 

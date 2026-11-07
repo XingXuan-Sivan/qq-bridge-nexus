@@ -326,6 +326,50 @@ function detailDshLabel(health, sessionId) {
   return `<span class="${status === 'online' ? 'pill g' : status === 'missing' ? 'pill r' : 'pill'}">${esc(label)}</span>`;
 }
 
+// 详情弹窗的 DSH 模型目录：打开时取一次，供运行卡的提供方/模型/思考强度下拉使用。
+let detailCatalog = null;
+async function ensureDetailCatalog() {
+  if (detailCatalog) return detailCatalog;
+  try {
+    const r = await api('/api/dsh/model');
+    detailCatalog = Array.isArray(r?.providers) ? r.providers : [];
+  } catch {
+    detailCatalog = [];
+  }
+  return detailCatalog;
+}
+
+function detailModelOptions(providerId) {
+  const provider = (detailCatalog || []).find((p) => p.id === providerId);
+  return provider?.models || [];
+}
+
+function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
+  const providerEl = document.getElementById('detailModelProvider');
+  const modelEl = document.getElementById('detailModel');
+  const reasonEl = document.getElementById('detailModelReasoning');
+  if (!providerEl || !modelEl || !reasonEl) return;
+  const providerId = providerEl.value;
+  if (!providerId) {
+    modelEl.innerHTML = '<option value="">跟随全局</option>';
+    modelEl.disabled = true;
+    reasonEl.innerHTML = '<option value="">跟随全局</option>';
+    reasonEl.disabled = true;
+    return;
+  }
+  const models = detailModelOptions(providerId);
+  const modelId = preferredModel || models[0]?.id || '';
+  modelEl.disabled = false;
+  modelEl.innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`).join('');
+  modelEl.value = models.some((m) => m.id === modelId) ? modelId : (models[0]?.id || '');
+  const entry = models.find((m) => m.id === modelEl.value);
+  const efforts = entry?.efforts || [];
+  reasonEl.disabled = !efforts.length;
+  reasonEl.innerHTML = '<option value="">模型默认</option>'
+    + efforts.map((e) => `<option value="${esc(e.id)}">${esc(e.name || e.id)}</option>`).join('');
+  if (preferredReasoning && efforts.some((e) => e.id === preferredReasoning)) reasonEl.value = preferredReasoning;
+}
+
 function renderDetail(data) {
   const body = document.getElementById('sessionDetailBody');
   if (!body) return;
@@ -363,6 +407,9 @@ function renderDetail(data) {
         <div class="meta">默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。</div>
         ${detailRow('模式', detailSelect('detailMode', data.mode || 'inherit', [['inherit', '跟随全局'], ['chat', '聊天模式'], ['reserved', '一代仿真'], ['reserved2', '二代仿真']]), `当前生效：${esc(data.effectiveMode || '—')}`)}
         ${detailRow('DSH 预设', detailSelect('detailPresetId', data.presetId || '', [['', '跟随模式默认'], ...(Array.isArray(data.presets) ? data.presets : []).map((id) => [id, id])]), '只影响这个会话的 DSH 会话；保存后下次唤醒按指纹自动重建。')}
+        ${detailRow('模型', detailSelect('detailModelProvider', data.model?.provider || '', [['', '跟随全局'], ...(detailCatalog || []).map((p) => [p.id, p.name || p.id])]), `当前生效：${esc(data.effectiveModel?.provider || '—')} / ${esc(data.effectiveModel?.model || '—')}`)}
+        ${detailRow('具体模型', detailSelect('detailModel', data.model?.model || '', []))}
+        ${detailRow('思考强度', detailSelect('detailModelReasoning', data.model?.reasoning || '', []), '保存会话模型会同步写 DSH 全局默认，Web GUI 里新建会话也会用这个模型；本会话按自己的模型能力决定能否看图。')}
         <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="run">保存运行</button></div>
       </div>
 
@@ -425,6 +472,12 @@ function renderDetail(data) {
       </div>
     </div>`;
   body.querySelectorAll('select').forEach((el) => el.dispatchEvent(new Event('change', { bubbles: true })));
+  syncDetailModelSelects(data.model?.model || data.effectiveModel?.model || '', data.model?.reasoning || '');
+  document.getElementById('detailModelProvider')?.addEventListener('change', () => syncDetailModelSelects('', ''));
+  document.getElementById('detailModel')?.addEventListener('change', () => {
+    const modelEl = document.getElementById('detailModel');
+    syncDetailModelSelects(modelEl?.value || '', '');
+  });
   const promptEl = document.getElementById('detailPrompt');
   promptEl?.addEventListener('input', () => {
     const counter = document.getElementById('detailPromptCount');
@@ -477,7 +530,10 @@ async function openDetail(key) {
   if (msg) msg.textContent = '';
   openModal(overlay);
   try {
-    const data = await api(`/api/sessions/${encodeURIComponent(key)}/profile`);
+    const [data] = await Promise.all([
+      api(`/api/sessions/${encodeURIComponent(key)}/profile`),
+      ensureDetailCatalog(),
+    ]);
     if (!data?.ok) throw new Error(data?.error || '读取失败');
     detailCache = data;
     renderDetail(data);
@@ -523,9 +579,17 @@ async function saveDetail(kind) {
         blocked: document.getElementById('detailBlocked')?.checked === true,
       };
     } else if (kind === 'run') {
+      const provider = document.getElementById('detailModelProvider')?.value || '';
       patch = {
         mode: document.getElementById('detailMode')?.value || 'inherit',
         presetId: document.getElementById('detailPresetId')?.value || '',
+        model: provider
+          ? {
+            provider,
+            model: document.getElementById('detailModel')?.value || '',
+            reasoning: document.getElementById('detailModelReasoning')?.value || '',
+          }
+          : null,
       };
     } else if (kind === 'persona') {
       patch = {

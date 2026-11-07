@@ -177,7 +177,7 @@ async function renderSessionTable() {
       platformSet.add(platform);
       kindSet.add(kind);
       const c = counts[i] || {};
-      const action = `<button type="button" class="btn small${localSessionKey === s.key ? ' primary' : ''}" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button>`;
+      const action = `<button type="button" class="btn small" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button>`;
       const cells = [
         `<span class="mono">${esc(s.key)}</span>`,
         esc(platform),
@@ -237,7 +237,7 @@ function showSessionView() {
 function setEntryFoot(entry) {
   const close = document.getElementById('memFootClose');
   if (close) close.hidden = entry;
-  for (const id of ['memEntryBack', 'memEntryCancel', 'memEntrySave']) {
+  for (const id of ['memEntryBack', 'memEntrySave']) {
     const b = document.getElementById(id);
     if (b) b.hidden = !entry;
   }
@@ -627,7 +627,6 @@ export function init() {
     });
   }
   document.getElementById('memEntrySave')?.addEventListener('click', saveEntry);
-  document.getElementById('memEntryCancel')?.addEventListener('click', () => { localEdit = null; showSessionView(); });
   document.getElementById('memEntryBack')?.addEventListener('click', () => { localEdit = null; showSessionView(); });
 
   renderSessionTable();

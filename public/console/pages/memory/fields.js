@@ -28,7 +28,6 @@ const MEM_MODAL = modalHtml({
 </div>`,
   footer: `<button type="button" class="btn" id="memFootClose" data-modal-close>关闭</button>
   <button type="button" class="btn" id="memEntryBack" hidden>返回列表</button>
-  <button type="button" class="btn" id="memEntryCancel" hidden>取消</button>
   <button type="button" class="btn primary" id="memEntrySave" hidden>保存</button>`,
 });
 const INGEST_STATS = '<div id="memoryIngestStats" class="meta">写回未开启：不会向任何外部服务发送对话内容。</div>';
@@ -57,9 +56,6 @@ export const MEMORY_FIELDS = {
   ],
   local: [
     {
-      name: 'memLocalSessionsBlock', type: 'custom', html: SESSION_HOST, span: 2,
-    },
-    {
       name: 'memLimitInjectTopics', type: 'number', label: '话题注入（条）', min: 0, max: 50, step: 1,
       hint: '每次唤醒带几条进行中的话题；0 表示不注入。',
     },
@@ -77,6 +73,7 @@ export const MEMORY_FIELDS = {
       hint: '超过这么久没再被提起的话题会被清掉；0 表示不过期。',
     },
     { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存上限设置' }], status: 'memLocalLimitsMsg' },
+    { name: 'memLocalSessionsBlock', type: 'custom', html: SESSION_HOST, span: 2 },
     { name: 'memLocalModalBlock', type: 'custom', html: MEM_MODAL, span: 2 },
   ],
   tools: [

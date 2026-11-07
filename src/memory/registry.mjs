@@ -113,6 +113,8 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
       capabilities: { sync: capabilities.sync === true, write: capabilities.write === true, listable: capabilities.listable !== false },
       fetch: typeof provider.fetch === 'function' ? provider.fetch : null,
       fetchSync: typeof provider.fetchSync === 'function' ? provider.fetchSync : null,
+      // 写回只对声明 write 且真的实现了 note() 的 provider 开放（qq_memory_note 用）。
+      note: typeof provider.note === 'function' ? provider.note : null,
       registeredAt: now(),
     });
     statsOf(id).lastStatus = 'idle';
@@ -272,6 +274,75 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     };
   }
 
+  // 主动回忆（qq_memory_recall）：联邦查询，所有启用的 provider 各查一次，合并时标注来源。
+  // 与注入路径不同，这里要的是“现在就去问”，所以 async provider 直接 fetch（带自己的超时），不吃注入缓存。
+  async function recall({ key, query = '', limit = 3, maxCharsPerProvider = 800, maxTotalChars = 2000, provider: onlyProvider = '' } = {}) {
+    const wanted = Math.max(1, Math.min(5, Number(limit) || 3));
+    const perChars = Math.max(0, Math.min(4000, Number(maxCharsPerProvider) || 800));
+    const totalCap = Math.max(0, Math.min(8000, Number(maxTotalChars) || 2000));
+    const results = [];
+    let total = 0;
+    for (const provider of providers.values()) {
+      if (results.length >= wanted) break;
+      if (!isEnabled(provider)) continue;
+      if (onlyProvider && provider.id !== onlyProvider) continue;
+      const conf = providerConf(provider.id);
+      const timeoutMs = conf.timeoutMs ?? cfg.inject.timeoutMs;
+      const st = statsOf(provider.id);
+      st.calls += 1;
+      const startedAt = now();
+      try {
+        let raw;
+        if (provider.capabilities.sync) {
+          raw = provider.fetchSync({ key, query, limit: perChars, limits: conf.limits ?? {} });
+        } else {
+          let timer;
+          raw = await Promise.race([
+            provider.fetch({ key, query, limit: perChars }),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`记忆 provider ${provider.id} 超时 ${timeoutMs}ms`)), timeoutMs); }),
+          ]);
+          clearTimeout(timer);
+        }
+        const text = normalizeText(raw?.text ?? raw?.block?.text ?? raw ?? '');
+        const cut = truncate(text, Math.min(perChars, totalCap - total));
+        st.lastChars = cut.text.length;
+        st.lastAt = now();
+        st.lastStatus = cut.truncated ? 'truncated' : (cut.text ? 'injected' : 'empty');
+        st.lastError = null;
+        if (!cut.text) continue;
+        total += cut.text.length;
+        results.push({ provider: provider.id, label: provider.label, status: st.lastStatus, chars: cut.text.length, truncated: cut.truncated, text: cut.text, ms: now() - startedAt });
+      } catch (error) {
+        st.failures += 1;
+        st.lastError = String(error?.message || error);
+        st.lastStatus = 'error';
+        st.lastAt = now();
+        log(`⚠️ 记忆 provider ${provider.id} 回忆失败：${st.lastError}`);
+        results.push({ provider: provider.id, label: provider.label, status: 'error', chars: 0, truncated: false, text: '', error: st.lastError, ms: now() - startedAt });
+      }
+      if (total >= totalCap) break;
+    }
+    return { query: String(query ?? ''), totalChars: total, results };
+  }
+
+  // 写回（qq_memory_note）：只写主 provider；主 provider 不可写时退到第一个可写的，并在结果里说明。
+  async function note({ key, text, tags } = {}) {
+    const body = normalizeText(text);
+    if (!key || !body) return { ok: false, error: 'key/text 不能为空' };
+    const candidates = [];
+    const primary = injectProvider();
+    if (primary) candidates.push(primary);
+    for (const provider of providers.values()) {
+      if (!isEnabled(provider)) continue;
+      if (primary && provider.id === primary.id) continue;
+      candidates.push(provider);
+    }
+    const target = candidates.find((p) => p.capabilities.write === true && typeof p.note === 'function');
+    if (!target) return { ok: false, error: '没有可写入的记忆 provider（当前注入源不支持写入）' };
+    const result = await target.note({ key, text: body, tags: Array.isArray(tags) ? tags.slice(0, 8).map((t) => String(t).slice(0, 24)) : [] });
+    return { ok: result?.ok !== false, provider: target.id, label: target.label, result };
+  }
+
   return {
     register,
     unregister,
@@ -283,6 +354,8 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     injectProvider,
     warm,
     injectionSync,
+    recall,
+    note,
     has: (id) => providers.has(id),
   };
 }

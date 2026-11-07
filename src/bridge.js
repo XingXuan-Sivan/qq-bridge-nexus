@@ -1648,6 +1648,12 @@ async function main() {
     contract: 'memory-provider/1',
     capabilities: { sync: true, write: true, listable: true },
     fetchSync: ({ key, limits }) => ({ text: formatMemoryV2(getSocialV2State(key), limits) }),
+    // 写回：把模型主动记下的一句话落成一条进行中的话题，下一轮 formatMemoryV2 会带上它。
+    note: ({ key, text }) => {
+      const st = getSocialV2State(key);
+      appendMemoryV2(st, 'activeTopic', text, {});
+      return { ok: true, category: 'activeTopic' };
+    },
   }, 'core');
   // 技能索引（§9.2）：技能目录只读扫描，结果缓存 60s；额外目录来自 config.json 的 skills.dirs。
   // 根顺序 = 额外目录 → DSH_HOME/skills → 仓库 skills/，同名技能以先出现的为准。
@@ -6382,7 +6388,7 @@ async function main() {
             getActiveMembers: 'qq_get_active_members',
             setWakeConfig: 'qq_set_wake_config',
             markRead: 'qq_mark_read',
-            memory: 'qq_memory_append / qq_memory_query / qq_memory_remove / qq_memory_clear',
+            memory: 'qq_memory_recall / qq_memory_note / qq_memory_append / qq_memory_query / qq_memory_remove / qq_memory_clear',
             slangQuery: 'qq_slang_query',
             slangSubmit: 'qq_slang_submit',
             getImages: 'qq_get_message_images',
@@ -8799,6 +8805,35 @@ async function main() {
           if (!category || category === 'memberImpression') st.memberImpressions = {};
           saveSocialV2State();
           sendJson({ ok: true, key, category: category || 'all', memory: formatMemoryV2(st) });
+          return;
+        }
+        // ── 记忆 provider（S4）：主动回忆 / 写回；工具开关在 memory.tools ───────
+        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-recall') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          const query = redactKnownTokensOnly(String(body.query ?? '')).trim().slice(0, 600);
+          const only = String(body.provider ?? '').trim();
+          if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
+          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
+          if (req.headers['x-agent-token'] && cfg.memory?.tools?.recall !== true) { sendJson({ ok: false, error: '工具未启用：qq_memory_recall' }, 403); return; }
+          if (only && !memoryRegistry.has(only)) { sendJson({ ok: false, error: `未知记忆 provider：${only}` }, 404); return; }
+          const recalled = await memoryRegistry.recall({ key, query, limit: body.limit, provider: only });
+          sendJson({ ok: true, key, query: recalled.query, totalChars: recalled.totalChars, results: recalled.results });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-note') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          const text = redactKnownTokensOnly(String(body.text ?? '')).trim().slice(0, 500);
+          const tags = Array.isArray(body.tags) ? body.tags : [];
+          if (!key || !text) { sendJson({ ok: false, error: 'key/text 不能为空' }, 400); return; }
+          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
+          if (req.headers['x-agent-token'] && cfg.memory?.tools?.note !== true) { sendJson({ ok: false, error: '工具未启用：qq_memory_note' }, 403); return; }
+          const wrote = await memoryRegistry.note({ key, text, tags });
+          if (!wrote.ok) { sendJson({ ok: false, error: wrote.error ?? '写入失败', provider: wrote.provider ?? null }, 400); return; }
+          sendJson({ ok: true, key, provider: wrote.provider, label: wrote.label, result: wrote.result });
           return;
         }
         // ── 二代黑话学习（reserved2）：AI 查询/提交黑话候选 ─────────────────

@@ -322,6 +322,8 @@ const TOOL_CONFIG_FLAGS = {
   qq_get_my_recent_messages: 'getMyRecent',
   qq_get_message_detail: 'getMessageDetail',
   qq_get_active_members: 'getActiveMembers',
+  qq_memory_recall: 'memory',
+  qq_memory_note: 'memory',
   qq_memory_append: 'memory',
   qq_memory_query: 'memory',
   qq_memory_remove: 'memory',
@@ -882,6 +884,53 @@ server.tool(
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `获取活跃成员失败：${error?.message ?? error}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'qq_memory_recall',
+  '主动回忆：按一句检索词去查长期记忆（多个记忆源各查一次，结果标注来源）。只在确实需要翻旧事、确认以前聊过什么时用，不要每轮都查。返回每个源的片段（每条≤800字，总≤2000字）。',
+  {
+    key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
+    token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
+    query: z.string().describe('检索词：一句话描述你想回忆什么，例如「上次说的那家店」'),
+    provider: z.string().optional().describe('可选：只查某一个记忆源（见 qq_get_prompt 的记忆源列表）'),
+    limit: z.number().optional().describe('最多返回几个记忆源的结果，默认 3，最大 5')
+  },
+  async ({ key, token, query, provider, limit }) => {
+    try {
+      const data = await agentApi('/api/socialV2/memory-recall', {
+        method: 'POST',
+        body: JSON.stringify({ key, query, provider: provider || '', limit }),
+        headers: { 'x-agent-token': token }
+      });
+      return { content: [{ type: 'text', text: serializeModelData(data) }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `主动回忆失败：${error?.message ?? error}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  'qq_memory_note',
+  '记一句想长期记住的话（默认关闭，需要管理员打开）。内容写到当前可写入的记忆源，返回写到了哪个源；当前注入源不支持写入时会明确报错。',
+  {
+    key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
+    token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
+    text: z.string().describe('要记住的一句话（≤500 字），写成陈述句，例如「他下周三要去杭州出差」'),
+    tags: z.array(z.string()).optional().describe('可选标签，最多 8 个，每个≤24 字')
+  },
+  async ({ key, token, text, tags }) => {
+    try {
+      const data = await agentApi('/api/socialV2/memory-note', {
+        method: 'POST',
+        body: JSON.stringify({ key, text, tags: tags || [] }),
+        headers: { 'x-agent-token': token }
+      });
+      return { content: [{ type: 'text', text: serializeModelData(data) }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `记忆写入失败：${error?.message ?? error}` }], isError: true };
     }
   }
 );

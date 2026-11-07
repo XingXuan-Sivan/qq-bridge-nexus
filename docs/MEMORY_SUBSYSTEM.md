@@ -52,10 +52,11 @@ ctx.memory.registerProvider({
 - 预算：`memory.inject.maxChars`（默认 2400，0=不限）与 provider 自己的 `maxChars` 取小；截断时块状态记 `truncated: true`。
 - 与旧块的关系：`core-digest` 不再作为独立块存在，改为 `local-digest` 的渲染函数；旧配置 `promptBlocks['core-digest']` 兼容读入（见 §5）。
 
-### 2.3 查询工具（S4）
+### 2.3 查询工具（S4，2026-11-07 已实现）
 
-- `qq_memory_recall(query, provider?, limit?)`：联邦查询，单次最多 3 条 / 2000 字，结果标来源；`query` 缺省取本轮最后一条真实用户消息。
-- `qq_memory_note(text, tags?)`：默认关；只有 `capabilities.write` 的 provider 接受。
+- `qq_memory_recall(query, provider?, limit?)`：联邦查询——所有 `enabled` 的 provider 各查一次（async 直接 fetch、带各自超时，不吃注入缓存），结果按 provider 标注；每源 ≤800 字、总 ≤2000 字、最多 3 个源（`limit` 1–5）。单个源超时/报错只在结果里留 `error`，不影响其它源。超时计入 provider 的 `failures`，与注入路径同一份状态。
+- `qq_memory_note(text, tags?)`：默认关（`memory.tools.note=false`）。写回**只走主 provider**；主 provider 声明 `write:true` 且实现了 `note()` 才写，否则退到第一个可写的 provider 并在结果里说明（见 `PLAN_DEVIATIONS.md` D4）。`soulkit` 目前是只读（`write:false`），写回会落到 `local-digest`（记成一条进行中的话题）。
+- 两个工具都走 `POST /api/socialV2/memory-recall` / `memory-note`，agent token + 会话白名单 + 工具开关三道校验；文本经 `redactKnownTokensOnly` 脱敏，note 截 500 字、recall 的 query 截 600 字。
 - key 解析：由当前 DSH session 反查 `state/sessions.json`（值是 sessionId、键带 `qq:` 前缀），**禁止跨会话**。
 
 ### 2.4 写回（S5，默认关）
@@ -138,7 +139,7 @@ ctx.memory.registerProvider({
 
 每阶段收尾固定动作：`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`、`npm run test:audit`、更新 `STATUS.md` 与 `PLAN_DEVIATIONS.md`、一阶段一提交。
 
-**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3 已完成（`plugins/soulkit-memory/` 适配器 + `memory:provide` 权限 + 真机 `POST /api/recall` 命中，`scripts/test-soulkit-memory.mjs` 6/6，注入源已切到 `soulkit`，旧 `promptBlocks['core-digest']` 键已从运行配置删除）；S4–S5 未开工。
+**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3 已完成（`plugins/soulkit-memory/` 适配器 + `memory:provide` 权限 + 真机 `POST /api/recall` 命中，`scripts/test-soulkit-memory.mjs` 6/6，注入源已切到 `soulkit`，旧 `promptBlocks['core-digest']` 键已从运行配置删除）；S4 已完成（`memoryRegistry.recall/note`、`qq_memory_recall` / `qq_memory_note` 两个 MCP 工具与 `/api/socialV2/memory-recall` / `memory-note` 端点、`local-digest` 的写回实现，`scripts/test-memory-tools.mjs` 6/6，真机 recall 返回 soulkit 片段）；S5 未开工。
 
 ## 7. 风险与对策
 

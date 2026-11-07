@@ -5,7 +5,7 @@ import { esc } from '../../js/ui.js';
 import { tableHtml, dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
-import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
+import { openModal, wireModal } from '../../components/modal/modal.js';
 import { MEMORY_FIELDS } from './fields.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
@@ -170,11 +170,15 @@ async function renderSessionTable() {
     const sessions = Array.isArray(data.sessions) ? data.sessions : [];
     sessionCache = sessions;
     const counts = await Promise.all(sessions.map((s) => sessionMemoryCounts(s.key)));
+    const platformSet = new Set();
+    const kindSet = new Set();
     const rows = sessions.map((s, i) => {
       const { platform, kind } = platformOf(s.key);
+      platformSet.add(platform);
+      kindSet.add(kind);
       const c = counts[i] || {};
-      const open = `<button type="button" class="btn small${localSessionKey === s.key ? ' primary' : ''}" data-mem-open="${esc(s.key)}">编辑</button>`;
-      return [
+      const action = `<button type="button" class="btn small${localSessionKey === s.key ? ' primary' : ''}" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button>`;
+      const cells = [
         `<span class="mono">${esc(s.key)}</span>`,
         esc(platform),
         esc(kindText(kind)),
@@ -182,38 +186,75 @@ async function renderSessionTable() {
         String(Number(c.thoughts) || 0),
         String(Number(c.impressions) || 0),
         String(Number(c.rules) || 0),
-        open,
+        action,
       ];
+      return { cells, attrs: { 'data-filter-platform': platform, 'data-filter-kind': kind } };
     });
     host.innerHTML = dataTableHtml({
       columns: [
         { label: '会话' }, { label: '平台', width: 90 }, { label: '类型', width: 80 },
         { label: '话题', width: 80 }, { label: '想法', width: 80 }, { label: '印象', width: 80 }, { label: '规则', width: 80 },
-        { label: '操作', width: 100 },
+        { label: '操作', width: 160 },
       ],
       rows,
       empty: '桥接还没有会话；在 QQ 里聊一句再回来。',
       pageSize: 20,
       sizes: [10, 20, 50],
-      search: true,
+      search: { placeholder: '搜索会话…' },
+      refresh: true,
+      filters: [
+        {
+          id: 'platform',
+          label: '平台',
+          value: 'all',
+          options: [{ value: 'all', label: '全部平台' }, ...[...platformSet].map((p) => ({ value: p, label: p }))],
+        },
+        {
+          id: 'kind',
+          label: '类型',
+          value: 'all',
+          options: [{ value: 'all', label: '全部类型' }, ...[...kindSet].map((k) => ({ value: k, label: kindText(k) }))],
+        },
+      ],
       meta: `${sessions.length} 个会话`,
     });
-    initDataTables(host);
+    initDataTables(host, { onRefresh: renderSessionTable });
   } catch (error) {
     host.innerHTML = `<div class="meta">❌ ${esc(error.message)}</div>`;
   }
 }
 
-function selectSession(key) {
+function showSessionView() {
+  const sessionView = document.getElementById('memSessionView');
+  const entryView = document.getElementById('memEntryView');
+  if (sessionView) sessionView.hidden = false;
+  if (entryView) entryView.hidden = true;
+  const title = document.getElementById('memMemoryModal-title');
+  if (title) title.textContent = '会话记忆';
+  setEntryFoot(false);
+}
+
+function setEntryFoot(entry) {
+  const close = document.getElementById('memFootClose');
+  if (close) close.hidden = entry;
+  for (const id of ['memEntryBack', 'memEntryCancel', 'memEntrySave']) {
+    const b = document.getElementById(id);
+    if (b) b.hidden = !entry;
+  }
+}
+
+function openSessionModal(key) {
   localSessionKey = key;
   localView = null;
   localCategory = 'topic';
   localEdit = null;
-  const detail = document.getElementById('memLocalDetail');
-  const head = document.getElementById('memLocalHead');
-  if (detail) detail.hidden = !key;
-  if (head) head.textContent = key ? `正在编辑：${key}` : '';
+  const overlay = document.getElementById('memMemoryModal');
+  if (!overlay) return;
+  const head = document.getElementById('memModalHead');
+  if (head) head.textContent = key ? `${key}（话题 / 想法 / 印象 / 规则都在这个弹窗里维护）` : '';
+  showSessionView();
   renderLocal();
+  openModal(overlay);
   if (key) loadLocalMemory();
   renderSessionTable();
 }
@@ -264,10 +305,21 @@ function renderLocal() {
   const host = document.getElementById('memoryLocalTable');
   if (!host) return;
   renderLocalTabs();
-  if (!localKey()) { host.innerHTML = '<div class="meta">在上表里点「编辑」选择会话。</div>'; return; }
+  if (!localKey()) { host.innerHTML = '<div class="meta">关闭弹窗后，可在会话表里点「管理」重新打开。</div>'; return; }
   if (!localView) { host.innerHTML = '<div class="meta">加载中…</div>'; return; }
   const rows = localRows();
-  host.innerHTML = rows.length ? tableHtml(localColumns(), rows) : `<div class="meta">（${CATEGORY_LABEL[localCategory]}为空）</div>`;
+  const counts = localView.counts || {};
+  host.innerHTML = dataTableHtml({
+    columns: localColumns(),
+    rows,
+    empty: `（${CATEGORY_LABEL[localCategory]}为空）`,
+    pageSize: 10,
+    sizes: [10, 20, 50],
+    search: { placeholder: `搜索${CATEGORY_LABEL[localCategory]}…` },
+    actions: `<button type="button" class="btn primary" data-mem-add>新增${CATEGORY_LABEL[localCategory]}</button>`,
+    meta: `${Number(counts[CATEGORY_COUNT_KEY[localCategory]]) || 0} 条`,
+  });
+  initDataTables(host);
 }
 
 async function loadLocalMemory({ quiet = false } = {}) {
@@ -285,30 +337,19 @@ async function loadLocalMemory({ quiet = false } = {}) {
   }
 }
 
-async function clearLocalMemory(category = '') {
-  const key = localKey();
-  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
-  if (!window.confirm(category ? `清空这个会话的${CATEGORY_LABEL[localCategory]}？` : '清空这个会话的全部记忆？')) return;
+async function clearSessionMemory(key) {
+  if (!key) return;
+  if (!window.confirm(`清空 ${key} 的全部记忆（话题 / 想法 / 印象 / 规则）？`)) return;
   try {
-    const data = await api('/api/memory/entries/clear', 'POST', { key, category });
-    msg('memLocalMsg', data.ok ? '✅ 已清空' : `❌ ${data.error || '失败'}`, data.ok ? 'ok' : 'err');
-    if (data.ok) loadLocalMemory({ quiet: true });
+    const data = await api('/api/memory/entries/clear', 'POST', { key, category: '' });
+    if (!data.ok) { window.alert(data.error || '清空失败'); return; }
+    if (localSessionKey === key) {
+      localView = null;
+      if (document.getElementById('memMemoryModal')?.classList.contains('open')) loadLocalMemory({ quiet: true });
+    }
+    renderSessionTable();
   } catch (error) {
-    msg('memLocalMsg', `❌ ${error.message}`, 'err');
-  }
-}
-
-async function compactLocalMemory() {
-  const key = localKey();
-  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
-  try {
-    const data = await api('/api/memory/entries/compact', 'POST', { key });
-    const removed = data.removed || {};
-    const total = Object.values(removed).reduce((a, b) => a + (Number(b) || 0), 0);
-    msg('memLocalMsg', data.ok ? `✅ 已整理，裁掉 ${total} 条` : `❌ ${data.error || '失败'}`, data.ok ? 'ok' : 'err');
-    if (data.ok) loadLocalMemory({ quiet: true });
-  } catch (error) {
-    msg('memLocalMsg', `❌ ${error.message}`, 'err');
+    window.alert(error.message);
   }
 }
 
@@ -341,22 +382,28 @@ function entryFields(cat, item) {
 
 function openEntryEditor(item = null) {
   const cat = localCategory;
-  const overlay = document.getElementById('memEntryModal');
+  const overlay = document.getElementById('memMemoryModal');
   const form = document.getElementById('memEntryForm');
   if (!overlay || !form) return;
   localEdit = { cat, id: item ? item.id : '' };
-  const title = document.getElementById('memEntryModal-title');
+  const title = document.getElementById('memMemoryModal-title');
   if (title) title.textContent = `${item ? '编辑' : '新增'}${CATEGORY_LABEL[cat]}`;
+  const sessionView = document.getElementById('memSessionView');
+  const entryView = document.getElementById('memEntryView');
+  if (sessionView) sessionView.hidden = true;
+  if (entryView) entryView.hidden = false;
+  setEntryFoot(true);
+  msg('memEntryMsg', '', '');
   form.innerHTML = '';
   renderFields(form, entryFields(cat, item), { columns: 1 });
-  openModal(overlay);
+  if (!overlay.classList.contains('open')) openModal(overlay);
   setTimeout(() => document.getElementById('memEntryContent')?.focus(), 30);
 }
 
 async function saveEntry() {
   if (!localEdit) return;
   const key = localKey();
-  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
+  if (!key) { msg('memEntryMsg', '请先选择一个会话', 'err'); return; }
   const cat = localEdit.cat;
   const body = { key, category: cat, content: val('memEntryContent') };
   if (cat === 'topic') {
@@ -377,13 +424,13 @@ async function saveEntry() {
   if (localEdit.id) body.id = localEdit.id;
   try {
     const r = await api('/api/memory/entries', method, body);
-    if (!r.ok) { msg('memLocalMsg', `❌ ${r.error || '保存失败'}`, 'err'); return; }
-    msg('memLocalMsg', '✅ 已保存', 'ok');
-    closeModal(document.getElementById('memEntryModal'));
+    if (!r.ok) { msg('memEntryMsg', `❌ ${r.error || '保存失败'}`, 'err'); return; }
     localEdit = null;
-    loadLocalMemory();
+    showSessionView();
+    msg('memLocalMsg', '✅ 已保存', 'ok');
+    loadLocalMemory({ quiet: true });
   } catch (error) {
-    msg('memLocalMsg', `❌ ${error.message}`, 'err');
+    msg('memEntryMsg', `❌ ${error.message}`, 'err');
   }
 }
 
@@ -541,9 +588,6 @@ export function init() {
 
   document.getElementById('memInjectSave')?.addEventListener('click', saveInject);
   document.getElementById('memProvidersSave')?.addEventListener('click', saveProviders);
-  document.getElementById('memLocalAdd')?.addEventListener('click', () => { openEntryEditor(null); });
-  document.getElementById('memLocalCompact')?.addEventListener('click', () => { compactLocalMemory(); });
-  document.getElementById('memLocalClear')?.addEventListener('click', () => { clearLocalMemory(''); });
   document.getElementById('memLocalSaveLimits')?.addEventListener('click', saveLocalLimits);
   document.getElementById('memToolsSave')?.addEventListener('click', saveTools);
   document.getElementById('memIngestSave')?.addEventListener('click', saveIngest);
@@ -556,6 +600,8 @@ export function init() {
   });
 
   document.getElementById('memoryLocalTable')?.addEventListener('click', (event) => {
+    const add = event.target.closest('[data-mem-add]');
+    if (add) { openEntryEditor(null); return; }
     const edit = event.target.closest('[data-mem-edit]');
     if (edit) { openEntryEditor(findLocalItem(edit.dataset.memEdit)); return; }
     const del = event.target.closest('[data-mem-del]');
@@ -563,17 +609,26 @@ export function init() {
   });
 
   document.getElementById('memorySessionTable')?.addEventListener('click', (event) => {
+    const clear = event.target.closest('[data-mem-clear]');
+    if (clear) { clearSessionMemory(clear.dataset.memClear); return; }
     const open = event.target.closest('[data-mem-open]');
-    if (open) selectSession(open.dataset.memOpen);
+    if (open) openSessionModal(open.dataset.memOpen);
   });
 
-  const entryModal = document.getElementById('memEntryModal');
-  if (entryModal && entryModal.parentElement !== document.body) document.body.appendChild(entryModal);
-  if (entryModal) {
-    wireModal(entryModal, { onClose: () => { localEdit = null; } });
-    document.getElementById('memEntrySave')?.addEventListener('click', saveEntry);
-    document.getElementById('memEntryCancel')?.addEventListener('click', () => closeModal(entryModal));
+  const memoryModal = document.getElementById('memMemoryModal');
+  if (memoryModal && memoryModal.parentElement !== document.body) document.body.appendChild(memoryModal);
+  if (memoryModal) {
+    wireModal(memoryModal, {
+      onClose: () => {
+        localEdit = null;
+        showSessionView();
+        renderSessionTable();
+      },
+    });
   }
+  document.getElementById('memEntrySave')?.addEventListener('click', saveEntry);
+  document.getElementById('memEntryCancel')?.addEventListener('click', () => { localEdit = null; showSessionView(); });
+  document.getElementById('memEntryBack')?.addEventListener('click', () => { localEdit = null; showSessionView(); });
 
   renderSessionTable();
 

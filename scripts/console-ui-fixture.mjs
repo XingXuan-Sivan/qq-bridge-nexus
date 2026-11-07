@@ -912,7 +912,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             else for (const f of Object.values(map)) bucket[f] = [];
             return json({ ok: true, removed: {} });
           }
-          case '/api/memory/entries/compact': return json({ ok: true, removed: { topics: 0, thoughts: 0, impressions: 0, rules: 0 } });
           case '/api/memory': {
             const next = state.memoryConfig;
             for (const key of ['inject', 'tools', 'handover', 'ingest']) if (body[key] && typeof body[key] === 'object') next[key] = { ...next[key], ...body[key] };

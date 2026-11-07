@@ -117,6 +117,7 @@ function pagerHtml(page, pages) {
  * @param {boolean} [options.refresh] 渲染「刷新」按钮（点击回调由页面接）
  * @param {Array<{id:string,label:string,options:Array<{value:string,label:string}>,value?:string}>} [options.filters]
  * @param {string} [options.meta] 工具栏右侧的统计文案
+ * @param {string} [options.actions] 工具栏右侧的动作按钮 HTML（例如「新增」）
  * @param {string} [options.empty] 无数据/无匹配时的提示
  * @param {boolean} [options.pager=true]
  */
@@ -129,10 +130,11 @@ export function dataTableHtml({
   refresh = false,
   filters = [],
   meta = '',
+  actions = '',
   empty = '没有匹配的数据。',
   pager = true,
 }) {
-  const hasToolbar = Boolean(search || refresh || filters.length || meta);
+  const hasToolbar = Boolean(search || refresh || filters.length || meta || actions);
   const filterHtml = filters.map((filter) => `<select class="table-filter" data-filter="${esc(filter.id)}" aria-label="${esc(filter.label)}">`
     + filter.options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === String(filter.value ?? '') ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
     + '</select>').join('');
@@ -143,7 +145,10 @@ export function dataTableHtml({
       ${filterHtml}
       ${search ? `<input type="search" class="search-box search-box--w240" data-table-search placeholder="${esc(search.placeholder || '搜索…')}" aria-label="${esc(search.placeholder || '搜索')}">` : ''}
     </div>
-    ${meta ? `<span class="table-toolbar-meta" data-table-meta>${esc(meta)}</span>` : ''}
+    <div class="table-toolbar-side">
+      ${meta ? `<span class="table-toolbar-meta" data-table-meta>${esc(meta)}</span>` : ''}
+      ${actions}
+    </div>
   </div>`
     : '';
   const footer = pager

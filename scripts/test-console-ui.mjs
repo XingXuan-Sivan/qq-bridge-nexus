@@ -417,29 +417,29 @@ try {
     assert.deepEqual(fixture.requests, expected);
   });
 
-  await test('Memory page: local table, modal add/edit/delete, rules and limits', async () => {
+  await test('Memory page: session modal with tabs, entry add/edit/delete and limits', async () => {
     await navigate('memory');
     await page.waitForSelector('#memorySessionTable [data-mem-open]');
     await page.click('#memorySessionTable [data-mem-open]');
-    await page.waitForFunction(() => !document.getElementById('memLocalDetail')?.hidden);
+    await page.waitForFunction(() => document.getElementById('memMemoryModal')?.classList.contains('open'));
     await page.waitForFunction(() => (document.getElementById('memoryLocalTable')?.textContent || '').includes('话题为空'));
     assert.equal(await page.inputValue('#memLimitMaxTopics'), '50', '存储上限应从配置回填');
 
-    await page.click('#memLocalAdd');
-    await page.waitForFunction(() => document.getElementById('memEntryModal')?.classList.contains('open'));
+    await page.click('#memoryLocalTable [data-mem-add]');
+    await page.waitForFunction(() => document.getElementById('memEntryView') && !document.getElementById('memEntryView').hidden);
     await fill('memEntryContent', '周末一起看书');
     await page.click('#memEntrySave');
     await page.waitForFunction(() => (document.getElementById('memoryLocalTable')?.textContent || '').includes('周末一起看书'));
 
     await page.click('#memoryLocalTable [data-mem-edit]');
-    await page.waitForFunction(() => document.getElementById('memEntryModal')?.classList.contains('open'));
+    await page.waitForFunction(() => document.getElementById('memEntryView') && !document.getElementById('memEntryView').hidden);
     await fill('memEntryContent', '周末一起看展');
     await page.click('#memEntrySave');
     await page.waitForFunction(() => (document.getElementById('memoryLocalTable')?.textContent || '').includes('周末一起看展'));
 
     await page.click('#memoryLocalTabs [data-mem-cat="rule"]');
-    await page.click('#memLocalAdd');
-    await page.waitForFunction(() => document.getElementById('memEntryModal')?.classList.contains('open'));
+    await page.click('#memoryLocalTable [data-mem-add]');
+    await page.waitForFunction(() => document.getElementById('memEntryView') && !document.getElementById('memEntryView').hidden);
     await fill('memEntryContent', '本群不聊工作');
     await page.click('#memEntrySave');
     await page.waitForFunction(() => (document.getElementById('memoryLocalTable')?.textContent || '').includes('本群不聊工作'));
@@ -447,6 +447,9 @@ try {
     await page.click('#memoryLocalTable [data-mem-del]');
     await page.waitForFunction(() => !(document.getElementById('memoryLocalTable')?.textContent || '').includes('本群不聊工作'));
     assert.match(await page.textContent('#memLocalMsg'), /已删除/);
+
+    await page.click('#memMemoryModal [data-modal-close]');
+    await page.waitForFunction(() => !document.getElementById('memMemoryModal')?.classList.contains('open'));
   });
 
   if (!original) await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {

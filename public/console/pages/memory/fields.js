@@ -12,23 +12,24 @@ const LOCAL_TABS = `<div class="page-tabs" role="tablist" id="memoryLocalTabs">
   <button type="button" class="page-tab" role="tab" aria-selected="false" data-mem-cat="rule">规则 <span class="meta" data-mem-count="rule">0</span></button>
 </div>`;
 const SESSION_HOST = '<div id="memorySessionTable">（正在读取会话…）</div>';
-const LOCAL_DETAIL = `<div id="memLocalDetail" hidden>
-  <div class="form-actions form-actions--inline">
-    <button type="button" class="btn" id="memLocalAdd">新增条目</button>
-    <button type="button" class="btn" id="memLocalCompact">立即整理</button>
-    <button type="button" class="btn danger" id="memLocalClear">清空这个会话</button>
-    <span class="form-actions-status" id="memLocalMsg" role="status"></span>
-  </div>
-  <p class="meta" id="memLocalHead"></p>
-  ${LOCAL_TABS}
-  <div id="memoryLocalTable">（选择一个会话后加载）</div>
-</div>`;
-const LOCAL_MODAL = modalHtml({
-  id: 'memEntryModal',
-  title: '编辑记忆条目',
+const MEM_MODAL = modalHtml({
+  id: 'memMemoryModal',
+  title: '会话记忆',
   wide: true,
-  body: '<div id="memEntryForm" class="form-grid"></div>',
-  footer: '<button type="button" class="btn" id="memEntryCancel">取消</button><button type="button" class="btn primary" id="memEntrySave">保存</button>',
+  body: `<div id="memSessionView">
+  <p class="meta" id="memModalHead"></p>
+  ${LOCAL_TABS}
+  <div id="memoryLocalTable"></div>
+  <p class="form-actions-status" id="memLocalMsg" role="status"></p>
+</div>
+<div id="memEntryView" hidden>
+  <div id="memEntryForm" class="form-grid"></div>
+  <p class="form-actions-status" id="memEntryMsg" role="status"></p>
+</div>`,
+  footer: `<button type="button" class="btn" id="memFootClose" data-modal-close>关闭</button>
+  <button type="button" class="btn" id="memEntryBack" hidden>返回列表</button>
+  <button type="button" class="btn" id="memEntryCancel" hidden>取消</button>
+  <button type="button" class="btn primary" id="memEntrySave" hidden>保存</button>`,
 });
 const INGEST_STATS = '<div id="memoryIngestStats" class="meta">写回未开启：不会向任何外部服务发送对话内容。</div>';
 const HISTORY = '<div id="memoryHistory">（还没有注入或回忆记录）</div>';
@@ -58,7 +59,6 @@ export const MEMORY_FIELDS = {
     {
       name: 'memLocalSessionsBlock', type: 'custom', html: SESSION_HOST, span: 2,
     },
-    { name: 'memLocalDetailBlock', type: 'custom', html: LOCAL_DETAIL, span: 2 },
     {
       name: 'memLimitInjectTopics', type: 'number', label: '话题注入（条）', min: 0, max: 50, step: 1,
       hint: '每次唤醒带几条进行中的话题；0 表示不注入。',
@@ -77,7 +77,7 @@ export const MEMORY_FIELDS = {
       hint: '超过这么久没再被提起的话题会被清掉；0 表示不过期。',
     },
     { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存上限设置' }], status: 'memLocalLimitsMsg' },
-    { name: 'memLocalModalBlock', type: 'custom', html: LOCAL_MODAL, span: 2 },
+    { name: 'memLocalModalBlock', type: 'custom', html: MEM_MODAL, span: 2 },
   ],
   tools: [
     { name: 'memToolRecall', type: 'switch', label: 'qq_memory_recall', onLabel: '开', offLabel: '关', hint: '让 AI 主动翻旧事；默认开。' },

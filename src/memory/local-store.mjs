@@ -6,7 +6,7 @@ import { addRule, normalizeRules, removeRule, rulesPromptBlock, GROUP_RULE_LIMIT
 // 本机轻量记忆：local-digest provider 自己的存储与「管理」实现。
 //
 // 这不是一份“页面专用”的存储：它是 memory-provider/1 的一个具体实现，
-// 注入（digest）、写回（note）、管理（manage.list/add/update/remove/clear/compact）
+// 注入（digest）、写回（note）、管理（manage.list/add/update/remove/clear）
 // 都在这里，桥接和 MCP 端点只做鉴权与转发。数据与 social-v2.json 完全分开，
 // 旧字段（activeTopics / pendingThoughts / memberImpressions / ownerRules）按约定直接丢弃。
 
@@ -17,7 +17,7 @@ export const LOCAL_MEMORY_LIMITS = Object.freeze({
   injectTopics: 10,
   injectThoughts: 10,
   injectImpressions: 10,
-  // 存储上限：写入时裁剪（compact 也按这组）
+  // 存储上限：写入时裁剪
   maxTopics: 50,
   maxThoughts: 50,
   maxImpressions: 200,
@@ -121,7 +121,7 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     return sanitize(String(text ?? '')).replace(/\s+/g, ' ').trim().slice(0, limit);
   }
 
-  // 按当前存储上限裁剪；返回删掉了多少条（供 compact / 写入后调用）。
+  // 按当前存储上限裁剪；返回删掉了多少条。
   function trim(b, L) {
     const removed = { topics: 0, thoughts: 0, impressions: 0, rules: 0 };
     if (L.staleHours > 0) {
@@ -394,13 +394,6 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     return { ok: true, removed };
   }
 
-  function compact({ key }) {
-    const b = bucket(key);
-    if (!b) return { ok: false, status: 400, error: 'key 不能为空' };
-    const removed = trim(b, limitsNow());
-    save();
-    return { ok: true, removed };
-  }
 
   // 收到新消息时刷新「被提到」的话题：命中 10 字前缀或参与者名字就更新 lastMentionAt，
   // 让 digest 的「已搁置」判断反映最近是否还在聊这件事。
@@ -431,7 +424,6 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     update,
     remove,
     clear,
-    compact,
     touch,
     limits: limitsNow,
   };

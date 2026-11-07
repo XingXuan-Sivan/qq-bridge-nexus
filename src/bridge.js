@@ -1653,7 +1653,6 @@ async function main() {
       update: (params) => localMemory.update(params),
       remove: (params) => localMemory.remove(params),
       clear: (params) => localMemory.clear(params),
-      compact: (params) => localMemory.compact(params),
     },
   }, 'core');
   // 记忆写回（S5，默认关）：QQ 会话里的 user / assistant 文本攒成事件，批量写给记忆服务。
@@ -8744,17 +8743,6 @@ async function main() {
           if (!r) return;
           ext.audit.append('memory.clear', { key, category: category || 'all', source: memConsole ? 'console' : 'agent' });
           sendJson({ ok: true, provider: r.provider, key, category: category || 'all', removed: r.result?.removed ?? {} });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/memory/entries/compact') {
-          const body = await readBody();
-          const key = apiKey(body.key);
-          if (!key) { memDeny('key 不能为空', 400); return; }
-          if (!memAgentAllowed(key)) return;
-          const r = await memCall(memProvider(body.provider), 'compact', { key });
-          if (!r) return;
-          ext.audit.append('memory.compact', { key, removed: r.result?.removed ?? {}, source: memConsole ? 'console' : 'agent' });
-          sendJson({ ok: true, provider: r.provider, key, removed: r.result?.removed ?? {} });
           return;
         }
         // 长期规则：控制台可对任意群增删；AI 仍要求「管理员私聊 + agent token + ownerGroupAccess + 白名单」。

@@ -260,10 +260,10 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
     // 交接开关已从二代工具开关搬到记忆页（memory.handover.enabled）。
     await withHarness(on ? {} : { memory: { handover: { enabled: false } } }, async (h) => {
       h.setMode('reserved2');
-      const ownerSt = h.getSocialV2State(OWNER_KEY);
-      ownerSt.activeTopics = [{ text: '帮管理员修电脑，日志在 /Users/alice/log.txt', lastMentionAt: Date.now() }];
-      ownerSt.pendingThoughts = [{ text: '想问问电脑修好没', expiresAt: Date.now() + 3600_000 }];
-      h.getSocialV2State(GROUP_KEY).activeTopics = [{ text: '群里的秘密话题', lastMentionAt: Date.now() }];
+      h.getSocialV2State(OWNER_KEY);
+      h.localMemory.add({ key: OWNER_KEY, category: 'topic', content: '帮管理员修电脑，日志在 /Users/alice/log.txt' });
+      h.localMemory.add({ key: OWNER_KEY, category: 'thought', content: '想问问电脑修好没' });
+      h.localMemory.add({ key: GROUP_KEY, category: 'topic', content: '群里的秘密话题' });
       await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L1' });
       await settle();
       await h.handleIncoming('private', OWNER, ownerPm('继续吧'), h.cfg);

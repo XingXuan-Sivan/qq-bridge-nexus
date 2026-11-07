@@ -44,12 +44,19 @@ export function normalizeMemoryConfig(raw) {
     if (value.limits && typeof value.limits === 'object' && !Array.isArray(value.limits)) {
       const limits = {};
       for (const [k, [min, max]] of Object.entries({
-        topics: [0, 50],
-        thoughts: [0, 50],
-        impressions: [0, 50],
-        impressionsMax: [0, 200],
-        topicStaleHours: [0, 24 * 30],
+        // 注入：每次唤醒最多带几条
+        injectTopics: [0, 50],
+        injectThoughts: [0, 50],
+        injectImpressions: [0, 50],
+        // 存储：落盘上限（超出时按时间裁剪）
+        maxTopics: [0, 500],
+        maxThoughts: [0, 500],
+        maxImpressions: [0, 2000],
+        maxRules: [0, 50],
+        maxTraits: [0, 50],
+        traitChars: [1, 200],
         itemChars: [20, 2000],
+        staleHours: [0, 24 * 30],
       })) {
         if (value.limits[k] === undefined) continue;
         limits[k] = clampInt(value.limits[k], min, max, undefined);
@@ -122,15 +129,29 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     if (capabilities.sync === true && typeof provider.fetchSync !== 'function') {
       throw new Error(`memory provider 声明 sync 但没有 fetchSync：${id}`);
     }
+    const manage = capabilities.manage === true ? provider.manage : null;
+    if (capabilities.manage === true) {
+      if (!manage || typeof manage !== 'object') throw new Error(`memory provider 声明 manage 但没有 manage 实现：${id}`);
+      for (const fn of ['list', 'add', 'update', 'remove', 'clear']) {
+        if (typeof manage[fn] !== 'function') throw new Error(`memory provider ${id} 的 manage 缺少 ${fn}()`);
+      }
+    }
     providers.set(id, {
       id,
       label: String(provider.label || id).slice(0, 60),
       pluginId: pluginId || provider.pluginId || 'core',
-      capabilities: { sync: capabilities.sync === true, write: capabilities.write === true, listable: capabilities.listable !== false },
+      capabilities: {
+        sync: capabilities.sync === true,
+        write: capabilities.write === true,
+        listable: capabilities.listable !== false,
+        manage: capabilities.manage === true,
+      },
       fetch: typeof provider.fetch === 'function' ? provider.fetch : null,
       fetchSync: typeof provider.fetchSync === 'function' ? provider.fetchSync : null,
       // 写回只对声明 write 且真的实现了 note() 的 provider 开放（qq_memory_note 用）。
       note: typeof provider.note === 'function' ? provider.note : null,
+      // 管理只对声明 manage 且实现了最小方法集的 provider 开放（/api/memory/entries|rules 用）。
+      manage,
       registeredAt: now(),
     });
     statsOf(id).lastStatus = 'idle';
@@ -171,6 +192,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
         injectable: cfg.inject.provider === provider.id,
         sync: provider.capabilities.sync,
         write: provider.capabilities.write,
+        manageable: provider.capabilities.manage === true && !!provider.manage,
         maxChars: conf.maxChars === undefined ? (provider.capabilities.sync ? cfg.inject.maxChars : 0) : conf.maxChars,
         timeoutMs: conf.timeoutMs ?? cfg.inject.timeoutMs,
         calls: st.calls,
@@ -369,6 +391,32 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     return { ok: result?.ok !== false, provider: target.id, label: target.label, result };
   }
 
+  // 管理（/api/memory/entries|rules）：只转给声明 manage 的 provider。
+  // 不做本地特判——控制台看到的可管理项就是这里列出来的。
+  function manageable() {
+    return [...providers.values()]
+      .filter((p) => p.capabilities.manage === true && p.manage)
+      .map((p) => ({ id: p.id, label: p.label, pluginId: p.pluginId }));
+  }
+
+  async function manage({ provider: providerId, action, params = {} } = {}) {
+    const id = String(providerId || '').trim();
+    const provider = id ? providers.get(id) : null;
+    if (!provider) return { ok: false, status: 404, error: `未知记忆 provider：${id || '(空)'}` };
+    if (provider.capabilities.manage !== true || !provider.manage) {
+      return { ok: false, status: 400, error: `记忆 provider ${id} 不支持管理` };
+    }
+    const fn = provider.manage[action];
+    if (typeof fn !== 'function') return { ok: false, status: 400, error: `不支持的 manage 操作：${action}` };
+    try {
+      const result = await fn.call(provider.manage, params);
+      if (result && result.ok === false) return { ok: false, status: result.status ?? 400, error: result.error ?? '操作失败' };
+      return { ok: true, provider: id, label: provider.label, result };
+    } catch (error) {
+      return { ok: false, status: 500, error: String(error?.message ?? error) };
+    }
+  }
+
   return {
     register,
     unregister,
@@ -382,6 +430,8 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     injectionSync,
     recall,
     note,
+    manageable,
+    manage,
     has: (id) => providers.has(id),
   };
 }

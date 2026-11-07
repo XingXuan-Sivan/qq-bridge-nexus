@@ -900,7 +900,7 @@ server.tool(
   },
   async ({ key, token, query, provider, limit }) => {
     try {
-      const data = await agentApi('/api/socialV2/memory-recall', {
+      const data = await agentApi('/api/memory/recall', {
         method: 'POST',
         body: JSON.stringify({ key, query, provider: provider || '', limit }),
         headers: { 'x-agent-token': token }
@@ -923,7 +923,7 @@ server.tool(
   },
   async ({ key, token, text, tags }) => {
     try {
-      const data = await agentApi('/api/socialV2/memory-note', {
+      const data = await agentApi('/api/memory/note', {
         method: 'POST',
         body: JSON.stringify({ key, text, tags: tags || [] }),
         headers: { 'x-agent-token': token }
@@ -937,23 +937,24 @@ server.tool(
 
 server.tool(
   'qq_memory_append',
-  '记录一条轻量记忆：activeTopic=进行中的话题；pendingThought=你想说但还没说的话；memberImpression=对某位群友的印象。记忆会持久化，并在后续唤醒/qq_get_prompt 中自动出现。',
+  '记录一条本机轻量记忆：topic=进行中的话题；thought=你想说但还没说的话；impression=对某位群友的印象；rule=管理员为本群设定的长期规则（通常只在管理员私聊里用）。记忆按会话隔离，会持久化并在后续唤醒/qq_get_prompt 中自动出现。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).describe('记忆类别'),
-    content: z.string().describe('记忆内容，例如话题、想说的话、对某人的印象标签'),
+    category: z.enum(['topic', 'thought', 'impression', 'rule']).describe('记忆类别'),
+    content: z.string().describe('记忆内容；impression 时是一句印象（可留空，用 extra.traits 给标签）'),
     extra: z.object({
-      target: z.string().optional().describe('memberImpression 时的群友名字/昵称'),
-      participants: z.array(z.string()).optional().describe('activeTopic 的参与者列表'),
-      pendingQuestion: z.string().optional().describe('activeTopic 里还没问出口的问题'),
-      motivation: z.string().optional().describe('pendingThought 的动机，如 curiosity/sociability'),
-      expiresAtMs: z.number().optional().describe('pendingThought 过期毫秒数，默认 2 小时')
+      target: z.string().optional().describe('impression 时的群友名字/昵称'),
+      traits: z.array(z.string()).optional().describe('impression 的标签列表'),
+      participants: z.array(z.string()).optional().describe('topic 的参与者列表'),
+      pendingQuestion: z.string().optional().describe('topic 里还没问出口的问题'),
+      motivation: z.string().optional().describe('thought 的动机，如 curiosity/sociability'),
+      expiresAtMs: z.number().optional().describe('thought 过期毫秒数，默认 2 小时')
     }).optional().describe('附加信息')
   },
   async ({ key, token, category, content, extra }) => {
     try {
-      const data = await agentApi('/api/socialV2/memory-append', {
+      const data = await agentApi('/api/memory/entries', {
         method: 'POST',
         body: JSON.stringify({ key, category, content, extra: extra || {} }),
         headers: { 'x-agent-token': token }
@@ -967,17 +968,17 @@ server.tool(
 
 server.tool(
   'qq_memory_query',
-  '查看当前会话的轻量记忆：进行中的话题、你想说但还没说的话、对群友的印象（只读）。',
+  '查看当前会话的本机轻量记忆：进行中的话题、你想说但还没说的话、对群友的印象、管理员设定的长期规则（只读，带 id）。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).optional().describe('可选：只看某一类记忆')
+    category: z.enum(['topic', 'thought', 'impression', 'rule']).optional().describe('可选：只看某一类记忆')
   },
   async ({ key, token, category }) => {
     try {
       const q = new URLSearchParams({ key });
       if (category) q.set('category', category);
-      const data = await agentApi(`/api/socialV2/memory?${q.toString()}`, { headers: { 'x-agent-token': token } });
+      const data = await agentApi(`/api/memory/entries?${q.toString()}`, { headers: { 'x-agent-token': token } });
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `记忆读取失败：${error?.message ?? error}` }], isError: true };
@@ -987,20 +988,44 @@ server.tool(
 
 server.tool(
   'qq_memory_remove',
-  '删除一条轻量记忆：activeTopic/pendingThought 用 content 匹配原文删除；memberImpression 用 target 参数指定群友名字删除。',
+  '删除一条本机轻量记忆。优先传 id（来自 qq_memory_query）；也可以传 content 原文或 impression 的 target 名字，桥接会先查一次再按唯一匹配删除。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).describe('记忆类别'),
-    content: z.string().optional().describe('要删除的话题/想法原文（memberImpression 不需要）'),
-    target: z.string().optional().describe('memberImpression 时要删除的群友名字')
+    category: z.enum(['topic', 'thought', 'impression', 'rule']).describe('记忆类别'),
+    id: z.string().optional().describe('条目 id（推荐；qq_memory_query 返回）'),
+    content: z.string().optional().describe('没有 id 时：要删除的话题/想法/规则原文'),
+    target: z.string().optional().describe('没有 id 时：impression 要删除的群友名字')
   },
-  async ({ key, token, category, content, target }) => {
+  async ({ key, token, category, id, content: text, target }) => {
     try {
-      const data = await agentApi('/api/socialV2/memory-remove', {
-        method: 'POST',
-        body: JSON.stringify({ key, category, content: content || '', target: target || '' }),
-        headers: { 'x-agent-token': token }
+      const headers = { 'x-agent-token': token };
+      let entryId = String(id || '').trim();
+      if (!entryId) {
+        const q = new URLSearchParams({ key, category });
+        const listed = await agentApi(`/api/memory/entries?${q.toString()}`, { headers });
+        const data = listed?.data ?? listed ?? {};
+        const items = category === 'impression'
+          ? Object.entries(data.impressions || {}).map(([name, im]) => ({ id: im?.id, name, traits: im?.traits }))
+          : (data[category === 'topic' ? 'topics' : category === 'thought' ? 'thoughts' : 'rules'] || []);
+        const wanted = String(text || '').trim();
+        const wantName = String(target || '').trim();
+        const hits = items.filter((it) => {
+          if (!it) return false;
+          if (category === 'impression') return wantName ? it.name === wantName : true;
+          if (!wanted) return false;
+          const body = String(it.text ?? it.content ?? '');
+          return body === wanted || (body.includes(wanted) && wanted.length >= 4);
+        });
+        if (!hits.length) return { content: [{ type: 'text', text: `没有找到要删除的${category}：${wanted || wantName || '(未给内容)'}` }], isError: true };
+        if (hits.length > 1) return { content: [{ type: 'text', text: `匹配到 ${hits.length} 条，请先 qq_memory_query 取 id 再删：${hits.map((h) => h.id).join(', ')}` }], isError: true };
+        entryId = String(hits[0].id || '');
+      }
+      if (!entryId) return { content: [{ type: 'text', text: '缺少 id：请先 qq_memory_query 确认要删除的条目' }], isError: true };
+      const data = await agentApi('/api/memory/entries', {
+        method: 'DELETE',
+        body: JSON.stringify({ key, category, id: entryId }),
+        headers
       });
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
@@ -1011,15 +1036,15 @@ server.tool(
 
 server.tool(
   'qq_memory_clear',
-  '清空轻量记忆：不传 category 清空全部；传 activeTopic/pendingThought/memberImpression 只清空对应类别。',
+  '清空本机轻量记忆：不传 category 清空全部；传 topic/thought/impression/rule 只清空对应类别。',
   {
     key: z.string().describe('会话 key，格式 group:群号 或 private:QQ号'),
     token: z.string().describe('会话令牌（见唤醒提示中的【会话令牌】）'),
-    category: z.enum(['activeTopic', 'pendingThought', 'memberImpression']).optional().describe('要清空的类别，缺省清空全部')
+    category: z.enum(['topic', 'thought', 'impression', 'rule']).optional().describe('要清空的类别，缺省清空全部')
   },
   async ({ key, token, category }) => {
     try {
-      const data = await agentApi('/api/socialV2/memory-clear', {
+      const data = await agentApi('/api/memory/entries/clear', {
         method: 'POST',
         body: JSON.stringify({ key, category: category || '' }),
         headers: { 'x-agent-token': token }
@@ -1755,7 +1780,7 @@ if (cfg.socialV2?.tools?.ownerGroupAccess === true) {
     },
     async ({ key, token, targetGroupId, action, text, ruleId }) => {
       try {
-        const data = await agentApi('/api/socialV2/group-rule', { method: 'POST', body: JSON.stringify({ key, targetGroupId, action, text, ruleId }), headers: { 'x-agent-token': token } });
+        const data = await agentApi('/api/memory/rules', { method: 'POST', body: JSON.stringify({ key, targetGroupId, action, text, ruleId }), headers: { 'x-agent-token': token } });
         return { content: [{ type: 'text', text: serializeModelData(data) }] };
       } catch (error) {
         return { content: [{ type: 'text', text: `群规则操作失败：${error?.message ?? error}` }], isError: true };

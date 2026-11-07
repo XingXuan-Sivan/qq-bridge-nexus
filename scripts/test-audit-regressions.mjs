@@ -256,34 +256,35 @@ await test('R8 wake-config 丢弃未知 triggers 键（不落盘、不回传模�
 });
 
 // ── R9. memory-update 不得凭空建条目 / 写穿原型链 ────────────────────────────
-await test('R9 memory-update 只编辑已有条目，不写穿 Object.prototype', async () => {
+await test('R9 memory entries 只编辑已有条目，不写穿对象原型', async () => {
   const h = await bridgeHarness();
   try {
     h.setMode('reserved2');
-    const st = h.getSocialV2State('qq:group:456');
-    st.memberImpressions['群友A'] = { traits: ['友善'], interactionCount: 1, lastSeenAt: Date.now() };
+    const key = 'qq:group:456';
+    const token = h.getSocialV2State(key).agentToken;
+    const seeded = h.localMemory.add({ key, category: 'impression', content: '', extra: { target: '群友A', traits: ['友善'], interactionCount: 1 } });
+    const id = seeded.item.id;
     await withServer(h, async (port) => {
-      const inherited = await call(port, '/api/socialV2/memory-update', {
-        method: 'POST', token: st.agentToken, body: { key: 'qq:group:456', category: 'memberImpression', target: 'toString', newContent: 'hacked' }
+      const inherited = await call(port, '/api/memory/entries', {
+        method: 'POST', token, body: { key, category: 'impression', content: '', extra: { target: '__proto__', traits: ['x'] } }
       });
-      assert.equal(inherited.status, 404, '继承来的属性名不得被当成已有条目');
-      assert.equal(Object.prototype.hasOwnProperty.call(st.memberImpressions, 'toString'), false);
-      assert.equal(Object.prototype.toString.traits, undefined, '不得往内置函数对象上写属性');
+      assert.equal(inherited.status, 400, '原型链关键字不得当作对象名');
+      assert.equal(Object.prototype.hasOwnProperty.call(h.localMemory.list({ key }).impressions ?? {}, '__proto__'), false);
+      assert.equal(Object.prototype.traits, undefined, '不得往内置对象原型上写属性');
 
-      const unknown = await call(port, '/api/socialV2/memory-update', {
-        method: 'POST', token: st.agentToken, body: { key: 'qq:group:456', category: 'memberImpression', target: '不存在的群友', newContent: 'x' }
+      const unknown = await call(port, '/api/memory/entries', {
+        method: 'PATCH', token, body: { key, category: 'impression', id: 'i_nope', content: 'x' }
       });
-      assert.equal(unknown.status, 404, '不存在的条目不凭空创建（防止无限塞名字）');
+      assert.equal(unknown.status, 404, '不存在的条目不凭空创建');
 
-      const ok = await call(port, '/api/socialV2/memory-update', {
-        method: 'POST', token: st.agentToken, body: { key: 'qq:group:456', category: 'memberImpression', target: '群友A', newContent: '幽默，爱接梗' }
+      const ok = await call(port, '/api/memory/entries', {
+        method: 'PATCH', token, body: { key, category: 'impression', id, content: '', extra: { traits: ['幽默', '爱接梗'] } }
       });
       assert.equal(ok.status, 200, ok.body);
-      // 跨 vm realm 的数组原型不同，deepEqual 会误判；逐元素断言。
-      const traits = st.memberImpressions['群友A'].traits;
-      assert.equal(traits.length, 2);
-      assert.equal(traits[0], '幽默');
-      assert.equal(traits[1], '爱接梗');
+      const row = h.localMemory.list({ key }).impressions.find((x) => x.id === id);
+      assert.equal(row.traits.length, 2);
+      assert.equal(row.traits[0], '幽默');
+      assert.equal(row.traits[1], '爱接梗');
     });
   } finally { await h.close(); }
 });

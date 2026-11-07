@@ -59,25 +59,7 @@
 .memory-field input[type="number"] { width: 108px; }
 .memory-field input[type="text"] { width: 228px; }
 
-/* 本机轻量记忆：分区标题 + 一列条目；条目里的按钮贴在同一行，不换行撑高。 */
-.memory-list { display: grid; gap: 14px; }
-.memory-section b { font-size: 13px; }
-.memory-item {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.7;
-}
-.memory-item .btn.small { margin-left: 2px; }
-.memory-output {
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: var(--surface-sunken);
-}
+/* 本机记忆：会话表与条目表都复用通用表格组件，标签复用 .page-tabs，不再另定义样式。 */
 
 @media (max-width: 1100px) {
   .memory-provider-head .meta { margin-left: 0; }

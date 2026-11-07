@@ -291,6 +291,33 @@ function usageRecentFixture() {
   return rows;
 }
 
+
+const MEMORY_LIMIT_DEFAULTS = {
+  injectTopics: 10, injectThoughts: 10, injectImpressions: 10,
+  maxTopics: 50, maxThoughts: 50, maxImpressions: 200, maxRules: 10,
+  maxTraits: 10, traitChars: 50, itemChars: 200, staleHours: 24,
+};
+
+function memoryBucket(state, key) {
+  if (!state.memoryEntries) state.memoryEntries = {};
+  if (!state.memoryEntries[key]) state.memoryEntries[key] = { seq: 0, topics: [], thoughts: [], impressions: [], rules: [] };
+  return state.memoryEntries[key];
+}
+
+function memoryEntryList(state, key) {
+  const bucket = memoryBucket(state, key);
+  const limits = { ...MEMORY_LIMIT_DEFAULTS, ...(state.memoryConfig.providers?.['local-digest']?.limits || {}) };
+  return {
+    key,
+    limits,
+    counts: { topics: bucket.topics.length, thoughts: bucket.thoughts.length, impressions: bucket.impressions.length, rules: bucket.rules.length },
+    topics: bucket.topics,
+    thoughts: bucket.thoughts,
+    impressions: bucket.impressions,
+    rules: bucket.rules,
+  };
+}
+
 function memoryStatusOf(state) {
   const cfg = state.memoryConfig;
   const mk = (id, label, sync, write) => ({
@@ -701,6 +728,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               globalSideEffect: true,
             });
           }
+          case '/api/memory/entries': return json({ ok: true, provider: 'local-digest', key: url.searchParams.get('key') || '', data: memoryEntryList(state, url.searchParams.get('key') || '') });
           case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
           case '/api/whitelist': return json(state.whitelist);
           case '/api/sessions': return json({ sessions: state.sessions });
@@ -766,6 +794,35 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/tokens/recent': return json({ ok: true, symbol: '¥', entries: usageRecentFixture() });
         }
       }
+      if (method === 'PATCH' || method === 'DELETE') {
+        if (path === '/api/memory/entries') {
+          const key = String(body.key || '');
+          const bucket = memoryBucket(state, key);
+          const map = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
+          const field = map[String(body.category || '')];
+          if (!field) return json({ ok: false, error: 'category 必须是 topic/thought/impression/rule' }, 400);
+          const idx = bucket[field].findIndex((x) => String(x.id) === String(body.id));
+          if (idx < 0) return json({ ok: false, error: '条目不存在' }, 404);
+          if (method === 'DELETE') {
+            bucket[field].splice(idx, 1);
+            return json({ ok: true, removed: true });
+          }
+          const item = bucket[field][idx];
+          if (body.category === 'impression') {
+            if (Array.isArray(body.extra?.traits)) item.traits = body.extra.traits;
+            if (body.extra?.interactionCount != null) item.interactionCount = Number(body.extra.interactionCount) || 0;
+          } else if (body.category === 'topic') {
+            if (body.content != null) item.text = String(body.content);
+            if (body.extra?.participants) item.participants = body.extra.participants;
+            if (body.extra?.pendingQuestion != null) item.pendingQuestion = body.extra.pendingQuestion;
+          } else {
+            if (body.content != null) item.text = String(body.content);
+            if (body.extra?.motivation != null) item.motivation = body.extra.motivation;
+          }
+          return json({ ok: true, item });
+        }
+        return json({ ok: false, error: 'not found' }, 404);
+      }
       if (method === 'POST') {
         switch (path) {
           case '/api/compact/config': {
@@ -828,6 +885,34 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             Object.assign(state, { dshProvider: body.provider, dshModel: body.model, dshEffort: ids.length ? (body.reasoningEffort || '') : '', dshVision: body.vision || 'auto' });
             return json({ ok: true, provider: state.dshProvider, model: state.dshModel, reasoningEffort: state.dshEffort, vision: state.dshVision });
           }
+          case '/api/memory/entries': {
+            const key = String(body.key || '');
+            const bucket = memoryBucket(state, key);
+            if (!key) return json({ ok: false, error: '缺少 key' }, 400);
+            const category = String(body.category || '');
+            const map = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
+            const field = map[category];
+            if (!field) return json({ ok: false, error: 'category 必须是 topic/thought/impression/rule' }, 400);
+            const idPrefix = { topic: 't_', thought: 'w_', impression: 'i_', rule: '' }[category];
+            const id = idPrefix + (++bucket.seq);
+            const item = category === 'impression'
+              ? { id, target: String(body.extra?.target || ''), traits: body.extra?.traits || [], interactionCount: Number(body.extra?.interactionCount) || 0, lastSeenAt: Date.now() }
+              : category === 'topic'
+                ? { id, text: String(body.content || ''), participants: body.extra?.participants || [], pendingQuestion: body.extra?.pendingQuestion || '', lastMentionAt: Date.now() }
+                : category === 'thought'
+                  ? { id, text: String(body.content || ''), motivation: body.extra?.motivation || '', at: Date.now() }
+                  : { id: ++bucket.seq, text: String(body.content || ''), at: Date.now() };
+            bucket[field].push(item);
+            return json({ ok: true, item, duplicate: false });
+          }
+          case '/api/memory/entries/clear': {
+            const bucket = memoryBucket(state, String(body.key || ''));
+            const map = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
+            if (map[body.category]) bucket[map[body.category]] = [];
+            else for (const f of Object.values(map)) bucket[f] = [];
+            return json({ ok: true, removed: {} });
+          }
+          case '/api/memory/entries/compact': return json({ ok: true, removed: { topics: 0, thoughts: 0, impressions: 0, rules: 0 } });
           case '/api/memory': {
             const next = state.memoryConfig;
             for (const key of ['inject', 'tools', 'handover', 'ingest']) if (body[key] && typeof body[key] === 'object') next[key] = { ...next[key], ...body[key] };

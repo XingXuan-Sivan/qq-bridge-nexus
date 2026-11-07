@@ -81,13 +81,15 @@ test('接线：默认关闭、端点与 MCP 都要求显式 true、规则注入�
   assert.equal((bridge.match(/ownerGroupAccess: false/g) ?? []).length, 2, '桥接两处运行时默认都是关闭');
   assert.ok(bridge.includes('enabled: cfg.socialV2?.tools?.ownerGroupAccess === true'), '端点要求显式 true');
   assert.ok(mcp.includes('if (cfg.socialV2?.tools?.ownerGroupAccess === true) {'), 'MCP 只在显式 true 时注册');
-  const fmt = bridge.slice(bridge.indexOf('function formatMemoryV2(st, limits = {}) {'), bridge.indexOf('function appendMemoryV2('));
-  assert.ok(fmt.includes('rulesPromptBlock(st.ownerRules)'), '记忆摘要（每次唤醒注入）带上规则');
+  const store = fs.readFileSync(path.join(ROOT, 'src', 'memory', 'local-store.mjs'), 'utf8');
+  assert.ok(store.includes('rulesPromptBlock('), '记忆摘要（每次唤醒注入）带上规则');
+  assert.ok(bridge.includes('memoryText: localMemory.digest(check.targetKey)'), '查看视图的记忆摘要来自 store');
   const seg = bridge.slice(bridge.indexOf("url.pathname === '/api/socialV2/owner-peek'"), bridge.indexOf('// ── v0.3.0 控制台（管理端专用'));
   assert.ok(seg.includes('agentTokenOk(key, agentToken)'), '令牌只和发起方会话比对');
   assert.ok(!seg.includes('noteModelMessagesV2'), '查看不标记目标群已读');
   assert.ok(!/sendGroupMessage|sendToQQ\(|scheduleWakeV2/.test(seg), '端点不发消息、不唤醒目标群');
-  const clear = bridge.slice(bridge.indexOf("url.pathname === '/api/socialV2/memory-clear'"), bridge.indexOf("url.pathname === '/api/socialV2/slang/query'"));
+  const clear = bridge.slice(bridge.indexOf("url.pathname === '/api/memory/entries/clear'"), bridge.indexOf("url.pathname === '/api/socialV2/slang/query'"));
+  assert.ok(clear.includes('memCall'), '清条目走统一 manage 接口');
   assert.ok(!clear.includes('ownerRules'), '群会话的 qq_memory_clear 不会清掉管理员规则');
 });
 
@@ -119,7 +121,7 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
     try {
       const hdr = (st) => ({ 'x-agent-token': st.agentToken, 'x-agent-call': '1' });
       const peek = (st, from, gid) => request(server, 'GET', `/api/socialV2/owner-peek?key=${encodeURIComponent(from)}&targetGroupId=${gid}`, { headers: hdr(st) });
-      const rule = (st, from, gid, body) => request(server, 'POST', '/api/socialV2/group-rule', { body: { key: from, targetGroupId: String(gid), ...body }, headers: hdr(st) });
+      const rule = (st, from, gid, body) => request(server, 'POST', '/api/memory/rules', { body: { key: from, targetGroupId: String(gid), ...body }, headers: hdr(st) });
 
       assert.equal((await peek(ownerSt, `qq:private:${OWNER}`, GROUP)).status, 403, '默认关闭');
       h.cfg.socialV2.tools.ownerGroupAccess = true;
@@ -137,12 +139,12 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
 
       const add = await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'add', text: QUESTION_RULE });
       assert.equal(add.status, 200, JSON.stringify(add.body));
-      assert.equal(groupSt.ownerRules.length, 1);
+      assert.equal(h.localMemory.list({ key: `qq:group:${GROUP}` }).rules.length, 1);
       assert.equal((await rule(groupSt, `qq:group:${GROUP}`, GROUP, { action: 'add', text: '群会话自己加' })).status, 403, '群会话不能给自己加规则');
       assert.equal((await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'add', text: 'token: abcdefg123' })).status, 403, '敏感内容被拦');
 
-      const saved = JSON.parse(fs.readFileSync(path.join(h.temp, 'state', 'social-v2.json'), 'utf8'));
-      assert.equal(saved.conversations[`qq:group:${GROUP}`].ownerRules[0].text, QUESTION_RULE, '规则落盘');
+      const saved = JSON.parse(fs.readFileSync(path.join(h.temp, 'state', 'local-memory.json'), 'utf8'));
+      assert.equal(saved.keys[`qq:group:${GROUP}`].rules[0].text, QUESTION_RULE, '规则落盘');
       const prompt = h.buildWakePromptV2(`qq:group:${GROUP}`, 'question');
       assert.ok(prompt.includes('管理员为本群设定的长期规则') && prompt.includes(QUESTION_RULE), '目标群唤醒提示词里有这条规则');
       assert.ok(!h.buildWakePromptV2(`qq:private:${OWNER}`, 'question').includes(QUESTION_RULE), '规则只注入目标群，不串到私聊');
@@ -151,7 +153,7 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
       assert.equal(list.body.rules[0].id, 1);
       const rm = await rule(ownerSt, `qq:private:${OWNER}`, GROUP, { action: 'remove', ruleId: 1 });
       assert.equal(rm.status, 200);
-      assert.equal(groupSt.ownerRules.length, 0);
+      assert.equal(h.localMemory.list({ key: `qq:group:${GROUP}` }).rules.length, 0);
 
       // 隔离不变：私聊令牌仍然不能直接往群里发
       const direct = await request(server, 'POST', '/api/send/group', { body: { groupId: String(GROUP), message: 'hi', token: ownerSt.agentToken }, headers: hdr(ownerSt) });

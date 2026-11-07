@@ -1,9 +1,35 @@
 // 记忆页的字段规格：只有静态输入项写在这里，provider 卡片/最近回忆/本机记忆列表
 // 依赖接口返回，由 page.js 渲染（见 docs/MEMORY_SUBSYSTEM.md §4）。
 // 注意：renderFields 的每一项都要有 name（即控件 id）；custom 的 name 只用于 data-custom，不能和 html 里的 id 重名。
+import { modalHtml } from '../../components/modal/modal.js';
+
 const PROVIDER_RADIOS = '<div id="memoryProviderRadios" class="memory-radios">（加载中…）</div>';
 const PROVIDER_CARDS = '<div id="memoryProviders" class="memory-providers">（加载中…）</div>';
-const LOCAL_OUTPUT = '<div id="memoryLocalOutput" class="memory-output">（先填会话 key，再点「加载记忆」）</div>';
+const LOCAL_TABS = `<div class="page-tabs" role="tablist" id="memoryLocalTabs">
+  <button type="button" class="page-tab active" role="tab" aria-selected="true" data-mem-cat="topic">话题 <span class="meta" data-mem-count="topic">0</span></button>
+  <button type="button" class="page-tab" role="tab" aria-selected="false" data-mem-cat="thought">想法 <span class="meta" data-mem-count="thought">0</span></button>
+  <button type="button" class="page-tab" role="tab" aria-selected="false" data-mem-cat="impression">印象 <span class="meta" data-mem-count="impression">0</span></button>
+  <button type="button" class="page-tab" role="tab" aria-selected="false" data-mem-cat="rule">规则 <span class="meta" data-mem-count="rule">0</span></button>
+</div>`;
+const SESSION_HOST = '<div id="memorySessionTable">（正在读取会话…）</div>';
+const LOCAL_DETAIL = `<div id="memLocalDetail" hidden>
+  <div class="form-actions form-actions--inline">
+    <button type="button" class="btn" id="memLocalAdd">新增条目</button>
+    <button type="button" class="btn" id="memLocalCompact">立即整理</button>
+    <button type="button" class="btn danger" id="memLocalClear">清空这个会话</button>
+    <span class="form-actions-status" id="memLocalMsg" role="status"></span>
+  </div>
+  <p class="meta" id="memLocalHead"></p>
+  ${LOCAL_TABS}
+  <div id="memoryLocalTable">（选择一个会话后加载）</div>
+</div>`;
+const LOCAL_MODAL = modalHtml({
+  id: 'memEntryModal',
+  title: '编辑记忆条目',
+  wide: true,
+  body: '<div id="memEntryForm" class="form-grid"></div>',
+  footer: '<button type="button" class="btn" id="memEntryCancel">取消</button><button type="button" class="btn primary" id="memEntrySave">保存</button>',
+});
 const INGEST_STATS = '<div id="memoryIngestStats" class="meta">写回未开启：不会向任何外部服务发送对话内容。</div>';
 const HISTORY = '<div id="memoryHistory">（还没有注入或回忆记录）</div>';
 
@@ -30,25 +56,28 @@ export const MEMORY_FIELDS = {
   ],
   local: [
     {
-      name: 'memLocalKey', type: 'text', label: '会话 key', span: 2,
-      placeholder: 'qq:group:903621673 或 qq:private:2897715886',
-      hint: '本机轻量记忆按会话隔离：群号与私聊各一份，不会互相串。',
+      name: 'memLocalSessionsBlock', type: 'custom', html: SESSION_HOST, span: 2,
     },
-    { type: 'action', items: [{ id: 'memLocalLoad', label: '加载记忆' }, { id: 'memLocalClear', label: '清空这个会话', variant: 'danger' }], status: 'memLocalMsg' },
-    { name: 'memLocalOutputBlock', type: 'custom', html: LOCAL_OUTPUT, span: 2 },
+    { name: 'memLocalDetailBlock', type: 'custom', html: LOCAL_DETAIL, span: 2 },
     {
-      name: 'memLimitTopics', type: 'number', label: '话题保留（条）', min: 0, max: 50, step: 1,
-      hint: '注入时最多带几条进行中的话题；0 表示不注入。',
+      name: 'memLimitInjectTopics', type: 'number', label: '话题注入（条）', min: 0, max: 50, step: 1,
+      hint: '每次唤醒带几条进行中的话题；0 表示不注入。',
     },
-    { name: 'memLimitThoughts', type: 'number', label: '想法保留（条）', min: 0, max: 50, step: 1 },
-    { name: 'memLimitImpressions', type: 'number', label: '印象注入（条）', min: 0, max: 50, step: 1 },
-    { name: 'memLimitImpressionsMax', type: 'number', label: '印象最多存（条）', min: 0, max: 200, step: 1 },
+    { name: 'memLimitInjectThoughts', type: 'number', label: '想法注入（条）', min: 0, max: 50, step: 1 },
+    { name: 'memLimitInjectImpressions', type: 'number', label: '印象注入（条）', min: 0, max: 100, step: 1 },
+    { name: 'memLimitMaxTopics', type: 'number', label: '话题最多存（条）', min: 1, max: 500, step: 1, hint: '存储上限：超出的旧条目按时间裁掉。' },
+    { name: 'memLimitMaxThoughts', type: 'number', label: '想法最多存（条）', min: 1, max: 500, step: 1 },
+    { name: 'memLimitMaxImpressions', type: 'number', label: '印象最多存（条）', min: 1, max: 1000, step: 1 },
+    { name: 'memLimitMaxRules', type: 'number', label: '规则最多存（条）', min: 1, max: 50, step: 1 },
+    { name: 'memLimitMaxTraits', type: 'number', label: '每人标签上限（个）', min: 1, max: 30, step: 1 },
+    { name: 'memLimitTraitChars', type: 'number', label: '单个标签最长（字）', min: 10, max: 200, step: 1, unit: '字' },
+    { name: 'memLimitItemChars', type: 'number', label: '单条最长（字）', min: 20, max: 2000, step: 10, unit: '字' },
     {
       name: 'memLimitStaleHours', type: 'number', label: '话题过期（小时）', min: 0, max: 720, step: 1, unit: 'h',
       hint: '超过这么久没再被提起的话题会被清掉；0 表示不过期。',
     },
-    { name: 'memLimitItemChars', type: 'number', label: '单条最长（字）', min: 20, max: 2000, step: 10, unit: '字' },
-    { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存读取上限' }], status: 'memLocalLimitsMsg' },
+    { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存上限设置' }], status: 'memLocalLimitsMsg' },
+    { name: 'memLocalModalBlock', type: 'custom', html: LOCAL_MODAL, span: 2 },
   ],
   tools: [
     { name: 'memToolRecall', type: 'switch', label: 'qq_memory_recall', onLabel: '开', offLabel: '关', hint: '让 AI 主动翻旧事；默认开。' },

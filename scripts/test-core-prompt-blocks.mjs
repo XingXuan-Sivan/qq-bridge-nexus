@@ -1,6 +1,6 @@
 // 内置段落块化（P4 迁移第一批）的端到端测试：
-// - core-digest 关掉后，wake prompt 里不再出现记忆摘要；
-// - core-digest 的 maxChars 能单独收紧，且不乱码、不截半句以外的内容。
+// - core-memory 关掉后，wake prompt 里不再出现记忆摘要；
+// - core-memory 的 maxChars 能单独收紧，且不乱码、不截半句以外的内容。
 // 这里走 bridgeHarness 真跑 buildWakePromptV2，避免只测注册表而漏掉桥接接线。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,12 +12,10 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 const KEY = 'group:1047096216';
 
 function seedSocial(bridge) {
-  const st = bridge.getSocialV2State(KEY);
-  assert.ok(st, '社交状态应存在');
-  st.activeTopics = [{ text: '周末去哪玩', lastMentionAt: Date.now() - 5 * 60 * 1000 }];
-  st.pendingThoughts = [{ text: '想问问他上次说的那家店', motivation: 'curiosity' }];
-  st.memberImpressions = { 小明: { traits: ['爱迟到', '会做饭'], interactionCount: 12 } };
-  st.ownerRules = ['不要在群里提工作'];
+  bridge.localMemory.add({ key: KEY, category: 'topic', content: '周末去哪玩' });
+  bridge.localMemory.add({ key: KEY, category: 'thought', content: '想问问他上次说的那家店', extra: { motivation: 'curiosity' } });
+  bridge.localMemory.add({ key: KEY, category: 'impression', content: '', extra: { target: '小明', traits: ['爱迟到', '会做饭'], interactionCount: 12 } });
+  bridge.localMemory.add({ key: KEY, category: 'rule', content: '不要在群里提工作' });
 }
 
 async function capture(config) {
@@ -33,25 +31,25 @@ async function capture(config) {
   }
 }
 
-test('core-digest：默认注入记忆摘要，关掉后整段消失，maxChars 可单独收紧', async () => {
+test('core-memory：默认注入记忆摘要，关掉后整段消失，maxChars 可单独收紧', async () => {
   const enabled = await capture({});
   assert.match(enabled, /【进行中的话题】/, '默认应包含记忆摘要段');
   assert.match(enabled, /周末去哪玩/);
 
-  const disabled = await capture({ promptBlocks: { 'core-digest': { enabled: false } } });
+  const disabled = await capture({ promptBlocks: { 'core-memory': { enabled: false } } });
   assert.doesNotMatch(disabled, /【进行中的话题】/, '关掉后不应再出现该段');
   assert.doesNotMatch(disabled, /周末去哪玩/);
   assert.ok(disabled.length < enabled.length, '关掉一块后 prompt 应变短');
 
-  const clipped = await capture({ promptBlocks: { 'core-digest': { maxChars: 20 } } });
+  const clipped = await capture({ promptBlocks: { 'core-memory': { maxChars: 120 } } });
   assert.match(clipped, /【进行中的话题】/, '限额只截断，不应整段消失');
   assert.ok(clipped.length < enabled.length, '限额后 prompt 应变短');
   assert.ok(clipped.length > disabled.length, '限额后仍应保留一部分摘要');
 });
 
-// S2：记忆不再由 core-digest 直接拼字符串，而是走 memory provider（默认为 local-digest）。
-// 三个判据：关 provider 后无记忆段、注入上限可收紧、旧 core-digest 配置读入后行为等价。
-test('memory：local-digest 可关、注入上限可配，旧 core-digest 配置等价', async () => {
+// S2：记忆走 memory provider（默认为 local-digest）。
+// 判据：关 provider 后无记忆段、注入上限可收紧。
+test('memory：local-digest 可关、注入上限可配', async () => {
   const enabled = await capture({});
   assert.match(enabled, /【进行中的话题】/);
 
@@ -59,13 +57,11 @@ test('memory：local-digest 可关、注入上限可配，旧 core-digest 配置
   assert.doesNotMatch(byProvider, /【进行中的话题】/, '关掉 local-digest 后不应有记忆段');
   assert.ok(byProvider.length < enabled.length);
 
-  const clipped = await capture({ memory: { inject: { maxChars: 40 } } });
+  const clipped = await capture({ memory: { inject: { maxChars: 120 } } });
   assert.ok(clipped.length < enabled.length, '注入上限应收紧记忆段');
   assert.ok(clipped.length > byProvider.length, '只截断，不应整段消失');
   assert.ok(!clipped.includes('小明'), '超出上限的印象行应被截掉');
 
-  const legacy = await capture({ promptBlocks: { 'core-digest': { enabled: false } } });
-  assert.doesNotMatch(legacy, /【进行中的话题】/, '旧 core-digest 配置应等价于关掉 local-digest');
 });
 
 test('core-stickers：配置可单独关闭该块，关掉后不再出现表情策略段', async () => {

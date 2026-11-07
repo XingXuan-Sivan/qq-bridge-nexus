@@ -55,7 +55,7 @@ test('② 端到端：完整 → 一行 → 改了重新完整；引导总完整
     h.setMode('reserved2');
     const sid = await h.ensureSession(GROUP);
     h.roleRefresh.markSeen(GROUP, sid, h.currentRoleFingerprintV2());
-    h.getSocialV2State(GROUP).ownerRules = [{ id: 1, text: '本群语气软一点', at: 1 }];
+    h.localMemory.add({ key: GROUP, category: 'rule', content: '本群语气软一点' });
     const last = () => promptText(h.calls.prompts.filter((p) => p.sessionId === sid).at(-1));
 
     await h.deliverPrompt(GROUP, '', { wakeReason: 'atMention' });

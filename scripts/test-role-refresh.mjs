@@ -114,7 +114,7 @@ test('② 换卡后下一次唤醒带新卡，投递后记下、不再重复；�
     assert.match(h.buildWakePromptV2(GROUP_KEY, 'timeout'), /^【角色卡已更新 · 桥接提供】管理员清除了当前角色/);
 
     // 群规则照样注入，不受影响
-    h.getSocialV2State(GROUP_KEY).ownerRules = [{ id: 1, text: '本群语气软一点', createdAt: 1 }];
+    h.localMemory.add({ key: GROUP_KEY, category: 'rule', content: '本群语气软一点' });
     const withRules = h.buildWakePromptV2(GROUP_KEY, 'timeout');
     assert.ok(withRules.includes('本群语气软一点') && withRules.includes('【角色卡已更新'), '规则和新卡同时在');
   });

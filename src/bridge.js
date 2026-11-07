@@ -117,7 +117,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
@@ -126,7 +126,7 @@ import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from './plugins/prompt-
 // 记忆 provider 注册表（docs/MEMORY_SUBSYSTEM.md）：注入只选一个 provider，同步直取、异步读预热缓存。
 import { createMemoryRegistry, normalizeMemoryConfig } from './memory/registry.mjs';
 import { createMemoryIngest } from './memory/ingest.mjs';
-import { LOCAL_DIGEST_LIMITS } from './memory/defaults.mjs';
+import { createLocalMemory } from './memory/local-store.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
 // 内置命令的「壳」（元数据 + 参数解析 + 回执文案）与 /api/commands 的响应组装，见 docs/COMMAND_REGISTRY.md。
@@ -768,21 +768,6 @@ function normalizePromptBlocks(raw) {
 }
 
 /**
- * 旧配置兼容（docs/MEMORY_SUBSYSTEM.md §7，迁移映射）：S2 之前「记忆摘要」是
- * `promptBlocks['core-digest']`（enabled / maxChars）。没写 `memory.*` 时把它读成
- * `providers['local-digest']` 的同名配置，迁移后行为等价；旧键此后只读，控制台不再写它。
- */
-function legacyMemoryConfig(promptBlocks) {
-  const digest = promptBlocks && typeof promptBlocks === 'object' ? promptBlocks['core-digest'] : null;
-  if (!digest || typeof digest !== 'object' || Array.isArray(digest)) return undefined;
-  const local = {};
-  if (typeof digest.enabled === 'boolean') local.enabled = digest.enabled;
-  const maxChars = Number(digest.maxChars);
-  if (Number.isInteger(maxChars) && maxChars > 0) local.maxChars = maxChars;
-  return Object.keys(local).length ? { providers: { 'local-digest': local } } : undefined;
-}
-
-/**
  * 平台段：`platform.id`（默认 qq）。
  *
  * key 形态只有一种：`<platform>:<group|private>:<id>`。老的 `group:<id>` 只在**读取侧**
@@ -917,7 +902,7 @@ function loadConfig() {
     // 记忆子系统（docs/MEMORY_SUBSYSTEM.md §3）：注入 provider / provider 开关与上限 / 工具。
     // 旧版本把「记忆摘要」配成 promptBlocks['core-digest']，这里兼容读一版：
     // 没写 memory.* 时，把它当成 providers['local-digest'] 的 enabled / maxChars。
-    memory: normalizeMemoryConfig(file.memory ?? legacyMemoryConfig(file.promptBlocks)),
+    memory: normalizeMemoryConfig(file.memory),
     // 技能清单（§9.2）：唤醒时注入固定行数的可用技能索引，全文由 AI 需要时自己读。
     skills: normalizeSkills(file.skills),
   platform: normalizePlatform(file.platform),
@@ -1640,20 +1625,35 @@ async function main() {
   // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
   // 插件块受 plugins.json 的 maxPromptAppendChars（4000）约束，内置段落沿用现有长度，不能互相挤占。
   const corePromptBlocks = createPromptBlockRegistry({ log, maxTotalChars: 200000 });
-  // 记忆 provider（docs/MEMORY_SUBSYSTEM.md §2.1）：内置 local-digest 直接同步渲染现有的
-  // formatMemoryV2（零延迟）；插件 provider（如 soulkit）走异步预热 + 缓存，注入时只读缓存。
+  // 记忆 provider（docs/MEMORY_SUBSYSTEM.md §2.1）：内置 local-digest 由自己的 store 实现
+  // 注入（digest）、写回（note）与管理（manage），数据在 state/local-memory.json；
+  // 插件 provider（如 soulkit）走异步预热 + 缓存，注入时只读缓存。
+  const localMemory = createLocalMemory({
+    file: path.join(STATE_DIR, 'local-memory.json'),
+    limits: () => cfg.memory?.providers?.['local-digest']?.limits ?? {},
+    sanitize: (text) => redactKnownTokensOnly(text),
+    log,
+  });
   const memoryRegistry = createMemoryRegistry({ log, config: cfg.memory });
   memoryRegistry.register({
     id: 'local-digest',
     label: '本机轻量记忆',
     contract: 'memory-provider/1',
-    capabilities: { sync: true, write: true, listable: true },
-    fetchSync: ({ key, limits }) => ({ text: formatMemoryV2(getSocialV2State(key), limits) }),
-    // 写回：把模型主动记下的一句话落成一条进行中的话题，下一轮 formatMemoryV2 会带上它。
+    capabilities: { sync: true, write: true, listable: true, manage: true },
+    fetchSync: ({ key }) => ({ text: localMemory.digest(key) }),
+    // 写回：把模型主动记下的一句话落成一条进行中的话题，下一轮 digest 会带上它。
     note: ({ key, text }) => {
-      const st = getSocialV2State(key);
-      appendMemoryV2(st, 'activeTopic', text, {});
-      return { ok: true, category: 'activeTopic' };
+      const r = localMemory.add({ key, category: 'topic', content: text });
+      return r.ok === false ? { ok: false, error: r.error } : { ok: true, category: 'topic' };
+    },
+    // 管理：控制台与 MCP 都走这里，不再有第二套本地记忆写入逻辑。
+    manage: {
+      list: (params) => localMemory.list(params),
+      add: (params) => localMemory.add(params),
+      update: (params) => localMemory.update(params),
+      remove: (params) => localMemory.remove(params),
+      clear: (params) => localMemory.clear(params),
+      compact: (params) => localMemory.compact(params),
     },
   }, 'core');
   // 记忆写回（S5，默认关）：QQ 会话里的 user / assistant 文本攒成事件，批量写给记忆服务。
@@ -3899,10 +3899,10 @@ async function main() {
       // 只取管理员私聊这一个会话的，不取任何群的；开关是二代工具开关里的 handoverMemory（默认开）。
       // 从休眠恢复的私聊会话不用带：它自己的唤醒提示里本来就有这些。
       let memoryText = '';
-      if (!p.resumed && p.to?.mode === 'closed-agent' && (cfg.memory?.handover?.enabled ?? cfg.socialV2?.tools?.handoverMemory !== false)) {
-        const ownerSt = socialV2.conversations.get(ownerKeyOf());
-        if (ownerSt) {
-          memoryText = formatMemoryV2(ownerSt).split('\n')
+      if (!p.resumed && p.to?.mode === 'closed-agent' && cfg.memory?.handover?.enabled !== false) {
+        const ownerKey = ownerKeyOf();
+        if (socialV2.conversations.has(ownerKey)) {
+          memoryText = localMemory.digest(ownerKey).split('\n')
             .map((line) => redactForHandover(line, (t) => redactSensitiveText(redactKnownTokensOnly(t))))
             .filter(Boolean).join('\n');
         }
@@ -4660,7 +4660,7 @@ async function main() {
           return;
         }
         // 暂停二代 AI 时，所有带 agent token 的 v2 工具调用一律拒绝
-        if (socialV2.paused && req.headers['x-agent-token'] && (url.pathname.startsWith('/api/socialV2/') || url.pathname.startsWith('/api/send/') || url.pathname.startsWith('/api/images/'))) {
+        if (socialV2.paused && req.headers['x-agent-token'] && (url.pathname.startsWith('/api/socialV2/') || url.pathname.startsWith('/api/memory/') || url.pathname.startsWith('/api/send/') || url.pathname.startsWith('/api/images/'))) {
           sendJson({ ok: false, error: 'AI 已暂停，当前不允许执行 v2 工具' }, 403);
           return;
         }
@@ -4693,6 +4693,10 @@ async function main() {
         if (req.headers['x-agent-token']) {
           const agentAllowed = url.pathname === '/api/status'
             || url.pathname.startsWith('/api/socialV2/')
+            || url.pathname.startsWith('/api/memory/entries')
+            || url.pathname === '/api/memory/rules'
+            || url.pathname === '/api/memory/recall'
+            || url.pathname === '/api/memory/note'
             || url.pathname.startsWith('/api/send/')
             || url.pathname.startsWith('/api/images/')
             || url.pathname === '/api/authorize/read';
@@ -4885,6 +4889,7 @@ async function main() {
             ok: true,
             config: memoryRegistry.getConfig(),
             status: memoryRegistry.status(),
+            manageable: memoryRegistry.manageable(),
             promptBlocks: corePromptBlocks.status(),
             ingest: memoryIngest.status(),
           });
@@ -4896,7 +4901,7 @@ async function main() {
             const file = path.join(ROOT, 'config.json');
             const raw = readJsonSafe(file, {}, true);
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.json 格式错误');
-            const base = normalizeMemoryConfig(raw.memory ?? legacyMemoryConfig(raw.promptBlocks));
+            const base = normalizeMemoryConfig(raw.memory);
             const incoming = body && typeof body === 'object' ? body : {};
             const next = {
               inject: { ...base.inject, ...(incoming.inject && typeof incoming.inject === 'object' ? incoming.inject : {}) },
@@ -6463,7 +6468,7 @@ async function main() {
             recentCount: st.recentMessages.length,
             currentWakeConfig: st.wakeConfig,
             wakeSafety: computeWakeSafetyV2(st.wakeConfig),
-            memory: formatMemoryV2(st),
+            memory: localMemory.digest(key),
             participation: formatParticipationV2(st),
             slang: {
               enabled: cfg.slang?.enabled !== false,
@@ -8543,15 +8548,12 @@ async function main() {
           sendJson({ ok: true, key, message: '已换新令牌：下一次唤醒时 AI 会拿到新令牌，旧令牌立即失效' });
           return;
         }
-        // 管理员私聊的跨群能力（默认关闭，socialV2.tools.ownerGroupAccess === true 才放行）：
-        //   GET  /api/socialV2/owner-peek  只读查看白名单群的最近消息、记忆摘要和长期规则（不标记已读、不能代发）
-        //   POST /api/socialV2/group-rule  给白名单群增删长期规则（桥接写进目标群会话记忆，唤醒时注入）
-        // 令牌只和发起方（管理员私聊）比对；目标群的令牌、发送权限都不经过这里。
-        if ((req.method === 'GET' && url.pathname === '/api/socialV2/owner-peek') || (req.method === 'POST' && url.pathname === '/api/socialV2/group-rule')) {
-          const isPeek = url.pathname === '/api/socialV2/owner-peek';
-          const body = isPeek ? {} : await readBody();
-          const key = String((isPeek ? url.searchParams.get('key') : body.key) ?? '').trim();
-          const targetGroupId = isPeek ? url.searchParams.get('targetGroupId') : body.targetGroupId;
+        // 管理员私聊的跨群只读能力（默认关闭，socialV2.tools.ownerGroupAccess === true 才放行）：
+        //   GET /api/socialV2/owner-peek  只读查看白名单群的最近消息、记忆摘要和长期规则（不标记已读、不能代发）
+        // 增删规则改走通用记忆管理面 /api/memory/rules（控制台与 AI 同一套 manage）。
+        if (req.method === 'GET' && url.pathname === '/api/socialV2/owner-peek') {
+          const key = String(url.searchParams.get('key') ?? '').trim();
+          const targetGroupId = url.searchParams.get('targetGroupId');
           const agentToken = req.headers['x-agent-token'];
           const check = validateOwnerGroupAccess({
             fromKey: key,
@@ -8563,41 +8565,16 @@ async function main() {
             targetGroupId,
           });
           if (!check.ok) {
-            ext.audit.append(isPeek ? 'ownerpeek.reject' : 'grouprule.reject', { from: key, to: String(targetGroupId ?? ''), reason: check.error });
+            ext.audit.append('ownerpeek.reject', { from: key, to: String(targetGroupId ?? ''), reason: check.error });
             sendJson({ ok: false, error: check.error }, check.status);
             return;
           }
           const target = getSocialV2State(check.targetKey);
-          if (isPeek) {
-            // 只读：不记录「模型已读到哪」，目标群的已读进度不受影响
-            const view = peekView(target, { limit: url.searchParams.get('limit'), memoryText: formatMemoryV2(target) });
-            ext.audit.append('ownerpeek', { from: key, to: check.targetKey, messages: view.messages.length });
-            sendJson({ ok: true, targetKey: check.targetKey, ...view, note: '只读视图：你不能直接在这个群发言；要在群里说话请用 qq_ask_group_session 托付，要让它长期改说话习惯请用 qq_owner_group_rule。' });
-            return;
-          }
-          const action = String(body.action ?? 'list');
-          if (action === 'list') { sendJson({ ok: true, targetKey: check.targetKey, rules: normalizeRules(target.ownerRules) }); return; }
-          let r;
-          if (action === 'add') {
-            if (SENSITIVE_RE.test(String(body.text ?? ''))) { sendJson({ ok: false, error: '规则内容含敏感信息，已阻止' }, 403); return; }
-            r = addRule(target.ownerRules, body.text, { maxRules: GROUP_RULE_LIMITS.maxRules, maxChars: GROUP_RULE_LIMITS.maxChars });
-          } else if (action === 'remove') {
-            r = removeRule(target.ownerRules, body.ruleId);
-          } else {
-            sendJson({ ok: false, error: 'action 只能是 list / add / remove' }, 400);
-            return;
-          }
-          if (r.error) { sendJson({ ok: false, error: r.error }, 400); return; }
-          const rule = action === 'add' ? r.rule : r.removed;
-          if (!r.duplicate) {
-            target.ownerRules = r.rules;
-            saveSocialV2State();
-            ext.audit.append(action === 'add' ? 'grouprule.add' : 'grouprule.remove', { from: key, to: check.targetKey, ruleId: rule.id, chars: rule.text.length });
-            appendActivity(`${key} ${action === 'add' ? '设定' : '删除'} ${check.targetKey} 长期规则 #${rule.id}：${rule.text.slice(0, 60)}`);
-            log(`[reserved2] 管理员${action === 'add' ? '设定' : '删除'} ${check.targetKey} 长期规则 #${rule.id}`);
-            void sendOwnerDirect(groupRuleNoticeText(check.targetKey, action, rule));
-          }
-          sendJson({ ok: true, targetKey: check.targetKey, duplicate: !!r.duplicate, rules: r.rules, message: r.duplicate ? `${check.targetKey} 已有同样的规则 #${rule.id}，没有重复添加。` : groupRuleResultText(check.targetKey, action, rule) });
+          // 只读：不记录「模型已读到哪」，目标群的已读进度不受影响
+          const peekRules = localMemory.list({ key: check.targetKey }).rules;
+          const view = peekView({ ...target, ownerRules: peekRules }, { limit: url.searchParams.get('limit'), memoryText: localMemory.digest(check.targetKey) });
+          ext.audit.append('ownerpeek', { from: key, to: check.targetKey, messages: view.messages.length });
+          sendJson({ ok: true, targetKey: check.targetKey, ...view, note: '只读视图：你不能直接在这个群发言；要在群里说话请用 qq_ask_group_session 托付，要让它长期改说话习惯请用 qq_owner_group_rule。' });
           return;
         }
         // ── v0.3.0 控制台（管理端专用；带 agent token 的请求在上面的白名单关卡就已被 403）──
@@ -8678,183 +8655,198 @@ async function main() {
           }
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-append') {
-          const body = await readBody();
-          const key = apiKey(body.key);
-          const category = String(body.category ?? '').trim();
-          const content = String(body.content ?? '').trim();
-          const extra = body.extra && typeof body.extra === 'object' ? body.extra : {};
-          if (!key || !category || !content) { sendJson({ ok: false, error: 'key/category/content 不能为空' }, 400); return; }
-          if (!['activeTopic', 'pendingThought', 'memberImpression'].includes(category)) { sendJson({ ok: false, error: 'category 必须是 activeTopic / pendingThought / memberImpression' }, 400); return; }
-          if (category === 'memberImpression' && !String(extra.target || '').trim()) { sendJson({ ok: false, error: 'memberImpression 需要 extra.target 指定群友名字' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_append' }, 403); return; }
-          const st = getSocialV2State(key);
-          appendMemoryV2(st, category, content, extra);
-          sendJson({ ok: true, key, category, content, memory: formatMemoryV2(st) });
+﻿        // ── 记忆管理面（统一 provider 契约）──────────────────────────────
+        // 控制台与 AI 共用同一组端点：控制台只带 x-console-token；AI 带 x-agent-token 时
+        // 必须命中会话、在允许范围内，并受 memory.tools 开关约束。写入统一落到 provider.manage。
+        const memConsole = !req.headers['x-agent-token'];
+        const memProvider = (value) => String(value ?? 'local-digest').trim() || 'local-digest';
+        const memDeny = (error, status = 403) => { sendJson({ ok: false, error }, status); return false; };
+        const memAgentAllowed = (key, tool = 'memory') => {
+          if (memConsole) return true;
+          if (!agentTokenOk(key, req.headers['x-agent-token'])) return memDeny('agent token 无效');
+          if (!v2SessionAllowed(key)) return memDeny('目标不在当前模式允许范围内');
+          if (tool && !v2ToolEnabled(tool)) return memDeny(`工具未启用：${tool}`);
+          return true;
+        };
+        const memCall = async (provider, action, params) => {
+          const r = await memoryRegistry.manage({ provider, action, params });
+          if (!r.ok) { sendJson({ ok: false, error: r.error }, r.status ?? 400); return null; }
+          return r;
+        };
+        const MEM_FIELDS = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
+        const memCategory = (value) => String(value ?? '').trim();
+        if (req.method === 'GET' && url.pathname === '/api/memory/entries') {
+          const key = apiKey(url.searchParams.get('key'));
+          const category = memCategory(url.searchParams.get('category'));
+          if (!key) { memDeny('key 不能为空', 400); return; }
+          if (category && !MEM_FIELDS[category]) { memDeny('category 必须是 topic / thought / impression / rule', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const r = await memCall(memProvider(url.searchParams.get('provider')), 'list', { key });
+          if (!r) return;
+          const data = r.result && typeof r.result === 'object' ? { ...r.result } : {};
+          if (category) for (const [cat, field] of Object.entries(MEM_FIELDS)) if (cat !== category) data[field] = [];
+          sendJson({ ok: true, provider: r.provider, key, data });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-update') {
+        if (req.method === 'POST' && url.pathname === '/api/memory/entries') {
           const body = await readBody();
           const key = apiKey(body.key);
-          const category = String(body.category ?? '').trim();
-          const oldContent = String(body.oldContent ?? '').trim();
-          const target = redactKnownTokensOnly(String(body.target ?? '').trim());
-          const newContent = body.newContent !== undefined && body.newContent !== null ? redactKnownTokensOnly(String(body.newContent).trim()) : undefined;
-          const newExtra = body.newExtra && typeof body.newExtra === 'object' && !Array.isArray(body.newExtra) ? body.newExtra : {};
-          const redactExtra = (v) => redactKnownTokensOnly(String(v ?? '')).trim();
-          const cleanNewExtra = {
-            ...newExtra,
-            pendingQuestion: newExtra.pendingQuestion !== undefined ? redactExtra(newExtra.pendingQuestion) : undefined,
-            participants: Array.isArray(newExtra.participants) ? newExtra.participants.map((p) => redactExtra(p)) : undefined,
-            motivation: newExtra.motivation !== undefined ? redactExtra(newExtra.motivation) : undefined,
-            target: newExtra.target !== undefined ? redactExtra(newExtra.target) : undefined
-          };
-          if (!key || !category) { sendJson({ ok: false, error: 'key/category 不能为空' }, 400); return; }
-          if (!['activeTopic', 'pendingThought', 'memberImpression'].includes(category)) { sendJson({ ok: false, error: 'category 必须是 activeTopic / pendingThought / memberImpression' }, 400); return; }
-          if (category === 'memberImpression' && !target) { sendJson({ ok: false, error: 'memberImpression 需要 target 指定原群友名字' }, 400); return; }
-          if (category !== 'memberImpression' && !oldContent) { sendJson({ ok: false, error: '该类别需要 oldContent 指定要编辑的记忆内容' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_*' }, 403); return; }
-          const st = getSocialV2State(key);
-          if (category === 'activeTopic' && Array.isArray(st.activeTopics)) {
-            const idx = st.activeTopics.findIndex((t) => String(t?.text ?? '') === oldContent);
-            if (idx < 0) { sendJson({ ok: false, error: '找不到要编辑的 activeTopic' }, 404); return; }
-            if (newContent !== undefined) st.activeTopics[idx].text = newContent.slice(0, 200);
-            if (cleanNewExtra.pendingQuestion !== undefined) st.activeTopics[idx].pendingQuestion = String(cleanNewExtra.pendingQuestion).slice(0, 200);
-            if (Array.isArray(cleanNewExtra.participants)) st.activeTopics[idx].participants = cleanNewExtra.participants.map(String).slice(0, 10);
-          } else if (category === 'pendingThought' && Array.isArray(st.pendingThoughts)) {
-            const idx = st.pendingThoughts.findIndex((t) => String(t?.text ?? '') === oldContent);
-            if (idx < 0) { sendJson({ ok: false, error: '找不到要编辑的 pendingThought' }, 404); return; }
-            if (newContent !== undefined) st.pendingThoughts[idx].text = newContent.slice(0, 200);
-            if (cleanNewExtra.motivation !== undefined) st.pendingThoughts[idx].motivation = String(cleanNewExtra.motivation).slice(0, 50);
-            if (cleanNewExtra.expiresAtMs !== undefined) st.pendingThoughts[idx].expiresAt = Date.now() + Math.max(0, Number(cleanNewExtra.expiresAtMs) || 0);
-          } else if (category === 'memberImpression' && st.memberImpressions && typeof st.memberImpressions === 'object') {
-            const oldTarget = target;
-            if (['__proto__', 'constructor', 'prototype'].includes(oldTarget)) { sendJson({ ok: false, error: '非法的群友名字' }, 400); return; }
-            // 必须命中**已有**条目（own property）：否则任意 target 都能凭空建一条，
-            // 而 'toString'/'valueOf' 这类名字会从 Object.prototype 上取到继承来的函数，
-            // 往函数对象上写 traits —— JSON.stringify 又会把它整个丢掉（静默数据丢失）。
-            if (!Object.prototype.hasOwnProperty.call(st.memberImpressions, oldTarget)) {
-              sendJson({ ok: false, error: '找不到要编辑的群友印象（新印象请用 qq_memory_append 添加）' }, 404);
+          const category = memCategory(body.category);
+          const content = redactKnownTokensOnly(String(body.content ?? '')).trim();
+          const extra = body.extra && typeof body.extra === 'object' && !Array.isArray(body.extra) ? body.extra : {};
+          if (!key || !category) { memDeny('key/category 不能为空', 400); return; }
+          if (!MEM_FIELDS[category]) { memDeny('category 必须是 topic / thought / impression / rule', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const r = await memCall(memProvider(body.provider), 'add', { key, category, content, extra });
+          if (!r) return;
+          sendJson({ ok: true, provider: r.provider, key, category, item: r.result?.item ?? null, duplicate: !!r.result?.duplicate });
+          return;
+        }
+        if (req.method === 'PATCH' && url.pathname === '/api/memory/entries') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          const category = memCategory(body.category);
+          const id = String(body.id ?? '').trim();
+          if (!key || !category || !id) { memDeny('key/category/id 不能为空', 400); return; }
+          if (!MEM_FIELDS[category]) { memDeny('category 必须是 topic / thought / impression / rule', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const extra = body.extra && typeof body.extra === 'object' && !Array.isArray(body.extra) ? body.extra : {};
+          const r = await memCall(memProvider(body.provider), 'update', {
+            key, category, id,
+            content: body.content === undefined || body.content === null ? undefined : redactKnownTokensOnly(String(body.content)).trim(),
+            extra,
+          });
+          if (!r) return;
+          sendJson({ ok: true, provider: r.provider, key, category, item: r.result?.item ?? null });
+          return;
+        }
+        if (req.method === 'DELETE' && url.pathname === '/api/memory/entries') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          const category = memCategory(body.category);
+          const id = String(body.id ?? '').trim();
+          if (!key || !category || !id) { memDeny('key/category/id 不能为空', 400); return; }
+          if (!MEM_FIELDS[category]) { memDeny('category 必须是 topic / thought / impression / rule', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const r = await memCall(memProvider(body.provider), 'remove', { key, category, id });
+          if (!r) return;
+          sendJson({ ok: true, provider: r.provider, key, category, item: r.result?.item ?? null });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/memory/entries/clear') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          const category = memCategory(body.category);
+          if (!key) { memDeny('key 不能为空', 400); return; }
+          if (category && !MEM_FIELDS[category]) { memDeny('category 必须是 topic / thought / impression / rule', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const r = await memCall(memProvider(body.provider), 'clear', { key, category: category || undefined });
+          if (!r) return;
+          ext.audit.append('memory.clear', { key, category: category || 'all', source: memConsole ? 'console' : 'agent' });
+          sendJson({ ok: true, provider: r.provider, key, category: category || 'all', removed: r.result?.removed ?? {} });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/memory/entries/compact') {
+          const body = await readBody();
+          const key = apiKey(body.key);
+          if (!key) { memDeny('key 不能为空', 400); return; }
+          if (!memAgentAllowed(key)) return;
+          const r = await memCall(memProvider(body.provider), 'compact', { key });
+          if (!r) return;
+          ext.audit.append('memory.compact', { key, removed: r.result?.removed ?? {}, source: memConsole ? 'console' : 'agent' });
+          sendJson({ ok: true, provider: r.provider, key, removed: r.result?.removed ?? {} });
+          return;
+        }
+        // 长期规则：控制台可对任意群增删；AI 仍要求「管理员私聊 + agent token + ownerGroupAccess + 白名单」。
+        if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/api/memory/rules') {
+          const body = req.method === 'POST' ? await readBody() : {};
+          const sourceKey = String((req.method === 'GET' ? url.searchParams.get('key') : body.key) ?? '').trim();
+          const targetGroupId = req.method === 'GET' ? url.searchParams.get('targetGroupId') : body.targetGroupId;
+          let targetKey = sourceKey;
+          if (!memConsole) {
+            const check = validateOwnerGroupAccess({
+              fromKey: sourceKey,
+              tokenOk: !!req.headers['x-agent-token'] && agentTokenOk(sourceKey, req.headers['x-agent-token']) && v2SessionAllowed(sourceKey),
+              isOwnerPrivateKey: ext.isOwnerPrivateKey,
+              isTargetAllowed: (k) => v2SessionAllowed(k),
+              enabled: cfg.socialV2?.tools?.ownerGroupAccess === true,
+              targetGroupId,
+            });
+            if (!check.ok) {
+              ext.audit.append('grouprule.reject', { from: sourceKey, to: String(targetGroupId ?? ''), reason: check.error });
+              memDeny(check.error, check.status);
               return;
             }
-            const im = st.memberImpressions[oldTarget];
-            const newTarget = String(cleanNewExtra.target || oldTarget).trim().slice(0, 64);
-            if (!newTarget || ['__proto__', 'constructor', 'prototype'].includes(newTarget)) { sendJson({ ok: false, error: '非法的群友名字' }, 400); return; }
-            if (newContent !== undefined) {
-              im.traits = newContent.split(/[,，、]/).map((s) => s.trim()).filter(Boolean).slice(0, 20);
+            targetKey = check.targetKey;
+          } else if (!/^[1-9]\d{0,11}$/.test(String(targetGroupId ?? '').trim())) {
+            // 控制台按会话 key 操作：必须是群会话（规则是「为本群设定」）
+            const m = /^qq:group:([1-9]\d{0,11})$/.exec(targetKey);
+            if (!m) { memDeny('targetGroupId 必须是群号（或传 qq:group:<群号> 的 key）', 400); return; }
+            targetKey = sessionKey('group', m[1]);
+          } else {
+            targetKey = sessionKey('group', String(targetGroupId).trim());
+          }
+          if (req.method === 'GET') {
+            const r = await memCall('local-digest', 'list', { key: targetKey });
+            if (!r) return;
+            sendJson({ ok: true, targetKey, rules: r.result?.rules ?? [] });
+            return;
+          }
+          const action = String(body.action ?? 'list');
+          if (action === 'list') {
+            const r = await memCall('local-digest', 'list', { key: targetKey });
+            if (!r) return;
+            sendJson({ ok: true, targetKey, rules: r.result?.rules ?? [] });
+            return;
+          }
+          if (action === 'add') {
+            if (SENSITIVE_RE.test(String(body.text ?? ''))) { memDeny('规则内容含敏感信息，已阻止', 403); return; }
+            const r = await memCall('local-digest', 'add', { key: targetKey, category: 'rule', content: String(body.text ?? '') });
+            if (!r) return;
+            const rule = r.result?.item;
+            if (!r.result?.duplicate && rule) {
+              ext.audit.append('grouprule.add', { from: sourceKey, to: targetKey, ruleId: rule.id, chars: rule.text.length, source: memConsole ? 'console' : 'agent' });
+              appendActivity(`${sourceKey} 设定 ${targetKey} 长期规则 #${rule.id}：${rule.text.slice(0, 60)}`);
+              if (!memConsole) void sendOwnerDirect(groupRuleNoticeText(targetKey, 'add', rule));
             }
-            if (cleanNewExtra.interactionCount !== undefined) im.interactionCount = Math.max(0, Number(cleanNewExtra.interactionCount) || 0);
-            if (newTarget !== oldTarget) delete st.memberImpressions[oldTarget];
-            st.memberImpressions[newTarget] = im;
-            // 与控制台/AI 的 append 路径保持一致：条目数上限 50，超了按 lastSeenAt 淘汰最旧，
-            // 否则 memory-update 能无限塞名字（每次 1MB 请求 → 状态文件与每轮 prompt 一起膨胀）。
-            const impressionEntries = Object.entries(st.memberImpressions);
-            if (impressionEntries.length > 50) {
-              impressionEntries.sort((a, b) => (Number(a[1]?.lastSeenAt) || 0) - (Number(b[1]?.lastSeenAt) || 0));
-              for (let i = 0; i < impressionEntries.length - 50; i += 1) delete st.memberImpressions[impressionEntries[i][0]];
-            }
+            sendJson({ ok: true, targetKey, duplicate: !!r.result?.duplicate, rules: r.result?.rules ?? [], message: r.result?.duplicate ? `${targetKey} 已有同样的规则 #${rule.id}，没有重复添加。` : groupRuleResultText(targetKey, 'add', rule) });
+            return;
           }
-          saveSocialV2State();
-          sendJson({ ok: true, key, category, memory: formatMemoryV2(st) });
-          return;
-        }
-        if (req.method === 'GET' && url.pathname === '/api/socialV2/memory') {
-          const key = apiKey(url.searchParams.get('key'));
-          const category = String(url.searchParams.get('category') ?? '').trim();
-          if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_query' }, 403); return; }
-          const st = getSocialV2State(key);
-          const raw = {
-            activeTopics: Array.isArray(st.activeTopics) ? st.activeTopics.slice(-20) : [],
-            pendingThoughts: Array.isArray(st.pendingThoughts) ? st.pendingThoughts.filter((t) => !t.expiresAt || Date.now() < t.expiresAt).slice(-20) : [],
-            memberImpressions: st.memberImpressions && typeof st.memberImpressions === 'object' ? st.memberImpressions : {}
-          };
-          if (category === 'activeTopic') {
-            raw.pendingThoughts = [];
-            raw.memberImpressions = {};
-          } else if (category === 'pendingThought') {
-            raw.activeTopics = [];
-            raw.memberImpressions = {};
-          } else if (category === 'memberImpression') {
-            raw.activeTopics = [];
-            raw.pendingThoughts = [];
+          if (action === 'remove') {
+            const r = await memCall('local-digest', 'remove', { key: targetKey, category: 'rule', id: String(body.ruleId ?? body.id ?? '') });
+            if (!r) return;
+            const rule = r.result?.item;
+            ext.audit.append('grouprule.remove', { from: sourceKey, to: targetKey, ruleId: rule?.id, source: memConsole ? 'console' : 'agent' });
+            appendActivity(`${sourceKey} 删除 ${targetKey} 长期规则 #${rule?.id}：${String(rule?.text ?? '').slice(0, 60)}`);
+            if (!memConsole) void sendOwnerDirect(groupRuleNoticeText(targetKey, 'remove', rule));
+            sendJson({ ok: true, targetKey, rules: (await memoryRegistry.manage({ provider: 'local-digest', action: 'list', params: { key: targetKey } })).result?.rules ?? [], message: groupRuleResultText(targetKey, 'remove', rule) });
+            return;
           }
-          sendJson({ ok: true, key, category, formatted: formatMemoryV2({ ...st, ...raw }), raw });
+          memDeny('action 只能是 list / add / remove', 400);
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-remove') {
-          const body = await readBody();
-          const key = apiKey(body.key);
-          const category = String(body.category ?? '').trim();
-          const content = String(body.content ?? '').trim();
-          const target = String(body.target ?? '').trim();
-          if (!key || !category) { sendJson({ ok: false, error: 'key/category 不能为空' }, 400); return; }
-          if (!['activeTopic', 'pendingThought', 'memberImpression'].includes(category)) { sendJson({ ok: false, error: 'category 必须是 activeTopic / pendingThought / memberImpression' }, 400); return; }
-          if (category === 'memberImpression' && !target) { sendJson({ ok: false, error: 'memberImpression 需要 target 指定群友名字' }, 400); return; }
-          if (category === 'memberImpression' && ['__proto__', 'constructor', 'prototype'].includes(target)) { sendJson({ ok: false, error: '非法的群友名字' }, 400); return; }
-          if (category !== 'memberImpression' && !content) { sendJson({ ok: false, error: '该类别需要 content 指定要删除的记忆内容' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_remove' }, 403); return; }
-          const st = getSocialV2State(key);
-          if (category === 'activeTopic' && Array.isArray(st.activeTopics)) {
-            st.activeTopics = st.activeTopics.filter((t) => String(t?.text ?? '') !== content);
-          } else if (category === 'pendingThought' && Array.isArray(st.pendingThoughts)) {
-            st.pendingThoughts = st.pendingThoughts.filter((t) => String(t?.text ?? '') !== content);
-          } else if (category === 'memberImpression' && st.memberImpressions && typeof st.memberImpressions === 'object') {
-            delete st.memberImpressions[target];
-          }
-          saveSocialV2State();
-          sendJson({ ok: true, key, category, memory: formatMemoryV2(st) });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-clear') {
-          const body = await readBody();
-          const key = apiKey(body.key);
-          const category = String(body.category ?? '').trim();
-          if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
-          if (category && !['activeTopic', 'pendingThought', 'memberImpression'].includes(category)) { sendJson({ ok: false, error: 'category 必须是 activeTopic / pendingThought / memberImpression' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('memory')) { sendJson({ ok: false, error: '工具未启用：qq_memory_clear' }, 403); return; }
-          const st = getSocialV2State(key);
-          if (!category || category === 'activeTopic') st.activeTopics = [];
-          if (!category || category === 'pendingThought') st.pendingThoughts = [];
-          if (!category || category === 'memberImpression') st.memberImpressions = {};
-          saveSocialV2State();
-          sendJson({ ok: true, key, category: category || 'all', memory: formatMemoryV2(st) });
-          return;
-        }
-        // ── 记忆 provider（S4）：主动回忆 / 写回；工具开关在 memory.tools ───────
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-recall') {
+        // ── 记忆 provider：主动回忆 / 写回（工具开关在 memory.tools）──────────
+        if (req.method === 'POST' && url.pathname === '/api/memory/recall') {
           const body = await readBody();
           const key = apiKey(body.key);
           const query = redactKnownTokensOnly(String(body.query ?? '')).trim().slice(0, 600);
           const only = String(body.provider ?? '').trim();
-          if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && cfg.memory?.tools?.recall !== true) { sendJson({ ok: false, error: '工具未启用：qq_memory_recall' }, 403); return; }
-          if (only && !memoryRegistry.has(only)) { sendJson({ ok: false, error: `未知记忆 provider：${only}` }, 404); return; }
+          if (!key) { memDeny('key 不能为空', 400); return; }
+          if (!memAgentAllowed(key, null)) return;
+          if (!memConsole && cfg.memory?.tools?.recall !== true) { memDeny('工具未启用：qq_memory_recall'); return; }
+          if (only && !memoryRegistry.has(only)) { memDeny(`未知记忆 provider：${only}`, 404); return; }
           const recalled = await memoryRegistry.recall({ key, query, limit: body.limit, provider: only });
           sendJson({ ok: true, key, query: recalled.query, totalChars: recalled.totalChars, results: recalled.results });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/memory-note') {
+        if (req.method === 'POST' && url.pathname === '/api/memory/note') {
           const body = await readBody();
           const key = apiKey(body.key);
           const text = redactKnownTokensOnly(String(body.text ?? '')).trim().slice(0, 500);
           const tags = Array.isArray(body.tags) ? body.tags : [];
-          if (!key || !text) { sendJson({ ok: false, error: 'key/text 不能为空' }, 400); return; }
-          if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && cfg.memory?.tools?.note !== true) { sendJson({ ok: false, error: '工具未启用：qq_memory_note' }, 403); return; }
+          if (!key || !text) { memDeny('key/text 不能为空', 400); return; }
+          if (!memAgentAllowed(key, null)) return;
+          if (!memConsole && cfg.memory?.tools?.note !== true) { memDeny('工具未启用：qq_memory_note'); return; }
           const wrote = await memoryRegistry.note({ key, text, tags });
           if (!wrote.ok) { sendJson({ ok: false, error: wrote.error ?? '写入失败', provider: wrote.provider ?? null }, 400); return; }
           sendJson({ ok: true, key, provider: wrote.provider, label: wrote.label, result: wrote.result });
@@ -10684,11 +10676,7 @@ async function main() {
         preSleepWaitAccumMs: 0,
         lastUnreadSeq: 0,
         lastReadThroughSeq: 0,
-        modelSeenSeqs: new Set(),
-        activeTopics: [],
-        pendingThoughts: [],
-        memberImpressions: {},
-        ownerRules: []          // 管理员设定的长期规则（只能经管理员私聊的 qq_owner_group_rule 改）
+        modelSeenSeqs: new Set()
       };
       rememberAgentToken(key, st.agentToken);
       socialV2.conversations.set(key, st);
@@ -10754,19 +10742,7 @@ async function main() {
             lastUnreadSeq: Number(val.lastUnreadSeq) || 0,
             lastReadThroughSeq: Number.isSafeInteger(val.lastReadThroughSeq) && val.lastReadThroughSeq >= 0
               ? Math.min(val.lastReadThroughSeq, Number(val.lastUnreadSeq) || 0) : 0,
-            modelSeenSeqs: new Set(),
-            activeTopics: Array.isArray(val.activeTopics) ? val.activeTopics : [],
-            pendingThoughts: Array.isArray(val.pendingThoughts) ? val.pendingThoughts : [],
-            memberImpressions: (() => {
-              const rawImp = (val.memberImpressions && typeof val.memberImpressions === 'object') ? val.memberImpressions : {};
-              const clean = {};
-              for (const [k, v] of Object.entries(rawImp)) {
-                if (['__proto__', 'constructor', 'prototype'].includes(k)) continue;
-                clean[k] = v;
-              }
-              return clean;
-            })(),
-            ownerRules: normalizeRules(val.ownerRules)
+            modelSeenSeqs: new Set()
           };
           // 旧状态/异常状态里的指定成员名单也统一归一化，防止“null”/非法值污染。
           if (st.wakeConfig?.triggers && typeof st.wakeConfig.triggers === 'object') {
@@ -10843,10 +10819,6 @@ async function main() {
           preSleepWaitAccumMs: st.preSleepWaitAccumMs || 0,
           lastUnreadSeq: st.lastUnreadSeq || 0,
           lastReadThroughSeq: st.lastReadThroughSeq || 0,
-          activeTopics: Array.isArray(st.activeTopics) ? st.activeTopics.slice(-50) : [],
-          pendingThoughts: Array.isArray(st.pendingThoughts) ? st.pendingThoughts.slice(-50) : [],
-          memberImpressions: st.memberImpressions && typeof st.memberImpressions === 'object' ? st.memberImpressions : {},
-          ownerRules: normalizeRules(st.ownerRules),
           seenForwardIds: Array.from(seenForwardIds.get(key) || []).slice(-1000)
         };
       }
@@ -11049,132 +11021,9 @@ async function main() {
     return defaultMs;
   }
 
-  // 轻量记忆的渲染：数量上限从 limits 取（默认沿用迁移前的硬编码，见 src/memory/defaults.mjs）。
-  // provider local-digest 会把自己的 limits 透进来；其它调用方不传就得到与旧行为一致的结果。
-  function formatMemoryV2(st, limits = {}) {
-    if (!st) return '';
-    const L = { ...LOCAL_DIGEST_LIMITS, ...(limits && typeof limits === 'object' ? limits : {}) };
-    const lines = [];
-    // 管理员设定的长期规则放在最前面：每次唤醒都注入，群会话自己的记忆工具改不动
-    const rulesBlock = rulesPromptBlock(st.ownerRules);
-    if (rulesBlock) lines.push(rulesBlock);
-    const topics = Array.isArray(st.activeTopics) ? st.activeTopics.filter((t) => t && t.text) : [];
-    if (topics.length) {
-      lines.push('【进行中的话题】');
-      for (const t of topics.slice(-L.topics)) {
-        const ago = t.lastMentionAt ? Math.round((Date.now() - t.lastMentionAt) / 60000) : 0;
-        const stale = t.lastMentionAt && Date.now() - Number(t.lastMentionAt) > 2 * 60 * 60 * 1000 ? '（已搁置）' : '';
-        lines.push(`- ${t.text}${stale}（${ago > 0 ? ago + '分钟前' : '刚刚'}）${t.pendingQuestion ? `；待追问：${t.pendingQuestion}` : ''}`);
-      }
-    }
-    const thoughts = Array.isArray(st.pendingThoughts) ? st.pendingThoughts.filter((t) => t && t.text && (!t.expiresAt || Date.now() < t.expiresAt)) : [];
-    if (thoughts.length) {
-      lines.push('【你想说但还没说的】');
-      for (const t of thoughts.slice(-L.thoughts)) {
-        lines.push(`- ${t.text}${t.motivation ? `（${t.motivation}）` : ''}`);
-      }
-    }
-    const impressions = st.memberImpressions && typeof st.memberImpressions === 'object' ? st.memberImpressions : {};
-    const names = Object.keys(impressions);
-    if (names.length) {
-      lines.push('【对群友的印象】');
-      for (const name of names.slice(-L.impressions)) {
-        const im = impressions[name] || {};
-        const traits = Array.isArray(im.traits) ? im.traits : [];
-        lines.push(`- ${name}：${traits.length ? traits.join('、') : '暂无记录'}（互动 ${Number(im.interactionCount) || 0} 次）`);
-      }
-    }
-    return lines.join('\n');
-  }
-
-  function appendMemoryV2(st, category, content, extra = {}) {
-    if (!st) return;
-    const text = redactKnownTokensOnly(String(content ?? '')).trim();
-    const cat = String(category || '').trim();
-    // 轻量清理：过期想法移除；超过 24h 未提起的话题移除（避免无限膨胀）。
-    if (Array.isArray(st.pendingThoughts)) {
-      st.pendingThoughts = st.pendingThoughts.filter((t) => t && (!t.expiresAt || Date.now() < Number(t.expiresAt)));
-    }
-    if (Array.isArray(st.activeTopics)) {
-      st.activeTopics = st.activeTopics.filter((t) => t && (!t.lastMentionAt || Date.now() - Number(t.lastMentionAt) < 24 * 60 * 60 * 1000));
-    }
-    if (cat === 'activeTopic' && text) {
-      if (!Array.isArray(st.activeTopics)) st.activeTopics = [];
-      const existing = st.activeTopics.find((t) => t && String(t.text || '') === text);
-      if (existing) {
-        existing.lastMentionAt = Date.now();
-        if (Array.isArray(extra.participants)) {
-          const set = new Set([...(existing.participants || []), ...extra.participants.map((p) => redactKnownTokensOnly(String(p)))]);
-          existing.participants = [...set].slice(0, 10);
-        }
-        if (extra.pendingQuestion) existing.pendingQuestion = truncateText(redactKnownTokensOnly(String(extra.pendingQuestion)), 200);
-      } else {
-        st.activeTopics.push({
-          text: truncateText(text, 200),
-          lastMentionAt: Date.now(),
-          participants: Array.isArray(extra.participants) ? extra.participants.map((p) => redactKnownTokensOnly(String(p))).slice(0, 10) : [],
-          pendingQuestion: redactKnownTokensOnly(String(extra.pendingQuestion || '')).slice(0, 200)
-        });
-      }
-      if (st.activeTopics.length > 20) st.activeTopics.splice(0, st.activeTopics.length - 20);
-    } else if (cat === 'pendingThought' && text) {
-      if (!Array.isArray(st.pendingThoughts)) st.pendingThoughts = [];
-      const existing = st.pendingThoughts.find((t) => t && String(t.text || '') === text);
-      if (existing) {
-        existing.createdAt = Date.now();
-        existing.expiresAt = Date.now() + (Number(extra.expiresAtMs) || 2 * 60 * 60 * 1000);
-        if (extra.motivation) existing.motivation = redactKnownTokensOnly(String(extra.motivation)).slice(0, 50);
-      } else {
-        st.pendingThoughts.push({
-          text: text.slice(0, 200),
-          createdAt: Date.now(),
-          expiresAt: Date.now() + (Number(extra.expiresAtMs) || 2 * 60 * 60 * 1000),
-          motivation: redactKnownTokensOnly(String(extra.motivation || 'curiosity')).slice(0, 50)
-        });
-      }
-      if (st.pendingThoughts.length > 20) st.pendingThoughts.splice(0, st.pendingThoughts.length - 20);
-    } else if (cat === 'memberImpression') {
-      const target = String(extra.target || '').trim();
-      if (!target || ['__proto__', 'constructor', 'prototype'].includes(target)) return;
-      if (!st.memberImpressions || typeof st.memberImpressions !== 'object') st.memberImpressions = {};
-      const old = st.memberImpressions[target] || {};
-      const traits = Array.isArray(old.traits) ? old.traits.slice(0, 10) : [];
-      if (text && !traits.includes(text.slice(0, 50))) traits.push(text.slice(0, 50));
-      st.memberImpressions[target] = {
-        traits,
-        interactionCount: (Number(old.interactionCount) || 0) + 1,
-        lastSeenAt: Date.now()
-      };
-      const impressionEntries = Object.entries(st.memberImpressions);
-      if (impressionEntries.length > 50) {
-        impressionEntries.sort((a, b) => (Number(a[1]?.lastSeenAt) || 0) - (Number(b[1]?.lastSeenAt) || 0));
-        for (let i = 0; i < impressionEntries.length - 50; i++) {
-          delete st.memberImpressions[impressionEntries[i][0]];
-        }
-      }
-    }
-    saveSocialV2State();
-  }
-
   loadSocialV2State();
   // 操作者预写的会话初始提示词（与控制台入口同样在 main() 里；损坏时只读降级，不阻塞启动）。
   loadInitialPrompts();
-
-  // v0.3.0 迁移：旧版二代记忆 memberImpressions 按「名字 + 会话」存。这里按 QQ 号导入人物库：
-  // 只有「同一会话最近消息里这个名字唯一对应一个 QQ 号」才导入，其余进 legacyReview 待人工确认（不猜）。
-  // 旧字段原样保留（向后兼容、可回滚），每个会话只迁移一次。
-  if (ext.continuityEnabled()) {
-    for (const [key, st] of socialV2.conversations) {
-      if (!st?.memberImpressions || !Object.keys(st.memberImpressions).length) continue;
-      try {
-        const r = ext.people.importLegacyImpressions(key, st.memberImpressions, st.recentMessages);
-        if (!r.skipped) log(`旧版群友印象迁移 ${key}：导入 ${r.imported} 条，待人工确认 ${r.review} 条（控制台/管理通道 /review 查看）`);
-      } catch (error) {
-        log(`旧版群友印象迁移失败 ${key}：${error?.message ?? error}`);
-      }
-    }
-    ext.people.flush();
-  }
 
   // v0.3.0 保留策略（默认关闭）：continuity.pruneListedAfterDays > 0 时，定期删除长期未出现、
   // 且没有任何记忆/管理员设定的「只在名单里见过」的人物记录。
@@ -12305,12 +12154,7 @@ async function main() {
     st.unread.push(msg);
     if (st.unread.length > unreadLimit) st.unread.splice(0, st.unread.length - unreadLimit);
     const lowerPlain = String(plainContent ?? textContent ?? '');
-    for (const t of st.activeTopics || []) {
-      if (!t || typeof t !== 'object') continue;
-      const topicHit = String(t.text || '').length > 0 && lowerPlain.includes(String(t.text || '').slice(0, 10));
-      const participantHit = Array.isArray(t.participants) && t.participants.some((p) => p && lowerPlain.includes(String(p)));
-      if (topicHit || participantHit) t.lastMentionAt = Date.now();
-    }
+    localMemory.touch({ key, text: lowerPlain });
     saveSocialV2State();
   }
 
@@ -13213,7 +13057,9 @@ async function main() {
       const idle = Date.now() - (st.lastIncomingAt || 0);
       const probBase = Number(p.probability);
       let prob = Math.min(1, Math.max(0, Number.isFinite(probBase) ? probBase : 0.4));
-      const pendingThoughts = Array.isArray(st.pendingThoughts) ? st.pendingThoughts.filter((t) => t && (!t.expiresAt || Date.now() < Number(t.expiresAt))).length : 0;
+      const localView = localMemory.list({ key });
+      const pendingThoughts = Array.isArray(localView.thoughts)
+        ? localView.thoughts.filter((t) => t && (!t.expiresAt || Date.now() < Number(t.expiresAt))).length : 0;
       if (pendingThoughts > 0) prob = Math.min(1, prob * 1.4);
       if (st.lastAiReplyAt && Date.now() - Number(st.lastAiReplyAt) < 30 * 60 * 1000) prob *= 0.5;
       const hour = new Date().getHours();

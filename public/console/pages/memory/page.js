@@ -2,9 +2,10 @@
 // 规格见 docs/MEMORY_SUBSYSTEM.md §4；provider 卡片与列表依赖 /api/memory 的返回，由本文件渲染。
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
-import { tableHtml } from '../../components/table/table.js';
+import { tableHtml, dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { MEMORY_FIELDS } from './fields.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
@@ -129,72 +130,280 @@ function renderIngest() {
   host.textContent = parts.join(' · ');
 }
 
-function renderLocalMemory(data) {
-  const box = document.getElementById('memoryLocalOutput');
-  if (!box) return;
-  if (!data || !data.ok) {
-    box.innerHTML = '<span class="meta">加载失败</span>';
-    return;
-  }
-  const raw = data.raw || {};
-  const topics = Array.isArray(raw.activeTopics) ? raw.activeTopics : [];
-  const thoughts = Array.isArray(raw.pendingThoughts) ? raw.pendingThoughts : [];
-  const impressions = raw.memberImpressions && typeof raw.memberImpressions === 'object' ? raw.memberImpressions : {};
-  const rules = Array.isArray(raw.ownerRules) ? raw.ownerRules : [];
-  let html = '<div class="memory-list">';
-  html += '<div class="memory-section"><b>进行中的话题</b> <button type="button" class="btn small" data-mem-action="clear" data-cat="activeTopic">清空</button>';
-  if (!topics.length) html += '<div class="meta">（空）</div>';
-  for (const t of topics) {
-    const text = esc(String(t?.text || ''));
-    const extra = t?.pendingQuestion ? `；待追问：${esc(String(t.pendingQuestion))}` : '';
-    html += `<div class="memory-item">📌 ${text}${extra} <button type="button" class="btn small" data-mem-action="edit" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">编辑</button> <button type="button" class="btn small" data-mem-action="remove" data-cat="activeTopic" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
-  }
-  html += '</div>';
-  html += '<div class="memory-section"><b>你想说但还没说的</b> <button type="button" class="btn small" data-mem-action="clear" data-cat="pendingThought">清空</button>';
-  if (!thoughts.length) html += '<div class="meta">（空）</div>';
-  for (const t of thoughts) {
-    html += `<div class="memory-item">💭 ${esc(String(t?.text || ''))}${t?.motivation ? `（${esc(String(t.motivation))}）` : ''} <button type="button" class="btn small" data-mem-action="edit" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">编辑</button> <button type="button" class="btn small" data-mem-action="remove" data-cat="pendingThought" data-content="${esc(String(t?.text || ''))}">删除</button></div>`;
-  }
-  html += '</div>';
-  html += '<div class="memory-section"><b>对群友的印象</b> <button type="button" class="btn small" data-mem-action="clear" data-cat="memberImpression">清空</button>';
-  const names = Object.keys(impressions);
-  if (!names.length) html += '<div class="meta">（空）</div>';
-  for (const name of names) {
-    const im = impressions[name] || {};
-    const traits = Array.isArray(im.traits) ? im.traits : [];
-    html += `<div class="memory-item">👤 ${esc(name)}：${traits.length ? esc(traits.join('、')) : '暂无记录'}（互动 ${Number(im.interactionCount) || 0} 次） <button type="button" class="btn small" data-mem-action="edit" data-cat="memberImpression" data-target="${esc(name)}" data-traits="${esc(traits.join(', '))}">编辑</button> <button type="button" class="btn small" data-mem-action="remove" data-cat="memberImpression" data-target="${esc(name)}">删除</button></div>`;
-  }
-  html += '</div>';
-  html += '<div class="memory-section"><b>管理员长期规则</b> <span class="pill">只读</span>';
-  if (!rules.length) html += '<div class="meta">（空）管理员私聊里用 <code>qq_owner_group_rule</code> 设定后出现在这里，并在注入时排在最前面。</div>';
-  for (const rule of rules) html += `<div class="memory-item">📜 ${esc(String(rule?.text ?? rule ?? ''))}</div>`;
-  html += '</div></div>';
-  box.innerHTML = html;
+﻿let localView = null;
+let localCategory = 'topic';
+let localEdit = null;
+let localSessionKey = '';
+let sessionCache = [];
+
+const CATEGORY_LABEL = { topic: '话题', thought: '想法', impression: '印象', rule: '规则' };
+const CATEGORY_COUNT_KEY = { topic: 'topics', thought: 'thoughts', impression: 'impressions', rule: 'rules' };
+
+function localKey() {
+  return localSessionKey;
 }
 
-async function loadLocalMemory() {
-  const key = val('memLocalKey');
-  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
-  msg('memLocalMsg', '加载中…');
+function platformOf(key = '') {
+  const [platform = 'qq', kind = ''] = String(key).split(':');
+  return { platform, kind };
+}
+
+function kindText(kind) {
+  return kind === 'group' ? '群' : kind === 'private' ? '私聊' : kind || '—';
+}
+
+async function sessionMemoryCounts(key) {
   try {
-    const data = await api(`/api/socialV2/memory?key=${encodeURIComponent(key)}`);
-    renderLocalMemory(data);
-    msg('memLocalMsg', data.ok ? '✅ 已加载' : `❌ ${data.error || '失败'}`, data.ok ? 'ok' : 'err');
+    const data = await api(`/api/memory/entries?key=${encodeURIComponent(key)}`);
+    return (data.ok && data.data && data.data.counts) || {};
+  } catch {
+    return {};
+  }
+}
+
+async function renderSessionTable() {
+  const host = document.getElementById('memorySessionTable');
+  if (!host) return;
+  host.innerHTML = '<div class="meta">正在读取会话…</div>';
+  try {
+    const data = await api('/api/sessions');
+    const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+    sessionCache = sessions;
+    const counts = await Promise.all(sessions.map((s) => sessionMemoryCounts(s.key)));
+    const rows = sessions.map((s, i) => {
+      const { platform, kind } = platformOf(s.key);
+      const c = counts[i] || {};
+      const open = `<button type="button" class="btn small${localSessionKey === s.key ? ' primary' : ''}" data-mem-open="${esc(s.key)}">编辑</button>`;
+      return [
+        `<span class="mono">${esc(s.key)}</span>`,
+        esc(platform),
+        esc(kindText(kind)),
+        String(Number(c.topics) || 0),
+        String(Number(c.thoughts) || 0),
+        String(Number(c.impressions) || 0),
+        String(Number(c.rules) || 0),
+        open,
+      ];
+    });
+    host.innerHTML = dataTableHtml({
+      columns: [
+        { label: '会话' }, { label: '平台', width: 90 }, { label: '类型', width: 80 },
+        { label: '话题', width: 80 }, { label: '想法', width: 80 }, { label: '印象', width: 80 }, { label: '规则', width: 80 },
+        { label: '操作', width: 100 },
+      ],
+      rows,
+      empty: '桥接还没有会话；在 QQ 里聊一句再回来。',
+      pageSize: 20,
+      sizes: [10, 20, 50],
+      search: true,
+      meta: `${sessions.length} 个会话`,
+    });
+    initDataTables(host);
+  } catch (error) {
+    host.innerHTML = `<div class="meta">❌ ${esc(error.message)}</div>`;
+  }
+}
+
+function selectSession(key) {
+  localSessionKey = key;
+  localView = null;
+  localCategory = 'topic';
+  localEdit = null;
+  const detail = document.getElementById('memLocalDetail');
+  const head = document.getElementById('memLocalHead');
+  if (detail) detail.hidden = !key;
+  if (head) head.textContent = key ? `正在编辑：${key}` : '';
+  renderLocal();
+  if (key) loadLocalMemory();
+  renderSessionTable();
+}
+
+function fmtAt(ts) {
+  const n = Number(ts) || 0;
+  return n ? new Date(n).toLocaleString('zh-CN', { hour12: false }) : '—';
+}
+
+function actionCell(id) {
+  return `<button type="button" class="btn small" data-mem-edit="${esc(String(id))}">编辑</button> <button type="button" class="btn small danger" data-mem-del="${esc(String(id))}">删除</button>`;
+}
+
+function localColumns() {
+  if (localCategory === 'topic') return [{ label: '话题' }, { label: '参与者', width: 160 }, { label: '待追问', width: 200 }, { label: '最近提起', width: 170 }, { label: '操作', width: 130 }];
+  if (localCategory === 'thought') return [{ label: '想法' }, { label: '动机', width: 120 }, { label: '过期时间', width: 170 }, { label: '操作', width: 130 }];
+  if (localCategory === 'impression') return [{ label: '对象', width: 160 }, { label: '标签' }, { label: '互动次数', width: 100 }, { label: '最近', width: 170 }, { label: '操作', width: 130 }];
+  return [{ label: '编号', width: 70 }, { label: '规则内容' }, { label: '设定时间', width: 170 }, { label: '操作', width: 130 }];
+}
+
+function localRows() {
+  const view = localView || {};
+  if (localCategory === 'topic') {
+    return (view.topics || []).map((t) => [esc(String(t.text || '')), esc((t.participants || []).join('、') || '—'), esc(String(t.pendingQuestion || '—')), fmtAt(t.lastMentionAt), actionCell(t.id)]);
+  }
+  if (localCategory === 'thought') {
+    return (view.thoughts || []).map((t) => [esc(String(t.text || '')), esc(String(t.motivation || '—')), fmtAt(t.expiresAt), actionCell(t.id)]);
+  }
+  if (localCategory === 'impression') {
+    return (view.impressions || []).map((t) => [esc(String(t.target || '')), esc((t.traits || []).join('、') || '—'), String(Number(t.interactionCount) || 0), fmtAt(t.lastSeenAt), actionCell(t.id)]);
+  }
+  return (view.rules || []).map((t) => [`#${esc(String(t.id))}`, esc(String(t.text || '')), fmtAt(t.at), actionCell(t.id)]);
+}
+
+function renderLocalTabs() {
+  const counts = (localView && localView.counts) || {};
+  document.querySelectorAll('#memoryLocalTabs [data-mem-cat]').forEach((btn) => {
+    const cat = btn.dataset.memCat;
+    const active = cat === localCategory;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    const slot = btn.querySelector(`[data-mem-count="${cat}"]`);
+    if (slot) slot.textContent = String(Number(counts[CATEGORY_COUNT_KEY[cat]]) || 0);
+  });
+}
+
+function renderLocal() {
+  const host = document.getElementById('memoryLocalTable');
+  if (!host) return;
+  renderLocalTabs();
+  if (!localKey()) { host.innerHTML = '<div class="meta">在上表里点「编辑」选择会话。</div>'; return; }
+  if (!localView) { host.innerHTML = '<div class="meta">加载中…</div>'; return; }
+  const rows = localRows();
+  host.innerHTML = rows.length ? tableHtml(localColumns(), rows) : `<div class="meta">（${CATEGORY_LABEL[localCategory]}为空）</div>`;
+}
+
+async function loadLocalMemory({ quiet = false } = {}) {
+  const key = localKey();
+  if (!key) { msg('memLocalMsg', '先选一个会话', 'err'); return; }
+  if (!quiet) msg('memLocalMsg', '加载中…');
+  try {
+    const data = await api(`/api/memory/entries?key=${encodeURIComponent(key)}`);
+    if (!data.ok) { msg('memLocalMsg', `❌ ${data.error || '失败'}`, 'err'); return; }
+    localView = data.data || null;
+    renderLocal();
+    if (!quiet) msg('memLocalMsg', '', '');
   } catch (error) {
     msg('memLocalMsg', `❌ ${error.message}`, 'err');
   }
 }
 
 async function clearLocalMemory(category = '') {
-  const key = val('memLocalKey');
+  const key = localKey();
   if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
+  if (!window.confirm(category ? `清空这个会话的${CATEGORY_LABEL[localCategory]}？` : '清空这个会话的全部记忆？')) return;
   try {
-    const data = await api('/api/socialV2/memory-clear', 'POST', { key, category });
+    const data = await api('/api/memory/entries/clear', 'POST', { key, category });
     msg('memLocalMsg', data.ok ? '✅ 已清空' : `❌ ${data.error || '失败'}`, data.ok ? 'ok' : 'err');
-    if (data.ok) loadLocalMemory();
+    if (data.ok) loadLocalMemory({ quiet: true });
   } catch (error) {
     msg('memLocalMsg', `❌ ${error.message}`, 'err');
   }
+}
+
+async function compactLocalMemory() {
+  const key = localKey();
+  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
+  try {
+    const data = await api('/api/memory/entries/compact', 'POST', { key });
+    const removed = data.removed || {};
+    const total = Object.values(removed).reduce((a, b) => a + (Number(b) || 0), 0);
+    msg('memLocalMsg', data.ok ? `✅ 已整理，裁掉 ${total} 条` : `❌ ${data.error || '失败'}`, data.ok ? 'ok' : 'err');
+    if (data.ok) loadLocalMemory({ quiet: true });
+  } catch (error) {
+    msg('memLocalMsg', `❌ ${error.message}`, 'err');
+  }
+}
+
+function entryFields(cat, item) {
+  if (cat === 'topic') {
+    return [
+      { name: 'memEntryContent', type: 'textarea', label: '话题内容', value: item?.text || '', rows: 4, hint: '一条进行中的话题，会被注入到之后的唤醒提示里。' },
+      { name: 'memEntryParticipants', type: 'text', label: '参与者', value: (item?.participants || []).join(', '), hint: '逗号分隔，可留空。' },
+      { name: 'memEntryPending', type: 'text', label: '待追问', value: item?.pendingQuestion || '', hint: '可选：下次想接着问的问题。' },
+    ];
+  }
+  if (cat === 'thought') {
+    return [
+      { name: 'memEntryContent', type: 'textarea', label: '想法内容', value: item?.text || '', rows: 4, hint: '「想说但还没说」的一句话。' },
+      { name: 'memEntryMotivation', type: 'text', label: '动机', value: item?.motivation || '', hint: '可选，例如 curiosity / sociability。' },
+    ];
+  }
+  if (cat === 'impression') {
+    return [
+      { name: 'memEntryTarget', type: 'text', label: '对象', value: item?.target || '', hint: '群友的昵称或 QQ 号。' },
+      { name: 'memEntryTraits', type: 'text', label: '标签', value: (item?.traits || []).join(', '), hint: '逗号分隔，例如 爱熬夜, 说话直。' },
+      { name: 'memEntryContent', type: 'textarea', label: '备注', value: item?.text || '', rows: 3, hint: '可选：更完整的印象描述。' },
+      { name: 'memEntryCount', type: 'number', label: '互动次数', value: String(Number(item?.interactionCount) || 0) },
+    ];
+  }
+  return [
+    { name: 'memEntryContent', type: 'textarea', label: '规则内容', value: item?.text || '', rows: 4, hint: '管理员对本群的长期要求；每次唤醒都会注入。' },
+  ];
+}
+
+function openEntryEditor(item = null) {
+  const cat = localCategory;
+  const overlay = document.getElementById('memEntryModal');
+  const form = document.getElementById('memEntryForm');
+  if (!overlay || !form) return;
+  localEdit = { cat, id: item ? item.id : '' };
+  const title = document.getElementById('memEntryModal-title');
+  if (title) title.textContent = `${item ? '编辑' : '新增'}${CATEGORY_LABEL[cat]}`;
+  form.innerHTML = '';
+  renderFields(form, entryFields(cat, item), { columns: 1 });
+  openModal(overlay);
+  setTimeout(() => document.getElementById('memEntryContent')?.focus(), 30);
+}
+
+async function saveEntry() {
+  if (!localEdit) return;
+  const key = localKey();
+  if (!key) { msg('memLocalMsg', '请先填会话 key', 'err'); return; }
+  const cat = localEdit.cat;
+  const body = { key, category: cat, content: val('memEntryContent') };
+  if (cat === 'topic') {
+    body.extra = {
+      participants: val('memEntryParticipants').split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
+      pendingQuestion: val('memEntryPending'),
+    };
+  } else if (cat === 'thought') {
+    body.extra = { motivation: val('memEntryMotivation') };
+  } else if (cat === 'impression') {
+    body.extra = {
+      target: localEdit.id ? undefined : val('memEntryTarget'),
+      traits: val('memEntryTraits').split(/[,，、]/).map((s) => s.trim()).filter(Boolean),
+      interactionCount: num('memEntryCount'),
+    };
+  }
+  const method = localEdit.id ? 'PATCH' : 'POST';
+  if (localEdit.id) body.id = localEdit.id;
+  try {
+    const r = await api('/api/memory/entries', method, body);
+    if (!r.ok) { msg('memLocalMsg', `❌ ${r.error || '保存失败'}`, 'err'); return; }
+    msg('memLocalMsg', '✅ 已保存', 'ok');
+    closeModal(document.getElementById('memEntryModal'));
+    localEdit = null;
+    loadLocalMemory();
+  } catch (error) {
+    msg('memLocalMsg', `❌ ${error.message}`, 'err');
+  }
+}
+
+async function removeEntry(id) {
+  const key = localKey();
+  if (!key || !id) return;
+  if (!window.confirm(`删除这条${CATEGORY_LABEL[localCategory]}？`)) return;
+  try {
+    const r = await api('/api/memory/entries', 'DELETE', { key, category: localCategory, id });
+    msg('memLocalMsg', r.ok ? '✅ 已删除' : `❌ ${r.error || '失败'}`, r.ok ? 'ok' : 'err');
+    if (r.ok) loadLocalMemory({ quiet: true });
+  } catch (error) {
+    msg('memLocalMsg', `❌ ${error.message}`, 'err');
+  }
+}
+
+function findLocalItem(id) {
+  const view = localView || {};
+  const pool = localCategory === 'topic' ? view.topics : localCategory === 'thought' ? view.thoughts : localCategory === 'impression' ? view.impressions : view.rules;
+  return (pool || []).find((x) => String(x.id) === String(id)) || null;
 }
 
 function applyConfig(data, status, ingest = null) {
@@ -228,12 +437,17 @@ function applyConfig(data, status, ingest = null) {
   setSwitch(document.getElementById('memToolLocal'), localTools?.enabled !== false);
   setSwitch(document.getElementById('memHandover'), (data?.handover ?? status?.handover)?.enabled !== false);
   const limits = data?.providers?.['local-digest']?.limits ?? {};
-  setNum('memLimitTopics', limits.topics ?? 10);
-  setNum('memLimitThoughts', limits.thoughts ?? 10);
-  setNum('memLimitImpressions', limits.impressions ?? 10);
-  setNum('memLimitImpressionsMax', limits.impressionsMax ?? 50);
-  setNum('memLimitStaleHours', limits.topicStaleHours ?? 24);
+  setNum('memLimitInjectTopics', limits.injectTopics ?? 10);
+  setNum('memLimitInjectThoughts', limits.injectThoughts ?? 10);
+  setNum('memLimitInjectImpressions', limits.injectImpressions ?? 10);
+  setNum('memLimitMaxTopics', limits.maxTopics ?? 50);
+  setNum('memLimitMaxThoughts', limits.maxThoughts ?? 50);
+  setNum('memLimitMaxImpressions', limits.maxImpressions ?? 200);
+  setNum('memLimitMaxRules', limits.maxRules ?? 10);
+  setNum('memLimitMaxTraits', limits.maxTraits ?? 10);
+  setNum('memLimitTraitChars', limits.traitChars ?? 50);
   setNum('memLimitItemChars', limits.itemChars ?? 200);
+  setNum('memLimitStaleHours', limits.staleHours ?? 24);
 }
 
 async function loadMemory({ quiet = false } = {}) {
@@ -288,8 +502,10 @@ function saveLocalLimits() {
     providers: {
       'local-digest': {
         limits: {
-          topics: num('memLimitTopics'), thoughts: num('memLimitThoughts'), impressions: num('memLimitImpressions'),
-          impressionsMax: num('memLimitImpressionsMax'), topicStaleHours: num('memLimitStaleHours'), itemChars: num('memLimitItemChars'),
+          injectTopics: num('memLimitInjectTopics'), injectThoughts: num('memLimitInjectThoughts'), injectImpressions: num('memLimitInjectImpressions'),
+          maxTopics: num('memLimitMaxTopics'), maxThoughts: num('memLimitMaxThoughts'), maxImpressions: num('memLimitMaxImpressions'),
+          maxRules: num('memLimitMaxRules'), maxTraits: num('memLimitMaxTraits'), traitChars: num('memLimitTraitChars'),
+          itemChars: num('memLimitItemChars'), staleHours: num('memLimitStaleHours'),
         },
       },
     },
@@ -325,37 +541,41 @@ export function init() {
 
   document.getElementById('memInjectSave')?.addEventListener('click', saveInject);
   document.getElementById('memProvidersSave')?.addEventListener('click', saveProviders);
-  document.getElementById('memLocalLoad')?.addEventListener('click', () => { loadLocalMemory(); });
+  document.getElementById('memLocalAdd')?.addEventListener('click', () => { openEntryEditor(null); });
+  document.getElementById('memLocalCompact')?.addEventListener('click', () => { compactLocalMemory(); });
   document.getElementById('memLocalClear')?.addEventListener('click', () => { clearLocalMemory(''); });
   document.getElementById('memLocalSaveLimits')?.addEventListener('click', saveLocalLimits);
   document.getElementById('memToolsSave')?.addEventListener('click', saveTools);
   document.getElementById('memIngestSave')?.addEventListener('click', saveIngest);
 
-  document.getElementById('memoryLocalOutput')?.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-mem-action]');
+  document.getElementById('memoryLocalTabs')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-mem-cat]');
     if (!button) return;
-    const action = button.dataset.memAction;
-    const cat = button.dataset.cat || '';
-    const key = val('memLocalKey');
-    if (!key) return;
-    if (action === 'clear') { clearLocalMemory(cat); return; }
-    if (action === 'remove') {
-      const body = { key, category: cat, content: button.dataset.content || '', target: button.dataset.target || '' };
-      const r = await api('/api/socialV2/memory-remove', 'POST', body);
-      msg('memLocalMsg', r.ok ? '✅ 已删除' : `❌ ${r.error || '失败'}`, r.ok ? 'ok' : 'err');
-      if (r.ok) loadLocalMemory();
-      return;
-    }
-    if (action === 'edit') {
-      const current = cat === 'memberImpression' ? (button.dataset.traits || '') : (button.dataset.content || '');
-      const next = window.prompt('修改内容（留空则不改）', current);
-      if (next === null || next === current) return;
-      const body = { key, category: cat, oldContent: button.dataset.content || '', target: button.dataset.target || '', newContent: next, newExtra: {} };
-      const r = await api('/api/socialV2/memory-update', 'POST', body);
-      msg('memLocalMsg', r.ok ? '✅ 已保存' : `❌ ${r.error || '失败'}`, r.ok ? 'ok' : 'err');
-      if (r.ok) loadLocalMemory();
-    }
+    localCategory = button.dataset.memCat;
+    renderLocal();
   });
+
+  document.getElementById('memoryLocalTable')?.addEventListener('click', (event) => {
+    const edit = event.target.closest('[data-mem-edit]');
+    if (edit) { openEntryEditor(findLocalItem(edit.dataset.memEdit)); return; }
+    const del = event.target.closest('[data-mem-del]');
+    if (del) removeEntry(del.dataset.memDel);
+  });
+
+  document.getElementById('memorySessionTable')?.addEventListener('click', (event) => {
+    const open = event.target.closest('[data-mem-open]');
+    if (open) selectSession(open.dataset.memOpen);
+  });
+
+  const entryModal = document.getElementById('memEntryModal');
+  if (entryModal && entryModal.parentElement !== document.body) document.body.appendChild(entryModal);
+  if (entryModal) {
+    wireModal(entryModal, { onClose: () => { localEdit = null; } });
+    document.getElementById('memEntrySave')?.addEventListener('click', saveEntry);
+    document.getElementById('memEntryCancel')?.addEventListener('click', () => closeModal(entryModal));
+  }
+
+  renderSessionTable();
 
   onPageRefresh('memory', () => { loadMemory({ quiet: true }); });
   loadMemory();

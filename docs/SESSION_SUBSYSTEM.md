@@ -1,18 +1,18 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**方案已定，代码未动**（2026-11-07）。本轮先落文档与偏差登记，确认后再按 P0 → P3 开工。
+状态：**方案已定，代码未动**（2026-11-08）。本轮先落文档与偏差登记，确认后再按 P0 → P3 开工。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D12；未完成项见 `STATUS.md` #16。
 
-涉及：`state/sessions.json` v2、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
+涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
 
 ## 1. 目标与不变量
 
-目标：把现在散在 `state/sessions.json`、`state/current-role.json`、`state/initial-prompts.json`、`state/social-v2.json`、`config.json` 五处的「按会话配置」收成**一个会话档案**；把「谁能触发 bot」拆成被动/主动两根可解释的轴；让 DSH 会话成为可丢弃、可自愈的执行实例；把单管理员扩展成 owner + 管理员两级。
+目标：把现在散在 `state/sessions.json`、`state/current-role.json`、`state/initial-prompts.json`、`state/social-v2.json`、`config.json` 五处的「按会话配置」收成**一个会话档案目录**；把「谁能触发 bot」拆成被动/主动两根可解释的轴；让 DSH 会话成为可丢弃、可自愈的执行实例；把单管理员扩展成 owner + 管理员两级。
 
 不变量（实现时不许破）：
 
 1. **覆盖不污染全局**：会话级配置只在该会话生效，任何读取失败都回落全局默认，绝不把会话值写回全局配置。
-2. **准入只有一个真相**：被动/主动的判定只读 `sessions.json` v2 的 `defaults` + `profiles`，不再有第二套白名单/豁免分支。
+2. **准入只有一个真相**：被动/主动的判定只读 `state/sessions/defaults.json` 与会话档案，不再有第二套白名单/豁免分支。
 3. **显式拒绝优先**：`blocked` / 显式 `deny` 高于本会话 `allow`，也高于 owner/管理员豁免。
 4. **运行模式不是过滤器**：`chat` / `reserved` / `reserved2` 是会话实际跑哪套仿真；`closed-agent` 是全局排他模式，不开放给会话级。
 5. **DSH 实例可丢弃**：任何 RPC 返回 `session/not-found` 只允许「退役 → 重建 → 重试一次」；不允许无限重建，也不允许静默不回复。
@@ -27,7 +27,7 @@
 | 迁移默认 | 完全保持现状：原 allow 会话被动/主动都开，原 deny 拒绝，`allowAllWhenEmpty` 决定默认 |
 | 运行模式 | 会话可固定 `chat` / `reserved` / `reserved2`；closed-agent 仍全局排他，不开放会话级 |
 | 覆盖范围 | P1：显示名、被动、主动、黑名单、人格、提示词、唤醒、记忆清空、DSH 状态；P2：运行模式、预设、模型 |
-| 存储与迁移 | 一次性迁到 `sessions.json` v2；正式版本无旧文件、旧键、兼容读、`.bak` |
+| 存储与迁移 | 一次性迁到 `state/sessions/` 目录（`defaults.json` + 每会话文件）；正式版本无旧文件、旧键、兼容读、`.bak` |
 | 清空上下文 | 拆成「重建 DSH 会话」与「重置会话状态」两个动作 |
 | 多管理员 | owner + 管理员两级；管理员不能改全局模式/权限/管理员名单 |
 | 控制台多账号 | 本轮不做；P3 只做服务端身份与权限，控制台登录仍视为 owner |
@@ -47,7 +47,19 @@
 
 ## 3. 数据模型
 
-文件：`state/sessions.json` v2（单文件；`src/session/store.mjs` 原子写盘）。
+目录：`state/sessions/`（默认文件 + 每会话一个文件；`src/session/store.mjs` 负责读写）。
+
+```
+state/sessions/
+  defaults.json                     # 全局默认（version / defaults / migratedAt）
+  qq/
+    group/
+      903621673.json                # 一个会话一个文件
+    private/
+      2897715886.json
+```
+
+`defaults.json`：
 
 ```json
 {
@@ -56,55 +68,84 @@
     "passive": "deny",
     "proactive": "deny"
   },
-  "profiles": {
-    "qq:group:903621673": {
-      "displayName": "技术闲聊群",
-      "blocked": false,
-      "access": {
-        "passive": "inherit",
-        "proactive": "deny"
-      },
-      "mode": "inherit",
-      "persona": { "mode": "inherit", "name": null },
-      "prompt": { "initialText": "", "updatedAt": 0 },
-      "wake": { "config": null },
-      "model": null,
-      "presetId": null,
-      "updatedAt": 0
-    }
+  "migratedAt": 0
+}
+```
+
+每会话文件（`state/sessions/<platform>/<kind>/<id>.json`）：
+
+```json
+{
+  "version": 2,
+  "key": "qq:group:903621673",
+  "displayName": "技术闲聊群",
+  "blocked": false,
+  "access": {
+    "passive": "inherit",
+    "proactive": "deny"
   },
-  "bindings": {
-    "qq:group:903621673": {
-      "sessionId": "session-…",
-      "workspaceId": "workspace-…",
-      "fingerprint": "reserved2|qq-chat-v2|…",
-      "status": "online",
-      "checkedAt": 0,
-      "createdAt": 0
-    }
-  }
+  "mode": "inherit",
+  "persona": { "mode": "inherit", "name": null },
+  "prompt": { "initialText": "", "updatedAt": 0 },
+  "wake": { "config": null },
+  "model": null,
+  "presetId": null,
+  "binding": {
+    "sessionId": "session-…",
+    "workspaceId": "workspace-…",
+    "fingerprint": "reserved2|qq-chat-v2|…",
+    "status": "online",
+    "checkedAt": 0,
+    "createdAt": 0
+  },
+  "updatedAt": 0
 }
 ```
 
 字段约定：
 
 - `defaults.passive/proactive`：全局默认策略，取值 `allow` / `deny`；切换它等于切换该轴的黑/白名单语义。
-- `profiles[key].access.*`：`inherit` / `allow` / `deny` 三态；`blocked=true` 时两根轴都拒绝，优先级最高。
-- `profiles[key].mode`：`inherit` / `chat` / `reserved` / `reserved2`；不允许 `closed-agent`。
-- `profiles[key].persona`：`inherit`（按全局三层解析）/ `off`（本会话不挂卡）/ `card`（指定角色卡名）。
-- `profiles[key].prompt.initialText`：首次唤醒时注入一次的会话背景；空串表示没有。
-- `profiles[key].wake.config`：会话级唤醒配置；`null` 表示按推荐值/全局默认。
-- `profiles[key].model`：`null` 表示跟随全局；否则 `{provider, model, reasoning}`，保存前按 DSH 目录校验。
-- `profiles[key].presetId`：`null` 表示按运行模式推导；否则必须是预设安全清单里的 id。
-- `bindings[key]`：运行态；`status` 取 `online` / `missing` / `unknown`；`fingerprint` 是建会话时的策略指纹，用于判断「需要重建」。
-- `admins` 不放进这个文件：管理员是全局身份，放 `config.json`（见 §10），避免会话文件被误删导致提权/锁死。
+- `defaults.migratedAt`：迁移提交点；0 表示旧来源仍有效、迁移未提交，非 0 表示目录已是唯一真相，启动只做旧源清理。
+- `access.*`：`inherit` / `allow` / `deny` 三态；`blocked=true` 时两根轴都拒绝，优先级最高。
+- `mode`：`inherit` / `chat` / `reserved` / `reserved2`；不允许 `closed-agent`。
+- `persona`：`inherit`（按全局三层解析）/ `off`（本会话不挂卡）/ `card`（指定角色卡名）。
+- `prompt.initialText`：首次唤醒时注入一次的会话背景；空串表示没有。
+- `wake.config`：会话级唤醒配置；`null` 表示按推荐值/全局默认。
+- `model`：`null` 表示跟随全局；否则 `{provider, model, reasoning}`，保存前按 DSH 目录校验。
+- `presetId`：`null` 表示按运行模式推导；否则必须是预设安全清单里的 id。
+- `binding`：运行态；`status` 取 `online` / `missing` / `unknown`；`fingerprint` 是建会话时的策略指纹，用于判断「需要重建」。放在同一文件里，删除档案即删除绑定，不留孤儿文件。
+- `key` 必须与文件路径完全一致（`platform/kind/id` 拼回 `key`）；不一致视为文件损坏，不进内存。
+- `admins` 不放进这个目录：管理员是全局身份，放 `config.json`（见 §10），避免会话文件被误删导致提权/锁死。
+
+为什么是目录而不是单文件：
+
+- 改一个会话只写一个文件，损坏/手改错误只影响该会话；单文件写坏会拖垮全部会话。
+- 文件名可读，人工排查、备份、删除都直观；不需要再维护一份容易漂移的索引。
+- 代价是启动要扫目录、跨文件没有事务；用「启动扫描 + 内存缓存 + 单写者 + 迁移最后删旧源」兜住，见下。
+
+路径与命名：
+
+- `<platform>`：`^[a-z][a-z0-9_-]{1,15}$`（现在 `qq`）；`<kind>`：`group` / `private`；`<id>`：`^[A-Za-z0-9_-]{1,64}$`（QQ 为纯数字）。
+- 不满足字符集的新 key 在「新增会话」时直接拒绝，并提示允许的形态；不为少数平台做转义文件名（避免路径与 key 二次映射）。
+- 目录不存在时按需创建；只创建用到的 `platform/kind`，不预建空目录。
+- 扫描只认 `<platform>/<kind>/<id>.json` 三层；其它层级或文件名忽略并记日志，不递归猜测。
+
+启动扫描与缓存：
+
+- 启动时递归读 `state/sessions/`，只认 `*.json`；忽略 `.tmp-*` 与 `.corrupt-*`。
+- 每个文件校验 `version`、`key` 与路径一致、字段类型；失败改名 `<file>.corrupt-<时间戳>` 并在日志/状态里报告，不阻断启动。
+- 同一 key 出现在多个文件：保留 `updatedAt` 最新的一份，其余改名 `.corrupt-` 隔离。
+- 内存里维护 `Map<key, profile>`；`list/filter/详情` 全读内存，不在每次请求时扫盘。桥接是唯一写者，控制台与桥接同进程，不需要文件锁。
+- 运行期不监听目录变化：外部手改/删除文件在重启后生效；控制台写文件后同步更新内存，避免同进程读到旧值。
 
 写入规则：
 
 - 只写变化的字段；保存一个卡片不覆盖其它卡片的值。
-- 写盘用 `.tmp` + rename；迁移/写盘失败保留旧文件并报错，不产生 `.bak`。
-- `profiles` 允许空桶（用户先建会话、后配置）；`bindings` 缺失不代表档案删了。
-- 旧 `state.sessions` / `state.sessionPolicies` 两个顶层键在迁移后不存在；v2 读取路径只认 `bindings`。
+- 单会话写盘：同目录 `.tmp-<pid>-<rand>` + rename；Windows 上 rename 覆盖已存在文件，失败则保留原文件并报错。
+- `defaults.json` 单独原子写；改默认策略不重写任何会话文件。
+- 空档案允许存在（用户先建会话、后配置）；`binding` 缺失不代表档案删了。
+- 删除档案的顺序：停该会话工作 → 归档/解绑 DSH 会话 → 从内存移除 → 删文件；删文件失败则回滚内存并报错，不留下「内存没有、磁盘还有」的假删除。
+- 不生成 `.bak`；迁移期也不生成（见 §9）。
 
 ## 4. 准入模型
 
@@ -154,7 +195,7 @@ resolve(axis, key):
 | `deny.groups` / `deny.private` 中的 key | `profiles[key].blocked = true` | 显式拒绝优先 |
 | `allowAllWhenEmpty=true` 且 allow 为空 | `defaults.passive = allow`、`defaults.proactive = allow` | 保持「谁都能触发」 |
 | 其它情况 | `defaults.passive = deny`、`defaults.proactive = deny` | 保持「只允许名单内」 |
-| 旧 `sessions` / `sessionPolicies` | `bindings[key]` | 指纹原样保留，迁移后第一次判定会按新指纹重建 |
+| 旧 `sessions` / `sessionPolicies` | `profiles[key].binding` | 指纹原样保留，迁移后第一次判定会按新指纹重建 |
 | `current-role.json.byKey` | `profiles[key].persona` | 有卡名 → `{mode:'card', name}`；无 → `inherit` |
 | `initial-prompts.json` | `profiles[key].prompt.initialText` | 保留更新时间 |
 | `social-v2.json.conversations[key].wakeConfig` | `profiles[key].wake.config` | 仅迁配置；未读、agentToken 留在运行态存储 |
@@ -248,7 +289,8 @@ effectiveMode(key):
 
 ### 7.3 启动对账
 
-- 启动时调用 `sessions.list` 与 `bindings` 比对：DSH 不存在的绑定标记 `missing` 并解绑；存在的标记 `online`。
+- 启动时调用 `sessions.list` 与所有档案的 `binding` 比对：DSH 不存在的绑定标记 `missing` 并解绑；存在的标记 `online`。
+- 桥接 workspace 下存在、但没有任何档案的 DSH 会话：不自动删除（可能是手工建的），记 `orphan` 日志并在维护视图列出，由用户一次性清理。
 - `sessions.list` 不可用/超时：全部标记 `unknown`，不删除绑定；下一次实际 RPC 再判定。
 - 对账失败不阻断启动。
 
@@ -262,7 +304,7 @@ effectiveMode(key):
 
 ### 8.1 会话列表
 
-数据源：`profiles` ∪ `bindings` ∪ 现有 `conversations`（已知会话）的并集；没有 DSH 映射的会话也要显示，状态 `未建`。
+数据源：档案目录（每个档案含 `binding`）∪ 现有 `conversations`（已知会话）的并集；没有 DSH 映射的会话也要显示，状态 `未建`。
 
 列：会话（显示名 + key）/ 平台 / 类型 / 被动 / 主动 / 运行模式 / 人格 / 模型 / DSH / 未读 / 最近活动 / 操作。
 
@@ -303,17 +345,21 @@ effectiveMode(key):
 步骤：
 
 1. 备份：**迁移代码不生成 `.bak`**。如本机需要人工快照，放在仓库外，验证后删除；仓库与 `state/` 正式版本不保留备份文件。
-2. 读取旧文件与旧键，构建 v2 内存对象；校验 key 形态、引用完整性。
-3. 写 `sessions.json.tmp` → rename；成功后才删除旧文件/旧键。
-4. 启动后跑一次对账；打印迁移摘要（会话数、allow/deny 数、人格/提示词/唤醒迁移数）。
-5. 迁移失败：保持旧文件原样、记录明确错误、拒绝进入会话子系统；修复后重跑（幂等）。
-6. 回滚：回滚代码提交 + 人工恢复仓库外快照；不提供运行时回滚工具（与 §6 原则一致）。
+2. 读取旧来源：`state/sessions.json`（绑定/策略）、`state/current-role.json`、`state/initial-prompts.json`、`state/social-v2.json` 的每会话 `wakeConfig`、`config.json` 的 allow/deny/`allowAllWhenEmpty`；校验 key 形态与引用完整性。
+3. 写新目录：先写 `state/sessions/defaults.json`（`migratedAt: 0`），再逐会话写 `<platform>/<kind>/<id>.json`；每文件 `.tmp-*` + rename。
+4. 回读校验：重新扫描目录，核对 key 集合、数量、每条 `key` 与路径一致；任一不符按失败处理。
+5. 提交：把 `defaults.json` 的 `migratedAt` 原子改成当前时间。**这一行是迁移提交点**；在此之前旧来源仍是唯一真相。
+6. 清理：删除旧 `state/sessions.json`、旧 `current-role.json` / `initial-prompts.json` 中的按会话键、`social-v2.json` 的 `wakeConfig`、`config.json` 的 allow/deny/`allowAllWhenEmpty`。删除按幂等清单逐项做；中途崩溃时，下次启动看到 `migratedAt > 0` 就继续删剩余旧键，不重新迁移。
+7. 失败：`migratedAt` 仍为 0 时，保持旧来源原样、删除本次写出的新目录内容（只删本次生成的 `defaults.json` 与档案文件）、记录明确错误并拒绝进入会话子系统；修复后重跑（幂等）。
+8. 回滚：回滚代码提交 + 人工恢复仓库外快照；不提供运行时回滚工具（与 §6 原则一致）。
+
+key 不符合目录字符集时：迁移**中止并列出全部非法 key**，要求先清理或改 key；不静默丢弃、不做文件名转义映射。
 
 判据：
 
 - 迁移前后同一批会话的被动/主动判定一致（用固定样例表断言）。
-- 迁移后旧文件与旧键不存在；`grep` 不到旧读取路径。
-- 迁移重复执行不改变结果（幂等）。
+- 迁移后旧文件与旧键不存在；`grep` 不到旧读取路径；目录里没有 `.tmp-*` / `.bak`。
+- 目录中的每个文件都能被启动扫描读回，`key` 与路径一致；重复执行迁移不改变结果（幂等）。
 
 ## 10. 多管理员
 
@@ -337,7 +383,7 @@ effectiveMode(key):
 | 阶段 | 内容 | 关键文件 | 完成判据 |
 | --- | --- | --- | --- |
 | P0 稳定性 | DSH 自愈、启动对账、确定性命名、详情页只读 DSH 状态与重建按钮 | `src/bridge.js`、`src/session/registry.mjs`、`src/session/store.mjs`、`pages/sessions/` | 手动删 DSH 会话后下一条消息自动重建并回复；启动对账把缺失标 `missing`；新会话标题为 `QQ·群/私聊 …`；`scripts/test-session-lifecycle.mjs` 全过 |
-| P1 档案与详情页 | `sessions.json` v2、迁移、准入双轴、列表并集、详情页 P1、入口迁移、双清空动作 | `src/session/profiles.mjs`（新）、`src/session/access.mjs`（新）、`src/bridge.js`、`pages/sessions/`、`pages/persona/`、`pages/social-v2/`、`pages/access/` | 迁移样例判定与旧配置一致；旧文件/旧键不存在；列表显示无 DSH 映射的会话；详情页每卡独立保存；删除档案不影响其它会话；`test-session-profiles` + UI 全过 |
+| P1 档案与详情页 | `state/sessions/` 目录（`defaults.json` + 每会话文件）、迁移、准入双轴、列表并集、详情页 P1、入口迁移、双清空动作 | `src/session/store.mjs`、`src/session/profiles.mjs`（新）、`src/session/access.mjs`（新）、`src/bridge.js`、`pages/sessions/`、`pages/persona/`、`pages/social-v2/`、`pages/access/` | 迁移样例判定与旧配置一致；旧文件/旧键不存在；目录可被启动扫描完整读回；列表显示无 DSH 映射的会话；详情页每卡独立保存；删除档案不影响其它会话；`test-session-profiles` + UI 全过 |
 | P2 运行模式与模型 | 会话级 mode/model/preset、全量 `currentMode` 调用点改 `effectiveMode`、主动检查点（scheduler/AI 跨会话工具）、任务跳过通知 | `src/session/profiles.mjs`、`src/session/mode-gate.mjs`、`src/bridge.js`、`src/scheduler/`、`pages/sessions/` | 同一时刻两个群可分别跑 v1/v2；改运行模式后下一次唤醒重建且工具集正确；主动被拒时任务跳过并通知；`test-session-mode` 全过 |
 | P3 多管理员 | `admins[]`、capability、审批多人、通知、closed-agent 级别、审计 actor、访问页 | `src/admin/`、`src/bridge.js`、`pages/access/`、`pages/sessions/` | 管理员能审批但不能改全局模式/权限/名单；owner 可增删管理员；审计有 actor；`test-admins` 全过 |
 
@@ -348,16 +394,18 @@ effectiveMode(key):
 - [ ] 统一 RPC 错误分类：识别 `session/not-found`（code 与 message 两种形态），其它错误不触发重建。
 - [ ] `ensureSession` 创建后写标题；标题规则集中在一处，详情页改标题复用。
 - [ ] 自愈：prompt / selectModel / follow 失败 → 退役 → 重建 → 重试一次；同会话 60 秒 3 次失败暂停并告警。
-- [ ] 启动对账：`sessions.list` 与 `bindings` 比对，缺失标 `missing`、超时标 `unknown`，不阻断启动。
+- [ ] 启动对账：`sessions.list` 与所有档案的 `binding` 比对，缺失标 `missing`、超时标 `unknown`，不阻断启动。
 - [ ] `POST /api/sessions/<key>/rebuild`、`GET /api/sessions/<key>/dsh`；控制台只读状态 + 重建按钮。
 - [ ] `scripts/test-session-lifecycle.mjs`：删除后自愈、对账、标题、只重试一次。
 
 **P1 档案与详情页**
 
+- [ ] `src/session/store.mjs` 改目录存储：扫描/校验/缓存、单文件 `.tmp` + rename、损坏隔离、删除顺序。
 - [ ] `src/session/profiles.mjs`：schema、默认值、读取/合并、三态解析、`blocked` 优先。
 - [ ] `src/session/access.mjs`：被动/主动判定唯一入口；替换旧 `allowed()` 调用。
-- [ ] `sessions.json` v2 迁移：旧绑定、人格、提示词、唤醒、allow/deny → 新结构；成功后删旧文件/旧键。
-- [ ] 迁移幂等与失败保护：`.tmp` + rename；失败保留旧文件并报错，不产生 `.bak`。
+- [ ] `state/sessions/` 迁移：旧绑定、人格、提示词、唤醒、allow/deny → `defaults.json` + 每会话文件；提交点 `migratedAt` 后再删旧文件/旧键。
+- [ ] 迁移幂等与失败保护：写入 `.tmp`、回读校验、失败清理本次新目录内容并保留旧来源，不产生 `.bak`。
+- [ ] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动。
 - [ ] 控制台列表改并集数据源；筛选、搜索、新增会话、行操作。
 - [ ] 详情子页 `#sessions/<key>`：P1 八卡、每卡独立保存、脏值守卫、返回保留筛选。
 - [ ] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
@@ -395,8 +443,10 @@ effectiveMode(key):
 
 - [ ] 没有新增第二条准入路径（`grep` 旧 `allowAllWhenEmpty` / `allowed(` 的其它调用）。
 - [ ] 没有保留旧读取分支、旧键、旧文件、`.bak`。
+- [ ] 目录里没有 `.tmp-*`；每个文件的 `key` 与路径一致；没有额外索引文件。
+- [ ] 单文件损坏只隔离该会话，不阻断启动，也不回写空档案。
 - [ ] 会话级写入没有回写全局配置。
-- [ ] 迁移幂等；失败不覆盖原文件。
+- [ ] 迁移幂等；`migratedAt` 之前失败不覆盖旧来源，之后崩溃能继续清理旧键。
 - [ ] 主动检查点覆盖 scheduler、AI 跨会话工具、v1/v2 主动发言。
 - [ ] `currentMode === …` 的调用点清单全部过一遍，没有漏用 `effectiveMode`。
 - [ ] 控制台权限在服务端校验，不只隐藏按钮。
@@ -408,7 +458,9 @@ effectiveMode(key):
 | --- | --- |
 | 会话级运行模式触碰大量全局分支 | P2 前先列 `currentMode` / `modeAllowed` 调用点清单；按清单逐个改，先加矩阵测试再改 |
 | DSH 会话被删后无限重建 | 只重试一次；60 秒窗口内 3 次失败暂停并告警 |
-| 迁移写坏 state | `.tmp` + rename；失败保留旧文件；迁移前人工快照放仓库外并限期删除 |
+| 迁移写坏 state | `.tmp` + rename；`migratedAt` 提交前失败保留旧来源并清理新目录；迁移前人工快照放仓库外并限期删除 |
+| 目录文件多、Windows 占用/锁 | 单写者 + 内存缓存；写失败保留原文件并报错；启动清理 `.tmp-*`；跨进程写入明确不支持 |
+| 人工改坏单个会话文件 | 启动校验 `key`/路径/类型；失败改名 `.corrupt-<ts>` 并回落到默认值，日志可见 |
 | 旧配置残留导致“两个真相” | 迁移后删除旧键；启动校验 version；grep 门禁 |
 | 会话级模型与全局目录不一致 | 保存前校验 DSH 目录；不在目录中拒绝保存；明确“下次唤醒生效” |
 | 多管理员提权 | owner 保留最高权限；管理员不能改模式/权限/名单；审计 actor |
@@ -418,3 +470,4 @@ effectiveMode(key):
 ## 14. 变更记录
 
 - 2026-11-07：初稿。确定双轴三态、会话级运行模式、P1/P2 覆盖清单、v2 单文件、无备份/无旧读、双清空动作、owner+管理员。
+- 2026-11-08：按用户建议把存储从单文件改为 `state/sessions/` 目录（`defaults.json` + 每会话文件）；补充路径/字符集、启动扫描与损坏隔离、单文件原子写、`migratedAt` 迁移提交点与目录级判据。

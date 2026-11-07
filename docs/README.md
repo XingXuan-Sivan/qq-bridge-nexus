@@ -25,7 +25,7 @@
 | [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 控制台表单迁移踩坑与检查清单（迁页面前先读） | ✅ 现行 |
 | [STATUS.md](STATUS.md) | **未完项清单**：每项写是什么 / 完成判据 / 依赖 / 优先级，状态为 Done、Partial（差什么）、Todo（已立项未开工）、Blocked（等什么）；阶段收尾先对这张表，防止把半成品说成已完成 | ✅ 现行（2026-11-05 起，每阶段收尾复核） |
 | [PARITY.md](PARITY.md) | **迁移评估**：nexus / enhanced 手改版 / enhanced 上游三条基线逐维度对照（按会话人格卡、切换入口、换人格是否换会话、注入位置与 token、可扩展性、soulkit 联动、会话管理页、标题、messages、切换与数据迁移），含待核实项与 4 个待拍板决策 | 🚧 评估中（2026-11-06 起，决定「保持/补齐/重设计」前先看这里） |
-| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：会话档案 v2（准入、运行模式、人格、提示词、唤醒、模型）、被动/主动双轴三态与黑白切换、DSH 自愈/对账/命名、详情子页、owner+管理员、P0–P3 判据与防偏离清单 | 📋 方案已定、代码未动（2026-11-08） |
+| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：会话档案目录 `state/sessions/`（默认文件 + 每会话文件；准入、运行模式、人格、提示词、唤醒、模型）、被动/主动双轴三态与黑白切换、DSH 自愈/对账/命名、详情子页、owner+管理员、P0–P3 判据与防偏离清单 | 📋 方案已定、代码未动（2026-11-08） |
 
 ---
 

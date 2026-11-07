@@ -25,6 +25,13 @@
 | D5 | 2026-11-07 | 记忆 S5 写回 | 计划只写「`/api/ingest` 队列（默认关）」 | 只采两类事件：入站的非命令用户文本 + 出站由模型生成的回复（`opts.decorate`）；系统通知、`/` 命令、peek 与工具输出都不入队 | 写回的目的是给长期记忆沉淀「人说了什么、AI 回了什么」；把系统通知或命令塞进去会污染记忆，也会把令牌类文本带出去 | 写回的覆盖范围小于「全量聊天记录」；关闭时 `enqueue` 直接返回 false 且不落盘 | 已改计划 | — |
 | D6 | 2026-11-07 | 记忆 S6 轻量记忆重做 | `MEMORY_SUBSYSTEM.md` 计划保留 `/api/socialV2/memory-*` 与 `group-rule`，作为控制台与工具的既有入口 | 直接删除这批端点，新增通用 `/api/memory/entries` / `/entries/clear` / `/entries/compact` / `/rules` / `/recall` / `/note`，**不做别名、不做双写**；同时删除 `formatMemoryV2` / `appendMemoryV2` 与 `social-v2.json` 的 `activeTopics/pendingThoughts/memberImpressions/ownerRules`，旧数据不迁移、直接丢弃 | 用户明确要求「旧实现、接口、数据都统一移除或归一化，不要再留着、当别名或者保留，不留技术债务」；轻量记忆本身没有需要保留的重要数据，核心数据在 soulkit | 旧接口的调用方（MCP 工具、控制台、测试）全部改到新端点；升级后旧的 `social-v2.json` 记忆字段成为死数据（不读、不删），`state/local-memory.json` 从空开始 | 已改计划 | — |
 
+| D7 | 2026-11-08 | 会话子系统设计 | 按会话配置分散在 `current-role.json` / `initial-prompts.json` / `social-v2.json` / `access` 页 / `sessions.json` 映射五处，各自读写 | 合并为 `state/sessions.json` v2 的 `profiles`（准入、运行模式、人格、提示词、唤醒、模型、预设），DSH 绑定放同文件 `bindings` | 跨文件保存无法原子、迁移/回滚/备份都要各写一遍；用户要求系统性重构而非修补 | P1 需要一次性迁移旧文件并删除旧键；迁移失败不覆盖原文件 | 已改计划 | — |
+| D8 | 2026-11-08 | 会话子系统设计 | 计划保留 `config.json` 的 `allow` / `deny` / `allowAllWhenEmpty` 作为兼容读 | 一次性迁到 `defaults` + `profiles[].access`，迁移后删除旧键，**不做兼容读、不做双写** | 两个准入真相会导致「改了没生效」且无法测试；用户要求正式版本不留旧配置 | 升级必须先成功迁移；失败拒绝启动会话子系统并报错，不静默降级 | 已改计划 | — |
+| D9 | 2026-11-08 | 会话子系统迁移 | `STATUS.md` §6 要求动手前把 `state/` 备份成 `state.bak-<时间戳>`，观察后再删 | 本轮迁移代码**不生成 `.bak`**；需要人工快照时放仓库外并在验证后删除；失败保留旧文件原样 | 用户明确要求「正式版本不得保留旧备份文件和旧配置」；运行期备份会变成永久残留 | 回滚依赖代码回滚 + 仓库外人工快照；迁移必须 `.tmp` + rename 且幂等 | 已改计划 | — |
+| D10 | 2026-11-08 | 会话子系统范围 | `PARITY.md` D-3 的会话页只做「列表 + 改标题 + 清理」 | 扩展为会话子系统重构：双轴准入、会话档案与详情子页、会话级运行模式、模型/预设、DSH 自愈/命名、多管理员 | 用户新需求要求把会话相关的通用配置与单会话配置整体重做，而不是继续修补 | `PARITY.md` D-3 的会话页范围由本文档覆盖；STATUS #11 的会话页子项以 `SESSION_SUBSYSTEM.md` 为准 | 已改计划 | — |
+| D11 | 2026-11-08 | 会话子系统设计 | 运行模式是全局唯一 `currentMode`，所有会话跟随 | 允许按会话固定 `chat` / `reserved` / `reserved2`；`closed-agent` 仍是全局排他模式，管理员私聊以外一律不活跃 | 用户明确要不同会话可分别跑一代/二代仿真，而不是全局切换 | 所有 `currentMode === …` 与 `modeAllowed` 分支要改成按会话的 `effectiveMode`；P2 风险最高，需先列调用点清单 | 已改计划 | — |
+| D12 | 2026-11-08 | 会话子系统设计 | 只有 `ownerQQ` 一个管理员，审批、通知、closed-agent 都只认它 | 引入 owner + `admins[]`（capability、maxLevel、notify、exemptPassive）；管理员不能改全局模式/权限/名单 | 用户要求支持多管理员，同时保留 owner 最高权限 | 审批/通知/审计/closed-agent 级别都要带 actor；控制台多账号不在本轮硬做 | 已改计划 | — |
+
 ## 模板
 
 ```md

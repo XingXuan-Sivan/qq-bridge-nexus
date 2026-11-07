@@ -130,6 +130,8 @@ N 的现状：会话相关能力散在「运行总览」「会话与审批」两
 | D-3 | **B，且「是否切换会话」做成可配置项** | 会话列表与平台解耦、面板删改与 DSH 同步见 7.3 |
 | D-4 | 待评估后讨论 | 见 7.4 |
 
+> 2026-11-08 注：D-3 的「会话页 = 列表 + 改标题 + 清理」范围已被 `docs/SESSION_SUBSYSTEM.md` 扩展为会话子系统重构（准入双轴、会话档案与详情子页、会话级运行模式、DSH 自愈/命名、多管理员）。以 `SESSION_SUBSYSTEM.md` 为准；差异见 `PLAN_DEVIATIONS.md` D10。
+
 ### 7.2 D-2：换人格是否换会话 —— AstrBot 的做法
 
 - AstrBot **不靠换会话**解决长对话：同一 conversation 内超阈值就压缩上下文（`llm_compress_keep_recent_ratio: 0.15`、`max_context_length`），压缩摘要继续留在原会话；新建会话是用户显式 `/new`（`astrbot/core/conversation_mgr.py:92 new_conversation`）。

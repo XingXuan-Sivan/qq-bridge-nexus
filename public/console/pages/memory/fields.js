@@ -66,10 +66,10 @@ export const MEMORY_FIELDS = {
     { name: 'memLimitMaxImpressions', type: 'number', label: '印象最多存（条）', min: 1, max: 1000, step: 1 },
     { name: 'memLimitMaxRules', type: 'number', label: '规则最多存（条）', min: 1, max: 50, step: 1 },
     { name: 'memLimitMaxTraits', type: 'number', label: '每人标签上限（个）', min: 1, max: 30, step: 1 },
-    { name: 'memLimitTraitChars', type: 'number', label: '单个标签最长（字）', min: 10, max: 200, step: 1, unit: '字' },
-    { name: 'memLimitItemChars', type: 'number', label: '单条最长（字）', min: 20, max: 2000, step: 10, unit: '字' },
+    { name: 'memLimitTraitChars', type: 'number', label: '单个标签最长（字）', min: 10, max: 200, step: 1 },
+    { name: 'memLimitItemChars', type: 'number', label: '单条最长（字）', min: 20, max: 2000, step: 10 },
     {
-      name: 'memLimitStaleHours', type: 'number', label: '话题过期（小时）', min: 0, max: 720, step: 1, unit: 'h',
+      name: 'memLimitStaleHours', type: 'number', label: '话题过期（小时）', min: 0, max: 720, step: 1,
       hint: '超过这么久没再被提起的话题会被清掉；0 表示不过期。',
     },
     { type: 'action', items: [{ id: 'memLocalSaveLimits', label: '保存上限设置' }], status: 'memLocalLimitsMsg' },

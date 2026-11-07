@@ -470,6 +470,9 @@ public/console/
 
 **问题**：现在加一个新的注入块必须改 `src/bridge.js`（`registerCoreBlock` + 配置白名单 + 控制台目录），三处都得动；记忆更是没有通道——`core-digest` 渲染的是 nexus 自己的轻量记忆（`formatMemoryV2`：话题/想说的话/印象），**不是 soulkit 的长期记忆**，所以真机上「看不到记忆注入」是真实缺口。
 
+> **2026-11-07 更新**：记忆部分已单独出设计（provider 契约、`core-memory` 块、预算分层、迁移映射、S1–S5 计划），见 [MEMORY_SUBSYSTEM.md](MEMORY_SUBSYSTEM.md)。与本节原写法的三处差异（记忆不做成声明式块、priority 用 200、`core-digest` 改为 provider 渲染）登记在 [PLAN_DEVIATIONS.md](PLAN_DEVIATIONS.md) D1–D3；本节下面第 3、5 条按该文档执行，其余（1、2、4、6 与判据）不变。
+
+
 **做什么**（契约见 [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) §5.5）：
 
 1. **统一模型**：所有块进同一个注册表，用 `owner` 区分 `core` / `plugin:<id>` / `declared`；渲染管线、限额、失败隔离只有一套。

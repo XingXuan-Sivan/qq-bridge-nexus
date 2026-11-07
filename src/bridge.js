@@ -123,6 +123,9 @@ import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth
 import { createPluginKernel } from './plugins/kernel.mjs';
 // 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
 import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from './plugins/prompt-blocks.mjs';
+// 记忆 provider 注册表（docs/MEMORY_SUBSYSTEM.md）：注入只选一个 provider，同步直取、异步读预热缓存。
+import { createMemoryRegistry, normalizeMemoryConfig } from './memory/registry.mjs';
+import { LOCAL_DIGEST_LIMITS } from './memory/defaults.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
 // 内置命令的「壳」（元数据 + 参数解析 + 回执文案）与 /api/commands 的响应组装，见 docs/COMMAND_REGISTRY.md。
@@ -764,6 +767,21 @@ function normalizePromptBlocks(raw) {
 }
 
 /**
+ * 旧配置兼容（docs/MEMORY_SUBSYSTEM.md §7，迁移映射）：S2 之前「记忆摘要」是
+ * `promptBlocks['core-digest']`（enabled / maxChars）。没写 `memory.*` 时把它读成
+ * `providers['local-digest']` 的同名配置，迁移后行为等价；旧键此后只读，控制台不再写它。
+ */
+function legacyMemoryConfig(promptBlocks) {
+  const digest = promptBlocks && typeof promptBlocks === 'object' ? promptBlocks['core-digest'] : null;
+  if (!digest || typeof digest !== 'object' || Array.isArray(digest)) return undefined;
+  const local = {};
+  if (typeof digest.enabled === 'boolean') local.enabled = digest.enabled;
+  const maxChars = Number(digest.maxChars);
+  if (Number.isInteger(maxChars) && maxChars > 0) local.maxChars = maxChars;
+  return Object.keys(local).length ? { providers: { 'local-digest': local } } : undefined;
+}
+
+/**
  * 平台段：`platform.id`（默认 qq）。
  *
  * key 形态只有一种：`<platform>:<group|private>:<id>`。老的 `group:<id>` 只在**读取侧**
@@ -895,6 +913,10 @@ function loadConfig() {
     },
     // 内置段落的块化（P4）：按块 id 配 enabled / maxChars。只有显式 false 才关闭，配错一律回落默认。
     promptBlocks: normalizePromptBlocks(file.promptBlocks),
+    // 记忆子系统（docs/MEMORY_SUBSYSTEM.md §3）：注入 provider / provider 开关与上限 / 工具。
+    // 旧版本把「记忆摘要」配成 promptBlocks['core-digest']，这里兼容读一版：
+    // 没写 memory.* 时，把它当成 providers['local-digest'] 的 enabled / maxChars。
+    memory: normalizeMemoryConfig(file.memory ?? legacyMemoryConfig(file.promptBlocks)),
     // 技能清单（§9.2）：唤醒时注入固定行数的可用技能索引，全文由 AI 需要时自己读。
     skills: normalizeSkills(file.skills),
   platform: normalizePlatform(file.platform),
@@ -1617,6 +1639,16 @@ async function main() {
   // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
   // 插件块受 plugins.json 的 maxPromptAppendChars（4000）约束，内置段落沿用现有长度，不能互相挤占。
   const corePromptBlocks = createPromptBlockRegistry({ log, maxTotalChars: 200000 });
+  // 记忆 provider（docs/MEMORY_SUBSYSTEM.md §2.1）：内置 local-digest 直接同步渲染现有的
+  // formatMemoryV2（零延迟）；插件 provider（如 soulkit）走异步预热 + 缓存，注入时只读缓存。
+  const memoryRegistry = createMemoryRegistry({ log, config: cfg.memory });
+  memoryRegistry.register({
+    id: 'local-digest',
+    label: '本机轻量记忆',
+    contract: 'memory-provider/1',
+    capabilities: { sync: true, write: true, listable: true },
+    fetchSync: ({ key, limits }) => ({ text: formatMemoryV2(getSocialV2State(key), limits) }),
+  }, 'core');
   // 技能索引（§9.2）：技能目录只读扫描，结果缓存 60s；额外目录来自 config.json 的 skills.dirs。
   // 根顺序 = 额外目录 → DSH_HOME/skills → 仓库 skills/，同名技能以先出现的为准。
   const skillIndex = createSkillIndex({
@@ -1643,7 +1675,12 @@ async function main() {
       // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；blockPlan 为空（测试、旧调用方）时照旧完整给。
       return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
     });
-    registerCoreBlock('core-digest', '记忆摘要', 200, ({ memoryText }) => memoryText || '');
+    // 记忆段（内置块 core-memory）：provider 由 memory.inject.provider 决定。
+    // 同步 provider 直接渲染；异步 provider 只读唤醒前的预热缓存——拿不到就空着，不阻塞。
+    registerCoreBlock('core-memory', '记忆', 200, ({ key, query } = {}) => {
+      const injected = memoryRegistry.injectionSync({ key, query });
+      return injected.text || '';
+    });
     // 技能清单排在注入块之间：贴纸（100）之后、记忆摘要（200）之前都不合适，
     // 取 150——它描述「能做什么」，跟着行为提示走比跟着记忆走更自然。
     registerCoreBlock('core-skills', '技能清单', 150, ({ skillText } = {}) => {
@@ -1661,6 +1698,7 @@ async function main() {
       log,
       deps: {
         commandRegistry,
+        memoryRegistry,
         sendToQQ: (key, msg) => sendToQQ(key, msg),
         hasSession: (key) => sessions.has(key),
         fetch: globalThis.fetch,
@@ -4811,6 +4849,46 @@ async function main() {
             registerCoreBlocks();
             atomicWriteJson(file, { ...raw, promptBlocks: normalized });
             sendJson({ ok: true, promptBlocks: normalized, coreBlocks: corePromptBlocks.status() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+          }
+          return;
+        }
+        // 记忆子系统（docs/MEMORY_SUBSYSTEM.md §3/§4）：读状态 + 改配置。
+        // 配置写 config.json 的 memory 段，热更新注册表；provider 的启用与上限也走这里。
+        if (req.method === 'GET' && url.pathname === '/api/memory') {
+          sendJson({
+            ok: true,
+            config: memoryRegistry.getConfig(),
+            status: memoryRegistry.status(),
+            promptBlocks: corePromptBlocks.status(),
+          });
+          return;
+        }
+        if (req.method === 'PATCH' && url.pathname === '/api/memory') {
+          try {
+            const body = await readBody();
+            const file = path.join(ROOT, 'config.json');
+            const raw = readJsonSafe(file, {}, true);
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.json 格式错误');
+            const base = normalizeMemoryConfig(raw.memory ?? legacyMemoryConfig(raw.promptBlocks));
+            const incoming = body && typeof body === 'object' ? body : {};
+            const next = {
+              inject: { ...base.inject, ...(incoming.inject && typeof incoming.inject === 'object' ? incoming.inject : {}) },
+              providers: { ...base.providers },
+              tools: { ...base.tools, ...(incoming.tools && typeof incoming.tools === 'object' ? incoming.tools : {}) },
+              handover: { ...base.handover, ...(incoming.handover && typeof incoming.handover === 'object' ? incoming.handover : {}) },
+              ingest: { ...base.ingest, ...(incoming.ingest && typeof incoming.ingest === 'object' ? incoming.ingest : {}) },
+            };
+            for (const [id, value] of Object.entries(incoming.providers ?? {})) {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+              next.providers[id] = { ...(next.providers[id] ?? {}), ...value };
+            }
+            const normalized = normalizeMemoryConfig(next);
+            cfg.memory = normalized;
+            memoryRegistry.setConfig(normalized);
+            atomicWriteJson(file, { ...raw, memory: normalized });
+            sendJson({ ok: true, memory: normalized, status: memoryRegistry.status() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
           }
@@ -10901,8 +10979,11 @@ async function main() {
     return defaultMs;
   }
 
-  function formatMemoryV2(st) {
+  // 轻量记忆的渲染：数量上限从 limits 取（默认沿用迁移前的硬编码，见 src/memory/defaults.mjs）。
+  // provider local-digest 会把自己的 limits 透进来；其它调用方不传就得到与旧行为一致的结果。
+  function formatMemoryV2(st, limits = {}) {
     if (!st) return '';
+    const L = { ...LOCAL_DIGEST_LIMITS, ...(limits && typeof limits === 'object' ? limits : {}) };
     const lines = [];
     // 管理员设定的长期规则放在最前面：每次唤醒都注入，群会话自己的记忆工具改不动
     const rulesBlock = rulesPromptBlock(st.ownerRules);
@@ -10910,7 +10991,7 @@ async function main() {
     const topics = Array.isArray(st.activeTopics) ? st.activeTopics.filter((t) => t && t.text) : [];
     if (topics.length) {
       lines.push('【进行中的话题】');
-      for (const t of topics.slice(-10)) {
+      for (const t of topics.slice(-L.topics)) {
         const ago = t.lastMentionAt ? Math.round((Date.now() - t.lastMentionAt) / 60000) : 0;
         const stale = t.lastMentionAt && Date.now() - Number(t.lastMentionAt) > 2 * 60 * 60 * 1000 ? '（已搁置）' : '';
         lines.push(`- ${t.text}${stale}（${ago > 0 ? ago + '分钟前' : '刚刚'}）${t.pendingQuestion ? `；待追问：${t.pendingQuestion}` : ''}`);
@@ -10919,7 +11000,7 @@ async function main() {
     const thoughts = Array.isArray(st.pendingThoughts) ? st.pendingThoughts.filter((t) => t && t.text && (!t.expiresAt || Date.now() < t.expiresAt)) : [];
     if (thoughts.length) {
       lines.push('【你想说但还没说的】');
-      for (const t of thoughts.slice(-10)) {
+      for (const t of thoughts.slice(-L.thoughts)) {
         lines.push(`- ${t.text}${t.motivation ? `（${t.motivation}）` : ''}`);
       }
     }
@@ -10927,7 +11008,7 @@ async function main() {
     const names = Object.keys(impressions);
     if (names.length) {
       lines.push('【对群友的印象】');
-      for (const name of names.slice(-10)) {
+      for (const name of names.slice(-L.impressions)) {
         const im = impressions[name] || {};
         const traits = Array.isArray(im.traits) ? im.traits : [];
         lines.push(`- ${name}：${traits.length ? traits.join('、') : '暂无记录'}（互动 ${Number(im.interactionCount) || 0} 次）`);
@@ -11325,6 +11406,9 @@ async function main() {
       // 唤醒时顺手刷新人格卡：TTL、单飞、失败降级都在内核注册表里，这里只给它一次机会。
       // 首次唤醒缓存为空时也在这里拿卡；超时/失败不阻塞唤醒，回落旧缓存或本地卡。
       if (plugins) await plugins.personaWarm(key).catch(() => {});
+      // 记忆预热：异步 provider（soulkit）在唤醒前取一次，注入时只读缓存；
+      // 超时/失败都只影响这一块，绝不影响唤醒本身。
+      await memoryRegistry.warm({ key, query: memoryQueryV2(getSocialV2State(key)) }).catch(() => {});
       // Build only after session creation: retries may rotate the token, and an
       // offline queue may have received more messages since this wake was queued.
       wakeState = getSocialV2State(key);
@@ -12543,14 +12627,23 @@ async function main() {
     return `【你的身份】你在 QQ 上的昵称是${label}${idText}。${callBits}；群名片可能与昵称不同，at/引用段里带${id ? ` ${id} ` : '你的 QQ 号'}就是在叫你。\n\n`;
   }
 
+  // 记忆检索的 query：本轮最后一条「不是自己发的」消息文本（最多 300 字）。
+  // 没有新消息时退回最近一条别人的消息，让记忆至少贴着当前话题；异步 provider 也用同一个 query 预热。
+  function memoryQueryV2(st) {
+    const list = [...(st?.unread || []), ...(st?.recentMessages || [])].filter((m) => m && !m.isSelf && m.text);
+    const last = list[list.length - 1];
+    return last ? String(last.text).slice(-300) : '';
+  }
+
   function buildWakePromptV2Core(key, reason, blockPlan = null) {
     const roleName = currentRoleName(key);
     const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
     const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
-    // 记忆摘要（内置块 core.digest）：块关掉时整段消失，maxChars 可单独收紧。
-    const digestBlock = corePromptBlocks.renderBlockSync('core-digest', { key, reason, memoryText: formatMemoryV2(st) });
-    const memoryLine = digestBlock.text ? `${digestBlock.text}\n\n` : '';
+    // 记忆段（内置块 core-memory）：块关掉时整段消失；上限由 memory.inject.maxChars 与
+    // provider 自己的 maxChars 取小值决定。query 取本轮最后一条别人说的话，供 provider 检索。
+    const memoryBlock = corePromptBlocks.renderBlockSync('core-memory', { key, reason, query: memoryQueryV2(st) });
+    const memoryLine = memoryBlock.text ? `${memoryBlock.text}\n\n` : '';
     // v0.3.0 在场人物：只注入本轮未读/最近消息里出现的人，并在注入时按共享策略过滤可见范围。
     const presentIds = [...(st.unread || []), ...(st.recentMessages || []).slice(-6)].filter((m) => m && !m.isSelf).map((m) => m.userId).filter(Boolean);
     const peopleText = ext.peopleBlockFor(key, presentIds);

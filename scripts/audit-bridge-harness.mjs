@@ -63,6 +63,8 @@ import * as voiceLib from '../src/send-voice-lib.js';
 import * as presetPrompt from '../src/preset-prompt.js';
 import * as stateAcl from '../src/state-acl.mjs';
 import * as bridgeExt from '../src/bridge-extensions.js';
+import * as memoryRegistry from '../src/memory/registry.mjs';
+import * as memoryDefaults from '../src/memory/defaults.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
@@ -232,7 +234,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     discoverDshLaunchToken: () => '', resolveDshHome: () => path.join(os.tmpdir(), 'qq-bridge-audit-no-dsh-home'), unwrap, createTurnCollector,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
     ...modelPrices, ...dshModel, ...quoteForward, ...modeHandover, ...roleCard, ...tokenLedger,
-    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...dshAuthHintLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...bridgeExt,
+    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...dshAuthHintLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...bridgeExt, ...memoryRegistry, ...memoryDefaults,
     // 插件内核与人格解析在 VM 里桩掉：这个夹具只验证 bridge.js 的接线与主链，不加载真插件、不连 soulkit。
     // 命令注册表用真实现（纯内存、无 IO），命令迁移后的行为才能在 VM 里验证。
     createPersonaResolver,

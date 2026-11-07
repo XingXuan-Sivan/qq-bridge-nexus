@@ -82,6 +82,15 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     };
   }
 
+  if (granted.has('memory:provide')) {
+    // 记忆 provider：与 persona 同构，注册先进 staging，activate 成功后才入表；
+    // 内核按 pluginId 批量注销，插件不需要自己清。
+    ctx.memory = {
+      registerProvider: (provider) => deps.registerMemory(provider, id),
+      unregisterProvider: () => deps.unregisterMemory(id),
+    };
+  }
+
   if (granted.has('commands')) {
     // 插件命令统一打上来源与 pluginId：内置永远优先，插件之间按 pluginId 字典序；
     // 卸载/重载时内核按 pluginId 批量注销，插件不需要自己清。

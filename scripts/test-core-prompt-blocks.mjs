@@ -49,6 +49,25 @@ test('core-digest：默认注入记忆摘要，关掉后整段消失，maxChars 
   assert.ok(clipped.length > disabled.length, '限额后仍应保留一部分摘要');
 });
 
+// S2：记忆不再由 core-digest 直接拼字符串，而是走 memory provider（默认为 local-digest）。
+// 三个判据：关 provider 后无记忆段、注入上限可收紧、旧 core-digest 配置读入后行为等价。
+test('memory：local-digest 可关、注入上限可配，旧 core-digest 配置等价', async () => {
+  const enabled = await capture({});
+  assert.match(enabled, /【进行中的话题】/);
+
+  const byProvider = await capture({ memory: { providers: { 'local-digest': { enabled: false } } } });
+  assert.doesNotMatch(byProvider, /【进行中的话题】/, '关掉 local-digest 后不应有记忆段');
+  assert.ok(byProvider.length < enabled.length);
+
+  const clipped = await capture({ memory: { inject: { maxChars: 40 } } });
+  assert.ok(clipped.length < enabled.length, '注入上限应收紧记忆段');
+  assert.ok(clipped.length > byProvider.length, '只截断，不应整段消失');
+  assert.ok(!clipped.includes('小明'), '超出上限的印象行应被截掉');
+
+  const legacy = await capture({ promptBlocks: { 'core-digest': { enabled: false } } });
+  assert.doesNotMatch(legacy, /【进行中的话题】/, '旧 core-digest 配置应等价于关掉 local-digest');
+});
+
 test('core-stickers：配置可单独关闭该块，关掉后不再出现表情策略段', async () => {
   const marker = '【表情包策略：像真人一样用，不刷屏】';
   const enabled = await capture({});

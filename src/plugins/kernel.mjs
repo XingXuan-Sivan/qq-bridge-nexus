@@ -273,9 +273,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     // 命令与注入块按 pluginId 批量注销：卸载/停用/重载后旧内容不能继续进 prompt。
     deps.commandRegistry?.unregisterPlugin?.(entry.id);
     promptBlockRegistry.unregisterPlugin(entry.id);
+    deps.memoryRegistry?.unregisterPlugin?.(entry.id);
     unregisterTaskTypes(entry.id);
     entry.commands = [];
     entry.blocks = [];
+    entry.memories = [];
     entry.taskTypes = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
@@ -305,7 +307,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     const runtime = runtimeEnabled.get(dirName);
     const enabled = runtime !== undefined ? runtime : config.plugins[dirName]?.enabled !== false;
     if (!enabled) {
-      return { ok: true, status: 'disabled', manifest, hooks: [], personas: [], dispose: null };
+      return { ok: true, status: 'disabled', manifest, hooks: [], personas: [], memories: [], dispose: null };
     }
 
     let mainPath;
@@ -332,7 +334,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -347,6 +349,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
           return true;
         },
         unregisterPersona: (pluginId) => persona.unregister(pluginId),
+        registerMemory: (provider, pluginId) => {
+          pending.memories.push({ provider, pluginId });
+          return true;
+        },
+        unregisterMemory: (pluginId) => deps.memoryRegistry?.unregisterPlugin?.(pluginId),
         registerTaskType: (definition, pluginId) => {
           pending.taskTypes.push({ definition, pluginId });
           return true;
@@ -389,7 +396,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -402,6 +409,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     entry.hooks = [];
     entry.commands = [];
     entry.blocks = [];
+    entry.memories = [];
     entry.taskTypes = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
@@ -431,6 +439,13 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
           if (promptBlockRegistry.register(definition, pluginId)) entry.blocks.push(definition.id);
         } catch (error) {
           logLine(`⚠️ [plugins] ${entry.id} 注册注入块 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
+        }
+      }
+      for (const { provider, pluginId } of desc.memories ?? []) {
+        try {
+          if (deps.memoryRegistry?.register(provider, pluginId)) entry.memories.push(provider.id);
+        } catch (error) {
+          logLine(`⚠️ [plugins] ${entry.id} 注册记忆 provider ${provider?.id ?? '?'} 失败：${error?.message ?? error}`);
         }
       }
       for (const { definition, pluginId } of desc.taskTypes ?? []) {

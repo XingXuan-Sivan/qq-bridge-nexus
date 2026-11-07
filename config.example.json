@@ -16,11 +16,34 @@
     "core-stickers": {
       "enabled": true
     },
-    "core-digest": {
+    "core-memory": {
       "enabled": true
     },
     "core-skills": {
       "enabled": true
+    }
+  },
+  "memory": {
+    "inject": {
+      "provider": "local-digest",
+      "maxChars": 2400,
+      "timeoutMs": 900,
+      "cacheTtlMs": 60000
+    },
+    "providers": {
+      "local-digest": {
+        "enabled": true
+      }
+    },
+    "tools": {
+      "recall": true,
+      "note": false
+    },
+    "handover": {
+      "enabled": true
+    },
+    "ingest": {
+      "enabled": false
     }
   },
   "skills": {

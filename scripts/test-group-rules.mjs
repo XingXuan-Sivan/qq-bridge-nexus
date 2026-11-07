@@ -81,7 +81,7 @@ test('接线：默认关闭、端点与 MCP 都要求显式 true、规则注入�
   assert.equal((bridge.match(/ownerGroupAccess: false/g) ?? []).length, 2, '桥接两处运行时默认都是关闭');
   assert.ok(bridge.includes('enabled: cfg.socialV2?.tools?.ownerGroupAccess === true'), '端点要求显式 true');
   assert.ok(mcp.includes('if (cfg.socialV2?.tools?.ownerGroupAccess === true) {'), 'MCP 只在显式 true 时注册');
-  const fmt = bridge.slice(bridge.indexOf('function formatMemoryV2(st) {'), bridge.indexOf('function appendMemoryV2('));
+  const fmt = bridge.slice(bridge.indexOf('function formatMemoryV2(st, limits = {}) {'), bridge.indexOf('function appendMemoryV2('));
   assert.ok(fmt.includes('rulesPromptBlock(st.ownerRules)'), '记忆摘要（每次唤醒注入）带上规则');
   const seg = bridge.slice(bridge.indexOf("url.pathname === '/api/socialV2/owner-peek'"), bridge.indexOf('// ── v0.3.0 控制台（管理端专用'));
   assert.ok(seg.includes('agentTokenOk(key, agentToken)'), '令牌只和发起方会话比对');

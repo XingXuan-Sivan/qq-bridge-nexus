@@ -8,9 +8,9 @@
 
       <section class="card span-all is-group">
       <details class="settings-group">
-        <summary>内置注入块</summary>
+        <summary>注入块（全部已注册）</summary>
         <div class="settings-content">
-          <div class="meta">这两段直接进每次唤醒的 prompt：关掉后模型当轮看不到对应内容，立即生效；上限按字符截断，清空表示用默认。</div>
+          <div class="meta">这里列出系统内所有已注册的注入块——内置的三块与插件运行时注册的块都在表里，按优先级顺序进每次唤醒的 prompt。关掉后当轮看不到该段、预算立即回收；上限按字符截断，留空表示不限（插件块默认不限，块内部各段的预算由插件自己配置）。</div>
           <div id="promptBlockRows" class="u-mt-8-grid">加载中…</div>
           <div data-plugins-fields="promptBlockActions"></div>
         </div>

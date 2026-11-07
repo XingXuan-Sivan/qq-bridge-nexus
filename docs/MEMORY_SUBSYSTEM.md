@@ -37,8 +37,14 @@ ctx.memory.registerProvider({
 - 查询工具**联邦**：所有 `enabled` 的 provider 都能被 `qq_memory_recall` 问到，结果合并并标注来源。
 - 内置 `local-digest` 由 core 注册（owner=core），数据仍在 `state/social-v2.json` 的会话状态里。
 
-### 2.2 注入
+### 2.2 块（所有注入块的通用约定）
 
+- 注册表是唯一事实来源：每个块有 `id` / `owner`（`core` / `plugin:<id>` / `declared`）/ `label` / `priority` / `maxChars`（`null` = 不限）/ `enabled` 覆盖 / 运行状态（`calls`、`lastChars`、`truncated`、`skipped`、`lastError`、`lastRunAt`）。
+- 控制台「插件」（原内置注入块）区统一展示**所有已注册块**：core 与插件贡献的块都在表里，可开关、可改上限；优先级只读展示。插件块**默认上限不限**，块内部各段的预算由实现者自行决定并在插件内配置——控制台只管「整块开不开、最多多少字」。
+- 开关与上限写进 `config.json.promptBlocks[<id>]`（`{ enabled, maxChars }`），对任意 owner 的块生效；插件重载不会丢这些覆盖值。
+- 关块后整段消失、预算立即回收；块取数失败只跳过自己（`skipped: 'error'`），不影响其它块与唤醒。
+
+### 2.3 注入
 - 唤醒时读 `memory.inject.provider`：
   - `sync:true` → 直接 `fetchSync`（local-digest 走这条，零延迟）；
   - `sync:false` → 读预热缓存（本轮开始前 warm，超时 `memory.providers[id].timeoutMs`，失败记 `lastError`，注入空串）。
@@ -87,10 +93,13 @@ ctx.memory.registerProvider({
 
 ## 4. 控制台
 
-### 4.1 插件页「内置注入块」→ 表格化
+### 4.1 插件页「注入块」→ 全量表格
 
-列：块 / owner（core / plugin:<id> / declared）/ 优先级 / 上限 / 最近字数 / 状态（正常 / 截断 / 跳过原因）/ 详情（最近调用时间、失败次数）。
-`core-memory` 行显示 `memory.inject.maxChars`，点「详情」跳到记忆页对应卡片。
+列：块 / owner（`core` / `plugin:<id>` / `declared`）/ 优先级 / 开关 / 上限 / 最近字数 / 状态（正常 / 截断 / 跳过原因）/ 详情（最近调用时间、失败次数）。
+
+- **列出所有已注册块**，包括插件运行时注册的块；插件块默认上限「不限」，块的内部子预算由实现者在插件里自行配置，控制台只提供「整块开关 + 总上限」。
+- 上限输入留空 = 不限（`null`）；保存写入 `config.json.promptBlocks[<id>]`，对任意 owner 生效。
+- `core-memory` 行显示 `memory.inject.maxChars`；点「详情」跳到记忆页对应卡片。
 
 ### 4.2 新「记忆」页（聊天行为分类）
 
@@ -113,8 +122,8 @@ ctx.memory.registerProvider({
 | `ownerRules` | 注入在最前、管理员私聊命令修改 | local-digest「长期规则」区 | 保留机制；记忆页只读展示 + 说明入口 |
 | `socialV2.tools.handoverMemory` | 切 agent 时带私聊记忆 | `memory.handover.enabled` | **迁**：默认仍 true |
 | `socialV2.tools.memory` | `qq_memory_append/query/remove/clear` | `local-digest.tools.*` | **迁** |
-| 二代仿真页「轻量记忆」组 | 查看/清空调试面板 | 记忆页「本机轻量记忆」 | **迁**：原位置改为一句话 + 链接 |
-| 插件页「内置注入块」 | digest 开关/上限 | 记忆页「注入」卡 | **迁**：块表只留内存块一行，开关指向记忆页 |
+| 二代仿真页「轻量记忆」组 | 查看/清空调试面板 | 记忆页「本机轻量记忆」 | **迁**：原处直接移除，不留提示或链接 |
+| 插件页「内置注入块」 | digest 开关/上限 | 记忆页「注入」卡 + 记忆块行 | **迁**：块表保留 `core-memory` 一行（上限随记忆页），不再列 `core-digest` |
 | `qq_get_prompt` / `peekView` | 返回 `formatMemoryV2` | 不变 | 保留，改读 provider 输出 |
 
 ## 6. 分阶段计划

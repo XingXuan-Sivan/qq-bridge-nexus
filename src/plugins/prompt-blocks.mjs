@@ -1,12 +1,16 @@
 // 具名注入块注册表（P4）。
 //
-// 每个块有自己的 id、优先级、字符上限和 render()，内核按优先级拼进 wake prompt。
+// 每个块有自己的 id、owner、优先级、字符上限和 render()，内核按优先级拼进 wake prompt。
 // 与钩子的区别：钩子是「通知」，块是「内容」——块必须能单独关掉、单独限额，并且在
 // 插件停用/重载/卸载时随之消失（注销按 pluginId 走）。
 //
-// 归属：这里只负责「收块、排序、限额、渲染、记账」，不关心 prompt 长什么样；
+// 归属：owner 区分 core / plugin:<id> / declared，控制台按它分组与展示。
+// 这里只负责「收块、排序、限额、渲染、记账」，不关心 prompt 长什么样；
 // 拼接位置由 bridge 的 deliverPromptNow 决定，总预算由 plugins.json 的
 // limits.maxPromptAppendChars 兜底。
+//
+// 覆盖：开关与上限可以按块 id 从配置覆盖（`setOverrides`），对任意 owner 生效；
+// 插件块默认不限（maxChars=null），块内部各段的预算由实现者自己决定。
 
 export const PROMPT_BLOCK_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
@@ -16,16 +20,34 @@ function toText(value) {
 }
 
 export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000, now = () => Date.now() } = {}) {
-  const blocks = new Map(); // id -> { id, pluginId, priority, maxChars, render, calls, failures, lastError, lastRunAt }
+  // id -> { id, pluginId, owner, label, priority, maxChars, enabled, render, calls, failures,
+  //         lastError, lastRunAt, lastChars, lastStatus, truncated, skipped }
+  const blocks = new Map();
   const stats = { renders: 0, injected: 0, skipped: 0 };
+  // id -> { enabled?: boolean, maxChars?: number|null }，来自 config.json.promptBlocks。
+  let overrides = {};
 
   function validate(definition) {
     if (!definition || typeof definition !== 'object') return '定义必须是对象';
     if (typeof definition.id !== 'string' || !PROMPT_BLOCK_ID_RE.test(definition.id)) return `注入块 id 非法：${definition.id}`;
     if (typeof definition.render !== 'function') return 'render 必须是函数';
     if (definition.priority !== undefined && !Number.isFinite(definition.priority)) return 'priority 必须是数字';
-    if (definition.maxChars !== undefined && (!Number.isInteger(definition.maxChars) || definition.maxChars < 1)) return 'maxChars 必须是正整数';
+    if (definition.maxChars !== undefined && definition.maxChars !== null && (!Number.isInteger(definition.maxChars) || definition.maxChars < 1)) return 'maxChars 必须是正整数或 null';
     return null;
+  }
+
+  function normalizeOwner(definition, pluginId) {
+    if (typeof definition.owner === 'string' && definition.owner.trim()) return definition.owner.trim();
+    return pluginId === 'core' ? 'core' : `plugin:${pluginId}`;
+  }
+
+  /** 生效值：有覆盖用覆盖，否则用注册时的默认值。`maxChars: null` = 不限。 */
+  function effective(block) {
+    const override = overrides[block.id] || {};
+    return {
+      enabled: override.enabled !== undefined ? override.enabled : block.enabledDefault,
+      maxChars: override.maxChars !== undefined ? override.maxChars : block.maxCharsDefault,
+    };
   }
 
   function register(definition, pluginId) {
@@ -41,13 +63,20 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     blocks.set(definition.id, {
       id: definition.id,
       pluginId,
+      owner: normalizeOwner(definition, pluginId),
+      label: typeof definition.label === 'string' && definition.label.trim() ? definition.label.trim() : definition.id,
       priority: definition.priority ?? 100,
-      maxChars: definition.maxChars ?? maxTotalChars,
+      enabledDefault: true,
+      maxCharsDefault: definition.maxChars ?? null,
       render: definition.render,
       calls: 0,
       failures: 0,
       lastError: null,
       lastRunAt: null,
+      lastChars: 0,
+      lastStatus: 'idle',
+      truncated: 0,
+      skipped: 0,
     });
     return true;
   }
@@ -58,15 +87,46 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     }
   }
 
+  /** 整体替换覆盖表（bridge 在配置变更与启动时调用）。 */
+  function setOverrides(next = {}) {
+    overrides = {};
+    if (!next || typeof next !== 'object') return;
+    for (const [id, value] of Object.entries(next)) {
+      if (!PROMPT_BLOCK_ID_RE.test(id) || !value || typeof value !== 'object') continue;
+      const conf = {};
+      if (typeof value.enabled === 'boolean') conf.enabled = value.enabled;
+      if (value.maxChars === null) conf.maxChars = null;
+      else if (Number.isInteger(value.maxChars) && value.maxChars > 0) conf.maxChars = value.maxChars;
+      if (Object.keys(conf).length) overrides[id] = conf;
+    }
+  }
+
   function list() {
     return [...blocks.values()]
       .sort((a, b) => (a.priority - b.priority) || a.id.localeCompare(b.id))
-      .map(({ render, ...rest }) => rest);
+      .map(({ render, enabledDefault, maxCharsDefault, ...rest }) => {
+        const live = effective({ ...rest, enabledDefault, maxCharsDefault });
+        return { ...rest, enabled: live.enabled, maxChars: live.maxChars };
+      });
+  }
+
+  function begin(block) {
+    block.calls += 1;
+    block.lastRunAt = new Date(now()).toISOString();
+  }
+
+  function finish(block, status, chars, text = '') {
+    block.lastStatus = status;
+    block.lastChars = chars;
+    if (status === 'truncated') block.truncated += 1;
+    if (status === 'budget') block.skipped += 1;
+    return text;
   }
 
   /**
    * 渲染所有块。单个块失败只记在它自己头上，不影响其它块；超出总预算的块整块跳过
-   * （宁可少一块，也不截半句话）。返回的 blocks 报告用于控制台与排查。
+   * （宁可少一块，也不截半句话）。关闭的块直接跳过（status='off'）。
+   * 返回的 blocks 报告用于控制台与排查。
    */
   async function render(context = {}) {
     const ordered = [...blocks.values()].sort((a, b) => (a.priority - b.priority) || a.id.localeCompare(b.id));
@@ -76,36 +136,41 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     stats.renders += 1;
 
     for (const block of ordered) {
-      block.calls += 1;
-      block.lastRunAt = new Date(now()).toISOString();
+      const live = effective(block);
+      if (!live.enabled) {
+        report.push({ id: block.id, owner: block.owner, status: 'off', chars: 0 });
+        continue;
+      }
+      begin(block);
       let text = '';
       try {
         text = toText(await block.render(context));
       } catch (error) {
         block.failures += 1;
         block.lastError = String(error?.message ?? error).slice(0, 300);
-        report.push({ id: block.id, pluginId: block.pluginId, status: 'error', chars: 0 });
+        finish(block, 'error', 0);
+        report.push({ id: block.id, owner: block.owner, status: 'error', chars: 0 });
         continue;
       }
       if (!text.trim()) {
-        report.push({ id: block.id, pluginId: block.pluginId, status: 'empty', chars: 0 });
+        finish(block, 'empty', 0);
+        report.push({ id: block.id, owner: block.owner, status: 'empty', chars: 0 });
         continue;
       }
-      const clipped = text.length > block.maxChars ? text.slice(0, block.maxChars) : text;
+      const limit = live.maxChars;
+      const clipped = limit !== null && text.length > limit ? text.slice(0, limit) : text;
       if (total + clipped.length > maxTotalChars) {
         stats.skipped += 1;
-        report.push({ id: block.id, pluginId: block.pluginId, status: 'budget', chars: 0 });
+        finish(block, 'budget', 0);
+        report.push({ id: block.id, owner: block.owner, status: 'budget', chars: 0 });
         continue;
       }
       parts.push(clipped);
       total += clipped.length;
       stats.injected += 1;
-      report.push({
-        id: block.id,
-        pluginId: block.pluginId,
-        status: clipped.length < text.length ? 'truncated' : 'injected',
-        chars: clipped.length,
-      });
+      const status = clipped.length < text.length ? 'truncated' : 'injected';
+      finish(block, status, clipped.length);
+      report.push({ id: block.id, owner: block.owner, status, chars: clipped.length });
     }
 
     return { text: parts.join('\n\n'), blocks: report, chars: total };
@@ -119,9 +184,10 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
   function renderBlockSync(id, context = {}) {
     const block = blocks.get(id);
     if (!block) return { id, status: 'missing', text: '', chars: 0 };
+    const live = effective(block);
+    if (!live.enabled) return { id, owner: block.owner, status: 'off', text: '', chars: 0 };
     let text = '';
-    block.calls += 1;
-    block.lastRunAt = new Date(now()).toISOString();
+    begin(block);
     try {
       const value = block.render(context);
       if (value && typeof value.then === 'function') throw new Error('同步渲染不接受 Promise 返回值');
@@ -129,32 +195,41 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     } catch (error) {
       block.failures += 1;
       block.lastError = String(error?.message ?? error).slice(0, 300);
-      return { id, pluginId: block.pluginId, status: 'error', text: '', chars: 0 };
+      finish(block, 'error', 0);
+      return { id, pluginId: block.pluginId, owner: block.owner, status: 'error', text: '', chars: 0 };
     }
-    if (!text.trim()) return { id, pluginId: block.pluginId, status: 'empty', text: '', chars: 0 };
-    const clipped = text.length > block.maxChars ? text.slice(0, block.maxChars) : text;
+    if (!text.trim()) {
+      finish(block, 'empty', 0);
+      return { id, pluginId: block.pluginId, owner: block.owner, status: 'empty', text: '', chars: 0 };
+    }
+    const limit = live.maxChars;
+    const clipped = limit !== null && text.length > limit ? text.slice(0, limit) : text;
     stats.injected += 1;
+    const status = clipped.length < text.length ? 'truncated' : 'injected';
+    finish(block, status, clipped.length);
     return {
       id,
       pluginId: block.pluginId,
-      status: clipped.length < text.length ? 'truncated' : 'injected',
+      owner: block.owner,
+      status,
       text: clipped,
       chars: clipped.length,
     };
   }
 
   function status() {
+    const items = list();
     return {
-      total: blocks.size,
+      total: items.length,
       maxTotalChars,
       renders: stats.renders,
       injected: stats.injected,
       skipped: stats.skipped,
-      blocks: list().map(({ id, pluginId, priority, maxChars, calls, failures, lastError, lastRunAt }) => ({
-        id, pluginId, priority, maxChars, calls, failures, lastError, lastRunAt,
+      blocks: items.map(({ id, pluginId, owner, label, priority, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated }) => ({
+        id, pluginId, owner, label, priority, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated,
       })),
     };
   }
 
-  return { register, unregisterPlugin, list, render, renderBlockSync, status };
+  return { register, unregisterPlugin, setOverrides, list, render, renderBlockSync, status };
 }

@@ -122,7 +122,7 @@ import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
 // 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
-import { createPromptBlockRegistry } from './plugins/prompt-blocks.mjs';
+import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from './plugins/prompt-blocks.mjs';
 // 命令注册表（docs/COMMAND_REGISTRY.md）：内置命令收进唯一真源，插件命令后续走同一张表。
 import { createCommandRegistry } from './commands/registry.mjs';
 // 内置命令的「壳」（元数据 + 参数解析 + 回执文案）与 /api/commands 的响应组装，见 docs/COMMAND_REGISTRY.md。
@@ -1633,31 +1633,25 @@ async function main() {
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
   const registerCoreBlocks = () => {
     corePromptBlocks.unregisterPlugin('core');
-    const coreBlockConf = (id) => (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[id] : null) || {};
-    const registerCoreBlock = (id, priority, render) => {
-      const conf = coreBlockConf(id);
-      if (conf.enabled === false) return;
-      const maxChars = Number(conf.maxChars);
-      corePromptBlocks.register({
-        id,
-        priority,
-        ...(Number.isInteger(maxChars) && maxChars > 0 ? { maxChars } : {}),
-        render,
-      }, 'core');
+    // 开关与上限不再决定「注册与否」：块始终在表里，关闭只是不参与渲染（enabled=false），
+    // 控制台才能看到并重新打开它。覆盖值统一从 cfg.promptBlocks 读。
+    const registerCoreBlock = (id, label, priority, render) => {
+      corePromptBlocks.register({ id, label, owner: 'core', priority, render }, 'core');
     };
-    registerCoreBlock('core-stickers', 100, ({ stickerFull, blockPlan }) => {
+    registerCoreBlock('core-stickers', '表情包策略', 100, ({ stickerFull, blockPlan }) => {
       if (!stickerFull) return '';
       // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；blockPlan 为空（测试、旧调用方）时照旧完整给。
       return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
     });
-    registerCoreBlock('core-digest', 200, ({ memoryText }) => memoryText || '');
+    registerCoreBlock('core-digest', '记忆摘要', 200, ({ memoryText }) => memoryText || '');
     // 技能清单排在注入块之间：贴纸（100）之后、记忆摘要（200）之前都不合适，
     // 取 150——它描述「能做什么」，跟着行为提示走比跟着记忆走更自然。
-    registerCoreBlock('core-skills', 150, ({ skillText } = {}) => {
+    registerCoreBlock('core-skills', '技能清单', 150, ({ skillText } = {}) => {
       if (typeof skillText === 'string') return skillText;
       if (cfg.skills?.enabled === false) return '';
       return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200 });
     });
+    corePromptBlocks.setOverrides(cfg.promptBlocks);
   };
   registerCoreBlocks();
   try {
@@ -4736,24 +4730,19 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/plugins') {
           const pluginStatus = plugins ? plugins.status() : { enabled: false, plugins: [] };
           const coreStatus = corePromptBlocks.status();
-          // 内置段落的块化状态一起回：控制台要显示「这段现在占多少字、有没有被关掉」。
-          // catalog 独立于注册表：被关掉的块不在 blocks 里，但控制台仍要能把它打开。
-          const coreBlockCatalog = [
-            { id: 'core-stickers', label: '表情包策略' },
-            { id: 'core-digest', label: '记忆摘要' },
-            { id: 'core-skills', label: '技能清单' },
-          ].map((item) => {
-            const conf = (cfg.promptBlocks && typeof cfg.promptBlocks === 'object' ? cfg.promptBlocks[item.id] : null) || {};
-            const live = coreStatus.blocks.find((block) => block.id === item.id);
-            return {
-              ...item,
-              enabled: conf.enabled !== false,
-              maxChars: Number.isInteger(Number(conf.maxChars)) && Number(conf.maxChars) > 0 ? Number(conf.maxChars) : null,
-              registered: Boolean(live),
-              calls: live?.calls ?? 0,
-            };
+          // 注入块统一清单：core 与插件贡献的块都在这里（owner 区分），控制台据此渲染
+          // 「全部已注册块」表格；关闭的块仍然在列（enabled=false），不会被隐藏。
+          sendJson({
+            ...pluginStatus,
+            coreBlocks: coreStatus,
+            promptBlocks: {
+              maxTotalChars: coreStatus.maxTotalChars,
+              renders: coreStatus.renders,
+              injected: coreStatus.injected,
+              skipped: coreStatus.skipped,
+              blocks: coreStatus.blocks,
+            },
           });
-          sendJson({ ...pluginStatus, coreBlocks: { ...coreStatus, catalog: coreBlockCatalog } });
           return;
         }
         // 插件安装（P2b）：JSON {path} 装服务器本地目录，application/zip 装上传包。
@@ -4809,6 +4798,7 @@ async function main() {
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('config.json 格式错误');
             const merged = { ...(raw.promptBlocks && typeof raw.promptBlocks === 'object' ? raw.promptBlocks : {}) };
             for (const [id, value] of Object.entries(incoming)) {
+              if (!PROMPT_BLOCK_ID_RE.test(id)) continue;
               if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
               const next = { ...(merged[id] ?? {}) };
               if (typeof value.enabled === 'boolean') next.enabled = value.enabled;

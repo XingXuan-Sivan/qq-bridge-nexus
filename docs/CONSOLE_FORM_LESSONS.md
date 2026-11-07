@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十八个真实踩过的坑
+## 1. 四十九个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -282,6 +282,12 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 - 分组折叠用 `groupedTableHtml({ columns, groups, openIndex })` + `initGroupedTables(root)`，组行带 `role="button"` / `aria-expanded`，键盘回车与空格也能切换；页面不要再手拼 `tr.group-row`、不要再写 `.hidden` 切换。
 - 样式写在组件自己的 `table.css` 里，用 `.table-wrap tr.group-row` 这种与页面无关的选择器；页面级 class（`.tool-log-table` 之类）只用来调列宽，不承载结构。
 - 迁移检查清单里加一问：**这张表原来的 class 和 CSS 是不是被留在了页面侧？** 搬 `page.html` 时把表结构一起搬进组件，别只搬数据。
+
+### 1.49 动态插入的开关必须带 `data-field`，否则 `bindSwitches` 不接管
+
+插件页「注入块」表里的启用开关是 `page.js` 用模板字符串拼出来的 `<button role="switch">`，渲染后调了 `bindSwitches(rows)`，但点击完全没反应：`bindSwitches` 的委托选择器是 `[role="switch"][data-field]`，只认 `data-field` 标记（`form.js` 里所有工厂生成的开关都带它）。少这个属性不会报错、`aria-checked` 也不会变，看起来像「保存没生效」。
+
+**规则**：任何手写/动态生成的开关，一律写成 `<button class="field-switch" type="button" role="switch" data-field …>` + `<span class="field-switch-track"></span><span>开</span>`，再对容器 `bindSwitches`；读写用 `getSwitch`/`setSwitch`。排查「点了没反应」时先看三件事：有没有 `data-field`、有没有对**新插入的容器**绑一次、保存时读的是不是 `aria-checked` 而不是某个不存在 `.checked`。
 
 ## 2. 迁移一个页面的检查清单
 

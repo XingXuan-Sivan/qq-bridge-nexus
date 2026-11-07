@@ -1,1 +1,25 @@
-/* 插件页私有样式；当前完全复用 css/app.css，页面专属规则写在这里。 */
+/* 插件页私有样式；通用表格与表单在 components/ 下，这里只补「注入块」表的紧凑排布。 */
+.table-block-settings {
+  width: 100%;
+}
+.table-block-settings th,
+.table-block-settings td {
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+.table-block-settings th {
+  white-space: nowrap;
+}
+.table-block-settings td code {
+  font-size: 12px;
+}
+.table-block-settings td .meta {
+  margin-top: 2px;
+}
+.table-block-settings input[type="number"] {
+  width: 100%;
+  min-width: 88px;
+}
+.table-block-settings .field-switch {
+  margin: 0;
+}

@@ -6,5 +6,32 @@
   "main": "index.mjs",
   "apiVersion": 1,
   "permissions": ["memory:provide", "net:http"],
-  "hooks": []
+  "hooks": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "title": "soulkit 地址",
+        "default": "http://127.0.0.1:3110",
+        "description": "soulkit 服务的根地址；不可用时记忆静默为空。"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "title": "请求超时",
+        "default": 900,
+        "minimum": 50,
+        "maximum": 10000,
+        "description": "单次回忆请求的等待上限。"
+      },
+      "view": {
+        "type": "enum",
+        "title": "回忆视角",
+        "default": "self",
+        "enum": ["self", "full"],
+        "description": "self 只取当前会话视角；full 取完整记忆视图。"
+      }
+    },
+    "additionalProperties": false
+  }
 }

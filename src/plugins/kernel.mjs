@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { validateManifest, resolveMainPath, KNOWN_HOOKS, PLUGIN_ID_RE } from './manifest.mjs';
+import { applyPluginConfig } from './config-schema.mjs';
 import { loadConfig, normalizeConfig, serializeConfig, writeConfigFile, PLUGIN_CONFIG_FILE, LIMIT_SPECS } from './config.mjs';
 import { createAuditLog } from './audit.mjs';
 import { createPersonaRegistry } from './persona.mjs';
@@ -788,6 +789,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       permissions: entry.manifest?.permissions ?? [],
       apiVersion: entry.manifest?.apiVersion ?? null,
       config: entry.config,
+      configSchema: entry.manifest?.configSchema ?? null,
       source: {
         dir: path.join(config.dir, id),
         main: entry.manifest?.main ?? null,
@@ -1009,6 +1011,52 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
      * persona.provider / plugins.<id>.enabled），校验失败整份不落盘。
      * 生效边界：watch、filters、limits、install 立即生效；persona.provider 与插件 enabled 需重启。
      */
+    /**
+     * 写单个插件的 config（plugins.json → plugins.<id>.config）。
+     * 有 configSchema 时先填默认值并按 schema 校验；没有 schema 的旧插件原样透传。
+     * 写完默认重载该插件；禁用中的插件只落盘、不启动。
+     */
+    async updatePluginConfig(id, patch = {}, { reload = true } = {}) {
+      const entry = entryById.get(id);
+      if (!entry) return { ok: false, error: `插件不存在: ${id}` };
+      if (!isPlainObject(patch)) return { ok: false, error: '配置必须是对象' };
+      const schema = entry.manifest?.configSchema ?? null;
+      const merged = { ...(isPlainObject(entry.config) ? entry.config : {}), ...patch };
+      const applied = applyPluginConfig(schema, merged);
+      if (!applied.ok) return { ok: false, error: applied.errors.join('；'), errors: applied.errors };
+      const raw = serializeConfig(config);
+      raw.plugins[id] = { ...(raw.plugins[id] ?? {}), config: applied.value };
+      const { config: next, warnings } = normalizeConfig(raw);
+      if (warnings.length) return { ok: false, error: warnings.join('；'), warnings };
+      try {
+        writeConfigFile(path.join(rootDir, PLUGIN_CONFIG_FILE), next);
+      } catch (error) {
+        return { ok: false, error: `写入 ${PLUGIN_CONFIG_FILE} 失败：${error?.message ?? error}` };
+      }
+      Object.assign(config, next);
+      entry.config = applied.value;
+      audit.append('config', { plugin: id });
+      let reloaded = false;
+      let warning = '';
+      if (reload && entry.status === 'active') {
+        const result = await doReload(id);
+        reloaded = Boolean(result.ok);
+        if (!result.ok) warning = `配置已保存，但插件重载失败：${result.error ?? '未知错误'}`;
+      }
+      return { ok: true, config: applied.value, reloaded, warning };
+    },
+
+    /** 只校验不落盘：弹窗里的“测试”用它检查配置是否合规。 */
+    testPluginConfig(id, patch = {}) {
+      const entry = entryById.get(id);
+      if (!entry) return { ok: false, error: `插件不存在: ${id}` };
+      if (!isPlainObject(patch)) return { ok: false, error: '配置必须是对象' };
+      const applied = applyPluginConfig(entry.manifest?.configSchema ?? null, { ...(entry.config ?? {}), ...patch });
+      return applied.ok
+        ? { ok: true, valid: true, config: applied.value }
+        : { ok: false, valid: false, error: applied.errors.join('；'), errors: applied.errors };
+    },
+
     async updateSettings(patch = {}) {
       if (!isPlainObject(patch)) return { ok: false, error: '请求体必须是对象' };
       const raw = serializeConfig(config);

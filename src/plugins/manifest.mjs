@@ -3,6 +3,7 @@
 // 纯函数、不碰文件系统：这样单测不需要造目录，桥接启动时也只在「读文件」这一层失败。
 // 校验原则是「宁可拒绝，也不半加载」——清单有一处不合法，插件就不该跑起来。
 import path from 'node:path';
+import { normalizeConfigSchema } from './config-schema.mjs';
 
 export const API_VERSION = 1;
 
@@ -75,6 +76,11 @@ export function validateManifest(raw, dirName) {
     fail('description 必须是不超过 200 字符的字符串');
   }
 
+  const schemaResult = normalizeConfigSchema(raw.configSchema);
+  if (!schemaResult.ok) {
+    for (const error of schemaResult.errors) fail(`configSchema.${error}`);
+  }
+
   if (errors.length) return { ok: false, errors, manifest: null };
 
   return {
@@ -89,6 +95,7 @@ export function validateManifest(raw, dirName) {
       permissions: Object.freeze([...new Set(permissions)]),
       hooks: Object.freeze([...new Set(hooks)]),
       description,
+      configSchema: schemaResult.schema,
     }),
   };
 }

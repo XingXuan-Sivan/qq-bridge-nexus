@@ -6,5 +6,25 @@
   "main": "index.mjs",
   "apiVersion": 1,
   "permissions": ["persona:provide", "net:http"],
-  "hooks": []
+  "hooks": [],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "title": "soulkit 地址",
+        "default": "http://127.0.0.1:3110",
+        "description": "soulkit 服务的根地址；不可用时人格回落 roles/*.md。"
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "title": "请求超时",
+        "default": 1200,
+        "minimum": 50,
+        "maximum": 10000,
+        "description": "单次读取人格卡的等待上限，超时即回落。"
+      }
+    },
+    "additionalProperties": false
+  }
 }

@@ -12,7 +12,7 @@
 ## 1. 当前阶段
 
 - 基线设计：[EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md)（2026-11-08 版）
-- 当前阶段：**P3 技能管理子批（已实现并通过门禁，待提交）**；P2 已提交 `de95c4a`。
+- 当前阶段：**P3（技能管理、插件 configSchema 已完成；预设结构化/YAML 编辑器待做）**；P2 已提交 `de95c4a`，技能与插件配置子批待提交。
 - P0 目标：修复 DSH 自动压缩被 `qq-tool-restrict.mjs` 拒绝的问题，让 `compress` 在 QQ 会话 preset 中可用；不提前做 Hub/catalog/MCP CRUD。
 - P0 完成判据：
   1. `compress` 进入守卫的 `SAFE_EXACT`，且不在 `RESTRICTED_TOOL_NAMES`；
@@ -157,6 +157,19 @@
 - 原因：外部技能是用户数据，不能污染仓库与 DSH 安装目录；ZIP 是当前最省事的导入格式，但必须限制体量与路径；旧 preset 兼容优先于“一律按空名单拒绝”。
 - 影响：外部技能不能通过控制台改名为内置技能，也不会自动同步回仓库；暂不支持从市场/URL 直接安装技能。
 - 验收证据：`test-skill-store.mjs` 3/3（frontmatter、写入/备份/启停/删除、ZIP 边界）；真机 create/detail/duplicate-409/disable/list/readonly-403/import/delete 均通过；Hub `describe` 技能正文 200；static 全过、UI 30/30、audit 100/100。
+- 状态：已接受
+
+### E14 — 插件 configSchema 只实现控制台需要的 JSON Schema 子集
+
+- 阶段：P3（插件配置子批）
+- 计划：插件声明 `configSchema`，控制台复用 `renderFields` 生成表单，配置写入 `plugins.json` 并重载；无 schema 插件保持原样。
+- 实际：
+  - 只支持 `type:object` + 简单属性（string/number/integer/boolean/array/enum），以及 title/description/default/enum/format=textarea/items/min/max/minLength/maxLength/minItems/maxItems/required/additionalProperties；不支持 `$ref`、`oneOf`、嵌套 object、pattern 等完整 JSON Schema。
+  - schema 由 `src/plugins/manifest.mjs` 在清单加载时校验；`src/plugins/config-schema.mjs` 负责填默认值与校验；无 schema 的插件不生成表单，详情保留原始 config JSON。
+  - `PATCH /api/plugins/<id>/config` 保存后对启用插件 `doReload`；`POST /api/plugins/<id>/test` 只校验不落盘。配置保存的「写入 plugins.json」与详情 footer 的启用状态分开。
+- 原因：控制台只需要覆盖插件最常见的标量/枚举/数组配置；引入完整 JSON Schema 依赖会让启动路径与错误信息不可控。
+- 影响：复杂配置仍由插件作者用文本/自定义界面扩展；后续如需 `oneOf`/嵌套对象再补，不在本子批承诺。
+- 验收证据：`test-plugin-config-schema.mjs` 4/4；真机 `GET /api/plugins/soulkit-memory` 返回 schema，`POST .../test` 返回 200/valid，非法值返回 400，`PATCH .../config` 返回 `reloaded:true`；控制台详情表单与日志无 pageerror；static 全过、UI 31/31、audit 101/101。
 - 状态：已接受
 
 ## 3. 待登记（占位，不预先承诺）

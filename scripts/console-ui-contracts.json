@@ -6,6 +6,16 @@
   },
   {
     "method": "POST",
+    "path": "/api/plugins/demo-plugin/test",
+    "body": {
+      "config": {
+        "baseUrl": "http://127.0.0.1:3110",
+        "timeoutMs": 1200
+      }
+    }
+  },
+  {
+    "method": "POST",
     "path": "/api/mode",
     "body": {
       "mode": "chat",

@@ -53,12 +53,129 @@ async function runPluginAction(id, action, button) {
 }
 
 let pluginDetailId = null;
+let pluginDetailSchema = null;
+
+function pluginConfigField(key, property, value) {
+  const name = `cfg__${key}`;
+  const label = property.title || key;
+  const hint = property.description || '';
+  if (property.type === 'boolean') {
+    return { type: 'switch', name, label, hint, checked: value === true, onLabel: '开', offLabel: '关' };
+  }
+  if (property.type === 'enum') {
+    return {
+      type: 'select', name, label, hint,
+      value: value === undefined ? '' : String(value),
+      options: property.enum.map((item) => ({ value: String(item), label: String(item) })),
+    };
+  }
+  if (property.type === 'array') {
+    return { type: 'textarea', name, label, hint, rows: 4, mono: true, value: JSON.stringify(value ?? [], null, 2) };
+  }
+  if (property.type === 'number' || property.type === 'integer') {
+    return {
+      type: 'number', name, label, hint,
+      value: value === undefined ? '' : value,
+      min: property.minimum, max: property.maximum,
+      step: property.type === 'integer' ? 1 : 'any',
+      integer: property.type === 'integer',
+    };
+  }
+  if (property.format === 'textarea') {
+    return { type: 'textarea', name, label, hint, rows: 4, value: value === undefined ? '' : String(value) };
+  }
+  return { type: 'text', name, label, hint, value: value === undefined ? '' : String(value) };
+}
+
+function readPluginConfig(schema) {
+  const patch = {};
+  for (const [key, property] of Object.entries(schema?.properties ?? {})) {
+    const el = document.getElementById(`cfg__${key}`);
+    if (!el) continue;
+    if (property.type === 'boolean') { patch[key] = getSwitch(el); continue; }
+    if (property.type === 'array') {
+      const raw = String(el.value ?? '').trim();
+      patch[key] = raw ? JSON.parse(raw) : [];
+      continue;
+    }
+    if (property.type === 'number' || property.type === 'integer') {
+      const raw = String(el.value ?? '').trim();
+      if (raw !== '') patch[key] = Number(raw);
+      continue;
+    }
+    if (property.type === 'enum') {
+      patch[key] = property.enum.find((item) => String(item) === String(el.value)) ?? el.value;
+      continue;
+    }
+    patch[key] = String(el.value ?? '');
+  }
+  return patch;
+}
+
+function renderPluginConfig(plugin) {
+  const host = document.getElementById('pluginConfigMount');
+  if (!host) return;
+  pluginDetailSchema = plugin.configSchema ?? null;
+  if (!pluginDetailSchema) {
+    host.innerHTML = `<div class="plugin-config-none">该插件未声明配置项。${Object.keys(plugin.config ?? {}).length ? '下面是 plugins.json 里的原始配置。' : ''}</div>`;
+    if (Object.keys(plugin.config ?? {}).length) {
+      const pre = document.createElement('pre');
+      pre.className = 'plugin-log-pre';
+      pre.id = 'pluginConfigRaw';
+      pre.textContent = JSON.stringify(plugin.config, null, 2);
+      host.appendChild(pre);
+    }
+    return;
+  }
+  const fields = [{ type: 'section', label: '插件配置', card: true, hint: '由插件清单的 configSchema 生成；保存后写入 plugins.json 并重载该插件。' }];
+  for (const [key, property] of Object.entries(pluginDetailSchema.properties ?? {})) {
+    fields.push(pluginConfigField(key, property, plugin.config?.[key] ?? property.default));
+  }
+  fields.push({
+    type: 'action',
+    items: [
+      { id: 'pluginConfigSave', label: '保存配置', variant: 'primary' },
+      { id: 'pluginConfigTest', label: '测试配置' },
+    ],
+    status: 'pluginConfigMsg',
+  });
+  renderFields(host, fields, { columns: 1 });
+  bindSwitches(host);
+  host.querySelector('#pluginConfigSave')?.addEventListener('click', () => { savePluginConfig(false).catch(() => {}); });
+  host.querySelector('#pluginConfigTest')?.addEventListener('click', () => { savePluginConfig(true).catch(() => {}); });
+}
+
+async function savePluginConfig(testOnly) {
+  if (!pluginDetailId || !pluginDetailSchema) return;
+  const msg = document.getElementById('pluginConfigMsg');
+  let patch;
+  try {
+    patch = readPluginConfig(pluginDetailSchema);
+  } catch (error) {
+    if (msg) msg.textContent = `配置不是合法 JSON：${error?.message || '解析失败'}`;
+    return;
+  }
+  if (msg) msg.textContent = testOnly ? '测试中…' : '保存中…';
+  try {
+    const data = testOnly
+      ? await api(`/api/plugins/${encodeURIComponent(pluginDetailId)}/test`, 'POST', { config: patch })
+      : await api(`/api/plugins/${encodeURIComponent(pluginDetailId)}/config`, 'PATCH', { config: patch });
+    if (!data?.ok) throw new Error(data?.error || '未知错误');
+    if (msg) msg.textContent = testOnly ? '配置校验通过' : (data.warning || '已保存并重载');
+    showConsoleToast(testOnly ? '配置校验通过' : `${pluginDetailId} 配置已保存`);
+    if (!testOnly) refreshPlugins().catch(() => {});
+  } catch (error) {
+    if (msg) msg.textContent = `${testOnly ? '测试' : '保存'}失败：${error?.message || '未知错误'}`;
+  }
+}
 
 async function openPluginDetail(id) {
   const body = document.getElementById('pluginDetailBody');
+  const logs = document.getElementById('pluginDetailLogs');
   const overlay = document.getElementById('pluginDetailOverlay');
   if (!body || !overlay) return;
   body.textContent = '加载中…';
+  if (logs) logs.textContent = '读取中…';
   openModal(overlay);
   try {
     const data = await api(`/api/plugins/${encodeURIComponent(id)}`);
@@ -76,24 +193,30 @@ async function openPluginDetail(id) {
       `调用 ${plugin.counters?.hookCalls ?? 0} 次 · 失败 ${plugin.counters?.hookErrors ?? 0} 次 · 重载 ${plugin.counters?.reloads ?? 0} 次`,
       plugin.updatedAt ? `最近变更：${plugin.updatedAt}` : '',
       plugin.error ? `最近错误：${plugin.error}` : '',
-      '',
-      '最近审计：',
-      ...audit.map((item) => {
-        const fields = Object.entries(item)
-          .filter(([key]) => key !== 'ts' && key !== 'event')
-          .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
-          .join(' ');
-        return `  ${item.ts || ''} ${item.event || ''} ${fields}`.trimEnd();
-      }),
     ].filter((line) => line !== '');
     body.textContent = lines.join('\n');
+    if (logs) {
+      logs.textContent = audit.length
+        ? audit.map((item) => {
+          const fields = Object.entries(item)
+            .filter(([key]) => key !== 'ts' && key !== 'event')
+            .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+            .join(' ');
+          return `${item.ts || ''} ${item.event || ''} ${fields}`.trimEnd();
+        }).join('\n')
+        : '暂无审计记录';
+    }
     pluginDetailId = plugin.id;
+    renderPluginConfig(plugin);
     const persist = document.getElementById('pluginPersistEnabled');
     if (persist) setSwitch(persist, plugin.config?.enabled !== false);
     const persistMsg = document.getElementById('pluginPersistMsg');
     if (persistMsg) persistMsg.textContent = '';
   } catch (error) {
     body.textContent = `读取失败：${error?.message || '未知错误'}`;
+    if (logs) logs.textContent = '—';
+    const host = document.getElementById('pluginConfigMount');
+    if (host) host.innerHTML = '';
   }
 }
 

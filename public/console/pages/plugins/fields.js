@@ -42,19 +42,22 @@ const INSTALL_PATH_FIELDS = [
 ];
 
 const DETAIL_HTML = `<div class="modal-overlay" id="pluginDetailOverlay">
-  <div class="modal u-maxw-720" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
+  <div class="modal u-maxw-860" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
     <header class="modal-head">
       <h3 id="pluginDetailTitle">插件详情</h3>
       <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
     </header>
     <div class="modal-body">
-      <div class="meta u-maxh-60vh-scroll" id="pluginDetailBody"></div>
+      <div class="meta plugin-detail-summary" id="pluginDetailBody"></div>
+      <div id="pluginConfigMount"></div>
+      <div class="plugin-log-head">最近审计</div>
+      <pre class="plugin-log-pre" id="pluginDetailLogs">—</pre>
       <div id="pluginPersistMount"></div>
     </div>
     <footer class="modal-foot">
       <span class="modal-status" id="pluginPersistMsg"></span>
       <button id="pluginDetailClose" class="btn" type="button">关闭</button>
-      <button id="pluginPersistSave" class="btn primary" type="button">保存</button>
+      <button id="pluginPersistSave" class="btn" type="button">保存启用状态</button>
     </footer>
   </div>
 </div>`;

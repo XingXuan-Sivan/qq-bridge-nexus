@@ -82,7 +82,9 @@ const tests = [
   // L1 只读 agent preset 的工具白名单守卫（不依赖 Windows 沙箱）。
   'test-agent-readonly-guard.mjs',
   // 插件内核（v1.2.0）：清单/配置坏输入只降级、钩子超时隔离、人格 provider 注册表、关闭流程。
+  // 插件内核与配置 schema：清单校验、默认值/边界、无 schema 兼容。
   'test-plugin-kernel.mjs',
+  'test-plugin-config-schema.mjs',
   // 人格三层解析：会话覆盖 → provider → 全局本地卡，off 硬覆盖，缺卡时继续往下落。
   'test-persona-resolve.mjs',
   // soulkit 人格适配器：协议三态、标题行剥离、ETag、坏响应抛错。

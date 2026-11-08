@@ -202,3 +202,11 @@ npm run test:console-ui
 - 控制台：技能页改为表格（技能/来源/状态/说明/路径/操作）+ 搜索/来源/状态筛选/刷新/自定义 meta；外部技能行「编辑/停用/删除」，只读行「查看」；编辑/导入弹窗复用表单与 modal 组件；说明 3 行截断、路径省略。
 - 验收：`test-skill-store` 3/3、技能/catalog/hub 相关 14/14、static 全过、UI 30/30、audit 100/100；真机 create/detail/duplicate-409/disable/list/readonly-403/import/delete 与 Hub 技能正文均通过。
 - 偏差：E13（只写外部目录、ZIP/体量限制、core-skills 未配置时保持全量）。P0 `compress` 仍 Partial；插件 `configSchema` 与预设结构化/YAML 编辑器留待后续子批。
+
+### 6.10 扩展平台 P3：插件 configSchema 通用表单（2026-11-09，已完成）
+
+- 清单：`plugin.json` 可声明 `configSchema`（JSON Schema 子集：object/properties 的 string/number/integer/boolean/array/enum，含 title/description/default/min/max/minLength/maxLength/minItems/maxItems/required/additionalProperties）；`src/plugins/manifest.mjs` 校验并暴露给控制台，无 schema 的旧插件继续原样透传。
+- 后端：`src/plugins/config-schema.mjs` 负责 schema 规范化与配置填充/校验；`kernel.updatePluginConfig(id,patch,{reload})` 写 `plugins.json` 的 `plugins.<id>.config`、审计并重载启用插件；`testPluginConfig(id,patch)` 只校验不落盘。API：`PATCH /api/plugins/<id>/config`、`POST /api/plugins/<id>/test`。
+- 控制台：插件详情改为摘要 + 由 schema 动态生成的配置表单（复用 `renderFields`，单列避免 148px 标签列压窄输入）+ 保存/测试按钮 + 最近审计日志区；无 schema 插件显示“未声明配置项”并保留原始 config JSON。内置 `soulkit-persona`、`soulkit-memory` 已补示例 schema（baseUrl/timeoutMs，memory 另有 view）。
+- 验收：`test-plugin-config-schema` 4/4、插件内核/清单 21/21、static 全过、UI **31/31**、audit **101/101**；真机 `GET /api/plugins/<id>` 返回 schema，`POST .../test` 与 `PATCH .../config` 均 200，`reloaded:true`；插件详情表单读出 baseUrl/timeoutMs/view、日志与控制台无 pageerror。
+- 偏差：E14（schema 只覆盖控制台需要的 JSON Schema 子集；无 schema 插件不做表单）。P0 `compress` 仍 Partial；预设结构化/YAML 编辑器留待后续子批。

@@ -5375,7 +5375,7 @@ async function main() {
           }
           return;
         }
-        const pluginAction = url.pathname.match(/^\/api\/plugins\/([a-z][a-z0-9-]{1,39})(?:\/(enable|disable|reload))?$/);
+        const pluginAction = url.pathname.match(/^\/api\/plugins\/([a-z][a-z0-9-]{1,39})(?:\/(enable|disable|reload|config|test))?$/);
         if (pluginAction) {
           const [, pluginId, action] = pluginAction;
           if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
@@ -5390,12 +5390,26 @@ async function main() {
             sendJson(result, result.ok ? 200 : 400);
             return;
           }
-          if (req.method === 'POST' && action) {
+          if (req.method === 'POST' && action && action !== 'config' && action !== 'test') {
             const result = action === 'enable'
               ? await plugins.enable(pluginId)
               : action === 'disable'
                 ? await plugins.disable(pluginId)
                 : await plugins.reload(pluginId);
+            sendJson(result, result.ok ? 200 : 400);
+            return;
+          }
+          if (req.method === 'PATCH' && action === 'config') {
+            let body = {};
+            try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            const result = await plugins.updatePluginConfig(pluginId, body?.config ?? {});
+            sendJson(result, result.ok ? 200 : 400);
+            return;
+          }
+          if (req.method === 'POST' && action === 'test') {
+            let body = {};
+            try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            const result = plugins.testPluginConfig(pluginId, body?.config ?? {});
             sendJson(result, result.ok ? 200 : 400);
             return;
           }

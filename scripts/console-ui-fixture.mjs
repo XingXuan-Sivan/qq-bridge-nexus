@@ -623,6 +623,31 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         requests.push({ method, path, body });
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
       }
+      const demoPlugin = {
+        id: 'demo-plugin', name: '演示插件', version: '0.1.0', status: 'active',
+        description: '离线预览用的假插件，不加载任何代码。',
+        permissions: ['state'], hooks: [], commands: [], blocks: [], personas: [], taskTypes: [],
+        source: { dir: 'plugins/demo-plugin', main: 'index.mjs' },
+        counters: { hookCalls: 1, hookErrors: 0, reloads: 0 },
+        updatedAt: '2026-11-09T04:00:00.000Z',
+        config: { enabled: true, baseUrl: 'http://127.0.0.1:3110', timeoutMs: 1200 },
+        configSchema: {
+          type: 'object',
+          properties: {
+            baseUrl: { type: 'string', title: '服务地址', default: 'http://127.0.0.1:3110' },
+            timeoutMs: { type: 'integer', title: '超时', default: 1200, minimum: 50, maximum: 10000 },
+          },
+          additionalProperties: false,
+        },
+        audit: [{ ts: '2026-11-09T04:00:01.000Z', event: 'config', plugin: 'demo-plugin' }],
+      };
+      const pluginMatch = path.match(/^\/api\/plugins\/([a-z][a-z0-9-]+)(?:\/(config|test))?$/);
+      if (pluginMatch) {
+        const [, pluginId, suffix] = pluginMatch;
+        if (method === 'GET' && !suffix && pluginId === 'demo-plugin') return json({ ok: true, plugin: demoPlugin });
+        if (method === 'PATCH' && suffix === 'config') return json({ ok: true, config: body?.config ?? {}, reloaded: true });
+        if (method === 'POST' && suffix === 'test') return json({ ok: true, valid: true, config: body?.config ?? {} });
+      }
       if (method === 'DELETE' && path.startsWith('/api/extensions/mcp/')) {
         return json({ ok: true, id: decodeURIComponent(path.split('/').pop()) });
       }
@@ -640,11 +665,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             enabled: true,
             dir: 'plugins',
-            plugins: [{
-              id: 'demo-plugin', name: '演示插件', version: '0.1.0', status: 'active',
-              description: '离线预览用的假插件，不加载任何代码。',
-              permissions: ['state'], hooks: [], commands: 0, blocks: [], personas: [], taskTypes: [],
-            }],
+            plugins: [demoPlugin],
             persona: { plugin: null },
             coreBlocks: { blocks: [], catalog: [] },
             taskTypes: [],

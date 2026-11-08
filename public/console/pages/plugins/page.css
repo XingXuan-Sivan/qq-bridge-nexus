@@ -23,3 +23,32 @@
 .table-block-settings .field-switch {
   margin: 0;
 }
+.plugin-detail-summary {
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+.plugin-log-head {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.plugin-log-pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 30vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.plugin-config-none {
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+}

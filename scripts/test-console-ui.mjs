@@ -198,6 +198,24 @@ try {
     await page.click('#mcpEditor [data-modal-close]');
   });
 
+  await test('Plugin detail renders its configSchema form and posts a draft test', async () => {
+    await navigate('plugins');
+    await page.waitForSelector('#pluginsList [data-plugin-action="detail"]');
+    await page.click('#pluginsList [data-plugin-action="detail"]');
+    await page.waitForFunction(() => document.getElementById('pluginDetailOverlay')?.classList.contains('open'));
+    await page.waitForSelector('#cfg__baseUrl');
+    assert.equal(await page.locator('#cfg__baseUrl').inputValue(), 'http://127.0.0.1:3110');
+    assert.equal(await page.locator('#cfg__timeoutMs').inputValue(), '1200');
+    assert.equal(await page.locator('#pluginConfigTest').count(), 1, '配置区应有测试按钮');
+    await page.click('#pluginConfigTest');
+    await page.waitForTimeout(250);
+    const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
+    const call = recorded.requests.find((entry) => entry.method === 'POST' && entry.path === '/api/plugins/demo-plugin/test');
+    assert.ok(call, '测试按钮应 POST /api/plugins/demo-plugin/test');
+    assert.equal(call.body.config.timeoutMs, 1200);
+    await page.click('#pluginDetailClose');
+  });
+
   await test('Field rows centre labels and keep two columns', async () => {
     await hydrate('social-v2');
     const geom = await page.evaluate(() => {

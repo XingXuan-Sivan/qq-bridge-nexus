@@ -95,6 +95,7 @@
 
 /* 会话列：会话名一行，平台/类型等标签另起一行。 */
 .session-name { font-weight: 600; line-height: 1.4; }
+.persona-name { line-height: 1.4; }
 .session-tags {
   display: flex;
   align-items: center;

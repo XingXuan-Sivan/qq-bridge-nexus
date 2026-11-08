@@ -319,7 +319,9 @@ test('⑤ 控制台：人格页把按会话设置人格迁到会话详情', () =
   assert.match(html, /data-group="assign"/, 'persona 页保留入口卡');
   assert.ok(html.includes('去会话与审批'), 'persona 页说明已迁移');
   assert.match(html, /href="#sessions"/, 'persona 页给出跳转');
-  assert.ok(html.includes('data-detail-save="persona"'), '会话详情有人格保存按钮');
+  assert.ok(html.includes('id="sessionDetailSave"'), '会话详情底栏有统一保存按钮');
+  assert.ok(html.includes('detailPersonaMode'), '会话详情有人格模式选择');
+  assert.ok(html.includes('id="detailPersonaName"'), '会话详情有人格名输入');
   assert.match(html, /\/profile`, 'PATCH'/, '人格走档案 PATCH');
-  assert.match(html, /data-detail-save="prompt"/, '提示词也在会话详情');
+  assert.ok(html.includes('id="detailPrompt"'), '提示词也在会话详情');
 });

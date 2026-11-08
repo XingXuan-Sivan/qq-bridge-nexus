@@ -42,8 +42,8 @@ function personaCell(entry) {
   if (!p.source || p.source === 'none') return '<span class="meta">未挂卡</span>';
   const name = p.name ? esc(p.name) : '<span class="meta">（未命名）</span>';
   const source = p.source === 'provider' ? '<span class="pill b">provider</span>' : '<span class="pill">全局卡</span>';
-  const stale = p.stale ? ' <span class="pill r">缓存</span>' : '';
-  return `${name} ${source}${stale}`;
+  const stale = p.stale ? '<span class="pill r">缓存</span>' : '';
+  return `<div class="persona-name">${name}</div><div class="session-tags">${source}${stale}</div>`;
 }
 
 function whenCell(ts) {
@@ -410,10 +410,11 @@ async function saveRename() {
 }
 
 // ── 详情（P1） ────────────────────────────────────────────────────────────
-// 一卡一件事、每卡独立保存：改准入不会顺手把没保存的提示词一起写掉。
+// 详情里的字段统一由底栏「保存」提交：一次只写变化的字段，没改动就不发请求。
 let detailKey = null;
 let detailCache = null;
 let detailDirty = false;
+let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
 
 function detailRow(label, control, hint = '') {
   return `<div class="control-row"><span class="control-label">${esc(label)}</span>`
@@ -444,7 +445,6 @@ function detailAccessCard(access) {
           ${detailAccessItem('proactive', '主动行为', access)}
         </div>
         <div class="field-hint">被动行为 ${accessModeLabel(passiveMode)} · 主动行为 ${accessModeLabel(proactiveMode)}　<button class="access-link" type="button" data-open-global-access>调整全局准入</button></div>
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="access">保存准入</button></div>
       </div>`;
 }
 function detailDshLabel(health, sessionId) {
@@ -501,7 +501,9 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
 function renderDetail(data) {
   const body = document.getElementById('sessionDetailBody');
   if (!body) return;
-  detailDirty = false; // 重新渲染后表单与缓存一致，脏标记清零
+  // 渲染期间会派发 change 让下拉联动，监听器要忽略这些事件；渲染完成后再清一次脏标记。
+  detailRendering = true;
+  detailDirty = false;
   const wake = data.wake && typeof data.wake === 'object' ? data.wake : {};
   const triggers = wake.triggers && typeof wake.triggers === 'object' ? wake.triggers : {};
   const access = data.access || {};
@@ -518,7 +520,6 @@ function renderDetail(data) {
         <h4>显示名</h4>
         <div class="meta">自定义名会同步写 DSH 侧栏标题；留空则用默认的「QQ·群 / QQ·私聊 + ID」。</div>
         ${detailRow('名称', `<input id="detailDisplayName" type="text" maxlength="60" value="${esc(data.displayName || '')}" placeholder="留空使用默认名">`)}
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="displayName">保存名称</button></div>
       </div>
 
       ${detailAccessCard(access)}
@@ -531,7 +532,6 @@ function renderDetail(data) {
         ${detailRow('模型', detailSelect('detailModelProvider', data.model?.provider || '', [['', '跟随全局'], ...(detailCatalog || []).map((p) => [p.id, p.name || p.id])]), `当前生效：${esc(data.effectiveModel?.provider || '—')} / ${esc(data.effectiveModel?.model || '—')}`)}
         ${detailRow('具体模型', detailSelect('detailModel', data.model?.model || '', []))}
         ${detailRow('思考强度', detailSelect('detailModelReasoning', data.model?.reasoning || '', []), '保存会话模型会同步写 DSH 全局默认，Web GUI 里新建会话也会用这个模型；本会话按自己的模型能力决定能否看图。')}
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="run">保存运行</button></div>
       </div>
 
       <div class="detail-card">
@@ -539,7 +539,6 @@ function renderDetail(data) {
         <div class="meta">继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。</div>
         ${detailRow('模式', detailSelect('detailPersonaMode', persona.mode || 'inherit', [['inherit', '继承全局'], ['card', '指定人格卡'], ['off', '不挂卡']]))}
         ${detailRow('人格名', `<input id="detailPersonaName" type="text" value="${esc(persona.name || '')}" placeholder="例如：猫娘">`, persona.resolved?.name && persona.mode === 'inherit' ? `当前实际使用：${persona.resolved.name}` : '')}
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="persona">保存人格</button></div>
       </div>
 
       <div class="detail-card">
@@ -547,7 +546,6 @@ function renderDetail(data) {
         <div class="meta">只在 AI 第一次进入这个会话时读一次；留空表示没有初始提示词。</div>
         <textarea id="detailPrompt" maxlength="${Number(prompt.maxChars) || 2000}" placeholder="例如：这是一个偏技术的闲聊群…">${esc(prompt.text || '')}</textarea>
         <div class="field-hint"><span id="detailPromptCount">${String(prompt.text || '').length}</span> / ${Number(prompt.maxChars) || 2000} 字</div>
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="prompt">保存提示词</button></div>
       </div>
 
       <div class="detail-card">
@@ -561,7 +559,6 @@ function renderDetail(data) {
           ${detailCheck('detailWakePoke', '拍一拍', triggers.poke === true)}
         </div></div></div>
         ${detailRow('关键词', `<input id="detailWakeKeywords" type="text" value="${esc(Array.isArray(triggers.keywords) ? triggers.keywords.join(', ') : '')}" placeholder="逗号分隔">`)}
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="wake">保存唤醒</button></div>
       </div>
 
       <div class="detail-card">
@@ -605,6 +602,10 @@ function renderDetail(data) {
   });
   void loadDetailMemory(data.key);
   void loadDetailTasks(data.key);
+  detailRendering = false;
+  detailDirty = false;
+  const saveBtn = document.getElementById('sessionDetailSave');
+  if (saveBtn) saveBtn.disabled = false;
 }
 
 async function loadDetailTasks(key) {
@@ -648,6 +649,8 @@ async function openDetail(key) {
   if (body) body.innerHTML = '<div class="meta">读取中…</div>';
   const msg = document.getElementById('sessionDetailMsg');
   if (msg) msg.textContent = '';
+  const saveBtn = document.getElementById('sessionDetailSave');
+  if (saveBtn) saveBtn.disabled = true;
   openModal(overlay);
   try {
     const [data] = await Promise.all([
@@ -662,68 +665,112 @@ async function openDetail(key) {
   }
 }
 
-async function saveDetail(kind) {
-  if (!detailKey) return;
+/** 把详情表单与最近一次读取的档案做 diff，只产出生效的字段。 */
+function buildDetailPatch() {
+  const data = detailCache || {};
+  const patch = {};
+  const displayName = String(document.getElementById('detailDisplayName')?.value ?? '').trim();
+  if (displayName !== String(data.displayName || '')) patch.displayName = displayName;
+
+  const mode = document.getElementById('detailMode')?.value || 'inherit';
+  if (mode !== (data.mode || 'inherit')) patch.mode = mode;
+
+  const presetId = document.getElementById('detailPresetId')?.value || '';
+  if (presetId !== (data.presetId || '')) patch.presetId = presetId;
+
+  const provider = document.getElementById('detailModelProvider')?.value || '';
+  const model = provider
+    ? {
+      provider,
+      model: document.getElementById('detailModel')?.value || '',
+      reasoning: document.getElementById('detailModelReasoning')?.value || '',
+    }
+    : null;
+  const cachedModel = data.model?.provider
+    ? {
+      provider: data.model.provider,
+      model: data.model.model || '',
+      reasoning: data.model.reasoning || '',
+    }
+    : null;
+  if (JSON.stringify(model) !== JSON.stringify(cachedModel)) patch.model = model;
+
+  const personaMode = document.getElementById('detailPersonaMode')?.value || 'inherit';
+  const personaName = String(document.getElementById('detailPersonaName')?.value ?? '').trim();
+  if (personaMode === 'card' && !personaName) throw new Error('指定人格卡时需要填写人格名');
+  if (personaMode !== (data.persona?.mode || 'inherit') || personaName !== (data.persona?.name || '')) {
+    // 服务端把「name 非空」视为切到 card；继承/关闭只发 mode，由服务端把 name 清空。
+    patch.persona = personaMode === 'card'
+      ? { mode: 'card', name: personaName }
+      : { mode: personaMode };
+  }
+
+  const promptText = String(document.getElementById('detailPrompt')?.value ?? '');
+  if (promptText !== String(data.prompt?.text || '')) patch.prompt = { text: promptText };
+
+  const accessPatch = {};
+  for (const [axis] of ACCESS_AXES) {
+    const allowed = document.querySelector(`[data-detail-access="${axis}"]`)?.checked === true;
+    if (allowed !== (data.access?.[axis] === 'allow')) accessPatch[axis] = allowed ? 'allow' : 'deny';
+  }
+  if (Object.keys(accessPatch).length) patch.access = accessPatch;
+
+  const wake = data.wake && typeof data.wake === 'object' ? data.wake : {};
+  const baseTriggers = wake.triggers && typeof wake.triggers === 'object' ? wake.triggers : {};
+  const nextMode = document.getElementById('detailWakeMode')?.value === 'active' ? 'active' : 'diving';
+  const triggerState = {
+    atMention: document.getElementById('detailWakeAt')?.checked === true,
+    nameMention: document.getElementById('detailWakeName')?.checked === true,
+    question: document.getElementById('detailWakeQuestion')?.checked === true,
+    poke: document.getElementById('detailWakePoke')?.checked === true,
+    keywords: String(document.getElementById('detailWakeKeywords')?.value || '')
+      .split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 50),
+  };
+  const cachedTriggers = {
+    atMention: baseTriggers.atMention === true,
+    nameMention: baseTriggers.nameMention === true,
+    question: baseTriggers.question === true,
+    poke: baseTriggers.poke === true,
+    keywords: Array.isArray(baseTriggers.keywords) ? baseTriggers.keywords : [],
+  };
+  const wakeChanged = nextMode !== (wake.mode === 'active' ? 'active' : 'diving')
+    || JSON.stringify(triggerState) !== JSON.stringify(cachedTriggers);
+  const wakeConfig = wakeChanged
+    ? { ...wake, mode: nextMode, triggers: { ...baseTriggers, ...triggerState } }
+    : null;
+  return { patch, wakeChanged, wakeConfig };
+}
+
+async function saveDetailAll() {
+  if (!detailKey || !detailCache) return;
   const msg = document.getElementById('sessionDetailMsg');
-  const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
+  const btn = document.getElementById('sessionDetailSave');
   try {
-    if (kind === 'wake') {
-      const wake = detailCache?.wake && typeof detailCache.wake === 'object' ? detailCache.wake : {};
-      const triggers = { ...(wake.triggers || {}) };
-      for (const [id, field] of [['detailWakeAt', 'atMention'], ['detailWakeName', 'nameMention'], ['detailWakeQuestion', 'question'], ['detailWakePoke', 'poke']]) {
-        triggers[field] = document.getElementById(id)?.checked === true;
-      }
-      triggers.keywords = String(document.getElementById('detailWakeKeywords')?.value || '')
-        .split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 50);
-      const config = {
-        ...wake,
-        mode: document.getElementById('detailWakeMode')?.value === 'active' ? 'active' : 'diving',
-        triggers,
-      };
-      const r = await api('/api/socialV2/wake-config', 'POST', { key: detailKey, config });
-      if (!r?.ok) throw new Error(r?.error || '保存失败');
-      await openDetail(detailKey);
-      if (msg) msg.textContent = '唤醒已保存';
-      showConsoleToast('唤醒已保存');
+    const { patch, wakeChanged, wakeConfig } = buildDetailPatch();
+    const hasPatch = Object.keys(patch).length > 0;
+    if (!hasPatch && !wakeChanged) {
+      detailDirty = false;
+      if (msg) msg.textContent = '没有改动';
       return;
     }
-    let patch = {};
-    if (kind === 'displayName') {
-      patch = { displayName: document.getElementById('detailDisplayName')?.value || '' };
-    } else if (kind === 'access') {
-      const verdict = (axis) => document.querySelector(`[data-detail-access="${axis}"]`)?.checked ? 'allow' : 'deny';
-      patch = { access: { passive: verdict('passive'), proactive: verdict('proactive') } };
-    } else if (kind === 'run') {
-      const provider = document.getElementById('detailModelProvider')?.value || '';
-      patch = {
-        mode: document.getElementById('detailMode')?.value || 'inherit',
-        presetId: document.getElementById('detailPresetId')?.value || '',
-        model: provider
-          ? {
-            provider,
-            model: document.getElementById('detailModel')?.value || '',
-            reasoning: document.getElementById('detailModelReasoning')?.value || '',
-          }
-          : null,
-      };
-    } else if (kind === 'persona') {
-      patch = {
-        persona: {
-          mode: document.getElementById('detailPersonaMode')?.value || 'inherit',
-          name: document.getElementById('detailPersonaName')?.value || '',
-        },
-      };
-    } else if (kind === 'prompt') {
-      patch = { prompt: { text: document.getElementById('detailPrompt')?.value || '' } };
+    if (btn) btn.disabled = true;
+    if (hasPatch) {
+      const r = await api(`/api/sessions/${encodeURIComponent(detailKey)}/profile`, 'PATCH', patch);
+      if (!r?.ok) throw new Error(r?.error || '保存失败');
     }
-    const r = await api(`/api/sessions/${encodeURIComponent(detailKey)}/profile`, 'PATCH', patch);
-    if (!r?.ok) throw new Error(r?.error || '保存失败');
+    if (wakeChanged) {
+      const r = await api('/api/socialV2/wake-config', 'POST', { key: detailKey, config: wakeConfig });
+      if (!r?.ok) throw new Error(r?.error || '保存唤醒失败');
+    }
+    detailDirty = false;
     await refreshSessions();
-    if (detailKey) await openDetail(detailKey);
+    await openDetail(detailKey);
     if (msg) msg.textContent = '已保存';
     showConsoleToast('已保存');
   } catch (error) {
     if (msg) msg.textContent = `失败：${String(error?.message ?? error)}`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -794,8 +841,9 @@ export function init() {
     onClose: () => { detailKey = null; detailCache = null; detailDirty = false; },
   });
 
-  document.getElementById('sessionDetailBody')?.addEventListener('input', () => { detailDirty = true; });
-  document.getElementById('sessionDetailBody')?.addEventListener('change', () => { detailDirty = true; });
+  document.getElementById('sessionDetailBody')?.addEventListener('input', () => { if (!detailRendering) detailDirty = true; });
+  document.getElementById('sessionDetailBody')?.addEventListener('change', () => { if (!detailRendering) detailDirty = true; });
+  document.getElementById('sessionDetailSave')?.addEventListener('click', () => { void saveDetailAll(); });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
     if (event.target.closest('[data-open-global-access]')) {
       if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
@@ -805,8 +853,6 @@ export function init() {
       document.getElementById('accessPassiveEntries')?.focus();
       return;
     }
-    const save = event.target.closest('[data-detail-save]');
-    if (save) { void saveDetail(save.dataset.detailSave); return; }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
     if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); }

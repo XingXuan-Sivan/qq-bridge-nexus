@@ -298,8 +298,9 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
 await test('初始提示词已迁到会话详情，persona/二代旧面板不再重复', async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const html = readConsoleSource(root);
-  // P1 起初始提示词只在「会话与审批 → 管理 → 初始提示词」里维护。
-  assert.ok(html.includes('data-detail-save="prompt"'), '会话详情有提示词保存按钮');
+  // P1 起初始提示词只在「会话与审批 → 管理 → 初始提示词」里维护；保存统一收到底栏。
+  assert.ok(html.includes('id="sessionDetailSave"'), '会话详情底栏有统一保存按钮');
+  assert.ok(html.includes('id="detailPrompt"'), '会话详情保留提示词编辑框');
   assert.match(html, /\/profile`, 'PATCH'/, '提示词走档案 PATCH');
   assert.match(html, /prompt\.maxChars/, '提示词卡显示上限');
   assert.ok(html.includes('只在 AI 第一次进入这个会话时读一次'), '说明仅首次唤醒生效');

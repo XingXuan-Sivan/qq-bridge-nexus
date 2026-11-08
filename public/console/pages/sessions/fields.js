@@ -18,7 +18,7 @@ export const SESSIONS_FIELDS = {
 <div class="access-columns">
   <div class="access-field">
     <div class="access-head">
-      <span class="access-title">被动</span>
+      <span class="access-title">被动行为</span>
       <button type="button" class="field-switch" id="accessPassiveMode" role="switch" data-field="accessPassiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
         <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
       </button>
@@ -28,7 +28,7 @@ export const SESSIONS_FIELDS = {
   </div>
   <div class="access-field">
     <div class="access-head">
-      <span class="access-title">主动</span>
+      <span class="access-title">主动行为</span>
       <button type="button" class="field-switch" id="accessProactiveMode" role="switch" data-field="accessProactiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
         <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
       </button>

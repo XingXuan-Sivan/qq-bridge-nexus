@@ -93,16 +93,26 @@
   margin-right: 8px;
 }
 
-/* 详情里的准入：两个成员开关，沿用表单行布局。 */
-.detail-access-list { display: grid; gap: 2px; }
-.detail-access-inline {
+/* 会话列：会话名一行，平台/类型等标签另起一行。 */
+.session-name { font-weight: 600; line-height: 1.4; }
+.session-tags {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
   flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
 }
-.detail-access-inline .meta { margin: 0; font-size: 13px; }
+
+/* 详情里的准入：两个并排复选框，状态说明各在下方。 */
+.detail-access-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+  margin: 2px 0 4px;
+}
+.detail-access-item { display: flex; flex-direction: column; gap: 4px; }
+.detail-access-item .field-check-item { min-height: 32px; }
+.detail-access-item .field-hint { font-size: 12px; }
 .access-link {
   appearance: none;
   border: 0;

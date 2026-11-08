@@ -68,20 +68,18 @@ function accessCell(entry) {
 function nameCell(entry) {
   const ownerTag = entry.owner ? ' <span class="pill r">管理员</span>' : '';
   const platformTag = `<span class="pill">${esc(platformOf(entry))}</span>`;
-  const name = entry.displayName
-    ? `<strong>${esc(entry.displayName)}</strong> <span class="meta">${esc(entry.key)}</span>`
-    : `<strong>${esc(entry.key)}</strong>`;
-  return `${name} ${platformTag}${kindPill(entry)}${ownerTag}`;
+  const name = `<strong>${esc(entry.displayName || entry.key)}</strong>`;
+  const keyLine = entry.displayName ? `<span class="meta">${esc(entry.key)}</span>` : '';
+  return `<div class="session-name">${name}</div>`
+    + `<div class="session-tags">${keyLine}${platformTag}${kindPill(entry)}${ownerTag}</div>`;
 }
 
 function dshCell(entry) {
-  if (!entry.sessionId) return '<span class="pill">未建</span> <span class="meta">只有档案</span>';
-  const health = entry.dsh || {};
-  const status = health.status || 'unknown';
+  if (!entry.sessionId) return '<span class="pill">未建</span>';
+  const status = entry.dsh?.status || 'unknown';
   const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
   const pill = status === 'online' ? 'pill g' : status === 'missing' ? 'pill r' : 'pill';
-  const when = health.checkedAt ? ` <span class="meta">${whenCell(health.checkedAt)}</span>` : '';
-  return `<span class="${pill}">${esc(label)}</span>${when}`;
+  return `<span class="${pill}">${esc(label)}</span>`;
 }
 
 
@@ -94,7 +92,7 @@ function platformOptions() {
 // ── 全局准入：两态单源名单 ──────────────────────────────────────────────────
 // 白名单 = 默认拒绝 + 名单内允许；黑名单 = 默认允许 + 名单内拒绝。会话详情的开关
 // 改的也是同一份名单，所以这里不再维护第二套「全局/局部」配置。
-const ACCESS_AXES = [['passive', '被动'], ['proactive', '主动']];
+const ACCESS_AXES = [['passive', '被动行为'], ['proactive', '主动行为']];
 const ACCESS_MODE_LABEL = { allow: '白名单', deny: '黑名单' };
 let accessDraft = null;   // { passive:{mode,entries}, proactive:{mode,entries} }
 let accessSaved = null;   // 上次保存的快照，用来提示“模式已改”
@@ -239,9 +237,6 @@ function renderSessions() {
   const platforms = platformOptions();
   const rows = sessionsCache.map((entry) => {
     const unread = entry.unread ? `<span class="pill r">${entry.unread}</span>` : '<span class="meta">0</span>';
-    const rebuild = entry.sessionId
-      ? ` <button type="button" class="btn small" data-rebuild-key="${esc(entry.key)}">重建</button>`
-      : '';
     const delProfile = entry.hasProfile
       ? ` <button type="button" class="btn small danger" data-drop-key="${esc(entry.key)}">删档案</button>`
       : '';
@@ -254,8 +249,7 @@ function renderSessions() {
         dshCell(entry),
         unread,
         whenCell(entry.lastWakeAt),
-        `<button type="button" class="btn small primary" data-manage-key="${esc(entry.key)}">管理</button>`
-          + ` <button type="button" class="btn small" data-rename-key="${esc(entry.key)}">改名</button>${rebuild}${delProfile}`,
+        `<button type="button" class="btn small" data-manage-key="${esc(entry.key)}">管理</button>${delProfile}`,
       ],
       attrs: { 'data-filter-platform': platformOf(entry), 'data-filter-kind': entry.kind || '' },
     };
@@ -266,10 +260,10 @@ function renderSessions() {
       { label: '模式', width: '110px' },
       { label: '准入（被动 / 主动）', width: '180px' },
       { label: '人格', width: '160px' },
-      { label: 'DSH', width: '120px' },
+      { label: 'DSH', width: '80px' },
       { label: '未读', width: '60px' },
       { label: '最近唤醒', width: '95px' },
-      { label: '操作', width: '290px' },
+      { label: '操作', width: '150px' },
     ],
     rows,
     pageSize: 20,
@@ -298,27 +292,9 @@ function renderSessions() {
   box.querySelectorAll('[data-manage-key]').forEach((btn) => btn.addEventListener('click', () => {
     openDetail(btn.dataset.manageKey);
   }));
-  box.querySelectorAll('[data-rename-key]').forEach((btn) => btn.addEventListener('click', () => {
-    openRename(btn.dataset.renameKey);
-  }));
-  box.querySelectorAll('[data-rebuild-key]').forEach((btn) => btn.addEventListener('click', () => {
-    void rebuildSession(btn.dataset.rebuildKey);
-  }));
   box.querySelectorAll('[data-drop-key]').forEach((btn) => btn.addEventListener('click', () => {
     void dropProfile(btn.dataset.dropKey);
   }));
-}
-
-async function rebuildSession(key) {
-  if (!window.confirm(`重建会归档当前 DSH 会话并新建一个（${key}），继续？`)) return;
-  try {
-    const r = await api(`/api/sessions/${encodeURIComponent(key)}/rebuild`, 'POST');
-    if (!r?.ok) throw new Error(r?.error || '重建失败');
-    showConsoleToast('已重建 DSH 会话');
-    await refreshSessions();
-  } catch (error) {
-    showConsoleToast(`重建失败：${error?.message ?? error}`);
-  }
 }
 
 async function dropProfile(key) {
@@ -459,16 +435,13 @@ function detailCheck(id, label, checked) {
   return `<label class="field-check-item"><input type="checkbox" id="${esc(id)}"${checked ? ' checked' : ''}>${esc(label)}</label>`;
 }
 
-function detailAccessRow(axis, label, summary) {
+function detailAccessItem(axis, label, summary) {
   const allowed = summary?.[axis] === 'allow';
   const reason = accessReason(axis, summary);
-  return `<div class="control-row">`
-    + `<span class="control-label">${esc(label)}</span>`
-    + `<div class="control-grow detail-access-inline">`
-    + `<button type="button" class="field-switch" role="switch" aria-checked="${allowed}" data-detail-access="${axis}">`
-    + `<span class="field-switch-track" aria-hidden="true"></span><span data-detail-access-label>${allowed ? '允许' : '拒绝'}</span></button>`
-    + `<span class="meta" data-detail-access-state>${esc(reason)}</span>`
-    + '</div></div>';
+  return `<div class="detail-access-item">`
+    + `<label class="field-check-item"><input type="checkbox" data-detail-access="${axis}"${allowed ? ' checked' : ''}>${esc(label)}</label>`
+    + `<span class="field-hint" data-detail-access-state="${axis}">${esc(reason)}</span>`
+    + '</div>';
 }
 
 function detailAccessCard(access) {
@@ -476,12 +449,12 @@ function detailAccessCard(access) {
   const proactiveMode = access?.proactiveMode === 'deny' ? 'deny' : 'allow';
   return `<div class="detail-card">
         <h4>准入</h4>
-        <div class="meta">这份名单是全局总闸门，会话内的开关改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。</div>
+        <div class="meta">这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。</div>
         <div class="detail-access-list">
-          ${detailAccessRow('passive', '被动', access)}
-          ${detailAccessRow('proactive', '主动', access)}
+          ${detailAccessItem('passive', '被动行为', access)}
+          ${detailAccessItem('proactive', '主动行为', access)}
         </div>
-        <div class="field-hint">被动 ${accessModeLabel(passiveMode)} · 主动 ${accessModeLabel(proactiveMode)}　<button class="access-link" type="button" data-open-global-access>调整全局准入</button></div>
+        <div class="field-hint">被动行为 ${accessModeLabel(passiveMode)} · 主动行为 ${accessModeLabel(proactiveMode)}　<button class="access-link" type="button" data-open-global-access>调整全局准入</button></div>
         <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="access">保存准入</button></div>
       </div>`;
 }
@@ -730,7 +703,7 @@ async function saveDetail(kind) {
     if (kind === 'displayName') {
       patch = { displayName: document.getElementById('detailDisplayName')?.value || '' };
     } else if (kind === 'access') {
-      const verdict = (axis) => document.querySelector(`[data-detail-access="${axis}"]`)?.getAttribute('aria-checked') === 'true' ? 'allow' : 'deny';
+      const verdict = (axis) => document.querySelector(`[data-detail-access="${axis}"]`)?.checked ? 'allow' : 'deny';
       patch = { access: { passive: verdict('passive'), proactive: verdict('proactive') } };
     } else if (kind === 'run') {
       const provider = document.getElementById('detailModelProvider')?.value || '';
@@ -814,17 +787,12 @@ function refreshActive() {
 }
 
 function toggleDetailAccess(axis) {
-  const btn = document.querySelector(`[data-detail-access="${axis}"]`);
-  if (!btn) return;
-  const allowed = btn.getAttribute('aria-checked') === 'true';
-  const next = !allowed;
+  const box = document.querySelector(`[data-detail-access="${axis}"]`);
+  if (!box) return;
+  const next = box.checked;
   const mode = detailCache?.access?.[`${axis}Mode`] === 'deny' ? 'deny' : 'allow';
   const member = mode === 'allow' ? next : !next;
-  btn.setAttribute('aria-checked', next ? 'true' : 'false');
-  const label = btn.querySelector('[data-detail-access-label]');
-  if (label) label.textContent = next ? '允许' : '拒绝';
-  const state = document.querySelector(`[data-detail-access-state="${axis}"]`)
-    || btn.parentElement?.querySelector('[data-detail-access-state]');
+  const state = document.querySelector(`[data-detail-access-state="${axis}"]`);
   if (state) {
     state.textContent = mode === 'allow'
       ? (member ? '白名单成员：允许（保存后生效）' : '不在白名单：拒绝（保存后生效）')

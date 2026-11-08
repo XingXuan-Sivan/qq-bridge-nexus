@@ -84,19 +84,6 @@
     "method": "POST",
     "path": "/api/whitelist",
     "body": {
-      "allow": {
-        "private": [
-          100001
-        ],
-        "groups": [
-          123456789,
-          100003
-        ]
-      },
-      "deny": {
-        "private": [],
-        "groups": []
-      },
       "ownerQQ": "100001",
       "admins": []
     }

@@ -47,12 +47,11 @@ import { createCommandRegistry } from '../src/commands/registry.mjs';
 import { createBuiltinCommands } from '../src/commands/builtin.mjs';
 // 命令层、会话重置与会话准入闸门都是真实现（纯内存 + 注入依赖），夹具剥掉 import 后要在这里补回同名符号。
 import { createSessionResetter } from '../src/session/reset.mjs';
-// bridge.js 以 `sessionAllowed` 的别名引用它，sandbox 里要用同名键。
-import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
-import { resolveAccess, resolveAccessSummary } from '../src/session/access.mjs';
+import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary } from '../src/session/access.mjs';
+import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
 // 多管理员（P3）：bridge 直接 import，夹具按同名补回。
@@ -196,7 +195,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     sendToQQ, sendStickerV2, collectStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
     getSocialV2State, appendSocialV2Message, recordSentMessagesV2, localMemory,
     buildWakePromptV2, buildWakeSnapshotV2, sendWakePromptV2, socialV2,
-    refreshMode, modeAllowed, trackTurnEvent, replayPendingWakeReasonsV2,
+    refreshMode, trackTurnEvent, replayPendingWakeReasonsV2,
     collectors, setupSleepTimerV2,
     getInitialPrompt, setInitialPrompt, loadInitialPrompts, formatInitialPromptV2,
     initialPrompts, initialPromptMaxChars,
@@ -261,10 +260,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createBuiltinCommands,
     buildCommandsPayload,
     createSessionResetter,
-    // 会话准入闸门（P7 第三步）：bridge.js 只保留薄包装，实现与单测共用同一份。
-    allowed,
-    modeAllowed,
-    sessionAllowed,
     // sessions.json 读写（P7 第三步续）：同样被 bridge.js import，夹具剥 import 后要补回。
     loadSessionState,
     saveSessionState,
@@ -273,8 +268,13 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     normalizeProfile,
     createSessionDirectoryWriter,
     loadSessionDirectory,
+    createAccessConfig,
+    normalizeAccessConfig,
+    normalizeAccessEntries,
     resolveAccess,
     resolveAccessSummary,
+    migrateAccessModel,
+    summarizeAccessConfig,
     migrateSessionProfiles,
     resolveEffectiveMode,
     isUsableMode,

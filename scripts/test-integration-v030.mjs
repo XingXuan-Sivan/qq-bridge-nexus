@@ -442,7 +442,7 @@ await test('owner 管理通道人物命令：/whois /person name /person forget�
   assert.equal(h.ext.people.getPerson(ALICE), null);
   await h.handleIncoming('private', OWNER, ownerPm('/say 31415926 越界'), h.cfg);
   await settle();
-  assert.match(lastOwnerText(h), /不在白名单/);
+  assert.match(lastOwnerText(h), /未授权(被动|主动)行为|不在白名单/);
 });
 
 await test('审计日志覆盖：申请、确认、变更、审批都有记录且哈希链完整', async (h) => {

@@ -15,7 +15,6 @@ function renderAccessFieldGroups() {
 }
 
 // 白名单 / 黑名单现在按会话存在档案里，这里不再编辑；保存管理员时把现值原样带回。
-let wlSnapshot = { allow: { groups: [], private: [] }, deny: { groups: [], private: [] } };
 let adminsDraft = [];
 const ADMIN_CAPS = [['approve', '审批'], ['sessions', '会话'], ['scheduler', '定时任务'], ['memory', '记忆']];
 
@@ -117,10 +116,6 @@ function readAdminsFromDom() {
 export async function refreshWhitelist() {
   try {
     const w = await api('/api/whitelist');
-    wlSnapshot = {
-      allow: { groups: w.allow?.groups || [], private: w.allow?.private || [] },
-      deny: { groups: w.deny?.groups || [], private: w.deny?.private || [] },
-    };
     $('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
     adminsDraft = Array.isArray(w.admins) ? w.admins : [];
     renderAdminRows();
@@ -168,7 +163,6 @@ export function init() {
   bindSwitches(document.getElementById('section-access'));
   $('wlSave').addEventListener('click', async () => {
     const r = await api('/api/whitelist', 'POST', {
-      ...wlSnapshot,
       ownerQQ: $('ownerQQ').value.trim(),
       admins: readAdminsFromDom(),
     });

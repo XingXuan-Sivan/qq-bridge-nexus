@@ -275,9 +275,9 @@ try {
     assert.deepEqual(await clickWrite('#silentOff', '/api/role-mode'), { mode: 'active' });
   });
 
-  await test('Whitelist numeric parsing and security contracts', async () => {
+  await test('Admin list save contract', async () => {
     await fill('ownerQQ', '100001');
-    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { allow: { private: [100001], groups: [123456789, 100003] }, deny: { private: [], groups: [] }, ownerQQ: '100001', admins: [] });
+    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { ownerQQ: '100001', admins: [] });
     await check('secInterceptNotify', false);
     assert.deepEqual(await clickWrite('#secSave', '/api/security'), { interceptNotify: false });
   });

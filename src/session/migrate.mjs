@@ -121,6 +121,18 @@ export function migrateSessionProfiles(input = {}) {
     if (input.dormant?.[key]) patch.dormant = input.dormant[key];
 
     profile = applyPatch(profile, patch, now);
+    // 档案 schema 已去掉三态字段；把迁移读到的旧准入先挂在 legacyAccess 上，
+    // 交给后面的 migrateAccessModel 翻译成 v2 名单，翻译完会删掉。
+    if (patch.blocked === true || patch.access) {
+      const access = patch.access && typeof patch.access === 'object' ? patch.access : {};
+      profile.legacyAccess = {
+        blocked: patch.blocked === true,
+        access: {
+          passive: ['inherit', 'allow', 'deny'].includes(access.passive) ? access.passive : 'inherit',
+          proactive: ['inherit', 'allow', 'deny'].includes(access.proactive) ? access.proactive : 'inherit',
+        },
+      };
+    }
     profiles[key] = profile;
   }
   report.keys = Object.keys(profiles).length;

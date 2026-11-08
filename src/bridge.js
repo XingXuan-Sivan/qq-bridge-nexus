@@ -135,14 +135,14 @@ import { createBuiltinCommands } from './commands/builtin.mjs';
 import { buildCommandsPayload } from './commands/payload.mjs';
 // 会话重置的清理序列（P7 第三步），deps 见 src/session/reset.mjs 的文件头。
 import { createSessionResetter } from './session/reset.mjs';
-// 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
-import { allowed, modeAllowed } from './session/mode-gate.mjs';
+// 会话准入：两态单源名单（白名单/黑名单），不再有 per-profile 三态或白名单投影。
+import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary } from './session/access.mjs';
+import { migrateAccessModel, summarizeAccessConfig } from './session/access-migrate.mjs';
 import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
 // 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
 import { actorForQQ, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
-import { resolveAccess, resolveAccessSummary } from './session/access.mjs';
 import { migrateSessionProfiles } from './session/migrate.mjs';
 import { loadSessionState } from './session/store.mjs';
 import { createSessionRegistry } from './session/registry.mjs';
@@ -1287,9 +1287,6 @@ function loadState() {
   state = loaded.state;
   stateWritable = loaded.writable;
   sessionDirectory = null;
-  // 迁移前不能投影：投影会把 config 里的旧 allow/deny 覆盖成「目录里的空集合」，
-  // 迁移就读不到旧白名单了。迁移完成后由 runSessionDirectoryMigration() 再刷新。
-  if (Number(state.migratedAt) > 0) refreshAccessProjection();
 }
 function saveState() {
   // 统一走原子写；`stateWritable:false`（读失败/损坏）时绝不回写 —— 见 src/session/directory.mjs 文件头。
@@ -1298,7 +1295,6 @@ function saveState() {
     sessionDirectory = createSessionDirectoryWriter({ dir: SESSION_DIR, fs, path, atomicWriteJson, log });
   }
   sessionDirectory.save(state);
-  refreshAccessProjection();
 }
 
 /** 确保某个会话有档案（自动发现的会话也留一条空档案，方便控制台直接看到/编辑）。 */
@@ -1312,40 +1308,6 @@ function ensureSessionProfile(rawKey, patch = {}) {
     return state.profiles[canonical];
   }
   return state.profiles[canonical];
-}
-
-/**
- * 把 `state.profiles` 的被动轴投影成旧的 `cfg.allow/deny` 形状，供现有 `allowed()` / `modeAllowed()`
- * 调用点继续使用（P1 只替换真相来源，不重写 20 多处调用点；P2 再改成显式 access 参数）。
- * 投影只存在内存，不写回 config.json；`defaults.passive=allow` 时用「空 allow + deny 例外」表达黑名单。
- */
-function refreshAccessProjection() {
-  // 迁移完成前，config 里的 allow/deny 才是真相；此时投影会把旧白名单冲掉。
-  if (!(Number(state?.migratedAt) > 0)) return;
-  const cfg = bridgeCfg;
-  if (!cfg || typeof cfg !== 'object') return;
-  const ownerKey = cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null;
-  const groups = [];
-  const privates = [];
-  const denyGroups = [];
-  const denyPrivates = [];
-  const defaultAllow = state?.defaults?.passive === 'allow';
-  for (const [key, profile] of Object.entries(state?.profiles ?? {})) {
-    const parsed = parseKey(key);
-    if (!parsed) continue;
-    const id = String(parsed.id);
-    const target = parsed.kind === 'group' ? groups : privates;
-    const denied = parsed.kind === 'group' ? denyGroups : denyPrivates;
-    if (profile.blocked || profile.access?.passive === 'deny') denied.push(id);
-    else if (profile.access?.passive === 'allow') target.push(id);
-  }
-  if (!defaultAllow && ownerKey) {
-    const ownerId = idOfKey(ownerKey);
-    if (ownerId && !privates.includes(String(ownerId)) && !denyPrivates.includes(String(ownerId))) privates.push(String(ownerId));
-  }
-  cfg.allow = { groups, private: privates };
-  cfg.deny = { groups: denyGroups, private: denyPrivates };
-  cfg.allowAllWhenEmpty = defaultAllow;
 }
 
 // ── 单实例锁 ─────────────────────────────────────────────────────────────────
@@ -2997,11 +2959,11 @@ async function main() {
     return parts.join('\n\n') + '\n\n' + promptText;
   }
 
-  if (!cfg.allow.private.length && !cfg.allow.groups.length && cfg.allowAllWhenEmpty) {
-    log('⚠️  白名单为空且 allowAllWhenEmpty=true：将转发所有私聊/群聊消息给 agent');
-  } else if (!cfg.allow.private.length && !cfg.allow.groups.length) {
-    // 否则这是一个「静默无响应」陷阱：消息全被丢弃，用户只看到 QQ 上毫无反应。
-    log(`⚠️  白名单为空且 allowAllWhenEmpty=false：不会响应任何 QQ 消息。请在 config.json 填 allow.private / allow.groups，或在控制台 http://127.0.0.1:${cfg.consolePort} 填写白名单`);
+  {
+    const passive = state.defaults?.passive ?? { mode: 'deny', entries: [] };
+    const proactive = state.defaults?.proactive ?? { mode: 'deny', entries: [] };
+    const label = (axis) => `${axis.mode === 'deny' ? '黑名单（默认允许）' : '白名单（默认拒绝）'} ${axis.entries.length} 条`;
+    log(`会话准入：被动 ${label(passive)}；主动 ${label(proactive)}`);
   }
   // 未配置管理员 QQ 时，一串功能会「静默失灵」：审批永远无法被回答（agent 一直等到超时）、
   // 管理命令全部被拒、封闭 agent 模式实际不可达。这里在启动日志里说清楚，避免排查时误判。
@@ -3312,28 +3274,33 @@ async function main() {
     if (currentMode === 'reserved2') return true;
     return Object.values(state.profiles ?? {}).some((p) => p?.mode === 'reserved2');
   }
-  /** 档案双轴准入的生效值；显式 deny/黑名单优先，未显式拒绝时兼容尚未清理的旧白名单。 */
+  /** 两态单源名单的生效值；不再有 owner/管理员豁免，也没有旧白名单兜底。 */
   function profileAccessAllowed(axis, key) {
     if (!key || typeof key !== 'string') return false;
-    const profile = state.profiles?.[key];
-    if (profile?.blocked === true) return false;
-    const verdict = resolveAccess(axis, key, state, { ownerPrivate: isOwnerPrivate(key) }) === 'allow';
-    if (verdict) return true;
-    if (profile?.access?.[axis] === 'deny') return false;
-    // 管理员私聊的被动豁免（P3）：owner 永远豁免，管理员按 exemptPassive，默认开。
-    if (axis === 'passive' && isPrivilegedPrivate(key)) return true;
-    if (!(Number(state.migratedAt) > 0)) {
-      const parsed = parseKey(key);
-      return parsed ? allowed(parsed.kind, parsed.id, cfg) : false;
+    try {
+      return resolveAccess(axis, apiKey(key), state) === 'allow';
+    } catch (error) {
+      log(`⚠️ 读取会话准入失败 ${key}：${error?.message ?? error}`);
+      return false;
     }
-    // 迁移完成后 profile 是唯一事实来源；这里再给一次旧白名单兜底，避免升级当次
-    // 因 config 尚未清理而把所有会话判成拒绝。
-    const parsed = parseKey(key);
-    return parsed ? allowed(parsed.kind, parsed.id, cfg) : false;
   }
   function passiveAllowed(key) {
     if (!isUsableMode(effectiveMode(key))) return false;
     return profileAccessAllowed('passive', key);
+  }
+  /** 当前生效的会话 key（供控制台下拉、定时目标、群成员对账等枚举用）。 */
+  function accessKeys(axis = 'passive') {
+    const cfgAxis = state.defaults?.[axis];
+    const entries = Array.isArray(cfgAxis?.entries) ? cfgAxis.entries : [];
+    if (cfgAxis?.mode === 'allow') return entries.slice();
+    const known = new Set([...Object.keys(state.profiles ?? {}), ...sessions.keys()]);
+    return [...known].filter((key) => !entries.includes(key));
+  }
+  function accessIds(axis, kind) {
+    return accessKeys(axis)
+      .map((key) => parseKey(key))
+      .filter((parsed) => parsed && parsed.kind === kind)
+      .map((parsed) => parsed.id);
   }
   function proactiveAllowed(key) {
     const mode = effectiveMode(key);
@@ -3341,8 +3308,6 @@ async function main() {
     return profileAccessAllowed('proactive', key);
   }
   function schedulerTargetAllowed(key) {
-    // 管理员私聊是定时任务的默认收件人：主动轴默认拒绝时也应放行；显式拉黑仍拒绝。
-    if (key === schedulerOwnerKey() && state.profiles?.[key]?.blocked !== true) return true;
     return proactiveAllowed(key);
   }
   let permissionCatalog = null;  // DSH permissionPresets/catalog 的预设名列表；null = 未知
@@ -3473,8 +3438,7 @@ async function main() {
   function schedulerTargetError(key) {
     const m = parseKey(String(key));
     if (!m) return `发送对象「${key}」格式不对（要写成 group:群号 或 private:QQ号）`;
-    if (key === schedulerOwnerKey()) return null;
-    if (!allowed(m.kind, m.id, cfg)) return `${key} 不在白名单里（allow.${m.kind === 'group' ? 'groups' : 'private'}），不能作为定时任务的发送对象`;
+    if (!schedulerTargetAllowed(key)) return `${key} 未授权主动行为（会话详情 → 准入，或全局准入的主动名单）`;
     return null;
   }
   async function deliverScheduled(task, target, { manual, scheduledAt }) {
@@ -3870,8 +3834,7 @@ async function main() {
     }
   }
 
-  /** 当前模式是否允许该会话进入（实现见 src/session/mode-gate.mjs） */
-  // modeAllowed 由模块提供，signature 保持 (key, kind, id, cfg, mode)。
+  /** 当前模式是否允许该会话进入：只读两态全局准入（被动轴）。 */
 
   /**
    * 解析一个 preset 名。
@@ -5045,8 +5008,8 @@ async function main() {
             })(),
             dshReady,
             ownerQQ: cfg.ownerQQ ?? null,
-            allowGroups: cfg.allow?.groups ?? [],
-            allowPrivate: cfg.allow?.private ?? [],
+            allowGroups: accessIds('passive', 'group'),
+            allowPrivate: accessIds('passive', 'private'),
             socialV2Paused: socialV2.paused,
             // 上游健康只给操作者看：它包含网关诊断信息（good/hint），
             // 属于管理侧观测，不该进 QQ 会话里那个受限的智能体视图。
@@ -5916,14 +5879,9 @@ async function main() {
               preset: policyPreset,
               level: policyLevel,
               displayName: profile?.displayName ?? null,
-              blocked: profile?.blocked === true,
               hasProfile: Boolean(profile),
-              // P1：两根轴各自「显式值 + 生效值」，详情页据此渲染三态与来源。
-              access: {
-                ...resolveAccessSummary(key, state, { ownerPrivate: key === ownerKey }),
-                passiveValue: profile?.access?.passive ?? 'inherit',
-                proactiveValue: profile?.access?.proactive ?? 'inherit',
-              },
+              // 两根轴的生效值 + 名单成员关系；详情页开关直接改这份全局名单。
+              access: resolveAccessSummary(key, state),
               // 人格卡的来源：card=全局卡、provider=外部来源（如 soulkit）、session=档案里固定的人格、none=没挂卡。
               // stale 表示 provider 这次没取到、用的是上一版缓存。
               persona,
@@ -5993,12 +5951,9 @@ async function main() {
               key,
               sessionId,
               displayName: profile?.displayName ?? null,
-              blocked: profile?.blocked === true,
               access: {
-                ...resolveAccessSummary(key, state, { ownerPrivate: key === ownerKey }),
-                passiveValue: profile?.access?.passive ?? 'inherit',
-                proactiveValue: profile?.access?.proactive ?? 'inherit',
-                defaults: { ...(state.defaults ?? {}) },
+                ...resolveAccessSummary(key, state),
+                defaults: normalizeAccessConfig(state.defaults) ?? createAccessConfig(),
               },
               persona: {
                 mode: profile?.persona?.mode ?? 'inherit',
@@ -6029,11 +5984,12 @@ async function main() {
             if (!profile) { sendJson({ ok: false, error: '会话档案不存在，请先建立会话' }, 404); return; }
             const body = await readBody();
             const patch = {};
+            let accessChanged = false;
+            let nextAccess = null;
             if (Object.hasOwn(body, 'displayName')) {
               const name = String(body.displayName ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
               patch.displayName = name || null;
             }
-            if (Object.hasOwn(body, 'blocked')) patch.blocked = body.blocked === true;
             if (Object.hasOwn(body, 'model')) {
               if (body.model === null) patch.model = null;
               else {
@@ -6065,13 +6021,21 @@ async function main() {
               }
             }
             if (body.access && typeof body.access === 'object') {
-              patch.access = {};
+              const current = normalizeAccessConfig(state.defaults);
+              if (!current) { sendJson({ ok: false, error: '准入配置尚未迁移，请先重启桥接完成迁移' }, 409); return; }
+              const draft = JSON.parse(JSON.stringify(current));
+              let changed = false;
               for (const axis of ['passive', 'proactive']) {
                 if (!Object.hasOwn(body.access, axis)) continue;
-                const v = body.access[axis];
-                if (!['inherit', 'allow', 'deny'].includes(v)) { sendJson({ ok: false, error: `准入取值无效：${axis}` }, 400); return; }
-                patch.access[axis] = v;
+                const verdict = body.access[axis];
+                if (!['allow', 'deny'].includes(verdict)) { sendJson({ ok: false, error: `准入取值无效：${axis}` }, 400); return; }
+                const list = draft[axis].entries;
+                const at = list.indexOf(key);
+                const member = draft[axis].mode === 'allow' ? verdict === 'allow' : verdict === 'deny';
+                if (member && at < 0) { list.push(key); changed = true; }
+                else if (!member && at >= 0) { list.splice(at, 1); changed = true; }
               }
+              if (changed) { accessChanged = true; nextAccess = draft; }
             }
             if (body.persona && typeof body.persona === 'object') {
               patch.persona = {};
@@ -6094,12 +6058,12 @@ async function main() {
               if (text.length > max) { sendJson({ ok: false, error: `提示词超过上限（${max} 字）` }, 400); return; }
               patch.prompt = { initialText: text, updatedAt: Date.now() };
             }
-            if (!Object.keys(patch).length) { sendJson({ ok: false, error: '没有要保存的字段' }, 400); return; }
+            if (!Object.keys(patch).length && !accessChanged) { sendJson({ ok: false, error: '没有要保存的字段' }, 400); return; }
+            if (accessChanged) state.defaults = nextAccess;
             const next = normalizeProfile(applyPatch(profile, patch), { key });
             state.profiles[key] = next;
             saveState();
-            refreshAccessProjection();
-            log(`控制台：会话档案已更新 ${key}`);
+            log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
             sendJson({ ok: true, key, profile: next });
             return;
           }
@@ -6107,7 +6071,6 @@ async function main() {
             if (!profile) { sendJson({ ok: false, error: '会话档案不存在' }, 404); return; }
             delete state.profiles[key];
             saveState();
-            refreshAccessProjection();
             log(`控制台：会话档案已删除 ${key}`);
             sendJson({ ok: true, key });
             return;
@@ -6134,25 +6097,74 @@ async function main() {
           sendJson({ pending: list });
           return;
         }
+        // ── 全局准入名单（两态单源：白名单/黑名单，控制台专用） ───────────────
+        if (url.pathname === '/api/access') {
+          if (req.method === 'GET') {
+            const access = normalizeAccessConfig(state.defaults) ?? createAccessConfig();
+            sendJson({ ok: true, access, summary: summarizeAccessConfig(access) });
+            return;
+          }
+          if (req.method === 'PATCH') {
+            const current = normalizeAccessConfig(state.defaults);
+            if (!current) { sendJson({ ok: false, error: '准入配置尚未迁移，请先重启桥接完成迁移' }, 409); return; }
+            const body = await readBody();
+            const next = JSON.parse(JSON.stringify(current));
+            let changed = false;
+            let flipped = false;
+            for (const axis of ['passive', 'proactive']) {
+              const incoming = body?.[axis];
+              if (!incoming || typeof incoming !== 'object') continue;
+              if (incoming.mode !== undefined) {
+                if (!['allow', 'deny'].includes(incoming.mode)) { sendJson({ ok: false, error: `${axis}.mode 只能是 allow / deny` }, 400); return; }
+                if (incoming.mode !== next[axis].mode) { next[axis].mode = incoming.mode; changed = true; flipped = true; }
+              }
+              if (incoming.entries !== undefined) {
+                if (!Array.isArray(incoming.entries)) { sendJson({ ok: false, error: `${axis}.entries 必须是数组` }, 400); return; }
+                const normalized = normalizeAccessEntries(incoming.entries);
+                if (normalized.invalid.length) {
+                  sendJson({ ok: false, error: `${axis} 名单里有无效条目：${normalized.invalid.slice(0, 5).join('、')}` }, 400);
+                  return;
+                }
+                const same = normalized.entries.length === next[axis].entries.length
+                  && normalized.entries.every((v, i) => v === next[axis].entries[i]);
+                if (!same) { next[axis].entries = normalized.entries; changed = true; }
+              }
+            }
+            if (!changed) { sendJson({ ok: false, error: '没有要保存的改动' }, 400); return; }
+            let affected = 0;
+            if (flipped) {
+              const before = { defaults: current };
+              const after = { defaults: next };
+              const known = new Set([...Object.keys(state.profiles ?? {}), ...sessions.keys()]);
+              for (const key of known) {
+                if (resolveAccess('passive', key, before) !== resolveAccess('passive', key, after)
+                  || resolveAccess('proactive', key, before) !== resolveAccess('proactive', key, after)) affected += 1;
+              }
+              if (body.confirmFlip !== true) {
+                sendJson({ ok: false, error: `切换名单模式会翻转所有会话的生效结果（影响 ${affected} 个会话），请确认后再保存`, requiresConfirm: true, affected }, 409);
+                return;
+              }
+            }
+            state.defaults = next;
+            saveState();
+            try { ext.audit.append('access.update', { passive: summarizeAccessConfig(next).passive ?? null, proactive: summarizeAccessConfig(next).proactive ?? null }); } catch { /* 审计尽力而为 */ }
+            log(`控制台：全局准入名单已更新（被动 ${next.passive.mode}/${next.passive.entries.length}，主动 ${next.proactive.mode}/${next.proactive.entries.length}）`);
+            sendJson({ ok: true, access: next, summary: summarizeAccessConfig(next), affected });
+            return;
+          }
+          sendJson({ ok: false, error: '不支持的请求' }, 405);
+          return;
+        }
         // ── 白名单可视化编辑（写 config.json + 热更新内存） ───────────────────
         if (req.method === 'GET' && url.pathname === '/api/whitelist') {
-          sendJson({ allow: cfg.allow ?? { private: [], groups: [] }, deny: cfg.deny ?? { private: [], groups: [] }, ownerQQ: cfg.ownerQQ ?? null, admins: cfg.admins ?? [] });
+          sendJson({ ownerQQ: cfg.ownerQQ ?? null, admins: cfg.admins ?? [] });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/whitelist') {
           const body = await readBody();
-          const toNum = (arr) => Array.isArray(arr) ? [...new Set(arr.map((x) => Number(String(x).trim())).filter((n) => Number.isFinite(n)))] : undefined;
           const configFile = path.join(ROOT, 'config.json');
-          // fail-fast：配置文件损坏时直接 500，绝不回写，避免把整个配置清成只剩 allow/deny/ownerQQ
+          // fail-fast：配置文件损坏时直接 500，绝不回写，避免把整个配置清成只剩 ownerQQ/admins
           const file = readConfigObject(configFile);
-          const allow = {
-            private: toNum(body.allow?.private) ?? (file.allow?.private ?? []),
-            groups: toNum(body.allow?.groups) ?? (file.allow?.groups ?? [])
-          };
-          const deny = {
-            private: toNum(body.deny?.private) ?? (file.deny?.private ?? []),
-            groups: toNum(body.deny?.groups) ?? (file.deny?.groups ?? [])
-          };
           // 管理员 QQ 可在控制台输入；空值=清除管理员（fail-closed），非法值拒绝写入。
           let ownerQQ = cfg.ownerQQ ?? null;
           if (body.ownerQQ !== undefined) {
@@ -6163,8 +6175,6 @@ async function main() {
               return;
             }
           }
-          file.allow = allow;
-          file.deny = deny;
           file.ownerQQ = ownerQQ;
           let admins;
           try {
@@ -6174,14 +6184,19 @@ async function main() {
             return;
           }
           file.admins = admins;
+          // 准入名单早已迁到会话档案的 defaults；旧 allow/deny 键在这里顺手清掉，避免第二份真相。
+          delete file.allow;
+          delete file.deny;
+          delete file.allowAllWhenEmpty;
           atomicWriteJson(configFile, file);
-          cfg.allow = { private: allow.private, groups: allow.groups };
-          cfg.deny = { private: deny.private, groups: deny.groups };
           cfg.admins = admins;
           cfg.ownerQQ = ownerQQ;
+          delete cfg.allow;
+          delete cfg.deny;
+          delete cfg.allowAllWhenEmpty;
           reconcileSessionPolicies();
-          log(`控制台：白名单已更新（群: ${allow.groups.join(',') || '无'}，私聊: ${allow.private.join(',') || '无'}，管理员: ${ownerQQ ?? '未设置'}）`);
-          sendJson({ ok: true, allow, deny, ownerQQ });
+          log(`控制台：管理员已更新（管理员: ${ownerQQ ?? '未设置'}，子管理员: ${admins.length}）`);
+          sendJson({ ok: true, ownerQQ, admins });
           return;
         }
 
@@ -6320,7 +6335,7 @@ async function main() {
             if (req.method === 'GET' && (sub === '' || sub === '/')) {
               const snap = scheduler.snapshot();
               // 可选的发送对象：管理员私聊 + 白名单好友 + 白名单群（群名尽量带上，方便勾选）
-              const listOf = (kind) => (cfg.allow?.[kind] ?? cfg.allow?.[kind + 's'] ?? []).map(String);
+              const listOf = (kind) => accessIds('passive', kind).map(String);
               const targets = [{ key: schedulerOwnerKey(), label: '管理员私聊', kind: 'owner' }];
               for (const id of listOf('private')) if (sessionKey('private', id) !== schedulerOwnerKey()) targets.push({ key: sessionKey('private', id), label: `好友 ${id}`, kind: 'private' });
               for (const id of listOf('group')) targets.push({ key: sessionKey('group', id), label: `群 ${id}`, kind: 'group' });
@@ -6436,7 +6451,6 @@ async function main() {
           if (!Number.isFinite(id) || id <= 0) { sendJson({ ok: false, error: '目标 id 无效' }, 400); return; }
           if (!message) { sendJson({ ok: false, error: '消息不能为空' }, 400); return; }
           if (SENSITIVE_RE.test(message)) { sendJson({ ok: false, error: '消息含敏感信息，已阻止发送' }, 403); return; }
-          if (!allowed(kind, id, cfg)) { sendJson({ ok: false, error: `目标不在白名单内（${kind} ${id}），请先加入白名单` }, 403); return; }
           const testKey = convKey(kind, id);
           if (!passiveAllowed(testKey)) { sendJson({ ok: false, error: `会话 ${testKey} 未授权被动行为（会话详情 → 准入）` }, 403); return; }
           try {
@@ -6557,10 +6571,6 @@ async function main() {
           }
           if (!passiveAllowed(key)) {
             sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
-            return;
-          }
-          if (!sessions.get(key) && !allowed(kind, id, cfg)) {
-            sendJson({ ok: false, error: '该会话不在白名单内，且尚未创建' }, 403);
             return;
           }
           if (!dshReady) {
@@ -7870,10 +7880,9 @@ async function main() {
           const parsedTarget = parseTargetKey(key);
           if (!parsedTarget) { sendJson({ ok: false, error: 'target 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           if (!passiveAllowed(key) || !proactiveAllowed(convKey(parsedTarget.kind, parsedTarget.id))) {
-            const a = cfg.allow ?? {};
             sendJson({
               ok: false,
-              error: `目标 ${key} 不在白名单内（config.json allow.groups / allow.private：群 ${(a.groups ?? []).join(', ') || '空'}；私聊 ${(a.private ?? []).join(', ') || '空'}）`
+              error: `目标 ${key} 未授权（会话详情 → 准入，或全局准入的被动/主动名单）`
             }, 403);
             return;
           }
@@ -11470,21 +11479,39 @@ async function main() {
       } catch (error) { log(`⚠️ 清理 social-v2 wakeConfig 失败：${error?.message ?? error}`); }
     };
 
+    const adminPassiveKeys = (cfg.admins ?? [])
+      .filter((admin) => admin?.exemptPassive === true)
+      .map((admin) => buildKey('private', String(admin.qq)));
+    const applyAccessMigration = () => {
+      const result = migrateAccessModel(state, {
+        ownerKey: cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null,
+        adminPassiveKeys,
+      });
+      if (!result.changed) return false;
+      state.defaults = result.defaults;
+      state.profiles = result.profiles;
+      sessionDirectory = null;
+      saveState();
+      log(`会话准入迁移完成：被动 ${result.defaults.passive.mode}/${result.defaults.passive.entries.length} 条，主动 ${result.defaults.proactive.mode}/${result.defaults.proactive.entries.length} 条`);
+      return true;
+    };
+
     if (Number(state.migratedAt) > 0) {
       cleanupLegacy();
-      refreshAccessProjection();
+      applyAccessMigration();
       return;
     }
 
     const legacyExists = fs.existsSync(legacyFile) || fs.existsSync(INITIAL_PROMPTS_FILE);
     const legacyConfigKeys = Object.hasOwn(cfg, 'allow') || Object.hasOwn(cfg, 'deny') || Object.hasOwn(cfg, 'allowAllWhenEmpty');
     if (!legacyExists && !legacyConfigKeys && Object.keys(state.profiles ?? {}).length === 0) {
-      // 全新安装：直接落一份空目录（默认拒绝），不制造旧来源。
-      state.defaults = { passive: 'deny', proactive: 'deny' };
+      // 全新安装：落一份黑名单空名单（空=全部允许），先保持历史“没配名单就都能聊”的行为；
+      // 需要收紧时在控制台把任一轴切成白名单即可。
+      state.defaults = createAccessConfig('deny');
       state.migratedAt = Date.now();
       sessionDirectory = null;
       saveState();
-      log('会话档案目录已初始化：state/sessions/（默认拒绝，按会话授权）');
+      log('会话档案目录已初始化：state/sessions/（被动/主动均为黑名单空名单，默认全部允许）');
       return;
     }
 
@@ -11550,6 +11577,14 @@ async function main() {
       state = verify.state;
       state.migratedAt = Date.now();
       state.defaults = migrated.defaults;
+      const accessResult = migrateAccessModel(state, {
+        ownerKey: cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null,
+        adminPassiveKeys,
+      });
+      if (accessResult.changed) {
+        state.defaults = accessResult.defaults;
+        state.profiles = accessResult.profiles;
+      }
       sessionDirectory = null;
       saveState();
     } catch (error) {
@@ -11562,7 +11597,6 @@ async function main() {
 
     cleanupLegacy();
     loadInitialPrompts();
-    refreshAccessProjection();
     log(`会话档案迁移完成：${migrated.report.keys} 个会话（允许 ${migrated.report.allowed}、拒绝 ${migrated.report.blocked}、人格 ${migrated.report.persona}、提示词 ${migrated.report.prompt}、唤醒 ${migrated.report.wake}、绑定 ${migrated.report.binding}）`);
   }
 
@@ -13938,9 +13972,9 @@ async function main() {
   /** /say：owner 让机器人在白名单群原话发言。在二代记忆里标注「受管理员之托」，避免她把这句话当成自己的观点。 */
   async function sayToGroup(groupId, textToSay) {
     const gid = String(groupId);
-    if (!allowed('group', Number(gid), cfg)) return `群 ${gid} 不在白名单 allow.groups 内，未发送。`;
-    if (SENSITIVE_RE.test(textToSay)) return '内容疑似含路径/凭据，未发送。';
     const key = sessionKey('group', gid);
+    if (!passiveAllowed(key)) return `群 ${gid} 未授权被动行为（会话详情 → 准入，或全局准入的被动名单），未发送。`;
+    if (SENSITIVE_RE.test(textToSay)) return '内容疑似含路径/凭据，未发送。';
     await sendToQQ(key, textToSay);
     if (!lastSendSucceeded(key)) return `发送到群 ${gid} 失败（可能当前模式不允许该群，或 QQ 侧发送失败）。`;
     try {
@@ -14025,7 +14059,7 @@ async function main() {
       current: (key) => sessions.get(key) ?? null,
       reset: resetSession,
     },
-    acl: { allowed },
+    acl: { allowed: (kind, id) => passiveAllowed(buildKey(kind, String(id))) },
     role: {
       read: readRoleState,
       writeFull: writeRoleStateFull,
@@ -14625,7 +14659,7 @@ async function main() {
     const r = await processMemberEvent(ev, {
       people: ext.people,
       continuity: ext.continuity(),
-      groupAllowed: (gid) => allowed('group', Number(gid), cfg),
+      groupAllowed: (gid) => passiveAllowed(sessionKey('group', String(gid))),
       fetchMember: fetchMemberInfo,
       log,
     });
@@ -14655,7 +14689,7 @@ async function main() {
     const out = [];
     let selfId = null;
     try { selfId = (await bot.getLoginInfo())?.user_id ?? null; } catch {}
-    for (const gid of (cfg.allow?.groups ?? []).map(String)) {
+    for (const gid of accessIds('passive', 'group')) {
       if (!ext.groupRecordable(gid)) continue;
       const last = memberReconcileAt.get(gid) ?? 0;
       if (!force && Date.now() - last < 10 * 60 * 1000) continue;

@@ -47,15 +47,15 @@ test('profile：无档案 404；建绑后返回默认档案与并集列表', asy
       assert.equal(missing.status, 404, '未绑定且无档案必须 404');
 
       const sessionId = await h.ensureSession(KEY);
-      // 夹具来自旧白名单（group:456 在 allow 里），迁移会给档案写 access.passive='allow'；
-      // 这里改回三态默认值，验证 GET 返回的是档案显式值而不是投影结果。
-      h.state.profiles[KEY].access = { passive: 'inherit', proactive: 'inherit' };
+      // 新夹具默认是黑名单空名单：没有显式名单时两根轴都允许。
       const got = await call(port, `/api/sessions/${ENCODED}/profile`, { headers: ADMIN });
       assert.equal(got.status, 200);
       assert.equal(got.json.key, KEY);
       assert.equal(got.json.sessionId, sessionId);
       assert.equal(got.json.mode, 'inherit');
-      assert.equal(got.json.access.passiveValue, 'inherit');
+      assert.equal(got.json.access.passive, 'allow');
+      assert.equal(got.json.access.passiveMode, 'allow');
+      assert.equal(got.json.access.proactive, 'allow');
       assert.equal(typeof got.json.prompt.maxChars, 'number');
       assert.ok(Array.isArray(got.json.presets));
       assert.equal(got.json.dsh.status, 'online');
@@ -78,7 +78,7 @@ test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async (
         method: 'PATCH', headers: ADMIN,
         body: {
           displayName: '测试群',
-          access: { passive: 'allow', proactive: 'deny' },
+          access: { passive: 'deny', proactive: 'allow' },
           persona: { mode: 'card', name: '测试角色' },
           prompt: { text: '这是测试提示词。' },
         },
@@ -88,18 +88,20 @@ test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async (
 
       const got = await call(port, `/api/sessions/${ENCODED}/profile`, { headers: ADMIN });
       assert.equal(got.json.displayName, '测试群');
-      assert.equal(got.json.access.passiveValue, 'allow');
-      assert.equal(got.json.access.proactiveValue, 'deny');
+      assert.equal(got.json.access.passive, 'deny');
+      assert.equal(got.json.access.proactive, 'allow');
       assert.equal(got.json.persona.mode, 'card');
       assert.equal(got.json.persona.name, '测试角色');
       assert.equal(got.json.prompt.text, '这是测试提示词。');
 
       const file = JSON.parse(fs.readFileSync(`${h.temp}/state/sessions/qq/group/456.json`, 'utf8'));
       assert.equal(file.displayName, '测试群');
-      assert.equal(file.access.passive, 'allow');
-      assert.equal(file.access.proactive, 'deny');
+      assert.equal(file.access, undefined, '档案里不再保存三态准入');
       assert.equal(file.persona.name, '测试角色');
       assert.equal(file.prompt.initialText, '这是测试提示词。');
+      const defaults = JSON.parse(fs.readFileSync(`${h.temp}/state/sessions/defaults.json`, 'utf8')).defaults;
+      assert.ok(!defaults.passive.entries.includes(KEY), 'deny 应把会话从被动白名单移除');
+      assert.ok(defaults.proactive.entries.includes(KEY), 'allow 应把会话留在主动白名单');
     });
   } finally { await h.close(); }
 });

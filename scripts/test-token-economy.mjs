@@ -191,8 +191,8 @@ await test('another conversation token, pause, mode and allowlist guards still r
   h.setMode('chat');
   assert.equal((await request('wake-config', { body })).status, 403);
   h.setMode('reserved2');
-  // P1 起准入以会话档案为准：显式拒绝，才等价于「被移出白名单」。
-  h.state.profiles[KEY].access.passive = 'deny';
+  // 两态单源：把被动白名单清空即等价于「被移出白名单」（空白名单=全部拒绝）。
+  h.state.defaults.passive = { mode: 'allow', entries: [] };
   assert.equal((await request('wake-config', { body })).status, 403);
   assert.deepEqual(seqs(st.unread), [1]);
 });
@@ -309,11 +309,12 @@ await test('building a budgeted snapshot preserves whole oldest messages without
 
 await test('an in-flight wait rechecks paused, feature, tool and allowlist permissions without granting observation', async ({ h, st, request, append }) => {
   append('unread before policy changes');
+  const savedPassive = JSON.parse(JSON.stringify(h.state.defaults.passive));
   const cases = [
     ['pause', () => { h.socialV2.paused = true; }, () => { h.socialV2.paused = false; }],
     ['feature disable', () => { h.cfg.socialV2.enabled = false; }, () => { h.cfg.socialV2.enabled = true; }],
     ['tool disable', () => { h.cfg.socialV2.tools.waitMessages = false; }, () => { h.cfg.socialV2.tools.waitMessages = true; }],
-    ['allowlist removal', () => { h.state.profiles[KEY].access.passive = 'deny'; }, () => { h.state.profiles[KEY].access.passive = 'inherit'; }],
+    ['allowlist removal', () => { h.state.defaults.passive = { mode: 'allow', entries: [] }; }, () => { h.state.defaults.passive = savedPassive; }],
   ];
   const before = () => plain({ unread: st.unread, wakeConfig: st.wakeConfig, lastReadThroughSeq: st.lastReadThroughSeq,
     observedAt: st.preSleepWaitObservedAt, satisfiedAt: st.preSleepWaitSatisfiedAt });

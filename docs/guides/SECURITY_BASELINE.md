@@ -29,8 +29,8 @@
 
 | 机制 | 位置 | 行为 |
 | --- | --- | --- |
-| 白名单 | `src/bridge.js` `allowed()` | `deny` 优先于 `allow`；两侧统一 `String()` 比较（兼容 OneBot int64 的数字/字符串差异）；allow 为空时返回 `allowAllWhenEmpty`（**默认 false**） |
-| 模式门 | `modeAllowed()` / `isSessionAllowedInCurrentMode()` | 会话 key 必须严格匹配 `^(group\|private):\d+$`；`closed-agent` 只放行 `private:<ownerQQ>` |
+| 全局准入 | `src/session/access.mjs` + `state/sessions/defaults.json` | 被动/主动各一条名单 `{mode:'allow'|'deny',entries}`；白名单默认拒绝、黑名单默认允许；空名单白=全拒、黑=全允；唯一真相源，不在档案或 `config.json` 里另存 |
+| 准入接入 | `resolveAccess(axis, key)` | 会话 key 统一 `qq:group:<id>`/`qq:private:<id>`；入站/调度/唤醒/跨会话发送/语音/MCP 群工具都读同一份；管理命令与审批走独立通道，不受名单影响 |
 | 配置失败 | `loadConfig()` | `config.json` 缺失/解析失败 → **fail-fast 退出**（不是"用默认值继续跑"） |
 | 管理员识别 | `handleIncoming()` | `String(event.user_id) === String(cfg.ownerQQ ?? '')`；未配置 `ownerQQ` 时启动日志明确告警（审批/管理命令/封闭 agent 全部不可用） |
 

@@ -156,7 +156,8 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     // `mcp-snowluma-safe.js` 现在依赖 `src/session/key.mjs` 构造会话 key；夹具只拷被启动的
     // 那几个文件，所以依赖的纯模块也要一起带上，否则子进程 import 失败直接退出。
     await fs.mkdir(path.join(fixture, 'src', 'session'));
-    await fs.copyFile(path.join(ROOT, 'src', 'session', 'key.mjs'), path.join(fixture, 'src', 'session', 'key.mjs'));
+    await Promise.all(['key.mjs', 'access.mjs'].map((name) =>
+      fs.copyFile(path.join(ROOT, 'src', 'session', name), path.join(fixture, 'src', 'session', name))));
     await Promise.all(['mcp-snowluma-safe.js', 'qq-model-view.js', 'sensitive.js'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', name), path.join(fixture, 'src', name))));
     await fs.writeFile(path.join(fixture, 'config.json'), JSON.stringify({ consolePort: api.address().port }));

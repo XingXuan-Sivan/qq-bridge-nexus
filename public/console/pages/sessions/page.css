@@ -5,6 +5,35 @@
   #sessionList table { table-layout:auto }
 }
 
+/* 全局准入：两条名单并排，窄屏才上下；不套卡片，沿用表单的控件样式。 */
+.access-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 10px;
+}
+.access-field { min-width: 0; }
+.access-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.access-title { font-weight: 600; }
+.access-textarea {
+  width: 100%;
+  min-height: 128px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.access-field .field-hint { margin-top: 6px; }
+#accessWarning { margin-top: 10px; }
+@media (max-width: 900px) {
+  .access-columns { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+}
+
 /* 会话详情：宽弹窗里按「一卡一件事」排，每卡自己保存。 */
 .session-detail-head {
   display: flex;
@@ -63,6 +92,27 @@
 .detail-danger .btn.danger {
   margin-right: 8px;
 }
+
+/* 详情里的准入：两个成员开关，沿用表单行布局。 */
+.detail-access-list { display: grid; gap: 2px; }
+.detail-access-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  flex-wrap: wrap;
+}
+.detail-access-inline .meta { margin: 0; font-size: 13px; }
+.access-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.access-link:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .session-detail-grid { grid-template-columns: minmax(0, 1fr); }
 }

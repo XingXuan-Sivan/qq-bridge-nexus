@@ -15,11 +15,12 @@
  */
 
 import { formatKey, parseKey } from './key.mjs';
+import { createAccessConfig, normalizeAccessConfig } from './access.mjs';
 
 export const SESSION_DIR_VERSION = 2;
+/** 旧三态模型的默认值；只用于“有档案但没有 defaults.json”的迁移读取。 */
 export const DEFAULT_ACCESS = { passive: 'deny', proactive: 'deny' };
 
-const ACCESS_VALUES = new Set(['inherit', 'allow', 'deny']);
 const MODE_VALUES = new Set(['inherit', 'chat', 'reserved', 'reserved2']);
 const AXES = ['passive', 'proactive'];
 
@@ -31,8 +32,13 @@ export function keyPath(key) {
   return `${canonical.split(':').join('/')}.json`;
 }
 
-/** 规范化默认策略：只认 allow/deny，缺省一律 deny（迁移会显式写成保持现状的值）。 */
+/**
+ * 规范化 defaults：v2 名单原样规范化；旧字符串形状原样保留，交给迁移读取。
+ * 迁移完成后 writer 只会再写 v2。
+ */
 export function normalizeDefaults(raw) {
+  const v2 = normalizeAccessConfig(raw);
+  if (v2) return v2;
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const out = {};
   for (const axis of AXES) out[axis] = src[axis] === 'allow' ? 'allow' : 'deny';
@@ -52,11 +58,22 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
   const canonical = formatKey(parsed.platform, parsed.kind, parsed.id);
   if (raw.key !== canonical) return null;
 
-  const access = {};
-  const rawAccess = raw.access && typeof raw.access === 'object' ? raw.access : {};
-  for (const axis of AXES) {
-    access[axis] = ACCESS_VALUES.has(rawAccess[axis]) ? rawAccess[axis] : 'inherit';
-  }
+  // 旧三态字段只在升级当次保留成 legacyAccess 供迁移读取；迁移完成后 writer 不再写它。
+  // 迁移流程产出的档案本身就带 legacyAccess，所以这里也要认这个形状，否则读档会丢掉三态。
+  const legacySource = raw.legacyAccess && typeof raw.legacyAccess === 'object' ? raw.legacyAccess : null;
+  const rawAccess = raw.access && typeof raw.access === 'object'
+    ? raw.access
+    : legacySource?.access && typeof legacySource.access === 'object' ? legacySource.access : null;
+  const legacyBlocked = raw.blocked === true || legacySource?.blocked === true;
+  const legacyAccess = rawAccess || legacyBlocked
+    ? {
+      blocked: legacyBlocked,
+      access: {
+        passive: ['inherit', 'allow', 'deny'].includes(rawAccess?.passive) ? rawAccess.passive : 'inherit',
+        proactive: ['inherit', 'allow', 'deny'].includes(rawAccess?.proactive) ? rawAccess.proactive : 'inherit',
+      },
+    }
+    : null;
 
   const personaRaw = raw.persona && typeof raw.persona === 'object' ? raw.persona : {};
   const personaMode = ['inherit', 'off', 'card'].includes(personaRaw.mode) ? personaRaw.mode : 'inherit';
@@ -73,8 +90,7 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     version: SESSION_DIR_VERSION,
     key: canonical,
     displayName: normalizeString(raw.displayName, 120),
-    blocked: raw.blocked === true,
-    access,
+    ...(legacyAccess ? { legacyAccess } : {}),
     mode: MODE_VALUES.has(raw.mode) ? raw.mode : 'inherit',
     persona: { mode: personaMode, name: personaMode === 'card' ? personaName || null : null },
     prompt: { initialText, updatedAt: Number(promptRaw.updatedAt) > 0 ? Number(promptRaw.updatedAt) : 0 },
@@ -110,8 +126,6 @@ export function createProfile(key, patch = {}, now = Date.now) {
     version: SESSION_DIR_VERSION,
     key: canonical,
     displayName: '',
-    blocked: false,
-    access: { passive: 'inherit', proactive: 'inherit' },
     mode: 'inherit',
     persona: { mode: 'inherit', name: null },
     prompt: { initialText: '', updatedAt: 0 },
@@ -122,20 +136,31 @@ export function createProfile(key, patch = {}, now = Date.now) {
     dormant: null,
     updatedAt: now(),
   };
-  return applyPatch(base, patch, now);
+  const profile = applyPatch(base, patch, now);
+  // 迁移阶段还会传旧三态；这里先收进 legacyAccess，等 migrateAccessModel 翻译完再清掉。
+  const legacySource = patch.legacyAccess && typeof patch.legacyAccess === 'object' ? patch.legacyAccess : null;
+  const legacyAccess = legacySource?.access && typeof legacySource.access === 'object'
+    ? legacySource.access
+    : patch.access && typeof patch.access === 'object' ? patch.access : null;
+  const legacyBlocked = patch.blocked === true || legacySource?.blocked === true;
+  if (legacyAccess || legacyBlocked) {
+    profile.legacyAccess = {
+      blocked: legacyBlocked,
+      access: {
+        passive: ['inherit', 'allow', 'deny'].includes(legacyAccess?.passive) ? legacyAccess.passive : 'inherit',
+        proactive: ['inherit', 'allow', 'deny'].includes(legacyAccess?.proactive) ? legacyAccess.proactive : 'inherit',
+      },
+    };
+  }
+  return profile;
 }
 
 /** 局部更新：只覆盖传入的顶层/二级字段，其余保留。 */
 export function applyPatch(profile, patch, now = Date.now) {
   const next = structuredClone(profile);
   const p = patch && typeof patch === 'object' ? patch : {};
-  for (const field of ['displayName', 'blocked', 'mode', 'presetId']) {
+  for (const field of ['displayName', 'mode', 'presetId']) {
     if (Object.hasOwn(p, field)) next[field] = p[field];
-  }
-  if (p.access && typeof p.access === 'object') {
-    for (const axis of AXES) {
-      if (Object.hasOwn(p.access, axis)) next.access[axis] = p.access[axis];
-    }
   }
   if (p.persona && typeof p.persona === 'object') {
     if (Object.hasOwn(p.persona, 'mode')) next.persona.mode = p.persona.mode;
@@ -264,6 +289,14 @@ export function loadSessionDirectory({ dir, fs, path, log = () => {}, now = Date
       if (profile.binding.fingerprint) state.sessionPolicies[key] = profile.binding.fingerprint;
     }
     if (profile.dormant) state.dormantSessions[key] = profile.dormant;
+  }
+
+  // 没有 defaults.json：全新安装给黑名单空名单（空=全部允许），避免首次启动把所有人挡在外面；
+  // 只有档案没有 defaults 的老目录保留旧形状，交给迁移按“默认拒绝”翻译。
+  if (!exists) {
+    state.defaults = Object.keys(state.profiles).length > 0
+      ? { ...DEFAULT_ACCESS }
+      : createAccessConfig('deny');
   }
 
   return { state, writable, corrupt, exists };

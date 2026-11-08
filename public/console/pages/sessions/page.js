@@ -7,7 +7,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { renderFields } from '../../components/form/form.js';
+import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { SESSIONS_FIELDS } from './fields.js';
 
@@ -53,27 +53,25 @@ function whenCell(ts) {
   return esc(`${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
 }
 
-function accessPill(value, explicit) {
-  const label = value === 'allow' ? '允许' : '拒绝';
-  const cls = value === 'allow' ? 'pill g' : 'pill r';
-  const inherit = explicit === 'inherit' ? ' <span class="meta">继承</span>' : '';
-  return `<span class="${cls}">${label}</span>${inherit}`;
+function accessPill(value) {
+  return value === 'allow'
+    ? '<span class="pill g">允许</span>'
+    : '<span class="pill r">拒绝</span>';
 }
 
 function accessCell(entry) {
   const access = entry.access || {};
-  return `<span class="meta">被动</span> ${accessPill(access.passive, access.passiveValue)}`
-    + ` <span class="meta">主动</span> ${accessPill(access.proactive, access.proactiveValue)}`;
+  return `<span class="meta">被动</span> ${accessPill(access.passive)}`
+    + ` <span class="meta">主动</span> ${accessPill(access.proactive)}`;
 }
 
 function nameCell(entry) {
   const ownerTag = entry.owner ? ' <span class="pill r">管理员</span>' : '';
   const platformTag = `<span class="pill">${esc(platformOf(entry))}</span>`;
-  const blocked = entry.blocked ? ' <span class="pill r">黑名单</span>' : '';
   const name = entry.displayName
     ? `<strong>${esc(entry.displayName)}</strong> <span class="meta">${esc(entry.key)}</span>`
     : `<strong>${esc(entry.key)}</strong>`;
-  return `${name} ${platformTag}${kindPill(entry)}${ownerTag}${blocked}`;
+  return `${name} ${platformTag}${kindPill(entry)}${ownerTag}`;
 }
 
 function dshCell(entry) {
@@ -91,6 +89,148 @@ function dshCell(entry) {
 function platformOptions() {
   const platforms = [...new Set(sessionsCache.map(platformOf))].sort();
   return [{ value: 'all', label: '全部平台' }, ...platforms.map((p) => ({ value: p, label: p }))];
+}
+
+// ── 全局准入：两态单源名单 ──────────────────────────────────────────────────
+// 白名单 = 默认拒绝 + 名单内允许；黑名单 = 默认允许 + 名单内拒绝。会话详情的开关
+// 改的也是同一份名单，所以这里不再维护第二套「全局/局部」配置。
+const ACCESS_AXES = [['passive', '被动'], ['proactive', '主动']];
+const ACCESS_MODE_LABEL = { allow: '白名单', deny: '黑名单' };
+let accessDraft = null;   // { passive:{mode,entries}, proactive:{mode,entries} }
+let accessSaved = null;   // 上次保存的快照，用来提示“模式已改”
+
+function accessModeLabel(mode) {
+  return ACCESS_MODE_LABEL[mode] || '白名单';
+}
+
+function accessSwitch(axis) {
+  return document.getElementById(axis === 'passive' ? 'accessPassiveMode' : 'accessProactiveMode');
+}
+
+function accessTextarea(axis) {
+  return document.getElementById(axis === 'passive' ? 'accessPassiveEntries' : 'accessProactiveEntries');
+}
+
+function accessLines(text) {
+  return String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function accessInvalidLines(lines) {
+  return lines.filter((line) => !/^(?:qq:)?(?:group|private):[1-9]\d*$/.test(line));
+}
+
+function accessReason(axis, summary) {
+  const mode = summary?.[`${axis}Mode`] || 'allow';
+  const member = summary?.[`${axis}Member`] === true;
+  if (mode === 'allow') return member ? '白名单成员：允许' : '不在白名单：拒绝';
+  return member ? '黑名单成员：拒绝' : '不在黑名单：允许';
+}
+
+/** 从表单读回草稿；mode 用开关的 aria-checked，开=白名单，关=黑名单。 */
+function readAccessDraft() {
+  const draft = {};
+  for (const [axis] of ACCESS_AXES) {
+    const sw = accessSwitch(axis);
+    const area = accessTextarea(axis);
+    draft[axis] = {
+      mode: sw && getSwitch(sw) ? 'allow' : 'deny',
+      entries: accessLines(area?.value),
+    };
+  }
+  accessDraft = draft;
+  return draft;
+}
+
+function renderAccessSummary() {
+  if (!accessDraft) return;
+  const summary = document.getElementById('globalAccessSummary');
+  const warning = document.getElementById('accessWarning');
+  const invalid = ACCESS_AXES.flatMap(([axis, label]) => accessInvalidLines(accessDraft[axis].entries).map((line) => `${label}：${line}`));
+  const notes = [];
+  const empty = [];
+  for (const [axis, label] of ACCESS_AXES) {
+    const cfg = accessDraft[axis];
+    if (!cfg.entries.length) {
+      empty.push(cfg.mode === 'allow' ? `${label}白名单为空：全部拒绝` : `${label}黑名单为空：全部允许`);
+    }
+    if (accessSaved && accessSaved[axis]?.mode !== cfg.mode) {
+      notes.push(`${label}从「${accessModeLabel(accessSaved[axis]?.mode)}」切到「${accessModeLabel(cfg.mode)}」，保存会翻转所有会话的生效结果`);
+    }
+  }
+  if (summary) {
+    summary.textContent = ACCESS_AXES
+      .map(([axis, label]) => `${label} ${accessModeLabel(accessDraft[axis].mode)} · ${accessDraft[axis].entries.length} 个`)
+      .join(' ｜ ');
+  }
+  if (warning) {
+    const messages = [...invalid.map((line) => `不是合法会话：${line}`), ...empty, ...notes];
+    warning.hidden = messages.length === 0;
+    warning.textContent = messages.join('；');
+  }
+}
+
+function fillAccessForm() {
+  if (!accessDraft) return;
+  for (const [axis] of ACCESS_AXES) {
+    const sw = accessSwitch(axis);
+    if (sw) setSwitch(sw, accessDraft[axis].mode !== 'deny');
+    const area = accessTextarea(axis);
+    if (area) area.value = accessDraft[axis].entries.join('\n');
+  }
+  renderAccessSummary();
+}
+
+function applyAccessPayload(data) {
+  const access = data?.access || {};
+  accessDraft = {
+    passive: { mode: access.passive?.mode === 'deny' ? 'deny' : 'allow', entries: Array.isArray(access.passive?.entries) ? access.passive.entries.slice() : [] },
+    proactive: { mode: access.proactive?.mode === 'deny' ? 'deny' : 'allow', entries: Array.isArray(access.proactive?.entries) ? access.proactive.entries.slice() : [] },
+  };
+  accessSaved = JSON.parse(JSON.stringify(accessDraft));
+  fillAccessForm();
+}
+
+async function refreshGlobalAccess() {
+  if (!document.getElementById('accessPassiveMode')) return;
+  const msg = document.getElementById('accessMsg');
+  try {
+    const r = await api('/api/access');
+    if (!r?.ok) throw new Error(r?.error || '读取失败');
+    applyAccessPayload(r);
+    if (msg) msg.textContent = '';
+  } catch (error) {
+    if (msg) msg.textContent = `读取失败：${String(error?.message ?? error)}`;
+  }
+}
+
+async function saveGlobalAccess() {
+  const msg = document.getElementById('accessMsg');
+  const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
+  readAccessDraft();
+  if (!accessDraft) return;
+  const invalid = ACCESS_AXES.flatMap(([axis]) => accessInvalidLines(accessDraft[axis].entries));
+  if (invalid.length) {
+    if (msg) msg.textContent = `有 ${invalid.length} 行不是合法会话`;
+    return;
+  }
+  const body = {
+    passive: { mode: accessDraft.passive.mode, entries: accessDraft.passive.entries },
+    proactive: { mode: accessDraft.proactive.mode, entries: accessDraft.proactive.entries },
+  };
+  try {
+    let r = await api('/api/access', 'PATCH', body);
+    if (!r?.ok && r?.requiresConfirm) {
+      const ok = window.confirm(r.error || `切换名单模式会翻转所有会话的生效结果（影响 ${r.affected} 个会话），确定保存？`);
+      if (!ok) return;
+      r = await api('/api/access', 'PATCH', { ...body, confirmFlip: true });
+    }
+    if (!r?.ok) throw new Error(r?.error || '保存失败');
+    applyAccessPayload(r);
+    const affected = Number(r.affected);
+    done(affected > 0 ? `全局准入已保存（影响 ${affected} 个会话）` : '全局准入已保存');
+  } catch (error) {
+    if (msg) msg.textContent = String(error?.message ?? error);
+  }
 }
 
 function renderSessions() {
@@ -151,7 +291,7 @@ function renderSessions() {
         ],
       },
     ],
-    empty: '还没有会话：白名单中的群或好友发来消息、或被唤醒后，会话会显示在这里。',
+    empty: '还没有会话：全局准入名单里的群或好友发来消息、或被唤醒后，会话会显示在这里。',
   });
   initDataTables(box, { onRefresh: refreshSessions });
 
@@ -319,6 +459,32 @@ function detailCheck(id, label, checked) {
   return `<label class="field-check-item"><input type="checkbox" id="${esc(id)}"${checked ? ' checked' : ''}>${esc(label)}</label>`;
 }
 
+function detailAccessRow(axis, label, summary) {
+  const allowed = summary?.[axis] === 'allow';
+  const reason = accessReason(axis, summary);
+  return `<div class="control-row">`
+    + `<span class="control-label">${esc(label)}</span>`
+    + `<div class="control-grow detail-access-inline">`
+    + `<button type="button" class="field-switch" role="switch" aria-checked="${allowed}" data-detail-access="${axis}">`
+    + `<span class="field-switch-track" aria-hidden="true"></span><span data-detail-access-label>${allowed ? '允许' : '拒绝'}</span></button>`
+    + `<span class="meta" data-detail-access-state>${esc(reason)}</span>`
+    + '</div></div>';
+}
+
+function detailAccessCard(access) {
+  const passiveMode = access?.passiveMode === 'deny' ? 'deny' : 'allow';
+  const proactiveMode = access?.proactiveMode === 'deny' ? 'deny' : 'allow';
+  return `<div class="detail-card">
+        <h4>准入</h4>
+        <div class="meta">这份名单是全局总闸门，会话内的开关改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。</div>
+        <div class="detail-access-list">
+          ${detailAccessRow('passive', '被动', access)}
+          ${detailAccessRow('proactive', '主动', access)}
+        </div>
+        <div class="field-hint">被动 ${accessModeLabel(passiveMode)} · 主动 ${accessModeLabel(proactiveMode)}　<button class="access-link" type="button" data-open-global-access>调整全局准入</button></div>
+        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="access">保存准入</button></div>
+      </div>`;
+}
 function detailDshLabel(health, sessionId) {
   if (!sessionId) return '<span class="pill">未建</span>';
   const status = health?.status || 'unknown';
@@ -393,14 +559,7 @@ function renderDetail(data) {
         <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="displayName">保存名称</button></div>
       </div>
 
-      <div class="detail-card">
-        <h4>准入</h4>
-        <div class="meta">被动=普通消息是否回复；主动=定时任务与 AI 主动发言是否允许。这里的值只影响本会话。</div>
-        ${detailRow('被动', detailSelect('detailPassive', access.passiveValue || 'inherit', [['inherit', '继承默认'], ['allow', '允许'], ['deny', '拒绝']]), `当前生效：${access.passive === 'allow' ? '允许' : '拒绝'}（默认 ${access.defaults?.passive === 'allow' ? '允许' : '拒绝'}）`)}
-        ${detailRow('主动', detailSelect('detailProactive', access.proactiveValue || 'inherit', [['inherit', '继承默认'], ['allow', '允许'], ['deny', '拒绝']]), `当前生效：${access.proactive === 'allow' ? '允许' : '拒绝'}（默认 ${access.defaults?.proactive === 'allow' ? '允许' : '拒绝'}）`)}
-        ${detailRow('黑名单', `<label class="field-check-item"><input type="checkbox" id="detailBlocked"${data.blocked ? ' checked' : ''}>把这个会话加入黑名单（两根轴一律拒绝）</label>`)}
-        <div class="detail-actions"><button class="btn small primary" type="button" data-detail-save="access">保存准入</button></div>
-      </div>
+      ${detailAccessCard(access)}
 
       <div class="detail-card">
         <h4>运行</h4>
@@ -571,13 +730,8 @@ async function saveDetail(kind) {
     if (kind === 'displayName') {
       patch = { displayName: document.getElementById('detailDisplayName')?.value || '' };
     } else if (kind === 'access') {
-      patch = {
-        access: {
-          passive: document.getElementById('detailPassive')?.value || 'inherit',
-          proactive: document.getElementById('detailProactive')?.value || 'inherit',
-        },
-        blocked: document.getElementById('detailBlocked')?.checked === true,
-      };
+      const verdict = (axis) => document.querySelector(`[data-detail-access="${axis}"]`)?.getAttribute('aria-checked') === 'true' ? 'allow' : 'deny';
+      patch = { access: { passive: verdict('passive'), proactive: verdict('proactive') } };
     } else if (kind === 'run') {
       const provider = document.getElementById('detailModelProvider')?.value || '';
       patch = {
@@ -656,6 +810,27 @@ async function detailClearMemory() {
 function refreshActive() {
   refreshSessions();
   refreshPending();
+  refreshGlobalAccess();
+}
+
+function toggleDetailAccess(axis) {
+  const btn = document.querySelector(`[data-detail-access="${axis}"]`);
+  if (!btn) return;
+  const allowed = btn.getAttribute('aria-checked') === 'true';
+  const next = !allowed;
+  const mode = detailCache?.access?.[`${axis}Mode`] === 'deny' ? 'deny' : 'allow';
+  const member = mode === 'allow' ? next : !next;
+  btn.setAttribute('aria-checked', next ? 'true' : 'false');
+  const label = btn.querySelector('[data-detail-access-label]');
+  if (label) label.textContent = next ? '允许' : '拒绝';
+  const state = document.querySelector(`[data-detail-access-state="${axis}"]`)
+    || btn.parentElement?.querySelector('[data-detail-access-state]');
+  if (state) {
+    state.textContent = mode === 'allow'
+      ? (member ? '白名单成员：允许（保存后生效）' : '不在白名单：拒绝（保存后生效）')
+      : (member ? '黑名单成员：拒绝（保存后生效）' : '不在黑名单：允许（保存后生效）');
+  }
+  detailDirty = true;
 }
 
 export function init() {
@@ -681,12 +856,35 @@ export function init() {
   document.getElementById('sessionDetailBody')?.addEventListener('input', () => { detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('change', () => { detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
+    const accessToggle = event.target.closest('[data-detail-access]');
+    if (accessToggle) { toggleDetailAccess(accessToggle.dataset.detailAccess); return; }
+    if (event.target.closest('[data-open-global-access]')) {
+      if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
+      closeModal(detailOverlay);
+      const panel = document.querySelector('[data-sessions-fields="access"]');
+      panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      document.getElementById('accessPassiveEntries')?.focus();
+      return;
+    }
     const save = event.target.closest('[data-detail-save]');
     if (save) { void saveDetail(save.dataset.detailSave); return; }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
     if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); }
   });
+
+  const accessHost = document.querySelector('[data-sessions-fields="access"]');
+  if (accessHost) bindSwitches(accessHost);
+  accessHost?.addEventListener('click', (event) => {
+    if (!event.target.closest('[role="switch"]')) return;
+    queueMicrotask(() => { readAccessDraft(); renderAccessSummary(); });
+  });
+  accessHost?.addEventListener('input', (event) => {
+    if (!event.target.matches('textarea')) return;
+    readAccessDraft();
+    renderAccessSummary();
+  });
+  document.getElementById('accessSave')?.addEventListener('click', () => { void saveGlobalAccess(); });
 
   document.querySelectorAll('[data-sessions-tab]').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.sessionsTab));

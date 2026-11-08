@@ -20,6 +20,8 @@ import { z } from 'zod';
 // 在 MCP 里拦会连「安全拒绝理由」都拿不到，反而让模型无法把话说清楚。
 import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
+import { formatKey } from './session/key.mjs';
+import { accessState, normalizeAccessConfig } from './session/access.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -40,15 +42,23 @@ function getConfig() {
   return loadConfig();
 }
 
-function getAccess() {
-  const c = getConfig();
-  return {
-    allowGroups: (c.allow?.groups ?? []).map(String),
-    allowPrivate: (c.allow?.private ?? []).map(String),
-    denyGroups: (c.deny?.groups ?? []).map(String),
-    denyPrivate: (c.deny?.private ?? []).map(String),
-    allowAllWhenEmpty: c.allowAllWhenEmpty === true
-  };
+// 准入的唯一真相是 `state/sessions/defaults.json`（两态全局名单）；MCP 独立进程也读同一份，
+// 不再从 config.json 的旧 allow/deny 推导第二套白名单。
+function loadAccessDefaults() {
+  try {
+    let text = fs.readFileSync(path.join(ROOT, 'state', 'sessions', 'defaults.json'), 'utf8');
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+    const raw = JSON.parse(text);
+    return normalizeAccessConfig(raw?.defaults ?? raw);
+  } catch {
+    return null;
+  }
+}
+
+function isPassiveAllowed(kind, id) {
+  const defaults = loadAccessDefaults();
+  if (!defaults) return false;
+  return accessState('passive', formatKey('qq', kind, String(id)), { defaults }).value === 'allow';
 }
 
 function getOneBotConfig() {
@@ -57,14 +67,6 @@ function getOneBotConfig() {
     httpUrl: (c.snowluma?.httpUrl ?? 'http://127.0.0.1:3000').replace(/\/+$/, ''),
     token: c.snowluma?.accessToken ?? ''
   };
-}
-
-// 与 bridge.allowed 保持一致：allow 列表为空时按 allowAllWhenEmpty 放行
-function isAllowed(allowList, denyList, id, allowAllWhenEmpty) {
-  const s = String(id);
-  if (denyList.includes(s)) return false;
-  if (allowList.length > 0) return allowList.includes(s);
-  return allowAllWhenEmpty;
 }
 
 // 兼容模型把单条消息序列化成 JSON 字符串的情况，例如 "\"你好\"" → "你好"。
@@ -409,10 +411,9 @@ server.tool(
       return { content: [{ type: 'text', text: `无法确认当前模式，拒绝执行：${error?.message ?? error}` }], isError: true };
     }
     try {
-      const a = getAccess();
       const data = await onebot('get_group_list');
       const list = (Array.isArray(data) ? data : (data?.data ?? []))
-          .filter((g) => isAllowed(a.allowGroups, a.denyGroups, g.group_id, a.allowAllWhenEmpty))
+          .filter((g) => isPassiveAllowed('group', g.group_id))
           .map((g) => ({ group_id: g.group_id, group_name: g.group_name }));
       return { content: [{ type: 'text', text: serializeModelData(list) }] };
     } catch (error) {
@@ -434,9 +435,8 @@ server.tool(
     } catch (error) {
       return { content: [{ type: 'text', text: `无法确认当前模式，拒绝读取：${error?.message ?? error}` }], isError: true };
     }
-    const a = getAccess();
-    if (!isAllowed(a.allowGroups, a.denyGroups, g, a.allowAllWhenEmpty)) {
-      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在只读白名单中` }], isError: true };
+    if (!isPassiveAllowed('group', g)) {
+      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在被动准入名单允许范围内` }], isError: true };
     }
     try {
       const data = await onebot('get_group_member_list', { group_id: Number(g) });
@@ -461,9 +461,8 @@ server.tool(
     } catch (error) {
       return { content: [{ type: 'text', text: `无法确认当前模式，拒绝读取：${error?.message ?? error}` }], isError: true };
     }
-    const a = getAccess();
-    if (!isAllowed(a.allowGroups, a.denyGroups, g, a.allowAllWhenEmpty)) {
-      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在只读白名单中` }], isError: true };
+    if (!isPassiveAllowed('group', g)) {
+      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在被动准入名单允许范围内` }], isError: true };
     }
     try {
       const params = { group_id: Number(g) };

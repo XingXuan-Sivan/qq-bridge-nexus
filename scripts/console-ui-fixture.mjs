@@ -374,7 +374,11 @@ export function makeFixtureState() {
     dshProvider: 'deepseek-official',
     dshModel: 'deepseek-flash',
     dshVision: 'auto',
-    whitelist: { allow: { groups: [123456789, 100003], private: [100001] }, deny: { groups: [], private: [] }, ownerQQ: '100001' },
+    whitelist: { ownerQQ: '100001', admins: [] },
+    access: {
+      passive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003', 'qq:private:100001'] },
+      proactive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003'] },
+    },
     sessions: [
       { key: 'group:123456789', sessionId: 'demo-community-20260920', owner: false },
       { key: 'group:100003', sessionId: 'demo-development-20260920', owner: false },
@@ -621,7 +625,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
       if (method === 'GET') {
         switch (path) {
-          case '/api/status': return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: state.whitelist.allow.groups, allowPrivate: state.whitelist.allow.private, activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
+          case '/api/status': {
+            const allowed = state.access.passive.entries;
+            const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
+            return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
+          }
           case '/api/presets': return json({ presets: [{ id: 'qq-chat-v2', trust: 'user' }, { id: 'qq-chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
           // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。
@@ -737,6 +745,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         case '/api/memory/sessions': return json({ ok: true, provider: 'local-digest', sessions: memorySessions(state) });
           case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
           case '/api/whitelist': return json(state.whitelist);
+          case '/api/access': return json({ ok: true, access: state.access });
           case '/api/sessions': return json({ sessions: state.sessions });
           case '/api/pending': return json({ pending: [{ key: 'group:123456789', kind: 'approval', toolName: '演示工具', reason: '等待管理员确认（离线示例）' }] });
           case '/api/social': return json({ config: state.social, states: state.socialStates, pendingSummaries: { 'group:123456789': 2 } });
@@ -940,6 +949,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           }
           case '/api/role-mode': state.roleMode = body.mode; return json({ ok: true });
           case '/api/whitelist': state.whitelist = body; return json({ ok: true });
+          case '/api/access':
+            state.access = {
+              passive: { mode: body?.passive?.mode === 'deny' ? 'deny' : 'allow', entries: Array.isArray(body?.passive?.entries) ? body.passive.entries : [] },
+              proactive: { mode: body?.proactive?.mode === 'deny' ? 'deny' : 'allow', entries: Array.isArray(body?.proactive?.entries) ? body.proactive.entries : [] },
+            };
+            return json({ ok: true, access: state.access });
           case '/api/social': state.social = body; return json({ ok: true });
           case '/api/social/state': state.socialStates[body.key] = { phase: body.phase }; return json({ ok: true });
           case '/api/socialV2/config': state.v2 = body; return json({ ok: true });

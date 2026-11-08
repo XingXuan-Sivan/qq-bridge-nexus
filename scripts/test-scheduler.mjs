@@ -282,7 +282,7 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
     const created = await req(port, '/api/scheduler/tasks', 'POST', {}, { name: '群公告', kind: 'text', text: '周末愉快', schedule: { type: 'weekly', weekdays: [5], times: ['18:00'] }, targets: ['qq:group:456'] });
     assert.equal(created.status, 200, JSON.stringify(created.json));
     const badTarget = await req(port, '/api/scheduler/tasks', 'POST', {}, { kind: 'text', text: 'x', schedule: { type: 'daily', times: ['09:00'] }, targets: ['qq:group:999999'] });
-    assert.equal(badTarget.status, 400); assert.match(badTarget.json.error, /不在白名单/);
+    assert.equal(badTarget.status, 400); assert.match(badTarget.json.error, /未授权主动行为|不在白名单/);
     const preview = await req(port, '/api/scheduler/preview', 'POST', {}, { schedule: { type: 'dailyRandom', count: 3, window: ['09:00', '22:00'] } });
     assert.equal(preview.json.next.length, 5);
   } finally {

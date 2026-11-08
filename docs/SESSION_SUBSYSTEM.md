@@ -1,6 +1,6 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 多管理员已实现（控制台仍单 token owner，见 D18）**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
+状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 多管理员已实现（控制台仍单 token owner，见 D18）；准入已收敛为「两态单源」（2026-11-08，见 §4、D19）**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
@@ -12,8 +12,8 @@
 不变量（实现时不许破）：
 
 1. **覆盖不污染全局**：会话级配置只在该会话生效，任何读取失败都回落全局默认，绝不把会话值写回全局配置。
-2. **准入只有一个真相**：被动/主动的判定只读 `state/sessions/defaults.json` 与会话档案，不再有第二套白名单/豁免分支。
-3. **显式拒绝优先**：`blocked` / 显式 `deny` 高于本会话 `allow`，也高于 owner/管理员豁免。
+2. **准入只有一个真相**：被动/主动的判定只读 `state/sessions/defaults.json` 的两份名单；会话档案里不再有准入字段，也不再有自己的允许/拒绝状态。
+3. **两态即语义**：每个轴只有 `allow`（白名单：默认拒绝、名单内允许）与 `deny`（黑名单：默认允许、名单内拒绝）两种模式；没有 `off`，也没有「显式拒绝优先」。管理命令、审批与 owner 私聊走独立通道，不受名单影响。
 4. **运行模式不是过滤器**：`chat` / `reserved` / `reserved2` 是会话实际跑哪套仿真；`closed-agent` 是全局排他模式，不开放给会话级。
 5. **DSH 实例可丢弃**：任何 RPC 返回 `session/not-found` 只允许「退役 → 重建 → 重试一次」；不允许无限重建，也不允许静默不回复。
 6. **迁移一次、无旧读**：成功后删除旧文件与旧键，正式版本没有兼容读分支、没有 `.bak`、没有双写。
@@ -23,10 +23,10 @@
 
 | 决策 | 结论 |
 | --- | --- |
-| 准入轴 | 被动、主动两根独立轴；每根轴都能切黑白名单（默认策略 + 每会话三态） |
-| 迁移默认 | 完全保持现状：原 allow 会话被动/主动都开，原 deny 拒绝，`allowAllWhenEmpty` 决定默认 |
+| 准入轴 | 被动、主动两根独立轴；每根轴一条全局名单，模式二选一：白名单（默认拒绝）或黑名单（默认允许） |
+| 迁移默认 | 完全保持现状：按旧默认选模式（旧默认 deny → 白名单，旧默认 allow → 黑名单），再把升级当次实际允许/拒绝的会话写成名单；不保留每会话三态 |
 | 运行模式 | 会话可固定 `chat` / `reserved` / `reserved2`；closed-agent 仍全局排他，不开放会话级 |
-| 覆盖范围 | P1：显示名、被动、主动、黑名单、人格、提示词、唤醒、记忆清空、DSH 状态；P2：运行模式、预设、模型 |
+| 覆盖范围 | P1：显示名、准入（只读全局名单成员关系）、人格、提示词、唤醒、记忆清空、DSH 状态；P2：运行模式、预设、模型 |
 | 存储与迁移 | 一次性迁到 `state/sessions/` 目录（`defaults.json` + 每会话文件）；正式版本无旧文件、旧键、兼容读、`.bak` |
 | 清空上下文 | 拆成「重建 DSH 会话」与「重置会话状态」两个动作 |
 | 多管理员 | owner + 管理员两级；管理员不能改全局模式/权限/管理员名单 |
@@ -65,12 +65,15 @@ state/sessions/
 {
   "version": 2,
   "defaults": {
-    "passive": "deny",
-    "proactive": "deny"
+    "version": 2,
+    "passive": { "mode": "allow", "entries": ["qq:group:903621673"] },
+    "proactive": { "mode": "deny", "entries": ["qq:group:100003"] }
   },
   "migratedAt": 0
 }
 ```
+
+`mode` 为 `allow` 时是白名单（默认拒绝、名单内允许），为 `deny` 时是黑名单（默认允许、名单内拒绝）；`entries` 里统一存完整 key（`platform:kind:id`）。全新安装写 `mode:'deny'` 且名单为空，即默认全部允许，避免首次启动把所有会话拒之门外。
 
 每会话文件（`state/sessions/<platform>/<kind>/<id>.json`）：
 
@@ -79,11 +82,6 @@ state/sessions/
   "version": 2,
   "key": "qq:group:903621673",
   "displayName": "技术闲聊群",
-  "blocked": false,
-  "access": {
-    "passive": "inherit",
-    "proactive": "deny"
-  },
   "mode": "inherit",
   "persona": { "mode": "inherit", "name": null },
   "prompt": { "initialText": "", "updatedAt": 0 },
@@ -104,9 +102,8 @@ state/sessions/
 
 字段约定：
 
-- `defaults.passive/proactive`：全局默认策略，取值 `allow` / `deny`；切换它等于切换该轴的黑/白名单语义。
+- `defaults.passive/proactive`：每轴一条全局名单；`{mode:'allow'|'deny', entries:[key]}`。`allow` = 白名单，`deny` = 黑名单；`entries` 是唯一准入数据，会话档案里没有第二份。
 - `defaults.migratedAt`：迁移提交点；0 表示旧来源仍有效、迁移未提交，非 0 表示目录已是唯一真相，启动只做旧源清理。
-- `access.*`：`inherit` / `allow` / `deny` 三态；`blocked=true` 时两根轴都拒绝，优先级最高。
 - `mode`：`inherit` / `chat` / `reserved` / `reserved2`；不允许 `closed-agent`。
 - `persona`：`inherit`（按全局三层解析）/ `off`（本会话不挂卡）/ `card`（指定角色卡名）。
 - `prompt.initialText`：首次唤醒时注入一次的会话背景；空串表示没有。
@@ -154,26 +151,21 @@ state/sessions/
 - `passive`：能不能因为「别人发来消息」而回复。
 - `proactive`：能不能由 bot 自己发起动作（主动发言、定时任务、跨会话发送、主动唤醒）。
 
-两根轴各自有全局默认（`defaults.passive/proactive`）和每会话三态（`inherit/allow/deny`）。默认拒绝 + 例外允许 = 白名单；默认允许 + 例外拒绝 = 黑名单。
+两根轴各自只有一份全局名单（`defaults.passive/proactive`），不存在每会话三态，也不存在会话档案里的准入字段。名单模式决定默认值：`allow` 白名单默认拒绝、名单内允许；`deny` 黑名单默认允许、名单内拒绝。空名单因此有意义：白名单空 = 全部拒绝，黑名单空 = 全部允许。
 
 ### 4.2 解析顺序
 
 ```
 resolve(axis, key):
-  profile = profiles[key]
-  if profile.blocked: return deny
-  if profile.access[axis] === deny: return deny
-  if profile.access[axis] === allow:
-      return allow
-  # inherit
-  if axis == passive and isOwnerPrivate(key): return allow
-  if axis == passive and isAdminPrivate(key) and admin.exemptPassive: return allow
-  return defaults[axis]
+  cfg = defaults[axis]
+  inside = cfg.entries.includes(key)
+  return cfg.mode === 'allow' ? inside : !inside
 ```
 
-- `deny` 永远优先；owner 私聊豁免只在 `inherit` 时生效，显式拒绝仍然生效（控制台仍可改）。
-- 管理员私聊被动默认豁免（可在管理员记录里关掉）；主动不豁免。
-- 判定函数只接受 `(axis, key, snapshot)`，不读 `currentMode`、不读旧 `allow` 列表。
+- 判定只依赖 `(axis, key, defaults)`；不读会话档案、不读运行模式、不读旧 `allow` 列表。
+- 管理命令、审批、owner 私聊的运维通道不经过这个函数，因此不会把管理员或主人锁在门外；它们与「会话是否被允许自动回复」是两条独立通道。
+- 控制台全局准入保存时要校验名单条目：允许 `group:123` / `private:123`，也允许完整 `qq:group:123`；落盘前统一补平台前缀、去重、保序，非法条目拒绝保存。
+- 切换模式会翻转所有会话的生效结果，控制台必须显示影响数并二次确认；名单增删不需要二次确认。
 
 ### 4.3 主动行为的检查点
 
@@ -191,22 +183,22 @@ resolve(axis, key):
 
 | 旧 | 新 | 说明 |
 | --- | --- | --- |
-| `allow.groups` / `allow.private` 中的 key | `profiles[key].access = {passive: allow, proactive: allow}` | 现在这些会话既能被动也能主动 |
-| `deny.groups` / `deny.private` 中的 key | `profiles[key].blocked = true` | 显式拒绝优先 |
-| `allowAllWhenEmpty=true` 且 allow 为空 | `defaults.passive = allow`、`defaults.proactive = allow` | 保持「谁都能触发」 |
-| 其它情况 | `defaults.passive = deny`、`defaults.proactive = deny` | 保持「只允许名单内」 |
+| 旧 `defaults.* = deny`（原白名单语义） | `defaults.* = {mode:'allow', entries:[升级当次实际允许的 key]}` | 白名单，默认拒绝；包含旧规则下 owner/管理员被动豁免的会话 |
+| 旧 `defaults.* = allow`（原黑名单语义） | `defaults.* = {mode:'deny', entries:[升级当次实际拒绝的 key]}` | 黑名单，默认允许；只把旧规则下真正被拒绝的会话写进名单 |
+| 旧档案 `access.*` / `blocked` | 不保留为字段，只在迁移时参与计算 | 三态在升级当次被翻译进名单；迁移后档案里不再有准入字段 |
 | 旧 `sessions` / `sessionPolicies` | `profiles[key].binding` | 指纹原样保留，迁移后第一次判定会按新指纹重建 |
 | `current-role.json.byKey` | `profiles[key].persona` | 有卡名 → `{mode:'card', name}`；无 → `inherit` |
 | `initial-prompts.json` | `profiles[key].prompt.initialText` | 保留更新时间 |
 | `social-v2.json.conversations[key].wakeConfig` | `profiles[key].wake.config` | 仅迁配置；未读、agentToken 留在运行态存储 |
-| `access` 页的 allow/deny 输入框 | 默认策略 + 会话档案 | 旧输入框删除，不再提供第二套编辑入口 |
+| `access` 页的 allow/deny 输入框 | 会话页的全局准入名单 | 旧输入框删除；访问页只保留 owner/管理员，不再有第二套名单 |
 
 迁移判定：
 
-- 同一 key 同时在 allow 与 deny：按 `blocked`（拒绝优先）处理，不保留 allow。
-- 新会话（迁移之后第一次出现）：`access` 全部 `inherit`；白名单默认下自然关闭，黑名单默认下跟随允许。
-- 手工「新增会话」：写一条 `inherit` 档案；弹窗里主动默认 `deny`，即使用户当前是黑名单默认，也先不给主动——要放开需在详情页显式改。
-- 自动发现的未知群/私聊：只建绑定或只记录，不自动写 `allow`；是否回复由 `defaults` 决定。
+- 旧规则里同一 key 同时在 allow 与 deny：按旧实现「拒绝优先」计算，迁移后只反映在名单里，不保留字段。
+- 新会话（迁移之后第一次出现）：没有档案级准入可写；是否回复完全由当前两轴名单决定。
+- 手工「新增会话」：只建档案（显示名/人格/提示词等），不自动加入任何名单；要允许或拒绝，改全局名单。
+- 自动发现的未知群/私聊：只建绑定或只记录，不自动写名单；是否回复由 `defaults` 决定。
+- 全新安装：两轴都是 `deny` 空名单（默认全部允许），不是白名单空名单（那会把所有人拒之门外）。
 
 ### 4.5 旧键删除
 
@@ -250,8 +242,8 @@ effectiveMode(key):
 | 项 | 行为 |
 | --- | --- |
 | 显示名 / DSH 标题 | 自定义名同步写 DSH；空则用 `QQ·群 <id>` / `QQ·私聊 <id>` |
-| 被动 / 主动 | 三态；见 §4 |
-| 黑名单 / 删除档案 | `blocked`；删除档案同时删绑定，可选连带删人格/提示词/记忆/唤醒 |
+| 被动 / 主动 | 只读显示是否在全局名单内 + 两个「是否允许」开关；开关直接改全局名单，不写档案（见 §4） |
+| 删除档案 | 删档案同时删绑定，可选连带删人格/提示词/记忆/唤醒；不再有 `blocked` 字段 |
 | 人格来源 | `inherit` / `off` / `card`；卡名必须在本地角色库中 |
 | 初始提示词 | 编辑 / 清除；首次唤醒注入一次 |
 | 唤醒配置 | `inherit`（推荐值）/ 自定义 / 重置 |
@@ -331,7 +323,7 @@ effectiveMode(key):
 
 - persona 页：删除「按会话设置人格」卡（全局角色库保留）。
 - social-v2 页：删除「唤醒状态」「初始提示词」「白名单快速选择」卡；唤醒推荐值仍在，但按会话的编辑在详情页。
-- access 页：保留默认策略（被动/主动）、黑名单、管理员、令牌、拦截提示；删除 allow/deny 名单编辑与会话白名单快速选择。
+- access 页：只保留 owner/管理员、控制台令牌、拦截提示；被动/主动名单与模式全部迁到会话页的全局准入，不再有 allow/deny 输入框或会话白名单快速选择。
 - 迁移完成后旧入口不留「已迁移」提示或死链接。
 
 ### 8.4 权限
@@ -401,11 +393,11 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 **P1 档案与详情页**
 
 - [x] 目录存储（落在 `src/session/directory.mjs`）：扫描/校验/缓存、单文件 `.tmp` + rename、损坏隔离、删除顺序。
-- [x] schema 与默认值（同文件 `createProfile`/`normalizeProfile`/`applyPatch`）：读取/合并、三态解析、`blocked` 优先。
-- [x] `src/session/access.mjs`：被动/主动判定唯一入口；替换旧 `allowed()` 调用。
-- [x] `state/sessions/` 迁移：旧绑定、人格、提示词、唤醒、allow/deny → `defaults.json` + 每会话文件；提交点 `migratedAt` 后再删旧文件/旧键。
+- [x] schema 与默认值（同文件 `createProfile`/`normalizeProfile`/`applyPatch`）：读取/合并、两态名单解析、迁移期只经 `legacyAccess` 暂存旧三态。
+- [x] `src/session/access.mjs`：被动/主动判定唯一入口；替换旧 `allowed()` 调用；`defaults` 只存 `{mode,entries}`。
+- [x] `state/sessions/` 迁移：旧绑定、人格、提示词、唤醒与旧 allow/deny → 两态名单 + 每会话文件；提交点 `migratedAt` 后再删旧文件/旧键。
 - [x] 迁移幂等与失败保护：写入 `.tmp`、回读校验、失败清理本次新目录内容并保留旧来源，不产生 `.bak`。
-- [x] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动（`scripts/test-session-directory.mjs` 7/7）。
+- [x] 目录规则测试：非法 key 中止并列出、`key` 与路径不一致隔离、重复 key 取新、`.tmp` 清理、损坏文件不影响启动（`scripts/test-session-directory.mjs` 6/6）。
 - [x] 控制台列表改并集数据源；筛选、搜索、行操作（管理/改名/重建/删档案）。
 - [x] 详情（`#sessions` 宽弹窗，见 D14）：七卡、每卡独立保存、关闭前未保存确认、显示无 DSH 映射的会话。
 - [x] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
@@ -413,9 +405,20 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [x] `test-session-profiles.mjs` 4/4：并集列表、GET/PATCH/DELETE、非法值与 agent 越权、删档保留绑定。
 - [ ] `test-session-migrate.mjs` + 详情弹窗 UI 专项用例；目前只有 `test-session-directory`/`test-session-profiles` 与真机探针覆盖。
 
+**准入两态单源（已完成，2026-11-08）**
+
+- [x] `defaults` v2：每轴 `{mode:'allow'|'deny', entries:[key]}`；空名单语义固定（白=全拒、黑=全允），全新安装为黑名单空名单。
+- [x] 删除会话档案的 `access` / `blocked`；旧三态只在迁移期以 `legacyAccess` 暂存，翻译后删除。
+- [x] 旧三态迁移：按旧默认选白/黑模式，把升级当次实际允许（白名单）或拒绝（黑名单）的会话写成 entries，迁移后不保留三态。
+- [x] `GET/PATCH /api/access`：GET 返回 `{access,summary}`；PATCH 校验条目、模式翻转返回 409 + `requiresConfirm` + `affected`，确认后才写。
+- [x] `/api/status`、`/api/scheduler` 目标、`reconcileGroupMembers`、语音发送的错误文案全部读同一份名单；`/api/whitelist` 只保留 owner/admins。
+- [x] 控制台会话页全局准入：统一表单、无标签页，被动/主动两条名单同排、窄屏堆叠；详情准入卡只显示成员关系与两个开关。
+- [x] `test-session-access.mjs` 5/5（条目前缀、空名单语义、旧三态迁移、summary、v2 校验）；`test-session-profiles` 4/4、`test-session-directory` 6/6。
+- [x] 全量 `test:audit` 96/96、控制台 UI 28/28、static 全过；真机 PID 46564 验证 `/api/access`、列表与详情渲染。
+
 **P2a 运行模式与预设（已完成）**
 
-- [x] 列出全部 `currentMode === …`、`modeAllowed(`、`modePreset(` 调用点，形成清单后再改。
+- [x] 列出全部 `currentMode === …`、`effectiveMode(`、`modePreset(` 调用点，形成清单后再改。
 - [x] `effectiveMode(key)`：会话覆盖、closed-agent 排他、inactive 语义（`src/session/mode.mjs`）。
 - [x] 会话级 preset 保存校验（DSH 安全清单）与指纹变化重建（`modePreset` + `policy.getMode`）。
 - [x] 详情页运行模式/预设控件与「下次唤醒按指纹重建」提示。
@@ -465,7 +468,7 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 
 | 风险 | 对策 |
 | --- | --- |
-| 会话级运行模式触碰大量全局分支 | P2 前先列 `currentMode` / `modeAllowed` 调用点清单；按清单逐个改，先加矩阵测试再改 |
+| 会话级运行模式触碰大量全局分支 | P2 前先列 `currentMode` / `effectiveMode` 调用点清单；按清单逐个改，先加矩阵测试再改 |
 | DSH 会话被删后无限重建 | 只重试一次；60 秒窗口内 3 次失败暂停并告警 |
 | 迁移写坏 state | `.tmp` + rename；`migratedAt` 提交前失败保留旧来源并清理新目录；迁移前人工快照放仓库外并限期删除 |
 | 目录文件多、Windows 占用/锁 | 单写者 + 内存缓存；写失败保留原文件并报错；启动清理 `.tmp-*`；跨进程写入明确不支持 |
@@ -486,3 +489,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-08：P2b 模型部分落地（D16）：档案 `model` + `profileModelSignature` 进 policy 指纹；`ensureChatModel(sessionId,key)` 按会话模型 `selectModel`；`GET/PATCH .../profile` 增 `model/effectiveModel`（PATCH 走 `validateModelSelection`，目录不可用 503、非法 400）；`resolveMediaList`/`fetchMediaData` 与表情/形象/web 图按 `sessionCanSeeImages(key)` 降级；详情运行卡加提供方/模型/思考强度（保存同步全局默认）；`test-session-model` 5/5，static 全过、UI 28/28、audit 93/93。
 - 2026-11-08：P2b 主动检查点方案 A 落地（D17）：scheduler 跳过项标记「未授权主动行为」并生成通知（`src/scheduler/skip-notice.js`），引擎按任务+日期去重（`noteSkipNotice`），桥接写活动/审计并私聊创建者；v1 仿真改 `socialEnabledForKey(key)` 逐会话启用，循环与随机触发都先过 `proactiveAllowed(key)`，主动被拒即退出活跃；跨会话 agent token 返回明确拒绝文案「跨会话能力尚未实现」。`test-session-proactive` 3/3，static 全过、UI 28/28、audit 94/94；方案 B（AI 跨会话工具）留后续。
 - 2026-11-08：P3 多管理员落地（D18）：新增 `src/admin/admins.mjs`（名单归一化、capability、actor、maxLevel、私聊被动豁免）与 `test-admins` 6/6；`config.admins[]` 启动校验；管理员私聊接入管理通道（`/status`、`/approvals`、`/level L1|L2`），审批回复按 `approve` 放行、审计带 `actor`、通知 owner + `notify` 管理员；closed-agent 的 admin 私聊按 maxLevel 限级，L3 只 owner；访问页新增管理员表并通过 `/api/whitelist` 读写。控制台仍单 token owner。
+- 2026-11-08：准入收敛为两态单源（D19）：删除会话档案 `access`/`blocked` 与三态语义，只保留每轴 `{mode,entries}`；旧三态在迁移期以 `legacyAccess` 暂存，按旧默认翻译成白/黑名单后删除；`GET/PATCH /api/access` 成为唯一入口，模式翻转需 `confirmFlip`；`/api/status`、scheduler 目标、`reconcileGroupMembers`、语音发送与 MCP 群工具全部读同一份 `state/sessions/defaults.json`；`/api/whitelist` 只保留 owner/admins；删除 `src/session/mode-gate.mjs` 与其单测，旧白名单自查代码一并清理。控制台会话页改为统一表单的两列名单（无标签页），详情准入卡只显示成员关系与开关；`test-session-access` 5/5、`test-session-directory` 6/6、`test-session-profiles` 4/4、`test-audit-bridge` 16/16，全量 audit **96/96**、UI 28/28、static 全过；真机验证 `/api/access`、模式翻转 409、详情卡与两列布局。

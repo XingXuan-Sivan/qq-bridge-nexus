@@ -13,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 import {
   createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile, keyPath, SESSION_DIR_VERSION,
 } from '../src/session/directory.mjs';
-import { resolveAccess, resolveAccessSummary } from '../src/session/access.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -65,11 +64,10 @@ test('损坏文件被隔离，不阻断其它会话；key 与路径不一致视�
   writeJson(path.join(dir, 'defaults.json'), { version: 2, defaults: { passive: 'deny', proactive: 'deny' }, migratedAt: 1 });
   writeJson(path.join(dir, 'qq/group/1.json'), { version: 2, key: 'qq:group:2' });
   writeJson(path.join(dir, 'qq/group/3.json'), { version: 2, key: 'qq:group:3', access: { passive: 'allow' }, updatedAt: 1 });
-  fs.mkdirSync(path.join(dir, 'qq/group'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'qq/group/4.json'), '{not json', 'utf8');
   const loaded = loadSessionDirectory({ dir, fs, path, log });
   assert.equal(Object.hasOwn(loaded.state.profiles, 'qq:group:1'), false);
-  assert.equal(loaded.state.profiles['qq:group:3'].access.passive, 'allow');
+  assert.equal(loaded.state.profiles['qq:group:3'].legacyAccess.access.passive, 'allow');
   const files = fs.readdirSync(path.join(dir, 'qq/group'));
   assert.ok(files.some((f) => f.startsWith('1.json.corrupt-')));
   assert.ok(files.some((f) => f.startsWith('4.json.corrupt-')));
@@ -102,28 +100,6 @@ test('写入只写变化，删除档案会删文件', () => {
   assert.equal(fs.existsSync(path.join(dir, 'qq/group/1.json')), false);
 });
 
-test('准入：deny 优先、三态、owner/管理员私聊豁免与默认策略', () => {
-  const snapshot = {
-    defaults: { passive: 'deny', proactive: 'deny' },
-    profiles: {
-      'qq:group:1': { blocked: false, access: { passive: 'allow', proactive: 'inherit' } },
-      'qq:group:2': { blocked: true, access: { passive: 'allow', proactive: 'allow' } },
-      'qq:group:3': { blocked: false, access: { passive: 'deny', proactive: 'inherit' } },
-    },
-  };
-  assert.equal(resolveAccess('passive', 'qq:group:1', snapshot), 'allow');
-  assert.equal(resolveAccess('proactive', 'qq:group:1', snapshot), 'deny');
-  assert.equal(resolveAccess('passive', 'qq:group:2', snapshot), 'deny');
-  assert.equal(resolveAccess('proactive', 'qq:group:2', snapshot), 'deny');
-  assert.equal(resolveAccess('passive', 'qq:private:99', snapshot, { ownerPrivate: true }), 'allow');
-  assert.equal(resolveAccess('proactive', 'qq:private:99', snapshot, { ownerPrivate: true }), 'deny');
-  assert.equal(resolveAccess('passive', 'qq:private:88', snapshot, { adminPrivate: true }), 'allow');
-  assert.equal(resolveAccess('passive', 'qq:private:88', snapshot, { adminPrivate: true, adminExemptPassive: false }), 'deny');
-  const allowed = { ...snapshot, defaults: { passive: 'allow', proactive: 'allow' } };
-  assert.equal(resolveAccess('passive', 'qq:group:9', allowed), 'allow');
-  assert.deepEqual(resolveAccessSummary('qq:group:1', snapshot), { passive: 'allow', proactive: 'deny' });
-});
-
 test('迁移：allow/deny、allowAllWhenEmpty、人格/提示词/唤醒/绑定都按现状映射', () => {
   const input = {
     allowGroups: ['qq:group:1', 'group:2'],
@@ -141,9 +117,9 @@ test('迁移：allow/deny、allowAllWhenEmpty、人格/提示词/唤醒/绑定�
   };
   const out = migrateSessionProfiles(input);
   assert.deepEqual(out.defaults, { passive: 'deny', proactive: 'deny' });
-  assert.equal(out.profiles['qq:group:1'].access.passive, 'allow');
-  assert.equal(out.profiles['qq:group:1'].access.proactive, 'allow');
-  assert.equal(out.profiles['qq:group:3'].blocked, true);
+  assert.equal(out.profiles['qq:group:1'].legacyAccess.access.passive, 'allow');
+  assert.equal(out.profiles['qq:group:1'].legacyAccess.access.proactive, 'allow');
+  assert.equal(out.profiles['qq:group:3'].legacyAccess.blocked, true);
   assert.equal(out.profiles['qq:group:1'].persona.mode, 'card');
   assert.equal(out.profiles['qq:group:4'].persona.mode, 'off');
   assert.equal(out.profiles['qq:group:1'].prompt.initialText, '技术群');

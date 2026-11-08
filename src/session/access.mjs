@@ -1,53 +1,136 @@
 /**
- * 会话准入：被动 / 主动两根独立的轴（SESSION_SUBSYSTEM.md §4）。
+ * 会话准入：被动 / 主动两根独立的轴，每根轴是一份**全局名单**（SESSION_SUBSYSTEM.md §4）。
  *
- * 解析顺序（deny 永远优先）：
- *   blocked → access[axis] 显式 deny/allow → 被动轴 owner/管理员私聊豁免 → 全局默认。
+ * 名单只有两种模式，没有第三种：
+ *   - allow（白名单）：名单内允许，名单外拒绝；空名单 = 全部拒绝。
+ *   - deny（黑名单）：名单内拒绝，名单外允许；空名单 = 全部允许。
  *
- * 只接受 `(axis, key, snapshot, ctx)`，不读 `currentMode`、不读旧的 allow/deny 列表：
- * 迁移完成后旧配置已被删除，这里不存在第二套真相。
+ * 名单是唯一真相：会话详情里的“允许/拒绝”开关只是往这份名单里增删该会话，
+ * 不再有 per-profile 的 inherit/allow/deny，也没有 owner/管理员豁免（管理命令走独立通道）。
  */
 
+import { formatKey, parseKey } from './key.mjs';
+
 export const ACCESS_AXES = ['passive', 'proactive'];
+export const ACCESS_MODES = ['allow', 'deny'];
+export const ACCESS_VERSION = 2;
 
 export function isAccessAxis(axis) {
   return ACCESS_AXES.includes(axis);
 }
 
-/** 规范化三态：非法值按 inherit。 */
-export function normalizeAccessValue(value) {
-  return ['inherit', 'allow', 'deny'].includes(value) ? value : 'inherit';
+/** 只保底 allow/deny；非法值按白名单处理（空名单=全拒，最保守）。 */
+export function normalizeAccessMode(value) {
+  return value === 'deny' ? 'deny' : 'allow';
+}
+
+/**
+ * 一条名单项 → 规范 key（`qq:group:123` / `qq:private:456`）。
+ * 接受 `qq:` 前缀、`group:123` / `private:456`，也接受完整 key；其余一律视为非法。
+ */
+export function parseAccessEntry(raw, platform = 'qq') {
+  if (typeof raw !== 'string') return null;
+  let text = raw.trim().toLowerCase();
+  if (!text) return null;
+  if (!text.includes(':')) return null;
+  if (/^(group|private):/.test(text)) text = `${platform}:${text}`;
+  const parsed = parseKey(text);
+  if (!parsed) return null;
+  return formatKey(parsed.platform, parsed.kind, parsed.id);
+}
+
+/** 名单数组 → `{entries, invalid}`；去重并保持首次出现顺序。 */
+export function normalizeAccessEntries(raw, platform = 'qq') {
+  const list = Array.isArray(raw) ? raw : [];
+  const entries = [];
+  const invalid = [];
+  const seen = new Set();
+  for (const item of list) {
+    const key = parseAccessEntry(item, platform);
+    if (!key) {
+      if (typeof item === 'string' && item.trim()) invalid.push(item.trim());
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(key);
+  }
+  return { entries, invalid };
+}
+
+/** 新建一个空名单配置；默认白名单（空=全部拒绝），全新安装可传 deny 得到“黑名单空=全部允许”。 */
+export function createAccessConfig(mode = 'allow') {
+  const config = { version: ACCESS_VERSION };
+  for (const axis of ACCESS_AXES) config[axis] = { mode: mode === 'deny' ? 'deny' : 'allow', entries: [] };
+  return config;
+}
+
+/** 已迁移到 v2 的 defaults 才返回配置，否则返回 null（调用方负责迁移）。 */
+export function normalizeAccessConfig(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  if (Number(raw.version) !== ACCESS_VERSION) return null;
+  const config = { version: ACCESS_VERSION };
+  for (const axis of ACCESS_AXES) {
+    const src = raw[axis] && typeof raw[axis] === 'object' && !Array.isArray(raw[axis]) ? raw[axis] : {};
+    const { entries } = normalizeAccessEntries(src.entries);
+    config[axis] = { mode: normalizeAccessMode(src.mode), entries };
+  }
+  return config;
+}
+
+export function isAccessConfigV2(raw) {
+  return Boolean(normalizeAccessConfig(raw));
 }
 
 /**
  * @param {'passive'|'proactive'} axis
  * @param {string} key
- * @param {{profiles?: object, defaults?: object}} snapshot
- * @param {{ownerPrivate?: boolean, adminPrivate?: boolean, adminExemptPassive?: boolean}} ctx
- * @returns {'allow'|'deny'}
+ * @param {{defaults?: object}|object} snapshot state 或 defaults 本体
+ * @returns {{mode:'allow'|'deny', member:boolean, value:'allow'|'deny'}}
  */
-export function resolveAccess(axis, key, snapshot, ctx = {}) {
+export function accessState(axis, key, snapshot) {
   if (!isAccessAxis(axis)) throw new Error(`未知的准入轴：${axis}`);
-  const profile = snapshot?.profiles?.[key] ?? null;
-  if (profile?.blocked === true) return 'deny';
-  const explicit = normalizeAccessValue(profile?.access?.[axis]);
-  if (explicit === 'deny') return 'deny';
-  if (explicit === 'allow') return 'allow';
-  if (axis === 'passive' && ctx.ownerPrivate === true) return 'allow';
-  if (axis === 'passive' && ctx.adminPrivate === true && ctx.adminExemptPassive !== false) return 'allow';
-  const fallback = snapshot?.defaults?.[axis];
-  return fallback === 'allow' ? 'allow' : 'deny';
+  const raw = snapshot?.defaults ?? snapshot;
+  const config = normalizeAccessConfig(raw);
+  if (!config) throw new Error('准入配置尚未迁移到名单模式');
+  const list = config[axis];
+  const member = list.entries.includes(key);
+  const value = (list.mode === 'allow') === member ? 'allow' : 'deny';
+  return { mode: list.mode, member, value };
+}
+
+export function resolveAccess(axis, key, snapshot) {
+  return accessState(axis, key, snapshot).value;
 }
 
 /** 一次解析两根轴（控制台列表/详情用）。 */
-export function resolveAccessSummary(key, snapshot, ctx = {}) {
-  return {
-    passive: resolveAccess('passive', key, snapshot, ctx),
-    proactive: resolveAccess('proactive', key, snapshot, ctx),
-  };
+export function resolveAccessSummary(key, snapshot) {
+  const out = {};
+  for (const axis of ACCESS_AXES) {
+    const state = accessState(axis, key, snapshot);
+    out[axis] = state.value;
+    out[`${axis}Mode`] = state.mode;
+    out[`${axis}Member`] = state.member;
+  }
+  return out;
 }
 
-/** 默认策略的黑白语义文案（给控制台提示用）。 */
-export function defaultPolicyText(value) {
-  return value === 'allow' ? '默认允许（黑名单模式）' : '默认拒绝（白名单模式）';
+/** 名单模式的中文文案（控制台提示用）。 */
+export function defaultPolicyText(mode) {
+  return mode === 'deny' ? '黑名单（名单外全部允许）' : '白名单（名单外全部拒绝）';
+}
+
+/** 名单为空时的后果文案；非空返回空串。 */
+export function emptyListWarning(axisConfig) {
+  if (!axisConfig || axisConfig.entries.length > 0) return '';
+  return axisConfig.mode === 'allow' ? '白名单为空：全部拒绝' : '黑名单为空：全部允许';
+}
+
+/** “这个会话为什么是允许/拒绝”的一句话说明。 */
+export function accessReasonText(axis, key, snapshot) {
+  const state = accessState(axis, key, snapshot);
+  if (state.mode === 'allow') {
+    return state.member ? '白名单成员' : '不在白名单（默认拒绝）';
+  }
+  return state.member ? '黑名单成员（拒绝）' : '不在黑名单（默认允许）';
 }

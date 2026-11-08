@@ -123,6 +123,10 @@ const tests = [
   'test-core-prompt-blocks.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
   'test-skills-index.mjs',
+  // 外部技能存储（P3）：frontmatter 校验、写入/备份/启停/删除、ZIP 导入与路径边界。
+  'test-skill-store.mjs',
+  // 扩展 Hub：preset 过滤 MCP/技能、工具 deny、技能正文读取。
+  'test-extension-hub.mjs',
   // 插件安装/卸载（P2b）：目录与 zip、清单失败回滚、路径穿越与超限拒绝、卸载进 _trash。
   'test-plugin-install.mjs',
   // preset 源与 bundle patch 不漂移（v0.3.0 起多了 qq-agent-readonly，一并钉住）。

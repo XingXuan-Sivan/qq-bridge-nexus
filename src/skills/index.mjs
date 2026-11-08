@@ -34,6 +34,8 @@ export function formatSkillLine(entry, { maxDescriptionChars = 40 } = {}) {
 /**
  * @param {object} opts
  * @param {string[]} opts.roots 技能根目录，按优先级排列（同名技能取第一个）
+ * @param {Array<{dir:string,source?:string,editable?:boolean}>} [opts.rootMeta] 每个根目录的来源/可编辑元数据
+ * @param {() => Array<object>} [opts.extraSkills] 额外技能（用户目录；active=false 的不注入）
  * @param {number} [opts.maxEntries] 最多列几条（默认 12）
  * @param {number} [opts.maxDescriptionChars] 每条描述最多几个字（默认 40）
  * @param {number} [opts.ttlMs] 扫描结果缓存时长（默认 60s；技能目录变化不频繁，避免每轮唤醒都读盘）
@@ -42,6 +44,8 @@ export function formatSkillLine(entry, { maxDescriptionChars = 40 } = {}) {
  */
 export function createSkillIndex({
   roots = [],
+  rootMeta = [],
+  extraSkills = null,
   maxEntries = 12,
   maxDescriptionChars = 40,
   ttlMs = 60000,
@@ -56,9 +60,33 @@ export function createSkillIndex({
   function scan() {
     const entries = [];
     const seen = new Set();
+    // 用户管理的技能优先于所有只读来源；同名时只保留优先级最高的一个，并在 UI 标注来源。
+    if (typeof extraSkills === 'function') {
+      let extra = [];
+      try {
+        extra = extraSkills() ?? [];
+      } catch (error) {
+        log(`⚠️ 外部技能清单读取失败，本次按空处理：${error?.message ?? error}`);
+      }
+      for (const item of Array.isArray(extra) ? extra : []) {
+        const id = String(item?.id ?? '').trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        entries.push({
+          id,
+          name: String(item?.name ?? id),
+          description: String(item?.description ?? ''),
+          dir: String(item?.path ?? item?.dir ?? ''),
+          source: String(item?.source ?? 'user'),
+          editable: item?.editable !== false,
+          active: item?.active !== false,
+        });
+      }
+    }
     for (const root of roots) {
       const dir = String(root ?? '').trim();
       if (!dir) continue;
+      const meta = rootMeta.find((entry) => String(entry?.dir ?? '') === dir) ?? {};
       let names = [];
       try {
         names = fs.readdirSync(dir, { withFileTypes: true })
@@ -85,30 +113,35 @@ export function createSkillIndex({
           name: parsed.name || id,
           description: parsed.description,
           dir: skillDir,
+          source: String(meta.source ?? 'builtin'),
+          editable: meta.editable === true,
+          active: true,
         });
       }
     }
     return entries;
   }
 
-  function list() {
+  function list({ includeInactive = false } = {}) {
     const at = now();
-    if (cache && at - cache.at < ttlMs) return cache.entries;
-    try {
-      cache = { at, entries: scan() };
-    } catch (error) {
-      log(`⚠️ 技能索引扫描失败，本次按空清单处理：${error?.message ?? error}`);
-      cache = { at, entries: [] };
+    if (!cache || at - cache.at >= ttlMs) {
+      try {
+        cache = { at, entries: scan() };
+      } catch (error) {
+        log(`⚠️ 技能索引扫描失败，本次按空清单处理：${error?.message ?? error}`);
+        cache = { at, entries: [] };
+      }
     }
-    return cache.entries;
+    return includeInactive ? cache.entries : cache.entries.filter((entry) => entry.active !== false);
   }
 
   /**
    * 生成注入块文本。行数有上限（标题 1 行 + maxEntries 行 + 溢出提示 1 行），字数再兜一层。
    * 返回空串表示「没有可用技能」，调用方据此整块跳过。
    */
-  function render({ maxChars = 1200, limit = maxEntries } = {}) {
-    const entries = list();
+  function render({ maxChars = 1200, limit = maxEntries, ids = null } = {}) {
+    const only = Array.isArray(ids) ? new Set(ids) : null;
+    const entries = list().filter((entry) => !only || only.has(entry.id));
     if (!entries.length) return '';
     const budget = Number(maxChars) > 0 ? Number(maxChars) : 1200;
     const cap = Number.isInteger(limit) && limit > 0 ? limit : maxEntries;
@@ -131,11 +164,11 @@ export function createSkillIndex({
   }
 
   function status() {
-    const entries = list();
+    const entries = list({ includeInactive: true });
     return {
       roots: roots.filter(Boolean),
-      count: entries.length,
-      entries: entries.map(({ id, name, dir }) => ({ id, name, dir })),
+      count: entries.filter((entry) => entry.active !== false).length,
+      entries: entries.map(({ id, name, dir, source, editable, active }) => ({ id, name, dir, source, editable, active })),
     };
   }
 

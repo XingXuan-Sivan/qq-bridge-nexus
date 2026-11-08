@@ -193,3 +193,12 @@ npm run test:console-ui
 - 偏差：E12（草稿测试端点 + 无 body DELETE 例外）。
 - 踩坑记录：`docs/CONSOLE_FORM_LESSONS.md` 1.50–1.58（DELETE 415、保存体形状、meta 覆盖、pill 统一、section card、模板推导、dialog 重复处理、浏览器扩展 pageerror、契约基线更新）。
 
+### 6.9 扩展平台 P3：技能管理子批（2026-11-09，已完成）
+
+- 外部技能目录：`extensions/skills/<id>/SKILL.md`，状态 `state/extensions/skills-state.json`，备份 `state/extensions/skill-backups/`；新增/编辑/启停/删除、ZIP 导入（根目录或单层目录、拒绝穿越/加密/多 SKILL、≤4MB/200 文件）、只读来源 403。
+- 技能索引：`src/skills/index.mjs` 支持 `rootMeta`/`extraSkills`/`list({includeInactive})`，条目带 `source/editable/active`；`render({ids})` 支持 preset 白名单；`core-skills` 按当前 preset `skills.allow` 过滤，未配置保持全量。
+- API：`GET/POST /api/extensions/skills`、`POST /api/extensions/skills/import`、`GET/PATCH/DELETE /api/extensions/skills/<id>`；写操作审计、`MAX_BODY_BYTES` 6MB。
+- Hub：`ext_describe` 支持 `skill`，返回技能正文；仍按 preset `skillAllowed` 与 active 校验。
+- 控制台：技能页改为表格（技能/来源/状态/说明/路径/操作）+ 搜索/来源/状态筛选/刷新/自定义 meta；外部技能行「编辑/停用/删除」，只读行「查看」；编辑/导入弹窗复用表单与 modal 组件；说明 3 行截断、路径省略。
+- 验收：`test-skill-store` 3/3、技能/catalog/hub 相关 14/14、static 全过、UI 30/30、audit 100/100；真机 create/detail/duplicate-409/disable/list/readonly-403/import/delete 与 Hub 技能正文均通过。
+- 偏差：E13（只写外部目录、ZIP/体量限制、core-skills 未配置时保持全量）。P0 `compress` 仍 Partial；插件 `configSchema` 与预设结构化/YAML 编辑器留待后续子批。

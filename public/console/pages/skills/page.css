@@ -1,2 +1,25 @@
-/* 技能页私有样式。当前技能页完全复用公共表格与卡片样式，这里先留空占位：
-   一旦出现「只属于技能页」的样式，写在这个文件里，不要回流到 css/app.css。 */
+/* 技能页私有样式：操作列保持一行，技能名下的 id 用次级文字。 */
+.skill-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.skill-row-actions .btn {
+  white-space: nowrap;
+}
+
+.skill-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.skill-path {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

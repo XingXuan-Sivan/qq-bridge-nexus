@@ -87,10 +87,11 @@ server.tool(
   '查看一个外部 MCP server 的工具与参数 schema，或读取一个技能的正文。需要会话令牌。',
   {
     token: z.string().describe('当前会话令牌'),
-    server: z.string().optional().describe('外部 MCP server id；不传则列出技能'),
+    server: z.string().optional().describe('外部 MCP server id'),
     tool: z.string().optional().describe('只看该 server 下的某个工具'),
+    skill: z.string().optional().describe('技能 id；传了就返回 SKILL.md 正文'),
   },
-  async ({ token, server: serverId, tool }) => textResult(await hubRequest('describe', token, { server: serverId, tool }))
+  async ({ token, server: serverId, tool, skill }) => textResult(await hubRequest('describe', token, { server: serverId, tool, skill }))
 );
 
 server.tool(

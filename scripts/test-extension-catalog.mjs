@@ -24,7 +24,7 @@ test('catalog 汇总技能与真实 MCP 工具，并保留 server 错误状态',
   assert.equal(data.version, 2);
   assert.equal(data.generatedAt, 999);
   assert.equal(data.scannedAt, 123);
-  assert.deepEqual(data.skills, [{ id: 'alpha', name: 'alpha-skill', description: '第一个技能', path: 'C:/skills/alpha' }]);
+  assert.deepEqual(data.skills, [{ id: 'alpha', name: 'alpha-skill', description: '第一个技能', path: 'C:/skills/alpha', source: 'builtin', editable: false, active: true }]);
   assert.equal(data.mcp.length, 2);
   assert.equal(data.mcp[0].toolCount, 2);
   assert.equal(data.mcp[0].tools[1].description, '');

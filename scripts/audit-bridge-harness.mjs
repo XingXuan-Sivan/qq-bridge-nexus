@@ -42,6 +42,8 @@ import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
 // 人格三层解析是纯函数模块（不读盘、不联网），直接用真实现：夹具要验证它读到的本地卡是否正确。
 import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createSkillIndex } from '../src/skills/index.mjs';
+// P3 外部技能：bridge 直接 import；夹具剥掉 import 后要补回同名符号。
+import { createSkillStore, validateSkillText } from '../src/extensions/skill-store.mjs';
 // 扩展 catalog（P1）：bridge.js 新 import；夹具剥掉 import 后补回同名符号。
 // 这里注入的是构造器本身，测试不读 /api/extensions 时不会启动 MCP 子进程。
 import { createMcpInventory } from '../src/extensions/mcp-inventory.mjs';
@@ -302,6 +304,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     resolveConnectionUpdate,
 createPromptBlockRegistry,
 createSkillIndex,
+createSkillStore,
+validateSkillText,
 createMcpInventory,
 createExtensionCatalog,
     createMcpStore,

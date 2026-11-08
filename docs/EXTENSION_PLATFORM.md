@@ -603,6 +603,8 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设结构化编辑 + YAML 高级编辑 + 校验/备份/apply/rollback；能力档位（safe/workspace/operator/custom）、危险工具声明与警告、绑定到群的确认流程；`compress` 开关归入 compaction 区块。
 - 验收：改预设不手工 build；保存失败可回滚；危险工具必须显式声明并给出警告；未知工具被拒绝。
 
+**2026-11-09 状态：P3 技能管理子批已实现并验收（待提交）。** 外部技能存 `extensions/skills/<id>/SKILL.md`，状态 `state/extensions/skills-state.json`，备份 `state/extensions/skill-backups/`；支持新增、ZIP 导入（根目录或单层目录、无路径穿越、≤4MB/200 文件）、编辑、启停、删除，只读来源（DSH_HOME、仓库、额外目录）只能查看。`GET/POST /api/extensions/skills`、`POST /api/extensions/skills/import`、`GET/PATCH/DELETE /api/extensions/skills/<id>`；Hub `ext_describe` 支持 `skill` 读正文；`core-skills` 注入按当前 preset 的 `skills.allow` 过滤（未配置时保持全量，兼容无 extensions.yml 的内置 preset）。控制台技能页改为表格 + 复用表单/弹窗，支持搜索、来源/状态筛选、刷新与外部技能操作。验收：`test-skill-store` 3/3、技能/catalog/hub 相关 14/14、static 全过、UI 30/30、audit 100/100；真机 API 往返、ZIP 导入、启停/删除与 Hub 技能正文均通过。偏差见 E13。插件 `configSchema` 通用表单、预设结构化/YAML 编辑器尚未开始。
+
 ### P4 市场与 GitHub source
 
 - `market/` source adapter：registry（AstrBot 兼容）、github（owner/repo 列表或 Search）、local。

@@ -121,6 +121,6 @@ test('status 给出根目录与条目摘要', () => {
   assert.deepEqual(index.status(), {
     roots: ['C:/s'],
     count: 1,
-    entries: [{ id: 'a', name: 'a', dir: 'C:/s/a' }],
+    entries: [{ id: 'a', name: 'a', dir: 'C:/s/a', source: 'builtin', editable: false, active: true }],
   });
 });

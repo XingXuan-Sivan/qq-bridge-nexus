@@ -16,11 +16,14 @@ export function createExtensionCatalog({ skillIndex, mcpInventory, extraMcp = nu
   if (!mcpInventory || typeof mcpInventory.snapshot !== 'function') throw new Error('createExtensionCatalog 需要 mcpInventory.snapshot');
 
   async function snapshot({ refresh = false } = {}) {
-    const skills = skillIndex.list().map((entry) => ({
+    const skills = skillIndex.list({ includeInactive: true }).map((entry) => ({
       id: String(entry?.id ?? entry?.name ?? ''),
       name: String(entry?.name ?? entry?.id ?? ''),
       description: String(entry?.description ?? ''),
       path: String(entry?.dir ?? entry?.path ?? ''),
+      source: String(entry?.source ?? 'builtin'),
+      editable: entry?.editable === true,
+      active: entry?.active !== false,
     })).filter((entry) => entry.id);
 
     const inventory = await mcpInventory.snapshot({ refresh });

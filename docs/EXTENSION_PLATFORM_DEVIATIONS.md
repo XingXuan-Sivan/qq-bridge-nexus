@@ -12,7 +12,7 @@
 ## 1. 当前阶段
 
 - 基线设计：[EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md)（2026-11-08 版）
-- 当前阶段：**P2（已实现并通过门禁，待提交）**
+- 当前阶段：**P3 技能管理子批（已实现并通过门禁，待提交）**；P2 已提交 `de95c4a`。
 - P0 目标：修复 DSH 自动压缩被 `qq-tool-restrict.mjs` 拒绝的问题，让 `compress` 在 QQ 会话 preset 中可用；不提前做 Hub/catalog/MCP CRUD。
 - P0 完成判据：
   1. `compress` 进入守卫的 `SAFE_EXACT`，且不在 `RESTRICTED_TOOL_NAMES`；
@@ -144,6 +144,19 @@
 - 原因：新建/编辑弹窗需要先验证未保存配置；浏览器删除请求不天然带 JSON body，要求 body 只会把 415 抛给用户。
 - 影响：无 body DELETE 成为通用例外（只限 DELETE，且无 content-type）；其他非 GET 仍必须 `application/json`。
 - 验收证据：真机 `DELETE /api/extensions/mcp/asd` 返回 200；`POST /api/extensions/mcp/test` 返回工具且 catalog 不出现草稿 id；UI 新建/删除行均通过。
+- 状态：已接受
+
+### E13 — P3 技能管理只写外部目录，ZIP 导入走 base64 与体量上限
+
+- 阶段：P3（技能管理子批）
+- 计划：技能导入/编辑/启停/删除；preset 技能白名单；`core-skills` 数据源切换。
+- 实际：
+  - 只有 `extensions/skills/` 可写；DSH_HOME/skills、仓库 `skills/`、额外目录保持只读，控制台对只读来源的写操作返回 403。
+  - ZIP 导入由前端 FileReader 转 base64 上传，bridge 的 `MAX_BODY_BYTES` 提升到 6MB；ZIP 解包只接受根目录或单层目录的 `SKILL.md`，拒绝加密、路径穿越、多个 SKILL、超过 4MB 或 200 个条目；技能正文上限 256KB。
+  - `core-skills` 只在 preset 显式配置 `skills.allow` 时过滤；未配置时保持全量，避免旧内置 preset 因缺少 `extensions.yml` 突然失去全部技能。
+- 原因：外部技能是用户数据，不能污染仓库与 DSH 安装目录；ZIP 是当前最省事的导入格式，但必须限制体量与路径；旧 preset 兼容优先于“一律按空名单拒绝”。
+- 影响：外部技能不能通过控制台改名为内置技能，也不会自动同步回仓库；暂不支持从市场/URL 直接安装技能。
+- 验收证据：`test-skill-store.mjs` 3/3（frontmatter、写入/备份/启停/删除、ZIP 边界）；真机 create/detail/duplicate-409/disable/list/readonly-403/import/delete 均通过；Hub `describe` 技能正文 200；static 全过、UI 30/30、audit 100/100。
 - 状态：已接受
 
 ## 3. 待登记（占位，不预先承诺）

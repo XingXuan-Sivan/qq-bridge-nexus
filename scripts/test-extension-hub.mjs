@@ -71,3 +71,31 @@ test('Hub：describe 返回 schema，deny 工具不可见也不可调用', async
   await assert.rejects(() => hub.call({ preset: 'limited', server: 'demo', tool: 'danger' }), /不允许工具/);
   await assert.rejects(() => hub.call({ preset: 'limited', server: 'missing', tool: 'echo' }), /不允许|不存在/);
 });
+
+test('Hub：describe 可读技能正文，遵守 preset 白名单与停用状态', async () => {
+  const catalog = {
+    async snapshot() {
+      return { skills: [
+        { id: 'alpha', name: '甲', description: '技能甲', active: true },
+        { id: 'beta', name: '乙', description: '技能乙', active: false },
+      ] };
+    },
+  };
+  const hub = createExtensionHub({
+    catalog,
+    runtime: { list: () => [], listTools: async () => [], call: async () => ({}) },
+    policyFor: () => normalizePresetPolicy({ skills: { allow: ['alpha', 'beta'] } }),
+    readSkill: (id) => `正文 ${id}`,
+  });
+  const described = await hub.describe({ preset: 'open', skill: 'alpha' });
+  assert.equal(described.skill.id, 'alpha');
+  assert.equal(described.skill.content, '正文 alpha');
+  await assert.rejects(() => hub.describe({ preset: 'open', skill: 'beta' }), /不存在或已停用/);
+  const denied = createExtensionHub({
+    catalog,
+    runtime: { list: () => [], listTools: async () => [] },
+    policyFor: () => normalizePresetPolicy({ skills: { allow: [] } }),
+    readSkill: () => 'x',
+  });
+  await assert.rejects(() => denied.describe({ preset: 'closed', skill: 'alpha' }), /不允许技能/);
+});

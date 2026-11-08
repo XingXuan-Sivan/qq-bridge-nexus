@@ -152,6 +152,7 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
+import { createSkillStore, validateSkillText } from './extensions/skill-store.mjs';
 // 扩展 catalog（P1）：MCP 工具由真实 tools/list 得到，技能与 MCP 走同一份只读视图。
 import { createMcpInventory } from './extensions/mcp-inventory.mjs';
 import { createExtensionCatalog } from './extensions/catalog.mjs';
@@ -1737,19 +1738,44 @@ async function main() {
     stateFile: path.join(STATE_DIR, 'memory-ingest-pending.json'),
   });
   memoryIngest.start();
-  // 技能索引（§9.2）：技能目录只读扫描，结果缓存 60s；额外目录来自 config.json 的 skills.dirs。
-  // 根顺序 = 额外目录 → DSH_HOME/skills → 仓库 skills/，同名技能以先出现的为准。
+  // 技能索引（§9.2）：用户技能目录优先，其次是额外目录 / DSH_HOME/skills / 仓库 skills/。
+  // 外部技能由 skillStore 管理（可编辑、可启停），只读目录仍由索引扫描；缓存 60s。
+  const skillStore = createSkillStore({
+    root: path.join(ROOT, 'extensions', 'skills'),
+    stateFile: path.join(STATE_DIR, 'extensions', 'skills-state.json'),
+    fs,
+    log,
+    now: Date.now,
+  });
+  const skillRoots = [
+    ...(Array.isArray(cfg.skills?.dirs) ? cfg.skills.dirs : []),
+    path.join(dshHomeDir(), 'skills'),
+    path.join(ROOT, 'skills'),
+  ].filter(Boolean);
   const skillIndex = createSkillIndex({
-    roots: [
-      ...(Array.isArray(cfg.skills?.dirs) ? cfg.skills.dirs : []),
-      path.join(dshHomeDir(), 'skills'),
-      path.join(ROOT, 'skills'),
-    ].filter(Boolean),
+    roots: skillRoots,
+    rootMeta: [
+      ...(Array.isArray(cfg.skills?.dirs) ? cfg.skills.dirs : []).map((dir) => ({ dir, source: 'external', editable: false })),
+      { dir: path.join(dshHomeDir(), 'skills'), source: 'dsh', editable: false },
+      { dir: path.join(ROOT, 'skills'), source: 'repo', editable: false },
+    ],
+    extraSkills: () => skillStore.list(),
     maxEntries: cfg.skills?.maxEntries ?? 12,
     maxDescriptionChars: cfg.skills?.maxDescriptionChars ?? 40,
     fs,
     log,
   });
+  const skillEntryById = (id) => skillIndex.list({ includeInactive: true }).find((item) => item.id === id) ?? null;
+  const readSkillText = (id) => {
+    const user = skillStore.list().find((entry) => entry.id === id);
+    if (user) return skillStore.read(id).content;
+    const entry = skillEntryById(id);
+    const file = entry?.dir ? path.join(entry.dir, 'SKILL.md') : '';
+    if (!file) throw new Error(`技能「${id}」不存在`);
+    const text = fs.readFileSync(file, 'utf8');
+    validateSkillText(text);
+    return text;
+  };
   // MCP 清单：真实启动内置 server 走 tools/list，缓存 5 分钟；控制台刷新可强制重扫。
   // 只读、无参数，失败按 server 隔离，不影响桥接主链。
   const mcpInventory = createMcpInventory({ root: ROOT, log });
@@ -1777,6 +1803,7 @@ async function main() {
     catalog: extensionCatalog,
     runtime: mcpRuntime,
     policyFor: (preset) => presetPolicy.get(preset),
+    readSkill: (id) => readSkillText(id),
   });
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
   const registerCoreBlocks = () => {
@@ -1799,10 +1826,19 @@ async function main() {
     });
     // 技能清单排在注入块之间：贴纸（100）之后、记忆摘要（200）之前都不合适，
     // 取 150——它描述「能做什么」，跟着行为提示走比跟着记忆走更自然。
-    registerCoreBlock('core-skills', '技能清单', 150, ({ skillText } = {}) => {
+    registerCoreBlock('core-skills', '技能清单', 150, ({ key, skillText } = {}) => {
       if (typeof skillText === 'string') return skillText;
       if (cfg.skills?.enabled === false) return '';
-      return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200 });
+      // 预设显式配了 skills.allow 时按白名单过滤；没配或空列表保持全量（内置 preset 没有 extensions.yml）。
+      let ids = null;
+      try {
+        const preset = modePreset(key, effectiveMode(key), cfg);
+        const allow = preset ? (presetPolicy.get(preset)?.skills?.allow ?? []) : [];
+        if (allow.length && !allow.includes('*')) ids = allow.slice();
+      } catch (error) {
+        log(`⚠️ 技能预设过滤失败，按全量处理：${error?.message ?? error}`);
+      }
+      return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200, ids });
     });
     corePromptBlocks.setOverrides(cfg.promptBlocks);
   };
@@ -4770,7 +4806,7 @@ async function main() {
         return '';
       };
       const readBody = () => new Promise((resolve, reject) => {
-        const MAX_BODY_BYTES = 1_000_000;
+        const MAX_BODY_BYTES = 6_000_000;
         const chunks = [];
         let total = 0;
         let settled = false;
@@ -4925,7 +4961,7 @@ async function main() {
         try {
           let result;
           if (action === 'list') result = await extensionHub.list({ preset, kind: body?.kind, query: body?.query });
-          else if (action === 'describe') result = await extensionHub.describe({ preset, server: body?.server, tool: body?.tool });
+          else if (action === 'describe') result = await extensionHub.describe({ preset, server: body?.server, tool: body?.tool, skill: body?.skill });
           else if (action === 'call') result = await extensionHub.call({ preset, server: body?.server, tool: body?.tool, args: body?.args });
           else {
             sendJson({ ok: false, error: `未知 Hub 操作：${action}` }, 404);
@@ -5399,6 +5435,93 @@ async function main() {
             sendJson({ ok: true, ...data });
           } catch (error) {
             sendJson({ ok: false, error: `扩展清单读取失败：${error?.message ?? error}` }, 500);
+          }
+          return;
+        }
+        // 外部技能管理（P3）：extensions/skills/<id>/SKILL.md。只允许控制台令牌；
+        // 只读来源（DSH_HOME/skills、仓库 skills/、额外目录）只能查看正文，不能改。
+        if (req.method === 'GET' && url.pathname === '/api/extensions/skills') {
+          const skills = skillIndex.list({ includeInactive: true }).map((entry) => ({
+            id: entry.id,
+            name: entry.name,
+            description: entry.description,
+            path: entry.dir,
+            source: entry.source ?? 'builtin',
+            editable: entry.editable === true,
+            active: entry.active !== false,
+          }));
+          sendJson({ ok: true, skills });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/extensions/skills') {
+          try {
+            const body = await readBody();
+            const id = String(body?.id ?? '').trim();
+            if (skillEntryById(id)) { sendJson({ ok: false, error: `技能 ${id} 已存在` }, 409); return; }
+            const result = skillStore.write(id, String(body?.content ?? ''));
+            skillIndex.invalidate();
+            ext.audit.append('extension.skill.created', { id: result.id });
+            sendJson({ ok: true, skill: result });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'exists' ? 409 : 400);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/extensions/skills/import') {
+          try {
+            const body = await readBody();
+            const raw = String(body?.data ?? '');
+            if (!raw) { sendJson({ ok: false, error: '缺少 zip 数据' }, 400); return; }
+            const buffer = Buffer.from(raw, 'base64');
+            const result = skillStore.importZip(buffer, { id: String(body?.id ?? '') });
+            skillIndex.invalidate();
+            ext.audit.append('extension.skill.imported', { id: result.id, bytes: buffer.length });
+            sendJson({ ok: true, skill: result });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'exists' ? 409 : 400);
+          }
+          return;
+        }
+        const skillRoute = url.pathname.match(/^\/api\/extensions\/skills\/([a-z0-9][a-z0-9._-]{0,63})$/);
+        if (skillRoute) {
+          const id = skillRoute[1];
+          const entry = skillEntryById(id);
+          if (!entry) { sendJson({ ok: false, error: '技能不存在' }, 404); return; }
+          if (req.method === 'GET') {
+            try {
+              const content = readSkillText(id);
+              sendJson({ ok: true, id, entry, content });
+            } catch (error) {
+              sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+            }
+            return;
+          }
+          if (entry.editable !== true || entry.source !== 'user') {
+            sendJson({ ok: false, error: '内置技能只读，不能修改或删除' }, 403);
+            return;
+          }
+          try {
+            if (req.method === 'PATCH') {
+              const body = await readBody();
+              let result = null;
+              if (Object.hasOwn(body, 'content')) result = skillStore.write(id, String(body.content ?? ''));
+              if (Object.hasOwn(body, 'active')) result = { ...(result ?? {}), ...skillStore.setActive(id, body.active !== false) };
+              if (!result) { sendJson({ ok: false, error: '没有可保存的字段' }, 400); return; }
+              skillIndex.invalidate();
+              ext.audit.append('extension.skill.updated', { id });
+              sendJson({ ok: true, skill: result });
+              return;
+            }
+            if (req.method === 'DELETE') {
+              const result = skillStore.remove(id);
+              skillIndex.invalidate();
+              ext.audit.append('extension.skill.deleted', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            sendJson({ ok: false, error: '不支持的技能操作' }, 405);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'not_found' ? 404 : 400);
           }
           return;
         }

@@ -14,7 +14,7 @@ function allowedTools(policy, serverId, tools) {
   return (tools ?? []).filter((tool) => mcpToolAllowed(policy, serverId, tool.name));
 }
 
-export function createExtensionHub({ catalog, runtime, policyFor }) {
+export function createExtensionHub({ catalog, runtime, policyFor, readSkill = null }) {
   if (!catalog) throw new Error('createExtensionHub: 缺少 catalog');
   if (!runtime) throw new Error('createExtensionHub: 缺少 runtime');
   if (typeof policyFor !== 'function') throw new Error('createExtensionHub: 缺少 policyFor');
@@ -79,12 +79,23 @@ export function createExtensionHub({ catalog, runtime, policyFor }) {
     return { policy, item };
   }
 
-  async function describe({ preset, server, tool } = {}) {
-    const { policy, item } = findServer(preset, server);
+  async function describe({ preset, server, tool, skill } = {}) {
+    const policy = policyOf(preset);
+    if (skill) {
+      const id = String(skill).trim();
+      if (!id || !skillAllowed(policy, id)) throw new HubError(`当前预设不允许技能「${id}」`, 'forbidden');
+      const snapshot = await catalog.snapshot();
+      const entry = (snapshot.skills ?? []).find((item) => item.id === id);
+      if (!entry || entry.active === false) throw new HubError(`技能「${id}」不存在或已停用`, 'not_found');
+      if (typeof readSkill !== 'function') throw new HubError('技能正文读取未配置', 'unavailable');
+      const content = await readSkill(id);
+      return { preset, skill: { ...entry, content } };
+    }
+    const { policy: resolvedPolicy, item } = findServer(preset, server);
     // 描述必须拿到真实 schema：未连接时按需拉起一次，不能把 stopped 的空工具表当成“没有工具”。
     await runtime.listTools(server);
     const connected = runtime.list().find((entry) => entry.id === server) ?? item;
-    const view = mcpView(policy, connected);
+    const view = mcpView(resolvedPolicy, connected);
     if (!tool) {
       return {
         preset,
@@ -94,10 +105,10 @@ export function createExtensionHub({ catalog, runtime, policyFor }) {
         },
       };
     }
-    if (!mcpToolAllowed(policy, server, tool)) throw new HubError(`当前预设不允许工具「${tool}」`, 'forbidden');
+    if (!mcpToolAllowed(resolvedPolicy, server, tool)) throw new HubError(`当前预设不允许工具「${tool}」`, 'forbidden');
     await runtime.listTools(server);
     const after = runtime.list().find((entry) => entry.id === server);
-    const detail = mcpView(policyFor(preset), after ?? item).tools.find((entry) => entry.name === tool);
+    const detail = mcpView(resolvedPolicy, after ?? item).tools.find((entry) => entry.name === tool);
     if (!detail) throw new HubError(`外部 MCP「${server}」没有工具「${tool}」`, 'not_found');
     return { preset, server: server, tool: detail };
   }

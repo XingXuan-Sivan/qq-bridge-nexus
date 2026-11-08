@@ -656,6 +656,13 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             dsh: [{ name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' }],
             tools: [{ name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' }],
           });
+          case '/api/extensions/skills': return json({
+            ok: true,
+            skills: [
+              { id: 'demo-skill', name: 'demo-skill', description: '离线预览用的假技能。', path: 'C:/fixture/skills/demo-skill', source: 'dsh', editable: false, active: true },
+              { id: 'demo-external', name: 'demo-external', description: '离线预览用的外部技能。', path: 'C:/fixture/extensions/skills/demo-external', source: 'user', editable: true, active: true },
+            ],
+          });
           case '/api/extensions': return json({
             ok: true,
             version: 2,

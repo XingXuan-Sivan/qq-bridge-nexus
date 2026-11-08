@@ -117,13 +117,6 @@ function accessInvalidLines(lines) {
   return lines.filter((line) => !/^(?:qq:)?(?:group|private):[1-9]\d*$/.test(line));
 }
 
-function accessReason(axis, summary) {
-  const mode = summary?.[`${axis}Mode`] || 'allow';
-  const member = summary?.[`${axis}Member`] === true;
-  if (mode === 'allow') return member ? '白名单成员：允许' : '不在白名单：拒绝';
-  return member ? '黑名单成员：拒绝' : '不在黑名单：允许';
-}
-
 /** 从表单读回草稿；mode 用开关的 aria-checked，开=白名单，关=黑名单。 */
 function readAccessDraft() {
   const draft = {};
@@ -437,11 +430,7 @@ function detailCheck(id, label, checked) {
 
 function detailAccessItem(axis, label, summary) {
   const allowed = summary?.[axis] === 'allow';
-  const reason = accessReason(axis, summary);
-  return `<div class="detail-access-item">`
-    + `<label class="field-check-item"><input type="checkbox" data-detail-access="${axis}"${allowed ? ' checked' : ''}>${esc(label)}</label>`
-    + `<span class="field-hint" data-detail-access-state="${axis}">${esc(reason)}</span>`
-    + '</div>';
+  return `<label class="field-check-item"><input type="checkbox" data-detail-access="${axis}"${allowed ? ' checked' : ''}>${esc(label)}</label>`;
 }
 
 function detailAccessCard(access) {
@@ -596,11 +585,10 @@ function renderDetail(data) {
         <h4>危险操作</h4>
         <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话。</div>
         <div class="detail-actions">
-          ${data.sessionId
-            ? `<button class="btn small" type="button" data-detail-rebuild>重建 DSH 会话</button>
-               <button class="btn small danger" type="button" data-detail-reset>重置会话状态</button>`
-            : '<span class="meta">还没有 DSH 会话：下一条消息到达时会自动创建，无需重建或重置。</span>'}
+          <button class="btn small" type="button" data-detail-rebuild>重建 DSH 会话</button>
+          <button class="btn small danger" type="button" data-detail-reset>重置会话状态</button>
         </div>
+        ${data.sessionId ? '' : '<div class="field-hint">还没有 DSH 会话：下一条消息到达时会自动创建；也可以现在重建一次。</div>'}
       </div>
     </div>`;
   body.querySelectorAll('select').forEach((el) => el.dispatchEvent(new Event('change', { bubbles: true })));
@@ -786,21 +774,6 @@ function refreshActive() {
   refreshGlobalAccess();
 }
 
-function toggleDetailAccess(axis) {
-  const box = document.querySelector(`[data-detail-access="${axis}"]`);
-  if (!box) return;
-  const next = box.checked;
-  const mode = detailCache?.access?.[`${axis}Mode`] === 'deny' ? 'deny' : 'allow';
-  const member = mode === 'allow' ? next : !next;
-  const state = document.querySelector(`[data-detail-access-state="${axis}"]`);
-  if (state) {
-    state.textContent = mode === 'allow'
-      ? (member ? '白名单成员：允许（保存后生效）' : '不在白名单：拒绝（保存后生效）')
-      : (member ? '黑名单成员：拒绝（保存后生效）' : '不在黑名单：允许（保存后生效）');
-  }
-  detailDirty = true;
-}
-
 export function init() {
   // 先渲染字段规格（标签条 / 两个面板宿主 / 改名弹窗），下面取节点才不会拿到空。
   document.querySelectorAll('[data-sessions-fields]').forEach((host) => {
@@ -824,8 +797,6 @@ export function init() {
   document.getElementById('sessionDetailBody')?.addEventListener('input', () => { detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('change', () => { detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
-    const accessToggle = event.target.closest('[data-detail-access]');
-    if (accessToggle) { toggleDetailAccess(accessToggle.dataset.detailAccess); return; }
     if (event.target.closest('[data-open-global-access]')) {
       if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
       closeModal(detailOverlay);

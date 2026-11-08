@@ -103,16 +103,14 @@
   margin-top: 4px;
 }
 
-/* 详情里的准入：两个并排复选框，状态说明各在下方。 */
+/* 详情里的准入：两个并排复选框，不写额外说明。 */
 .detail-access-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 32px;
   margin: 2px 0 4px;
 }
-.detail-access-item { display: flex; flex-direction: column; gap: 4px; }
-.detail-access-item .field-check-item { min-height: 32px; }
-.detail-access-item .field-hint { font-size: 12px; }
+.detail-access-list .field-check-item { min-height: 32px; }
 .access-link {
   appearance: none;
   border: 0;

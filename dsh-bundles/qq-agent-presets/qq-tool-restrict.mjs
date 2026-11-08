@@ -169,10 +169,12 @@ const SAFE_PREFIXES = [
 ]
 
 // 无害模型侧工具：ask_user_question 用于把问题转给管理员/用户，
-// todo_write 仅维护任务列表。若后续 preset 不再挂载这些工具，保留无害。
+// todo_write 仅维护任务列表，compress 只压缩当前会话上下文（不读写本地文件、
+// 不派生 agent、不执行命令）。若后续 preset 不再挂载这些工具，保留无害。
 const SAFE_EXACT = new Set([
   'ask_user_question',
   'todo_write',
+  'compress',
 ])
 
 /**

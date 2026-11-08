@@ -233,7 +233,7 @@ test('守卫导出的名单与本测试的清单一致（防两份名单各自�
     assert.deepEqual(missing, [],
       `${id}: 守卫导出的名单缺少本地执行工具：${missing.join(', ')}`);
     // 反向：名单里不该混入"允许的无害工具"。
-    for (const allowed of ['ask_user_question', 'todo_write']) {
+    for (const allowed of ['ask_user_question', 'todo_write', 'compress']) {
       assert.ok(!mod.RESTRICTED_TOOL_NAMES.includes(allowed),
         `${id}: ${allowed} 是无害模型侧工具，不应出现在 restrict 名单里（会与 SAFE_EXACT 自相矛盾）`);
     }
@@ -278,7 +278,7 @@ test('守卫仍放行 QQ MCP 命名空间与无害模型侧工具', async () => 
         `${id}: MCP 前缀 ${prefix} 应放行`,
       );
     }
-    for (const name of ['ask_user_question', 'todo_write']) {
+    for (const name of ['ask_user_question', 'todo_write', 'compress']) {
       assert.equal(fakeTools._guard({ name }), undefined, `${id}: ${name} 应放行`);
     }
     // 未知工具名必须 fail-closed。

@@ -99,6 +99,8 @@ const tests = [
   'test-session-proactive.mjs',
   // 多管理员（P3）：名单归一化、capability、closed-agent 级别与私聊被动豁免。
   'test-admins.mjs',
+  // 会话档案端点（P1）：并集列表、GET/PATCH/DELETE、权限与非法值。
+  'test-session-profiles.mjs',
   // sessions.json 读写（P7 第三步续）：损坏/读失败降级为只读不写、缺字段补齐、可写才落盘。
   'test-session-store.mjs',
   // 会话映射表（P7 第三步收尾）：映射与策略指纹成对维护、isCurrent 三条件、state 被替换后仍有效。

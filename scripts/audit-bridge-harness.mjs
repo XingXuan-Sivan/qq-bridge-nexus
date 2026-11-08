@@ -51,8 +51,8 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 import { allowed, modeAllowed, isSessionAllowedInCurrentMode as sessionAllowed } from '../src/session/mode-gate.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
-import { createProfile, createSessionDirectoryWriter, loadSessionDirectory } from '../src/session/directory.mjs';
-import { resolveAccess } from '../src/session/access.mjs';
+import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
+import { resolveAccess, resolveAccessSummary } from '../src/session/access.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
 // 多管理员（P3）：bridge 直接 import，夹具按同名补回。
@@ -269,9 +269,12 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     loadSessionState,
     saveSessionState,
     createProfile,
+    applyPatch,
+    normalizeProfile,
     createSessionDirectoryWriter,
     loadSessionDirectory,
     resolveAccess,
+    resolveAccessSummary,
     migrateSessionProfiles,
     resolveEffectiveMode,
     isUsableMode,

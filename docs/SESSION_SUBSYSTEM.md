@@ -410,7 +410,8 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - [x] 详情（`#sessions` 宽弹窗，见 D14）：七卡、每卡独立保存、关闭前未保存确认、显示无 DSH 映射的会话。
 - [x] 迁走 persona / social-v2 / access 的按会话入口；旧入口删除，不留死链。
 - [x] 双清空动作：重建 DSH 会话 / 重置会话状态（复用 `/api/session/reset`）。
-- [ ] `test-session-profiles.mjs` + `test-session-migrate.mjs` + UI 用例；目前只有 `test-session-directory` 与真机探针覆盖。
+- [x] `test-session-profiles.mjs` 4/4：并集列表、GET/PATCH/DELETE、非法值与 agent 越权、删档保留绑定。
+- [ ] `test-session-migrate.mjs` + 详情弹窗 UI 专项用例；目前只有 `test-session-directory`/`test-session-profiles` 与真机探针覆盖。
 
 **P2a 运行模式与预设（已完成）**
 

@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 四十九个真实踩过的坑
+## 1. 五十八个真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -288,6 +288,60 @@ await page.locator('#slangConfirmedList tbody tr:not([hidden])').count()
 插件页「注入块」表里的启用开关是 `page.js` 用模板字符串拼出来的 `<button role="switch">`，渲染后调了 `bindSwitches(rows)`，但点击完全没反应：`bindSwitches` 的委托选择器是 `[role="switch"][data-field]`，只认 `data-field` 标记（`form.js` 里所有工厂生成的开关都带它）。少这个属性不会报错、`aria-checked` 也不会变，看起来像「保存没生效」。
 
 **规则**：任何手写/动态生成的开关，一律写成 `<button class="field-switch" type="button" role="switch" data-field …>` + `<span class="field-switch-track"></span><span>开</span>`，再对容器 `bindSwitches`；读写用 `getSwitch`/`setSwitch`。排查「点了没反应」时先看三件事：有没有 `data-field`、有没有对**新插入的容器**绑一次、保存时读的是不是 `aria-checked` 而不是某个不存在 `.checked`。
+
+### 1.50 `DELETE` 没带 body 也会被 CSRF 中间件拦成 415
+
+MCP 页删除外部 server 时，前端 `api(path, 'DELETE')` 不带 body、也不带 `content-type`；bridge 的全局 CSRF 中间件要求所有非 GET 必须是 `application/json`，之前只给插件卸载开了特例，所以 `DELETE /api/extensions/mcp/<id>` 直接返回 `415 请求必须是 application/json`，按钮看起来「完全没反应」。用 PowerShell 发同样的无 body DELETE 也复现 415，才确认不是前端按钮没绑事件。
+
+**规则**：标准 DELETE 允许没有请求体，服务端对「无 content-type 的 DELETE」应放行，但仍要做 Origin 校验；不要为了绕过去让前端硬塞一个 `{}` body（后端路由未必有 body schema，还会让「无 body」契约失真）。排查顺序：先看响应码（415 是中间件，400/404 才是路由/参数），再用不带 body 的原始请求复现一次。
+
+### 1.51 前端提交 `{config,secrets}`、后端要扁平字段：保存 400 但按钮「像没生效」
+
+MCP 弹窗的 `parseEditor()` 返回 `{config,secrets}`，保存时原样 POST；而 `POST /api/extensions/mcp` 读的是顶层 `id/transport/command/...`，于是真实新建一直 400。更早的 UI 测试只 mock 了 `POST` 成功，没有校验请求体形状，所以测试全绿、真机全挂。
+
+**规则**：改动「新建/编辑」接口时，前端保存前把 `config` 摊平（`{...config, secrets}`），并用真机创建一条测试数据确认 200；测试夹具里的 mock 路由要记录 body 并按真实后端字段断言，不能只断言「请求发出过」。
+
+### 1.52 `initDataTables` 会用「共 N 条」覆盖自定义统计
+
+MCP 两张表在工具栏传了 `meta: '2 个 server · 2 个工具 · 1 个技能'`，但 `initDataTables` 每次刷新都执行 `meta.textContent = '共 N 条'`，统计瞬间被覆盖。UI 测试因此报「期望 2 个 server，实际 共 2 条」。
+
+**规则**：组件只覆盖自己生成的 meta；调用方传了固定统计时，在 meta 元素上打 `data-table-meta-fixed`，组件检测到就不再改写。页面侧不要靠「刷新后再手动写一次」补救，否则每次翻页/搜索都会回退。
+
+### 1.53 同一语义的标签混用 `.status-badge` 与 `.pill`
+
+MCP 页来源/状态最初用 `.status-badge is-pill`，其他表格用 `.pill`，圆角、底色、字重都不一致；内置来源还是纯文本。用户一眼就看出「和别的表不一样」。
+
+**规则**：表格内的状态/来源/权限标签统一用 `.pill`（中性 `.pill n`、主色 `.pill b`、成功 `.pill g`、危险 `.pill r`）；不要再造页面私有的 badge 样式。新增 `.pill.n` 时要确认 `components.css` 里已有定义，否则 class 存在但样式是空的（静态门禁只查 class 是否有定义，不查视觉效果）。
+
+### 1.54 `section card:true` 必须切到 `<section>` 并自己闭合
+
+把 MCP 弹窗的三段改成卡片时，`renderFields` 仍输出 `<fieldset>`，标题 `legend` 落在卡片框外；同时 `sectionClose` 固定写 `</fieldset>`，`section` 版本会留下未闭合标签，后续 DOM 全被吞。
+
+**规则**：`type:'section', card:true` 时输出 `<section class="form-section form-section--card"><div class="form-section-head"><h3>…</h3></div>`，并用 `sectionClose` 变量记录 `</section>`/`</fieldset>`；改渲染器后至少检查三项：标题在框内、`.cols` 子元素数等于字段数、控制台无 `pageerror`。
+
+### 1.55 模板按钮会破坏表单对齐，能推导的配置不要多造一行控件
+
+MCP 弹窗最初并列放「stdio 模板 / HTTP 模板 / SSE 模板」三个按钮，和 148px 标签列对不齐，用户要求「模板应随连接方式自动切换，不要单列按钮」。
+
+**规则**：连接方式这类互斥选择，模板由 `transport` 推导；切换时先保存旧模式草稿，新模式无草稿再 `templateFor(next)`，有草稿则恢复。不要为「可能有用」再增加一行按钮；表单行越少，标签列越稳定。
+
+### 1.56 测试里重复挂 `dialog` handler 会抛「already handled」
+
+UI 测试顶部已有全局 `page.on('dialog', d => d.accept())`；MCP 删除回归又加了 `page.once('dialog', d => d.accept())`，同一个 confirm 被 accept 两次，直接抛 `Cannot accept dialog which is already handled!`，整轮测试中断。之前 `test-silence` 也踩过同一个坑。
+
+**规则**：一个页面只保留一个 dialog handler；局部测试只 `click` 并等待请求/状态，不再 accept。只有全局 handler 不存在时才加局部 handler，且用 `page.once` 后要确认没有旧的全局 handler。
+
+### 1.57 真机 `pageerror` 先看堆栈来源，Edge 自带扩展不是应用错误
+
+MCP 真机检查一直报 `TypeError: v[w] is not a function`，打印 stack 后发现来自 `chrome-extension://abkclgdmdkokpdkbpdkoiiemhcaafbkg/main...js`，是 headless Edge 自带的扩展脚本，不是控制台代码。
+
+**规则**：`pageerror` 必须记录 `error.stack` 并检查协议/来源；`chrome-extension://`、`moz-extension://` 的错误先排除浏览器扩展，换干净 user-data-dir 复测；不要为浏览器扩展改应用代码，也不要把「有 pageerror」直接当成业务失败。
+
+### 1.58 契约基线是逐字节请求列表，新增行为要显式更新而不是 `--accept-contracts`
+
+MCP 删除回归新增了一条 `DELETE /api/extensions/mcp/test-ext`，`test-console-ui.mjs` 的「所有提交载荷与基线一致」立刻失败；基线是 `console-ui-contracts.json` 的完整请求数组，不是宽松包含。
+
+**规则**：有意新增请求时，只在 `console-ui-contracts.json` 的对应位置插入这一条（本次是数组首位），并在提交说明里写清；不要用 `--accept-contracts` 整份重录（会把其他页面的意外变化一起掩盖）。新增请求后必须重跑完整 UI，确认 30/30 而不是只看单条断言。
 
 ## 2. 迁移一个页面的检查清单
 

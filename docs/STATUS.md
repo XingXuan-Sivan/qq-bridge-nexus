@@ -191,4 +191,5 @@ npm run test:console-ui
 - 删除修复：`api(path,'DELETE')` 不带 body 时，bridge CSRF 中间件对无 content-type 的 DELETE 放行（保留 Origin 校验），不再返回 415；前端另修保存请求体，POST/PATCH 改为扁平 `{...config,secrets}`。
 - 测试：`test-console-static.mjs` 全过；`test-console-ui.mjs` **30/30**（含 MCP 弹窗模板、测试按钮、标签/筛选断言）；`npm run test:audit` **98/98**。真机重启后验证：无 body DELETE 返回 200、草稿测试返回 1 个工具且 catalog 不新增、UI 新建/删除行成功、弹窗 3 张卡片/模板自动切换/日志隐藏正确；`extensions/` 运行时数据已加入 `.gitignore` 并清理测试 server。
 - 偏差：E12（草稿测试端点 + 无 body DELETE 例外）。
+- 踩坑记录：`docs/CONSOLE_FORM_LESSONS.md` 1.50–1.58（DELETE 415、保存体形状、meta 覆盖、pill 统一、section card、模板推导、dialog 重复处理、浏览器扩展 pageerror、契约基线更新）。
 

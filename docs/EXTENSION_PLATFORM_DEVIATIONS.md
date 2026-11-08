@@ -20,6 +20,7 @@
   3. 安装到 DSH 的链接包包含新守卫（重启 DSH 后生效）；
   4. static / UI / audit 门禁通过；
   5. 提交只包含 P0 相关文件与本台账。
+- P0 当前状态：**代码与加载链路已验收**；DSH 已于 2026-11-09 重启，守卫测试 7/7、static 全过、UI 28/28、audit 97/97。真实长会话自动压缩尚未在本次会话中人工触发，因此不把 P0 标成 Done；等下一次长会话压缩成功后补实录。
 
 ## 2. 偏差记录
 
@@ -40,8 +41,8 @@
 - 实际：`C:\Users\starl\.dsh\profiles\desktop\node_modules\qq-agent-presets` 是指向 `C:\Users\starl\.dsh\plugins\qq-agent-presets` 的 junction，后者再指向仓库 `dsh-bundles/qq-agent-presets`；源文件已改，但 DSH 进程内的 preset 已加载，需要重启 DSH 才能用新守卫。
 - 原因：这是 preset 代码更新，不是运行时扩展 CRUD；文档里的“不重启 DSH”只针对 Hub 的扩展增删改。
 - 影响：P0 验收需要一次 DSH 重启；不涉及桥接重启。
-- 验收证据：junction 指向仓库；安装目录文件已含 `compress`；待重启后实测压缩。
-- 状态：待验收
+- 验收证据：junction 指向仓库；安装目录文件已含 `compress`；2026-11-09 重启 DSH 后重新加载；`node --test scripts/test-preset-local-tools.mjs` 7/7。
+- 状态：已接受（加载链路）；真实长会话压缩调用待自然触发后补一次实录。
 
 ### E3 — 偏差台账本身是本阶段新增交付物
 

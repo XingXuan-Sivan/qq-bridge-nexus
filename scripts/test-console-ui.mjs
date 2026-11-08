@@ -125,12 +125,13 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 202 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('All 201 legacy IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
     // 暂停/恢复合并成一个开关后 218→217（-2 +1）；二代「轻量记忆」整组收进记忆页后 217→212（-5）；
-    // 会话级准入/人格/唤醒/提示词迁到会话详情后 212→202（-10：访问页四个白名单框、二代唤醒与会话快选）。
+    // 会话级准入/人格/唤醒/提示词迁到会话详情后 212→202（-10：访问页四个白名单框、二代唤醒与会话快选）；
+    // 手动静默开启/恢复正常合并成一个切换按钮后 202→201（-2 +1）。
     // 数字写死是为了防止「悄悄删 id」，需要增减时连同 pages/*/fields.js 的改动一起改这里。
-    assert.equal(legacyIds.length, 202);
+    assert.equal(legacyIds.length, 201);
     const missing = legacyIds.filter(x => !ids.includes(x));
     assert.deepEqual(missing, []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
@@ -272,8 +273,9 @@ try {
     assert.deepEqual(await clickWrite('#roleSet', '/api/role'), { role: '契约测试角色', apply: 'nextWake' });
     assert.deepEqual(await clickWrite('#roleClear', '/api/role'), { role: null, apply: 'nextWake' });
     // 手动静默按钮在总览页；这里只校验表单契约与按钮可用，实际写请求由后端测试覆盖。
-    await reveal('#silentOn');
-    assert.equal(await page.evaluate(() => document.getElementById('silentOn').disabled), false);
+    await reveal('#silentToggle');
+    assert.equal(await page.evaluate(() => document.getElementById('silentToggle').disabled), false);
+    assert.equal((await page.textContent('#silentToggle')).trim(), '开启手动静默');
     assert.equal(await page.evaluate(() => document.getElementById('manualSilenceStages').querySelectorAll('input[type="checkbox"]').length), 5);
     assert.deepEqual(await page.evaluate(async () => {
       const res = await fetch('/api/role-mode', {

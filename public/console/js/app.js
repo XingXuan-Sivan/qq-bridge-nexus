@@ -138,11 +138,10 @@ function updateOverview(status, modeLabel) {
   const alert = document.getElementById('connectionAlert');
   if (alert) alert.hidden = true;
   const silent = status.roleMode === 'silent';
-  for (const [id, active] of [['silentOn', silent], ['silentOff', !silent]]) {
-    const button = document.getElementById(id);
-    if (!button) continue;
-    button.classList.toggle('active', active);
-    button.setAttribute('aria-pressed', String(active));
+  const silentToggle = document.getElementById('silentToggle');
+  if (silentToggle) {
+    silentToggle.classList.toggle('active', silent);
+    silentToggle.setAttribute('aria-pressed', String(silent));
   }
 }
 function setConnectionError(error) {

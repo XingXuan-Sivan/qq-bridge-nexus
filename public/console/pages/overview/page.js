@@ -317,14 +317,15 @@ function renderManualSilence(silent) {
   setSwitch($('manualRecordMessages'), p.recordMessages !== false);
   setSwitch($('manualCatchUp'), p.catchUp !== false);
   const active = !!silent;
-  $('silentOn').disabled = active;
+  const toggle = $('silentToggle');
+  toggle.textContent = active ? '关闭手动静默' : '开启手动静默';
+  toggle.disabled = false;
   $('silentApply').disabled = !active;
-  $('silentOff').disabled = !active;
   $('manualSilenceNote').textContent = active
-    ? '手动静默已锁定：只有 owner 能在控制台解除；管理员不能开启或解除。'
-    : '开启后 AI 按下面的策略停手，直到你手动恢复；owner 私聊始终例外。';
+    ? '手动静默已锁定：只有 owner 能在控制台关闭；管理员不能开启或关闭。'
+    : '开启后 AI 按下面的策略停手，直到你关闭手动静默；owner 私聊始终例外。';
   $('manualSilenceElapsed').textContent = active
-    ? `已静默 ${manualDuration(silent.elapsedMs)} · 直到手动恢复${silent.locked ? ' · 已锁定' : ''}`
+    ? `已静默 ${manualDuration(silent.elapsedMs)} · 直到关闭手动静默${silent.locked ? ' · 已锁定' : ''}`
     : '未开启手动静默。';
 }
 
@@ -403,31 +404,33 @@ export function init() {
     if (r.ok) { await refreshDshModel(); setMsg(msg, `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`, 'ok'); }
   });
 
-  // 静默开关（手动优先，直到手动恢复）
-  $('silentOn').addEventListener('click', async () => {
-    let r;
+  // 手动静默：同一个按钮按当前状态开启或关闭
+  $('silentToggle').addEventListener('click', async () => {
+    const toggle = $('silentToggle');
+    const turningOff = !!silenceState?.manual;
+    toggle.disabled = true;
     try {
-      r = await api('/api/role-mode', 'POST', { mode: 'silent', silent: readManualSilencePolicy() });
+      if (turningOff) {
+        const r = await api('/api/role-mode', 'POST', { mode: 'active' });
+        if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '关闭失败'); return; }
+        if (r.resumedScheduled) showConsoleToast(`定时静默「${r.resumedScheduled.name}」这一段临时恢复，到 ${r.resumedScheduled.untilText}；下一段照常静默`);
+      } else {
+        const r = await api('/api/role-mode', 'POST', { mode: 'silent', silent: readManualSilencePolicy() });
+        if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '开启失败'); return; }
+      }
+      await refreshSilence();
+      requestStatusRefresh();
     } catch (error) {
-      console.error('开启手动静默失败', error?.stack || error);
-      $('manualSilenceNote').textContent = '❌ 网络错误，未开启';
-      return;
+      console.error(`${turningOff ? '关闭' : '开启'}手动静默失败`, error?.stack || error);
+      $('manualSilenceNote').textContent = `❌ 网络错误，未${turningOff ? '关闭' : '开启'}`;
+    } finally {
+      toggle.disabled = false;
     }
-    if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '开启失败'); return; }
-    await refreshSilence();
-    requestStatusRefresh();
   });
   $('silentApply').addEventListener('click', async () => {
     const r = await api('/api/role-mode', 'POST', { mode: 'silent', silent: readManualSilencePolicy() });
     $('manualSilenceNote').textContent = r.ok ? '✅ 静默策略已保存' : ('❌ ' + (r.error || '保存失败'));
     if (r.ok) { await refreshSilence(); requestStatusRefresh(); }
-  });
-  $('silentOff').addEventListener('click', async () => {
-    const r = await api('/api/role-mode', 'POST', { mode: 'active' });
-    if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '解除失败'); return; }
-    if (r.resumedScheduled) showConsoleToast(`定时静默「${r.resumedScheduled.name}」这一段临时恢复，到 ${r.resumedScheduled.untilText}；下一段照常静默`);
-    await refreshSilence();
-    requestStatusRefresh();
   });
 
   // 定时静默排期

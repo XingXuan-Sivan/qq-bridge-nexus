@@ -3,7 +3,7 @@
 //      DeepSeek 高峰预设取自价目表、临时恢复到这一段结束、开始 / 结束检测、持久化 0600、读坏只读；
 //   ② 桥接：静默时群消息记下但不唤醒、各种唤醒都不发（真正不花 token）、管理员私聊默认不受影响、发送被拦；
 //      定时任务「叫 AI 来说」跳过 / 设了「照常执行」就放行、固定文字照发、预览标出会跳过的那几次；
-//      手动「恢复正常」= 这一段临时恢复；结束时给被直接找过的会话补一次唤醒；控制台接口拒绝 agent token；
+//      手动「关闭手动静默」= 这一段临时恢复；结束时给被直接找过的会话补一次唤醒；控制台接口拒绝 agent token；
 //   ③ 控制台：静默开关卡片里的定时静默面板与任务表单选项；
 //   ④ 「只在被 @ 或私聊时唤醒」档位：没人找时照样不唤醒；被 @ 后这个群放行一段时间（能唤醒、能发），别的群照样静默。
 import test from 'node:test';
@@ -150,7 +150,7 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
     const pv = await req(port, '/api/scheduler/preview', 'POST', {}, { schedule: { type: 'interval', everyMinutes: 30, window: ['00:00', '23:30'] }, kind: 'ai', targets: ['qq:group:456'], count: 5 });
     assert.ok(pv.json.next.some((x) => x.silenced === '测试段'), '预览标出落在静默里的那几次');
 
-    // 手动「恢复正常」：这一段临时恢复
+    // 手动「关闭手动静默」：这一段临时恢复
     const resume = await req(port, '/api/role-mode', 'POST', {}, { mode: 'active' });
     assert.equal(resume.json.resumedScheduled.name, '测试段');
     assert.equal(h.scheduledSilenceFor('qq:group:456'), null, '这一段临时恢复了');
@@ -190,7 +190,10 @@ test('③ 控制台：静默开关卡片里有定时静默面板；旧「静默�
   // 工厂生成的控件只有 `name: 'x'`（渲染时才变成 id），手写 HTML 里的才是 `id="x"`。
   assert.match(sec, /data-overview-fields="silence"/);
   const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
-  for (const id of ['silentOn', 'silentOff', 'silenceStatePill', 'manualSilenceStages', 'manualAdminApplies', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(hasId(id), id);
+  for (const id of ['silentToggle', 'silenceStatePill', 'manualSilenceStages', 'manualAdminApplies', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(hasId(id), id);
+  // 开启与关闭合并成一个按钮后，不应再留旧的两个按钮。
+  assert.equal(hasId('silentOn'), false, '旧的开启按钮应已合并');
+  assert.equal(hasId('silentOff'), false, '旧的恢复正常按钮应已合并');
   // 旧的手动静默选项与唤醒档位已经并入新的「手动静默」表单，不能在定时静默面板里再留一套。
   assert.equal(html.includes('data-silence-opt='), false, '旧的静默选项应已移除');
   assert.equal(html.includes('name="silenceWakeTier"'), false, '旧的唤醒档位应已移除');

@@ -37,10 +37,9 @@ const SEND_LIMIT_HTML = `<div class="field-inline">
 
 const SILENCE_HEAD = `<div class="control-row">
   <span class="status-badge is-pill" id="silenceStatePill">—</span>
-  <button type="button" id="silentOn" class="btn">开启手动静默</button>
+  <button type="button" id="silentToggle" class="btn">开启手动静默</button>
   <button type="button" id="silentApply" class="btn" disabled>保存静默策略</button>
-  <button type="button" id="silentOff" class="btn" disabled>恢复正常</button>
-  <span class="control-note" id="manualSilenceNote">开启后 AI 按下面的策略停手，直到你手动恢复。</span>
+  <span class="control-note" id="manualSilenceNote">开启后 AI 按下面的策略停手，直到你关闭手动静默。</span>
 </div>
 <div class="meta" id="manualSilenceElapsed">—</div>`;
 

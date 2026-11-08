@@ -156,6 +156,13 @@ npm run test:console-ui
 - 回滚靠代码回滚 + 仓库外人工快照，不提供运行时回滚工具。
 - 原因与判据见 `docs/SESSION_SUBSYSTEM.md` §9 与 `docs/PLAN_DEVIATIONS.md` D7–D9。
 
+### 6.5 手动静默（2026-11-08，已完成）
 
-
+- 语义：手动静默由 owner 在运行总览开启，直到手动恢复，不自动过期；owner 私聊始终例外；管理员不能开启或解除。静默决定“进入后 AI 是否活动”，不改变准入名单。
+- 策略：`mode:'full'|'sendOnly'`；五个环节（被动行为/主动行为/定时任务·叫 AI 来说/定时任务·固定文字/插件任务）可单独勾选；`adminApplies` 控制管理员是否按普通目标处理（owner 始终不受影响），`recordMessages` 控制静默期记录群消息，`catchUp` 控制解除后最多补一次唤醒。
+- 定时任务：固定文字与「叫 AI 来说」共用管理员开关/owner 豁免矩阵；普通群/好友停，管理员仅在 `adminApplies` 开启时停，owner 永远照发/可唤醒；被跳过的定时 AI 不补跑，也不重排定时任务。`sendOnly` 只拦发送，AI 仍会唤醒并消耗 token。
+- 实现：`src/manual-silence.mjs` 定义策略与判定；`src/role-per-key.js` 持久化 `silent`；`src/bridge.js` 的 `setManualSilenceMode` 统一 `/api/role-mode`、`/silent`、`/active`，并在入站、唤醒、发送、定时投递处统一门禁；开启冻结 pending/sleep/reply/proactive 计时器，解除后按未读/休眠重排并最多补一次 `silenceEnded`。
+- 界面：总览页移除旧「静默期间」三选一与旧复选，改为手动模式、五环节、三个行为开关、锁定/已静默时长；定时静默只保留开关、时区、时间段。
+- 边界：管理命令与审批走独立通道；群里的 owner/管理员不单独豁免；`sendOnly` 不省 token；静默期间不中断正在执行的 AI 回合，但后续发送会被发送门禁拦住。
+- 验证：`test-manual-silence.mjs` 9/9、`test-silence-schedule.mjs` 4/4、`npm run test:audit` 97/97、UI 28/28、static 全过；真机重启后 `/api/silence`、`/api/role-mode` 的 silent/active 往返正常。
 

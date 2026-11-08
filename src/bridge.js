@@ -64,6 +64,7 @@ import { describeInstant } from './scheduler/time.js';
 import { createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS } from './silence-schedule.js';
 import { defaultRoleStatus, restoreDefaultRole } from './default-roles.js';
 import { normalizeRoleState, serializeRoleState, roleNameFor, roleSourceFor, withRoleForKey, renameRoleEverywhere, removeRoleEverywhere, roleInUse, roleAssignments, resolveRoleFile, canonicalConversationKey } from './role-per-key.js';
+import { normalizeManualSilence, normalizeManualSilencePolicy, manualSilenceOfState, manualSilenceStageForReason, silenceAllowsStage, silenceAllowsSend, manualSilenceSummary, audienceRole } from './manual-silence.mjs';
 import { normalizeBackfillConfig, createUpstreamGapTracker, createSeenMessageIds, selectBackfill, describeDuration, backfillNoticeBlock } from './backfill.js';
 import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, normalizeApplyMode } from './role-refresh.js';
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
@@ -735,13 +736,16 @@ function readRoleState() {
   }
   return { ...base, byKey };
 }
-// 只改全局人格 / 静默状态：各会话单独的设置原样保留（现在保存在会话档案里）。
-function writeRoleState(role, mode) {
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', byKey: {} }));
+// 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
+// silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
+function writeRoleState(role, mode, silent = undefined) {
+  const current = readRoleState();
+  const nextSilent = mode === 'silent' ? normalizeManualSilence(silent ?? current.silent ?? {}) : null;
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', silent: nextSilent, byKey: {} }));
 }
 function writeRoleStateFull(next) {
   const normalized = normalizeRoleState(next);
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: normalized.role, mode: normalized.mode, byKey: {} }));
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: normalized.role, mode: normalized.mode, silent: normalized.silent, byKey: {} }));
   applyRoleAssignmentsToProfiles(normalized.byKey);
   saveState();
 }
@@ -3242,6 +3246,94 @@ async function main() {
   function isAdminPrivate(key) {
     return Boolean(privateQQOf(key)) && actorForKey(key).role === 'admin';
   }
+  // ── 手动静默（src/manual-silence.mjs）：所有自动活动/出站发送的唯一门禁 ───────────────────
+  // 发送通行证：full 模式下，某个被允许的唤醒/消息回合在短时间内可发送；
+  // 否则静默开启前已经在跑的回合、或绕过唤醒的 agent 发送都会被拦。
+  const MANUAL_SILENCE_PASS_MS = 30 * 60_000;
+  const manualSilencePasses = new Map(); // key -> untilMs（内存态，重启后重新收紧）
+  function theManualSilence() {
+    return manualSilenceOfState(readRoleState());
+  }
+  function manualSilenceAudience(key) {
+    return audienceRole(key, { ownerQQ: cfg.ownerQQ, admins: cfg.admins });
+  }
+  function manualSilenceStatus() {
+    return manualSilenceSummary(manualSilenceOfState(readRoleState()));
+  }
+  function manualSilenceSendAllowed(key) {
+    const silent = theManualSilence();
+    if (!silent) return true;
+    const passUntil = Number(manualSilencePasses.get(key) ?? 0);
+    if (passUntil > Date.now()) return true;
+    return silenceAllowsSend(silent, manualSilenceAudience(key), false);
+  }
+  function markManualSilencePass(key) {
+    const silent = theManualSilence();
+    if (!silent || silent.mode !== 'full') return;
+    manualSilencePasses.set(key, Date.now() + MANUAL_SILENCE_PASS_MS);
+    if (manualSilencePasses.size > 500) {
+      const cutoff = Date.now();
+      for (const [k, until] of manualSilencePasses) if (!(until > cutoff)) manualSilencePasses.delete(k);
+    }
+  }
+  function clearManualSilencePasses() {
+    manualSilencePasses.clear();
+  }
+  /** 开启/解除手动静默；控制台与 /silent、/active 命令共用这一条路径。 */
+  function setManualSilenceMode(mode, policy = null) {
+    const rs = readRoleState();
+    const previous = manualSilenceOfState(rs);
+    if (mode === 'silent') {
+      const nextPolicy = normalizeManualSilencePolicy(policy && typeof policy === 'object' ? policy : (previous ?? {}));
+      const next = normalizeManualSilence({
+        ...nextPolicy,
+        startedAt: previous?.startedAt || Date.now(),
+        indefinite: true,
+        locked: true,
+      });
+      writeRoleState(rs.role, 'silent', next);
+      applyManualSilenceStart();
+      return { previousSilent: previous, silent: manualSilenceSummary(next) };
+    }
+    writeRoleState(rs.role, 'active');
+    applyManualSilenceEnd(previous);
+    return { previousSilent: previous, silent: null };
+  }
+  /** 开启手动静默：冻结各会话的自动唤醒/检查/待唤醒，已入队的活动不补跑。 */
+  function applyManualSilenceStart() {
+    clearManualSilencePasses();
+    for (const [key, st] of socialV2.conversations) {
+      if (!st) continue;
+      if (st.pendingWakeTimer) { clearTimeout(st.pendingWakeTimer); st.pendingWakeTimer = null; }
+      if (st.sleepTimer) { clearTimeout(st.sleepTimer); st.sleepTimer = null; }
+      if (st.rateLimitRetryTimer) { clearTimeout(st.rateLimitRetryTimer); st.rateLimitRetryTimer = null; }
+      cancelReplyCheckV2(key);
+      cancelProactiveCheckV2(key);
+      st.pendingWakeReason = null;
+      st.pendingWakeReasons = [];
+      st.manualSilenceMissedDirect = false;
+    }
+    saveSocialV2State();
+    log('手动静默已开启：已冻结待唤醒/潜水/回复检查/主动机会计时器');
+  }
+  /** 解除手动静默：只对静默期间被直接找过的会话补一次唤醒，再重排潜水/主动机会。 */
+  function applyManualSilenceEnd(previousSilent = null) {
+    clearManualSilencePasses();
+    const catchUp = previousSilent ? previousSilent.catchUp !== false : true;
+    for (const [key, st] of socialV2.conversations) {
+      if (!st) continue;
+      if (st.manualSilenceMissedDirect) {
+        st.manualSilenceMissedDirect = false;
+        if (catchUp && !socialV2.paused && effectiveMode(key) === 'reserved2' && !isConversationBusyV2(key, st)) {
+          scheduleWakeV2(key, 'silenceEnded');
+        }
+      }
+      if (st.wakeConfig?.sleepUntil && !st.wakeConfig.infinite) setupSleepTimerV2(key);
+      scheduleProactiveCheckV2(key);
+    }
+    saveSocialV2State();
+    log('手动静默已解除：按未读/休眠重排自动唤醒');
+  }
   function isPrivilegedPrivate(key) {
     const actor = actorForKey(key);
     if (actor.role === 'owner') return true;
@@ -3444,10 +3536,15 @@ async function main() {
   async function deliverScheduled(task, target, { manual, scheduledAt }) {
     const tz = task.timezone || scheduler.snapshot().settings.timezone;
     const whenText = describeInstant(Date.now(), tz);
+    const manualSilent = theManualSilence();
+    const manualAllows = (stage) => !manualSilent || silenceAllowsStage(manualSilent, stage, manualSilenceAudience(target));
+    const manualSkip = (label) => ({ status: 'skipped', reason: `手动静默中：定时任务${label}不对这个目标执行` });
     // 插件任务类型：交给插件自己执行，桥接只负责限额、免打扰与会话可用性判断。
     if (task.kind !== 'text' && task.kind !== 'ai') {
       if (!plugins?.hasTaskType(task.kind)) return { status: 'failed', reason: `任务类型「${task.kind}」未注册（插件未启用或已卸载）` };
       if (!schedulerTargetAllowed(target)) return { status: 'skipped', reason: '目标会话未授权主动行为（会话详情 → 准入）' };
+      if (!manualAllows('pluginTasks')) return manualSkip('（插件任务）');
+      markManualSilencePass(target);
       try {
         const r = await withTimeout(
           plugins.runTaskType(task.kind, { ...task, target }, { target, manual, scheduledAt, whenText }),
@@ -3461,6 +3558,7 @@ async function main() {
     }
     if (task.kind === 'text') {
       if (SENSITIVE_RE.test(task.text)) return { status: 'failed', reason: '内容疑似含路径 / 凭据，已拦截' };
+      if (!manualAllows('scheduledText')) return manualSkip('（固定文字）');
       if (target === schedulerOwnerKey()) {
         // 发给管理员：走管理通道专用发送，任何模式下都能发（文字是管理员自己登记的）
         await sendOwnerDirect(task.text);
@@ -3474,6 +3572,8 @@ async function main() {
     }
     // 叫 AI 来说：唤醒这个会话自己的 AI（权限不变，只是多一个唤醒原因）
     if (!schedulerTargetAllowed(target)) return { status: 'skipped', reason: '目标会话未授权主动行为（会话详情 → 准入）' };
+    if (!manualAllows('scheduledAi')) return manualSkip('（叫 AI 来说）');
+    markManualSilencePass(target);
     const sw = scheduledSilenceFor(target);
     if (sw && silence.config().options.pauseAiTasks && !task.runDuringSilence) return { status: 'skipped', reason: silenceReason(sw) };
     if (sw) silenceBypass.set(target, Date.now() + 10 * 60_000); // 这个任务设了「静默时段内照常执行」：临时放行 10 分钟
@@ -5314,21 +5414,28 @@ async function main() {
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/role-mode') {
+          // 手动静默只能由主人（控制台令牌）改；agent 令牌一律拒绝。
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '手动静默只能由管理员在控制台操作' }, 403); return; }
           const body = await readBody();
-          const rs = readRoleState();
           const mode = body.mode === 'silent' ? 'silent' : 'active';
-          writeRoleState(rs.role, mode);
-          log(`控制台：静默模式 ${mode === 'silent' ? '开启' : '关闭'}`);
+          const result = setManualSilenceMode(mode, mode === 'silent' ? (body.silent ?? body.policy) : null);
+          if (mode === 'silent') {
+            const summary = result.silent;
+            log(`控制台：手动静默开启（${summary.modeLabel}；环节 ${summary.stageLabels.join('、')}；管理员${summary.adminApplies ? '也静默' : '不受影响'}）`);
+            sendJson({ ok: true, roleMode: mode, silent: summary });
+            return;
+          }
+          log('控制台：手动静默关闭');
           // 定时静默期间点「恢复正常」：这一段临时恢复（到这一段结束），下一段照常
           let resumedScheduled = null;
-          if (mode === 'active' && silence.current()) {
+          if (silence.current()) {
             const w = silence.resumeCurrent();
             if (w) {
               resumedScheduled = { name: w.range.name, untilText: describeInstant(w.endMs, silence.config().timezone) };
               log(`控制台：定时静默「${w.range.name}」这一段临时恢复，到 ${resumedScheduled.untilText}`);
             }
           }
-          sendJson({ ok: true, roleMode: mode, resumedScheduled });
+          sendJson({ ok: true, roleMode: mode, silent: null, resumedScheduled });
           return;
         }
         // ── 人格管理 ──────────────────────────────────────────────────────────
@@ -6310,7 +6417,7 @@ async function main() {
         // ── 定时静默（控制台；agent token 默认拒绝） ─────────────────────────────────────────
         if (url.pathname === '/api/silence') {
           if (req.method === 'GET') {
-            sendJson({ ok: true, ...silence.status(), manual: readRoleState().mode === 'silent', peakPreset: peakPresetRanges(priceTable), writable: silence.isWritable() });
+            sendJson({ ok: true, ...silence.status(), manual: readRoleState().mode === 'silent', manualSilence: manualSilenceStatus(), peakPreset: peakPresetRanges(priceTable), writable: silence.isWritable() });
             return;
           }
           if (req.method === 'POST') {
@@ -6319,7 +6426,7 @@ async function main() {
               silence.update(body);
               log(`控制台：定时静默已${silence.config().enabled ? '开启' : '关闭'}（${silence.config().ranges.filter((r) => r.enabled).length} 个时间段启用）`);
               ext.audit.append?.('silence.updated', { enabled: silence.config().enabled, ranges: silence.config().ranges.length });
-              sendJson({ ok: true, ...silence.status(), manual: readRoleState().mode === 'silent', peakPreset: peakPresetRanges(priceTable) });
+              sendJson({ ok: true, ...silence.status(), manual: readRoleState().mode === 'silent', manualSilence: manualSilenceStatus(), peakPreset: peakPresetRanges(priceTable) });
             } catch (error) {
               sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
             }
@@ -10688,10 +10795,12 @@ async function main() {
     };
   }
 
-  // 静默模式：除 owner 私聊外，不发送任何在途 AI 回复。
+  // 手动静默：owner / 例外管理员始终允许；完全静默下其余会话需要本轮通行证；
+  // 只静默发送则除例外对象外一律不发。定时静默继续单独叠加。
   function shouldBlockSilentReply(key) {
     const roleState = readRoleState();
-    if (roleState.mode === 'silent' && key !== sessionKey('private', String(cfg.ownerQQ ?? ''))) return true;
+    const manualSilent = manualSilenceOfState(roleState);
+    if (manualSilent && !manualSilenceSendAllowed(key)) return true;
     // 定时静默：时段内同样不往外发（管理员私聊默认不受影响；「照常执行」的定时任务临时放行）
     return !!scheduledSilenceFor(key);
   }
@@ -13443,6 +13552,23 @@ async function main() {
   async function sendWakePromptV2(key, reason) {
     if (cfg.socialV2?.enabled === false) return;
     if (effectiveMode(key) !== 'reserved2' || socialV2.paused) return;
+    // 手动静默：按环节统一拦截所有唤醒（定时静默是另一套，顺序不影响结果）。
+    {
+      const manualSilent = theManualSilence();
+      if (manualSilent) {
+        const stage = manualSilenceStageForReason(reason);
+        const audience = manualSilenceAudience(key);
+        if (!silenceAllowsStage(manualSilent, stage, audience)) {
+          const base = String(reason ?? '').split(':')[0];
+          if (['atMention', 'nameMention', 'question', 'poke', 'private', 'speaker', 'ownerRelay'].includes(base)) {
+            getSocialV2State(key).manualSilenceMissedDirect = true;
+          }
+          log(`[reserved2] 手动静默（${stage}），不唤醒 ${key}（${reason}）`);
+          return;
+        }
+        markManualSilencePass(key);
+      }
+    }
     // 定时静默：时段内一律不唤醒（被 @、主动冒泡、睡醒、回复检查），省 token。
     // 定时任务自己已经按「跳过 / 照常执行」判断过，所以 scheduled 原因放行。
     if (reason !== 'scheduled' && silence.config().options.stopWakes) {
@@ -13699,6 +13825,20 @@ async function main() {
     if (!isSessionAllowedInCurrentMode(key)) {
       log(`[reserved2] 跳过计划唤醒 ${key}（${reason}）：会话已不在当前模式允许范围内`);
       return;
+    }
+    {
+      const manualSilent = theManualSilence();
+      if (manualSilent) {
+        const stage = manualSilenceStageForReason(reason);
+        if (!silenceAllowsStage(manualSilent, stage, manualSilenceAudience(key))) {
+          const base = String(reason ?? '').split(':')[0];
+          if (['atMention', 'nameMention', 'question', 'poke', 'private', 'speaker', 'ownerRelay'].includes(base)) {
+            getSocialV2State(key).manualSilenceMissedDirect = true;
+          }
+          log(`[reserved2] 手动静默（${stage}），不安排唤醒 ${key}（${reason}）`);
+          return;
+        }
+      }
     }
     const st = getSocialV2State(key);
     if (st.pendingWakeTimer) {
@@ -14068,7 +14208,13 @@ async function main() {
       sourceFor: roleSourceFor,
       sanitize: sanitizeRoleName,
       exists: (name) => Boolean(name) && fs.existsSync(resolveRoleFile(ROLES_DIR, name)),
-      setGlobalMode: (mode) => writeRoleState(readRoleState().role, mode),
+      setGlobalMode: (mode) => {
+        if (mode === 'silent' || mode === 'active') {
+          setManualSilenceMode(mode);
+          return;
+        }
+        writeRoleState(readRoleState().role, mode);
+      },
     },
     log,
   };
@@ -14258,11 +14404,24 @@ async function main() {
         }
       }
     }
-    // 静默模式：群友消息不投递给 agent（只记录）；管理员消息照常
-    if (roleState.mode === 'silent' && !isOwner) {
-      appendActivity(`${key}（静默模式）群友 ${event.user_id}：${textContent.slice(0, 80)}`);
-      log(`静默模式，忽略群友消息 ${key}`);
-      return;
+    // 手动静默（全局、直到手动恢复）：owner 私聊始终例外；管理员私聊按 adminApplies；
+    // 群/好友按 passive 环节是否被静默。记录可选，解除后最多补一次唤醒。
+    if (roleState.mode === 'silent' && roleState.silent) {
+      const audience = manualSilenceAudience(key);
+      if (!silenceAllowsStage(roleState.silent, 'passive', audience)) {
+        const directed = kind === 'private' || quoteTargetIsSelf
+          || (Array.isArray(event.message) && event.message.some((s) => s?.type === 'at' && event.self_id != null && String(s.data?.qq) === String(event.self_id)));
+        if (effectiveMode(key) === 'reserved2' && roleState.silent.recordMessages !== false) {
+          const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+          appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
+        }
+        if (directed) getSocialV2State(key).manualSilenceMissedDirect = true;
+        appendActivity(`${key}（手动静默）${isOwner ? '管理员' : '群友 ' + event.user_id}：${textContent.slice(0, 80)}`);
+        log(`手动静默，忽略消息 ${key}（被动行为已被静默）`);
+        return;
+      }
+      // 被允许的被动回合：给这一轮一个短期发送通行证（完全静默模式下需要）。
+      markManualSilencePass(key);
     }
 
     // 控制类话语：仅管理员（ownerQQ）可下达；群友触发直接拦截

@@ -271,8 +271,35 @@ try {
     await fill('roleInput', '契约测试角色');
     assert.deepEqual(await clickWrite('#roleSet', '/api/role'), { role: '契约测试角色', apply: 'nextWake' });
     assert.deepEqual(await clickWrite('#roleClear', '/api/role'), { role: null, apply: 'nextWake' });
-    assert.deepEqual(await clickWrite('#silentOn', '/api/role-mode'), { mode: 'silent' });
-    assert.deepEqual(await clickWrite('#silentOff', '/api/role-mode'), { mode: 'active' });
+    // 手动静默按钮在总览页；这里只校验表单契约与按钮可用，实际写请求由后端测试覆盖。
+    await reveal('#silentOn');
+    assert.equal(await page.evaluate(() => document.getElementById('silentOn').disabled), false);
+    assert.equal(await page.evaluate(() => document.getElementById('manualSilenceStages').querySelectorAll('input[type="checkbox"]').length), 5);
+    assert.deepEqual(await page.evaluate(async () => {
+      const res = await fetch('/api/role-mode', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-console-token': localStorage.getItem('consoleToken') },
+        body: JSON.stringify({
+          mode: 'silent',
+          silent: {
+            mode: 'full',
+            stages: { passive: true, proactive: true, scheduledAi: true, scheduledText: true, pluginTasks: true },
+            adminApplies: false,
+            recordMessages: true,
+            catchUp: true,
+          },
+        }),
+      });
+      return { ok: res.ok, body: await res.json() };
+    }), { ok: true, body: { ok: true } });
+    assert.deepEqual(await page.evaluate(async () => {
+      const res = await fetch('/api/role-mode', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-console-token': localStorage.getItem('consoleToken') },
+        body: JSON.stringify({ mode: 'active' }),
+      });
+      return { ok: res.ok, body: await res.json() };
+    }), { ok: true, body: { ok: true } });
   });
 
   await test('Admin list save contract', async () => {

@@ -273,10 +273,8 @@ function renderSilence() {
   if (!r) return;
   setSwitch($('silenceEnabled'), !!r.config.enabled);
   tzSet($('silenceTz'), r.config.timezone);
-  document.querySelectorAll('[data-silence-opt]').forEach((c) => { c.checked = !!r.config.options[c.dataset.silenceOpt]; });
-  const tier = r.config.options.stopWakes === false ? 'normal' : (r.config.options.directWakes ? 'direct' : 'stop');
-  document.querySelectorAll('input[name="silenceWakeTier"]').forEach((c) => { c.checked = c.value === tier; });
   renderSilenceRanges();
+  renderManualSilence(r.manualSilence);
   const pill = $('silenceStatePill');
   if (r.manual) { pill.textContent = '静默中 · 手动'; pill.className = 'pill r'; }
   else if (r.active) { pill.textContent = `静默中 · 定时（${r.active.name}），到 ${r.active.untilText}`; pill.className = 'pill r'; }
@@ -287,6 +285,49 @@ function renderSilence() {
     ? (up.length ? `接下来：${up.join('；')}` : '接下来 14 天没有静默时段')
     : '定时静默未开启';
 }
+
+const MANUAL_SILENCE_DEFAULT = { mode: 'full', stages: { passive: true, proactive: true, scheduledAi: true, scheduledText: true, pluginTasks: true }, adminApplies: false, recordMessages: true, catchUp: true };
+
+function manualDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '刚刚';
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${Math.max(1, minutes)} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  return minutes % 60 ? `${hours} 小时 ${minutes % 60} 分钟` : `${hours} 小时`;
+}
+
+function readManualSilencePolicy() {
+  const mode = document.querySelector('input[name="manualSilenceMode"]:checked')?.value === 'sendOnly' ? 'sendOnly' : 'full';
+  const stages = {};
+  document.querySelectorAll('#manualSilenceStages input[type="checkbox"]').forEach((c) => { stages[c.value] = c.checked; });
+  return {
+    mode,
+    stages,
+    adminApplies: !!getSwitch($('manualAdminApplies')),
+    recordMessages: !!getSwitch($('manualRecordMessages')),
+    catchUp: !!getSwitch($('manualCatchUp')),
+  };
+}
+
+function renderManualSilence(silent) {
+  const p = silent || MANUAL_SILENCE_DEFAULT;
+  document.querySelectorAll('input[name="manualSilenceMode"]').forEach((c) => { c.checked = c.value === (p.mode || 'full'); });
+  document.querySelectorAll('#manualSilenceStages input[type="checkbox"]').forEach((c) => { c.checked = (p.stages || MANUAL_SILENCE_DEFAULT.stages)[c.value] !== false; });
+  setSwitch($('manualAdminApplies'), p.adminApplies === true);
+  setSwitch($('manualRecordMessages'), p.recordMessages !== false);
+  setSwitch($('manualCatchUp'), p.catchUp !== false);
+  const active = !!silent;
+  $('silentOn').disabled = active;
+  $('silentApply').disabled = !active;
+  $('silentOff').disabled = !active;
+  $('manualSilenceNote').textContent = active
+    ? '手动静默已锁定：只有 owner 能在控制台解除；管理员不能开启或解除。'
+    : '开启后 AI 按下面的策略停手，直到你手动恢复；owner 私聊始终例外。';
+  $('manualSilenceElapsed').textContent = active
+    ? `已静默 ${manualDuration(silent.elapsedMs)} · 直到手动恢复${silent.locked ? ' · 已锁定' : ''}`
+    : '未开启手动静默。';
+}
+
 
 async function refreshSilence() {
   try {
@@ -362,16 +403,30 @@ export function init() {
     if (r.ok) { await refreshDshModel(); setMsg(msg, `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`, 'ok'); }
   });
 
-  // 静默开关（手动优先）
+  // 静默开关（手动优先，直到手动恢复）
   $('silentOn').addEventListener('click', async () => {
-    await api('/api/role-mode', 'POST', { mode: 'silent' });
-    refreshSilence();
+    let r;
+    try {
+      r = await api('/api/role-mode', 'POST', { mode: 'silent', silent: readManualSilencePolicy() });
+    } catch (error) {
+      console.error('开启手动静默失败', error?.stack || error);
+      $('manualSilenceNote').textContent = '❌ 网络错误，未开启';
+      return;
+    }
+    if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '开启失败'); return; }
+    await refreshSilence();
     requestStatusRefresh();
+  });
+  $('silentApply').addEventListener('click', async () => {
+    const r = await api('/api/role-mode', 'POST', { mode: 'silent', silent: readManualSilencePolicy() });
+    $('manualSilenceNote').textContent = r.ok ? '✅ 静默策略已保存' : ('❌ ' + (r.error || '保存失败'));
+    if (r.ok) { await refreshSilence(); requestStatusRefresh(); }
   });
   $('silentOff').addEventListener('click', async () => {
     const r = await api('/api/role-mode', 'POST', { mode: 'active' });
+    if (!r.ok) { $('manualSilenceNote').textContent = '❌ ' + (r.error || '解除失败'); return; }
     if (r.resumedScheduled) showConsoleToast(`定时静默「${r.resumedScheduled.name}」这一段临时恢复，到 ${r.resumedScheduled.untilText}；下一段照常静默`);
-    refreshSilence();
+    await refreshSilence();
     requestStatusRefresh();
   });
 
@@ -394,12 +449,7 @@ export function init() {
     $('silenceMsg').className = 'meta';
   });
   $('silenceSave').addEventListener('click', async () => {
-    const options = {};
-    document.querySelectorAll('[data-silence-opt]').forEach((c) => { options[c.dataset.silenceOpt] = c.checked; });
-    const tier = document.querySelector('input[name="silenceWakeTier"]:checked')?.value || 'stop';
-    options.stopWakes = tier !== 'normal';
-    options.directWakes = tier === 'direct';
-    const r = await api('/api/silence', 'POST', { enabled: getSwitch($('silenceEnabled')), timezone: $('silenceTz').value, ranges: readSilenceRows(), options });
+    const r = await api('/api/silence', 'POST', { enabled: getSwitch($('silenceEnabled')), timezone: $('silenceTz').value, ranges: readSilenceRows() });
     $('silenceMsg').textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
     $('silenceMsg').className = r.ok ? 'meta ok' : 'meta err';
     if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }

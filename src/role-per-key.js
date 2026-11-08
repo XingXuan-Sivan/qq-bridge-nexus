@@ -15,6 +15,7 @@
 
 import path from 'node:path';
 import { key as buildKey, parseKey } from './session/key.mjs';
+import { normalizeManualSilence } from './manual-silence.mjs';
 
 /** byKey 最多记这么多会话，防止被手改的文件撑爆。 */
 export const ROLE_BY_KEY_MAX = 500;
@@ -45,7 +46,7 @@ export function resolveRoleFile(rolesDir, name) {
   return resolved;
 }
 
-/** 读到的角色状态规范化：{ role: 名字|null, mode: 'active'|'silent', byKey: { key: 名字|null } }。 */
+/** 读到的角色状态规范化：{ role: 名字|null, mode: 'active'|'silent', silent: 手动静默策略|null, byKey: { key: 名字|null } }。 */
 export function normalizeRoleState(raw) {
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const byKey = {};
@@ -58,13 +59,17 @@ export function normalizeRoleState(raw) {
     const name = safeRoleName(v);
     if (name) byKey[key] = name;
   }
-  return { role: safeRoleName(r.role), mode: r.mode === 'silent' ? 'silent' : 'active', byKey };
+  const mode = r.mode === 'silent' ? 'silent' : 'active';
+  // 旧文件只有 mode:'silent'：按无限期、锁定、默认策略处理；不丢 byKey。
+  const silent = mode === 'silent' ? normalizeManualSilence(r.silent) : null;
+  return { role: safeRoleName(r.role), mode, silent, byKey };
 }
 
-/** 写盘用：没有 byKey 时不写这个字段，保持老格式。 */
+/** 写盘用：没有 byKey / silent 时不写这些字段，保持老格式。 */
 export function serializeRoleState(state) {
   const s = normalizeRoleState(state);
   const out = { role: s.role, mode: s.mode };
+  if (s.mode === 'silent' && s.silent) out.silent = s.silent;
   if (Object.keys(s.byKey).length) out.byKey = s.byKey;
   return out;
 }

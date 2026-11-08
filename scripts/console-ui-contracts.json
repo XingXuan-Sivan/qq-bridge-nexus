@@ -70,7 +70,20 @@
     "method": "POST",
     "path": "/api/role-mode",
     "body": {
-      "mode": "silent"
+      "mode": "silent",
+      "silent": {
+        "mode": "full",
+        "stages": {
+          "passive": true,
+          "proactive": true,
+          "scheduledAi": true,
+          "scheduledText": true,
+          "pluginTasks": true
+        },
+        "adminApplies": false,
+        "recordMessages": true,
+        "catchUp": true
+      }
     }
   },
   {

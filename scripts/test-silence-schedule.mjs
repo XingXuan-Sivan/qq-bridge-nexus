@@ -183,17 +183,17 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
   }
 });
 
-test('③ 控制台：静默开关卡片里有定时静默面板；任务表单有「静默时段内」选项', () => {
+test('③ 控制台：静默开关卡片里有定时静默面板；旧「静默期间」设置已移除', () => {
   const html = readConsoleSource();
   const sec = html.slice(html.indexOf('<section id="section-silent"'), html.indexOf('</section>', html.indexOf('<section id="section-silent"')));
   // 控件已搬进 pages/overview/fields.js：卡片里只剩宿主 div，控件 id / 选项都在整份控制台源码里断言。
   // 工厂生成的控件只有 `name: 'x'`（渲染时才变成 id），手写 HTML 里的才是 `id="x"`。
   assert.match(sec, /data-overview-fields="silence"/);
   const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
-  for (const id of ['silentOn', 'silentOff', 'silenceStatePill', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(hasId(id), id);
-  for (const opt of ['recordMessages', 'catchUpOnEnd', 'pauseAiTasks', 'includeOwnerPrivate']) assert.ok(html.includes(`data-silence-opt="${opt}"`), opt);
-  for (const tier of ['stop', 'direct', 'normal']) assert.ok(html.includes(`name="silenceWakeTier" value="${tier}"`), `唤醒档位 ${tier}`);
-  assert.match(html, /只在被 @ 或私聊时唤醒/);
+  for (const id of ['silentOn', 'silentOff', 'silenceStatePill', 'manualSilenceStages', 'manualAdminApplies', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(hasId(id), id);
+  // 旧的手动静默选项与唤醒档位已经并入新的「手动静默」表单，不能在定时静默面板里再留一套。
+  assert.equal(html.includes('data-silence-opt='), false, '旧的静默选项应已移除');
+  assert.equal(html.includes('name="silenceWakeTier"'), false, '旧的唤醒档位应已移除');
   // 编辑器改成「标签在左」的行结构后，标签只写「定时静默时段」，两个取值各自独立成 option。
   assert.match(html, /定时静默时段/, '任务表单有「定时静默时段」行');
   assert.match(html, /<option value="skip">跳过这次<\/option><option value="run">照常执行<\/option>/);

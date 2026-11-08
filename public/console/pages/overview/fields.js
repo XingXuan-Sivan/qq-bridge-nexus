@@ -37,11 +37,26 @@ const SEND_LIMIT_HTML = `<div class="field-inline">
 
 const SILENCE_HEAD = `<div class="control-row">
   <span class="status-badge is-pill" id="silenceStatePill">—</span>
-  <button type="button" id="silentOn" class="btn">开启静默</button>
-  <button type="button" id="silentOff" class="btn">恢复正常</button>
-  <span class="control-note">手动开关优先：手动开启后一直静默；定时静默期间点「恢复正常」= 这一段临时恢复，下一段照常。</span>
+  <button type="button" id="silentOn" class="btn">开启手动静默</button>
+  <button type="button" id="silentApply" class="btn" disabled>保存静默策略</button>
+  <button type="button" id="silentOff" class="btn" disabled>恢复正常</button>
+  <span class="control-note" id="manualSilenceNote">开启后 AI 按下面的策略停手，直到你手动恢复。</span>
 </div>
-<div class="meta">静默时群友消息不投递 agent，仅管理员可对话。</div>`;
+<div class="meta" id="manualSilenceElapsed">—</div>`;
+
+const MANUAL_SILENCE_MODE = `<div class="field-checklist" id="manualSilenceMode" data-columns="2">
+  <label class="field-check-item"><input type="radio" name="manualSilenceMode" value="full" checked><span><b>完全静默</b><span class="field-check-desc">按下面勾选的范围停掉唤醒与发送；owner 私聊始终不受影响。</span></span></label>
+  <label class="field-check-item"><input type="radio" name="manualSilenceMode" value="sendOnly"><span><b>只静默发送</b><span class="field-check-desc">AI 仍会被唤醒、仍会消耗 token，只是不把话发出去；不会省 token。</span></span></label>
+</div>`;
+
+const MANUAL_SILENCE_STAGES = [
+  { value: 'passive', label: '被动行为', desc: '群友发消息、@、私聊触发的唤醒与回复。' },
+  { value: 'proactive', label: '主动行为', desc: '主动冒泡、潜水超时、回复检查等无人触发的唤醒。' },
+  { value: 'scheduledAi', label: '定时任务·叫 AI 来说', desc: '到点唤醒 AI 生成内容；固定文字不受这一项影响。' },
+  { value: 'scheduledText', label: '定时任务·固定文字', desc: '到点直接发送的预写文字，不经过 AI；与「叫 AI 来说」共用管理员开关和 owner 豁免。' },
+  { value: 'pluginTasks', label: '插件任务', desc: '插件自行注册并执行的定时任务。' },
+];
+
 
 const SILENCE_RANGES = `<div class="silence-block">
   <div id="silenceRanges"></div>
@@ -50,21 +65,9 @@ const SILENCE_RANGES = `<div class="silence-block">
     <button id="silencePeak" class="btn small">一键填入 DeepSeek 高峰时段</button>
     <span class="control-note" id="silencePeakNote">高峰：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</span>
   </div>
+  <div class="meta" id="silenceUpcoming">—</div>
 </div>`;
 
-// 静默期间的行为：唤醒档位是单选（互斥），其余是复选。
-const SILENCE_OPTIONS = `<div class="silence-options">
-  <div class="u-fw-500">静默期间</div>
-  <div class="meta u-mt-4">AI 的唤醒</div>
-  <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="stop"> 全部停止（被 @、主动冒泡、睡醒、回复检查都不唤醒）——最省 token<span class="meta">原来的手动静默只拦发送，AI 仍会被定时唤醒去思考；这一档连唤醒一起停</span></label>
-  <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="direct"> 只在被 @ 或私聊时唤醒<span class="meta">有人 @ AI、引用回复 AI 或私聊 AI 时，这个群 / 私聊照常放行 10 分钟（能接着聊几句）；主动冒泡、睡醒等其余唤醒照样停，大头的花费照样省下</span></label>
-  <label class="sched-chip silence-opt"><input type="radio" name="silenceWakeTier" value="normal"> 照常唤醒，只拦往外发<span class="meta">AI 照样思考、照样花钱，只是说的话不发出去</span></label>
-  <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="recordMessages"> 群消息照样记下（不唤醒 AI），恢复后 AI 能补看这段时间说了什么</label>
-  <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="catchUpOnEnd"> 静默期间有人 @ / 叫名字 / 提问 / 拍一拍 AI，结束时补一次唤醒</label>
-  <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="pauseAiTasks"> 定时任务里「叫 AI 来说」的也暂停（任务里可以单独设「照常执行」）；固定文字照发</label>
-  <label class="sched-chip silence-opt"><input type="checkbox" data-silence-opt="includeOwnerPrivate"> 管理员私聊也一起静默（默认不勾：你随时能和 AI 私聊）</label>
-</div>
-<div class="meta" id="silenceUpcoming">—</div>`;
 
 const DSH_NOTES = `<div id="dshModelNotices"></div>
 <div class="meta" id="dshEffortNote"></div>
@@ -114,6 +117,37 @@ export const OVERVIEW_FIELDS = {
   silence: {
     fields: [
       { name: 'overviewSilenceHead', type: 'custom', span: 2, html: SILENCE_HEAD },
+      { name: 'manualSilenceMode', type: 'custom', label: '手动静默模式', span: 2, html: MANUAL_SILENCE_MODE },
+      {
+        name: 'manualSilenceStages',
+        type: 'checkList',
+        label: '静默范围',
+        columns: 2,
+        span: 2,
+        options: MANUAL_SILENCE_STAGES,
+        value: MANUAL_SILENCE_STAGES.map((x) => x.value),
+        hint: '勾选表示该环节在静默期间停止；不勾选则照常。固定文字与「叫 AI 来说」共用下面的管理员开关，owner 私聊始终例外。',
+      },
+      {
+        name: 'manualAdminApplies',
+        type: 'switch',
+        label: '对管理员生效',
+        hint: '开启后管理员按普通用户处理；owner 始终不受影响。',
+      },
+      {
+        name: 'manualRecordMessages',
+        type: 'switch',
+        label: '静默期间记录群消息',
+        checked: true,
+        hint: '不唤醒 AI，只把消息记进会话；解除静默后 AI 能补看。',
+      },
+      {
+        name: 'manualCatchUp',
+        type: 'switch',
+        label: '解除后补一次唤醒',
+        checked: true,
+        hint: '静默期间有人直接找过 AI 时，恢复后补一次唤醒；跳过的定时任务不补跑。',
+      },
       {
         name: 'silenceEnabled',
         type: 'switch',
@@ -127,7 +161,6 @@ export const OVERVIEW_FIELDS = {
         html: `<select id="silenceTz" aria-label="定时静默的时区"></select>`,
       },
       { name: 'overviewSilenceRanges', type: 'custom', span: 2, html: SILENCE_RANGES },
-      { name: 'overviewSilenceOptions', type: 'custom', span: 2, html: SILENCE_OPTIONS },
       {
         type: 'action',
         id: 'silenceActions',

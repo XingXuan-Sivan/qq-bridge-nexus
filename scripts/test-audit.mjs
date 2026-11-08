@@ -97,6 +97,8 @@ const tests = [
   'test-session-proactive.mjs',
   // 多管理员（P3）：名单归一化、capability、closed-agent 级别与私聊被动豁免。
   'test-admins.mjs',
+  // 手动静默：策略归一化、owner/管理员/普通矩阵、阶段开关、sendOnly、旧状态兼容。
+  'test-manual-silence.mjs',
   // 会话档案端点（P1）：并集列表、GET/PATCH/DELETE、权限与非法值。
   'test-session-profiles.mjs',
   // 准入名单：条目前缀、白/黑空语义、旧三态迁移与 v2 校验。

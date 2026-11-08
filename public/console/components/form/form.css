@@ -38,6 +38,23 @@
   color: var(--text);
 }
 
+/* 弹窗/规格表单里的「卡片式分组」：标题在框内，视觉与页面 .card 一致。 */
+.form-section--card {
+  padding: 18px 20px;
+  background: var(--card);
+  border-color: var(--card-border);
+  border-radius: var(--radius);
+}
+
+.form-section--card > .form-section-head {
+  margin-bottom: 14px;
+}
+
+.form-section--card > .form-section-head h3 {
+  font-size: 14px;
+  letter-spacing: -0.1px;
+}
+
 .form-section-head .meta {
   margin: 0;
 }

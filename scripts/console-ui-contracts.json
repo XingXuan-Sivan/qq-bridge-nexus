@@ -1,5 +1,10 @@
 [
   {
+    "method": "DELETE",
+    "path": "/api/extensions/mcp/test-ext",
+    "body": {}
+  },
+  {
     "method": "POST",
     "path": "/api/mode",
     "body": {

@@ -165,9 +165,37 @@ try {
     await page.waitForFunction(() => document.querySelectorAll('#mcpList [data-table]').length >= 2);
     const text = await page.locator('#mcpList').innerText();
     assert.match(text, /snowluma_status/);
-    assert.match(await page.locator('#mcpMeta').innerText(), /1 个 server · 1 个工具/);
+    assert.match(text, /demo_tool/);
+    assert.match(text, /2 个 server · 2 个工具 · 1 个技能/);
+    assert.equal(await page.locator('#mcpList .status-badge').count(), 0, 'MCP 标签统一用 .pill');
+    assert.ok(await page.locator('#mcpList .pill').count() >= 2, '来源与状态标签应使用 .pill');
+    const externalActions = page.locator('#mcpList tr', { hasText: 'test-ext' }).locator('[data-mcp-act]');
+    assert.equal(await externalActions.count(), 3, '外部 MCP 操作列最多编辑/测试/删除三个');
+    assert.equal(await page.locator('#mcpList [data-filter="source"]').count(), 1);
+    assert.equal(await page.locator('#mcpList [data-filter="status"]').count(), 1);
+    assert.equal(await page.locator('#mcpList [data-filter="server"]').count(), 1);
+    await page.locator('#mcpList tr', { hasText: 'test-ext' }).locator('[data-mcp-act="delete"]').click();
+    await page.waitForTimeout(350);
+    const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
+    assert.ok(
+      recorded.requests.some((entry) => entry.method === 'DELETE' && entry.path === '/api/extensions/mcp/test-ext'),
+      '删除按钮应发出无 body 的 DELETE /api/extensions/mcp/test-ext',
+    );
     assert.equal(await page.locator('[data-view="reference"]').count(), 0, '工具参考已并入 MCP 页，不再有独立导航');
     assert.equal(await page.locator('#section-reference').count(), 0, '旧工具参考容器应已移除');
+  });
+
+  await test('MCP editor uses a transport template and exposes a draft test button', async () => {
+    await navigate('mcp');
+    await page.click('[data-mcp-new]');
+    await page.waitForFunction(() => document.getElementById('mcpEditor')?.classList.contains('open'));
+    assert.equal(await page.locator('#mcpEditTest').count(), 1, '弹窗底栏应有测试连接');
+    assert.match(await page.locator('#mcpEditConfig').inputValue(), /"command"/, '新建 stdio 默认带模板');
+    await page.selectOption('#mcpEditTransport', 'streamable_http');
+    assert.match(await page.locator('#mcpEditConfig').inputValue(), /"url"/, '切换 HTTP 应换成 URL 模板');
+    assert.equal(await page.locator('#mcpEditAllowPrivate').isVisible(), true);
+    assert.equal(await page.locator('#mcpEditAllowArbitrary').isVisible(), false);
+    await page.click('#mcpEditor [data-modal-close]');
   });
 
   await test('Field rows centre labels and keep two columns', async () => {

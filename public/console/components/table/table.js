@@ -146,7 +146,7 @@ export function dataTableHtml({
       ${search ? `<input type="search" class="search-box search-box--w240" data-table-search placeholder="${esc(search.placeholder || '搜索…')}" aria-label="${esc(search.placeholder || '搜索')}">` : ''}
     </div>
     <div class="table-toolbar-side">
-      ${meta ? `<span class="table-toolbar-meta" data-table-meta>${esc(meta)}</span>` : ''}
+      ${meta ? `<span class="table-toolbar-meta" data-table-meta data-table-meta-fixed>${esc(meta)}</span>` : ''}
       ${actions}
     </div>
   </div>`
@@ -222,7 +222,7 @@ function setupDataTable(table, hooks) {
         ? `第 ${start + 1}–${Math.min(start + state.pageSize, visible.length)} 条，共 ${visible.length} 条`
         : '共 0 条';
     }
-    if (meta) meta.textContent = `共 ${visible.length} 条`;
+    if (meta && !meta.hasAttribute('data-table-meta-fixed')) meta.textContent = `共 ${visible.length} 条`;
     if (pager) pager.innerHTML = pagerHtml(state.page, pages);
   }
 

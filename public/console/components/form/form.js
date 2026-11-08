@@ -372,6 +372,7 @@ export function renderFields(host, spec, options = {}) {
   const items = Array.isArray(spec) ? spec : [];
   const out = [];
   let inSection = false;
+  let sectionClose = '</fieldset>';
   let gridOpen = false;
   let count = 0;
   const openGrid = () => { if (!inlineLayout && !gridOpen) { out.push('<div class="cols form-cols">'); gridOpen = true; } };
@@ -379,7 +380,7 @@ export function renderFields(host, spec, options = {}) {
   const closeSection = () => {
     if (!inSection) return;
     closeGrid();
-    out.push('</fieldset>');
+    out.push(sectionClose);
     inSection = false;
   };
   const spanClass = (span) => {
@@ -392,7 +393,13 @@ export function renderFields(host, spec, options = {}) {
     const item = raw ?? {};
     if (item.type === 'section') {
       closeSection();
-      out.push(`<fieldset class="form-section"><legend>${esc(item.label ?? '')}</legend>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
+      if (item.card === true) {
+        out.push(`<section class="form-section form-section--card"><div class="form-section-head"><h3>${esc(item.label ?? '')}</h3></div>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
+        sectionClose = '</section>';
+      } else {
+        out.push(`<fieldset class="form-section"><legend>${esc(item.label ?? '')}</legend>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
+        sectionClose = '</fieldset>';
+      }
       inSection = true;
       openGrid();
       continue;

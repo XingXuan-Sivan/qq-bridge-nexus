@@ -413,6 +413,10 @@ tr:last-child td {
   background:var(--pill-blue-bg);
   color:var(--pill-blue-fg)
 }
+.pill.n {
+  background:var(--color-surface-2);
+  color:var(--text-secondary)
+}
 .pill.g {
   background:var(--pill-green-bg);
   color:var(--pill-green-fg)

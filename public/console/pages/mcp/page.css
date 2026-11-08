@@ -8,6 +8,20 @@
 #mcpList .data-table + .data-table {
   margin-top: 12px;
 }
+.mcp-status-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+.mcp-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.mcp-row-actions .btn {
+  white-space: nowrap;
+}
 .log-pre {
   margin: 0;
   max-height: 420px;

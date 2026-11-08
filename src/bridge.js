@@ -155,7 +155,7 @@ import { createSkillIndex } from './skills/index.mjs';
 // 扩展 catalog（P1）：MCP 工具由真实 tools/list 得到，技能与 MCP 走同一份只读视图。
 import { createMcpInventory } from './extensions/mcp-inventory.mjs';
 import { createExtensionCatalog } from './extensions/catalog.mjs';
-import { createMcpStore } from './extensions/mcp-store.mjs';
+import { createMcpStore, normalizeMcpConfig } from './extensions/mcp-store.mjs';
 import { createSecretStore } from './extensions/secrets.mjs';
 import { createMcpRuntime } from './extensions/mcp-runtime.mjs';
 import { createPresetPolicy } from './extensions/preset-policy.mjs';
@@ -5046,7 +5046,10 @@ async function main() {
           && /^application\/(zip|octet-stream)\b/i.test(ctype);
         const pluginDelete = req.method === 'DELETE'
           && /^\/api\/plugins\/[a-z][a-z0-9-]{1,39}$/.test(url.pathname);
-        if (!ctype.toLowerCase().includes('application/json') && !pluginUpload && !pluginDelete) {
+        // 标准 DELETE 可以不带请求体；浏览器只能通过 fetch/XHR 发，HTML 表单发不出 DELETE，
+        // 因此放行「无 content-type 的 DELETE」不会削弱 Origin 校验；带 body 的 DELETE 仍要求 JSON。
+        const bodylessDelete = req.method === 'DELETE' && !ctype;
+        if (!ctype.toLowerCase().includes('application/json') && !pluginUpload && !pluginDelete && !bodylessDelete) {
           sendJson({ ok: false, error: '请求必须是 application/json' }, 415);
           return;
         }
@@ -5417,6 +5420,24 @@ async function main() {
             sendJson({ ok: true, config, runtime: mcpRuntime.list().find((item) => item.id === config.id) ?? null });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'exists' ? 409 : 400);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/extensions/mcp/test') {
+          // 草稿测试：不写 server.json / secrets.json，只临时连接并返回工具数。
+          try {
+            const body = await readBody();
+            const rawConfig = body?.config && typeof body.config === 'object' ? body.config : null;
+            if (!rawConfig) {
+              sendJson({ ok: false, error: '缺少 config' }, 400);
+              return;
+            }
+            const config = normalizeMcpConfig(rawConfig, { id: rawConfig.id });
+            const secrets = body?.secrets && typeof body.secrets === 'object' ? body.secrets : {};
+            const result = await mcpRuntime.test(config, { secrets });
+            sendJson({ ok: true, id: config.id, ...result });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
           }
           return;
         }

@@ -276,11 +276,24 @@ export function createMcpRuntime({
     }
   }
 
-  async function test(config) {
+  async function test(config, { secrets = null } = {}) {
     const state = { status: 'stopped', tools: [], client: null, transport: null };
+    // 草稿测试允许带未落盘的秘密：只影响本次连接，不写入 secretStore。
+    const draftStore = secrets && typeof secrets === 'object'
+      ? {
+        materialize(refs = {}) {
+          const out = secretStore ? secretStore.materialize(refs) : {};
+          for (const [key, ref] of Object.entries(refs ?? {})) {
+            const match = /^secret:(.+)$/.exec(String(ref ?? ''));
+            if (match && Object.hasOwn(secrets, match[1])) out[key] = String(secrets[match[1]] ?? '');
+          }
+          return out;
+        },
+      }
+      : secretStore;
     try {
       const connection = await withTimeout(
-        Promise.resolve(createConnection(config, { secretStore, onStderr: (line) => appendLog(config.id, `stderr ${line}`) })),
+        Promise.resolve(createConnection(config, { secretStore: draftStore, onStderr: (line) => appendLog(config.id, `stderr ${line}`) })),
         INIT_TIMEOUT_MS,
         '初始化连接超时',
       );

@@ -134,6 +134,18 @@
 - 验收证据：`test-extension-mcp-store.mjs` 3/3（allowlist、私网、secret 引用）；真机 test-ext 走 node + 默认值成功。
 - 状态：已接受
 
+### E12 — 新增草稿测试端点与无 body DELETE 例外
+
+- 阶段：P2 后续（MCP 页重构）
+- 计划：只在 `POST /api/extensions/mcp/<id>/test` 测试已保存 server；删除走普通 JSON DELETE。
+- 实际：
+  - 新增 `POST /api/extensions/mcp/test`，请求体 `{config,secrets}`，用 `normalizeMcpConfig` 校验后临时连接测试，不写 `server.json`、不写 secrets；用于弹窗“测试连接”。
+  - CSRF 中间件对 **无 content-type 的 DELETE** 放行（`bodylessDelete`），仍保留 Origin 校验；此前 `api(path,'DELETE')` 不带 body 会 415。
+- 原因：新建/编辑弹窗需要先验证未保存配置；浏览器删除请求不天然带 JSON body，要求 body 只会把 415 抛给用户。
+- 影响：无 body DELETE 成为通用例外（只限 DELETE，且无 content-type）；其他非 GET 仍必须 `application/json`。
+- 验收证据：真机 `DELETE /api/extensions/mcp/asd` 返回 200；`POST /api/extensions/mcp/test` 返回工具且 catalog 不出现草稿 id；UI 新建/删除行均通过。
+- 状态：已接受
+
 ## 3. 待登记（占位，不预先承诺）
 
 - P1 旧路由/书签处理：已登记 E4（整页移除 + `#reference` 重定向）。

@@ -174,12 +174,21 @@ npm run test:console-ui
 - 验收：`test-extension-catalog.mjs` 4/4、static 全过、UI 29/29、audit 98/98；真机 `GET /api/extensions` 返回 `summary{servers:3,online:3,errors:0,tools:51,skills:1}`。
 - 偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E4–E6（整页移除 + 重定向、v2 不保留旧字段、运行时 `tools/list` 而非静态源扫描）。
 
-### 6.7 扩展平台 P2：Hub 与外部 MCP（2026-11-09，已实现待提交）
+### 6.7 扩展平台 P2：Hub 与外部 MCP（2026-11-09，已提交 `de95c4a`）
 
 - 新增 `src/mcp-bridge-ext.js`（MCP stdio server）：对 DSH 只暴露 `ext_list` / `ext_describe` / `ext_call`；每个调用把 `x-hub-token` + `x-agent-token` 转发到 bridge 内部 `/api/extensions/hub/*`，bridge 用 agent token 反查会话与 preset，再按 preset 的 `extensions.yml` 做 server 与工具级 allow/deny。
 - 外部 MCP 管理：`extensions/mcp/<id>/server.json` 为配置态；`state/extensions/secrets.json` 存 `secret:<name>` 实际值（0600）；`state/extensions/logs/<id>.log` 存 stderr 环形日志；`src/extensions/mcp-runtime.mjs` 懒连接、30s 初始化/60s 调用/300s 硬上限、单 server 错误隔离；`src/extensions/mcp-store.mjs` 校验 id/transport/stdio allowlist/HTTP 私网/秘密引用。
 - 控制台 MCP 页：内置 server 只读展示真实 `tools/list`；外部 MCP 行提供编辑/测试/刷新/日志/删除；新增 MCP 弹窗复用表单组件；`#reference` 旧入口重定向到 `#mcp`。
 - 预设策略：`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能；其他预设无文件即默认拒绝。DSH `agent.cordis.yml` 是插件数组，不能追加顶层 mapping，所以策略独立存 `extensions.yml`。
 - 验收：static 全过、UI 29/29、audit 无失败、扩展模块测试 14/14；真机 3 内置 server + 51 工具、外部 `test-ext` CRUD/测试/日志、Hub `list/describe/call` 与 401/403 均通过；DSH 已加载 `mcp__bridge_ext__*` 三工具。
-- 边界与偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E7–E11；P2 第一版不提升内置 MCP/插件工具、`tools/list_changed` 先显式 refresh、`ext_list` 不自动连接、Hub 本身需一次 DSH 重启。P0 `compress` 仍为 Partial（真实长会话自动压缩未触发）。
+- 边界与偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E7–E12；P2 第一版不提升内置 MCP/插件工具、`tools/list_changed` 先显式 refresh、`ext_list` 不自动连接、Hub 本身需一次 DSH 重启。P0 `compress` 仍为 Partial（真实长会话自动压缩未触发）。
+
+### 6.8 扩展平台 P2 后续：MCP 页重构与删除修复（2026-11-09，已完成）
+
+- MCP 页统一表格：来源/状态用 `.pill`（内置/外部、在线/读取失败），状态列按「来源 + 状态」排列；失败提示移到工具栏，说明列不再回显原始 `Streamable HTTP error`；server 表补来源/状态筛选、搜索、刷新，工具表补 server 筛选、搜索、刷新；外部行操作列只保留编辑/测试/删除，日志进弹窗。
+- 外部 MCP 弹窗重做：基本信息/连接/凭据三张卡片分组（复用 `form.js` 的 `section card:true`，标题在框内）；配置为单 JSON 文本框，按连接方式自动套用 stdio/HTTP/SSE 模板；footer 提供取消/测试连接/保存，编辑时显示日志入口；隐藏与本连接方式无关的开关。
+- 新增 `POST /api/extensions/mcp/test` 草稿测试：接收未保存的 `{config,secrets}`，`mcpRuntime.test` 用临时 secret 覆盖，不落盘；弹窗测试连接使用该端点。
+- 删除修复：`api(path,'DELETE')` 不带 body 时，bridge CSRF 中间件对无 content-type 的 DELETE 放行（保留 Origin 校验），不再返回 415；前端另修保存请求体，POST/PATCH 改为扁平 `{...config,secrets}`。
+- 测试：`test-console-static.mjs` 全过；`test-console-ui.mjs` **30/30**（含 MCP 弹窗模板、测试按钮、标签/筛选断言）；`npm run test:audit` **98/98**。真机重启后验证：无 body DELETE 返回 200、草稿测试返回 1 个工具且 catalog 不新增、UI 新建/删除行成功、弹窗 3 张卡片/模板自动切换/日志隐藏正确；`extensions/` 运行时数据已加入 `.gitignore` 并清理测试 server。
+- 偏差：E12（草稿测试端点 + 无 body DELETE 例外）。
 

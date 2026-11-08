@@ -6,6 +6,8 @@ node_modules/
 # state/ 匹配任意层级：桥接的 state/ 与接口平台的 interface-platform/state/（令牌、实例配置）都不入库
 state/
 interface-platform/state/
+# 外部扩展的数据目录（用户新增的 MCP 配置；秘密只在 state/extensions/secrets.json）
+/extensions/
 config.json
 # 插件内核的本机配置（启用哪些插件、各自的 config 可能含本机地址与服务名），与 config.json 同属不入库
 plugins.json

@@ -623,6 +623,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         requests.push({ method, path, body });
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
       }
+      if (method === 'DELETE' && path.startsWith('/api/extensions/mcp/')) {
+        return json({ ok: true, id: decodeURIComponent(path.split('/').pop()) });
+      }
       if (method === 'GET') {
         switch (path) {
           case '/api/status': {
@@ -666,8 +669,18 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               status: 'online',
               toolCount: 1,
               tools: [{ name: 'snowluma_status', description: '读取网关状态' }],
+            }, {
+              id: 'test-ext',
+              name: 'test-ext',
+              source: 'external',
+              transport: 'stdio',
+              file: 'extensions/mcp/test-ext/server.json',
+              note: '外部测试 server',
+              status: 'running',
+              toolCount: 1,
+              tools: [{ name: 'demo_tool', description: '外部测试工具' }],
             }],
-            summary: { servers: 1, online: 1, errors: 0, tools: 1, skills: 1 },
+            summary: { servers: 2, online: 2, errors: 0, tools: 2, skills: 1 },
           });
           case '/api/persona/sources': return json({ ok: true, provider: null, rows: [] });
           case '/api/roles': return json({

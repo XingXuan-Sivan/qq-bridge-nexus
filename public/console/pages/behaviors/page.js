@@ -7,7 +7,6 @@ import { groupedTableHtml, initGroupedTables, tableHtml } from '../../components
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { BEHAVIORS_FIELDS } from './fields.js';
 
-const BEHAVIOR_PERMISSION_LABEL = { all: '所有人', admin: 'admin', owner: 'owner' };
 const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
 
 function behaviorGroupName(entry) {
@@ -40,7 +39,14 @@ function behaviorTable(rows) {
       key: name,
       rows: items.map((entry) => {
         const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
-        const source = entry.source === 'plugin' ? `插件 ${entry.pluginId || ''}` : '内置';
+        const source = entry.source === 'plugin'
+          ? `<span class="pill b">插件 ${esc(entry.pluginId || '')}</span>`
+          : '<span class="pill n">内置</span>';
+        const permission = entry.permission === 'owner'
+          ? '<span class="pill r">owner</span>'
+          : entry.permission === 'admin'
+            ? '<span class="pill b">admin</span>'
+            : '<span class="pill n">所有人</span>';
         const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
         const action = entry.source === 'plugin'
           ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
@@ -49,9 +55,9 @@ function behaviorTable(rows) {
         return [
           `<code>${esc(entry.name)}</code>${aliases}`,
           migrated,
-          esc(source),
+          source,
           `${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span>`,
-          esc(BEHAVIOR_PERMISSION_LABEL[entry.permission] || entry.permission),
+          permission,
           status,
           action,
         ];

@@ -594,7 +594,7 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设的 MCP allowlist 与工具级 allow/deny；Hub 执行期校验。
 - 验收：新增外部 server 不需要重启 DSH；未授权 preset 调用被拒；断线/超时/日志可见；`compress` 正常。
 
-**2026-11-09 状态：P2 已实现并通过门禁（待提交）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。范围边界见 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) E7–E11（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值）。
+**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
 
 ### P3 技能 / 插件配置 / 预设编辑器
 

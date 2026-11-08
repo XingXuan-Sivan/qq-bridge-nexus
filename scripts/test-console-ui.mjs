@@ -216,6 +216,19 @@ try {
     await page.click('#pluginDetailClose');
   });
 
+  await test('Preset page lists presets and opens the YAML editor', async () => {
+    await navigate('presets');
+    await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
+    const text = await page.locator('#presetList').innerText();
+    assert.match(text, /qq-chat-v2/);
+    assert.match(text, /MCP：\*/);
+    await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
+    await page.waitForFunction(() => !document.getElementById('presetEditor').hidden);
+    assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
+    assert.match(await page.locator('#presetEditYaml').inputValue(), /qq-tool-restrict/);
+    assert.equal(await page.locator('#presetValidate').count(), 1);
+  });
+
   await test('Field rows centre labels and keep two columns', async () => {
     await hydrate('social-v2');
     const geom = await page.evaluate(() => {

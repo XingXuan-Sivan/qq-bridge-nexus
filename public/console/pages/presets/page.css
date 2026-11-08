@@ -1,0 +1,11 @@
+#presetEditor .form-section--card { margin-bottom: 14px; }
+.preset-row-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+.preset-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+#presetEditYaml { font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+#presetEditorActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+#presetEditorActions .meta { margin-left: 4px; }

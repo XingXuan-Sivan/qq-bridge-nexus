@@ -172,6 +172,19 @@
 - 验收证据：`test-plugin-config-schema.mjs` 4/4；真机 `GET /api/plugins/soulkit-memory` 返回 schema，`POST .../test` 返回 200/valid，非法值返回 400，`PATCH .../config` 返回 `reloaded:true`；控制台详情表单与日志无 pageerror；static 全过、UI 31/31、audit 101/101。
 - 状态：已接受
 
+### E15 — 预设编辑器不提供“按预设放行原生工具”的假开关
+
+- 阶段：P3（预设编辑器子批）
+- 计划：预设页能编辑元数据、扩展授权与 `agent.cordis.yml`，并明确展示哪些能力会被放大。
+- 实际：
+  - 五个预设共用同一个 `dsh-bundles/qq-agent-presets/qq-tool-restrict.mjs` 守卫；守卫进程拿不到 preset id，无法按预设区分原生危险工具（命令/读写/网络等）。
+  - 因此本子批只提供“扩展授权”（`extensions.yml`：MCP server / MCP tool / skills）与控制台侧危险能力说明；不提供“按预设放行原生工具”的开关，避免界面上给出实际不生效的承诺。
+  - 原生工具的 preset 级放行需要后续把 preset id 传进守卫契约（或为每个 preset 生成独立 guard），属于跨 DSH bundle 的改动，单独排期。
+- 原因：共用守卫是无 preset 上下文的静态文件，无法安全地按预设分支。
+- 影响：预设页能调整扩展可见性，但不能改变原生工具白名单；原生高权限仍由 preset 类型（readonly/workspace/full）与 owner 审批控制。
+- 验收证据：`test-preset-store.mjs` 5/5 覆盖元数据/扩展写入、备份、YAML 校验与恢复；真机 GET/PUT/validate/apply/rollback 通过；static 全过、UI 32/32、audit 101/101。
+- 状态：已接受
+
 ## 3. 待登记（占位，不预先承诺）
 
 - P1 旧路由/书签处理：已登记 E4（整页移除 + `#reference` 重定向）。

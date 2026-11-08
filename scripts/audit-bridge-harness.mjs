@@ -55,6 +55,8 @@ import { createMcpRuntime } from '../src/extensions/mcp-runtime.mjs';
 import { createPresetPolicy } from '../src/extensions/preset-policy.mjs';
 import { createExtensionHub } from '../src/extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs';
+// P3 预设编辑器：bridge 直接 import，夹具按同名补回。
+import { createPresetStore, PRESET_IDS, validateAgentYaml } from '../src/presets/store.mjs';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
 import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
@@ -313,6 +315,9 @@ createExtensionCatalog,
     createMcpRuntime,
     createPresetPolicy,
     createExtensionHub,
+    createPresetStore,
+    PRESET_IDS,
+    validateAgentYaml,
     ensureHubToken,
     hubTokenMatches,
     formatKey,

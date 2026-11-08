@@ -17,7 +17,7 @@
 | [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) | 桥接插件内核（v1.2.0）：四个钩子、manifest、`plugins.json`、host-api 权限、人格 provider 契约、审计、控制台接口与 P1 验收 | ✅ 与当前实现同步（2026-11-02） |
 | [PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) | 人格三层解析（会话覆盖 → 外部 provider → 全局本地卡）、`persona-provider/1` 契约、缓存与降级、控制台只读来源页 | ✅ 与当前实现同步（2026-11-02） |
 | [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) | 插件与扩展的后续路线（P2a 启停/重载、P2b 安装、P2c 监听、命令注册与注入块、MCP/Skills 门槛、明确不做） | 🚧 进行中（P2a–P2c 已完成，2026-11-03） |
-| [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) | **扩展平台方案**：MCP/技能/插件/预设统一 catalog、桥接 Hub（元工具 + 提升工具）、外部 MCP 生命周期、预设 YAML 编辑、GitHub 扫描式市场与分期；修订旧路线图「不做 MCP/技能/市场」的结论 | 📋 P0 实施中（2026-11-08），其余未动工 |
+| [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) | **扩展平台方案**：MCP/技能/插件/预设统一 catalog、桥接 Hub（元工具 + 提升工具）、外部 MCP 生命周期、预设 YAML 编辑、GitHub 扫描式市场与分期；修订旧路线图「不做 MCP/技能/市场」的结论 | 🚧 P0 白名单已接、P1/P2 完成、P3 技能/插件配置/预设编辑器完成（2026-11-09），P4/P5 未动 |
 | [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) | **扩展平台实施偏差台账**：只记与 `EXTENSION_PLATFORM.md` 不一致的临时改动、分期调整、验收缺口与回写设计检查 | ✅ 现行（2026-11-08 起，实施前先读） |
 | [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表（P3a）：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands`、管理行为页与 P3b 预留 | ✅ 与当前实现同步（2026-11-03） |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界约定**：静态资源路径穿越守卫、未启用=404 与先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复顺序、插件 UI 沙箱与样式隔离、验收清单 | ✅ 现行约定（2026-11-04 起，改路由/静态资源/插件 UI 前必读） |

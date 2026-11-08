@@ -343,6 +343,30 @@ MCP 删除回归新增了一条 `DELETE /api/extensions/mcp/test-ext`，`test-co
 
 **规则**：有意新增请求时，只在 `console-ui-contracts.json` 的对应位置插入这一条（本次是数组首位），并在提交说明里写清；不要用 `--accept-contracts` 整份重录（会把其他页面的意外变化一起掩盖）。新增请求后必须重跑完整 UI，确认 30/30 而不是只看单条断言。
 
+### 1.59 `dataTableHtml` 的 `columns` 必须是对象，字符串会让表头整行空白
+
+预设页第一版 `columns: ['预设', '名称', '说明', '授权', '操作']`，表格能出数据、表头却是空白细条：组件按 `column.label` 生成 `<th>`，字符串没有 `label`，渲染成空单元格。技能页一直是 `{ label, width }` 对象，所以没暴露。
+
+**规则**：`tableHtml` / `dataTableHtml` 的列一律写 `{ label, width?, className? }`；需要列宽就显式给，别指望内容撑。新增页先看同目录成熟页的 `columns` 形状，不要凭「字符串数组也能用」的记忆写。
+
+### 1.60 无 body 的 `POST` 也会被 CSRF 拦成 415，前端要么带 `{}` 要么服务端放行
+
+预设页「应用」「回滚」是 `POST /api/extensions/presets/<id>/apply|rollback`，没有业务 body。用 curl 直接 POST 得到 415「请求必须是 application/json」；`api()` 只在有 body 时加 content-type，所以真实按钮也会命中同一拦截。页面里改成 `api(..., 'POST', {})` 后正常。这与 1.50 的 DELETE 不同：DELETE 已在 CSRF 中间件放行无 body；POST 没有，且不应为了一个按钮放宽所有 POST。
+
+**规则**：无 body 的 POST 在前端显式传 `{}`，或在服务端按路由加白名单；不要靠「反正 GET 能过」或删掉 CSRF。联调时用与页面完全相同的 `api()` 调用，不要只测 curl 带 JSON 的版本。
+
+### 1.61 新增片段页要同时改三处静态门禁
+
+预设页接完后 `test-console-static.mjs` 连报两项：`路由器登记了片段页`（精确匹配的 `PAGE_FRAGMENTS` 字符串没加 `presets`）和 `页面手写控件只降不升（presets: 0 → 5）`（`BARE_CONTROL_BASELINE` 没登记 5 个按钮）。两处都是测试数据，不是页面 bug。
+
+**规则**：新增/迁移页面时同时改 `consolePageDirs` 能扫到的 `page.html`、`PAGE_FRAGMENTS` 精确字符串、`pilotIds`、`BARE_CONTROL_BASELINE`；先跑一次 static 看真实计数，再登记基线。不要为了让断言过而把按钮搬回 HTML 或改宽正则。
+
+### 1.62 结构化写 YAML 会重排引号并丢掉原注释
+
+预设页保存 `extensions.yml` 时走 `yaml.dump`，一次「原样保存」把 `allow: ['*']` 改成多行列表、并删掉文件头三行说明注释；`writeMeta` 同理。源码是权威源，注释也是维护信息。
+
+**规则**：结构化保存必须在写盘前保留一段固定说明头（`src/presets/store.mjs` 的 `writeExtensions` 已加「扩展授权：由控制台预设编辑器维护…」），并在验收时 `git diff` 看格式变化；需要逐字节保留注释就只能走 YAML 原文编辑或 CST，不要假装结构化保存无损。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

@@ -677,6 +677,43 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             dsh: [{ name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' }],
             tools: [{ name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' }],
           });
+          case '/api/extensions/presets': return json({
+            ok: true,
+            presets: [
+              {
+                id: 'qq-chat',
+                name: 'QQ 群聊',
+                description: '离线预览用的安全群聊预设。',
+                order: 1,
+                editable: true,
+                error: null,
+                hasExtensions: true,
+                extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
+              },
+              {
+                id: 'qq-chat-v2',
+                name: 'QQ 群聊（二代）',
+                description: '离线预览用的二代群聊预设。',
+                order: 2,
+                editable: true,
+                error: null,
+                hasExtensions: true,
+                extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
+              },
+            ],
+          });
+          case '/api/extensions/presets/qq-chat-v2': return json({
+            ok: true,
+            preset: {
+              id: 'qq-chat-v2',
+              meta: { name: 'QQ 群聊（二代）', description: '离线预览用的二代群聊预设。', order: 2 },
+              extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
+              extensionsExists: true,
+              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              validation: { ok: true, rows: 2 },
+              backups: [],
+            },
+          });
           case '/api/extensions/skills': return json({
             ok: true,
             skills: [

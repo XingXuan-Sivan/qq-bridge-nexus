@@ -210,3 +210,11 @@ npm run test:console-ui
 - 控制台：插件详情改为摘要 + 由 schema 动态生成的配置表单（复用 `renderFields`，单列避免 148px 标签列压窄输入）+ 保存/测试按钮 + 最近审计日志区；无 schema 插件显示“未声明配置项”并保留原始 config JSON。内置 `soulkit-persona`、`soulkit-memory` 已补示例 schema（baseUrl/timeoutMs，memory 另有 view）。
 - 验收：`test-plugin-config-schema` 4/4、插件内核/清单 21/21、static 全过、UI **31/31**、audit **101/101**；真机 `GET /api/plugins/<id>` 返回 schema，`POST .../test` 与 `PATCH .../config` 均 200，`reloaded:true`；插件详情表单读出 baseUrl/timeoutMs/view、日志与控制台无 pageerror。
 - 偏差：E14（schema 只覆盖控制台需要的 JSON Schema 子集；无 schema 插件不做表单）。P0 `compress` 仍 Partial；预设结构化/YAML 编辑器留待后续子批。
+
+### 6.11 扩展平台 P3：预设编辑器（2026-11-09，已完成）
+
+- 源文件：五个内置预设仍以 `dsh/agent-presets/<id>/` 为权威源（`preset.yml`、`extensions.yml`、`agent.cordis.yml`）；`src/presets/store.mjs` 提供 list/read/writeMeta/writeExtensions/writeAgentYaml/listBackups/restore/apply，写前备份到 `state/preset-editor-backups/<id>/<timestamp>-<reason>/`，`apply` 执行 `build-agent-preset-patches.mjs` + `setup-dsh.mjs`，失败自动恢复。
+- API：`GET /api/extensions/presets`、`GET /<id>`、`PUT /<id>/meta|extensions|yaml`、`POST /<id>/validate|apply|rollback`；写操作写 `ext.audit`；YAML 校验要求非空数组、id/name 唯一、含 `persona` 与 `qq-tool-restrict`；非法 YAML 400，apply 失败 502。
+- 控制台：新增「预设」页（技能与 MCP 之间），列表显示预设/名称/说明/授权/操作（编辑、应用、回滚），说明 3 行截断；编辑区内联三段（基本信息/扩展授权/YAML 高级编辑）+ 危险能力提示，保存先校验 YAML，应用后提示新会话生效、已开始会话需重建/重启 DSH。
+- 验收：`test-preset-store` 5/5、static 全过、UI **32/32**、audit **102/102**；真机 GET 列表 5 个、GET 详情、validate 200/6 行、PUT extensions 200（已回滚测试写入）、apply 200（build+setup 均成功）、rollback 200（恢复后重新 apply 成功），无 pageerror。
+- 偏差：E15（共用 guard 拿不到 preset id，不提供按预设放行原生工具的假开关）。P0 `compress` 仍 Partial；P4/P5 后续子批。

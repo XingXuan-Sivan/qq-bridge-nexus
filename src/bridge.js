@@ -20,6 +20,7 @@ import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken, res
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
+import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -1792,6 +1793,13 @@ async function main() {
     now: Date.now,
   });
   const presetPolicy = createPresetPolicy({ root: path.join(ROOT, 'dsh', 'agent-presets'), log });
+  const presetStore = createPresetStore({
+    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    backupRoot: path.join(STATE_DIR, 'preset-editor-backups'),
+    presetIds: PRESET_IDS,
+    scriptsDir: path.join(ROOT, 'scripts'),
+    log,
+  });
   const hubToken = ensureHubToken(path.join(extensionStateDir, 'hub-token'), { log });
   const extensionCatalog = createExtensionCatalog({
     skillIndex,
@@ -5536,6 +5544,68 @@ async function main() {
             sendJson({ ok: false, error: '不支持的技能操作' }, 405);
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'not_found' ? 404 : 400);
+          }
+          return;
+        }
+        // DSH 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
+        // 权威源仍是 dsh/agent-presets/<id>/，应用前备份，apply 负责 build + setup。
+        const presetRoute = url.pathname.match(/^\/api\/extensions\/presets(?:\/([a-z0-9-]+))?(?:\/(meta|extensions|yaml|validate|apply|rollback))?$/);
+        if (presetRoute) {
+          const id = presetRoute[1];
+          const action = presetRoute[2];
+          try {
+            if (!id && req.method === 'GET') {
+              sendJson({ ok: true, presets: presetStore.list() });
+              return;
+            }
+            if (!id) { sendJson({ ok: false, error: '缺少预设 id' }, 400); return; }
+            if (req.method === 'GET' && !action) {
+              sendJson({ ok: true, preset: presetStore.read(id), backups: presetStore.listBackups(id).slice(0, 8) });
+              return;
+            }
+            if (req.method === 'PUT' && action === 'meta') {
+              const body = await readBody();
+              const result = presetStore.writeMeta(id, body ?? {});
+              ext.audit.append('extension.preset.meta', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'PUT' && action === 'extensions') {
+              const body = await readBody();
+              const result = presetStore.writeExtensions(id, body ?? {});
+              ext.audit.append('extension.preset.extensions', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'PUT' && action === 'yaml') {
+              const body = await readBody();
+              const result = presetStore.writeAgentYaml(id, String(body?.yaml ?? ''));
+              ext.audit.append('extension.preset.yaml', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'POST' && action === 'validate') {
+              const body = await readBody();
+              sendJson({ ok: true, validation: validateAgentYaml(body?.yaml) });
+              return;
+            }
+            if (req.method === 'POST' && action === 'apply') {
+              const result = await presetStore.apply(id);
+              ext.audit.append('extension.preset.applied', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'POST' && action === 'rollback') {
+              const result = presetStore.restore(id);
+              const applied = await presetStore.apply(id);
+              ext.audit.append('extension.preset.rolled_back', { id, restored: result.restored });
+              sendJson({ ok: true, ...result, apply: applied });
+              return;
+            }
+            sendJson({ ok: false, error: '不支持的预设操作' }, 405);
+          } catch (error) {
+            const code = error?.code === 'invalid_yaml' ? 400 : error?.code === 'apply_failed' ? 502 : 400;
+            sendJson({ ok: false, error: error?.message ?? String(error) }, code);
           }
           return;
         }

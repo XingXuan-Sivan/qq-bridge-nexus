@@ -1,0 +1,22 @@
+<section class="card span-all">
+  <div class="card-head">
+    <h2>DSH 预设</h2>
+    <span class="meta">权威源在 dsh/agent-presets；保存后点「应用」才会 build 并安装到 DSH。</span>
+  </div>
+  <div data-presets-fields="main"></div>
+</section>
+<section class="card span-all" id="presetEditor" hidden>
+  <div class="card-head">
+    <h2 id="presetEditorTitle">编辑预设</h2>
+    <span class="meta" id="presetEditorPath"></span>
+  </div>
+  <div data-presets-fields="edit"></div>
+  <div class="form-actions" id="presetEditorActions">
+    <button id="presetValidate" class="btn" type="button">校验 YAML</button>
+    <button id="presetSave" class="btn primary" type="button">保存源文件</button>
+    <button id="presetApply" class="btn" type="button">应用并安装</button>
+    <button id="presetRollback" class="btn danger" type="button">回滚上一版</button>
+    <button id="presetCancelEdit" class="btn" type="button">收起</button>
+    <span class="meta" id="presetEditMsg"></span>
+  </div>
+</section>

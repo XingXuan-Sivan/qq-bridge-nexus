@@ -39,6 +39,17 @@ export const ACCESS_FIELDS = {
         span: 2,
       },
       {
+        name: 'adminsBlock',
+        type: 'custom',
+        span: 2,
+        html: `<div class="meta">管理员（owner 之外）：可在自己的 QQ 私聊里审批、进入 closed-agent；每人的权限与上限单独设置。owner 永远不受此表限制。</div>
+<table class="table admin-table">
+  <thead><tr><th>QQ</th><th>称呼</th><th>权限</th><th>最高级别</th><th>通知</th><th>私聊被动豁免</th><th></th></tr></thead>
+  <tbody id="adminRows"></tbody>
+</table>
+<div class="control-row u-mt-8"><button type="button" id="adminAdd" class="btn small">+ 添加管理员</button><span class="meta" id="adminMsg"></span></div>`,
+      },
+      {
         type: 'action',
         id: 'accessWhitelistActions',
         items: [{ id: 'wlSave', label: '保存管理员', variant: 'primary' }],

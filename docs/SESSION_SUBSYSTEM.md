@@ -1,6 +1,6 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 未开工**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
+状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 多管理员已实现（控制台仍单 token owner，见 D18）**（2026-11-08）。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
 关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
@@ -432,12 +432,12 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 
 **P3 多管理员**
 
-- [ ] `config.admins[]` 归一化与校验（QQ、caps、maxLevel、notify、exemptPassive）。
-- [ ] 服务端 capability 校验；owner 独占全局模式/权限/名单/控制台令牌。
-- [ ] 审批：同会话任一有 `approve` 的管理员可答复；通知去重；审计 actor。
-- [ ] closed-agent：owner/管理员私聊 + 各自 maxLevel。
-- [ ] 访问与安全页管理员列表；会话页按权限隐藏/禁用保存。
-- [ ] `test-admins.mjs`：越权拒绝、审批、通知、level。
+- [x] `config.admins[]` 归一化与校验（QQ、caps、maxLevel、notify、exemptPassive）。
+- [x] 服务端 capability 校验；owner 独占全局模式/权限/名单/控制台令牌。
+- [x] 审批：同会话任一有 `approve` 的管理员可答复；通知去重；审计 actor。
+- [x] closed-agent：owner/管理员私聊 + 各自 maxLevel（管理员最高 L2，L3 只 owner）。
+- [x] 访问与安全页管理员列表；会话页按权限隐藏/禁用保存**未做**（控制台仍单 token owner，见 D18）。
+- [x] `test-admins.mjs` 6/6：越权拒绝、审批能力、closed-agent 级别、私聊被动豁免。
 
 每阶段收尾固定动作：`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`、`npm run test:audit`、更新 `STATUS.md` 与 `PLAN_DEVIATIONS.md`、一阶段一提交。
 
@@ -484,3 +484,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-08：P2a 落地：`src/session/mode.mjs`（`resolveEffectiveMode`/`normalizeSessionMode`/`isUsableMode`）；桥接全部单会话门禁改 `effectiveMode(key)`（scheduler、压缩、静默补唤醒、入站/唤醒/内部输出、v2-only 端点、agent-token 全局门）；`modePreset` 支持档案 `presetId` 并进 policy 指纹；`GET/PATCH .../profile` 增 `mode/effectiveMode/presetId/presets`；详情加「运行」卡与「定时任务」只读卡；`test-session-mode` 5/5，static 全过、UI 28/28、audit 92/92。模型与主动检查点留 P2b。
 - 2026-11-08：P2b 模型部分落地（D16）：档案 `model` + `profileModelSignature` 进 policy 指纹；`ensureChatModel(sessionId,key)` 按会话模型 `selectModel`；`GET/PATCH .../profile` 增 `model/effectiveModel`（PATCH 走 `validateModelSelection`，目录不可用 503、非法 400）；`resolveMediaList`/`fetchMediaData` 与表情/形象/web 图按 `sessionCanSeeImages(key)` 降级；详情运行卡加提供方/模型/思考强度（保存同步全局默认）；`test-session-model` 5/5，static 全过、UI 28/28、audit 93/93。
 - 2026-11-08：P2b 主动检查点方案 A 落地（D17）：scheduler 跳过项标记「未授权主动行为」并生成通知（`src/scheduler/skip-notice.js`），引擎按任务+日期去重（`noteSkipNotice`），桥接写活动/审计并私聊创建者；v1 仿真改 `socialEnabledForKey(key)` 逐会话启用，循环与随机触发都先过 `proactiveAllowed(key)`，主动被拒即退出活跃；跨会话 agent token 返回明确拒绝文案「跨会话能力尚未实现」。`test-session-proactive` 3/3，static 全过、UI 28/28、audit 94/94；方案 B（AI 跨会话工具）留后续。
+- 2026-11-08：P3 多管理员落地（D18）：新增 `src/admin/admins.mjs`（名单归一化、capability、actor、maxLevel、私聊被动豁免）与 `test-admins` 6/6；`config.admins[]` 启动校验；管理员私聊接入管理通道（`/status`、`/approvals`、`/level L1|L2`），审批回复按 `approve` 放行、审计带 `actor`、通知 owner + `notify` 管理员；closed-agent 的 admin 私聊按 maxLevel 限级，L3 只 owner；访问页新增管理员表并通过 `/api/whitelist` 读写。控制台仍单 token owner。

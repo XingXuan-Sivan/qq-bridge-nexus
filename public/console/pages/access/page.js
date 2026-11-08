@@ -16,6 +16,103 @@ function renderAccessFieldGroups() {
 
 // 白名单 / 黑名单现在按会话存在档案里，这里不再编辑；保存管理员时把现值原样带回。
 let wlSnapshot = { allow: { groups: [], private: [] }, deny: { groups: [], private: [] } };
+let adminsDraft = [];
+const ADMIN_CAPS = [['approve', '审批'], ['sessions', '会话'], ['scheduler', '定时任务'], ['memory', '记忆']];
+
+function adminCell(row, text) {
+  const td = document.createElement('td');
+  if (text != null) td.textContent = text;
+  row.appendChild(td);
+  return td;
+}
+
+function renderAdminRows() {
+  const tbody = $('adminRows');
+  if (!tbody) return;
+  tbody.textContent = '';
+  if (!adminsDraft.length) {
+    const tr = document.createElement('tr');
+    const td = adminCell(tr, '还没有管理员。点「添加管理员」新增。');
+    td.colSpan = 7;
+    tbody.appendChild(tr);
+    return;
+  }
+  adminsDraft.forEach((admin, index) => {
+    const tr = document.createElement('tr');
+    const qq = document.createElement('input');
+    qq.type = 'text';
+    qq.value = admin.qq ?? '';
+    qq.placeholder = 'QQ 号';
+    qq.dataset.adminField = 'qq';
+    qq.dataset.adminIndex = String(index);
+    adminCell(tr).appendChild(qq);
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.value = admin.name ?? '';
+    name.placeholder = '可留空';
+    name.dataset.adminField = 'name';
+    name.dataset.adminIndex = String(index);
+    adminCell(tr).appendChild(name);
+    const caps = adminCell(tr);
+    for (const [value, label] of ADMIN_CAPS) {
+      const wrap = document.createElement('label');
+      wrap.className = 'field-check-item';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.value = value;
+      box.checked = (admin.caps ?? []).includes(value);
+      box.dataset.adminField = 'caps';
+      box.dataset.adminIndex = String(index);
+      wrap.appendChild(box);
+      wrap.append(` ${label}`);
+      caps.appendChild(wrap);
+    }
+    const level = document.createElement('select');
+    level.dataset.adminField = 'maxLevel';
+    level.dataset.adminIndex = String(index);
+    for (const value of ['L1', 'L2', 'L3']) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      option.selected = (admin.maxLevel ?? 'L2') === value;
+      level.appendChild(option);
+    }
+    adminCell(tr).appendChild(level);
+    for (const field of ['notify', 'exemptPassive']) {
+      const cell = adminCell(tr);
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = admin[field] !== false;
+      box.dataset.adminField = field;
+      box.dataset.adminIndex = String(index);
+      cell.appendChild(box);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn small danger';
+    remove.textContent = '移除';
+    remove.dataset.adminRemove = String(index);
+    adminCell(tr).appendChild(remove);
+    tbody.appendChild(tr);
+  });
+}
+
+function readAdminsFromDom() {
+  return adminsDraft.map((admin, index) => {
+    const rows = [...document.querySelectorAll('[data-admin-index]')];
+    const valueOf = (field) => rows.find((el) => el.dataset.adminField === field && Number(el.dataset.adminIndex) === index);
+    const caps = rows.filter((el) => el.dataset.adminField === 'caps' && Number(el.dataset.adminIndex) === index && el.checked).map((el) => el.value);
+    return {
+      ...admin,
+      qq: String(valueOf('qq')?.value ?? '').trim(),
+      name: String(valueOf('name')?.value ?? '').trim(),
+      caps,
+      maxLevel: String(valueOf('maxLevel')?.value ?? 'L2'),
+      notify: valueOf('notify')?.checked !== false,
+      exemptPassive: valueOf('exemptPassive')?.checked !== false,
+    };
+  });
+}
 
 export async function refreshWhitelist() {
   try {
@@ -25,6 +122,8 @@ export async function refreshWhitelist() {
       deny: { groups: w.deny?.groups || [], private: w.deny?.private || [] },
     };
     $('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
+    adminsDraft = Array.isArray(w.admins) ? w.admins : [];
+    renderAdminRows();
   } catch {}
 }
 
@@ -71,9 +170,22 @@ export function init() {
     const r = await api('/api/whitelist', 'POST', {
       ...wlSnapshot,
       ownerQQ: $('ownerQQ').value.trim(),
+      admins: readAdminsFromDom(),
     });
     if (r.ok) { refreshWhitelist(); alert('管理员已保存并生效'); }
     else alert(r.error || '保存失败');
+  });
+  $('adminAdd').addEventListener('click', () => {
+    adminsDraft = readAdminsFromDom();
+    adminsDraft.push({ qq: '', name: '', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true });
+    renderAdminRows();
+  });
+  $('adminRows').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-admin-remove]');
+    if (!button) return;
+    adminsDraft = readAdminsFromDom();
+    adminsDraft.splice(Number(button.dataset.adminRemove), 1);
+    renderAdminRows();
   });
 
   $('secSave').addEventListener('click', async () => {

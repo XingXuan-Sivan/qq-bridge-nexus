@@ -1,3 +1,10 @@
 /* 访问与安全页：三张卡片（白名单 / 安全拦截 / 访问令牌）目前完全复用公共样式。
    宿主 section 用 .page-stack（display:contents）让三张卡片直接落在 main 的网格里。
    本页独有样式写在这里，不要回流到 css/app.css。 */
+
+/* 管理员表：单元格里放控件，宽度收紧，避免把表格撑出横向滚动。 */
+.admin-table td { vertical-align: middle; }
+.admin-table td > input[type="text"] { width: 100%; max-width: 150px; }
+.admin-table td > select { width: 100%; max-width: 90px; }
+.admin-table .field-check-item { display: inline-flex; align-items: center; gap: 4px; margin: 0 8px 0 0; font-size: 12px; white-space: nowrap; }
+.admin-table input[type="checkbox"] { margin: 0; }

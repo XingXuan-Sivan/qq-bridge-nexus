@@ -18,6 +18,7 @@ import { createAuditLog } from './admin/audit-log.js';
 import { createModeController, LEVEL_TEXT, MODE_TEXT } from './admin/mode-control.js';
 import { createApprovalRegistry, describeToolArgs } from './admin/approvals.js';
 import { parseOwnerCommand, ADMIN_HELP } from './admin/owner-commands.js';
+import { canOpenLevel } from './admin/admins.mjs';
 
 // bridge.js 只 import 这一个模块（测试夹具按名字注入绑定，入口越少越不容易漂移）。
 export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/group-events.js';
@@ -230,11 +231,31 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
    * @param {(groupId:string, text:string)=>Promise<string>} ctx.say   代为发言（bridge 负责白名单与发送）
    * @returns {Promise<{handled:boolean, reply?:string}>}
    */
-  async function handleOwnerText(text, { say } = {}) {
+  async function handleOwnerText(text, { say, actor } = {}) {
     if (!adminEnabled()) return { handled: false };
     const cmd = parseOwnerCommand(text, { naturalLanguage: cfg.admin?.naturalLanguage !== false });
     if (!cmd) return { handled: false };
+    const role = actor?.role ?? 'owner';
+    const isOwner = role === 'owner';
+    const can = (cap) => (actor && typeof actor.can === 'function' ? actor.can(cap) : true);
     const reply = (r) => ({ handled: true, reply: r });
+    // 管理员只开放三类：查状态/帮助、审批（有 approve 权限）、进入 closed-agent（≤ maxLevel）。
+    const adminAllowed = new Set(['status', 'help', 'approvals', 'mode', 'error', 'blocked-slash']);
+    if (!isOwner && !adminAllowed.has(cmd.type)) {
+      return reply('这条命令只对 owner 开放；管理员可用 /status、/approvals、/level L1|L2|L3。');
+    }
+    if (!isOwner && cmd.type === 'approvals' && !can('approve')) {
+      return reply('你没有审批权限（approve）。');
+    }
+    if (!isOwner && cmd.type === 'mode') {
+      if (cmd.mode && cmd.mode !== 'closed-agent') return reply('管理员不能切换全局运行模式，只能申请进入 closed-agent 与权限级别。');
+      if (!cmd.level) return reply('管理员请用 /level L1|L2|L3 申请 closed-agent 权限级别。');
+      if (cmd.level !== 'L0' && !canOpenLevel(actor, cmd.level)) return reply(`你的权限上限是 ${actor.maxLevel}，不能申请 ${cmd.level}。`);
+      if (cmd.level === 'L3') return reply('L3 只能由 owner 开启（管理员上限 L2）。');
+    }
+    if (!isOwner && ['confirm', 'cancel', 'panic'].includes(cmd.type)) {
+      return reply('确认码/取消/紧急关闭只对 owner 开放。');
+    }
     try {
       switch (cmd.type) {
         case 'confirm': {
@@ -255,7 +276,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
           return reply(ADMIN_HELP);
         case 'mode': {
           const mode = cmd.mode ?? (controller.options.safeMode);
-          const r = await controller.requestChange({ mode, level: cmd.level }, { origin: cmd.natural ? 'nl' : 'command' });
+          const r = await controller.requestChange({ mode, level: cmd.level }, { origin: cmd.natural ? 'nl' : 'command', direct: !isOwner, actor: actor?.qq ?? null });
           // 已执行（降级）时统一通知已经发过，这里不再重复。
           return reply(r.status === 'applied' ? '' : r.text);
         }

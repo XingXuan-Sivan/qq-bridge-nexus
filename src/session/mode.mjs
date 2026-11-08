@@ -17,11 +17,13 @@ export function normalizeSessionMode(value) {
 /**
  * @param {string} globalMode chat | reserved | reserved2 | closed-agent
  * @param {string} override 档案 mode：inherit/chat/reserved/reserved2
- * @param {{ owner?: boolean }} ctx
+ * @param {{ owner?: boolean, privileged?: boolean }} ctx privileged = owner 或可进入 closed-agent 的管理员
  * @returns {string} chat | reserved | reserved2 | closed-agent | inactive
  */
 export function resolveEffectiveMode(globalMode, override, ctx = {}) {
-  if (globalMode === 'closed-agent') return ctx.owner === true ? 'closed-agent' : 'inactive';
+  if (globalMode === 'closed-agent') {
+    return (ctx.owner === true || ctx.privileged === true) ? 'closed-agent' : 'inactive';
+  }
   const mode = normalizeSessionMode(override);
   return mode === 'inherit' ? globalMode : mode;
 }

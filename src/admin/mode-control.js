@@ -246,6 +246,11 @@ export function createModeController({ file, config = {}, applyMode, notifyOwner
       const cur = current();
       if (cur.mode === target.mode && cur.level === target.level) return { status: 'noop', text: `已经是 ${MODE_TEXT[target.mode] ?? target.mode} / ${LEVEL_TEXT[target.level]}。` };
       const up = levelRank(target.level) > levelRank(cur.level);
+      // 受信任的管理员（P3）：在自己的 maxLevel 内直接切换，不再走 owner 确认码。
+      if (ctx.direct === true) {
+        const r = await transition(target, 'qq-command', { auditExtra: { origin: ctx.origin, actor: ctx.actor ?? null, reason: ctx.reason ?? '' } });
+        return { status: r.ok ? 'applied' : 'rejected', text: r.ok ? `已切换到 ${MODE_TEXT[target.mode]} / ${LEVEL_TEXT[target.level]}。` : `切换失败：${r.error}` };
+      }
       if (!up) {
         // 降级与 L0 之间的平移：一步执行。AI 工具也可以发起降级 —— 降级不会扩大任何能力。
         const r = await transition(target, ctx.origin === 'ai-tool' ? 'qq-command' : (ctx.origin === 'console' ? 'console' : 'qq-command'), { auditExtra: { origin: ctx.origin, reason: ctx.reason ?? '' } });

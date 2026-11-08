@@ -138,6 +138,8 @@ import { createSessionResetter } from './session/reset.mjs';
 // 会话准入闸门（白名单 + 模式），P7 第三步；keep 纯函数，详见模块头。
 import { allowed, modeAllowed } from './session/mode-gate.mjs';
 import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
+// 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
+import { actorForQQ, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
 import { resolveAccess, resolveAccessSummary } from './session/access.mjs';
@@ -839,6 +841,7 @@ function loadConfig() {
   const p = path.join(ROOT, 'config.json');
   const file = readJsonSafe(p, null, true);
   if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error(`配置格式错误：${p}`);
+  const ownerQQ = normalizeOwnerQQ(file.ownerQQ);
   const cfg = {
     dsh: {
       // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/lib/dsh-endpoint.mjs）
@@ -862,7 +865,8 @@ function loadConfig() {
     sessionCwd: file.sessionCwd ?? '',
     agentPreset: file.agentPreset ?? 'qq-chat',
     workspaceTitle: file.workspaceTitle ?? 'QQ 聊天',
-    ownerQQ: normalizeOwnerQQ(file.ownerQQ),
+    ownerQQ,
+    admins: normalizeAdmins(file.admins, { ownerQQ }),
     allow: {
       private: normalizeIdList(file.allow?.private ?? file.allow?.privates ?? []),
       groups: normalizeIdList(file.allow?.groups ?? file.allow?.group ?? [])
@@ -3266,8 +3270,41 @@ async function main() {
   function isOwnerPrivate(key) {
     return Boolean(key) && key === ownerPrivateKeyOf();
   }
+  function privateQQOf(key) {
+    const m = /:private:(\d+)$/.exec(String(key ?? ''));
+    return m ? m[1] : '';
+  }
+  function actorForKey(key) {
+    return actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: privateQQOf(key) });
+  }
+  function isAdminPrivate(key) {
+    return Boolean(privateQQOf(key)) && actorForKey(key).role === 'admin';
+  }
+  function isPrivilegedPrivate(key) {
+    const actor = actorForKey(key);
+    if (actor.role === 'owner') return true;
+    return actor.role === 'admin' && actor.exemptPassive === true;
+  }
+  function canEnterClosedAgent(key) {
+    const actor = actorForKey(key);
+    return actor.role === 'owner' || (actor.role === 'admin' && canOpenLevel(actor, 'L1'));
+  }
+  /** 审批通知收件人：owner + 勾了 notify 且有 approve 权限的管理员（私聊）。 */
+  function approvalNotifyTargets(requester) {
+    const keys = [];
+    if (requester) keys.push(requester);
+    if (cfg.ownerQQ) keys.push(ownerPrivateKeyOf());
+    for (const admin of cfg.admins ?? []) {
+      if (admin.notify !== true) continue;
+      if (!admin.caps?.includes('approve')) continue;
+      const key = buildKey('private', admin.qq);
+      if (!keys.includes(key)) keys.push(key);
+    }
+    return keys.filter(Boolean);
+  }
   function effectiveMode(key) {
-    return resolveEffectiveMode(currentMode, state.profiles?.[key]?.mode, { owner: isOwnerPrivate(key) });
+    const privileged = canEnterClosedAgent(key);
+    return resolveEffectiveMode(currentMode, state.profiles?.[key]?.mode, { owner: isOwnerPrivate(key), privileged });
   }
   /** 是否还有任何会话会跑二代仿真（全局 v2，或有人固定 v2）。用于全局接口的总开关。 */
   function anyV2Session() {
@@ -3283,6 +3320,8 @@ async function main() {
     const verdict = resolveAccess(axis, key, state, { ownerPrivate: isOwnerPrivate(key) }) === 'allow';
     if (verdict) return true;
     if (profile?.access?.[axis] === 'deny') return false;
+    // 管理员私聊的被动豁免（P3）：owner 永远豁免，管理员按 exemptPassive，默认开。
+    if (axis === 'passive' && isPrivilegedPrivate(key)) return true;
     if (!(Number(state.migratedAt) > 0)) {
       const parsed = parseKey(key);
       return parsed ? allowed(parsed.kind, parsed.id, cfg) : false;
@@ -6097,7 +6136,7 @@ async function main() {
         }
         // ── 白名单可视化编辑（写 config.json + 热更新内存） ───────────────────
         if (req.method === 'GET' && url.pathname === '/api/whitelist') {
-          sendJson({ allow: cfg.allow ?? { private: [], groups: [] }, deny: cfg.deny ?? { private: [], groups: [] }, ownerQQ: cfg.ownerQQ ?? null });
+          sendJson({ allow: cfg.allow ?? { private: [], groups: [] }, deny: cfg.deny ?? { private: [], groups: [] }, ownerQQ: cfg.ownerQQ ?? null, admins: cfg.admins ?? [] });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/whitelist') {
@@ -6127,9 +6166,18 @@ async function main() {
           file.allow = allow;
           file.deny = deny;
           file.ownerQQ = ownerQQ;
+          let admins;
+          try {
+            admins = normalizeAdmins(body.admins !== undefined ? body.admins : (file.admins ?? []), { ownerQQ });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? 'admins 无效' }, 400);
+            return;
+          }
+          file.admins = admins;
           atomicWriteJson(configFile, file);
           cfg.allow = { private: allow.private, groups: allow.groups };
           cfg.deny = { private: deny.private, groups: deny.groups };
+          cfg.admins = admins;
           cfg.ownerQQ = ownerQQ;
           reconcileSessionPolicies();
           log(`控制台：白名单已更新（群: ${allow.groups.join(',') || '无'}，私聊: ${allow.private.join(',') || '无'}，管理员: ${ownerQQ ?? '未设置'}）`);
@@ -13855,8 +13903,9 @@ async function main() {
     return d;
   }
 
-  async function tryHandleApprovalReply(key, text, isOwner) {
-    if (!isOwner) return false;
+  async function tryHandleApprovalReply(key, text, actor) {
+    const role = typeof actor === 'object' && actor ? actor.role : (actor === true ? 'owner' : 'user');
+    if (role !== 'owner' && !(role === 'admin' && actor.can?.('approve'))) return false;
     const r = ext.approvals.resolveReply(key, text);
     if (!r) return false;
     const reply = (msg) => (ext.isOwnerPrivateKey(key) ? sendOwnerDirect(msg) : sendToQQ(key, msg));
@@ -13876,7 +13925,7 @@ async function main() {
     try {
       await api.respond({ clientId: entry.clientId, eventId: entry.eventId, outcome: { kind: 'result', value: r.decision } });
       ext.approvals.complete(entry.id);
-      ext.audit.append('approval.decided', { id: entry.id, key, tool: entry.toolName, decision: r.decision, argsKnown: entry.argsKnown });
+      ext.audit.append('approval.decided', { id: entry.id, key, tool: entry.toolName, decision: r.decision, argsKnown: entry.argsKnown, actor: role });
       if (currentLevel !== 'L0') ext.controller.touch();
       await reply(r.decision === 'allowed-once' ? `✅ 已通过审批 #${entry.id}（仅这一次）` : `❌ 已拒绝审批 #${entry.id}`);
     } catch (error) {
@@ -14000,27 +14049,31 @@ async function main() {
     if (backfill && seenMsgIds.has(key, incomingId)) return;
     seenMsgIds.add(key, incomingId);
     if (backfill && currentMode !== 'reserved2') return;
-    // ── v0.3.0 owner 管理通道：在**任何**模式与白名单判断之前拦截 ──────────────────
-    // 只认 owner 的私聊（私聊对象与发送者都必须是 ownerQQ）。这里处理的消息绝不交给模型：
+    // ── v0.3.0 管理通道：owner 与管理员私聊，在**任何**模式与白名单判断之前拦截 ──────
+    // 只认本人私聊（私聊对象与发送者一致）。这里处理的消息绝不交给模型：
     // 确认码、TOTP 动态码、管理命令、审批回复。群里的同类命令在下面被拒绝。
-    if (!backfill && kind === 'private' && ext.adminEnabled()
-        && String(event.user_id) === String(cfg.ownerQQ ?? '') && String(id) === String(cfg.ownerQQ ?? '')) {
+    const adminActor = kind === 'private' ? actorForKey(key) : null;
+    if (!backfill && kind === 'private' && ext.adminEnabled() && adminActor && adminActor.role !== 'user'
+        && String(event.user_id) === String(id)) {
       const ownerText = (await segmentsToText(event.message ?? [], { includeReply: false })).trim();
       if (ownerText) {
-        if (await tryHandleApprovalReply(key, ownerText, true)) { rememberAdminMessageId(event.message_id ?? event.msg_id); return; }
-        // /remind 定时任务命令：桥接直接处理，不交给模型
-        const remindReply = await handleRemindCommand(ownerText);
+        if (await tryHandleApprovalReply(key, ownerText, adminActor)) { rememberAdminMessageId(event.message_id ?? event.msg_id); return; }
+        // /remind 定时任务命令：桥接直接处理，不交给模型；只对 owner 开放。
+        const remindReply = adminActor.role === 'owner' ? await handleRemindCommand(ownerText) : null;
         if (remindReply != null) {
           rememberAdminMessageId(event.message_id ?? event.msg_id);
           appendActivity(`${key} 管理通道定时任务命令：${ownerText.slice(0, 40)}`);
           await sendOwnerDirect(remindReply);
           return;
         }
-        const r = await ext.handleOwnerText(ownerText, { say: sayToGroup });
+        const r = await ext.handleOwnerText(ownerText, { say: sayToGroup, actor: adminActor });
         if (r.handled) {
           rememberAdminMessageId(event.message_id ?? event.msg_id);
           appendActivity(`${key} 管理通道命令已由桥接处理：${ownerText.replace(/\d{6}$/, '******').slice(0, 40)}`);
-          if (r.reply) await sendOwnerDirect(r.reply);
+          if (r.reply) {
+            if (adminActor.role === 'owner') await sendOwnerDirect(r.reply);
+            else await sendToQQ(key, r.reply);
+          }
           return;
         }
       }
@@ -15108,8 +15161,10 @@ async function main() {
             ext.audit.append('approval.requested', { id: entry.id, key, tool: entry.toolName, argsKnown: entry.argsKnown, level: currentLevel });
             const auditKey = shouldAuditKey(key);
             const msgText = ext.renderApprovalRequest(entry, { key, auditKey, redactAll: (s) => (SENSITIVE_RE.test(String(s)) ? redactSensitiveText(s) : String(s)) });
-            if (ext.isOwnerPrivateKey(key)) await sendOwnerDirect(msgText);
-            else await sendToQQ(key, msgText);
+            for (const target of approvalNotifyTargets(key)) {
+              if (target === ownerPrivateKeyOf()) await sendOwnerDirect(msgText);
+              else await sendToQQ(target, msgText);
+            }
           } else if (frame.type === 'stream/error') {
             log('事件流错误:', frame.error);
           }

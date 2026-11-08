@@ -155,6 +155,12 @@ import { createSkillIndex } from './skills/index.mjs';
 // 扩展 catalog（P1）：MCP 工具由真实 tools/list 得到，技能与 MCP 走同一份只读视图。
 import { createMcpInventory } from './extensions/mcp-inventory.mjs';
 import { createExtensionCatalog } from './extensions/catalog.mjs';
+import { createMcpStore } from './extensions/mcp-store.mjs';
+import { createSecretStore } from './extensions/secrets.mjs';
+import { createMcpRuntime } from './extensions/mcp-runtime.mjs';
+import { createPresetPolicy } from './extensions/preset-policy.mjs';
+import { createExtensionHub } from './extensions/hub.mjs';
+import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
 import { configureKeys, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1747,7 +1753,31 @@ async function main() {
   // MCP 清单：真实启动内置 server 走 tools/list，缓存 5 分钟；控制台刷新可强制重扫。
   // 只读、无参数，失败按 server 隔离，不影响桥接主链。
   const mcpInventory = createMcpInventory({ root: ROOT, log });
-  const extensionCatalog = createExtensionCatalog({ skillIndex, mcpInventory, now: Date.now });
+  // 外部 MCP：配置在 extensions/mcp/<id>/server.json，秘密在 state/extensions/secrets.json，
+  // 运行态与日志在 state/extensions/。Hub 只做授权/聚合，连接由 runtime 懒加载。
+  const extensionStateDir = path.join(STATE_DIR, 'extensions');
+  const mcpStore = createMcpStore({ root: path.join(ROOT, 'extensions', 'mcp'), log, now: Date.now });
+  const secretStore = createSecretStore({ file: path.join(extensionStateDir, 'secrets.json'), log });
+  const mcpRuntime = createMcpRuntime({
+    store: mcpStore,
+    secretStore,
+    logsDir: path.join(extensionStateDir, 'logs'),
+    log,
+    now: Date.now,
+  });
+  const presetPolicy = createPresetPolicy({ root: path.join(ROOT, 'dsh', 'agent-presets'), log });
+  const hubToken = ensureHubToken(path.join(extensionStateDir, 'hub-token'), { log });
+  const extensionCatalog = createExtensionCatalog({
+    skillIndex,
+    mcpInventory,
+    extraMcp: () => mcpRuntime.list(),
+    now: Date.now,
+  });
+  const extensionHub = createExtensionHub({
+    catalog: extensionCatalog,
+    runtime: mcpRuntime,
+    policyFor: (preset) => presetPolicy.get(preset),
+  });
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
   const registerCoreBlocks = () => {
     corePromptBlocks.unregisterPlugin('core');
@@ -4865,6 +4895,50 @@ async function main() {
         serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
         return;
       }
+      // Hub 入口不走控制台令牌：mcp-bridge-ext 子进程不可能持有管理端全权。
+      // 它带 x-hub-token（本机 0600 文件）证明自己是 Hub，再用 x-agent-token 绑定会话；
+      // 真正的授权仍是「会话 → preset → extensions.yml」。
+      if (url.pathname.startsWith('/api/extensions/hub/')) {
+        if (req.method !== 'POST') {
+          sendJson({ ok: false, error: 'Hub 只接受 POST' }, 405);
+          return;
+        }
+        if (!hubTokenMatches(req.headers['x-hub-token'], hubToken)) {
+          sendJson({ ok: false, error: '未授权：Hub 凭据无效' }, 401);
+          return;
+        }
+        let body;
+        try {
+          body = await readBody();
+        } catch (error) {
+          sendJson({ ok: false, error: `请求体无效：${error?.message ?? error}` }, 400);
+          return;
+        }
+        const token = String(body?.token ?? req.headers['x-agent-token'] ?? '');
+        const key = agentTokenOwnerKey(token);
+        if (!key) {
+          sendJson({ ok: false, error: '未授权：需要有效的会话令牌', code: 'forbidden' }, 403);
+          return;
+        }
+        const preset = modePreset(key, effectiveMode(key), cfg);
+        const action = url.pathname.slice('/api/extensions/hub/'.length);
+        try {
+          let result;
+          if (action === 'list') result = await extensionHub.list({ preset, kind: body?.kind, query: body?.query });
+          else if (action === 'describe') result = await extensionHub.describe({ preset, server: body?.server, tool: body?.tool });
+          else if (action === 'call') result = await extensionHub.call({ preset, server: body?.server, tool: body?.tool, args: body?.args });
+          else {
+            sendJson({ ok: false, error: `未知 Hub 操作：${action}` }, 404);
+            return;
+          }
+          sendJson({ ok: true, ...result });
+        } catch (error) {
+          const code = error?.code ?? 'error';
+          const status = code === 'forbidden' ? 403 : code === 'not_found' ? 404 : code === 'invalid' || code === 'invalid_args' ? 400 : 502;
+          sendJson({ ok: false, error: error?.message ?? String(error), code }, status);
+        }
+        return;
+      }
       // 控制台鉴权：API 只认 x-console-token；页面 GET 还可以用 ?token= 或页面 cookie（见下）。
       // 定长比较：`!==` 会在第一个不同的字符处短路，理论上可被本机进程用响应时延逐字节试探。
       // 令牌是 192 bit 随机值且只监听回环，所以这是纵深防御而非在野漏洞。
@@ -5322,6 +5396,79 @@ async function main() {
             sendJson({ ok: true, ...data });
           } catch (error) {
             sendJson({ ok: false, error: `扩展清单读取失败：${error?.message ?? error}` }, 500);
+          }
+          return;
+        }
+        // 外部 MCP 管理：列表 + CRUD + test/refresh/logs。只接受控制台令牌（上面的集中校验），
+        // 秘密值只走 state/extensions/secrets.json；server.json 里只保留 secret:<name> 引用。
+        if (req.method === 'GET' && url.pathname === '/api/extensions/mcp') {
+          sendJson({ ok: true, servers: mcpRuntime.list(), configs: mcpStore.list() });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/extensions/mcp') {
+          try {
+            const body = await readBody();
+            const secrets = body?.secrets && typeof body.secrets === 'object' ? body.secrets : {};
+            for (const [name, value] of Object.entries(secrets)) secretStore.set(name, String(value ?? ''));
+            const input = { ...body };
+            delete input.secrets;
+            const config = mcpStore.save(String(body?.id ?? ''), input, { create: true });
+            ext.audit.append('extension.mcp.created', { id: config.id, transport: config.transport });
+            sendJson({ ok: true, config, runtime: mcpRuntime.list().find((item) => item.id === config.id) ?? null });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'exists' ? 409 : 400);
+          }
+          return;
+        }
+        const mcpRoute = url.pathname.match(/^\/api\/extensions\/mcp\/([a-z][a-z0-9-]{1,39})(?:\/(test|refresh|logs))?$/);
+        if (mcpRoute) {
+          const id = mcpRoute[1];
+          const action = mcpRoute[2] ?? '';
+          try {
+            if (req.method === 'GET' && !action) {
+              sendJson({ ok: true, config: mcpStore.get(id), runtime: mcpRuntime.list().find((item) => item.id === id) ?? null });
+              return;
+            }
+            if (req.method === 'GET' && action === 'logs') {
+              sendJson({ ok: true, id, lines: mcpRuntime.logs(id, { limit: url.searchParams.get('limit') }) });
+              return;
+            }
+            if ((req.method === 'PATCH' || req.method === 'DELETE') && !action) {
+              if (req.method === 'DELETE') {
+                await mcpRuntime.stop(id);
+                mcpStore.remove(id);
+                ext.audit.append('extension.mcp.deleted', { id });
+                sendJson({ ok: true, id, deleted: true });
+                return;
+              }
+              const body = await readBody();
+              const secrets = body?.secrets && typeof body.secrets === 'object' ? body.secrets : {};
+              for (const [name, value] of Object.entries(secrets)) secretStore.set(name, String(value ?? ''));
+              const input = { ...body };
+              delete input.secrets;
+              const config = mcpStore.save(id, input, { create: false });
+              await mcpRuntime.invalidate(id);
+              ext.audit.append('extension.mcp.updated', { id, transport: config.transport });
+              sendJson({ ok: true, config, runtime: mcpRuntime.list().find((item) => item.id === id) ?? null });
+              return;
+            }
+            if (req.method === 'POST' && action === 'refresh') {
+              await mcpRuntime.invalidate(id);
+              const state = await mcpRuntime.start(id);
+              ext.audit.append('extension.mcp.refreshed', { id });
+              sendJson({ ok: true, id, runtime: mcpRuntime.list().find((item) => item.id === id) ?? state });
+              return;
+            }
+            if (req.method === 'POST' && action === 'test') {
+              const config = mcpStore.get(id);
+              const result = await mcpRuntime.test(config);
+              sendJson({ ok: true, id, ...result });
+              return;
+            }
+            sendJson({ ok: false, error: '不支持的扩展 MCP 操作' }, 405);
+          } catch (error) {
+            const code = error?.code;
+            sendJson({ ok: false, error: error?.message ?? String(error) }, code === 'not_found' ? 404 : 400);
           }
           return;
         }

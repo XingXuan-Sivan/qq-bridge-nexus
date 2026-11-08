@@ -29,9 +29,9 @@
 | 页面 | 现在能做什么 | 缺口 |
 | --- | --- | --- |
 | 插件 | 列表、启停、重载、详情、zip/目录安装、卸载、注入块、运行设置 | 插件配置不可改；无测试/日志/市场；`plugins.<id>.config` 只读 |
-| MCP | 只读列三个桥接自带 server | 不能增删改、不能连接外部 MCP、工具清单为空/不全、不能测试/重连/看日志 |
+| MCP | 内置 server 真实工具清单；外部 MCP 新增/编辑/测试/刷新/日志/删除；Hub 元工具 | 技能尚未接入 Hub；预设策略目前只有 `qq-chat-v2` 的 `extensions.yml`，编辑器在 P3 |
 | 技能 | 只读扫描 `SKILL.md` | 不能安装、编辑、启停、删除；不能分配 preset |
-| 工具参考 | 硬编码 9 条静态说明 | 不发请求，和真实工具清单脱节 |
+| 工具参考 | 已并入 MCP 页（server 概览 + 工具参考） | 独立页面与导航已移除，旧 `#reference` 重定向到 `#mcp` |
 | 预设 | 只能改 `qq-chat` / `qq-chat-v2` 的提示词正文 | 五个 preset 写死在 `dsh/agent-presets/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
 
 关键代码位置：
@@ -593,6 +593,8 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 外部 MCP CRUD/测试/刷新/日志；连接态/工具清单/错误可视化。
 - 预设的 MCP allowlist 与工具级 allow/deny；Hub 执行期校验。
 - 验收：新增外部 server 不需要重启 DSH；未授权 preset 调用被拒；断线/超时/日志可见；`compress` 正常。
+
+**2026-11-09 状态：P2 已实现并通过门禁（待提交）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。范围边界见 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) E7–E11（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值）。
 
 ### P3 技能 / 插件配置 / 预设编辑器
 

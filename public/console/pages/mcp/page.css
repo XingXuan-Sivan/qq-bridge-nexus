@@ -1,4 +1,4 @@
-/* MCP 页私有样式：工具参考并入后，需要在概览表与工具表之间留出层级。 */
+/* MCP 页：server 概览、工具参考、外部 MCP 编辑/日志的少量页面级样式。 */
 .mcp-section-title {
   margin: 22px 0 10px;
   font-size: 15px;
@@ -7,4 +7,18 @@
 }
 #mcpList .data-table + .data-table {
   margin-top: 12px;
+}
+.log-pre {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }

@@ -174,3 +174,12 @@ npm run test:console-ui
 - 验收：`test-extension-catalog.mjs` 4/4、static 全过、UI 29/29、audit 98/98；真机 `GET /api/extensions` 返回 `summary{servers:3,online:3,errors:0,tools:51,skills:1}`。
 - 偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E4–E6（整页移除 + 重定向、v2 不保留旧字段、运行时 `tools/list` 而非静态源扫描）。
 
+### 6.7 扩展平台 P2：Hub 与外部 MCP（2026-11-09，已实现待提交）
+
+- 新增 `src/mcp-bridge-ext.js`（MCP stdio server）：对 DSH 只暴露 `ext_list` / `ext_describe` / `ext_call`；每个调用把 `x-hub-token` + `x-agent-token` 转发到 bridge 内部 `/api/extensions/hub/*`，bridge 用 agent token 反查会话与 preset，再按 preset 的 `extensions.yml` 做 server 与工具级 allow/deny。
+- 外部 MCP 管理：`extensions/mcp/<id>/server.json` 为配置态；`state/extensions/secrets.json` 存 `secret:<name>` 实际值（0600）；`state/extensions/logs/<id>.log` 存 stderr 环形日志；`src/extensions/mcp-runtime.mjs` 懒连接、30s 初始化/60s 调用/300s 硬上限、单 server 错误隔离；`src/extensions/mcp-store.mjs` 校验 id/transport/stdio allowlist/HTTP 私网/秘密引用。
+- 控制台 MCP 页：内置 server 只读展示真实 `tools/list`；外部 MCP 行提供编辑/测试/刷新/日志/删除；新增 MCP 弹窗复用表单组件；`#reference` 旧入口重定向到 `#mcp`。
+- 预设策略：`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能；其他预设无文件即默认拒绝。DSH `agent.cordis.yml` 是插件数组，不能追加顶层 mapping，所以策略独立存 `extensions.yml`。
+- 验收：static 全过、UI 29/29、audit 无失败、扩展模块测试 14/14；真机 3 内置 server + 51 工具、外部 `test-ext` CRUD/测试/日志、Hub `list/describe/call` 与 401/403 均通过；DSH 已加载 `mcp__bridge_ext__*` 三工具。
+- 边界与偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E7–E11；P2 第一版不提升内置 MCP/插件工具、`tools/list_changed` 先显式 refresh、`ext_list` 不自动连接、Hub 本身需一次 DSH 重启。P0 `compress` 仍为 Partial（真实长会话自动压缩未触发）。
+

@@ -46,6 +46,13 @@ import { createSkillIndex } from '../src/skills/index.mjs';
 // 这里注入的是构造器本身，测试不读 /api/extensions 时不会启动 MCP 子进程。
 import { createMcpInventory } from '../src/extensions/mcp-inventory.mjs';
 import { createExtensionCatalog } from '../src/extensions/catalog.mjs';
+// P2 外部 MCP/Hub：bridge 直接 import，夹具按同名补回。
+import { createMcpStore } from '../src/extensions/mcp-store.mjs';
+import { createSecretStore } from '../src/extensions/secrets.mjs';
+import { createMcpRuntime } from '../src/extensions/mcp-runtime.mjs';
+import { createPresetPolicy } from '../src/extensions/preset-policy.mjs';
+import { createExtensionHub } from '../src/extensions/hub.mjs';
+import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
 import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
@@ -297,6 +304,13 @@ createPromptBlockRegistry,
 createSkillIndex,
 createMcpInventory,
 createExtensionCatalog,
+    createMcpStore,
+    createSecretStore,
+    createMcpRuntime,
+    createPresetPolicy,
+    createExtensionHub,
+    ensureHubToken,
+    hubTokenMatches,
     formatKey,
     parseKey,
     platformOfConfig,

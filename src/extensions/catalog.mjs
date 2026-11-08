@@ -7,9 +7,11 @@
  * @param {object} opts
  * @param {{ list: () => Array<object> }} opts.skillIndex
  * @param {{ snapshot: (opts?: object) => Promise<{ at: number, servers: Array<object> }> }} opts.mcpInventory
+ * @param {() => Array<object> | Promise<Array<object>>} [opts.extraMcp]
+ * @param {(line: string) => void} [opts.log]
  * @param {() => number} [opts.now]
  */
-export function createExtensionCatalog({ skillIndex, mcpInventory, now = Date.now } = {}) {
+export function createExtensionCatalog({ skillIndex, mcpInventory, extraMcp = null, log = () => {}, now = Date.now } = {}) {
   if (!skillIndex || typeof skillIndex.list !== 'function') throw new Error('createExtensionCatalog 需要 skillIndex.list');
   if (!mcpInventory || typeof mcpInventory.snapshot !== 'function') throw new Error('createExtensionCatalog 需要 mcpInventory.snapshot');
 
@@ -22,9 +24,10 @@ export function createExtensionCatalog({ skillIndex, mcpInventory, now = Date.no
     })).filter((entry) => entry.id);
 
     const inventory = await mcpInventory.snapshot({ refresh });
-    const mcp = (inventory?.servers ?? []).map((server) => ({
+    const builtin = (inventory?.servers ?? []).map((server) => ({
       id: String(server?.id ?? server?.name ?? ''),
       name: String(server?.name ?? server?.id ?? ''),
+      source: 'builtin',
       file: String(server?.file ?? ''),
       note: String(server?.note ?? ''),
       status: server?.status === 'error' ? 'error' : 'online',
@@ -37,6 +40,33 @@ export function createExtensionCatalog({ skillIndex, mcpInventory, now = Date.no
         })).filter((tool) => tool.name)
         : [],
     }));
+    let external = [];
+    if (extraMcp) {
+      try {
+        const provided = typeof extraMcp === 'function' ? await extraMcp() : extraMcp;
+        external = (Array.isArray(provided) ? provided : []).map((server) => ({
+          id: String(server?.id ?? ''),
+          name: String(server?.name ?? server?.id ?? ''),
+          source: 'external',
+          file: `extensions/mcp/${String(server?.id ?? '')}/server.json`,
+          note: String(server?.description ?? ''),
+          transport: String(server?.transport ?? 'stdio'),
+          enabled: server?.enabled !== false,
+          status: server?.status === 'error' ? 'error' : (server?.enabled === false ? 'disabled' : 'online'),
+          error: server?.error ? String(server.error) : '',
+          toolCount: Number(server?.toolCount) || 0,
+          tools: Array.isArray(server?.tools)
+            ? server.tools.map((tool) => ({
+              name: String(tool?.name ?? ''),
+              description: String(tool?.description ?? ''),
+            })).filter((tool) => tool.name)
+            : [],
+        })).filter((server) => server.id);
+      } catch (error) {
+        log(`[extensions] 外部 MCP 清单读取失败: ${error?.message ?? error}`);
+      }
+    }
+    const mcp = [...builtin, ...external];
 
     const totalTools = mcp.reduce((sum, server) => sum + server.toolCount, 0);
     const errors = mcp.filter((server) => server.status === 'error').length;
@@ -48,7 +78,7 @@ export function createExtensionCatalog({ skillIndex, mcpInventory, now = Date.no
       mcp,
       summary: {
         servers: mcp.length,
-        online: mcp.length - errors,
+        online: mcp.filter((server) => server.status === 'online').length,
         errors,
         tools: totalTools,
         skills: skills.length,

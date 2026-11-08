@@ -12,7 +12,7 @@
 ## 1. 当前阶段
 
 - 基线设计：[EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md)（2026-11-08 版）
-- 当前阶段：**P1（已完成，待提交）**
+- 当前阶段：**P2（已实现并通过门禁，待提交）**
 - P0 目标：修复 DSH 自动压缩被 `qq-tool-restrict.mjs` 拒绝的问题，让 `compress` 在 QQ 会话 preset 中可用；不提前做 Hub/catalog/MCP CRUD。
 - P0 完成判据：
   1. `compress` 进入守卫的 `SAFE_EXACT`，且不在 `RESTRICTED_TOOL_NAMES`；
@@ -84,13 +84,64 @@
 - 验收证据：实测 `1 + 2 + 48 = 51`；真机 API `summary{servers:3,online:3,errors:0,tools:51,skills:1}`；`test-extension-catalog.mjs` 4/4。
 - 状态：已接受
 
+### E7 — Hub 第一版只承载外部 MCP 与技能，不提升内置 MCP/插件工具
+
+- 阶段：P2
+- 计划：Hub 聚合外部 MCP、内置 MCP 与插件工具，统一走 `ext_list/ext_call`。
+- 实际：内置 MCP 仍由 DSH 直连（`mcp__snowluma__*` 等），Hub 的 `ext_list` 只列 external MCP 与 skills；插件工具暂不进入 Hub。
+- 原因：内置 MCP 已有稳定的直连工具与 preset 守卫，重复包一层会出现同名工具、schema 重复和权限双入口；插件工具还没有稳定的 JSON schema/元数据。先把“动态、外部、需要授权”的部分收进 Hub，避免第一版把静态能力也搅进来。
+- 影响：模型对内置 MCP 仍按原工具名调用；只有外部 MCP 与技能需要 `ext_list/ext_describe/ext_call`。
+- 验收证据：真机 `ext_list` 只返回 external `test-ext`；`ext_describe` 返回其 tools；内置 `mcp__snowluma__*` 保持不变。
+- 状态：已接受（后续提升内置/插件工具时另开一期，不沿用本条的豁免）
+
+### E8 — `tools/list_changed` 不接运行时刷新，先靠显式 refresh
+
+- 阶段：P2
+- 计划：外部 MCP 的 `tools/list_changed` 到达时自动刷新工具清单。
+- 实际：`src/extensions/mcp-runtime.mjs` 首版不订阅通知；`POST /api/extensions/mcp/<id>/refresh` 清缓存并重新 `tools/list`，页面刷新按钮显式触发。
+- 原因：首版先保证连接状态、超时、错误隔离和授权稳定；通知驱动的刷新要和调用中的工具清单做并发/幂等处理，容易在工具调用中途换掉 schema。显式 refresh 可预期、可审计。
+- 影响：外部 server 自行增删工具后，需要人工刷新一次；不刷新则模型看到旧清单。
+- 验收证据：`test-extension-runtime.mjs` 覆盖 refresh；真机 `POST .../refresh` 后 toolCount 从 0 变 1；`ext_describe` 懒连接后也能拿到清单。
+- 状态：已接受（P3 或后续再接通知）
+
+### E9 — `ext_list` 不自动连接外部 server，`ext_describe` 懒连接
+
+- 阶段：P2
+- 计划：`ext_list` 返回每个外部 server 的完整工具清单。
+- 实际：`ext_list` 只返回运行态摘要（未启动时 `status:'stopped'`、`toolCount:0`）；`ext_describe` 才 `await runtime.listTools(server)` 建连并返回真实 tools/schema。
+- 原因：列表是高频入口，自动拉起所有外部进程会拖慢每次唤醒、放大故障面；描述是显式查看某一条，适合按需连接。
+- 影响：模型若只看列表会以为没有工具；必须先 `ext_describe` 再 `ext_call`。文档与工具描述要明确这一点。
+- 验收证据：`test-extension-hub.mjs` 覆盖；真机修复后 `ext_describe` 返回 `toolCount:1` 与 `snowluma_status`。
+- 状态：已接受
+
+### E10 — 新增 `mcp-bridge-ext` 需要一次 DSH 重启；之后外部 CRUD 不重启
+
+- 阶段：P2
+- 计划：新增 Hub 时不打断 DSH。
+- 实际：`scripts/setup-dsh.mjs` 把 `mcp-bridge-ext` 写入 desktop profile，并修改 `qq-tool-restrict.mjs` 的 `SAFE_PREFIXES`；这两处是 DSH 启动时加载的，必须重启 DSH 一次。Hub 进程起来后，外部 MCP 的增删改测试只走 bridge，不再动 DSH profile。
+- 原因：Hub 本身是 DSH 的 MCP server 条目，不能靠运行时 catalog 动态插入；外部 server 才是 Hub 内部管理的对象。
+- 影响：P2 首次上线需要一次 DSH 重启；后续外部扩展 CRUD 不需要。
+- 验收证据：DSH 重启后出现 `mcp__bridge_ext__ext_list/ext_describe/ext_call`；真机新增/测试/删除 `test-ext` 全程未再重启 DSH。
+- 状态：已接受
+
+### E11 — 外部 MCP 的安全默认值按设计收紧
+
+- 阶段：P2
+- 计划：stdio 默认 allowlist、HTTP 默认 https；高级开关显式放开。
+- 实际：`src/extensions/mcp-store.mjs` 对 stdio 只允许 `node/npx/python/python3/uv/uvx/deno/bun/bunx`，`allowArbitraryCommand` 默认 false；HTTP 只允许 https，私网需 `allowPrivateNetwork`；env/headers 只接受 `secret:<name>`，实际值落 `state/extensions/secrets.json`（0600），`server.json` 不存明文。
+- 原因：外部 MCP 是本机进程/任意 HTTP，默认放开等于把 SSRF 与任意命令执行直接交给控制台表单；但用户明确要求“创建时由 owner 决定启用”，所以只收紧传输层的危险默认值，不强制默认禁用。
+- 影响：创建非 allowlist 命令或私网 HTTP 时会被拒，必须显式打开高级开关；日志/API 不回显秘密。
+- 验收证据：`test-extension-mcp-store.mjs` 3/3（allowlist、私网、secret 引用）；真机 test-ext 走 node + 默认值成功。
+- 状态：已接受
+
 ## 3. 待登记（占位，不预先承诺）
 
 - P1 旧路由/书签处理：已登记 E4（整页移除 + `#reference` 重定向）。
 - P1 catalog 旧字段兼容：已登记 E5（v2 直接替换，不保留兼容层）。
 - P1 工具数来源：已登记 E6（运行时 `tools/list` + 缓存/错误隔离）。
-- P2 若 Hub 第一版只做 `ext_list` / `ext_call`，需登记“哪些内置工具先不提升、为什么”。
-- P2 外部 MCP `allowArbitraryCommand` / `allowPrivateNetwork` 的实际默认值，若与设计不同，必须登记。
+- P2 Hub 第一版只做 `ext_list` / `ext_describe` / `ext_call`，已登记 E7（内置 MCP/插件工具暂不提升）与 E9（列表不自动连接）。
+- P2 外部 MCP 安全默认值：已登记 E11（与设计一致，未放宽）。
+- P2 `tools/list_changed`：已登记 E8（首版显式 refresh）。
 - P3 预设 YAML 保存若丢注释，需登记“接受范围、备份位置、恢复方式”。
 
 ## 4. 回写检查

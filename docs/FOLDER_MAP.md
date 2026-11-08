@@ -29,6 +29,8 @@ DSH/                         ← 工作区根（不是仓库根）
 | `src/launcher/` `public/control-center/` `control-center.bat` `control-center-hidden.vbs` | **v0.4.0 控制中心**：托管桥接与 SnowLuma 子进程的本地网页（见 guides/CONTROL_CENTER.md） | 配套测试 `scripts/test-control-center.mjs` |
 | `src/plugins/` | **v1.2.0 插件内核**：清单校验（`manifest.mjs`）、配置（`config.mjs`）、审计轮转（`audit.mjs`）、人格 provider 注册表（`persona.mjs`）、按权限收口的 host-api（`host-api.mjs`）与加载/分发（`kernel.mjs`）；`bridge.js` 只接三处钩子与两处人格注入点 | 设计见 `PLUGIN_KERNEL.md`；改这里必须跑 `scripts/test-plugin-kernel.mjs` |
 | `src/skills/` | **技能清单（路线图 §9.2）**：`index.mjs` 只读扫描技能根目录（`SKILL.md` 前 600 字，认 `name` / `description`），产出「可用技能」注入块 `core-skills`——标题 1 行 + 最多 `skills.maxEntries` 行 + 溢出提示 1 行，全文由 AI 需要时自己读；同名技能按根顺序去重；扫描结果缓存 60s。`/api/extensions` 的技能列表与提示词注入同源 | `scripts/test-skills-index.mjs`（解析/去重/行数/字数预算/缓存）；改行数或预算后跑 `scripts/test-core-prompt-blocks.mjs` 的 `core-skills` 用例 |
+| `src/extensions/` | **扩展平台后端（P1/P2）**：`catalog.mjs` 汇总内置/外部条目，`mcp-inventory.mjs` 真实 `tools/list`，`mcp-store.mjs`/`secrets.mjs` 外部 MCP 配置与秘密，`mcp-runtime.mjs` 连接/超时/日志，`preset-policy.mjs` 读 `extensions.yml`，`hub.mjs` 过滤与调用，`hub-token.mjs` 本机 Hub 凭据；`src/mcp-bridge-ext.js` 是对 DSH 暴露的 MCP server | 改目录/API 后跑 `test-extension-*` 与 `test-console-static/UI`；Hub 三工具只做外部 MCP + 技能，边界见 `EXTENSION_PLATFORM_DEVIATIONS.md` E7–E11 |
+| `extensions/` | **数据型扩展目录**：外部 MCP 配置在 `extensions/mcp/<id>/server.json`；后续技能/市场源也落这里；秘密值不写这里，只存 `secret:<name>` 引用 | 用户配置，别手删；增删改走控制台，写入原子化、保留 createdAt |
 | `src/persona-resolve.mjs` | **v1.2.0 人格三层解析**：会话覆盖（`current-role.json` 的 `byKey`）→ 外部 provider（soulkit）→ 全局本地卡；`off` 硬覆盖 provider，缺卡告警后继续往下 | 设计见 `PERSONA_PROVIDER.md`；配套 `scripts/test-persona-resolve.mjs` |
 | `interface-platform/`（独立子程序：自己的 `package.json`、测试和 `state/`） | **接口平台**（M1）：统一接入实例/账号/事件/发送，QQ 经 SnowLuma / NapCat 连接器；OneBot v11 兼容入口供桥接过渡使用。本仓库只经 HTTP 接口与它通信（见它的 README.md、docs/CONTRACT.md、docs/MILESTONES.md） | 自带测试 `interface-platform/test/`；`scripts/test-platform.mjs` 一并跑（缺失即失败）；它的 `state/`（令牌、实例配置）不入库 |
 | `scripts/` | 调试 / 测试 / 一次性运维脚本（见第二节命名约定） | 测试脚本不能删；`cleanup-*` / `fix-*` / `patch-*` / `diag-*` 多为历史遗留 |
@@ -39,7 +41,7 @@ DSH/                         ← 工作区根（不是仓库根）
 | `roles/` | 人格卡（`小鲸鱼.md` / `傲娇助手.md` / `README.md`）：控制台「人格与角色」页可编辑，保存即生效（二代仿真里是下一次唤醒或选「立即」时生效） | 用户内容，别乱动 |
 | `assets/` | 仓库用图片等资源（`deepseek娘.png`；`project-intro.mp4` 已改为 Release 附件、不入库）；`assets/default-roles/` 是默认人格的原版副本，控制台「恢复默认人格」从这里取 | 别加体积大的二进制；改了 `roles/` 下的默认人格要同步改 `assets/default-roles/` 里的同名文件 |
 | `audio/` | **语音库**（用户的真实音频）。桥接的 AI 语音工具只能发这里的文件；独立 `voice-tool` 默认也指向这里 | **用户文件，绝不删除/移动** |
-| `state/` | **运行时数据**（会话映射、模式、角色、黑话库、日志、锁、令牌）。`.gitignore` 排除 | **用户数据，绝不删除/移动** |
+| `state/` | **运行时数据**（会话映射、模式、角色、黑话库、日志、锁、令牌）。`.gitignore` 排除；扩展平台的运行态在 `state/extensions/`（hub-token、secrets、logs） | **用户数据，绝不删除/移动** |
 | `docs/` | 全部文档，按用途分子目录（见第三节） | 见第三节 |
 | `node_modules/` `.npm-cache/` | 依赖与 npm 缓存 | 忽略 |
 | `config.json` | 运行配置（真实配置**不入库**）；模板是 `config.example.json` | 值属于用户，别改 |

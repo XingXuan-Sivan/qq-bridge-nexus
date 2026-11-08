@@ -655,8 +655,19 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           });
           case '/api/extensions': return json({
             ok: true,
-            skills: [{ name: 'demo-skill', description: '离线预览用的假技能。', path: 'C:/fixture/skills/demo-skill' }],
-            mcp: [{ name: 'snowluma-host', file: 'src/mcp-host-server.js', tools: ['snowluma_status'], note: 'SnowLuma 网关状态，只读' }],
+            version: 2,
+            generatedAt: Date.parse(timestamp),
+            skills: [{ id: 'demo-skill', name: 'demo-skill', description: '离线预览用的假技能。', path: 'C:/fixture/skills/demo-skill' }],
+            mcp: [{
+              id: 'snowluma-host',
+              name: 'snowluma-host',
+              file: 'src/mcp-host-server.js',
+              note: 'SnowLuma 网关状态，只读',
+              status: 'online',
+              toolCount: 1,
+              tools: [{ name: 'snowluma_status', description: '读取网关状态' }],
+            }],
+            summary: { servers: 1, online: 1, errors: 0, tools: 1, skills: 1 },
           });
           case '/api/persona/sources': return json({ ok: true, provider: null, rows: [] });
           case '/api/roles': return json({

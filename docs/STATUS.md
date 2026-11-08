@@ -166,3 +166,11 @@ npm run test:console-ui
 - 边界：管理命令与审批走独立通道；群里的 owner/管理员不单独豁免；`sendOnly` 不省 token；静默期间不中断正在执行的 AI 回合，但后续发送会被发送门禁拦住。
 - 验证：`test-manual-silence.mjs` 9/9、`test-silence-schedule.mjs` 4/4、`npm run test:audit` 97/97、UI 28/28、static 全过；真机重启后 `/api/silence`、`/api/role-mode` 的 silent/active 往返正常。
 
+### 6.6 扩展平台 P1：真实 catalog 与 MCP 页（2026-11-09，已完成）
+
+- `GET /api/extensions` 升级 v2：`src/extensions/catalog.mjs` 汇总技能与 MCP；`src/extensions/mcp-inventory.mjs` 用 MCP SDK 启动三个内置 server 并调用 `tools/list`，5 分钟缓存、15s 超时、单 server 错误隔离、`?refresh=1` 强制重扫。
+- MCP 页合并独立工具参考：server 概览 + 工具参考两张表，显示真实工具名/描述/数量；页面标题改「MCP 与工具」；独立 `reference` 页、导航、路由与 `#section-reference` 全部移除，旧 `#reference` 重定向到 `#mcp`。
+- 实测工具数：`snowluma-host` 1、`web-search-safe` 2、`snowluma-safe` 48，合计 51；此前页面显示的 0 是假数据。
+- 验收：`test-extension-catalog.mjs` 4/4、static 全过、UI 29/29、audit 98/98；真机 `GET /api/extensions` 返回 `summary{servers:3,online:3,errors:0,tools:51,skills:1}`。
+- 偏差：见 `docs/EXTENSION_PLATFORM_DEVIATIONS.md` E4–E6（整页移除 + 重定向、v2 不保留旧字段、运行时 `tools/list` 而非静态源扫描）。
+

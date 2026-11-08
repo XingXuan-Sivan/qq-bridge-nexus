@@ -152,6 +152,9 @@ import { createSessionPolicy } from './session/policy.mjs';
 import { createPersonaResolver } from './persona-resolve.mjs';
 // 技能清单（§9.2）：只读扫描 skills 目录，产出固定行数的「可用技能」注入块。
 import { createSkillIndex } from './skills/index.mjs';
+// 扩展 catalog（P1）：MCP 工具由真实 tools/list 得到，技能与 MCP 走同一份只读视图。
+import { createMcpInventory } from './extensions/mcp-inventory.mjs';
+import { createExtensionCatalog } from './extensions/catalog.mjs';
 import { configureKeys, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1741,6 +1744,10 @@ async function main() {
     fs,
     log,
   });
+  // MCP 清单：真实启动内置 server 走 tools/list，缓存 5 分钟；控制台刷新可强制重扫。
+  // 只读、无参数，失败按 server 隔离，不影响桥接主链。
+  const mcpInventory = createMcpInventory({ root: ROOT, log });
+  const extensionCatalog = createExtensionCatalog({ skillIndex, mcpInventory, now: Date.now });
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
   const registerCoreBlocks = () => {
     corePromptBlocks.unregisterPlugin('core');
@@ -5307,15 +5314,15 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/extensions') {
-          // 技能与 MCP 的只读清单：技能走同一个 skillIndex（与唤醒注入同源，页面上看到的就是 AI 看到的），
-          // MCP 只列桥接自己维护的 server；DSH 侧的 MCP 配置不在这里猜。
-          const skills = skillIndex.list().map(({ name, description, dir }) => ({ name, description, path: dir }));
-          const mcp = [
-            { name: 'snowluma-host', file: 'src/mcp-host-server.js', tools: ['snowluma_status'], note: 'SnowLuma 网关状态，只读' },
-            { name: 'web-search-safe', file: 'src/mcp-web-search-safe.js', tools: ['web_search', 'web_fetch'], note: '只读联网，禁内网地址' },
-            { name: 'snowluma-safe', file: 'src/mcp-snowluma-safe.js', tools: [], note: '安全版 SnowLuma 工具集；工具名以 DSH 侧为准' },
-          ];
-          sendJson({ ok: true, skills, mcp });
+          // 扩展 catalog v2（只读）：技能与唤醒注入同源；MCP 工具有 server 自己 tools/list 实测。
+          // ?refresh=1 只给控制台刷新按钮用，其余请求走 5 分钟缓存，避免每次轮询都起子进程。
+          const refresh = ['1', 'true', 'yes'].includes(String(url.searchParams.get('refresh') ?? '').toLowerCase());
+          try {
+            const data = await extensionCatalog.snapshot({ refresh });
+            sendJson({ ok: true, ...data });
+          } catch (error) {
+            sendJson({ ok: false, error: `扩展清单读取失败：${error?.message ?? error}` }, 500);
+          }
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/presets') {

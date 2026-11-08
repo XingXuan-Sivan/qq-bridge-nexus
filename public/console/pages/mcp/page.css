@@ -1,2 +1,10 @@
-/* MCP 页私有样式。当前完全复用公共表格与卡片样式，这里先留空占位：
-   一旦出现「只属于 MCP 页」的样式，写在这个文件里，不要回流到 css/app.css。 */
+/* MCP 页私有样式：工具参考并入后，需要在概览表与工具表之间留出层级。 */
+.mcp-section-title {
+  margin: 22px 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+#mcpList .data-table + .data-table {
+  margin-top: 12px;
+}

@@ -582,9 +582,10 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 
 ### P1 Catalog + MCP 页合并工具参考
 
+- 状态：**已完成（2026-11-09）**。实现与偏差见 `EXTENSION_PLATFORM_DEVIATIONS.md` E4–E6。
 - 新增 `src/extensions/catalog.mjs`；`GET /api/extensions` v2 返回真实 MCP/技能条目（只读）。
-- MCP 页显示 3 个内置 server 的真实工具数（从 `src/mcp-*.js` 的注册表取，不手写）；工具参考合并。
-- 验收：页面工具数与 MCP `tools/list` 一致；无假开关；static/UI 测试通过。
+- MCP 页显示 3 个内置 server 的真实工具数（运行时 `tools/list`，5 分钟缓存）；工具参考合并进同一页，旧 `#reference` 重定向到 `#mcp`。
+- 验收：页面工具数与 MCP `tools/list` 一致（实测 51 个：1/2/48）；无假开关；static 全过、UI 29/29、audit 98/98。
 
 ### P2 Hub + 外部 MCP + 预设授权
 

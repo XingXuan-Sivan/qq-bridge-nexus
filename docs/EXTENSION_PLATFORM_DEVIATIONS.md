@@ -12,7 +12,7 @@
 ## 1. 当前阶段
 
 - 基线设计：[EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md)（2026-11-08 版）
-- 当前阶段：**P0**
+- 当前阶段：**P1（已完成，待提交）**
 - P0 目标：修复 DSH 自动压缩被 `qq-tool-restrict.mjs` 拒绝的问题，让 `compress` 在 QQ 会话 preset 中可用；不提前做 Hub/catalog/MCP CRUD。
 - P0 完成判据：
   1. `compress` 进入守卫的 `SAFE_EXACT`，且不在 `RESTRICTED_TOOL_NAMES`；
@@ -54,10 +54,41 @@
 - 验收证据：`docs/README.md` 与 `docs/EXTENSION_PLATFORM.md` 可跳转到本文件。
 - 状态：已接受
 
+### E4 — 工具参考页从“合并”改为“整页移除 + 旧书签重定向”
+
+- 阶段：P1
+- 计划：把工具参考的内容合并进 MCP 页，保留独立 reference 页作为可选入口。
+- 实际：删除 `public/console/pages/reference/`、导航按钮、`#section-reference`、`consolePages.reference`/`PAGE_FRAGMENTS`；`#reference` 旧 hash 重定向到 `#mcp`。
+- 原因：工具清单改为运行时 `tools/list` 后，独立页会重复维护同一份数据；保留一个只读静态页只会再次变成“摆设”，且容易与 MCP 页数据不一致。
+- 影响：旧书签不会落到未知页面；MCP 页是唯一工具入口。
+- 验收证据：`test-console-static.mjs` 去掉 reference 基线后全过；UI 用例断言无 reference 导航/容器；`#reference` 重定向由 router 归一化处理。
+- 状态：已接受
+
+### E5 — `GET /api/extensions` v2 直接替换旧字段，不保留兼容层
+
+- 阶段：P1
+- 计划：v2 返回真实 catalog；旧字段是否保留待定。
+- 实际：直接返回 `{version:2, generatedAt, scannedAt, skills, mcp, summary}`；旧 `mcp[].tools` 的静态值不再保留。
+- 原因：唯一消费者是控制台；保留旧字段会留下两套工具数据源，违背“单一事实来源”。agent token 不在该端点白名单内。
+- 影响：控制台必须同步升级；旧外部脚本若读 v1 字段会失败（当前无此类脚本）。
+- 验收证据：真机 `GET /api/extensions` 返回 v2 与 `summary.tools=51`；UI fixture 改为 v2 形状后 29/29。
+- 状态：已接受
+
+### E6 — 工具数改为运行时 `tools/list`，不再从源文件注册表手写
+
+- 阶段：P1
+- 计划：从 `src/mcp-*.js` 的注册表取工具数。
+- 实际：新增 `src/extensions/mcp-inventory.mjs`，用 MCP SDK 启动 server 并调用 `tools/list`；5 分钟缓存、15s 超时、单 server 错误隔离、并发去重、`refresh` 强制重扫。
+- 原因：snowluma-safe 存在 `TOOL_CONFIG_FLAGS` 条件注册，源文件 54 个 `server.tool(` 实际只暴露 48 个；静态扫描会给出假数字。
+- 影响：页面首次加载会触发 3 个子进程（约几秒），之后走缓存；刷新按钮强制重扫。失败 server 只显示错误，不影响其他 server。
+- 验收证据：实测 `1 + 2 + 48 = 51`；真机 API `summary{servers:3,online:3,errors:0,tools:51,skills:1}`；`test-extension-catalog.mjs` 4/4。
+- 状态：已接受
+
 ## 3. 待登记（占位，不预先承诺）
 
-- P1 若把 `reference` 页面并入 MCP 页面，需登记“旧路由是否保留、书签如何处理”。
-- P1 若 catalog 与 `GET /api/extensions` 旧字段不兼容，需登记“兼容层保留多久、何时删除”。
+- P1 旧路由/书签处理：已登记 E4（整页移除 + `#reference` 重定向）。
+- P1 catalog 旧字段兼容：已登记 E5（v2 直接替换，不保留兼容层）。
+- P1 工具数来源：已登记 E6（运行时 `tools/list` + 缓存/错误隔离）。
 - P2 若 Hub 第一版只做 `ext_list` / `ext_call`，需登记“哪些内置工具先不提升、为什么”。
 - P2 外部 MCP `allowArbitraryCommand` / `allowPrivateNetwork` 的实际默认值，若与设计不同，必须登记。
 - P3 预设 YAML 保存若丢注释，需登记“接受范围、备份位置、恢复方式”。

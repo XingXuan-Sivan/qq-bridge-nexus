@@ -23,7 +23,7 @@ export const consolePages = {
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
   skills: ['技能', '让 AI 知道，自己会什么。', '只读查看 DSH 与仓库里可用的 SKILL.md 技能包，启停与安装交给 DSH 自己管。'],
-  mcp: ['MCP', '把外部能力，接成标准接口。', '只读查看桥接自带的 MCP server；DSH 侧的 MCP 配置不在这里改。'],
+  mcp: ['MCP 与工具', '把外部能力，接成标准接口。', '只读查看桥接自带的 MCP server 与真实工具清单；工具参考已并入本页。'],
   behaviors: ['管理行为', '命令与工具，一处看清。', '按注册表查看桥接命令（含迁移状态），并只读列出 DSH 会话命令与 Agent 工具。'],
   'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
   'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
@@ -33,7 +33,6 @@ export const consolePages = {
   usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
   access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
   operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
-  reference: ['工具参考', '每一种能力，都清晰可见。', '查看桥接提供给 DSH 的 MCP 工具与用途。'],
 };
 
 const PAGE_STORAGE_KEY = 'qqb-console-page';
@@ -41,7 +40,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'mcp', 'behaviors', 'reference', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'mcp', 'behaviors', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -152,7 +151,7 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   // 不能用全局 [data-page] 选择器，否则点过一次分页后按钮会被当成页面宿主隐藏。
   document.querySelectorAll('main section[data-page]').forEach((el) => {
     el.hidden = el.dataset.page !== page;
-    // 非片段页（参考页）的 DOM 直接在 index.html 里，切到即就绪；片段页由 hydratePage 标记。
+    // 片段页由 hydratePage 标记；这里只处理仍有静态 DOM 的页面。
     if (el.dataset.page === page && !PAGE_FRAGMENTS.has(page)) el.dataset.pageReady = '1';
   });
   void hydratePage(page);
@@ -181,9 +180,15 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   }
 }
 
+/** 工具参考已并入 MCP 页：#reference 旧链接统一按 #mcp 处理。 */
+function normalizePageHash(page) {
+  return page === 'reference' ? 'mcp' : page;
+}
+
 /** 首屏恢复：hash（深链）→ sessionStorage（同标签页刷新）→ overview。 */
 function restoreInitialPage() {
-  const hashPage = location.hash.slice(1);
+  // 工具参考已并入 MCP 页：旧书签 #reference 直接落到 #mcp，不再当成无效页面。
+  const hashPage = location.hash.slice(1) === 'reference' ? 'mcp' : location.hash.slice(1);
   const storedPage = readStoredPage();
   const initialPage = Object.hasOwn(consolePages, hashPage) ? hashPage
     : Object.hasOwn(consolePages, storedPage ?? '') ? storedPage
@@ -204,16 +209,20 @@ export function initRouter() {
     setConsolePage(button.dataset.view, { focus: true, target: button.dataset.target });
   });
   window.addEventListener('hashchange', () => {
-    const page = location.hash.slice(1);
+    const page = normalizePageHash(location.hash.slice(1));
     if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }
-    if (Object.hasOwn(consolePages, page)) { setConsolePage(page, { updateHash: false }); return; }
+    if (Object.hasOwn(consolePages, page)) {
+      setConsolePage(page, { updateHash: false });
+      if (location.hash !== '#' + page) history.replaceState({}, '', '#' + page);
+      return;
+    }
     // 未知 hash：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
     setConsolePage(readStoredPage() ?? 'overview', { updateHash: false });
     history.replaceState({}, '', '#' + currentConsolePage);
   });
   // 前进/后退时 hash 也会变，hashchange 已覆盖；这里兜住「只改了 history.state」的情况。
   window.addEventListener('popstate', () => {
-    const page = location.hash.slice(1);
+    const page = normalizePageHash(location.hash.slice(1));
     if (Object.hasOwn(consolePages, page)) setConsolePage(page, { updateHash: false });
   });
   document.querySelector('.skip-link')?.addEventListener('click', (event) => {

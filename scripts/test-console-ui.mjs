@@ -18,7 +18,7 @@ const original = args.includes('--original');
 const acceptContracts = args.includes('--accept-contracts');
 const record = args.includes('--record-baseline') || acceptContracts;
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
-const views = ['overview', 'sessions', 'persona', 'social-v2', 'social-v1', 'slang', 'usage', 'access', 'operations', 'reference'];
+const views = ['overview', 'sessions', 'persona', 'social-v2', 'social-v1', 'slang', 'usage', 'access', 'operations', 'mcp'];
 const legacyIds = JSON.parse((await readFile(join(here, 'console-ui-legacy-ids.json'), 'utf8')).replace(/^\uFEFF/, ''));
 const baselinePath = join(here, 'console-ui-contracts.json');
 if (record && !original && !acceptContracts) throw new Error('--record-baseline requires --original; use --accept-contracts to re-record from the current console on purpose.');
@@ -158,6 +158,16 @@ try {
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
     await hydrate('social-v2');
+  });
+
+  await test('MCP page merges the tool reference and shows the real tool inventory', async () => {
+    await navigate('mcp');
+    await page.waitForFunction(() => document.querySelectorAll('#mcpList [data-table]').length >= 2);
+    const text = await page.locator('#mcpList').innerText();
+    assert.match(text, /snowluma_status/);
+    assert.match(await page.locator('#mcpMeta').innerText(), /1 个 server · 1 个工具/);
+    assert.equal(await page.locator('[data-view="reference"]').count(), 0, '工具参考已并入 MCP 页，不再有独立导航');
+    assert.equal(await page.locator('#section-reference').count(), 0, '旧工具参考容器应已移除');
   });
 
   await test('Field rows centre labels and keep two columns', async () => {

@@ -44,6 +44,8 @@ const tests = [
   'test-voice-gui.mjs',
   // 控制台静态契约（跑不了 Playwright 的环境下的替代回归）
   'test-console-static.mjs',
+  // 扩展 catalog（P1）：技能/MCP 统一视图、真工具数的缓存与错误隔离
+  'test-extension-catalog.mjs',
   // HTTP 边界（docs/HTTP_BOUNDARY.md）：静态资源穿越/符号链接/扩展名白名单，未启用与未知端点 404
   'test-http-boundary.mjs',
   // 语音系统整体结构检查（入口/依赖/端点/开关/文档一致性）

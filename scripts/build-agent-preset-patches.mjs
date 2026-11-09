@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import yaml from 'js-yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -65,7 +65,7 @@ function readYaml(file) {
     throw new Error(`读取失败 ${file}：${error?.message ?? error}`);
   }
   try {
-    return yaml.load(text);
+    return parseYaml(text);
   } catch (error) {
     throw new Error(`${file} 不是合法 YAML：${error?.message ?? error}`);
   }
@@ -139,8 +139,9 @@ export function renderPatch(name) {
     `# 该包以 link: 依赖注册在 profile package.json（node_modules junction 由 setup-dsh.mjs 维护）。`,
     '',
   ].join('\n');
-  // lineWidth: -1 —— 长行不折行，产物与源逐字对应，diff 只反映真实改动。
-  return `${header}${yaml.dump([{ insert: [row] }], { lineWidth: -1, noRefs: true })}`;
+  // lineWidth: 0 —— 长行不折行；aliasDuplicateObjects: false —— 不生成锚点/别名（等价 js-yaml 的 noRefs）；
+  // singleQuote: true —— 尽量用单引号，保持与旧产出（js-yaml）逐字一致，diff 只反映真实改动。
+  return `${header}${stringifyYaml([{ insert: [row] }], { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true })}`;
 }
 
 /** 生成（或校验）全部 patch 文件。@returns {{file:string,changed:boolean}[]} */

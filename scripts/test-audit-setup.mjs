@@ -1,6 +1,6 @@
 // Offline integration tests. Every setup invocation receives its own repository and DSH_HOME.
 // QQ_BRIDGE_TEST_YAML_ROOT is only useful when auditing with an intentionally read-only
-// node_modules tree; normal installs resolve the declared js-yaml dependency directly.
+// node_modules tree; normal installs resolve the declared yaml dependency directly.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,8 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const parserRoot = process.env.QQ_BRIDGE_TEST_YAML_ROOT || path.dirname(require.resolve('js-yaml/package.json'));
-const yaml = (await import(pathToFileURL(path.join(parserRoot, 'dist/js-yaml.mjs')).href)).default;
+const parserRoot = process.env.QQ_BRIDGE_TEST_YAML_ROOT || path.dirname(require.resolve('yaml/package.json'));
+const yamlModule = await import(pathToFileURL(path.join(parserRoot, 'dist/index.js')).href);
+const { parse: parseYaml } = yamlModule.default ?? yamlModule;
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-bridge-audit-setup-'));
 let failures = 0;
 
@@ -26,7 +27,7 @@ function fixture(name, patch = '') {
   fs.copyFileSync(path.join(root, 'scripts/build-agent-preset-patches.mjs'), path.join(repo, 'scripts/build-agent-preset-patches.mjs'));
   fs.cpSync(path.join(root, 'dsh'), path.join(repo, 'dsh'), { recursive: true });
   fs.cpSync(path.join(root, 'dsh-bundles'), path.join(repo, 'dsh-bundles'), { recursive: true });
-  fs.cpSync(parserRoot, path.join(repo, 'node_modules/js-yaml'), { recursive: true });
+  fs.cpSync(parserRoot, path.join(repo, 'node_modules/yaml'), { recursive: true });
   fs.mkdirSync(path.join(home, 'profiles/web'), { recursive: true });
   const patchFile = path.join(home, 'profiles/web/cordis.patch.yml');
   fs.writeFileSync(patchFile, patch);
@@ -51,11 +52,11 @@ try {
   test('shared inserts, quoted IDs, flow YAML and unrelated nested arrays survive repeat setup', () => {
     const source = `# user patch\n- insert:\n    - id: mcp-snowluma\n      name: old\n    - id: custom\n      name: custom-plugin\n      config:\n        empty:\n          []\n        nested:\n          - id: mcp-snowluma-host\n            value: keep\n- insert:\n    - id: 'mcp-snowluma-host' # previous setup\n      name: old\n- {insert: [{id: mcp-web-search-safe, name: old}]}\n`;
     const f = fixture('structured', source);
-    const originalCustom = yaml.load(source)[0].insert[1];
+    const originalCustom = parseYaml(source)[0].insert[1];
     for (let i = 0; i < 2; i++) {
       const result = f.run();
       assert.equal(result.status, 0, result.stderr || result.error?.message);
-      const doc = yaml.load(fs.readFileSync(f.patchFile, 'utf8'));
+      const doc = parseYaml(fs.readFileSync(f.patchFile, 'utf8'));
       const entries = doc.flatMap((op) => op.insert || []);
       assert.deepEqual(entries.find((entry) => entry.id === 'custom'), originalCustom);
       for (const id of ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-safe']) {
@@ -72,7 +73,7 @@ try {
     const f = fixture('legacy', `[]\n- insert:\n    - id: custom\n      name: custom\n      config:\n        text: |\n          []\n          keep me\n`);
     const result = f.run();
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(yaml.load(fs.readFileSync(f.patchFile, 'utf8'))[0].insert[0].config.text, '[]\nkeep me\n');
+    assert.equal(parseYaml(fs.readFileSync(f.patchFile, 'utf8'))[0].insert[0].config.text, '[]\nkeep me\n');
   });
 
   test('malformed patch fails before replacing user configuration or presets', () => {

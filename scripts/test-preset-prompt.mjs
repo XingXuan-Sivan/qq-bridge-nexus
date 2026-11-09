@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 import {
   PRESET_BLOCKING_SUBSTRINGS,
   PRESET_REQUIRED_MARKERS,
@@ -68,8 +68,8 @@ test('原样写回是幂等的，且不改变提示词语义', () => {
 
 test('改写只动 prefix，其它条目与文件头注释原样保留', () => {
   const next = renderPresetPromptYaml(source, `${originalPrefix}\n\n【新增段落】测试内容。`);
-  const before = yaml.load(source);
-  const after = yaml.load(next);
+  const before = parseYaml(source);
+  const after = parseYaml(next);
   assert.deepEqual(after.map((row) => row.id), before.map((row) => row.id), '条目 id 顺序不变');
   for (const id of before.map((row) => row.id)) {
     if (id === 'persona') continue;
@@ -102,8 +102,8 @@ test('特殊内容可安全往返（空行、缩进、Markdown、模板变量、
   // 必须在保留安全不变量的前提下追加特殊内容，否则会被阻断校验拦下
   const next = renderPresetPromptYaml(source, `${originalPrefix}\n\n${tricky}`);
   assert.equal(extractPresetPrefix(next), `${originalPrefix}\n\n${tricky}`);
-  const rows = yaml.load(next);
-  assert.equal(rows.length, yaml.load(source).length, '其它条目数量不变');
+  const rows = parseYaml(next);
+  assert.equal(rows.length, parseYaml(source).length, '其它条目数量不变');
 });
 
 test('危险输入被拒绝，且不产生半截结果', () => {

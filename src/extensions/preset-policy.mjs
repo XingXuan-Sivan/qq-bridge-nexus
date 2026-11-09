@@ -14,7 +14,7 @@
 //   allow: ['*']
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 
 const PRESET_ID_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const MAX_LIST_ITEMS = 300;
@@ -116,7 +116,7 @@ export function createPresetPolicy({ root, log = () => {} }) {
     let policy;
     try {
       const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
-      const parsed = yaml.load(text, { json: true }) ?? {};
+      const parsed = parseYaml(text) ?? {};
       policy = normalizePresetPolicy(parsed);
     } catch (error) {
       log(`[extensions] preset policy 解析失败 ${preset}: ${error?.message ?? error}`);

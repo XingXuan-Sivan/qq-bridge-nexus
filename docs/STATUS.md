@@ -260,4 +260,6 @@ npm run test:console-ui
 - 代码编辑器：`components/code-editor/`（`entry.mjs` + `vendor/codemirror.js` + 主题/高亮）替换预设页与行为档案的 textarea，Monaco 风亮暗配色走 CSS 变量；`npm run build:console-vendor` 重建、`npm run verify:console-vendor` 比对 sha256。
 - 终端：`components/terminal/` 抽出统一外观，MCP 日志弹窗、插件日志、控制中心终端三处共用（控制中心经 `/shared/terminal.css` 映射）。
 - 表格：`components/table/table.js` 支持可展开父行（`children` + `tree-toggle`）与 `pager:false` 全量显示；拓展功能改为 37 项工具表（分类筛选、搜索、全开/全关、工具栏保存）；MCP 页合并成一张「服务器 → 工具」层级表；预设扩展授权按 server 分组、组头三态全选并级联到工具。
-- 验收：`test-console-static` 全过；`test-console-ui` **31/31、39 次写**；`test-control-center` **fail 0**；`verify:console-vendor` OK；全量 audit **103/103**。未做：其余 `js-yaml` 迁移（见 D24），以及表格的分组行/多选列/可配置限高（见 D23）。
+- 验收：`test-console-static` 全过；`test-console-ui` **31/31、39 次写**；`test-control-center` **fail 0**；`verify:console-vendor` OK；全量 audit **103/103**。
+- `js-yaml` 统一迁移（G5 剩余项）：桥接自有代码全部改用 `yaml` 的 `parse`/`stringify`，`js-yaml` 已从依赖删除；`stringify` 用 `lineWidth: 0 + singleQuote: true + aliasDuplicateObjects: false`，重新生成的 5 个 patch 与旧产出逐字一致。三个 `verify-*`/`test-setup-dsh-idempotent` 仍加载 DSH 自带的 `js-yaml` 做对照（见 D24）。
+- 未做：表格的分组行 / 多选列 / 可配置限高（见 D23），等有真实使用点再补。

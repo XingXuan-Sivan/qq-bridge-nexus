@@ -3,9 +3,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 
-const preset = yaml.load(fs.readFileSync(
+const preset = parseYaml(fs.readFileSync(
   new URL('../dsh/agent-presets/qq-chat-v2/agent.cordis.yml', import.meta.url), 'utf8',
 ));
 const persona = preset.find((row) => row.id === 'persona');

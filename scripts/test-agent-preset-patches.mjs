@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 import {
   BUNDLE_DIR, GUARD_SPECIFIER, PRESETS, REPO_ROOT, RELATIVE_ROW_REWRITES,
   buildPatches, patchFileFor, presetRowId,
@@ -23,7 +23,7 @@ function ok(cond, label) {
 }
 
 const read = (p) => fs.readFileSync(p, 'utf8');
-const load = (p) => yaml.load(read(p));
+const load = (p) => parseYaml(read(p));
 
 console.log('## 1. 产物与源不漂移（--check 语义）');
 {

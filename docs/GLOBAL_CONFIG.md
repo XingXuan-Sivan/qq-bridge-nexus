@@ -1,7 +1,7 @@
 # 全局配置：三层模型与配置归一化方案
 
-> 状态：**G1–G4 已提交；G5 部分完成**（2026-11-09）。
-> G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页 `aa2176a`、G4 动态 picker / CM6 / 统一 `yaml` `169da58`。G5 已完成文档收尾与控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）；其余 `js-yaml` 迁移按 D24 延后。
+> 状态：**G1–G4 已提交；G5 已完成**（2026-11-09）。
+> G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页 `aa2176a`、G4 动态 picker / CM6 / 统一 `yaml` `169da58`。G5 完成文档收尾、控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）与 `js-yaml` 迁移；表格可选能力（D23）留待有使用点再补。
 > 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.16。
 
 ## 0. 结论
@@ -436,7 +436,7 @@ behaviorKind  = behavior.kind
 - 预设结构化保存（meta/extensions）全部改走 `yaml` Document；`js-yaml` 从桥接自有代码中移除，避免两个 YAML 库并存；
 - DSH 自己 bundle 里的 `js-yaml` 不属于桥接依赖，保持不动。
 
-迁移影响：目前 `src/presets/store.mjs` 已改 `yaml` Document（`writeMeta`/`writeExtensions` 保注释，`test-preset-store` 6/6）；`src/extensions/skill-store.mjs`、`src/extensions/preset-policy.mjs`、`src/bridge.js`、`src/dsh-client.js`、`src/preset-prompt.js`、`src/web-search.js`、`scripts/build-agent-preset-patches.mjs`、`scripts/setup-dsh.mjs` 及 4 个测试仍 `import yaml from 'js-yaml'`。这些属于 G5 的统一迁移项；在完成前不删 `js-yaml` 依赖，避免半迁移。DSH 自己 bundle 里的 `js-yaml` 不属于桥接依赖，保持不动。
+迁移影响（已完成）：桥接自有代码已全部改用 `yaml`——`src/presets/store.mjs` 用 `parseDocument`/`setIn`（保注释，`test-preset-store` 6/6），`src/extensions/skill-store.mjs`、`src/extensions/preset-policy.mjs`、`scripts/build-agent-preset-patches.mjs`、`scripts/setup-dsh.mjs` 及 3 个测试改用 `parse`/`stringify`；产出与旧 `js-yaml` 逐字一致（`lineWidth: 0` + `singleQuote: true` + `aliasDuplicateObjects: false`），patch 文件无 diff。`js-yaml` 已从 `package.json` 删除。仅 `scripts/test-setup-dsh-idempotent.mjs`、`scripts/verify-dsh-020-adaptation.mjs`、`scripts/verify-persona-config.mjs` 仍按路径加载 **DSH 自带的** `js-yaml`（用于验证 DSH 侧解析结果），不属于桥接依赖。
 
 ### 8.3 保存交互
 
@@ -498,7 +498,7 @@ behaviorKind  = behavior.kind
 | G4 | 预设页动态 picker + 统一代码编辑器 + YAML Document | 注释保留测试、保存/应用/回滚 |
 | G5 | 文档/STATUS/配置说明收尾 | 提交、工作区干净 |
 
-状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a`、G4 `169da58` 已提交；G5 的文档收尾与控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表）已完成，验收见 `docs/STATUS.md` 6.16。其余 `js-yaml` 使用统一迁移按 `PLAN_DEVIATIONS.md` D24 延后：4 处是 DSH 互操作/夹具，其余需逐处改 API 并回归，不与本轮混做。
+状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a`、G4 `169da58` 已提交；G5 已完成文档收尾、控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）与 `js-yaml` 统一迁移（见 §8.2）。表格可选能力（分组行/多选列/可配置限高）按 `PLAN_DEVIATIONS.md` D23 留待有使用点再补。
 
 ## 11. 已拍板（2026-11-09，m31268）
 

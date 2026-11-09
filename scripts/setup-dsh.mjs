@@ -18,7 +18,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import yaml from 'js-yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { BUNDLE_DIR, PRESETS, buildPatches, patchFileFor } from './build-agent-preset-patches.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -184,7 +184,7 @@ function prepareCordisPatch() {
     lines.splice(first, 1);
   }
   let doc;
-  try { doc = yaml.load(lines.join('\n')) ?? []; }
+  try { doc = parseYaml(lines.join('\n')) ?? []; }
   catch (error) { fatal(`failed to parse ${patchFile}; file unchanged: ${error.message}`); }
   if (!Array.isArray(doc)) fatal(`${patchFile} must contain a YAML array; file unchanged`);
   let removed = 0;
@@ -204,7 +204,7 @@ function prepareCordisPatch() {
     if (entries.length || Object.keys(operation).length > 1) kept.push({ ...operation, insert: entries });
   }
   ensurePermissionPresets(kept);
-  const text = (kept.length ? `${yaml.dump(kept, { lineWidth: -1, noRefs: true })}\n` : '') + mcpEntries();
+  const text = (kept.length ? `${stringifyYaml(kept, { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true })}\n` : '') + mcpEntries();
   return { patchFile, original, text, removed };
 }
 

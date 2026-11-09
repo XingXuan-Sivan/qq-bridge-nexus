@@ -6,7 +6,7 @@
 // - 所有写入先校验 frontmatter，再备份旧文件；路径必须落在技能根内，拒绝穿越。
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 import zlib from 'node:zlib';
 
 const SKILL_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -45,7 +45,7 @@ export function parseSkillDocument(text) {
   if (end < 0) throw new SkillStoreError('SKILL.md 的 frontmatter 没有结束标记', 'invalid_frontmatter');
   let meta;
   try {
-    meta = yaml.load(source.slice(3, end)) ?? {};
+    meta = parseYaml(source.slice(3, end)) ?? {};
   } catch (error) {
     throw new SkillStoreError(`frontmatter YAML 解析失败：${error?.message ?? error}`, 'invalid_frontmatter');
   }

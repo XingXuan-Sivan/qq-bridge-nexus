@@ -229,3 +229,9 @@
 /* 阈值下面那句「默认 30…」贴着输入框，不要继承表单行距再拉一大截。 */
 #section-compact-config .field-notes { margin-top: 4px; }
 
+/* 拓展功能：两张卡由 JS 注入到这个宿主里。宿主本身是主栅格的直接子项，
+   不让它参与布局（display:contents）卡片才会按全局 22px 间距排开。 */
+#toolsPanel {
+  display: contents;
+}
+

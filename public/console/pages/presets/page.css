@@ -1,4 +1,6 @@
 #presetEditor .form-section--card { margin-bottom: 14px; }
+/* 预设列表：新建按钮独立一行、靠右（表格组件 actions 槽位在部分布局下宽度塌陷，单独放更稳）。 */
+.preset-list-bar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .preset-row-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
 .preset-desc {
   display: -webkit-box;
@@ -58,8 +60,16 @@
 .behavior-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
 .behavior-form-panel .form-cols { row-gap: 14px; }
 .behavior-form-panel .behavior-form { width: 100%; }
-.behavior-form-panel .form-section { width: 100%; margin: 0; padding: 14px 16px 6px; }
-.behavior-form-panel .form-section + .form-section { margin-top: 14px; }
+/* 分组各自一张卡：外层只是排版容器，不再重复画卡。 */
+.behavior-form-panel .form-section--card,
+.agent-form-panel .form-section--card {
+  width: 100%;
+  margin: 0;
+}
+.behavior-form-panel .form-section--card + .form-section--card,
+.agent-form-panel .form-section--card + .form-section--card {
+  margin-top: 14px;
+}
 /* 带「毫秒」等 hint 的行：标签对齐输入框首行，而不是整行（含 hint）的垂直中心。 */
 .behavior-form-panel .field-row { align-items: start; }
 .behavior-form-panel .field-label { min-height: 40px; height: 40px; }
@@ -70,8 +80,6 @@
 /* 预设的插件配置表单：与行为档案表单同一套排版（两列、标签首行对齐、分组整宽）。 */
 .agent-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
 .agent-form-panel .form-cols { row-gap: 14px; }
-.agent-form-panel .form-section { width: 100%; margin: 0; padding: 14px 16px 6px; }
-.agent-form-panel .form-section + .form-section { margin-top: 14px; }
 .agent-form-panel .field-row { align-items: start; }
 .agent-form-panel .field-label { min-height: 40px; height: 40px; }
 .agent-form-panel .field-control > input[type="text"],

@@ -9,6 +9,7 @@ import { attachTextareaEditor } from '../../components/code-editor/code-editor.j
 import { readAgentForm, renderAgentForm } from './agent-form.js';
 import { PRESETS_FIELDS } from './fields.js';
 import { behaviorFormHtml, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
+import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 
 let presetsCache = [];
 let editingId = '';
@@ -190,10 +191,14 @@ function authSummary(preset) {
 
 function actionButtons(preset) {
   const id = esc(preset.id);
+  const remove = preset.builtin
+    ? ''
+    : `<button class="btn small danger" type="button" data-preset-act="delete" data-preset-id="${id}">删除</button>`;
   return '<div class="preset-row-actions">'
     + `<button class="btn small" type="button" data-preset-act="edit" data-preset-id="${id}">编辑</button>`
     + `<button class="btn small primary" type="button" data-preset-act="apply" data-preset-id="${id}">应用</button>`
     + `<button class="btn small danger" type="button" data-preset-act="rollback" data-preset-id="${id}">回滚</button>`
+    + remove
     + '</div>';
 }
 
@@ -212,7 +217,8 @@ function row(preset) {
 function renderList() {
   const host = document.getElementById('presetList');
   if (!host) return;
-  host.innerHTML = dataTableHtml({
+  host.innerHTML = '<div class="preset-list-bar"><button class="btn primary" type="button" id="presetNewOpen">新建预设</button></div>'
+    + dataTableHtml({
     columns: [
       { label: '预设', width: '150px' },
       { label: '名称', width: '180px' },
@@ -222,13 +228,14 @@ function renderList() {
     ],
     rows: presetsCache.map(row),
     pageSize: 10,
-    search: false,
+    search: { placeholder: '搜索预设 id、名称或说明…' },
     refresh: true,
-    meta: `${presetsCache.length} 个预设`,
+    meta: `${presetsCache.length} 个预设（内置 ${presetsCache.filter((p) => p.builtin).length} 个）`,
     empty: '没有可管理的预设',
     actions: '',
   });
   initDataTables(host, { onRefresh: () => refreshPresets(true) });
+  host.querySelector('#presetNewOpen')?.addEventListener('click', () => openCreatePresetModal());
 }
 
 function setField(name, value) {
@@ -374,6 +381,10 @@ async function fillEditor(preset) {
     ? `插件配置已载入（${preset.validation.rows} 个插件行）`
     : `插件配置有问题：${preset.validation?.error ?? '未知错误'}`;
   document.getElementById('presetEditor').hidden = false;
+  // 自建预设没有出厂版本：还原按钮只对系统自带预设展示。
+  const builtin = Boolean(presetsCache.find((item) => item.id === preset.id)?.builtin);
+  const factoryButton = document.getElementById('presetFactory');
+  if (factoryButton) factoryButton.hidden = !builtin;
   document.getElementById('presetEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
   await refreshPresetPrompt(preset.id);
 }
@@ -473,6 +484,45 @@ function refreshCreateOptions() {
   if (current && presetsCache.some((preset) => preset.id === current)) select.value = current;
 }
 
+// 新建预设：走项目统一弹窗，字段与编辑区的基础信息保持同一套排版。
+function openCreatePresetModal() {
+  const existing = document.getElementById('presetCreateModal');
+  if (existing) { openModal(existing); return; }
+  const options = presetsCache
+    .map((preset) => `<option value="${esc(preset.id)}">${esc(preset.id)} · ${esc(preset.name || preset.id)}</option>`)
+    .join('');
+  const body = `
+    <div class="field-row">
+      <label class="field-label" for="presetNewId">预设 id</label>
+      <div class="field-control">
+        <input class="input" id="presetNewId" placeholder="my-preset" autocomplete="off">
+        <p class="field-hint">只能用小写字母、数字与连字符，且以字母或数字开头。</p>
+      </div>
+    </div>
+    <div class="field-row">
+      <label class="field-label" for="presetNewName">名称</label>
+      <div class="field-control">
+        <input class="input" id="presetNewName" placeholder="留空则用「来源名（副本）」">
+      </div>
+    </div>
+    <div class="field-row">
+      <label class="field-label" for="presetNewFrom">复制自</label>
+      <div class="field-control"><select class="input" id="presetNewFrom">${options}</select></div>
+    </div>
+    <p class="meta" id="presetNewMsg" role="status"></p>`;
+  document.body.insertAdjacentHTML('beforeend', modalHtml({
+    id: 'presetCreateModal',
+    title: '新建预设',
+    body,
+    footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="presetNewCreate">创建</button>',
+  }));
+  const overlay = document.getElementById('presetCreateModal');
+  wireModal(overlay, { onClose: () => overlay.remove() });
+  overlay.querySelector('#presetNewCreate').addEventListener('click', () => void createPresetFromForm());
+  openModal(overlay);
+  overlay.querySelector('#presetNewId').focus();
+}
+
 async function createPresetFromForm() {
   if (busy) return;
   const id = document.getElementById('presetNewId')?.value.trim() ?? '';
@@ -492,12 +542,33 @@ async function createPresetFromForm() {
     const result = await api('/api/extensions/presets/create', 'POST', { id, from, name: name || undefined });
     if (!result.ok) throw new Error(result.error || '创建失败');
     setCreateMsg(`已创建 ${result.id}；正在打开编辑…`, 'ok');
+    document.getElementById('presetCreateModal')?.remove();
     await refreshPresets(true);
-    document.getElementById('presetNewId').value = '';
-    document.getElementById('presetNewName').value = '';
     await openPreset(result.id);
   } catch (error) {
     setCreateMsg(error?.message ?? '创建失败', 'error');
+  } finally {
+    busy = false;
+  }
+}
+
+// 删除自建预设：先确认，后端会先整份备份再删目录；自带预设后端直接拒绝。
+async function deletePreset(id) {
+  const preset = presetsCache.find((item) => item.id === id);
+  if (!preset || preset.builtin) return;
+  if (!confirm(`删除预设「${preset.name || id}」（${id}）？删除前会自动备份到 state/preset-editor-backups。`)) return;
+  busy = true;
+  try {
+    const result = await api(`/api/extensions/presets/${encodeURIComponent(id)}`, 'DELETE');
+    if (!result.ok) throw new Error(result.error || '删除失败');
+    showConsoleToast(`已删除 ${id}`);
+    if (editingId === id) {
+      editingId = '';
+      document.getElementById('presetEditor').hidden = true;
+    }
+    await refreshPresets(true);
+  } catch (error) {
+    showConsoleToast(error?.message ?? '删除失败', { tone: 'error' });
   } finally {
     busy = false;
   }
@@ -617,12 +688,10 @@ function showPresetsTab(name) {
 export function init() {
   const main = document.querySelector('[data-presets-fields="main"]');
   const edit = document.querySelector('[data-presets-fields="edit"]');
-  const create = document.querySelector('[data-presets-fields="create"]');
   // 页面里的开关都是动态渲染的 role=switch 按钮，统一挂一次点击委托即可。
   bindSwitches(document.querySelector('.presets-page'));
   if (main) renderFields(main, PRESETS_FIELDS.main.fields);
   if (edit) renderFields(edit, PRESETS_FIELDS.edit.fields);
-  if (create) renderFields(create, PRESETS_FIELDS.create.fields);
   const promptSlot = document.querySelector('[data-presets-fields="simPrompt"]');
   if (promptSlot) renderFields(promptSlot, PRESETS_FIELDS.simPrompt.fields);
   // 仿真提示词卡在字段规格里只是一个占位（presetPromptSlot），渲染后把卡片搬进去，
@@ -660,11 +729,13 @@ export function init() {
     if (button.dataset.presetAct === 'edit') void openPreset(id);
     else if (button.dataset.presetAct === 'apply') void applyPreset(id);
     else if (button.dataset.presetAct === 'rollback') void rollbackPreset(id);
+    else if (button.dataset.presetAct === 'delete') void deletePreset(id);
   });
   document.getElementById('presetSave')?.addEventListener('click', () => void savePreset());
   document.getElementById('presetApply')?.addEventListener('click', () => void savePreset({ apply: true }));
   document.getElementById('presetFactory')?.addEventListener('click', () => void restoreFactoryPreset());
-  document.getElementById('presetNewCreate')?.addEventListener('click', () => void createPresetFromForm());
+  // 行为档案是默认标签，进页面就要把列表读出来（脚本跑完后再切，避免早于字段渲染）。
+  void showPresetsTab('behaviors');
   document.getElementById('presetRollback')?.addEventListener('click', () => {
     if (editingId) void rollbackPreset(editingId);
   });

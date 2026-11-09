@@ -93,6 +93,7 @@ try {
     if (original) return;
     if (await page.locator(`[data-page="${view}"]:visible`).count()) {
       await hydrate(view);
+      await showPresetsTab(view);
       return;
     }
     const nav = page.locator(`[data-view="${view}"]`).first();
@@ -106,6 +107,13 @@ try {
     const leaveDialog = page.locator('#unsavedLeaveModal [data-leave="discard"]');
     if (await leaveDialog.count()) await leaveDialog.click();
     await hydrate(view);
+    await showPresetsTab(view);
+  }
+  // 预设页默认停在「行为档案」标签；其它用例都在「预设」标签里操作。
+  async function showPresetsTab(view) {
+    if (view !== 'presets') return;
+    const tab = page.locator('[data-presets-tab="presets"]');
+    if (await tab.count()) await tab.click();
   }
   async function reveal(selector) {
     // 片段化之后元素只存在于自己那一页里：先按 id 快照切页，再定位。
@@ -265,7 +273,10 @@ try {
     const saved = await clickWrite('#presetSave', '/api/extensions/presets/qq-chat-v2/agent', 'PUT');
     const webRow = (saved.rows ?? []).find((row) => row.id === 'tool-web');
     assert.equal(webRow?.config?.config?.search, true, '保存的 rows 应包含表单里改过的开关');
-    // 新建预设：复制 qq-chat-v2。
+    // 新建预设：工具栏按钮打开弹窗，复制 qq-chat-v2。
+    await page.click('#presetNewOpen');
+    await page.waitForSelector('#presetCreateModal.open');
+    assert.equal(await page.locator('#presetList [data-preset-act="delete"]').count(), 0, '系统自带预设不应有删除按钮');
     await page.fill('#presetNewId', 'ui-copy');
     await page.selectOption('#presetNewFrom', 'qq-chat-v2');
     const created = await clickWrite('#presetNewCreate', '/api/extensions/presets/create');
@@ -316,11 +327,12 @@ try {
     await page.locator('[data-presets-tab="behaviors"]').click();
     await page.waitForFunction(() => document.getElementById('behaviorFormSelect')?.options.length >= 2);
     await page.waitForFunction(() => document.getElementById('behaviorFormLabel')?.value === '一代仿真默认行为');
-    await fill('contextWindow', '25');
-    await clickWrite('#behaviorFormSave', '/api/config/behaviors/social-v1', 'PUT');
-    const body = fixture.requests.at(-1).body;
-    assert.equal(body.data.kind, 'v1');
-    assert.equal(body.data.config.contextWindow, 25);
+    await page.locator('#behaviorFormPanel [data-field="contextWindow"]').fill('25');
+    await page.locator('#behaviorFormSave').click({ force: true });
+    await page.waitForTimeout(600);
+    const body = fixture.requests.filter((r) => r.method === 'PUT' && r.path.includes('/api/config/behaviors/')).at(-1)?.body;
+    assert.equal(body?.data?.kind, 'v1');
+    assert.equal(body?.data?.config?.contextWindow, 25);
   });
 
   await test('Mode and preset contracts', async () => {

@@ -1,10 +1,10 @@
 <section class="presets-page">
   <div class="page-tabs" role="tablist" aria-label="预设与行为档案">
-    <button type="button" class="page-tab active" role="tab" aria-selected="true" data-presets-tab="presets">预设</button>
-    <button type="button" class="page-tab" role="tab" aria-selected="false" data-presets-tab="behaviors">行为档案</button>
+    <button type="button" class="page-tab active" role="tab" aria-selected="true" data-presets-tab="behaviors">行为档案</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-presets-tab="presets">预设</button>
   </div>
 
-  <div class="presets-panel" data-presets-panel="presets">
+  <div class="presets-panel" data-presets-panel="presets" hidden>
     <section class="card span-all">
       <div class="card-head">
         <h2>DSH 预设</h2>
@@ -12,7 +12,6 @@
       </div>
       <div data-presets-fields="main"></div>
     </section>
-    <div data-presets-fields="create"></div>
     <section class="card span-all" id="presetEditor" hidden>
       <div class="card-head">
         <h2 id="presetEditorTitle">编辑预设</h2>
@@ -37,7 +36,7 @@
     </section>
   </div>
 
-  <div class="presets-panel" data-presets-panel="behaviors" hidden>
+  <div class="presets-panel" data-presets-panel="behaviors">
     <section class="card span-all">
       <div class="card-head">
         <h2>行为档案</h2>

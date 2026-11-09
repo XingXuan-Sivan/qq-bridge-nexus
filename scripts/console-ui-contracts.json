@@ -98,6 +98,8 @@
         "config": {
           "triggerProbability": 0.2,
           "contextWindow": 25,
+          "maxReplyChars": 0,
+          "mustReplyKeywords": [],
           "activeCheckMinMs": 0,
           "activeCheckMaxMs": 0,
           "activeReplyDelayMinMs": 0,
@@ -105,24 +107,22 @@
           "activeDurationEnabled": false,
           "activeDurationMinMs": 0,
           "activeDurationMaxMs": 0,
-          "idleWindowMs": 0,
-          "idleRetryProbability": 0,
-          "idleRetryWaitMs": 0,
           "proactiveEnabled": false,
           "proactiveIdleThresholdMs": 0,
           "proactiveCheckMinMs": 0,
           "proactiveCheckMaxMs": 0,
           "proactiveProbability": 0,
-          "skipProbability": 0,
-          "surrenderProbability": 0,
-          "maxReplyChars": 0,
-          "mustReplyKeywords": [],
+          "idleWindowMs": 0,
+          "idleRetryProbability": 0,
+          "idleRetryWaitMs": 0,
           "burstEnabled": false,
           "burstIntervalMinMs": 0,
           "burstIntervalMaxMs": 0,
           "longGapProbability": 0,
           "longGapMinMs": 0,
-          "longGapMaxMs": 0
+          "longGapMaxMs": 0,
+          "skipProbability": 0,
+          "surrenderProbability": 0
         }
       }
     }

@@ -165,6 +165,7 @@ export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, sc
         order: meta?.order ?? null,
         behavior: meta?.behavior ?? '',
         editable: true,
+        builtin: Boolean(factoryRoot) && fs.existsSync(path.join(factoryRoot, id)),
         error,
         hasExtensions: fs.existsSync(fileFor(id, 'extensions.yml')),
         extensions,
@@ -327,6 +328,18 @@ export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, sc
     return { id: value, from: source };
   }
 
+  // 删除自建预设：出厂预设只能改不能删；删前先整份备份，误删还能从备份目录恢复。
+  function deletePreset(id) {
+    const target = presetDir(id);
+    if (factoryRoot && fs.existsSync(path.join(factoryRoot, id))) {
+      throw new Error('系统自带预设不能删除，只能修改或还原出厂');
+    }
+    const backupInfo = backup(id, 'before-delete');
+    fs.rmSync(target, { recursive: true, force: true });
+    log(`控制台：已删除预设 ${id}`);
+    return { id, backup: backupInfo };
+  }
+
   // 还原出厂：用 assets/default-presets/<id>/ 覆盖，覆盖前先整份备份。
   function restoreFactory(id) {
     const target = presetDir(id);
@@ -396,5 +409,5 @@ export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, sc
     }
   }
 
-  return { list, read, readAgent, backup, writeMeta, writeExtensions, writeAgentYaml, writeAgentConfig, createPreset, restoreFactory, listBackups, restore, apply, presetDir };
+  return { list, read, readAgent, backup, writeMeta, writeExtensions, writeAgentYaml, writeAgentConfig, createPreset, deletePreset, restoreFactory, listBackups, restore, apply, presetDir };
 }

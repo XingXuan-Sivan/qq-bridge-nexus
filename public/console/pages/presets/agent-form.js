@@ -1,4 +1,4 @@
-// 预设插件配置的表单规格：按 agent.cordis.yml 的插件行生成字段，
+﻿// 预设插件配置的表单规格：按 agent.cordis.yml 的插件行生成字段，
 // 读表单时按行组装回 {id, config} 的 patch，交给 PUT /api/extensions/presets/<id>/agent。
 import { getSwitch, renderFields } from '../../components/form/form.js';
 
@@ -85,11 +85,11 @@ export function agentFormFields(rows) {
   const fields = [];
   for (const [rowId, spec] of Object.entries(PLUGIN_FORMS)) {
     if (!hasRow(rows, rowId)) continue;
-    fields.push({ type: 'section', label: spec.title, card: true });
+    fields.push({ type: 'section', card: true, label: spec.title, card: true });
     for (const field of spec.fields) fields.push(fieldSpec(rowId, field));
   }
   if (hasRow(rows, 'compaction')) {
-    fields.push({ type: 'section', label: COMPACTION_FORM.title, card: true });
+    fields.push({ type: 'section', card: true, label: COMPACTION_FORM.title, card: true });
     for (const field of COMPACTION_FORM.fields) fields.push(fieldSpec('compaction', field));
   }
   return fields;
@@ -206,3 +206,4 @@ export function readAgentForm(host, rows) {
   }
   return [...patches.values()];
 }
+

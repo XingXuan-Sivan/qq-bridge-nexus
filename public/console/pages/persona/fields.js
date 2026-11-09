@@ -106,24 +106,6 @@ export const PERSONA_FIELDS = {
 
   // ── 按会话设置人格（入口已迁到会话与审批页，这里不再生成控件） ────────────
 
-  // ── 人格来源（只读） ──────────────────────────────────────────────────────
-  sources: {
-    fields: [
-      {
-        type: 'action',
-        id: 'personaSourceActions',
-        items: [{ id: 'personaSourceRefresh', label: '刷新' }],
-        status: 'personaSourceMeta',
-      },
-      {
-        type: 'custom',
-        name: 'personaSourceList',
-        span: 2,
-        html: '<div class="u-mt-8" id="personaSourceList">加载中…</div>',
-      },
-    ],
-  },
-
   // ── 恢复默认人格：并入列表每一行的「恢复初始」操作，不再单独一组 ──────────
 
   // ── 外部人格编辑弹窗（provider 侧角色卡；只开放覆盖与角色追加） ─────────────

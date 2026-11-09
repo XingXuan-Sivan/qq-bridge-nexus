@@ -97,31 +97,6 @@ export const PRESETS_FIELDS = {
   },
 
   // 新建预设：复制一个现有预设作为起点，id 即目录名。
-  create: {
-    fields: [
-      {
-        type: 'section',
-        label: '新建预设',
-        hint: '复制一个现有预设作为起点；id 只能用小写字母、数字与连字符。',
-        card: true,
-      },
-      { name: 'presetNewId', type: 'text', label: '预设 id', placeholder: 'my-preset' },
-      { name: 'presetNewName', type: 'text', label: '显示名', placeholder: '留空则用 id' },
-      {
-        name: 'presetNewFromRow',
-        type: 'custom',
-        span: 2,
-        html: '<div class="field-row"><label class="field-label" for="presetNewFrom">复制自</label><div class="field-control"><select id="presetNewFrom" class="u-w-190"></select></div></div>',
-      },
-      {
-        type: 'action',
-        id: 'presetNewActions',
-        items: [{ id: 'presetNewCreate', label: '新建预设', variant: 'primary' }],
-        status: 'presetNewMsg',
-      },
-    ],
-  },
-
   // 仿真提示词：跟随当前预设的 persona.prefix。放在编辑卡里、YAML 高级编辑上方，
   // 控件仍走统一的字段渲染（页面里不手写 input/textarea/button）。
   simPrompt: {

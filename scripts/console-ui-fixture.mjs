@@ -664,6 +664,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (action === 'rollback') return json({ ok: true, restored: '2026-01-01-00-00-00-000' });
         return json({ ok: true, id: presetId, preset: { id: presetId } });
       }
+      const presetDelete = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)$/);
+      if (presetDelete && method === 'DELETE') {
+        const id = presetDelete[1];
+        if (['qq-chat', 'qq-chat-v2'].includes(id)) return json({ ok: false, error: '系统自带预设不能删除' }, 400);
+        return json({ ok: true, id, presets: [] });
+      }
       const presetAction = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(agent|factory)$/);
       if (presetAction) {
         const [, presetId, action] = presetAction;
@@ -769,6 +775,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 description: '离线预览用的安全群聊预设。',
                 order: 1,
                 editable: true,
+                builtin: true,
                 error: null,
                 hasExtensions: true,
                 extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
@@ -779,6 +786,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 description: '离线预览用的二代群聊预设。',
                 order: 2,
                 editable: true,
+                builtin: true,
                 error: null,
                 hasExtensions: true,
                 extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },

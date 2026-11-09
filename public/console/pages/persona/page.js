@@ -80,27 +80,6 @@ function resetRoleForm() {
   setRoleMsg('');
 }
 
-const PERSONA_SOURCE_LABEL = { session: '会话', provider: '外部', global: '全局', off: '不挂卡', none: '无' };
-
-// 只读：每个会话实际落在哪一层（会话覆盖 → provider → 全局）。不改任何状态。
-async function refreshPersonaSources() {
-  const box = document.getElementById('personaSourceList');
-  if (!box) return;
-  const r = await api('/api/persona/sources');
-  if (!r || !r.ok) { box.textContent = '❌ ' + ((r && r.error) || '读取失败'); return; }
-  const rows = Array.isArray(r.rows) ? r.rows : [];
-  const meta = document.getElementById('personaSourceMeta');
-  if (meta) meta.textContent = `${r.provider ? 'provider：' + r.provider : '当前没有启用 provider'} · ${rows.length} 个会话`;
-  box.replaceChildren();
-  if (!rows.length) { box.textContent = '还没有会话'; return; }
-  let html = '<table><tr><th>会话</th><th>来源</th><th>人格</th><th>备注</th></tr>';
-  for (const row of rows) {
-    const label = PERSONA_SOURCE_LABEL[row.source] || row.source;
-    html += `<tr><td><code>${esc(row.key)}</code></td><td>${esc(label)}</td><td>${row.name ? esc(row.name) : '—'}</td><td class="meta">${row.stale ? '缓存已过期，正在用旧卡' : ''}</td></tr>`;
-  }
-  box.innerHTML = html + '</table>';
-}
-
 // 列表状态：默认人格、会话分配、搜索与筛选。恢复初始已并进每一行，不再单独一组。
 let roleDefaults = [];
 let roleAssignments = {};
@@ -555,22 +534,17 @@ export function init() {
     if (r.ok) refreshRoles();
   });
 
-  document.getElementById('personaSourceRefresh').addEventListener('click', () => refreshPersonaSources().catch(() => {}));
-
-  // 停在人格页时，每 15 秒同步一次「人格来源」。
-  setInterval(() => { if (getCurrentPage() === 'persona' && !document.hidden) refreshPersonaSources().catch(() => {}); }, 15_000);
+  // 停在人格页时不再轮询「人格来源」：那是只读诊断，入口与卡片都已移除。
 
   onPageRefresh('persona', () => {
     // 每次进入都重读一次：全局人格可能在别处改过、新会话可能刚建好。
     refreshPersonaStatus();
-    refreshPersonaSources().catch(() => {});
     refreshExternalPersonas().catch(() => {});
   });
   // 首次进入时片段刚注入，延后一拍再拉数据，避免 DOM 就绪前空转。
   setTimeout(() => {
     refreshPersonaStatus();
     refreshRoles();
-    refreshPersonaSources().catch(() => {});
     refreshExternalPersonas().catch(() => {});
   }, 0);
 }

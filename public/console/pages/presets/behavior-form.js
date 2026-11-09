@@ -1,14 +1,19 @@
-// 行为档案表单（v1 / v2）：只描述字段与取值映射，渲染交给 components/form。
+﻿// 行为档案表单（v1 / v2）：只描述字段与取值映射，渲染交给 components/form。
 // 权威存储仍是 config/behaviors/<id>.yml；后端 GET 返回结构化 data，PUT 收 {data}。
 import { renderFields } from '../../components/form/form.js';
 
 const num = (name, label, extra = {}) => ({ name, label, type: 'number', step: 'any', ...extra });
 const sw = (name, label) => ({ name, label, type: 'switch' });
 
-// ── 一代仿真（social-v1）：扁平 27 项 ─────────────────────────────────────────
+// ── 一代仿真（social-v1）：按能力分组（与 v2 一致的 section 形态，不额外包卡片） ──
 const V1_FIELDS = [
+  { type: 'section', card: true, label: '触发与上下文' },
   num('triggerProbability', '触发概率', { min: 0, max: 1, step: 0.01, hint: '0–1' }),
   num('contextWindow', '上下文条数', { min: 1 }),
+  num('maxReplyChars', '单条最大字数', { min: 0 }),
+  { name: 'mustReplyKeywords', label: '必回关键词', type: 'textarea', rows: 4, list: true, hint: '每行一个' },
+
+  { type: 'section', card: true, label: '主动检查' },
   num('activeCheckMinMs', '主动检查最小间隔', { hint: '毫秒' }),
   num('activeCheckMaxMs', '主动检查最大间隔', { hint: '毫秒' }),
   num('activeReplyDelayMinMs', '主动回复延迟最小', { hint: '毫秒' }),
@@ -16,31 +21,37 @@ const V1_FIELDS = [
   sw('activeDurationEnabled', '主动持续'),
   num('activeDurationMinMs', '主动持续最小', { hint: '毫秒' }),
   num('activeDurationMaxMs', '主动持续最大', { hint: '毫秒' }),
-  num('idleWindowMs', '空闲窗口', { hint: '毫秒' }),
-  num('idleRetryProbability', '空闲重试概率', { min: 0, max: 1, step: 0.01 }),
-  num('idleRetryWaitMs', '空闲重试等待', { hint: '毫秒' }),
+
+  { type: 'section', card: true, label: '主动机会' },
   sw('proactiveEnabled', '主动机会'),
   num('proactiveIdleThresholdMs', '触发主动的空闲阈值', { hint: '毫秒' }),
   num('proactiveCheckMinMs', '主动机会检查最小间隔', { hint: '毫秒' }),
   num('proactiveCheckMaxMs', '主动机会检查最大间隔', { hint: '毫秒' }),
   num('proactiveProbability', '主动机会概率', { min: 0, max: 1, step: 0.01 }),
-  num('skipProbability', '跳过概率', { min: 0, max: 1, step: 0.01 }),
-  num('surrenderProbability', '放弃概率', { min: 0, max: 1, step: 0.01 }),
-  num('maxReplyChars', '单条最大字数', { min: 0 }),
-  { name: 'mustReplyKeywords', label: '必回关键词', type: 'textarea', rows: 4, list: true, hint: '每行一个' },
+
+  { type: 'section', card: true, label: '空闲重试' },
+  num('idleWindowMs', '空闲窗口', { hint: '毫秒' }),
+  num('idleRetryProbability', '空闲重试概率', { min: 0, max: 1, step: 0.01 }),
+  num('idleRetryWaitMs', '空闲重试等待', { hint: '毫秒' }),
+
+  { type: 'section', card: true, label: '连发与间隔' },
   sw('burstEnabled', '连发'),
   num('burstIntervalMinMs', '连发最小间隔', { hint: '毫秒' }),
   num('burstIntervalMaxMs', '连发最大间隔', { hint: '毫秒' }),
   num('longGapProbability', '长停顿概率', { min: 0, max: 1, step: 0.01 }),
   num('longGapMinMs', '长停顿最小', { hint: '毫秒' }),
   num('longGapMaxMs', '长停顿最大', { hint: '毫秒' }),
+
+  { type: 'section', card: true, label: '其它' },
+  num('skipProbability', '跳过概率', { min: 0, max: 1, step: 0.01 }),
+  num('surrenderProbability', '放弃概率', { min: 0, max: 1, step: 0.01 }),
 ];
 
 // ── 二代仿真（social-v2）：按能力分组 ────────────────────────────────────────
 const V2_FIELDS = [
   num('autoReplyCheckMs', '自动回复检查间隔', { hint: '毫秒' }),
   sw('provideRecommendations', '提供推荐值'),
-  { type: 'section', label: '唤醒', card: true },
+  { type: 'section', card: true, label: '唤醒' },
   { name: 'wake_defaultMode', label: '默认潜水方式', type: 'select', options: [{ value: 'diving', label: '潜水' }, { value: 'active', label: '活跃' }] },
   sw('wake_preSleepWaitEnabled', '睡前观察'),
   num('wake_preSleepWaitMs', '睡前观察时长', { hint: '毫秒' }),
@@ -61,7 +72,7 @@ const V2_FIELDS = [
   num('wake_maxWakePerHour', '每小时最多唤醒'),
   num('wake_noActionLimit', '无动作上限' ),
   num('wake_maxWakeConfigReminders', '唤醒配置提醒上限' ),
-  { type: 'section', label: '发送', card: true },
+  { type: 'section', card: true, label: '发送' },
   sw('send_burstEnabled', '连发'),
   num('send_burstMaxMessages', '连发最多条数'),
   num('send_burstIntervalMinMs', '连发最小间隔', { hint: '毫秒' }),
@@ -74,19 +85,19 @@ const V2_FIELDS = [
   num('send_gapBaseMs', '条间基础间隔', { hint: '毫秒' }),
   num('send_gapPerCharMs', '每字追加间隔', { hint: '毫秒' }),
   { name: 'send_recommendedHint', label: '发送推荐提示词', type: 'textarea', rows: 3 },
-  { type: 'section', label: '等待', card: true },
+  { type: 'section', card: true, label: '等待' },
   num('wait_defaultMs', '默认等待', { hint: '毫秒' }),
   num('wait_minMs', '最短等待', { hint: '毫秒' }),
   num('wait_maxMs', '最长等待', { hint: '毫秒' }),
   num('wait_defaultQuietMs', '默认静默窗口', { hint: '毫秒' }),
   num('wait_minQuietAfterNewMs', '新消息后最少静默', { hint: '毫秒' }),
-  { type: 'section', label: '主动机会', card: true },
+  { type: 'section', card: true, label: '主动机会' },
   sw('proactive_enabled', '主动机会'),
   num('proactive_checkIntervalMinMs', '检查最小间隔', { hint: '毫秒' }),
   num('proactive_checkIntervalMaxMs', '检查最大间隔', { hint: '毫秒' }),
   num('proactive_idleThresholdMs', '空闲阈值', { hint: '毫秒' }),
   num('proactive_probability', '主动概率', { min: 0, max: 1, step: 0.01 }),
-  { type: 'section', label: '表情', card: true },
+  { type: 'section', card: true, label: '表情' },
   sw('sticker_enabled', '表情包'),
   num('sticker_syncTtlMs', '同步缓存时长', { hint: '毫秒' }),
   num('sticker_maxListCount', '列表最多条数'),
@@ -97,7 +108,7 @@ const V2_FIELDS = [
   num('sticker_collect_maxPerMinute', '每分钟最多收藏'),
   num('sticker_collect_maxPerHour', '每小时最多收藏'),
   num('sticker_collect_maxRemarkChars', '收藏备注字数上限'),
-  { type: 'section', label: '上下文', card: true },
+  { type: 'section', card: true, label: '上下文' },
   num('context_recentLimit', '最近消息条数'),
   num('context_unreadLimit', '未读条数上限'),
   num('context_contextWindow', '上下文条数'),
@@ -105,7 +116,7 @@ const V2_FIELDS = [
   num('context_wakeMessageLimit', '唤醒消息条数'),
   num('context_wakeRecentLimit', '唤醒最近条数'),
   num('context_wakeMaxChars', '唤醒最大字符'),
-  { type: 'section', label: '反馈', card: true },
+  { type: 'section', card: true, label: '反馈' },
   num('feedback_maxLength', '反馈最大长度'),
   sw('feedback_notifyOwnerOnError', '出错通知 owner'),
 ];
@@ -169,3 +180,4 @@ export function readBehaviorForm(host, kind) {
   }
   return config;
 }
+

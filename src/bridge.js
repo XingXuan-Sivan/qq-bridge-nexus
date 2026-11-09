@@ -5990,6 +5990,12 @@ async function main() {
               sendJson({ ok: true, preset: presetStore.read(id), backups: presetStore.listBackups(id).slice(0, 8) });
               return;
             }
+            if (req.method === 'DELETE' && !action) {
+              const result = presetStore.deletePreset(id);
+              ext.audit.append('extension.preset.deleted', { id });
+              sendJson({ ok: true, ...result, presets: presetStore.list() });
+              return;
+            }
             if (req.method === 'PUT' && action === 'meta') {
               const body = await readBody();
               const result = presetStore.writeMeta(id, body ?? {});

@@ -248,6 +248,99 @@ function setField(name, value) {
   el.value = value ?? '';
 }
 
+// ── 仿真提示词（预设内置 persona.prefix；保存后需重启 DSH）────────────────
+// 从人格页搬过来：它属于预设而不是人格，放在 YAML 高级编辑上方，改的是同一份源文件。
+const PROMPT_PRESETS = new Set(['qq-chat', 'qq-chat-v2']);
+let promptEditor = null;
+let promptPreset = '';
+let promptOriginal = '';
+
+function promptEl(id) { return document.getElementById(id); }
+
+function setPromptMsg(text, tone) {
+  const el = promptEl('simPromptMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = tone === 'ok' ? 'meta ok' : tone === 'err' ? 'meta err' : 'meta';
+}
+
+function setPromptEditing(editing) {
+  promptEl('simPromptEdit').disabled = editing;
+  promptEl('simPromptSave').disabled = !editing;
+  promptEl('simPromptCancel').disabled = !editing;
+  promptEditor?.setReadOnly(!editing);
+}
+
+function mountPromptEditor() {
+  const textarea = promptEl('simPromptText');
+  if (!textarea || promptEditor) return;
+  promptEditor = attachTextareaEditor(textarea, { language: 'text', height: '420px', readOnly: true });
+}
+
+async function refreshPresetPrompt(id) {
+  const card = promptEl('presetPrompt');
+  if (!card) return;
+  const supported = PROMPT_PRESETS.has(id);
+  card.hidden = !supported;
+  if (!supported) { promptPreset = ''; delete card.dataset.preset; return; }
+  promptPreset = id;
+  setPromptMsg('读取中…');
+  try {
+    const r = await api('/api/preset/sim-prompt?preset=' + encodeURIComponent(id));
+    if (!r.ok) { setPromptMsg(r.error || '读取失败', 'err'); return; }
+    promptOriginal = r.content ?? '';
+    promptEditor?.setValue(promptOriginal);
+    setPromptEditing(false);
+    setPromptMsg('');
+    promptEl('presetPromptStatus').textContent =
+      `${r.chars} 字符 · ${r.status?.installed ? '已同步到 DSH' : '尚未同步到 DSH'}`
+      + (r.hasDefault && !r.modified ? ' · 初始版本' : '');
+    promptEl('simPromptWarnings').textContent = (r.warnings ?? []).length
+      ? '⚠️ ' + r.warnings.join('；') : '';
+    promptEl('simPromptReset').disabled = !r.hasDefault || !r.modified;
+    // 给测试与样式一个「这次卡片内容属于哪个预设」的确定信号（异步回填完成才置位）。
+    card.dataset.preset = id;
+  } catch (error) {
+    setPromptMsg('读取失败：' + (error?.message ?? error), 'err');
+  }
+}
+
+async function savePresetPrompt() {
+  if (!promptPreset || busy) return;
+  busy = true;
+  setPromptMsg('保存中…');
+  try {
+    const r = await api('/api/preset/sim-prompt', 'POST', { preset: promptPreset, content: promptEditor?.getValue() ?? '' });
+    if (!r.ok) { setPromptMsg(r.error || '保存失败', 'err'); return; }
+    const preset = promptPreset;
+    await refreshPresetPrompt(preset);
+    setPromptMsg(r.unchanged ? '内容没有变化' : `已保存（${r.chars} 字符），重启 DSH 生效`, 'ok');
+  } catch (error) {
+    setPromptMsg('保存失败：' + (error?.message ?? error), 'err');
+  } finally {
+    busy = false;
+  }
+}
+
+async function resetPresetPrompt() {
+  if (!promptPreset || busy) return;
+  const ok = window.confirm('还原成发布包自带的初始提示词？当前内容会先备份到 state/preset-backups/，可再回滚。');
+  if (!ok) return;
+  busy = true;
+  setPromptMsg('还原中…');
+  try {
+    const preset = promptPreset;
+    const r = await api('/api/preset/sim-prompt/reset', 'POST', { preset });
+    if (!r.ok) { setPromptMsg(r.error || '还原失败', 'err'); return; }
+    await refreshPresetPrompt(preset);
+    setPromptMsg(`已还原初始版本（${r.chars} 字符），重启 DSH 生效`, 'ok');
+  } catch (error) {
+    setPromptMsg('还原失败：' + (error?.message ?? error), 'err');
+  } finally {
+    busy = false;
+  }
+}
+
 function readEditor() {
   return {
     meta: {
@@ -290,6 +383,7 @@ async function fillEditor(preset) {
     : `YAML 有问题：${preset.validation?.error ?? '未知错误'}`;
   document.getElementById('presetEditor').hidden = false;
   document.getElementById('presetEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  await refreshPresetPrompt(preset.id);
 }
 
 async function openPreset(id) {
@@ -411,7 +505,23 @@ export function init() {
   const edit = document.querySelector('[data-presets-fields="edit"]');
   if (main) renderFields(main, PRESETS_FIELDS.main.fields);
   if (edit) renderFields(edit, PRESETS_FIELDS.edit.fields);
+  const promptSlot = document.querySelector('[data-presets-fields="simPrompt"]');
+  if (promptSlot) renderFields(promptSlot, PRESETS_FIELDS.simPrompt.fields);
   mountYamlEditor();
+  // 仿真提示词卡在字段规格里只是一个占位（presetPromptSlot），渲染后把卡片搬进去，
+  // 位置就固定在「YAML 高级编辑」区块上方。
+  const promptMount = document.getElementById('presetPromptMount');
+  const promptCard = document.getElementById('presetPrompt');
+  if (promptMount && promptCard) promptMount.appendChild(promptCard);
+  mountPromptEditor();
+  document.getElementById('simPromptEdit')?.addEventListener('click', () => setPromptEditing(true));
+  document.getElementById('simPromptSave')?.addEventListener('click', () => void savePresetPrompt());
+  document.getElementById('simPromptCancel')?.addEventListener('click', () => {
+    promptEditor?.setValue(promptOriginal);
+    setPromptEditing(false);
+    setPromptMsg('已取消编辑');
+  });
+  document.getElementById('simPromptReset')?.addEventListener('click', () => void resetPresetPrompt());
 
   document.getElementById('presetList')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-preset-act]');

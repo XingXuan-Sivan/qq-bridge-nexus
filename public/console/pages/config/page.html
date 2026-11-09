@@ -7,15 +7,15 @@
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="tools">拓展功能</button>
   </div>
   <div class="config-body">
-    <div class="config-layer-note">
-      <strong>三层配置</strong>
-      <span>系统层管整台桥接；预设层决定 Agent 包；会话层只覆盖单个群 / 好友。运行模式是路由，不是预设。</span>
-    </div>
-
     <section class="config-panel active" data-config-panel="runtime">
       <section id="section-mode" class="card span-all">
         <h2>运行模式</h2>
         <div data-overview-fields="mode"></div>
+      </section>
+      <section id="section-roledefault" class="card span-all">
+        <h2 data-note="下一条消息生效">默认人格</h2>
+        <p class="meta">全局只保留一个默认人格；按会话单独指定仍在「人格与角色」页。</p>
+        <div data-overview-fields="roleDefault"></div>
       </section>
       <section id="section-sendlimit" class="card span-all">
         <h2 data-note="保存后立即生效">发言上限</h2>

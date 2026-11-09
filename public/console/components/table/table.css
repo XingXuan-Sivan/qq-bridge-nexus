@@ -190,57 +190,6 @@
   gap: 6px;
 }
 
-/* 可展开的层级表：父行首列的 ▸ 按钮 + 子区行（colspan 铺满）。
-   子区行不参与分页与筛选，显隐只跟父行走（见 table.js 的 setupDataTable）。 */
-.table-wrap .tree-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  margin-right: 6px;
-  padding: 0;
-  vertical-align: -5px;
-  font-size: 14px;
-  line-height: 1;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.table-wrap .tree-toggle:hover {
-  color: var(--text);
-  background: var(--surface-hover);
-  border-color: var(--card-border);
-}
-.table-wrap tr.tree-parent > td {
-  vertical-align: middle;
-}
-.table-wrap tr.tree-child > td {
-  padding: 0 12px 12px 46px;
-  background: var(--surface-sunken);
-}
-.table-wrap tr.tree-child .tree-tool-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 0 2px;
-}
-.table-wrap tr.tree-child .tree-tool {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  font-size: 12px;
-}
-.table-wrap tr.tree-child .tree-tool code {
-  flex: 0 0 auto;
-  min-width: 220px;
-}
-.table-wrap tr.tree-child .tree-tool .meta {
-  color: var(--muted);
-}
-
 /* 表格里的分类标签与勾选列（工具表等）：标签沿用站点的胶囊观感，勾选列居中。 */
 .table-wrap .table-tag {
   display: inline-block;

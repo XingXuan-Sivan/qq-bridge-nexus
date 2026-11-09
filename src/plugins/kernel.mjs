@@ -696,6 +696,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return persona.resolve(key);
   }
 
+  /** 当前人格 provider 的只读引用（控制台「外部人格」列表/编辑用；可能为 null）。 */
+  function personaProvider() {
+    return persona.provider();
+  }
+
   /**
    * 渲染插件注册的具名注入块（P4）。与 promptAdditions 的区别：这里是「内容」，
    * 按 priority 排序、按块限额、按总预算跳块；返回的 blocks 报告给控制台看占比。
@@ -933,6 +938,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     decorateReply,
     filterInbound,
     personaResolve,
+    personaProvider,
     personaWarm,
     taskTypes,
     hasTaskType,

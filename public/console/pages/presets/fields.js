@@ -70,6 +70,12 @@ export const PRESETS_FIELDS = {
         hint: 'deny 优先于 allow。',
       },
       {
+        name: 'presetPromptSlot',
+        type: 'custom',
+        span: 2,
+        html: '<div id="presetPromptMount"></div>',
+      },
+      {
         type: 'section',
         label: 'YAML 高级编辑',
         hint: '直接编辑 agent.cordis.yml；保存前校验插件行、persona 与 qq-tool-restrict。注释会原样保留。',
@@ -89,6 +95,46 @@ export const PRESETS_FIELDS = {
         label: '危险能力',
         hint: '当前 DSH 守卫是所有预设共用的一份 qq-tool-restrict；原生 read/write/pwsh 等工具不能按预设声明放行。需要高权限时请使用仓库里的 L1/L2/L3 运维预设。',
         card: true,
+      },
+    ],
+  },
+
+  // 仿真提示词：跟随当前预设的 persona.prefix。放在编辑卡里、YAML 高级编辑上方，
+  // 控件仍走统一的字段渲染（页面里不手写 input/textarea/button）。
+  simPrompt: {
+    fields: [
+      {
+        type: 'custom',
+        name: 'simPromptHead',
+        span: 2,
+        html: '<span class="meta" id="presetPromptStatus">加载中…</span>',
+      },
+      {
+        type: 'textarea',
+        name: 'simPromptText',
+        label: '',
+        rows: 16,
+        mono: true,
+        span: 2,
+        readonly: true,
+        className: 'code-editor-field',
+      },
+      {
+        type: 'action',
+        id: 'simPromptActions',
+        items: [
+          { id: 'simPromptEdit', label: '编辑' },
+          { id: 'simPromptSave', label: '保存提示词', variant: 'primary' },
+          { id: 'simPromptCancel', label: '取消' },
+          { id: 'simPromptReset', label: '还原初始提示词' },
+        ],
+        status: 'simPromptMsg',
+      },
+      {
+        type: 'custom',
+        name: 'simPromptWarnings',
+        span: 2,
+        html: '<p class="meta" id="simPromptWarnings"></p>',
       },
     ],
   },

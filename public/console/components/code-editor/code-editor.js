@@ -16,9 +16,10 @@ function cspNonce() {
 
 function editorTheme(CM) {
   return CM.EditorView.theme({
+    // 背景色由宿主 .code-editor 提供：CM 的选区层是 z-index:-2 的子元素，
+    // 如果给 .cm-editor 自己铺不透明背景，会把它自己的选区盖住。
     '&': {
       height: '100%',
-      backgroundColor: 'var(--editor-bg)',
       color: 'var(--text)',
       fontSize: '12.5px',
     },
@@ -71,6 +72,7 @@ function createFallback(container, { value, language, readOnly, onChange }) {
     getValue: () => area.value,
     setValue: (next) => { if (area.value !== next) area.value = String(next ?? ''); },
     focus: () => area.focus(),
+    setReadOnly: (next) => { area.readOnly = Boolean(next); },
     layout: () => {},
     destroy: () => area.remove(),
   };
@@ -97,17 +99,19 @@ export function mountCodeEditor(container, {
   body.className = 'code-editor-body';
   root.appendChild(body);
 
+  const editable = new CM.Compartment();
   const extensions = [
     CM.basicSetup,
-    CM.yaml(),
+    // 只有声明 yaml 才挂 YAML 高亮；纯文本（如仿真提示词）不要被当成 YAML 着色。
+    ...(language === 'yaml' ? [CM.yaml()] : []),
     CM.EditorView.lineWrapping,
     editorTheme(CM),
     editorHighlight(CM),
+    editable.of(readOnly ? [CM.EditorState.readOnly.of(true), CM.EditorView.editable.of(false)] : []),
     CM.EditorView.updateListener.of((update) => {
       if (update.docChanged) onChange?.(update.state.doc.toString());
     }),
   ];
-  if (readOnly) extensions.push(CM.EditorState.readOnly.of(true), CM.EditorView.editable.of(false));
   const nonce = cspNonce();
   if (nonce) extensions.push(CM.EditorView.cspNonce.of(nonce));
 
@@ -129,6 +133,13 @@ export function mountCodeEditor(container, {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
     },
     focus: () => view.focus(),
+    setReadOnly: (next) => {
+      view.dispatch({
+        effects: editable.reconfigure(next
+          ? [CM.EditorState.readOnly.of(true), CM.EditorView.editable.of(false)]
+          : []),
+      });
+    },
     layout: () => view.requestMeasure(),
     destroy: () => {
       view.destroy();
@@ -138,20 +149,27 @@ export function mountCodeEditor(container, {
 }
 
 // 把已有 textarea 升级成编辑器：编辑结果写回 textarea，原有读写 textarea.value 的逻辑不用改。
-export function attachTextareaEditor(textarea, { language = 'yaml', height = '' } = {}) {
+export function attachTextareaEditor(textarea, { language = 'yaml', height = '', readOnly = false } = {}) {
   if (!textarea) return null;
   if (textarea.dataset.codeEditorAttached === '1') return textarea._codeEditorHandle || null;
   const host = document.createElement('div');
   host.className = 'code-editor-host';
   textarea.parentNode.insertBefore(host, textarea);
   textarea.hidden = true;
+  textarea.readOnly = Boolean(readOnly);
   textarea.dataset.codeEditorAttached = '1';
   const handle = mountCodeEditor(host, {
     value: textarea.value,
     language,
     height,
+    readOnly,
     onChange: (next) => { textarea.value = next; },
   });
+  const setReadOnly = handle.setReadOnly?.bind(handle);
+  handle.setReadOnly = (next) => {
+    textarea.readOnly = Boolean(next);
+    setReadOnly?.(next);
+  };
   textarea._codeEditorHandle = handle;
   return handle;
 }

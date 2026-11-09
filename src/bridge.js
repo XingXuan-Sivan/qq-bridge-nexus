@@ -11,8 +11,8 @@ import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import yaml from 'js-yaml';
 import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
+import { defaultPromptState, readDefaultPrompt } from './preset-defaults.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
@@ -526,6 +526,86 @@ function writeRoleContent(name, content) {
   atomicWriteText(roleFilePath(name), content + (content.endsWith('\n') ? '' : '\n'));
 }
 
+// ── 外部人格（provider 侧的角色卡）────────────────────────────────────────
+// 桥接不缓存卡片正文用于注入（那是内核注册表的职责），这里只做控制台视图的兜底：
+// provider 断连时仍能列出上次看到的卡、读出上次的正文，供「另存为内部人格」使用。
+const EXTERNAL_PERSONA_CACHE = path.join(STATE_DIR, 'persona-external.json');
+const ROLE_BACKUP_DIR = path.join(STATE_DIR, 'role-backups');
+const CARD_HEADER_RE = /^【人格卡：[^】]*】[ \t]*\r?\n?/;
+
+function readExternalPersonaCache() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(EXTERNAL_PERSONA_CACHE, 'utf8'));
+    if (raw?.version === 1 && raw.cards && typeof raw.cards === 'object') return raw;
+  } catch { /* 没有缓存或损坏都按空处理 */ }
+  return { version: 1, provider: null, cards: {}, fetchedAt: null };
+}
+
+function writeExternalPersonaCache(next) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    atomicWriteJson(EXTERNAL_PERSONA_CACHE, { ...next, version: 1, fetchedAt: new Date().toISOString() });
+  } catch (error) {
+    log(`⚠️ 外部人格缓存写入失败：${error?.message ?? error}`);
+  }
+}
+
+function externalPersonaProvider() {
+  return plugins?.personaProvider?.() ?? null;
+}
+
+function externalCardView(entry) {
+  return {
+    name: entry.name,
+    slug: entry.slug ?? entry.name,
+    description: entry.description ?? '',
+    systemAppendChars: String(entry.systemAppend ?? '').length,
+    overlayChars: String(entry.overlay ?? '').length,
+    updatedAt: entry.updatedAt ?? null,
+    hasText: typeof entry.text === 'string' && entry.text.length > 0,
+    stale: Boolean(entry.stale),
+  };
+}
+
+async function listExternalPersonas() {
+  const provider = externalPersonaProvider();
+  const cache = readExternalPersonaCache();
+  if (!provider || typeof provider.list !== 'function') {
+    return {
+      provider: provider?.id ?? null,
+      listable: false,
+      cards: Object.values(cache.cards).map((entry) => externalCardView({ ...entry, stale: true })),
+      stale: true,
+      error: provider ? '当前 provider 不支持列出角色卡' : '未启用外部人格 provider',
+    };
+  }
+  try {
+    const rows = await provider.list();
+    const cards = {};
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const name = String(row?.name ?? row?.slug ?? '').trim();
+      if (!name) continue;
+      cards[name] = {
+        ...(cache.cards[name] ?? {}),
+        ...row,
+        name,
+        slug: row?.slug ?? name,
+        stale: false,
+      };
+    }
+    writeExternalPersonaCache({ provider: provider.id, cards });
+    return { provider: provider.id, listable: true, cards: Object.values(cards).map((entry) => externalCardView(entry)), stale: false, error: null };
+  } catch (error) {
+    return {
+      provider: provider.id,
+      listable: true,
+      cards: Object.values(cache.cards).map((entry) => externalCardView({ ...entry, stale: true })),
+      stale: true,
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
 // ── 二代仿真预设提示词（「仿真」层）────────────────────────────────────────
 // 与「人格」层的边界：
 //   仿真提示词 = 预设内置，规定 AI 怎么调工具、怎么参与群聊（行为与协议）
@@ -758,7 +838,28 @@ function readRoleState() {
     if (profile?.persona?.mode === 'card' && profile.persona.name) byKey[key] = profile.persona.name;
     else if (profile?.persona?.mode === 'off') byKey[key] = null;
   }
-  return { ...base, byKey };
+  // 全局默认人格的唯一事实源是 config.json 的 role.default（见 /api/config/role-default）；
+  // 老版本写在 state/current-role.json 的 role 只作为回退，避免升级后人格突然变空。
+  return { ...base, role: configDefaultRoleName() ?? base.role ?? null, byKey };
+}
+/** config.json 的 role.default：名字不合法或人格文件不存在时视为未设置。 */
+function configDefaultRoleName() {
+  const raw = bridgeCfg?.role?.default;
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const name = sanitizeRoleName(raw);
+  if (!name) return null;
+  const file = resolveRoleFile(ROLES_DIR, name);
+  return file && fs.existsSync(file) ? name : null;
+}
+/** 写 config.json 的 role.default（null = 清空），并同步内存里的 cfg。 */
+function setConfigDefaultRole(name) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  const role = { ...(file.role ?? {}) };
+  if (name) role.default = name; else delete role.default;
+  file.role = role;
+  atomicWriteJson(configFile, file);
+  if (bridgeCfg) bridgeCfg.role = { ...(bridgeCfg.role ?? {}), default: name ?? undefined };
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
 // silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
@@ -5573,6 +5674,132 @@ async function main() {
           sendJson({ ok: true, provider: plugins?.status()?.persona?.id ?? null, rows });
           return;
         }
+        // 外部（provider 侧）人格卡：列表、正文、编辑、新建、改名、另存为内部人格。
+        if (req.method === 'GET' && url.pathname === '/api/persona/external') {
+          const data = await listExternalPersonas();
+          sendJson({ ok: true, ...data, capabilities: plugins?.status()?.persona?.capabilities ?? null });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/card') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const name = String(body?.name ?? '').trim();
+          if (!name) { sendJson({ ok: false, error: '缺少 name' }, 400); return; }
+          const provider = externalPersonaProvider();
+          const cache = readExternalPersonaCache();
+          const cached = cache.cards[name] ?? null;
+          try {
+            if (typeof provider?.card !== 'function') throw new Error('当前 provider 不支持读取角色卡');
+            const card = await provider.card(name);
+            const text = String(card?.text ?? '').replace(CARD_HEADER_RE, '').trim();
+            if (!text) throw new Error('provider 返回了空卡片');
+            cache.cards[name] = { ...(cached ?? {}), name, text, stale: false };
+            writeExternalPersonaCache(cache);
+            sendJson({ ok: true, name, text, chars: text.length, stale: false });
+          } catch (error) {
+            if (cached?.text) {
+              sendJson({ ok: true, name, text: cached.text, chars: String(cached.text).length, stale: true, error: String(error?.message ?? error) });
+              return;
+            }
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/detail') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const name = String(body?.name ?? '').trim();
+          if (!name) { sendJson({ ok: false, error: '缺少 name' }, 400); return; }
+          const provider = externalPersonaProvider();
+          const cache = readExternalPersonaCache();
+          const cached = cache.cards[name] ?? null;
+          try {
+            if (typeof provider?.getByName !== 'function') throw new Error('当前 provider 不支持读取角色卡');
+            const character = await provider.getByName(name);
+            if (!character) throw new Error('角色卡不存在');
+            cache.cards[name] = { ...(cached ?? {}), ...character, name, stale: false };
+            writeExternalPersonaCache(cache);
+            sendJson({ ok: true, character, stale: false });
+          } catch (error) {
+            if (cached) {
+              sendJson({ ok: true, character: { name, slug: cached.slug ?? name, description: cached.description ?? '', overlay: cached.overlay ?? '', systemAppend: cached.systemAppend ?? '' }, stale: true, error: String(error?.message ?? error) });
+              return;
+            }
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/save') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const name = String(body?.name ?? '').trim();
+          const provider = externalPersonaProvider();
+          if (!name) { sendJson({ ok: false, error: '缺少 name' }, 400); return; }
+          try {
+            if (typeof provider?.save !== 'function') throw new Error('当前 provider 不支持编辑角色卡');
+            const character = await provider.save({
+              slug: name,
+              description: body?.description,
+              systemAppend: body?.systemAppend,
+              overlay: body?.overlay,
+            });
+            const cache = readExternalPersonaCache();
+            if (cache.cards[name] && character) cache.cards[name] = { ...cache.cards[name], ...character, text: cache.cards[name].text, stale: false };
+            writeExternalPersonaCache(cache);
+            sendJson({ ok: true, character, message: '已写入 soulkit 角色卡' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/create') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const provider = externalPersonaProvider();
+          try {
+            if (typeof provider?.create !== 'function') throw new Error('当前 provider 不支持新建角色卡');
+            const character = await provider.create({ name: String(body?.name ?? '').trim(), from: String(body?.from ?? '').trim() });
+            sendJson({ ok: true, character, message: '已新建外部人格卡' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/rename') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const provider = externalPersonaProvider();
+          try {
+            if (typeof provider?.rename !== 'function') throw new Error('当前 provider 不支持改名');
+            const character = await provider.rename({ name: String(body?.name ?? '').trim(), nextName: String(body?.nextName ?? '').trim() });
+            sendJson({ ok: true, character, message: '已改名' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/persona/external/save-as-role') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const name = String(body?.name ?? '').trim();
+          const as = String(body?.as ?? name).trim();
+          const text = String(body?.text ?? '').trim();
+          if (!name || !as) { sendJson({ ok: false, error: '缺少 name / as' }, 400); return; }
+          const cache = readExternalPersonaCache();
+          const content = text || String(cache.cards[name]?.text ?? '').replace(CARD_HEADER_RE, '').trim();
+          if (!content) { sendJson({ ok: false, error: '没有可写入的正文' }, 400); return; }
+          try {
+            if (fs.existsSync(roleFilePath(as))) {
+              fs.mkdirSync(ROLE_BACKUP_DIR, { recursive: true });
+              fs.copyFileSync(roleFilePath(as), path.join(ROLE_BACKUP_DIR, `${as}-${Date.now()}.md`));
+            }
+            writeRoleContent(as, content);
+            sendJson({ ok: true, name: as, chars: content.length, message: `已另存为内部人格「${as}」` });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 500);
+          }
+          return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/commands') {
           // 三个来源分开返回，页面自己标来源；桥接不假装能管 DSH 的命令与工具。组装见 src/commands/payload.mjs。
           sendJson(buildCommandsPayload(commandRegistry));
@@ -5919,22 +6146,52 @@ async function main() {
         };
         if (req.method === 'POST' && url.pathname === '/api/role') {
           const body = await readBody();
-          const rs = readRoleState();
           if (body.role && typeof body.role === 'string') {
             const name = sanitizeRoleName(body.role);
             if (!fs.existsSync(path.join(ROOT, 'roles', name + '.md'))) {
               sendJson({ ok: false, error: `角色「${name}」不存在（roles/${name}.md）` }, 400);
               return;
             }
-            writeRoleState(name, rs.mode);
-            log(`控制台：角色已设置为 ${name}`);
+            // 全局默认人格存在 config.json（state/current-role.json 只留 mode/byKey）。
+            setConfigDefaultRole(name);
+            log(`控制台：默认人格已设置为 ${name}（config.json role.default）`);
             sendJson({ ok: true, role: name, refresh: applyRoleChange(body.apply) });
           } else {
-            writeRoleState(null, rs.mode);
-            log('控制台：角色已清除');
+            setConfigDefaultRole(null);
+            log('控制台：默认人格已清除（config.json role.default）');
             sendJson({ ok: true, role: null, refresh: applyRoleChange(body.apply) });
           }
           return;
+        }
+        // 全局配置页的「默认人格」下拉：读写 config.json role.default，与 /api/role 等价。
+        if (url.pathname === '/api/config/role-default') {
+          if (req.method === 'GET') {
+            const roles = fs.existsSync(ROLES_DIR)
+              ? fs.readdirSync(ROLES_DIR).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort()
+              : [];
+            sendJson({ ok: true, value: configDefaultRoleName(), options: roles });
+            return;
+          }
+          if (req.method === 'POST') {
+            const body = await readBody();
+            const raw = typeof body.value === 'string' ? body.value.trim() : '';
+            if (raw) {
+              const name = sanitizeRoleName(raw);
+              const file = resolveRoleFile(ROLES_DIR, name);
+              if (!name || !file || !fs.existsSync(file)) {
+                sendJson({ ok: false, error: `人格「${raw}」不存在（roles/${name || raw}.md）` }, 400);
+                return;
+              }
+              setConfigDefaultRole(name);
+              log(`控制台：默认人格已设为 ${name}（下一条消息生效）`);
+              sendJson({ ok: true, value: name, message: `已设为「${name}」，下一条消息生效` });
+            } else {
+              setConfigDefaultRole(null);
+              log('控制台：默认人格已清空（无会话单独指定时不挂人格卡）');
+              sendJson({ ok: true, value: null, message: '已清空默认人格' });
+            }
+            return;
+          }
         }
         // 这张卡有没有会话在用（全局是它，或者有会话单独指定了它）：改它的内容时才需要让会话重新读卡
         const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, sessions.keys());
@@ -6114,6 +6371,7 @@ async function main() {
           if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
           try {
             const { prefix } = readPresetPromptText(preset);
+            const initial = defaultPromptState(preset, prefix);
             sendJson({
               ok: true,
               content: prefix,
@@ -6122,6 +6380,11 @@ async function main() {
               warnings: presetPromptWarnings(prefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2'),
               status: presetStatus(preset),
               presets: Object.values(PRESET_NAMES).map((n) => presetStatus(n)),
+              // 初始版本：控制台用它做「已还原 / 已修改」判断与一键还原。
+              hasDefault: initial.hasDefault,
+              modified: initial.modified,
+              defaultContent: initial.hasDefault ? readDefaultPrompt(preset) : '',
+              defaultChars: initial.chars,
             });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '读取预设失败', status: presetStatus(preset) }, 500);
@@ -6171,6 +6434,48 @@ async function main() {
           sendJson({
             ok: true,
             chars: String(body.content ?? '').length,
+            warnings,
+            synced: fs.existsSync(installedPresetYaml(preset)),
+            requiresRestart: true,
+            status: presetStatus(preset),
+          });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt/reset') {
+          const body = await readBody();
+          const preset = knownPresetName(body.preset);
+          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const initial = readDefaultPrompt(preset);
+          if (initial === null) { sendJson({ ok: false, error: '这个预设没有内置的初始版本' }, 404); return; }
+          const side = preset === PRESET_NAMES.v1 ? 'v1' : 'v2';
+          let nextText;
+          let warnings;
+          try {
+            const { text } = readPresetPromptText(preset);
+            nextText = renderPresetPromptYaml(text, initial, side);
+            warnings = presetPromptWarnings(initial, side);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '还原失败' }, 400);
+            return;
+          }
+          let sourceBackup = null;
+          try {
+            sourceBackup = backupPresetFile(preset);
+            atomicWriteText(presetSourceYaml(preset), nextText);
+            const installed = installedPresetYaml(preset);
+            if (fs.existsSync(installed)) fs.copyFileSync(presetSourceYaml(preset), installed);
+          } catch (error) {
+            if (sourceBackup && fs.existsSync(sourceBackup)) {
+              try { fs.copyFileSync(sourceBackup, presetSourceYaml(preset)); } catch {}
+            }
+            sendJson({ ok: false, error: `写入失败：${error?.message ?? error}` }, 500);
+            return;
+          }
+          log(`控制台：${preset} 仿真提示词已还原为初始版本（${initial.length} 字符）；需重启 DSH 生效`);
+          sendJson({
+            ok: true,
+            restored: true,
+            chars: initial.length,
             warnings,
             synced: fs.existsSync(installedPresetYaml(preset)),
             requiresRestart: true,

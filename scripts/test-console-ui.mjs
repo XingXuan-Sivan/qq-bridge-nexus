@@ -131,21 +131,21 @@ try {
     assert.equal((await response.json()).ok, true);
     return fixture.requests.at(-1)?.body;
   }
-  // 页面级保存条：输入事件到「脏」有 60ms 合并窗口，先等它出现，再点保存。
+  // 页面级保存：右下角 action-dock 的保存动作。输入事件到「脏」有 60ms 合并窗口，先等它可用，再点保存。
   async function saveBarWrite(path, method = 'POST') {
     // 保存按钮常驻：等它可用（=当前确有脏分区）再点，否则会点到禁用态。
     await page.waitForFunction(() => {
-      const btn = document.getElementById('saveBarButton');
-      return !!btn && !btn.disabled && !document.getElementById('saveBar')?.hidden;
+      const btn = document.getElementById('actionDock-save');
+      return !!btn && !btn.disabled && !document.getElementById('actionDock')?.hidden;
     }, null, { timeout: 5000 });
-    return clickWrite('#saveBarButton', path, method);
+    return clickWrite('#actionDock-save', path, method);
   }
 
   await test('Legacy config IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
     // G3 删除了 social-v1 / social-v2 / access 三页；这些页的旧 id 记在 retired 基线里，
     // 其余历史 id 仍必须存在，避免后续改版悄悄删掉仍在用的字段。
-    assert.equal(legacyIds.length, 201);
+    assert.equal(legacyIds.length, 198);
     const missing = legacyIds.filter(x => !ids.includes(x) && !retiredIds.has(x));
     assert.deepEqual(missing, []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
@@ -183,24 +183,30 @@ try {
 
   await test('MCP page merges the tool reference and shows the real tool inventory', async () => {
     await navigate('mcp');
-    // 层级表：一行 server（可展开），展开后是它的工具；不再有第二张平铺的「工具参考」。
-    await page.waitForFunction(() => document.querySelectorAll('#mcpList tr.tree-parent').length >= 2);
-    assert.equal(await page.locator('#mcpList [data-table]').count(), 1, 'MCP 页只保留一张层级表');
-    const toggles = page.locator('#mcpList [data-tree-toggle]');
-    assert.equal(await toggles.count(), 2, '每个 server 一个展开按钮');
-    for (const toggle of await toggles.all()) await toggle.click();
-    await page.waitForTimeout(200);
-    const text = await page.locator('#mcpList').innerText();
-    assert.match(text, /snowluma_status/);
-    assert.match(text, /demo_tool/);
-    assert.match(text, /2 个 server · 2 个工具 · 1 个技能/);
-    assert.equal(await page.locator('#mcpList .status-badge').count(), 0, 'MCP 标签统一用 .pill');
-    assert.ok(await page.locator('#mcpList .pill').count() >= 2, '来源与状态标签应使用 .pill');
-    const externalActions = page.locator('#mcpList tr.tree-parent', { hasText: 'test-ext' }).locator('[data-mcp-act]');
-    assert.equal(await externalActions.count(), 3, '外部 MCP 操作列最多编辑/测试/删除三个');
-    assert.equal(await page.locator('#mcpList [data-filter="source"]').count(), 1);
-    assert.equal(await page.locator('#mcpList [data-filter="status"]').count(), 1);
-    await page.locator('#mcpList tr.tree-parent', { hasText: 'test-ext' }).locator('[data-mcp-act="delete"]').click();
+    // 主从布局：左栏是 server 列表，右栏是选中 server 的详情与工具清单。
+    await page.waitForFunction(() => document.querySelectorAll('#mcpSplit .split-item').length >= 2);
+    assert.equal(await page.locator('#mcpList [data-table]').count(), 0, 'MCP 页不再用表格');
+    const summary = await page.locator('#mcpSummary').innerText();
+    assert.match(summary, /2 个 server · 2 个工具 · 1 个技能/);
+    assert.ok(await page.locator('#mcpSplit .split-item').first().getAttribute('aria-selected') === 'true', '默认选中第一个 server');
+    const detail = page.locator('#mcpList [data-split-detail]');
+    assert.match(await detail.innerText(), /snowluma_status/, '内置 server 详情应列出工具');
+
+    await page.locator('#mcpSplit .split-item[data-split-key="test-ext"]').click();
+    await page.waitForFunction(() => document.querySelector('#mcpList [data-split-detail]')?.textContent.includes('demo_tool'));
+    const externalActions = detail.locator('[data-mcp-act]');
+    assert.equal(await externalActions.count(), 4, '外部 MCP 操作有编辑/测试/日志/删除');
+    assert.equal(await page.locator('#mcpFilterSource').count(), 1);
+    assert.equal(await page.locator('#mcpFilterStatus').count(), 1);
+    assert.equal(await page.locator('#mcpServerSearch').count(), 1);
+
+    // 筛选：只看外部 → 左栏剩 test-ext；清空后恢复两条。
+    await page.selectOption('#mcpFilterSource', 'external');
+    await page.waitForTimeout(120);
+    assert.equal(await page.locator('#mcpSplit .split-item').count(), 1, '按来源筛选只留外部 server');
+    await page.selectOption('#mcpFilterSource', 'all');
+
+    await detail.locator('[data-mcp-act="delete"]').click();
     await page.waitForTimeout(350);
     const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
     assert.ok(
@@ -255,7 +261,8 @@ try {
     assert.equal(await page.locator('#presetValidate').count(), 1);
     assert.equal(await page.locator('#presetAuthPicker .preset-picker-group').count(), 3);
     await page.waitForSelector('#presetEditor .code-editor .cm-editor');
-    await page.locator('#presetEditor .code-editor .cm-content').click();
+    // 编辑卡里现在有两个编辑器（仿真提示词 + YAML），YAML 是后挂的那个。
+    await page.locator('#presetEditor .code-editor .cm-content').last().click();
     await page.keyboard.press('Control+End');
     await page.keyboard.type('\n# ui cm smoke');
     assert.match(await page.locator('#presetEditYaml').inputValue(), /# ui cm smoke/);
@@ -324,10 +331,12 @@ try {
     await fill('newRoleName', '契约测试角色');
     await fill('newRoleContent', '温柔、有耐心，回答简洁。');
     assert.deepEqual(await clickWrite('#roleCreate', '/api/roles/create'), { name: '契约测试角色', content: '温柔、有耐心，回答简洁。', apply: 'nextWake' });
-    // 人格切换的生效时机（apply）是改版后新增的选项，默认「下次唤醒」。
-    await fill('roleInput', '契约测试角色');
-    assert.deepEqual(await clickWrite('#roleSet', '/api/role'), { role: '契约测试角色', apply: 'nextWake' });
-    assert.deepEqual(await clickWrite('#roleClear', '/api/role'), { role: null, apply: 'nextWake' });
+    // 默认人格已归一到全局配置：列表行的「设为默认」写 config.json 的 role.default。
+    assert.deepEqual(await clickWrite('[data-role="契约测试角色"] [data-role-default]', '/api/config/role-default'), { value: '契约测试角色' });
+    // 清除默认人格走全局配置页的下拉（空选项 = 不挂人格卡）。
+    await navigate('config');
+    await page.selectOption('#roleDefaultSelect', '');
+    assert.deepEqual(await saveBarWrite('/api/config/role-default'), { value: '' });
     // 手动静默按钮在总览页；这里只校验表单契约与按钮可用，实际写请求由后端测试覆盖。
     await reveal('#silentToggle');
     assert.equal(await page.evaluate(() => document.getElementById('silentToggle').disabled), false);
@@ -399,7 +408,7 @@ try {
     await fill('sendLimitMin', 7);
     await fill('sendLimitHour', 0);
     assert.deepEqual(await saveBarWrite('/api/config/send-limit'), { maxSendPerMinute: 7, maxSendPerHour: 0 });
-    await page.waitForFunction(() => /已保存/.test(document.getElementById('saveBarResults')?.textContent || ''));
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('actionDockResults')?.textContent || ''));
   });
 
   await test('Slang add, search, confirm modal, tab switching and parameter contracts', async () => {
@@ -690,6 +699,41 @@ try {
     await calm.close();
   });
 
+  if (!original) await test('外部人格：读取角色卡 → 编辑覆盖并保存 → 另存为内部人格 → 改名', async () => {
+    await navigate('persona');
+    await page.waitForFunction(() => document.querySelectorAll('#externalRoles .tile').length >= 2, null, { timeout: 8000 });
+    assert.equal(await page.locator('#externalRoles .tile').count(), 2);
+    assert.match(await page.textContent('#externalHint'), /soulkit/);
+    await page.locator('#externalRoles [data-ext-open]').first().click();
+    await page.waitForSelector('#externalEditor.open', { timeout: 5000 });
+    assert.equal(await page.locator('#extName').inputValue(), '星苒');
+    assert.equal(await page.locator('#extOverlay').inputValue(), '雨夜的北京，窗没关。');
+    await page.locator('#extOverlay').fill('雨停了，天台上风很大。');
+    const [saveRes] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/save' && r.request().method() === 'POST'),
+      page.locator('#extSave').click(),
+    ]);
+    assert.equal(saveRes.status(), 200);
+    assert.match(await page.textContent('#extMsg'), /已保存/);
+    // 另存为内部人格：名字来自表单字段（默认「星苒-内部」）。
+    await page.locator('#extSaveAsName').fill('星苒内部');
+    const [asRes] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/save-as-role' && r.request().method() === 'POST'),
+      page.locator('#extSaveAs').click(),
+    ]);
+    assert.equal(asRes.status(), 200);
+    await page.waitForFunction(() => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === '星苒内部'), null, { timeout: 8000 });
+    await page.locator('#extNewName').fill('星苒二号');
+    const [renameRes] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/rename' && r.request().method() === 'POST'),
+      page.locator('#extRename').click(),
+    ]);
+    assert.equal(renameRes.status(), 200);
+    assert.match(await page.textContent('#extMsg'), /已改名/);
+    await page.locator('#extClose').click();
+    await page.waitForFunction(() => !document.getElementById('externalEditor'), null, { timeout: 5000 });
+  });
+
   if (!original) await test('人格管理：新建 → 载入编辑 → 保存修改 → 重命名 → 删除', async () => {
     await navigate('persona');
     const created = '回归人格A';
@@ -704,7 +748,7 @@ try {
     assert.equal(createRes.status(), 200);
     await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
     // 点列表载入编辑：内容回填 + 按钮切到「保存修改」
-    await page.locator('#roleList .tile').filter({ hasText: created }).first().click();
+    await page.locator('#roleList .tile .tile-body').filter({ hasText: created }).first().click();
     await page.waitForFunction((n) => document.getElementById('newRoleName').value === n, created);
     assert.match(await page.locator('#newRoleContent').inputValue(), /用于回归测试/);
     assert.equal((await page.locator('#roleCreate').textContent()).trim(), '保存修改');
@@ -732,43 +776,44 @@ try {
     assert.match(await page.locator('#roleCreateMsg').textContent(), /已删除/);
   });
 
-  if (!original) await test('仿真提示词默认可查看、解锁后可编辑、保存后提示需重启 DSH', async () => {
-    await navigate('persona');
-    // 仿真提示词现在收在默认折叠的分组里：先展开，否则控件存在但不可点。
-    await page.evaluate(() => { const d = document.querySelector('details[data-group="sim"]'); if (d) d.open = true; });
-    await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
-    assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), '', '默认应为只读');
+  if (!original) await test('仿真提示词：预设页只读展示、解锁后可编辑、保存提示重启 DSH、可还原初始版本', async () => {
+    await navigate('presets');
+    await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
+    await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
+    await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
+    await page.waitForFunction(() => (document.querySelector('#presetPrompt .cm-content')?.textContent || '').length > 0);
+    assert.match(await page.locator('#presetPromptStatus').textContent(), /字符/, '状态行应显示字符数');
     assert.equal(await page.locator('#simPromptSave').isDisabled(), true, '只读时不应能保存');
-    assert.match(await page.locator('#layer-note, .layer-note').first().textContent(), /仿真提示词/, '页面应说明两层提示词的边界');
+    assert.equal(await page.locator('#presetPrompt .cm-content').getAttribute('contenteditable'), 'false', '默认应为只读');
     await page.locator('#simPromptEdit').click();
-    assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), null, '解锁后应可编辑');
+    assert.equal(await page.locator('#presetPrompt .cm-content').getAttribute('contenteditable'), 'true', '解锁后应可编辑');
     assert.equal(await page.locator('#simPromptSave').isDisabled(), false);
-    const edited = (await page.locator('#simPromptText').inputValue()) + '\n\n【回归追加】一句测试规则。';
-    await page.locator('#simPromptText').fill(edited);
-    const [saved] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/preset/sim-prompt' && r.request().method() === 'POST'),
-      page.locator('#simPromptSave').click(),
-    ]);
-    assert.equal(saved.status(), 200);
-    assert.equal((await saved.json()).ok, true);
-    assert.match(await page.locator('#simPromptMsg').textContent(), /重启 DSH/, '保存后必须提示重启 DSH');
-    assert.equal(await page.locator('#simPromptText').getAttribute('readonly'), '', '保存后应回到只读');
+    await page.locator('#presetPrompt .cm-content').click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n\n【回归追加】一句测试规则。');
+    await page.locator('#simPromptSave').click();
+    await page.waitForFunction(() => /重启 DSH/.test(document.getElementById('simPromptMsg')?.textContent || ''), null, { timeout: 8000 });
+    // 改过之后「还原初始提示词」才可点；确认框由全局 dialog handler 接受。
+    await page.locator('#simPromptReset').click();
+    await page.waitForFunction(() => /已还原/.test(document.getElementById('simPromptMsg')?.textContent || ''), null, { timeout: 8000 });
   });
 
-  if (!original) await test('仿真提示词可切换到一代/二代，两代内容相互独立', async () => {
-    await navigate('persona');
-    await page.evaluate(() => { const d = document.querySelector('details[data-group="sim"]'); if (d) d.open = true; });
-    await page.waitForFunction(() => document.getElementById('simPromptText').value.length > 0);
-    const v2 = await page.locator('#simPromptText').inputValue();
-    assert.match(await page.locator('#simPromptStatus').textContent(), /二代仿真|qq-chat-v2/);
-    await page.locator('#simPromptPreset').selectOption('qq-chat');
-    await page.waitForFunction((prev) => document.getElementById('simPromptText').value !== prev, v2);
-    const v1 = await page.locator('#simPromptText').inputValue();
+  if (!original) await test('仿真提示词按预设独立：一代与二代内容不同', async () => {
+    const readPrompt = async (presetId) => {
+      await navigate('presets');
+      await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
+      await page.locator('#presetList tbody tr', { hasText: presetId }).first().locator('[data-preset-act="edit"]').click();
+      await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
+      // 卡片内容是异步回填的：等它明确标成本次预设，避免读到上一个预设的旧内容。
+      await page.waitForFunction((id) => document.getElementById('presetPrompt').dataset.preset === id, presetId);
+      await page.waitForFunction(() => (document.querySelector('#presetPrompt .cm-content')?.textContent || '').length > 0);
+      return page.locator('#simPromptText').inputValue();
+    };
+    const v2 = await readPrompt('qq-chat-v2');
+    assert.match(await page.locator('#presetEditName').inputValue(), /二代/);
+    const v1 = await readPrompt('qq-chat');
+    assert.match(await page.locator('#presetEditName').inputValue(), /一代/);
     assert.notEqual(v1, v2, '两代预设的提示词应各自独立');
-    assert.match(await page.locator('#simPromptStatus').textContent(), /一代仿真|qq-chat/);
-    // 切回二代，避免影响后续断言
-    await page.locator('#simPromptPreset').selectOption('qq-chat-v2');
-    await page.waitForFunction((prev) => document.getElementById('simPromptText').value === prev, v2);
   });
 
   if (!original) await test('人格注入上限可调，且随模式筛选后统计', async () => {
@@ -819,7 +864,7 @@ try {
     ]);
     assert.equal(saved.status(), 200);
     assert.deepEqual(saved.request().postDataJSON(), { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'medium', vision: 'auto' });
-    await page.waitForFunction(() => /example-reasoner/.test(document.getElementById('saveBarResults')?.textContent || ''));
+    await page.waitForFunction(() => /example-reasoner/.test(document.getElementById('actionDockResults')?.textContent || ''));
     // 改回默认，避免影响后续断言
     await page.locator('#dshProviderSelect').selectOption('deepseek-official');
     await page.locator('#dshModelSelect').selectOption('deepseek-flash');

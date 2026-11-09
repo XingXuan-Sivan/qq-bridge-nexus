@@ -33,3 +33,66 @@
   min-width: 180px;
   width: auto;
 }
+
+/* 人格卡片：整卡是一个 div，主体是铺满的按钮，行内操作单独一行靠右。 */
+.tile-body {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tile-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.tile-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 2px;
+}
+.tile-actions .btn.small {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+.tile-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 外部人格（soulkit provider）：列表卡片沿用 .tile，只加分区标题与小标。 */
+.external-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 22px 0 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+.external-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.external-head .meta {
+  margin: 0;
+}
+.tile-external .tile-head strong {
+  font-weight: 600;
+}
+
+#roleSearch {
+  flex: 0 1 320px;
+  max-width: 320px;
+}
+#roleFilter {
+  flex: 0 0 140px;
+}
+
+

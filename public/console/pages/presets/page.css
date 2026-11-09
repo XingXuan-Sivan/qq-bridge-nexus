@@ -35,3 +35,18 @@
 }
 .preset-picker-tools.is-disabled { opacity: .55; }
 .preset-picker-note { margin-top: 8px; }
+/* 仿真提示词卡：挂在「YAML 高级编辑」上方，与编辑器同宽。 */
+.preset-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 18px;
+  margin: 0 0 6px;
+  border-bottom: 1px dashed var(--border-subtle);
+}
+.preset-prompt[hidden] { display: none; }
+.preset-prompt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.preset-prompt-head h3 { margin: 0; font-size: 14px; }
+.preset-prompt .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.preset-prompt .meta.ok { color: var(--ok, #2f8f5b); }
+.preset-prompt .meta.err { color: var(--danger); }

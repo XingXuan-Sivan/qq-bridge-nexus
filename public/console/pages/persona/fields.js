@@ -80,37 +80,26 @@ export const PERSONA_FIELDS = {
   },
 
   // ── 切换当前启用的人格 ────────────────────────────────────────────────────
-  switch: {
+  toolbar: {
     fields: [
       {
         type: 'custom',
-        name: 'roleSwitchPanel',
-        label: '人格名',
+        name: 'roleToolbar',
         span: 2,
-        html: `<div class="control-row">
-  <input class="control-grow" type="text" id="roleInput" placeholder="选择已有角色或输入新角色名" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="roleSuggest">
-  <button type="button" class="btn" id="roleSet">设置</button>
-  <button type="button" class="btn" id="roleClear">清除</button>
-</div>
-<ul id="roleSuggest" class="role-suggest" role="listbox" aria-label="已有人格" hidden></ul>`,
-      },
-      {
-        type: 'radio',
-        name: 'roleApply',
-        label: '生效方式',
-        value: 'nextWake',
-        options: [
-          { value: 'nextWake', label: '下次唤醒时重新读卡' },
-          { value: 'immediate', label: '立即切换（现在就唤醒各会话读新卡）' },
-        ],
-        span: 2,
-        hint: '二代仿真的会话只在建立时读一次完整角色卡；切换、清除或修改当前人格后，桥接会把新卡写进各会话下一次的唤醒提示里。',
-      },
-      {
-        type: 'custom',
-        name: 'roleApplyResult',
-        span: 2,
-        html: '<div class="meta" id="roleApplyResult" hidden></div>',
+        html: `<div class="table-toolbar">
+  <div class="table-toolbar-main">
+    <input id="roleSearch" class="search-input" type="search" placeholder="搜索人格名或说明…" aria-label="搜索人格">
+    <select id="roleFilter" class="u-w-190" aria-label="筛选人格">
+      <option value="all">全部人格</option>
+      <option value="used">已用于会话</option>
+      <option value="unused">未使用</option>
+    </select>
+  </div>
+  <div class="table-toolbar-side">
+    <button type="button" class="btn" id="roleRefresh">刷新</button>
+    <button type="button" class="btn primary" id="roleNew">新建人格</button>
+  </div>
+</div>`,
       },
     ],
   },
@@ -135,74 +124,72 @@ export const PERSONA_FIELDS = {
     ],
   },
 
-  // ── 恢复默认人格 ──────────────────────────────────────────────────────────
-  defaults: {
-    fields: [
-      {
-        type: 'custom',
-        name: 'roleDefaultsList',
-        span: 2,
-        html: '<div id="roleDefaultsList" class="role-defaults u-mt-8">加载中…</div>',
-      },
-      {
-        type: 'custom',
-        name: 'roleDefaultsMsg',
-        span: 2,
-        html: '<div class="meta" id="roleDefaultsMsg"></div>',
-      },
-    ],
-  },
+  // ── 恢复默认人格：并入列表每一行的「恢复初始」操作，不再单独一组 ──────────
 
-  // ── 仿真提示词（预设内置） ────────────────────────────────────────────────
-  sim: {
+  // ── 外部人格编辑弹窗（provider 侧角色卡；只开放覆盖与角色追加） ─────────────
+  externalEditor: {
     fields: [
       {
-        type: 'custom',
-        name: 'simPromptHead',
-        label: '仿真代次',
+        type: 'text',
+        name: 'extName',
+        label: '人格名',
+        readonly: true,
+        hint: '来自 soulkit 的角色卡；改名在下方「新名字」里操作。',
         span: 2,
-        html: `<div class="control-row">
-  <span class="control-fixed u-flex-basis-max-280"><select id="simPromptPreset">
-    <option value="qq-chat-v2">二代仿真（reserved2 · qq-chat-v2）</option>
-    <option value="qq-chat">一代仿真（reserved · qq-chat）</option>
-  </select></span>
-  <span class="status-badge is-pill" id="simPromptStatus">加载中…</span>
-  <span class="control-note">两代机制不同（一代空格分条 / 二代一切皆工具），提示词各自独立。</span>
-</div>`,
+      },
+      {
+        type: 'text',
+        name: 'extNewName',
+        label: '新名字',
+        placeholder: '留空表示不改名',
+        hint: '只改显示名与目录名，不改 soul；改名后请点「改名」。',
+        span: 2,
+      },
+      {
+        type: 'text',
+        name: 'extSaveAsName',
+        label: '另存为名字',
+        hint: '点「另存为内部人格」时写进 roles/<名字>.md；同名会先备份。',
+        span: 2,
       },
       {
         type: 'textarea',
-        name: 'simPromptText',
-        rows: 20,
-        // 不要再用 .code-area：它是「带边框和内边距的容器」类，挂到 field-block 上会形成
-        // 「外层容器一个框 + textarea 自己一个框」的双层边框。样式走 .field-block--code 里的 textarea 规则。
-        className: 'field-block--code',
-        spellcheck: false,
-        readonly: true,
+        name: 'extDescription',
+        label: '描述',
+        rows: 2,
+        maxlength: 500,
         span: 2,
       },
       {
-        type: 'custom',
-        name: 'simPromptWarnings',
+        type: 'textarea',
+        name: 'extOverlay',
+        label: '世界内覆盖',
+        rows: 8,
+        mono: true,
+        maxlength: 20000,
         span: 2,
-        html: '<div class="meta" id="simPromptWarnings"></div>',
+        hint: '写进这张卡的 overlay.md：当前世界的额外设定，拼在 soul 提示词之前。',
+      },
+      {
+        type: 'textarea',
+        name: 'extSystemAppend',
+        label: '角色追加',
+        rows: 5,
+        mono: true,
+        maxlength: 2000,
+        span: 2,
+        hint: '写进这张卡的 persona.systemAppend：拼在 soul 提示词之后，适合放这个角色额外的口径。',
       },
       {
         type: 'action',
-        id: 'simPromptActions',
+        id: 'extActions',
         items: [
-          { id: 'simPromptEdit', label: '编辑' },
-          { id: 'simPromptSave', label: '保存并同步到 DSH', variant: 'primary' },
-          { id: 'simPromptRestore', label: '还原上次备份' },
-          { id: 'simPromptCancel', label: '取消编辑' },
+          { id: 'extSave', label: '保存到 soulkit', variant: 'primary' },
+          { id: 'extRename', label: '改名' },
+          { id: 'extSaveAs', label: '另存为内部人格' },
+          { id: 'extClose', label: '关闭' },
         ],
-        status: 'simPromptMsg',
-      },
-      {
-        type: 'custom',
-        name: 'simPromptRestart',
-        span: 2,
-        html: '<div class="meta" id="simPromptRestart"></div>',
+        status: 'extMsg',
       },
     ],
   },

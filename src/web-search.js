@@ -26,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
 import { URL } from 'node:url';
-import YAML from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 import { resolveSafeAddresses, safeFetch } from './safe-fetch.js';
 
 const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic/v1';
@@ -94,7 +94,7 @@ export function readDshCredential(ref) {
   const name = String(ref ?? '').trim();
   if (!name) return '';
   try {
-    const doc = YAML.load(fs.readFileSync(path.join(resolveDshHome(), '.credentials.yaml'), 'utf8'));
+    const doc = parseYaml(fs.readFileSync(path.join(resolveDshHome(), '.credentials.yaml'), 'utf8'));
     const value = doc?.refs?.[name];
     return typeof value === 'string' ? value.trim() : '';
   } catch {

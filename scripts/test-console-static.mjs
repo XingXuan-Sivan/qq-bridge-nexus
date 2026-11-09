@@ -54,23 +54,15 @@ console.log('## JS 语法');
   ok(!failing, '全部控制台模块语法可解析', failing || `${moduleFiles.length} 个文件`);
 }
 
-console.log('## 人格快捷选择（v0.4.1）');
-ok(/id="roleInput"[^>]*role="combobox"/.test(html) && /id="roleSuggest"[^>]*role="listbox"/.test(html), '切换人格输入框带下拉候选（combobox + listbox）');
-{
-  const src = /function filterRoleSuggestions\([\s\S]*?\n\}/.exec(html)?.[0];
-  ok(!!src, 'filterRoleSuggestions 已定义');
-  if (src) {
-    const filter = new Function(`${src}; return filterRoleSuggestions;`)();
-    const names = ['AAA', 'BBB', 'CCC', 'ABB'];
-    ok(JSON.stringify(filter(names, '')) === JSON.stringify(names), '空输入列出全部人格');
-    ok(JSON.stringify(filter(names, 'A')) === '["AAA","ABB"]', '输入 A → AAA、ABB');
-    ok(JSON.stringify(filter(names, 'AA')) === '["AAA"]', '输入 AA → 只剩 AAA');
-    ok(JSON.stringify(filter(names, 'a')) === '["AAA","ABB"]', '不区分大小写');
-    ok(JSON.stringify(filter(names, 'B')) === '["BBB"]', '只按开头匹配（ABB 不因含 B 而出现）');
-  }
-  ok(/addEventListener\('mousedown', \(e\) => \{ e\.preventDefault\(\); pick\(name\)/.test(html), '点击候选填入输入框（mousedown 防失焦）');
-  ok(/e\.key === 'ArrowDown'/.test(html) && /e\.key === 'Escape'/.test(html), '键盘 ↑↓ / 回车 / Esc');
-}
+console.log('## 人格列表：工具栏 + 行内操作（P3）');
+ok(/data-persona-fields="toolbar"/.test(html), '列表卡顶部挂了工具栏槽位');
+ok(/id="roleSearch"/.test(html) && /id="roleFilter"/.test(html) && /id="roleNew"/.test(html), '工具栏含搜索 / 筛选 / 新建');
+ok(/dataset\.roleDefault/.test(html) && /dataset\.roleRestore/.test(html), '行内操作：设为默认 / 恢复初始');
+ok(/function renderRoleList\(\)/.test(html), 'renderRoleList 已定义');
+ok(/roleFilter === 'used'/.test(html) && /roleFilter === 'unused'/.test(html), '筛选区分已用 / 未用');
+ok(/roleQuery = e\.target\.value/.test(html), '搜索输入实时过滤');
+ok(!/id="roleInput"/.test(html) && !/roleSuggest/.test(html), '旧的人格切换输入框与候选下拉已移除');
+ok(!/roleDefaultsList/.test(html), '「恢复默认人格」独立面板已移除（并入列表行）');
 
 console.log('## 语音图形界面的音量控件');
 if (!hasVoiceTool()) {
@@ -268,10 +260,17 @@ for (const id of fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))) 
 ok(searchInputs.length === 0, `页面级搜索框已全部进组件/字段规格，page.html 里不再手写搜索框（实际 ${searchInputs.length}）`);
 ok(searchInputs.every(({ tag }) => /type="search"/.test(tag)), `页面内搜索框都写明 type="search"（${searchInputs.filter(({ tag }) => !/type="search"/.test(tag)).map(({ id }) => id).join(', ') || '全部正确'}）`);
 ok(/class="[^"]*search-box/.test(html.match(/<input id="consoleSearch"[^>]*>/)?.[0] ?? ''), '全局搜索框也走 search-box 组件类');
-for (const id of ['skills', 'mcp', 'behaviors']) {
+for (const id of ['skills', 'behaviors']) {
   const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
   ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(|dataTableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的表格组件`);
 }
+// MCP 页是主从布局（server 列表 → 工具清单），复用 split-view 组件而不是表格。
+const mcpModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'mcp', 'page.js'), 'utf8');
+ok(
+  /from '\.\.\/\.\.\/components\/split-view\/split-view\.js'/.test(mcpModule)
+  && /splitViewHtml\(|splitItemHtml\(/.test(mcpModule),
+  'mcp 页改用 components/split-view 的主从布局组件',
+);
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
 for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'customField', 'checkListField', 'checkTableField', 'statusBadge', 'inlineActions', 'createForm', 'renderFields']) {

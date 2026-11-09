@@ -7,7 +7,7 @@
 //                由桥接每条消息注入，保存即生效。
 //
 // 本模块只做纯文本/YAML 处理，不碰文件系统以外的任何状态，便于单测。
-import yaml from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 
 export const PRESET_PERSONA_ID = 'persona';
 export const PRESET_PROMPT_MAX_BYTES = 128 * 1024;
@@ -104,7 +104,7 @@ export function locatePresetPromptBlock(text) {
 export function extractPresetPrefix(text) {
   let loaded;
   try {
-    loaded = yaml.load(text);
+    loaded = parseYaml(text);
   } catch {
     return null;
   }

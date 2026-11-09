@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
-import YAML from 'js-yaml';
+import { parse as parseYaml } from 'yaml';
 import { AbstractApiClient } from '@deepseek-ai/dsh-host-apiproxy/client';
 
 /** DSH home：凭据文件与（历史）启动日志都在这里。 */
@@ -96,7 +96,7 @@ const base64url = (buffer) => Buffer.from(buffer).toString('base64')
  */
 export function readBrowserSessionSecret() {
   try {
-    const doc = YAML.load(fs.readFileSync(path.join(resolveDshHome(), '.credentials.yaml'), 'utf8'));
+    const doc = parseYaml(fs.readFileSync(path.join(resolveDshHome(), '.credentials.yaml'), 'utf8'));
     const record = doc?.records?.[BROWSER_SESSION_KEY];
     if (record?.kind !== 'grant' || record?.payload?.version !== 1) return null;
     const secret = record.payload.secret;

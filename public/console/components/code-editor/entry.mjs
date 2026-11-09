@@ -6,9 +6,9 @@
 // 产物：public/console/components/code-editor/vendor/codemirror.js（已入库，运行时不需要 node_modules）
 import { basicSetup } from 'codemirror';
 import { EditorView } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { yaml } from '@codemirror/lang-yaml';
 
-export { basicSetup, EditorView, EditorState, HighlightStyle, syntaxHighlighting, tags, yaml };
+export { basicSetup, EditorView, Compartment, EditorState, HighlightStyle, syntaxHighlighting, tags, yaml };

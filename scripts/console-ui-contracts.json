@@ -81,18 +81,16 @@
   },
   {
     "method": "POST",
-    "path": "/api/role",
+    "path": "/api/config/role-default",
     "body": {
-      "role": "契约测试角色",
-      "apply": "nextWake"
+      "value": "契约测试角色"
     }
   },
   {
     "method": "POST",
-    "path": "/api/role",
+    "path": "/api/config/role-default",
     "body": {
-      "role": null,
-      "apply": "nextWake"
+      "value": ""
     }
   },
   {

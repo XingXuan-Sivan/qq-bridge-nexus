@@ -365,7 +365,17 @@ export function makeFixtureState() {
       温柔助手: '# 温柔助手\n\n- 性格：温和、有耐心\n- 说话风格：先共情再回答',
       技术伙伴: '# 技术伙伴\n\n- 性格：直接、爱讲原理\n- 说话风格：先给结论再解释',
     },
+    // 外部人格（soulkit provider 的角色卡）；桥接按 name 代理读取与写入。
+    externalPersonas: {
+      星苒: { slug: '星苒', description: '群里的主角色', overlay: '雨夜的北京，窗没关。', systemAppend: '说话别太长。' },
+      备用角色: { slug: '备用角色', description: '备用设定', overlay: '', systemAppend: '' },
+    },
     simPrompts: {
+      'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
+      'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+    },
+    // 「初始版本」：与 simPrompts 起始值一致，用来测「已修改 / 还原」。
+    simDefaults: {
       'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
       'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
     },
@@ -736,6 +746,18 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               },
             ],
           });
+          case '/api/extensions/presets/qq-chat': return json({
+            ok: true,
+            preset: {
+              id: 'qq-chat',
+              meta: { name: 'QQ 群聊（一代）', description: '离线预览用的群聊预设。', order: 1 },
+              extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
+              extensionsExists: true,
+              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              validation: { ok: true, rows: 2 },
+              backups: [],
+            },
+          });
           case '/api/extensions/presets/qq-chat-v2': return json({
             ok: true,
             preset: {
@@ -782,6 +804,25 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             summary: { servers: 2, online: 2, errors: 0, tools: 2, skills: 1 },
           });
           case '/api/persona/sources': return json({ ok: true, provider: null, rows: [] });
+          case '/api/persona/external': return json({
+            ok: true,
+            provider: 'soulkit',
+            listable: true,
+            stale: false,
+            error: null,
+            capabilities: { perSession: true, conditional: true, listable: true },
+            cards: Object.entries(state.externalPersonas).map(([name, card]) => ({
+              name,
+              slug: card.slug,
+              description: card.description,
+              systemAppendChars: card.systemAppend.length,
+              overlayChars: card.overlay.length,
+              updatedAt: Date.parse(timestamp),
+              hasText: true,
+              stale: false,
+            })),
+          });
+          case '/api/config/role-default': return json({ ok: true, value: state.role ?? null, options: state.roles.slice() });
           case '/api/roles': return json({
             roles: state.roles.slice(),
             summaries: state.roles.map((name) => {
@@ -838,6 +879,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               warnings: [],
               status: presetStatusFixture(preset),
               presets: [presetStatusFixture('qq-chat'), presetStatusFixture('qq-chat-v2')],
+              hasDefault: true,
+              modified: state.simPrompts[preset] !== state.simDefaults[preset],
+              defaultContent: state.simDefaults[preset],
+              defaultChars: state.simDefaults[preset].length,
             });
           }
           case '/api/preset/sim-prompt/backups': {
@@ -989,6 +1034,48 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             state.restoredTsundere = true; return json({ ok: true, name: body.name, created: true, unchanged: false, backup: null, refresh: { apply: body.apply || 'nextWake', notActive: true } });
           case '/api/stickers/describe': state.stickerDescribed = true; return json({ ok: true, started: true, total: 21, undescribed: 10, running: true, progress: { done: 0, total: 10 }, last: null, blocker: '', model: 'deepseek-flash', max: 20 });
           case '/api/mode': state.mode = body.mode; state.closedAgentPreset = body.closedAgentPreset; return json({ ok: true, dshSynced: true });
+          case '/api/persona/external/card': {
+            const card = state.externalPersonas[body.name];
+            if (!card) return json({ ok: false, error: '角色卡不存在' }, 404);
+            const text = `【人格卡：${body.name}｜${'a1b2c3d4e5'}】\n${card.overlay}\n${body.name} 的 soul\n${card.systemAppend}`;
+            return json({ ok: true, name: body.name, text, chars: text.length });
+          }
+          case '/api/persona/external/detail': {
+            const card = state.externalPersonas[body.name];
+            if (!card) return json({ ok: false, error: '角色卡不存在' }, 404);
+            return json({ ok: true, stale: false, character: { name: body.name, slug: card.slug, description: card.description, overlay: card.overlay, systemAppend: card.systemAppend } });
+          }
+          case '/api/persona/external/save': {
+            const card = state.externalPersonas[body.name];
+            if (!card) return json({ ok: false, error: '角色卡不存在' }, 404);
+            if (typeof body.description === 'string') card.description = body.description;
+            if (typeof body.overlay === 'string') card.overlay = body.overlay;
+            if (typeof body.systemAppend === 'string') card.systemAppend = body.systemAppend;
+            return json({ ok: true, name: body.name, message: '已保存' });
+          }
+          case '/api/persona/external/rename': {
+            const card = state.externalPersonas[body.name];
+            if (!card) return json({ ok: false, error: '角色卡不存在' }, 404);
+            const next = String(body.nextName ?? '').trim();
+            if (!next) return json({ ok: false, error: '新名字为空' }, 400);
+            delete state.externalPersonas[body.name];
+            state.externalPersonas[next] = { ...card, slug: next };
+            return json({ ok: true, name: next });
+          }
+          case '/api/persona/external/save-as-role': {
+            const as = String(body.as ?? '').trim();
+            if (!as) return json({ ok: false, error: '缺少内部人格名' }, 400);
+            if (!state.roles.includes(as)) state.roles.push(as);
+            const text = String(body.text ?? `# ${as}\n\n- 从外部人格另存。`);
+            state.roleContents[as] = text;
+            return json({ ok: true, name: as, chars: text.length, message: `已另存为「${as}」` });
+          }
+          case '/api/config/role-default': {
+            const value = typeof body.value === 'string' ? body.value.trim() : '';
+            if (value && !state.roles.includes(value)) return json({ ok: false, error: `人格「${value}」不存在` }, 400);
+            state.role = value || null;
+            return json({ ok: true, value: state.role, message: value ? `已设为「${value}」，下一条消息生效` : '已清空默认人格' });
+          }
           case '/api/role': state.role = body.role; return json({ ok: true, role: body.role, refresh: body.apply === 'immediate' ? { apply: 'immediate', mode: 'reserved2', woke: 2, pending: 0 } : { apply: 'nextWake', mode: 'reserved2', woke: 0, pending: 3 } });
           case '/api/roles/create': state.roles.push(body.name); state.roleContents[body.name] = body.content ?? ''; return json({ ok: true, role: body.name, warnings: [] });
           case '/api/roles/update': state.roleContents[body.name] = body.content ?? ''; return json({ ok: true, role: body.name, chars: String(body.content ?? '').length, warnings: [], refresh: body.name !== state.role ? { apply: body.apply || 'nextWake', notActive: true } : body.apply === 'immediate' ? { apply: 'immediate', mode: 'reserved2', woke: 2, pending: 0 } : { apply: 'nextWake', mode: 'reserved2', woke: 0, pending: 3 } });
@@ -1015,6 +1102,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const unchanged = content === state.simPrompts[preset];
             if (!unchanged) state.simPrompts[preset] = content;
             return json({ ok: true, unchanged, chars: content.length, warnings: [], synced: true, requiresRestart: !unchanged, status: presetStatusFixture(preset) });
+          }
+          case '/api/preset/sim-prompt/reset': {
+            const preset = body.preset === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            state.simPrompts[preset] = state.simDefaults[preset];
+            return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], synced: true, requiresRestart: true, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/restore': {
             const preset = body.preset === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';

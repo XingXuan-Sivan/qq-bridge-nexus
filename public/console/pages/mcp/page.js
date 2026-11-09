@@ -1,11 +1,11 @@
-// MCP 页：内置 server 概览 + 外部 MCP 管理 + 工具参考。
-// 表格与弹窗都复用 console 的共享组件；连接配置按 AstrBot 的方式用一份 JSON + 模板。
+// MCP 页：内置 server 概览 + 外部 MCP 管理 + 工具清单（主从布局）。
+// 左右分栏复用 split-view 组件；编辑弹窗复用 form / modal / terminal。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
+import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
 import { MCP_FIELDS } from './fields.js';
 import { renderTerminalLines, terminalHtml, textToLines } from '../../components/terminal/terminal.js';
 
@@ -56,130 +56,154 @@ function statusTag(server) {
   return `<span class="pill">${esc(server.status === 'stopped' ? '已停止' : server.status ?? '已停止')}</span>`;
 }
 
-function actionButtons(server) {
-  if (server.source !== 'external') return '<span class="meta">—</span>';
-  const id = esc(server.id);
-  return `<div class="mcp-row-actions">
-    <button class="btn small" type="button" data-mcp-act="edit" data-id="${id}">编辑</button>
-    <button class="btn small" type="button" data-mcp-act="test" data-id="${id}">测试</button>
-    <button class="btn small danger" type="button" data-mcp-act="delete" data-id="${id}">删除</button>
+// 列表筛选与选中态都放在这里：refresh 只换数据，不重置用户的筛选与选择。
+const MCP_STATE = { servers: [], skills: 0, summary: {}, query: '', source: 'all', status: 'all', selected: null, toolQuery: '' };
+
+function serverHaystack(server) {
+  const tools = Array.isArray(server.tools) ? server.tools : [];
+  return [
+    server.name, server.id, server.description, server.note, server.file,
+    ...tools.map((tool) => `${toolName(tool)} ${toolDescription(tool)}`),
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function isOnline(server) {
+  return server.status === 'running' || server.status === 'online';
+}
+
+function visibleServers() {
+  const q = MCP_STATE.query.trim().toLowerCase();
+  return MCP_STATE.servers.filter((server) => {
+    if (MCP_STATE.source !== 'all' && (server.source === 'external' ? 'external' : 'builtin') !== MCP_STATE.source) return false;
+    if (MCP_STATE.status === 'running' && !isOnline(server)) return false;
+    if (MCP_STATE.status === 'error' && server.status !== 'error') return false;
+    if (MCP_STATE.status === 'stopped' && (isOnline(server) || server.status === 'error')) return false;
+    if (q && !serverHaystack(server).includes(q)) return false;
+    return true;
+  });
+}
+
+function toolbarMarkup(servers, summary) {
+  const toolCount = Number(summary.tools) || servers.reduce((sum, server) => sum + (Number(server.toolCount) || (server.tools ?? []).length), 0);
+  const errors = Number(summary.errors) || servers.filter((server) => server.status === 'error').length;
+  const warning = errors ? `<span class="pill r" title="部分 server 连接失败；打开详情可查看原因">${errors} 个读取失败</span>` : '';
+  return `<div class="table-toolbar">
+    <div class="table-toolbar-main">
+      <input id="mcpServerSearch" class="search-input" type="search" placeholder="搜索服务器、工具、说明…" aria-label="搜索 MCP 服务器">
+      <select id="mcpFilterSource" class="u-w-190" aria-label="按来源筛选">
+        <option value="all">全部来源</option><option value="builtin">内置</option><option value="external">外部</option>
+      </select>
+      <select id="mcpFilterStatus" class="u-w-190" aria-label="按状态筛选">
+        <option value="all">全部状态</option><option value="running">在线</option><option value="error">读取失败</option><option value="stopped">已停止</option>
+      </select>
+    </div>
+    <div class="table-toolbar-side">
+      <span class="meta" id="mcpSummary">${servers.length} 个 server · ${toolCount} 个工具 · ${MCP_STATE.skills} 个技能</span>
+      ${warning}
+      <button class="btn small" type="button" data-mcp-refresh>刷新</button>
+      <button class="btn primary" type="button" data-mcp-new>新增 MCP</button>
+    </div>
   </div>`;
 }
 
-function serverRow(server) {
-  const count = Number(server.toolCount) || (server.tools ?? []).length;
-  const online = server.status === 'running' || server.status === 'online';
-  const description = server.status === 'error'
-    ? ''
-    : esc(server.note || server.description || '');
+function detailMarkup(server) {
+  if (!server) return '<div class="split-empty">从左侧选一个 server 查看工具清单</div>';
   const tools = Array.isArray(server.tools) ? server.tools : [];
-  const child = `<div class="tree-tool-list">${tools.length
-    ? tools.map((tool) => `<div class="tree-tool"><code>${esc(toolName(tool))}</code><span class="meta">${esc(toolDescription(tool) || '—')}</span></div>`).join('')
-    : '<span class="meta">没有注册工具</span>'}</div>`;
-  return {
-    key: server.id,
-    children: child,
-    attrs: {
-      'data-filter-source': server.source === 'external' ? 'external' : 'builtin',
-      'data-filter-status': online ? 'running' : server.status === 'error' ? 'error' : 'stopped',
-    },
-    cells: [
-      `<strong>${esc(server.name || server.id)}</strong><div class="meta">${esc(server.id)}</div>`,
-      `<div class="mcp-status-cell">${sourceTag(server)}${statusTag(server)}</div>`,
-      String(count),
-      `<code>${esc(server.file || TRANSPORT_LABEL[server.transport] || '')}</code>`,
-      description,
-      actionButtons(server),
-    ],
-  };
+  const external = server.source === 'external';
+  const description = server.status === 'error' ? (server.error || '读取失败') : (server.note || server.description || '');
+  const actions = external
+    ? `<button class="btn small" type="button" data-mcp-act="edit" data-id="${esc(server.id)}">编辑</button>
+       <button class="btn small" type="button" data-mcp-act="test" data-id="${esc(server.id)}">测试</button>
+       <button class="btn small" type="button" data-mcp-act="logs" data-id="${esc(server.id)}">日志</button>
+       <button class="btn small danger" type="button" data-mcp-act="delete" data-id="${esc(server.id)}">删除</button>`
+    : '<span class="meta">内置 server 由桥接仓库提供，不能在这里修改。</span>';
+  const toolRows = tools.length
+    ? tools.map((tool) => `<div class="mcp-tool" data-mcp-tool data-filter-text="${esc(`${toolName(tool)} ${toolDescription(tool)}`.toLowerCase())}">
+        <code>${esc(toolName(tool))}</code><span class="meta">${esc(toolDescription(tool) || '—')}</span>
+      </div>`).join('')
+    : '<div class="meta">没有注册工具。</div>';
+  return `<div class="mcp-detail" data-mcp-detail="${esc(server.id)}">
+    <header class="mcp-detail-head">
+      <div class="mcp-detail-title">
+        <h3>${esc(server.name || server.id)}</h3>
+        <div class="mcp-detail-sub"><code>${esc(server.id)}</code><span class="meta">${esc(server.file || TRANSPORT_LABEL[server.transport] || '')}</span></div>
+      </div>
+      <div class="mcp-status-cell">${sourceTag(server)}${statusTag(server)}</div>
+    </header>
+    ${description ? `<p class="meta mcp-detail-note">${esc(description)}</p>` : ''}
+    <div class="mcp-detail-actions">${actions}</div>
+    <section class="mcp-tools">
+      <div class="mcp-tools-head">
+        <h4>工具 <span class="meta">${tools.length}</span></h4>
+        <input id="mcpToolSearch" class="search-input" type="search" placeholder="筛选工具名或说明…" aria-label="筛选工具" value="${esc(MCP_STATE.toolQuery)}">
+      </div>
+      <div class="mcp-tool-list" id="mcpToolList">${toolRows}</div>
+    </section>
+  </div>`;
 }
 
-function toolRows(servers) {
-  const rows = [];
-  for (const server of servers) {
-    const tools = Array.isArray(server.tools) ? server.tools : [];
-    if (!tools.length) {
-      rows.push({
-        attrs: { 'data-filter-server': server.id },
-        cells: [
-          `<strong>${esc(server.name || server.id)}</strong>`,
-          '<span class="meta">—</span>',
-          server.status === 'error' ? '' : '<span class="meta">没有注册工具</span>',
-        ],
-      });
-      continue;
-    }
-    for (const tool of tools) {
-      rows.push({
-        attrs: { 'data-filter-server': server.id },
-        cells: [
-          `<strong>${esc(server.name || server.id)}</strong>`,
-          `<code>${esc(toolName(tool))}</code>`,
-          esc(toolDescription(tool) || '—'),
-        ],
-      });
-    }
+function paintList() {
+  const host = document.querySelector('#mcpSplit .split-list');
+  if (!host) return;
+  const servers = visibleServers();
+  if (!servers.length) {
+    host.innerHTML = `<div class="split-empty">${MCP_STATE.servers.length ? '没有匹配的 server' : '没有登记 MCP server'}</div>`;
+    return;
   }
-  return rows;
+  host.innerHTML = servers.map((server) => {
+    const online = isOnline(server);
+    const badges = `${sourceTag(server)}${statusTag(server)}`;
+    const count = Number(server.toolCount) || (server.tools ?? []).length;
+    const meta = [server.file || TRANSPORT_LABEL[server.transport] || '', `${count} 个工具`].filter(Boolean).join(' · ');
+    return splitItemHtml({
+      key: server.id,
+      title: server.name || server.id,
+      badges,
+      meta,
+      active: server.id === MCP_STATE.selected,
+      attrs: !online ? 'data-offline="1"' : '',
+    });
+  }).join('');
+}
+
+function paintDetail() {
+  const host = document.querySelector('#mcpSplit [data-split-detail]');
+  if (!host) return;
+  const server = MCP_STATE.servers.find((item) => item.id === MCP_STATE.selected) || null;
+  host.innerHTML = detailMarkup(server);
+  filterToolList();
+}
+
+function filterToolList() {
+  const q = MCP_STATE.toolQuery.trim().toLowerCase();
+  for (const row of document.querySelectorAll('#mcpToolList [data-mcp-tool]')) {
+    row.hidden = Boolean(q) && !(row.dataset.filterText || '').includes(q);
+  }
+}
+
+function selectServer(id) {
+  if (!id || id === MCP_STATE.selected) return;
+  MCP_STATE.selected = id;
+  MCP_STATE.toolQuery = '';
+  paintDetail();
 }
 
 function render(data) {
-  const list = document.getElementById('mcpList');
-  if (!list) return;
+  const host = document.getElementById('mcpList');
+  if (!host) return;
   const servers = Array.isArray(data.mcp) ? data.mcp : [];
-  const summary = data.summary ?? {};
-  const toolCount = Number(summary.tools) || servers.reduce((sum, server) => sum + (Number(server.toolCount) || (server.tools ?? []).length), 0);
-  const skillCount = Number(summary.skills) || (Array.isArray(data.skills) ? data.skills.length : 0);
-  const errors = Number(summary.errors) || servers.filter((server) => server.status === 'error').length;
-
-  if (!servers.length) {
-    list.innerHTML = '<div class="meta">没有登记 MCP server。</div>';
-    return;
+  MCP_STATE.servers = servers;
+  MCP_STATE.summary = data.summary ?? {};
+  MCP_STATE.skills = Number(MCP_STATE.summary.skills) || (Array.isArray(data.skills) ? data.skills.length : 0);
+  if (!MCP_STATE.selected || !servers.some((server) => server.id === MCP_STATE.selected)) {
+    MCP_STATE.selected = servers[0]?.id ?? null;
+    MCP_STATE.toolQuery = '';
   }
-
-  const warning = errors
-    ? `<span class="pill r" title="部分 server 连接失败；展开日志可查看原因">${errors} 个 server 读取失败</span>`
-    : '';
-  const overview = dataTableHtml({
-    columns: [
-      { label: '服务器', width: '220px' },
-      { label: '状态', width: '150px' },
-      { label: '工具', width: '64px' },
-      { label: '入口', width: '190px' },
-      { label: '说明' },
-      { label: '操作', width: '230px' },
-    ],
-    rows: servers.map(serverRow),
-    pager: false,
-    search: { placeholder: '搜索服务器、说明…' },
-    refresh: true,
-    filters: [
-      {
-        id: 'source',
-        label: '来源',
-        options: [
-          { value: 'all', label: '全部来源' },
-          { value: 'builtin', label: '内置' },
-          { value: 'external', label: '外部' },
-        ],
-      },
-      {
-        id: 'status',
-        label: '状态',
-        options: [
-          { value: 'all', label: '全部状态' },
-          { value: 'running', label: '在线' },
-          { value: 'error', label: '读取失败' },
-          { value: 'stopped', label: '已停止' },
-        ],
-      },
-    ],
-    meta: `${servers.length} 个 server · ${toolCount} 个工具 · ${skillCount} 个技能`,
-    actions: `${warning}<button class="btn primary" type="button" data-mcp-new>新增 MCP</button>`,
-  });
-
-  list.innerHTML = overview;
-  initDataTables(list, { onRefresh: () => { refreshMcp(true).catch(() => {}); } });
+  host.innerHTML = toolbarMarkup(servers, MCP_STATE.summary)
+    + splitViewHtml({ id: 'mcpSplit', listLabel: 'MCP 服务器', listHtml: '', detailHtml: '', empty: '从左侧选一个 server 查看工具清单' });
+  paintList();
+  paintDetail();
+  initSplitView(document.getElementById('mcpSplit'), { onSelect: selectServer });
 }
 
 async function refreshMcp(force = false) {
@@ -458,9 +482,27 @@ export function init() {
       openEditor('').catch(() => {});
       return;
     }
+    if (target.closest('[data-mcp-refresh]')) {
+      refreshMcp(true).catch(() => {});
+      return;
+    }
     const hit = target.closest('[data-mcp-act]');
     if (!hit) return;
+    if (hit.dataset.mcpAct === 'logs') { openLogs(hit.dataset.id); return; }
     handleAction(hit.dataset.mcpAct, hit.dataset.id).catch(() => {});
+  });
+  // 搜索与筛选只重画左栏，不打断右侧正在看的详情。
+  document.getElementById('mcpList')?.addEventListener('input', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    if (target.id === 'mcpServerSearch') { MCP_STATE.query = target.value; paintList(); }
+    else if (target.id === 'mcpToolSearch') { MCP_STATE.toolQuery = target.value; filterToolList(); }
+  });
+  document.getElementById('mcpList')?.addEventListener('change', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.id === 'mcpFilterSource') { MCP_STATE.source = target.value; paintList(); }
+    else if (target.id === 'mcpFilterStatus') { MCP_STATE.status = target.value; paintList(); }
   });
   onPageRefresh('mcp', () => { refreshMcp(false).catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'mcp' && !document.hidden) refreshMcp(false).catch(() => {}); }, 30_000);

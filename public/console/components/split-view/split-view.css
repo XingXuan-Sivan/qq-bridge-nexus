@@ -1,0 +1,109 @@
+/* 主从布局：左列表 + 右详情。默认随内容高度，不设固定滚动区；
+   只有传了 height 时（data-fixed-height）才把两栏各自限制在 --split-height 内滚动。
+   窄屏（<=900px）改为上下堆叠，列表限制高度，避免把详情挤到屏幕外。 */
+.split-view {
+  display: grid;
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-chip);
+  border-radius: 12px;
+  background: var(--surface-subtle);
+}
+
+.split-view[data-fixed-height] .split-list,
+.split-view[data-fixed-height] .split-detail {
+  max-height: var(--split-height);
+  overflow: auto;
+}
+
+.split-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.split-item:hover {
+  background: var(--surface-hover);
+}
+.split-item.is-active {
+  border-color: var(--accent-border-active);
+  background: var(--accent-soft-bg);
+}
+.split-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.split-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.split-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.split-item-badges {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.split-item-meta {
+  font-size: 11px;
+  color: var(--muted-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-detail {
+  min-width: 0;
+}
+.split-empty {
+  padding: 28px 18px;
+  border: 1px dashed var(--border-chip);
+  border-radius: 12px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .split-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .split-list {
+    max-height: 220px;
+    overflow: auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .split-item {
+    min-width: 200px;
+  }
+}

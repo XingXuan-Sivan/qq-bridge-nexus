@@ -1,0 +1,104 @@
+/* 竖向浮动操作组（右下角）。
+   形状可配：默认圆形，`data-shape="square"` 时改成圆角方形；尺寸用 --dock-btn-size。 */
+.action-dock {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 62;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  --dock-btn-size: 46px;
+  --dock-radius: 50%;
+}
+.action-dock[data-shape="square"] { --dock-radius: 12px; }
+.action-dock[hidden] { display: none; }
+
+.action-dock-btn {
+  position: relative;
+  width: var(--dock-btn-size);
+  height: var(--dock-btn-size);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-input);
+  border-radius: var(--dock-radius);
+  background: var(--surface);
+  color: var(--text-secondary);
+  box-shadow: 0 6px 18px rgb(15 23 42 / 16%);
+  cursor: pointer;
+  transition: background-color .16s ease, color .16s ease, border-color .16s ease, transform .12s ease;
+}
+.action-dock-btn:hover:not(:disabled) {
+  background: var(--surface-hover, var(--surface-chip));
+  color: var(--text-strong);
+  border-color: var(--border-strong, var(--border-input));
+}
+.action-dock-btn:active:not(:disabled) { transform: translateY(1px); }
+.action-dock-btn:focus-visible { outline: 3px solid var(--accent-border-soft); outline-offset: 2px; }
+.action-dock-btn:disabled {
+  cursor: default;
+  color: var(--text-dim);
+  background: var(--surface-chip-strong, var(--surface-chip));
+  border-color: var(--border-subtle);
+  box-shadow: none;
+}
+.action-dock-btn.is-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.action-dock-btn.is-primary:hover:not(:disabled) { background: var(--accent-hover); color: #fff; border-color: var(--accent-hover); }
+.action-dock-btn.is-primary:disabled {
+  color: var(--text-secondary);
+  background: var(--surface-chip-strong, var(--surface-chip));
+  border-color: var(--border-subtle);
+}
+.action-dock-btn[data-tone="danger"] { color: var(--err, #c0392b); }
+.action-dock-btn[data-tone="danger"]:hover:not(:disabled) { border-color: var(--err, #c0392b); }
+
+.action-dock-icon { display: inline-flex; }
+.action-dock-icon svg { display: block; }
+
+.action-dock-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+.action-dock-badge[hidden] { display: none; }
+.action-dock-btn.is-primary .action-dock-badge { background: #fff; color: var(--accent); }
+
+/* 操作结果：贴在按钮组左上方，失败时停留，全部成功 6 秒后自动收起。 */
+.action-dock-results {
+  max-width: min(360px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgb(15 23 42 / 18%);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.action-dock-results[hidden] { display: none; }
+.action-dock-item { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; }
+.action-dock-item + .action-dock-item { border-top: 1px solid var(--border-subtle); }
+.action-dock-item-icon { flex: 0 0 auto; line-height: 1.5; }
+.action-dock-item-body { min-width: 0; word-break: break-word; }
+.action-dock-item-body b { color: var(--text-strong); }
+.action-dock-item.err .action-dock-item-body b { color: var(--err, #c0392b); }
+
+@media (max-width: 720px) {
+  .action-dock { right: 14px; bottom: 14px; --dock-btn-size: 42px; }
+}

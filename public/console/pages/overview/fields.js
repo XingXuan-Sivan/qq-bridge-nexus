@@ -102,6 +102,22 @@ export const OVERVIEW_FIELDS = {
   activity: {
     fields: [{ name: 'overviewActivity', type: 'custom', span: 2, html: ACTIVITY_HTML }],
   },
+  roleDefault: {
+    fields: [
+      {
+        name: 'roleDefaultPanel',
+        type: 'custom',
+        span: 2,
+        html: `<div class="field-row">
+  <span class="field-label">默认人格</span>
+  <div class="field-control"><div class="role-default-control">
+    <select id="roleDefaultSelect" class="u-w-190"><option value="">不挂人格卡</option></select>
+    <div class="field-hint">没有单独指定人格的会话都用这张卡；按会话的设置在「人格与角色」页。改完下一条消息生效。</div>
+  </div></div>
+</div>`,
+      },
+    ],
+  },
   sendLimit: {
     fields: [
       { name: 'overviewSendLimit', type: 'custom', span: 2, html: SEND_LIMIT_HTML },

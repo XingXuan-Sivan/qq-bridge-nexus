@@ -11,6 +11,13 @@
     <span class="meta" id="presetEditorPath"></span>
   </div>
   <div data-presets-fields="edit"></div>
+  <section class="preset-prompt" id="presetPrompt" hidden>
+    <div class="preset-prompt-head">
+      <h3>仿真提示词</h3>
+    </div>
+    <p class="meta">存在本预设的 <code>persona.prefix</code>：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件并同步到 DSH，需要重启 DSH 生效。</p>
+    <div data-presets-fields="simPrompt"></div>
+  </section>
   <div class="form-actions" id="presetEditorActions">
     <button id="presetValidate" class="btn" type="button">校验 YAML</button>
     <button id="presetSave" class="btn primary" type="button">保存源文件</button>

@@ -150,5 +150,8 @@
     "voiceSendTarget",
     "consoleTokenSave",
     "secMsg",
-    "secSave"
+    "secSave",
+    "roleInput",
+    "roleSet",
+    "roleClear"
 ]

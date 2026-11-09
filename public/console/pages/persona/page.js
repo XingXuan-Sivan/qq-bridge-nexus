@@ -5,6 +5,7 @@ import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { renderFields } from '../../components/form/form.js';
+import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { PERSONA_FIELDS } from './fields.js';
 
 /** 把 fields.js 的规格渲染进每个 `<div data-persona-fields="…">`。init() 里第一件事。 */
@@ -100,45 +101,37 @@ async function refreshPersonaSources() {
   box.innerHTML = html + '</table>';
 }
 
-async function refreshRoleDefaults() {
-  const box = document.getElementById('roleDefaultsList');
-  if (!box) return;
-  const r = await api('/api/roles/defaults');
-  if (!r.ok) { box.textContent = '❌ ' + (r.error || '读取失败'); return; }
-  box.replaceChildren();
-  if (!(r.defaults || []).length) { box.textContent = '发布包里没有找到默认人格（assets/default-roles/）'; return; }
-  for (const d of r.defaults) {
-    const row = document.createElement('div');
-    row.className = 'assign-row';
-    const state = !d.exists ? '已被删除' : (d.modified ? '改过' : '和原版一样');
-    row.innerHTML = `<span class="u-flex-none"><b>${esc(d.name)}</b>${d.name === r.current ? '（当前启用）' : ''}</span><span class="pill ${!d.exists ? 'r' : (d.modified ? 'b' : 'g')}">${state}</span>`;
-    const btn = document.createElement('button');
-    btn.className = 'btn small';
-    btn.textContent = d.exists ? '恢复成原版' : '重新放回';
-    btn.dataset.roleRestore = d.name;
-    btn.disabled = d.exists && !d.modified;
-    btn.addEventListener('click', async () => {
-      if (d.exists && !confirm(`把「${d.name}」恢复成原版？你改过的那份会先备份到 state/role-backups/。`)) return;
-      const apply = (document.querySelector('input[name="roleSaveApply"]:checked') || {}).value || 'nextWake';
-      const x = await api('/api/roles/restore-default', 'POST', { name: d.name, apply });
-      const msg = document.getElementById('roleDefaultsMsg');
-      msg.className = x.ok ? 'control-note ok' : 'control-note err';
-      msg.textContent = !x.ok ? '❌ ' + (x.error || '恢复失败')
-        : x.unchanged ? `「${d.name}」本来就是原版`
-        : `✅ 已恢复「${d.name}」` + (x.backup ? `（改过的那份备份为 state/role-backups/${x.backup}）` : '（原来被删了，已重新放回）') + roleSaveRefreshText(x.refresh);
-      if (x.ok && roleEditorState.mode === 'edit' && roleEditorState.name === d.name) {
-        const c = await api('/api/roles/content?name=' + encodeURIComponent(d.name));
-        if (c.ok) { document.getElementById('newRoleContent').value = c.content; updateRoleEditorWarnings(); }
-      }
-      refreshRoles();
-    });
-    row.appendChild(btn);
-    box.appendChild(row);
+// 列表状态：默认人格、会话分配、搜索与筛选。恢复初始已并进每一行，不再单独一组。
+let roleDefaults = [];
+let roleAssignments = {};
+let roleCurrent = null;
+let roleQuery = '';
+let roleFilter = 'all';
+
+async function refreshRoleDefaultsState() {
+  try {
+    const r = await api('/api/roles/defaults');
+    roleDefaults = r.ok ? (r.defaults || []) : [];
+  } catch { roleDefaults = []; }
+}
+
+async function restoreRoleDefault(name) {
+  const d = roleDefaults.find((x) => x.name === name) || { name, exists: true, modified: true };
+  if (d.exists && !confirm(`把「${d.name}」恢复成原版？你改过的那份会先备份到 state/role-backups/。`)) return;
+  const apply = (document.querySelector('input[name="roleSaveApply"]:checked') || {}).value || 'nextWake';
+  const x = await api('/api/roles/restore-default', 'POST', { name: d.name, apply });
+  if (!x.ok) { setRoleMsg('❌ ' + (x.error || '恢复失败'), false); return; }
+  setRoleMsg(x.unchanged ? `「${d.name}」本来就是原版`
+    : `✅ 已恢复「${d.name}」` + (x.backup ? `（改过的那份备份为 state/role-backups/${x.backup}）` : '（原来被删了，已重新放回）'), true);
+  if (roleEditorState.mode === 'edit' && roleEditorState.name === d.name) {
+    const c = await api('/api/roles/content?name=' + encodeURIComponent(d.name));
+    if (c.ok) { document.getElementById('newRoleContent').value = c.content; updateRoleEditorWarnings(); }
   }
+  refreshRoles();
 }
 
 async function refreshRoles() {
-  refreshRoleDefaults().catch(() => {});
+  await refreshRoleDefaultsState();
   try {
     const r = await api('/api/roles');
     if (r.limits?.injectMaxChars) {
@@ -150,106 +143,114 @@ async function refreshRoles() {
     roleCache = Array.isArray(r.summaries) && r.summaries.length === names.length
       ? r.summaries
       : names.map((name) => ({ name, chars: 0, bytes: 0, excerpt: '', truncated: false }));
-    const box = document.getElementById('roleList');
-    box.replaceChildren();
-    if (!roleCache.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty-state';
-      empty.innerHTML = '<strong>还没有人格</strong><p>在「编辑人格提示词」里填名称与内容，点「新建人格」创建第一个。</p>';
-      box.appendChild(empty);
-    }
-    for (const role of roleCache) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'tile' + (role.name === r.current ? ' active' : '');
-      item.setAttribute('aria-pressed', String(role.name === r.current));
-      const head = document.createElement('span');
-      head.className = 'tile-head';
-      const title = document.createElement('strong');
-      title.textContent = role.name;
-      head.appendChild(title);
-      if (role.name === r.current) {
-        const badge = document.createElement('span');
-        badge.className = 'persona-badge';
-        badge.textContent = '启用中';
-        head.appendChild(badge);
-      }
-      if (role.truncated) {
-        const badge = document.createElement('span');
-        badge.className = 'persona-badge warn';
-        badge.textContent = `超出上限`;
-        badge.title = `按模式筛选后仍有超出：二代 ${role.charsV2} 字符 / 一代 ${role.charsV1} 字符，上限 ${roleInjectMax}`;
-        head.appendChild(badge);
-      }
-      if (role.hasModeTags) {
-        const badge = document.createElement('span');
-        badge.className = 'persona-badge';
-        badge.textContent = '分代内容';
-        badge.title = '该人格含 〔一代〕/〔二代〕 专属小节，只在对应仿真模式下注入';
-        head.appendChild(badge);
-      }
-      const meta = document.createElement('small');
-      const split = Number.isFinite(role.charsV1) && role.charsV1 !== role.charsV2;
-      const injection = split
-        ? `按模式注入：二代 ${role.injectedV2} / 一代 ${role.injectedV1} 字符`
-        : `注入 ${role.injectedV2 ?? role.chars} 字符`;
-      meta.textContent = `共 ${role.chars} 字符 · ${injection}${role.excerpt ? ' · ' + role.excerpt : ''}`;
-      item.append(head, meta);
-      item.addEventListener('click', () => openRoleForEdit(role.name));
-      box.appendChild(item);
-    }
+    roleCurrent = r.current ?? null;
+    roleAssignments = Array.isArray(r.assignments) ? r.assignments
+      : Object.entries(r.assignments ?? {}).map(([key, role]) => ({ key, role, source: 'key' }));
+    renderRoleList();
     const hint = document.getElementById('roleListHint');
-    if (hint) hint.textContent = roleCache.length ? `共 ${roleCache.length} 个 · 点任意一个载入编辑` : '';
+    if (hint) hint.textContent = roleCache.length ? `共 ${roleCache.length} 个 · 点卡片编辑` : '';
     renderRoleEditor();
   } catch (error) {
     document.getElementById('roleList').textContent = '加载失败：' + (error?.message ?? error);
   }
 }
 
-// ── 仿真提示词（预设内置，需重启 DSH 生效）──────────────────────────────────
-let simPromptOriginal = '';
-let simPromptPreset = 'qq-chat-v2';
+/** 按搜索词与筛选渲染人格卡片；每行带「设为默认 / 恢复初始」两个行内操作。 */
+function renderRoleList() {
+  const box = document.getElementById('roleList');
+  if (!box) return;
+  box.replaceChildren();
+  const used = new Set((roleAssignments || [])
+    .filter((row) => row && row.role && row.source !== 'global' && row.source !== 'off')
+    .map((row) => row.role));
+  const defaultNames = new Set((roleDefaults || []).map((d) => d.name));
+  const q = roleQuery.trim().toLowerCase();
+  const rows = roleCache.filter((role) => {
+    if (q && !`${role.name} ${role.excerpt ?? ''}`.toLowerCase().includes(q)) return false;
+    const isUsed = role.name === roleCurrent || used.has(role.name);
+    if (roleFilter === 'used') return isUsed;
+    if (roleFilter === 'unused') return !isUsed;
+    return true;
+  });
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = roleCache.length
+      ? '<strong>没有匹配的人格</strong><p>换个搜索词或筛选条件试试。</p>'
+      : '<strong>还没有人格</strong><p>点右上角「新建人格」，或在下方编辑区填名称与内容。</p>';
+    box.appendChild(empty);
+    return;
+  }
+  for (const role of rows) {
+    const item = document.createElement('div');
+    item.className = 'tile' + (role.name === roleCurrent ? ' active' : '');
+    item.dataset.role = role.name;
 
-function setSimMsg(text, ok) {
-  const el = document.getElementById('simPromptMsg');
-  el.textContent = text;
-  el.className = ok === undefined ? 'meta' : (ok ? 'meta ok' : 'meta err');
-}
-
-function setSimEditing(editing) {
-  const area = document.getElementById('simPromptText');
-  area.readOnly = !editing;
-  area.classList.toggle('editing', editing);
-  document.getElementById('simPromptEdit').disabled = editing;
-  document.getElementById('simPromptSave').disabled = !editing;
-  document.getElementById('simPromptCancel').disabled = !editing;
-}
-
-async function refreshSimPrompt() {
-  simPromptPreset = document.getElementById('simPromptPreset').value || 'qq-chat-v2';
-  setSimMsg('读取中…');
-  try {
-    const r = await api('/api/preset/sim-prompt?preset=' + encodeURIComponent(simPromptPreset));
-    const area = document.getElementById('simPromptText');
-    if (!r.ok) {
-      area.value = '';
-      setSimMsg(r.error || '读取失败', false);
-      document.getElementById('simPromptStatus').textContent = '不可用';
-      return;
+    const body = document.createElement('button');
+    body.type = 'button';
+    body.className = 'tile-body';
+    const head = document.createElement('span');
+    head.className = 'tile-head';
+    const title = document.createElement('strong');
+    title.textContent = role.name;
+    head.appendChild(title);
+    if (role.name === roleCurrent) {
+      const badge = document.createElement('span');
+      badge.className = 'persona-badge';
+      badge.textContent = '默认';
+      head.appendChild(badge);
     }
-    simPromptOriginal = r.content;
-    area.value = r.content;
-    setSimEditing(false);
-    setSimMsg('');
-    const status = r.status || {};
-    document.getElementById('simPromptStatus').textContent =
-      `${status.label || simPromptPreset} · ${r.chars} 字符${status.installed ? ' · 已同步到 DSH' : ' · 尚未同步到 DSH'}`;
-    document.getElementById('simPromptWarnings').textContent = (r.warnings || []).length
-      ? '⚠️ ' + r.warnings.join('；') : '';
-    document.getElementById('simPromptRestart').textContent =
-      '改动写入该代预设的源文件并同步到 DSH 的 preset 目录；preset 由 DSH 在会话创建时装配，因此新会话会自动用新版，正在进行的 QQ 会话需重置该会话或重启 DSH。';
-  } catch (error) {
-    setSimMsg('读取失败：' + (error?.message ?? error), false);
+    if (used.has(role.name)) {
+      const badge = document.createElement('span');
+      badge.className = 'persona-badge';
+      badge.textContent = '用于会话';
+      head.appendChild(badge);
+    }
+    if (role.truncated) {
+      const badge = document.createElement('span');
+      badge.className = 'persona-badge warn';
+      badge.textContent = '超出上限';
+      badge.title = `按模式筛选后仍有超出：二代 ${role.charsV2} 字符 / 一代 ${role.charsV1} 字符，上限 ${roleInjectMax}`;
+      head.appendChild(badge);
+    }
+    if (role.hasModeTags) {
+      const badge = document.createElement('span');
+      badge.className = 'persona-badge';
+      badge.textContent = '分代内容';
+      badge.title = '该人格含 〔一代〕/〔二代〕 专属小节，只在对应仿真模式下注入';
+      head.appendChild(badge);
+    }
+    const meta = document.createElement('small');
+    const split = Number.isFinite(role.charsV1) && role.charsV1 !== role.charsV2;
+    const injection = split
+      ? `按模式注入：二代 ${role.injectedV2} / 一代 ${role.injectedV1} 字符`
+      : `注入 ${role.injectedV2 ?? role.chars} 字符`;
+    meta.textContent = `共 ${role.chars} 字符 · ${injection}${role.excerpt ? ' · ' + role.excerpt : ''}`;
+    body.append(head, meta);
+    body.addEventListener('click', () => openRoleForEdit(role.name));
+
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
+    if (role.name !== roleCurrent) {
+      const setDefault = document.createElement('button');
+      setDefault.type = 'button';
+      setDefault.className = 'btn small';
+      setDefault.dataset.roleDefault = role.name;
+      setDefault.textContent = '设为默认';
+      actions.appendChild(setDefault);
+    }
+    if (defaultNames.has(role.name)) {
+      const d = (roleDefaults || []).find((x) => x.name === role.name);
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'btn small';
+      restore.dataset.roleRestore = role.name;
+      restore.textContent = '恢复初始';
+      restore.disabled = Boolean(d && d.exists && !d.modified);
+      actions.appendChild(restore);
+    }
+    item.append(body, actions);
+    box.appendChild(item);
   }
 }
 
@@ -264,84 +265,225 @@ async function refreshPersonaStatus() {
   } catch {}
 }
 
-// 人格快捷选择：只按「开头」匹配、不区分大小写；空输入列出全部。手动输入新名字仍然可以。
-function filterRoleSuggestions(names, query) {
-  const q = String(query ?? '').trim().toLowerCase();
-  return names.filter((name) => String(name).toLowerCase().startsWith(q));
+// ── 外部人格：soulkit provider 的角色卡 ──────────────────────────────────────
+// 只开放「覆盖 + 角色追加」两个可写面（soul 与角色本身由 soulkit 管理）；
+// 断连时用桥接缓存兜底，卡片仍可看、可另存为内部人格。
+let externalCards = [];
+let externalMeta = { provider: null, stale: false, error: null, listable: true };
+let externalState = { name: null, stale: false, text: '' };
+
+function setExtMsg(text, kind = 'info') {
+  const el = document.getElementById('extMsg');
+  if (el) setMsg(el, text || '', kind);
 }
-function setupRoleSuggest() {
-  const input = document.getElementById('roleInput');
-  const list = document.getElementById('roleSuggest');
-  let items = [];
-  let active = -1;
-  const close = () => { list.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); input.removeAttribute('aria-activedescendant'); };
-  const highlight = (i) => {
-    active = i;
-    [...list.children].forEach((li, idx) => li.setAttribute('aria-selected', String(idx === i)));
-    const li = list.children[i];
-    if (li && li.id) { input.setAttribute('aria-activedescendant', li.id); li.scrollIntoView({ block: 'nearest' }); }
-  };
-  const pick = (name) => { input.value = name; close(); input.focus(); };
-  const open = () => {
-    items = filterRoleSuggestions(roleCache.map((role) => role.name), input.value);
-    list.replaceChildren();
-    if (!items.length) {
-      const li = document.createElement('li');
-      li.className = 'role-suggest-empty';
-      li.textContent = roleCache.length ? '没有以此开头的人格（可直接输入新名字）' : '还没有人格';
-      list.appendChild(li);
+
+async function refreshExternalPersonas() {
+  try {
+    const r = await api('/api/persona/external');
+    externalCards = Array.isArray(r?.cards) ? r.cards : [];
+    externalMeta = {
+      provider: r?.provider ?? null,
+      stale: Boolean(r?.stale),
+      error: r?.error ?? null,
+      listable: r?.listable !== false,
+    };
+  } catch (error) {
+    externalCards = [];
+    externalMeta = { provider: null, stale: true, error: String(error?.message ?? error), listable: false };
+  }
+  renderExternalRoles();
+}
+
+function renderExternalRoles() {
+  const host = document.getElementById('externalRoles');
+  const hint = document.getElementById('externalHint');
+  if (!host) return;
+  if (hint) {
+    hint.textContent = !externalMeta.listable
+      ? '当前没有可用的外部人格 provider；下面是上次缓存。'
+      : externalMeta.stale
+        ? '外部 provider 暂不可用，显示上次缓存；仍可另存为内部人格。'
+        : '来自 soulkit 的角色卡；可编辑覆盖与角色追加，或另存为内部人格。';
+  }
+  host.replaceChildren();
+  if (!externalCards.length) {
+    const empty = document.createElement('p');
+    empty.className = 'meta';
+    empty.textContent = externalMeta.error ? `读取失败：${externalMeta.error}` : '没有外部人格卡。';
+    host.appendChild(empty);
+    return;
+  }
+  for (const card of externalCards) {
+    const item = document.createElement('div');
+    item.className = 'tile tile-external';
+    item.dataset.ext = card.name;
+
+    const body = document.createElement('button');
+    body.type = 'button';
+    body.className = 'tile-body';
+    body.dataset.extOpen = card.name;
+    const head = document.createElement('span');
+    head.className = 'tile-head';
+    const title = document.createElement('strong');
+    title.textContent = card.name;
+    head.appendChild(title);
+    const badge = document.createElement('span');
+    badge.className = 'persona-badge';
+    badge.textContent = '外部';
+    head.appendChild(badge);
+    if (card.stale) {
+      const stale = document.createElement('span');
+      stale.className = 'persona-badge warn';
+      stale.textContent = '缓存';
+      head.appendChild(stale);
     }
-    items.forEach((name, i) => {
-      const li = document.createElement('li');
-      li.id = 'roleSuggest-' + i;
-      li.setAttribute('role', 'option');
-      li.textContent = name;
-      // mousedown 而不是 click：避免输入框先失焦把菜单关掉
-      li.addEventListener('mousedown', (e) => { e.preventDefault(); pick(name); });
-      list.appendChild(li);
-    });
-    list.hidden = false;
-    input.setAttribute('aria-expanded', 'true');
-    highlight(-1);
-  };
-  input.addEventListener('focus', open);
-  input.addEventListener('input', open);
-  input.addEventListener('blur', close);
-  input.addEventListener('keydown', (e) => {
-    if (list.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { open(); e.preventDefault(); return; }
-    if (list.hidden) return;
-    if (e.key === 'ArrowDown' && items.length) { highlight((active + 1) % items.length); e.preventDefault(); }
-    else if (e.key === 'ArrowUp' && items.length) { highlight(active <= 0 ? items.length - 1 : active - 1); e.preventDefault(); }
-    else if (e.key === 'Enter' && active >= 0) { pick(items[active]); e.preventDefault(); }
-    else if (e.key === 'Escape') { close(); e.preventDefault(); }
+    const meta = document.createElement('small');
+    meta.textContent = `${card.description || 'soulkit 角色卡'} · 覆盖 ${card.overlayChars ?? 0} 字 · 追加 ${card.systemAppendChars ?? 0} 字`;
+    body.append(head, meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'tile-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'btn small';
+    edit.dataset.extOpen = card.name;
+    edit.textContent = '编辑';
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'btn small';
+    use.dataset.extUse = card.name;
+    use.textContent = '选用';
+    use.title = '另存为内部人格并设为全局默认';
+    const saveAs = document.createElement('button');
+    saveAs.type = 'button';
+    saveAs.className = 'btn small';
+    saveAs.dataset.extSaveas = card.name;
+    saveAs.textContent = '另存为内部';
+    actions.append(edit, use, saveAs);
+
+    item.append(body, actions);
+    host.appendChild(item);
+  }
+}
+
+async function saveExternalAsRole(name, text, asArg) {
+  const target = String(asArg ?? `${name}-内部`).trim();
+  if (!target) { setRoleMsg('请填写内部人格名', false); return ''; }
+  const r = await api('/api/persona/external/save-as-role', 'POST', { name, as: target, text: text || undefined });
+  if (!r?.ok) { setRoleMsg('❌ ' + (r?.error || '另存失败'), false); return ''; }
+  setRoleMsg(`✅ 已另存为内部人格「${target}」（${r.chars} 字符）`, true);
+  await refreshRoles();
+  return target;
+}
+
+async function useExternalAsDefault(name) {
+  const target = await saveExternalAsRole(name);
+  if (!target) return;
+  const r = await api('/api/config/role-default', 'POST', { value: target });
+  if (r?.ok) {
+    setRoleMsg(r.message || `已把「${target}」设为默认人格`, true);
+    await refreshRoles();
+    refreshPersonaStatus();
+  } else {
+    setRoleMsg('❌ ' + (r?.error || '设为默认失败'), false);
+  }
+}
+
+async function openExternal(name) {
+  let detail = null;
+  let card = null;
+  try {
+    [detail, card] = await Promise.all([
+      api('/api/persona/external/detail', 'POST', { name }),
+      api('/api/persona/external/card', 'POST', { name }),
+    ]);
+  } catch (error) {
+    setRoleMsg('❌ ' + String(error?.message ?? error), false);
+    return;
+  }
+  if (!detail?.ok) { setRoleMsg('❌ ' + (detail?.error || '读取外部人格失败'), false); return; }
+  externalState = { name, stale: Boolean(detail.stale), text: card?.text || '' };
+
+  document.getElementById('externalEditor')?.remove();
+  document.body.insertAdjacentHTML('beforeend', modalHtml({
+    id: 'externalEditor',
+    title: `外部人格 · ${name}`,
+    body: '<div id="externalForm"></div>',
+    wide: true,
+  }));
+  const overlay = document.getElementById('externalEditor');
+  renderFields(document.getElementById('externalForm'), PERSONA_FIELDS.externalEditor.fields, { columns: 1 });
+
+  const character = detail.character || {};
+  document.getElementById('extName').value = name;
+  document.getElementById('extSaveAsName').value = `${name}-内部`;
+  document.getElementById('extDescription').value = character.description || '';
+  document.getElementById('extOverlay').value = character.overlay || '';
+  document.getElementById('extSystemAppend').value = character.systemAppend || '';
+  if (detail.stale) setExtMsg('当前显示的是缓存；改动会先在本地，连上 soulkit 后再保存。');
+
+  document.getElementById('extSave').addEventListener('click', async () => {
+    const body = {
+      name: externalState.name,
+      description: document.getElementById('extDescription').value,
+      overlay: document.getElementById('extOverlay').value,
+      systemAppend: document.getElementById('extSystemAppend').value,
+    };
+    const r = await api('/api/persona/external/save', 'POST', body);
+    if (!r?.ok) { setExtMsg('❌ ' + (r?.error || '保存失败'), 'err'); return; }
+    setExtMsg('✅ 已保存到 soulkit；下一条消息生效', 'ok');
+    const fresh = await api('/api/persona/external/card', 'POST', { name: externalState.name }).catch(() => null);
+    if (fresh?.text) externalState.text = fresh.text;
+    refreshExternalPersonas();
   });
-}
-function roleApplyMode() {
-  const el = document.querySelector('input[name="roleApply"]:checked');
-  return el ? el.value : 'nextWake';
-}
-function showRoleApplyResult(r) {
-  const box = document.getElementById('roleApplyResult');
-  const x = r && r.refresh;
-  if (!x) { box.hidden = true; return; }
-  let text;
-  if (x.note) text = '✅ ' + x.note;
-  else if (x.apply === 'immediate') text = '✅ 已唤醒 ' + x.woke + ' 个会话重新读卡' + (x.pending ? '；' + x.pending + ' 个在定时静默里，静默结束后的下一次唤醒再读' : '') + (x.woke || x.pending ? '' : '（所有会话都已是新卡）');
-  else text = '✅ 已切换；' + (x.pending ? x.pending + ' 个会话会在下一次唤醒时读到新卡' : '所有会话都已是新卡');
-  box.textContent = text;
-  box.hidden = false;
+
+  document.getElementById('extRename').addEventListener('click', async () => {
+    const nextName = document.getElementById('extNewName').value.trim();
+    if (!nextName) { setExtMsg('先填「新名字」', 'err'); return; }
+    const r = await api('/api/persona/external/rename', 'POST', { name: externalState.name, nextName });
+    if (!r?.ok) { setExtMsg('❌ ' + (r?.error || '改名失败'), 'err'); return; }
+    externalState.name = nextName;
+    document.getElementById('extName').value = nextName;
+    document.getElementById('extNewName').value = '';
+    setExtMsg(`✅ 已改名为「${nextName}」`, 'ok');
+    refreshExternalPersonas();
+  });
+
+  document.getElementById('extSaveAs').addEventListener('click', () => {
+    saveExternalAsRole(externalState.name, externalState.text, document.getElementById('extSaveAsName').value);
+  });
+  const closeExternal = wireModal(overlay, { onClose: () => overlay.remove() });
+  document.getElementById('extClose').addEventListener('click', () => closeExternal());
+  openModal(overlay);
 }
 
 export function init() {
   // 先把控件渲染出来：后面所有 getElementById 都要取到它们。
   renderPersonaFieldGroups();
-  setupRoleSuggest();
 
-  document.getElementById('roleSet').addEventListener('click', async () => {
-    const r = await api('/api/role', 'POST', { role: document.getElementById('roleInput').value.trim(), apply: roleApplyMode() });
-    if (r.ok) { showRoleApplyResult(r); refreshRoles(); refreshPersonaStatus(); } else alert(r.error || '设置失败');
+  // 列表工具栏：搜索 / 筛选 / 刷新 / 新建（新建 = 清空编辑区并聚焦名称）。
+  const search = document.getElementById('roleSearch');
+  if (search) search.addEventListener('input', (e) => { roleQuery = e.target.value; renderRoleList(); });
+  const filter = document.getElementById('roleFilter');
+  if (filter) filter.addEventListener('change', (e) => { roleFilter = e.target.value; renderRoleList(); });
+  document.getElementById('roleRefresh')?.addEventListener('click', () => refreshRoles());
+  document.getElementById('roleNew')?.addEventListener('click', () => {
+    resetRoleForm?.();
+    document.getElementById('newRoleName')?.focus();
   });
-  document.getElementById('roleClear').addEventListener('click', async () => { const r = await api('/api/role', 'POST', { role: null, apply: roleApplyMode() }); showRoleApplyResult(r); refreshRoles(); refreshPersonaStatus(); });
+  // 行内操作：设为默认 / 恢复初始。
+  document.getElementById('roleList')?.addEventListener('click', async (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const restore = target?.closest('[data-role-restore]');
+    if (restore) { e.preventDefault(); await restoreRoleDefault(restore.dataset.roleRestore); return; }
+    const setDefault = target?.closest('[data-role-default]');
+    if (setDefault) {
+      e.preventDefault();
+      const r = await api('/api/config/role-default', 'POST', { value: setDefault.dataset.roleDefault });
+      if (r?.ok) { setRoleMsg(r.message || '已设为默认人格', true); await refreshRoles(); refreshPersonaStatus(); }
+      else setRoleMsg('❌ ' + (r?.error || '设置失败'), false);
+    }
+  });
   document.getElementById('roleCreate').addEventListener('click', async () => {
     const name = document.getElementById('newRoleName').value.trim();
     const content = document.getElementById('newRoleContent').value.trim();
@@ -388,51 +530,19 @@ export function init() {
     refreshRoles();
     refreshPersonaStatus();
   });
+
+  // ── 外部人格 ────────────────────────────────────────────────────────────────
+  document.getElementById('externalRoles')?.addEventListener('click', async (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    const open = target?.closest('[data-ext-open]');
+    if (open) { await openExternal(open.dataset.extOpen); return; }
+    const use = target?.closest('[data-ext-use]');
+    if (use) { await useExternalAsDefault(use.dataset.extUse); return; }
+    const saveAs = target?.closest('[data-ext-saveas]');
+    if (saveAs) { await saveExternalAsRole(saveAs.dataset.extSaveas); return; }
+  });
   document.getElementById('roleFormReset').addEventListener('click', () => resetRoleForm());
   document.getElementById('newRoleContent').addEventListener('input', updateRoleEditorWarnings);
-
-  // ── 仿真提示词 ──────────────────────────────────────────────────────────────
-  document.getElementById('simPromptEdit').addEventListener('click', () => {
-    setSimEditing(true);
-    setSimMsg('编辑中：改完点「保存并同步到 DSH」。保存会先备份，并做 YAML 与安全不变量校验。');
-    // 进入编辑后把焦点交给文本框：用户点「编辑」就是准备打字，
-    // 还要再点一次框才聚焦是多余的一步；长文本顺手滚到可见处。
-    const area = document.getElementById('simPromptText');
-    area.focus({ preventScroll: true });
-    area.setSelectionRange(0, 0);
-    area.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  });
-  document.getElementById('simPromptCancel').addEventListener('click', () => {
-    document.getElementById('simPromptText').value = simPromptOriginal;
-    setSimEditing(false);
-    setSimMsg('已放弃修改');
-  });
-  document.getElementById('simPromptPreset').addEventListener('change', () => { refreshSimPrompt(); });
-  document.getElementById('simPromptSave').addEventListener('click', async () => {
-    const content = document.getElementById('simPromptText').value;
-    if (!confirm('保存会改写该代预设的源文件并同步到 DSH 的 preset 目录（新会话生效，进行中的会话需重置或重启 DSH）。确定继续？')) return;
-    setSimMsg('保存中…');
-    const r = await api('/api/preset/sim-prompt', 'POST', { preset: simPromptPreset, content });
-    if (!r.ok) { setSimMsg('❌ ' + (r.error || '保存失败'), false); return; }
-    if (r.unchanged) {
-      simPromptOriginal = content;
-      setSimEditing(false);
-      setSimMsg('内容没有变化，未写入文件（避免无谓地重排预设格式）', true);
-      return;
-    }
-    simPromptOriginal = content;
-    setSimEditing(false);
-    setSimMsg(`✅ 已保存${r.synced ? '并同步到 DSH' : ''}；重启 DSH 后生效`, true);
-    document.getElementById('simPromptWarnings').textContent = (r.warnings || []).length ? '⚠️ ' + r.warnings.join('；') : '';
-    document.getElementById('simPromptStatus').textContent = `${r.status?.label || simPromptPreset} · ${content.length} 字符 · 已保存，待重启 DSH`;
-  });
-  document.getElementById('simPromptRestore').addEventListener('click', async () => {
-    if (!confirm('还原到该代预设上一次保存前的备份？当前改动会丢失（原文件会先自动备份）。')) return;
-    const r = await api('/api/preset/sim-prompt/restore', 'POST', { preset: simPromptPreset });
-    if (!r.ok) { setSimMsg('❌ ' + (r.error || '还原失败'), false); return; }
-    setSimMsg(`✅ 已还原（${r.restoredFrom}）；重启 DSH 后生效`, true);
-    refreshSimPrompt();
-  });
 
   // ── 人格注入上限 ────────────────────────────────────────────────────────────
   document.getElementById('roleInjectMaxSave').addEventListener('click', async () => {
@@ -454,12 +564,13 @@ export function init() {
     // 每次进入都重读一次：全局人格可能在别处改过、新会话可能刚建好。
     refreshPersonaStatus();
     refreshPersonaSources().catch(() => {});
+    refreshExternalPersonas().catch(() => {});
   });
   // 首次进入时片段刚注入，延后一拍再拉数据，避免 DOM 就绪前空转。
   setTimeout(() => {
     refreshPersonaStatus();
     refreshRoles();
     refreshPersonaSources().catch(() => {});
-    refreshSimPrompt();
+    refreshExternalPersonas().catch(() => {});
   }, 0);
 }

@@ -9,7 +9,8 @@ import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initTimeFields } from '../../components/time/time.js';
-import { askLeaveWithUnsaved, createSaveBar } from '../../components/save-bar/save-bar.js';
+import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
+import { DOCK_ICONS } from '../../components/action-dock/action-dock.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { CONFIG_FIELDS } from './fields.js';
 import { init as initAccessPage, loadSecurity, securitySection, tokenSection } from './access-section.js';
@@ -397,6 +398,30 @@ async function loadSendLimit() {
   }
 }
 
+// ── 默认人格（config.json 的 role.default）────────────────────────────────────
+async function loadRoleDefault() {
+  const select = $('roleDefaultSelect');
+  if (!select) return;
+  const r = await api('/api/config/role-default');
+  const current = r?.value ?? '';
+  const options = Array.isArray(r?.options) ? r.options : [];
+  select.innerHTML = '<option value="">不挂人格卡</option>'
+    + options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
+  select.value = options.includes(current) ? current : '';
+}
+
+const roleDefaultSection = {
+  id: 'roleDefault',
+  label: '默认人格',
+  read: () => ({ value: $('roleDefaultSelect')?.value ?? '' }),
+  save: async (value) => {
+    const r = await api('/api/config/role-default', 'POST', { value: value?.value ?? '' });
+    if (!r?.ok) return { ok: false, message: r?.error || '保存失败' };
+    await loadRoleDefault();
+    return { ok: true, message: r.message || '已保存，下一条消息生效' };
+  },
+};
+
 // ── 行为档案 ────────────────────────────────────────────────────────────────
 let behaviorCurrentId = '';
 let behaviorEditor = null;
@@ -492,12 +517,23 @@ export function init() {
   // 准入：复用会话页的全局名单组件；必须先挂载，保存条才能读到它的控件。
   mountGlobalAccess(document.querySelector('[data-sessions-access]'));
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
-  saveBar = createSaveBar({
+  saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, dshModelSection, sendLimitSection, tokenSection],
+    sections: [securitySection, globalAccessSection, roleDefaultSection, dshModelSection, sendLimitSection, tokenSection],
+    actions: [{
+      id: 'discard',
+      label: '撤销未保存的修改',
+      icon: DOCK_ICONS.close,
+      tone: 'danger',
+      disabled: true,
+      onClick: () => { saveBar?.refresh(); },
+    }],
   });
   setPageLeaveGuard((from, to) => {
     if (from !== 'config' || !saveBar?.isDirty()) return true;
+    // 只有用户真的改过才拦：首次进入时字段值是异步回填的，这期间快照可能暂时有差异，
+    // 那不是「未保存的修改」，不该弹窗也不该把假脏值当真。
+    if (!saveBar.isTouched()) { saveBar.refresh(); return true; }
     void askLeaveWithUnsaved({ bar: saveBar }).then((answer) => {
       if (answer === 'cancel') return;
       if (answer === 'discard') saveBar.reset();
@@ -602,7 +638,7 @@ export function init() {
   const refreshOverviewPage = () => setTimeout(async () => {
     refreshPresets();
     refreshSilence();
-    await Promise.allSettled([refreshDshModel(), loadSendLimit(), loadSecurity(), refreshGlobalAccess()]);
+    await Promise.allSettled([refreshDshModel(), loadSendLimit(), loadSecurity(), refreshGlobalAccess(), loadRoleDefault()]);
     requestStatusRefresh();
     // 数据刚被重读：用户还没动过本页时把当前值重拍成基线（否则加载前拍的旧基线
     // 会让「8 条」「真/假」这类异步回填的值一上来就算脏）。

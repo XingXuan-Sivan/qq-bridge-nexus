@@ -103,7 +103,7 @@ ctx.persona.register({
 
 ## 7. 明确不做（P1）
 
-- **不写穿**：桥接改人格不回调 soulkit。`/role` 与按会话设置只写本地 `current-role.json`；要让外部服务知道，得在它那边改绑定。
+- **不写穿人格选择**：桥接改全局/按会话人格不回调 soulkit（写 `config.json` 的 `role.default` 与本地会话档案）；要让外部服务知道「当前选了谁」，得在它那边改绑定。唯一例外是控制台显式编辑外部卡（§9），那是在改 provider 自己的数据。
 - **不做多 provider 竞争**：`persona.provider` 指定一个；没指定时第一个注册成功的生效，其余记日志忽略。
 - **不做 provider 热切换**：改 `plugins.json` 后重启桥接。
 - **不内置 HTTP provider**：契约足够简单，需要的人照 §3 写十行；先让 soulkit 这个真实实现把接口磨稳。
@@ -115,3 +115,34 @@ ctx.persona.register({
 - `scripts/test-soulkit-persona.mjs`：注册形态、URL 参数、标题行剥离、ETag/304、未绑定与空 key、坏响应抛错、`baseUrl`/`timeoutMs` 边界。
 - `scripts/test-plugin-kernel.mjs`：注册表的 `warm` 前后行为、指纹格式、`status().persona`。
 - 手测：`GET /api/persona/sources` 与控制台只读页；把 soulkit 停掉后旧卡继续用、超过 24h 回落本地卡（`state/persona-cache.json` 可手工改 `fetchedAt` 验证）。
+
+## 9. 可选扩展：角色卡列表与编辑（P5，能力可选）
+
+`persona-provider/1` 的必选面仍是 `get`。控制台要「像本地人格一样」列出与编辑外部卡，provider 可再实现以下**可选**方法；没实现就只读缓存，不影响注入。
+
+```js
+list()                                  // → [{ name, slug, description, overlay, systemAppend, updatedAt }]
+getByName(name)                         // → 同 list 单项；用于编辑弹窗
+save({ name, description?, overlay?, systemAppend? })  // → 更新后的单项
+create({ name, from? })                 // → 新建（from = 复制来源）
+rename({ name, nextName })              // → 改名
+card(name)                              // → { name, text, chars }，合成完整人格卡
+```
+
+桥接侧对应的只读/写入接口：
+
+| 用途 | 接口 |
+| --- | --- |
+| 列表（含缓存降级） | `GET /api/persona/external` |
+| 合成卡正文 | `POST /api/persona/external/card` |
+| 读取编辑字段 | `POST /api/persona/external/detail` |
+| 保存覆盖/追加 | `POST /api/persona/external/save` |
+| 新建 / 改名 | `POST /api/persona/external/create`、`POST /api/persona/external/rename` |
+| 另存为内部人格 | `POST /api/persona/external/save-as-role` |
+
+约定：
+
+- 桥接把可编辑面收窄到「世界覆盖（overlay）」与「角色追加（systemAppend）」；soul 与角色本体归 provider，避免两边各写一份。
+- 卡正文缓存到 `state/persona-external.json`；provider 不可达时列表标 `stale`、仍可另存为内部人格。
+- 不提供删除：外部服务的角色可能被记忆/绑定引用，删除留给 provider 自己的管理面。
+

@@ -125,16 +125,6 @@
 .config-tabs { margin: 0; }
 .config-tabs .page-tab { padding: 9px 16px; }
 .config-body { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
-.config-layer-note {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-sunken);
-  color: var(--text-2);
-  font-size: 12.5px;
-  line-height: 1.7;
-}
-.config-layer-note strong { color: var(--text); margin-right: 8px; }
 .config-panel { display: flex; flex-direction: column; gap: 22px; }
 .config-panel[hidden] { display: none; }
 .config-panel .card { margin: 0; }
@@ -158,6 +148,15 @@
   flex: 0 1 420px;
   max-width: 420px;
 }
+/* 默认人格：下拉与说明上下排，说明不跟着下拉跑到右侧。 */
+.config-panel .role-default-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.config-panel .role-default-control .field-hint { margin: 0; }
 /* 全局准入：说明行与表单同一套纵向节奏；文本域铺满整行，不再缩进成两列。 */
 .config-panel #globalAccessSummary { margin: 0 0 14px; }
 .config-panel .access-textarea {

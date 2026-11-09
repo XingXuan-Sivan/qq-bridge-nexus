@@ -4,6 +4,7 @@ import { OVERVIEW_FIELDS } from '../overview/fields.js';
 
 export const CONFIG_FIELDS = {
   mode: OVERVIEW_FIELDS.mode,
+  roleDefault: OVERVIEW_FIELDS.roleDefault,
   sendLimit: OVERVIEW_FIELDS.sendLimit,
   silence: OVERVIEW_FIELDS.silence,
   dsh: OVERVIEW_FIELDS.dsh,

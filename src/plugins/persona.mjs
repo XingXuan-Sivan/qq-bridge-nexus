@@ -262,6 +262,11 @@ export function createPersonaRegistry({
     };
   }
 
+  /** 当前 provider 的只读引用：桥接的「外部人格」接口用它做列表 / 读写代理。 */
+  function provider() {
+    return active?.provider ?? null;
+  }
+
   function status() {
     load();
     const nowMs = now();
@@ -287,5 +292,5 @@ export function createPersonaRegistry({
     };
   }
 
-  return { register, unregister, resolve, warm, describe, status };
+  return { register, unregister, resolve, warm, describe, status, provider };
 }

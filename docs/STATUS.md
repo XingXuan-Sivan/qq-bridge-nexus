@@ -263,3 +263,60 @@ npm run test:console-ui
 - 验收：`test-console-static` 全过；`test-console-ui` **31/31、39 次写**；`test-control-center` **fail 0**；`verify:console-vendor` OK；全量 audit **103/103**。
 - `js-yaml` 统一迁移（G5 剩余项）：桥接自有代码全部改用 `yaml` 的 `parse`/`stringify`，`js-yaml` 已从依赖删除；`stringify` 用 `lineWidth: 0 + singleQuote: true + aliasDuplicateObjects: false`，重新生成的 5 个 patch 与旧产出逐字一致。三个 `verify-*`/`test-setup-dsh-idempotent` 仍加载 DSH 自带的 `js-yaml` 做对照（见 D24）。
 - 未做：表格的分组行 / 多选列 / 可配置限高（见 D23），等有真实使用点再补。
+
+### 6.17 断点：控制台二轮收尾（2026-11-10，回来从这里继续）
+
+用户 2026-11-10 提出下一批需求（人格页重构等，见 6.18），要求先记录断点、未批准前不动工。本节是恢复上下文用的检查点。
+
+**已提交**
+- `581d26b` feat(console)：配置页五分区水平标签、页面级保存条、表单统一、code-editor/terminal 组件、工具表、MCP 层级表、预设工具级联；文档 STATUS 6.16 / GLOBAL_CONFIG / D20–D23。
+- `a166a4c` refactor(yaml)：自有代码统一迁到 `yaml`，删除 `js-yaml` 依赖；5 个 preset patch 重新生成后与旧产出逐字一致；D24。
+- 工作树干净（`git status --short` 为空）。
+
+**回来先做的收尾项**
+
+| # | 项 | 完成判据 | 依赖 / 备注 |
+| --- | --- | --- | --- |
+| 1 | 重启桥接后真机复核 | 3111 上运行的是新进程；控制台五标签、保存条逐项结果、工具表筛选、MCP 展开均可用；无 pageerror | 当前进程 PID 22656 是 YAML 迁移前的代码，`src/extensions/*` 的改动要重启才生效；纯前端改动刷新即可 |
+| 2 | 表格可选能力（D23） | 分组行 / 多选列 / 可配置限高（默认不限高）按需补；`dataTableHtml` 现有 `children` + `pager:false` 为基线 | 目前没有真实使用点，优先级低于 6.18 |
+| 3 | 清理 `.dsh-scratch/` | 目录删除（117 MB：会话解码 jsonl + 截图 + 临时 Playwright 脚本） | 与仓库无关；截图里的验收证据已同步进本文档 |
+| 4 | 保存条改版时同步替换 | 6.18 第 2 条会把 `components/save-bar/` 换成通用浮动按钮组，届时删旧组件、更新 `index.html` 引用与 `test-console-ui.mjs` 的 `saveBarWrite` | 在改版前不要在其他页面复用 `components/save-bar/` |
+
+**恢复入口（关键文件，2026-11-10 P0–P5 后）**
+- 浮动操作组：`public/console/components/action-dock/{action-dock.js,save-dock.js,action-dock.css}`；配置页分区表在 `pages/config/page.js`，离开拦截在 `js/router.js` 的 `setPageLeaveGuard`。
+- 编辑器：`components/code-editor/{entry.mjs,vendor/codemirror.js,code-editor.js,code-editor.css}`；构建 `npm run build:console-vendor`、校验 `npm run verify:console-vendor`。
+- 终端：`components/terminal/`（`terminalHtml`/`renderTerminalLines`/`textToLines`）。
+- 表格与主从：`components/table/table.js`（`dataTableHtml`/`tableHtml`）、`components/split-view/`（`splitViewHtml`/`splitItemHtml`/`initSplitView`）。
+- 配置页分区：`pages/config/page.html`（tabs 3–7 行、五个 `.config-panel`）。
+
+### 6.18 下一批需求（2026-11-10 提出，未动工）
+
+1. **移除三层配置说明条**：`pages/config/page.html` 的 `.config-layer-note`（「三层配置 系统层管整台桥接；预设层决定 Agent 包；会话层只覆盖单个群 / 好友。运行模式是路由，不是预设。」）整块删除。
+2. **保存栏改为 AstrBot 式浮动按钮组**：右下角竖向排列一组圆形/胶囊操作按钮（保存只是其中之一），常驻、非默认隐藏，组件需重命名（不再是 save 专用），供其他页面复用。现状是 `components/save-bar/` 单个保存胶囊 + 结果面板。
+3. **MCP 级联菜单重新调研**：现为「服务器行展开工具」的层级表，用户认为效果不理想；需对比常见方案（主从表 / 右侧抽屉 / 左右分栏 / 折叠树 / 服务器卡片 + 工具列表）后再定，涉及 `pages/mcp/page.js` 与表格组件。
+4. **人格与角色页重构**（`pages/persona/{page.html,fields.js,page.js,page.css}`）：
+   - 页面重新定位为「人格 CRUD」：只保留人格列表与提示词编辑；列表用卡片而非表格，但顶部要有表格工具栏式操作（刷新 / 筛选 / 搜索 / 新建）。
+   - 全局默认人格设置移到全局配置，并归一到 `config.json`（现为 `state/current-role.json`，由 `/api/role` 写入）。
+   - 外部（soulkit）人格要像本地卡一样可 CRUD、可在全局/会话被选中，卡片标「外部」；现 `/api/persona/sources` 只读、无 CRUD 接口，nexus 需提供完整 CRUD，soulkit 侧配合改造（soulkit 暂不实现删除）。
+   - 被引用的外部人格在断连时用本地缓存兜底；卡片仍可见，可手动编辑并另存为内部卡。
+   - 仿真提示词与预设配置重合，需先查清链路（`data-persona-fields="sim"`、`docs/PERSONA_PROVIDER.md`、preset prompt）再决定取舍或合并。
+   - 「恢复默认人格」并入人格列表，不再作为独立功能；现 `/api/roles/restore-default` + `src/default-roles.js`。
+   - 相关来源：`src/plugins/persona.mjs`、`src/persona-resolve.mjs`、`roles/*.md`、`state/current-role.json`、`src/default-roles.js`。
+
+### 6.19 第二批需求完成（2026-11-10，P0–P5）
+
+6.18 的六条已按 P0→P5 分批做完；本次改动未提交，等确认后一起提交。
+
+1. **说明条**：`pages/config/page.html` 的 `.config-layer-note` 与 `page.css` 对应规则已删。
+2. **编辑器选区**：`components/code-editor/code-editor.js` 不再给 `.cm-editor` 铺不透明背景（选区层 `z-index:-2` 会被自己的背景盖住）；背景只由宿主 `.code-editor` 提供。复测选区 `rgb(173,214,255)` 可见。
+3. **浮动操作组**：`components/action-dock/`（`action-dock.js` + `save-dock.js` + `action-dock.css`），常驻右下、竖向排列、圆/方可配、支持角标与结果面板；配置页现有「保存」「撤销未保存的修改」两个动作。旧 `components/save-bar/` 已删。
+4. **仿真提示词搬到预设页**：卡片在「YAML 高级编辑」上方，只读展示、解锁后可编辑；出厂初始版本在 `assets/default-prompts/{qq-chat,qq-chat-v2}.md`，新增「还原初始提示词」按钮（`POST /api/preset/sim-prompt/reset`）。人格页对应分组已删。源预设的 `persona.prefix` 从 `>-` 折叠块一次性迁成 `|-` 字面块（语义等价，`test-preset-prompt` 已放宽断言）。
+5. **默认人格归一到 `config.json`**：`role.default` 是唯一事实源（`state/current-role.json` 只作升级回退）；全局配置「运行与模型」新增「默认人格」卡片，走 `GET/POST /api/config/role-default`；`/api/role` 也改为写 `config.json`。
+6. **人格页重排**：列表改为卡片 + 顶部工具栏（搜索 / 筛选 已用·未用 / 刷新 / 新建）；行内操作「设为默认」「恢复初始」（原「恢复默认人格」独立分组已删）；`state/current-role.json` 的全局开关 UI 已删。
+7. **外部人格**：soulkit 增加角色列表/读取/写入/改名/合成卡接口（只动接口，不碰核心模型）；`persona-provider/1` 增加可选方法（`list/getByName/save/create/rename/card`）；桥接新增 `GET /api/persona/external` 与 `POST /api/persona/external/{card,detail,save,create,rename,save-as-role}`，并把卡片缓存到 `state/persona-external.json`（断连时用缓存兜底）。控制台人格页新增「外部人格」区：编辑（只开放覆盖与角色追加）、选用（另存为内部并设默认）、另存为内部。
+8. **MCP 改主从布局**：`components/split-view/`（`splitViewHtml`/`splitItemHtml`/`initSplitView`），左栏 server、右栏详情与工具清单；表格上一轮加的树形能力已从 `table.js`/`table.css` 移除（管理行为页的多级表格不受影响）。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、46 次写**；`test-qq-preset-contract` 8/0；`test-preset-prompt` 13/0；`test-control-center` fail 0；`verify:console-vendor` OK；真机（3111 + soulkit 3110）`/api/roles`、`/api/persona/external`、`/api/characters/card` 均正常，人格页外部卡可读、弹窗字段正确。
+
+**有意保留**：外部人格不提供「删除」（soulkit 侧避免记忆悬空）；外部编辑不开放 soul 与角色本体；soulkit 的绑定/切换仍走它自己的 `/api/bindings`。
+

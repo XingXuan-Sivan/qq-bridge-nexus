@@ -17,20 +17,11 @@ export function tableHtml(columns, rows) {
   const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
   // 行可以只给单元格数组，也可以给 `{ cells, attrs }`：attrs 落到 <tr> 上，
   // 供工具栏的筛选器按 data-filter-<id> 读取（例如会话页按平台 / 类型筛）。
-  // 再进一步：带 `children` 的行是可展开的父行，children 是一个 HTML 片段（子区内容），
-  // 父行首列前面会自动加 ▸ 展开按钮，子区单独一行 colspan 铺满。
-  const body = rows.map((row, index) => {
+  const body = rows.map((row) => {
     const cells = Array.isArray(row) ? row : row.cells;
     const attrs = Array.isArray(row) ? '' : Object.entries(row.attrs || {})
       .map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('');
-    const children = Array.isArray(row) ? null : row.children;
-    if (!children) return `<tr${attrs}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
-    const key = row.key ?? `row-${index}`;
-    const first = `<button type="button" class="tree-toggle" data-tree-toggle="${esc(key)}" aria-expanded="false" aria-label="展开">▸</button>${cells[0] ?? ''}`;
-    const parent = `<tr class="tree-parent" data-tree-key="${esc(key)}"${attrs}>`
-      + `<td class="tree-cell">${first}</td>${cells.slice(1).map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
-    const child = `<tr class="tree-child" data-tree-child="${esc(key)}" hidden><td colspan="${columns.length}">${children}</td></tr>`;
-    return parent + child;
+    return `<tr${attrs}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
   }).join('');
   return `<table>${head}<tbody>${body}</tbody></table>`;
 }
@@ -193,9 +184,7 @@ function setupDataTable(table, hooks) {
   const tbody = table.querySelector('tbody');
   if (!tbody) return;
   table.dataset.ready = '1';
-  // 可展开父行的子区行不参与分页/筛选：它们跟着父行显隐。
-  const childRows = [...tbody.querySelectorAll('tr.tree-child')];
-  const allRows = [...tbody.rows].filter((row) => !row.classList.contains('tree-child'));
+  const rows = [...tbody.rows];
   const emptyBox = table.querySelector('[data-table-empty]');
   const searchInput = table.querySelector('[data-table-search]');
   const filterEls = [...table.querySelectorAll('[data-filter]')];
@@ -206,7 +195,7 @@ function setupDataTable(table, hooks) {
   const state = {
     page: 1,
     // 不分页的表（pager:false）一次显示全部：分页只是「隐藏行」，这里的 pageSize 决定隐藏多少。
-    pageSize: pager ? (Number(table.dataset.pageSize) || 20) : allRows.length,
+    pageSize: pager ? (Number(table.dataset.pageSize) || 20) : rows.length,
     keyword: '',
     filters: Object.fromEntries(filterEls.map((el) => [el.dataset.filter, el.value])),
   };
@@ -222,18 +211,12 @@ function setupDataTable(table, hooks) {
   };
 
   function render() {
-    const visible = allRows.filter(matches);
+    const visible = rows.filter(matches);
     const pages = Math.max(1, Math.ceil(visible.length / state.pageSize));
     state.page = Math.min(Math.max(1, state.page), pages);
     const start = (state.page - 1) * state.pageSize;
     const pageRows = new Set(visible.slice(start, start + state.pageSize));
-    allRows.forEach((row) => { row.hidden = !pageRows.has(row); });
-    // 子区跟随父行：父行隐藏时一并隐藏；父行可见时只显示「已展开」的那些。
-    childRows.forEach((row) => {
-      const parent = row.previousElementSibling;
-      const toggle = parent?.querySelector('[data-tree-toggle]');
-      row.hidden = !parent || parent.hidden || toggle?.getAttribute('aria-expanded') !== 'true';
-    });
+    rows.forEach((row) => { row.hidden = !pageRows.has(row); });
     if (emptyBox) emptyBox.hidden = visible.length > 0;
     if (summary) {
       summary.textContent = visible.length
@@ -267,17 +250,6 @@ function setupDataTable(table, hooks) {
   });
   table.querySelector('[data-table-refresh]')?.addEventListener('click', () => {
     hooks.onRefresh?.(table);
-  });
-  // 展开/收起父行的子区（点击整行或按钮都行；只改 hidden，不重建 DOM）。
-  table.addEventListener('click', (event) => {
-    const toggle = event.target.closest('[data-tree-toggle]');
-    if (!toggle || !table.contains(toggle)) return;
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    toggle.textContent = open ? '▾' : '▸';
-    const parent = toggle.closest('tr');
-    const child = parent?.nextElementSibling;
-    if (child?.classList.contains('tree-child')) child.hidden = !open;
   });
 
   render();

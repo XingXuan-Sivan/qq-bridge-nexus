@@ -1,12 +1,17 @@
-/* MCP 页：server 概览、工具参考、外部 MCP 编辑/日志的少量页面级样式。 */
+/* MCP 页：server 概览、工具清单、外部 MCP 编辑/日志的少量页面级样式。 */
 .mcp-section-title {
   margin: 22px 0 10px;
   font-size: 15px;
   font-weight: 600;
   color: var(--text);
 }
-#mcpList .data-table + .data-table {
-  margin-top: 12px;
+#mcpList .table-toolbar {
+  margin-bottom: 14px;
+}
+#mcpList .table-toolbar .search-box,
+#mcpList #mcpServerSearch {
+  flex: 0 1 320px;
+  max-width: 320px;
 }
 .mcp-status-cell {
   display: flex;
@@ -22,6 +27,105 @@
 .mcp-row-actions .btn {
   white-space: nowrap;
 }
+
+/* 右栏：server 详情 */
+.mcp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.mcp-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.mcp-detail-title {
+  min-width: 0;
+}
+.mcp-detail-title h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.mcp-detail-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.mcp-detail-sub code {
+  font-size: 12px;
+}
+.mcp-detail-note {
+  margin: 0;
+}
+.mcp-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mcp-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.mcp-tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mcp-tools-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.mcp-tools-head .search-input {
+  flex: 0 1 260px;
+  max-width: 260px;
+}
+.mcp-tool-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-chip);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.mcp-tool {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-subtle);
+}
+.mcp-tool:first-child {
+  border-top: 0;
+}
+.mcp-tool code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.mcp-tool .meta {
+  overflow-wrap: anywhere;
+}
+.mcp-tool[hidden] {
+  display: none;
+}
+
 .log-pre {
   margin: 0;
   max-height: 420px;

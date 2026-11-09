@@ -85,11 +85,11 @@ export function agentFormFields(rows) {
   const fields = [];
   for (const [rowId, spec] of Object.entries(PLUGIN_FORMS)) {
     if (!hasRow(rows, rowId)) continue;
-    fields.push({ type: 'section', card: true, label: spec.title, card: true });
+    fields.push({ type: 'section', label: spec.title });
     for (const field of spec.fields) fields.push(fieldSpec(rowId, field));
   }
   if (hasRow(rows, 'compaction')) {
-    fields.push({ type: 'section', card: true, label: COMPACTION_FORM.title, card: true });
+    fields.push({ type: 'section', label: COMPACTION_FORM.title });
     for (const field of COMPACTION_FORM.fields) fields.push(fieldSpec('compaction', field));
   }
   return fields;
@@ -206,4 +206,5 @@ export function readAgentForm(host, rows) {
   }
   return [...patches.values()];
 }
+
 

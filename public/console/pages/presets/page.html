@@ -6,26 +6,31 @@
     </div>
     <div data-presets-fields="main"></div>
   </section>
-  <section class="card span-all" id="presetEditor" hidden>
-    <div class="card-head">
-      <h2 id="presetEditorTitle">编辑预设</h2>
-      <span class="meta" id="presetEditorPath"></span>
-    </div>
-    <div data-presets-fields="edit"></div>
-    <section class="preset-prompt" id="presetPrompt" hidden>
+
+  <div class="page-stack" id="presetEditor" hidden>
+    <section class="card span-all">
+      <div class="card-head">
+        <h2 id="presetEditorTitle">编辑预设</h2>
+        <span class="meta" id="presetEditorPath"></span>
+      </div>
+    </section>
+    <div class="preset-edit-fields" data-presets-fields="edit"></div>
+    <section class="card span-all" id="presetPrompt" hidden>
       <div class="preset-prompt-head">
         <h3>仿真提示词</h3>
       </div>
       <p class="meta">存在本预设的 <code>persona.prefix</code>：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件并同步到 DSH，需要重启 DSH 生效。</p>
       <div data-presets-fields="simPrompt"></div>
     </section>
-    <div class="form-actions" id="presetEditorActions">
-      <button id="presetSave" class="btn primary" type="button">保存源文件</button>
-      <button id="presetApply" class="btn" type="button">应用并安装</button>
-      <button id="presetRollback" class="btn" type="button">回滚上一版</button>
-      <button id="presetFactory" class="btn" type="button">还原出厂设置</button>
-      <button id="presetCancelEdit" class="btn" type="button">收起</button>
-      <span class="meta" id="presetEditMsg"></span>
-    </div>
-  </section>
+    <section class="card span-all">
+      <div class="form-actions" id="presetEditorActions">
+        <button id="presetSave" class="btn primary" type="button">保存源文件</button>
+        <button id="presetApply" class="btn" type="button">应用并安装</button>
+        <button id="presetRollback" class="btn" type="button">回滚上一版</button>
+        <button id="presetFactory" class="btn" type="button">还原出厂设置</button>
+        <button id="presetCancelEdit" class="btn" type="button">收起</button>
+        <span class="meta" id="presetEditMsg"></span>
+      </div>
+    </section>
+  </div>
 </section>

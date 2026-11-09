@@ -1,0 +1,75 @@
+/* 终端 / 日志块（console 与控制中心共用）。
+   两套类名都接受：控制中心老代码用 .term > .l / .t / .tag / .stderr…；
+   console 组件用 .terminal > .terminal-line / .terminal-time / .terminal-tag / .is-*。
+   颜色全部来自 tokens.css 的 --term-*，亮暗主题各自覆盖，组件本身不写死色值。 */
+.terminal,
+.term {
+  flex: 1;
+  min-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--term-bg);
+  color: var(--term-fg);
+  font: 12.5px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: 10px;
+  tab-size: 2;
+}
+.terminal[data-height="240"] { height: 240px; }
+.terminal[data-height="320"] { height: 320px; }
+.terminal[data-height="420"] { height: 420px; }
+.terminal[data-height="480"] { height: 480px; }
+.terminal:focus-visible,
+.term:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.terminal-line,
+.term .l {
+  display: block;
+}
+.terminal-time,
+.term .t {
+  margin-right: 8px;
+  color: var(--term-fg-dim);
+  user-select: none;
+}
+.terminal-tag,
+.term .tag {
+  margin-right: 6px;
+  color: var(--term-tag);
+}
+.terminal-line.stderr,
+.terminal-line.error,
+.terminal-line.err,
+.term .stderr,
+.term .error {
+  color: var(--term-err);
+}
+.terminal-line.warn,
+.term .warn {
+  color: var(--term-warn);
+}
+.terminal-line.system,
+.term .system {
+  color: var(--term-system);
+}
+.terminal-line.cmd,
+.term .cmd {
+  color: var(--term-cmd);
+}
+.terminal-line.ok {
+  color: var(--term-system);
+}
+.terminal-empty,
+.term .empty {
+  color: var(--term-fg-dim);
+}
+
+/* 内嵌在卡片里的终端：跟着卡片宽度走，不再额外撑高。 */
+.card > .terminal {
+  margin-top: 12px;
+  min-height: 200px;
+}

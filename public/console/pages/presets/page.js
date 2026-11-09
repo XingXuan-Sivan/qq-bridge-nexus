@@ -5,6 +5,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
+import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { PRESETS_FIELDS } from './fields.js';
 
 let presetsCache = [];
@@ -16,22 +17,14 @@ let yamlEditor = null;
 
 function setYamlEditorValue(value) {
   if (!yamlEditor) return;
-  const current = yamlEditor.state.doc.toString();
-  if (current === value) return;
-  yamlEditor.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+  yamlEditor.setValue(value);
 }
 
 function mountYamlEditor() {
   const textarea = document.getElementById('presetEditYaml');
-  if (!textarea || yamlEditor || !window.ConsoleCM?.createEditor) return;
-  const mount = document.createElement('div');
-  mount.className = 'preset-yaml-mount';
-  mount.id = 'presetYamlMount';
-  textarea.parentNode.insertBefore(mount, textarea);
-  textarea.hidden = true;
-  yamlEditor = window.ConsoleCM.createEditor(mount, textarea.value, (value) => {
-    textarea.value = value;
-  });
+  if (!textarea || yamlEditor) return;
+  // 共享编辑器组件：整行铺满，编辑结果写回 textarea，保存/校验逻辑不用改。
+  yamlEditor = attachTextareaEditor(textarea, { language: 'yaml', height: '460px' });
 }
 
 function lines(value) {
@@ -81,6 +74,67 @@ function pickerGroup(title, key, items, values, { stalePrefix = '' } = {}) {
     </div>`;
 }
 
+// MCP 工具按 server 分组：server 行是「全选该 server 的工具」的三态复选框，
+// 工具行单独勾选；写回时仍是一个扁平 allow 列表（server__tool），与旧数据结构兼容。
+function toolPickerGroup(items, values) {
+  const groups = new Map();
+  for (const item of items) {
+    const server = item.value.includes('__') ? item.value.slice(0, item.value.indexOf('__')) : '（未分组）';
+    if (!groups.has(server)) groups.set(server, []);
+    groups.get(server).push(item);
+  }
+  const known = new Set(items.map((item) => item.value));
+  const stale = values.filter((value) => value !== '*' && !known.has(value));
+  const body = [...groups.entries()].map(([server, list]) => {
+    const rows = list.map((item) => {
+      const short = item.value.includes('__') ? item.value.slice(item.value.indexOf('__') + 2) : item.value;
+      return `<label class="preset-picker-item preset-picker-tool">
+        <input type="checkbox" data-picker-group="tools" data-picker-owner="${esc(server)}" value="${esc(item.value)}"${pickerChecked(values, item.value) ? ' checked' : ''}>
+        <span><code>${esc(short)}</code>${item.note ? ` <span class="meta">${esc(item.note)}</span>` : ''}</span>
+      </label>`;
+    }).join('');
+    return `<div class="preset-picker-server">
+      <label class="preset-picker-server-head">
+        <input type="checkbox" data-picker-server-all="${esc(server)}">
+        <strong>${esc(server)}</strong><span class="meta">${list.length} 个工具</span>
+      </label>
+      <div class="preset-picker-tools">${rows}</div>
+    </div>`;
+  }).join('');
+  const staleRows = stale.map((value) => `
+    <label class="preset-picker-item preset-picker-stale">
+      <input type="checkbox" data-picker-group="tools" value="${esc(value)}" checked>
+      <span><code>${esc(value)}</code> <span class="meta">工具当前未安装，保留</span></span>
+    </label>`).join('');
+  return `
+    <div class="preset-picker-group">
+      <div class="preset-picker-head"><strong>MCP 工具</strong>${`<label class="preset-picker-wild"><input type="checkbox" data-picker-wild="tools"${values.includes('*') ? ' checked' : ''}> 全部允许（写入 *）</label>`}</div>
+      <div class="preset-picker-list">${body || '<span class="meta">没有可选项</span>'}${staleRows}</div>
+      <div class="meta preset-picker-note">按 server 勾选会级联到它下面的工具；deny 仍走 YAML/文本框。</div>
+    </div>`;
+}
+
+// 勾了「全部允许（*）」时细分勾选不生效：直接禁用并压暗，避免「勾了却没用」。
+function syncToolDisabled(host = document.getElementById('presetAuthPicker')) {
+  if (!host) return;
+  const wild = host.querySelector('[data-picker-wild="tools"]');
+  const locked = Boolean(wild?.checked);
+  host.querySelectorAll('[data-picker-group="tools"], [data-picker-server-all]').forEach((input) => { input.disabled = locked; });
+  host.querySelectorAll('.preset-picker-tools').forEach((box) => box.classList.toggle('is-disabled', locked));
+}
+
+// 让每个 server 的三态复选框跟上工具勾选状态。
+function syncToolServerChecks(host = document.getElementById('presetAuthPicker')) {
+  if (!host) return;
+  host.querySelectorAll('[data-picker-server-all]').forEach((box) => {
+    const owner = box.dataset.pickerServerAll;
+    const tools = [...host.querySelectorAll(`[data-picker-owner="${CSS.escape(owner)}"]`)];
+    const checked = tools.filter((tool) => tool.checked).length;
+    box.checked = tools.length > 0 && checked === tools.length;
+    box.indeterminate = checked > 0 && checked < tools.length;
+  });
+}
+
 function renderAuthPicker(extensions = {}) {
   const host = document.getElementById('presetAuthPicker');
   if (!host) return;
@@ -104,9 +158,11 @@ function renderAuthPicker(extensions = {}) {
   host.innerHTML = [
     '<div class="preset-picker-note"><span>勾选会写入下面的 allow 列表；<code>*</code> 表示全部。deny 仍走 YAML/文本框。</span><button class="btn small" type="button" id="presetAuthRefresh">刷新目录</button></div>',
     pickerGroup('MCP 服务器', 'mcp', servers, mcpValues),
-    pickerGroup('MCP 工具', 'tools', tools, toolValues, { stalePrefix: '工具' }),
+    toolPickerGroup(tools, toolValues),
     pickerGroup('技能', 'skills', skills, skillValues, { stalePrefix: '技能' }),
   ].join('');
+  syncToolServerChecks(host);
+  syncToolDisabled(host);
 }
 
 function syncAuthPicker() {
@@ -376,7 +432,19 @@ export function init() {
     editingId = '';
   });
   document.getElementById('presetAuthPicker')?.addEventListener('change', (event) => {
-    if (event.target.matches('[data-picker-group], [data-picker-wild]')) syncAuthPicker();
+    const target = event.target;
+    const host = document.getElementById('presetAuthPicker');
+    if (!host) return;
+    // 勾 server 行 = 级联勾选它下面的所有工具；再统一刷新三态与 allow 列表。
+    if (target.matches('[data-picker-server-all]')) {
+      const owner = target.dataset.pickerServerAll;
+      host.querySelectorAll(`[data-picker-owner="${CSS.escape(owner)}"]`).forEach((input) => { input.checked = target.checked; });
+    }
+    if (target.matches('[data-picker-group], [data-picker-wild], [data-picker-server-all]')) {
+      syncAuthPicker();
+      syncToolServerChecks(host);
+      syncToolDisabled(host);
+    }
   });
   document.getElementById('presetAuthPicker')?.addEventListener('click', (event) => {
     if (event.target.closest('#presetAuthRefresh')) void refreshExtensionCatalog();

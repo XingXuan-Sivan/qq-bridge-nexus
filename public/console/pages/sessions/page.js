@@ -194,34 +194,48 @@ export async function refreshGlobalAccess() {
   }
 }
 
-export async function saveGlobalAccess() {
-  const msg = document.getElementById('accessMsg');
-  const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
-  readAccessDraft();
-  if (!accessDraft) return;
-  const invalid = ACCESS_AXES.flatMap(([axis]) => accessInvalidLines(accessDraft[axis].entries));
-  if (invalid.length) {
-    if (msg) msg.textContent = `有 ${invalid.length} 行不是合法会话`;
-    return;
-  }
-  const body = {
-    passive: { mode: accessDraft.passive.mode, entries: accessDraft.passive.entries },
-    proactive: { mode: accessDraft.proactive.mode, entries: accessDraft.proactive.entries },
+function accessBody() {
+  const draft = readAccessDraft();
+  if (!draft) return null;
+  return {
+    passive: { mode: draft.passive.mode, entries: draft.passive.entries },
+    proactive: { mode: draft.proactive.mode, entries: draft.proactive.entries },
   };
+}
+
+async function pushGlobalAccess(body) {
+  if (!body) return { ok: false, message: '表单还没渲染' };
+  const invalid = ACCESS_AXES.flatMap(([axis]) => accessInvalidLines(body[axis].entries));
+  if (invalid.length) return { ok: false, message: `有 ${invalid.length} 行不是合法会话` };
   try {
     let r = await api('/api/access', 'PATCH', body);
     if (!r?.ok && r?.requiresConfirm) {
       const ok = window.confirm(r.error || `切换名单模式会翻转所有会话的生效结果（影响 ${r.affected} 个会话），确定保存？`);
-      if (!ok) return;
+      if (!ok) return { ok: true, skipped: true, message: '已取消保存' };
       r = await api('/api/access', 'PATCH', { ...body, confirmFlip: true });
     }
-    if (!r?.ok) throw new Error(r?.error || '保存失败');
+    if (!r?.ok) return { ok: false, message: String(r?.error || '保存失败') };
     applyAccessPayload(r);
     const affected = Number(r.affected);
-    done(affected > 0 ? `全局准入已保存（影响 ${affected} 个会话）` : '全局准入已保存');
+    return { ok: true, message: affected > 0 ? `已保存，影响 ${affected} 个会话` : '已保存，立即生效' };
   } catch (error) {
-    if (msg) msg.textContent = String(error?.message ?? error);
+    return { ok: false, message: String(error?.message ?? error) };
   }
+}
+
+/** 全局准入也走配置页的页面级保存条：read 读当前草稿，save 提交 PATCH /api/access。 */
+export const globalAccessSection = {
+  id: 'access',
+  label: '全局准入',
+  read: accessBody,
+  save: (value) => pushGlobalAccess(value || accessBody()),
+};
+
+export async function saveGlobalAccess() {
+  const msg = document.getElementById('accessMsg');
+  const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
+  const result = await pushGlobalAccess(accessBody());
+  if (result.message) done(result.message);
 }
 
 function renderSessions() {
@@ -840,11 +854,6 @@ export function mountGlobalAccess(host) {
       readAccessDraft();
       renderAccessSummary();
     });
-  }
-  const save = document.getElementById('accessSave');
-  if (save && !save.dataset.accessBound) {
-    save.dataset.accessBound = '1';
-    save.addEventListener('click', () => { void saveGlobalAccess(); });
   }
   void refreshGlobalAccess();
 }

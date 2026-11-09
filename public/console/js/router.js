@@ -51,6 +51,11 @@ let searchCloser = () => {};
 export function getCurrentPage() { return currentConsolePage; }
 export function onPageRefresh(page, fn) { pageRefreshers.set(page, fn); }
 
+// 「切页前」拦截：页面有未保存修改时自己弹确认，返回 false 取消本次切页。
+// 只做同步判断——异步确认（如「保存并离开」）由页面在弹窗回调里再调一次 setConsolePage。
+let pageLeaveGuard = null;
+export function setPageLeaveGuard(fn) { pageLeaveGuard = typeof fn === 'function' ? fn : null; }
+
 // 全局刷新按钮只知道自己被点了，不知道当前页该怎么刷：让页面注册的 refresher 去刷。
 export function refreshCurrentPage() {
   const fn = pageRefreshers.get(getCurrentPage());
@@ -142,8 +147,10 @@ function hydratePage(page) {
 }
 
 /** 切页：只做展示层与 URL，数据加载交给各页面注册的回调。 */
-export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true } = {}) {
+export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true, skipGuard = false } = {}) {
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
+  // 离开当前页前让页面自己确认（未保存修改）；返回 false 表示用户取消了这次切页。
+  if (!skipGuard && page !== currentConsolePage && pageLeaveGuard && pageLeaveGuard(currentConsolePage, page) === false) return false;
   currentConsolePage = page;
   if (persist) rememberPage(page);
   // 只切「页面宿主」（main 里的 section）的显隐：分页器按钮也带 data-page 的数字属性，
@@ -177,6 +184,7 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
     if (document.getElementById(targetId)) reveal();
     else void hydratePage(page).then(reveal);
   }
+  return true;
 }
 
 /** 工具参考已并入 MCP 页：#reference 旧链接统一按 #mcp 处理。 */
@@ -211,8 +219,9 @@ export function initRouter() {
     const page = normalizePageHash(location.hash.slice(1));
     if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }
     if (Object.hasOwn(consolePages, page)) {
-      setConsolePage(page, { updateHash: false });
-      if (location.hash !== '#' + page) history.replaceState({}, '', '#' + page);
+      // 页面拦下了这次切页（未保存修改）：地址栏已经变了，得改回当前页，否则刷新会跳到没去的页。
+      if (setConsolePage(page, { updateHash: false }) === false) history.replaceState({}, '', '#' + currentConsolePage);
+      else if (location.hash !== '#' + page) history.replaceState({}, '', '#' + page);
       return;
     }
     // 未知 hash：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
@@ -222,7 +231,8 @@ export function initRouter() {
   // 前进/后退时 hash 也会变，hashchange 已覆盖；这里兜住「只改了 history.state」的情况。
   window.addEventListener('popstate', () => {
     const page = normalizePageHash(location.hash.slice(1));
-    if (Object.hasOwn(consolePages, page)) setConsolePage(page, { updateHash: false });
+    if (!Object.hasOwn(consolePages, page)) return;
+    if (setConsolePage(page, { updateHash: false }) === false) history.replaceState({}, '', '#' + currentConsolePage);
   });
   document.querySelector('.skip-link')?.addEventListener('click', (event) => {
     event.preventDefault();

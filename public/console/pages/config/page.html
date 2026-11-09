@@ -1,12 +1,11 @@
 <div class="config-layout">
-  <nav class="config-nav" aria-label="全局配置分区">
-    <button type="button" class="config-nav-item active" data-config-section="runtime">运行与模型</button>
-    <button type="button" class="config-nav-item" data-config-section="security">安全与静默</button>
-    <button type="button" class="config-nav-item" data-config-section="access">准入</button>
-    <button type="button" class="config-nav-item" data-config-section="behavior">行为档案</button>
-    <button type="button" class="config-nav-item" data-config-section="tools">工具与语音</button>
-    <button type="button" class="config-nav-item" data-config-section="paths">配置位置</button>
-  </nav>
+  <div class="page-tabs config-tabs" role="tablist" aria-label="全局配置分区">
+    <button type="button" class="page-tab active" role="tab" aria-selected="true" data-config-section="runtime">运行与模型</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="security">安全与静默</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="access">准入</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="behavior">行为档案</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="tools">拓展功能</button>
+  </div>
   <div class="config-body">
     <div class="config-layer-note">
       <strong>三层配置</strong>
@@ -32,9 +31,16 @@
 
     <section class="config-panel" data-config-panel="security" hidden>
       <section class="card span-all">
-        <h2>管理员与访问令牌</h2>
+        <h2>管理员</h2>
+        <p class="meta">按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里只保留管理员。owner 拥有最高权限，可在自己的私聊里审批、进入 closed-agent；表里的管理员只在自己的私聊生效。</p>
         <div data-access-fields="whitelist"></div>
+      </section>
+      <section class="card span-all">
+        <h2 data-note="保存后立即生效">访问令牌</h2>
         <div data-access-fields="token"></div>
+      </section>
+      <section class="card span-all">
+        <h2>安全提示</h2>
         <div data-access-fields="security"></div>
       </section>
       <section id="section-silent" class="card span-all">
@@ -53,29 +59,28 @@
     <section class="config-panel" data-config-panel="behavior" hidden>
       <section class="card span-all">
         <h2>行为档案</h2>
-        <div class="meta">行为档案定义 QQ 交互参数（唤醒、发送节奏、主动机会、表情、上下文等），由预设通过 <code>behavior</code> 引用；不绑定运行模式。</div>
-        <div class="field-row">
-          <label class="field-label" for="behaviorSelect">选择档案</label>
-          <div class="field-control">
-            <div class="control-row">
-              <select id="behaviorSelect" class="u-w-190"></select>
-              <button type="button" class="btn small" id="behaviorRefresh">刷新</button>
-              <button type="button" class="btn small" id="behaviorNew">新建</button>
+        <p class="meta">行为档案定义 QQ 交互参数（唤醒、发送节奏、主动机会、表情、上下文等），由预设通过 <code>behavior</code> 引用；不绑定运行模式。</p>
+        <div class="form-stack">
+          <div class="field-row">
+            <label class="field-label" for="behaviorSelect">选择档案</label>
+            <div class="field-control">
+              <div class="control-row">
+                <select id="behaviorSelect" class="u-w-190"></select>
+                <button type="button" class="btn small" id="behaviorRefresh">刷新</button>
+                <button type="button" class="btn small" id="behaviorNew">新建</button>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="field-row">
-          <label class="field-label" for="behaviorId">文件名</label>
-          <div class="field-control">
-            <div class="control-row">
-              <input id="behaviorId" type="text" class="u-w-190" placeholder="default-v2" autocomplete="off">
-              <span class="meta">小写字母/数字/点/横线；保存为 config/behaviors/&lt;id&gt;.yml</span>
+          <div class="field-row">
+            <label class="field-label" for="behaviorId">文件名</label>
+            <div class="field-control">
+              <div class="control-row">
+                <input id="behaviorId" type="text" class="u-w-190" placeholder="default-v2" autocomplete="off">
+                <span class="meta">小写字母/数字/点/横线；保存为 config/behaviors/&lt;id&gt;.yml</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="field-row">
-          <label class="field-label" for="behaviorText">YAML</label>
-          <div class="field-control">
+          <div class="field-block">
             <textarea id="behaviorText" rows="18" class="u-mono" spellcheck="false"></textarea>
             <div class="form-actions" id="behaviorActions">
               <button type="button" class="btn small" id="behaviorValidate">校验</button>
@@ -89,13 +94,6 @@
 
     <section class="config-panel" data-config-panel="tools" hidden>
       <div id="toolsPanel"></div>
-    </section>
-
-    <section class="config-panel" data-config-panel="paths" hidden>
-      <section class="card span-all">
-        <h2>配置位置</h2>
-        <div class="meta">系统层：<code>config.json</code>、<code>state/mode.json</code>、<code>state/sessions/defaults.json</code>、<code>plugins.json</code>。预设层：<code>dsh/agent-presets/&lt;id&gt;/</code> 与 <code>config/behaviors/&lt;id&gt;.yml</code>。会话层：<code>state/sessions/&lt;platform&gt;/&lt;kind&gt;/&lt;id&gt;.json</code>。</div>
-      </section>
     </section>
   </div>
 </div>

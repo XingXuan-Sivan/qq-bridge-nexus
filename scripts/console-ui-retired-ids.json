@@ -147,5 +147,8 @@
     "voiceRefreshBtn",
     "voiceSendBtn",
     "voiceSendDryRun",
-    "voiceSendTarget"
+    "voiceSendTarget",
+    "consoleTokenSave",
+    "secMsg",
+    "secSave"
 ]

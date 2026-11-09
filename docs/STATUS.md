@@ -251,3 +251,13 @@ npm run test:console-ui
 - YAML Document：`src/presets/store.mjs` 改 `yaml` 的 `parseDocument`/`setIn`/`String(doc)`，meta/extensions 保存保留原注释；`test-preset-store` 6/6（含顶部注释与 `EXTENSIONS_HEADER` 不重复）。
 - 回归：UI 31/31（含 picker 3 组、CM 挂载与 textarea 同步）、static 全过、`test-http-boundary` 0 fail、全量 audit 103/103。
 - 遗留：其余 12 处 `js-yaml`（bridge/dsh-client/preset-prompt/web-search/skill-store/preset-policy/build/setup/测试）统一迁移留在 G5；临时 `_pw-*`/`_picker*.png`/`tools-patch-sdk.mjs` 提交前清理，SDK 补丁由 `scripts/patch-snowluma-sdk.mjs` postinstall 负责。
+
+### 6.16 控制台配置页二轮（2026-11-09，阶段 0–4 已实现并验收）
+
+- 导航：配置页去掉左侧竖排 nav 与「配置位置」分区，改成五个水平标签（运行与模型 / 安全与静默 / 准入 / 行为档案 / 拓展功能）；概览页删除「管理全局配置 →」重复入口，脚注回到 `#section-overview` 内；运行模式圆点全亮的问题按 `.mode-row button.active` 收窄。
+- 保存模型（方案 C）：页面级悬浮保存条（`components/save-bar/`）常驻右下角，按 `read()` 快照比对脏值；只串行保存有变化的分区，逐项显示结果，失败项保留脏值；改动后改回原值自动变干净。分区 = 安全提示 / 全局准入 / DSH 模型 / 发言上限 / 访问令牌（令牌最后保存）；管理员、静默时间段、行为档案、工具开关保留各自表格/卡片上的保存按钮。离开配置页时若有脏值，弹「取消 / 不保存，直接离开 / 保存并离开」，`beforeunload` 兜底。
+- 表单统一：所有字段规格改为单列（`columns: 1`），新增 `.form-stack` 统一行距 14px；卡片间距对齐站点网格 22px；卡片说明到字段 14px；单行控件限宽 460px，令牌输入 420px，文本域与编辑器整行；安全面板拆成管理员 / 访问令牌 / 安全提示 / 静默四张卡，管理员表格保存按钮进表格工具栏。
+- 代码编辑器：`components/code-editor/`（`entry.mjs` + `vendor/codemirror.js` + 主题/高亮）替换预设页与行为档案的 textarea，Monaco 风亮暗配色走 CSS 变量；`npm run build:console-vendor` 重建、`npm run verify:console-vendor` 比对 sha256。
+- 终端：`components/terminal/` 抽出统一外观，MCP 日志弹窗、插件日志、控制中心终端三处共用（控制中心经 `/shared/terminal.css` 映射）。
+- 表格：`components/table/table.js` 支持可展开父行（`children` + `tree-toggle`）与 `pager:false` 全量显示；拓展功能改为 37 项工具表（分类筛选、搜索、全开/全关、工具栏保存）；MCP 页合并成一张「服务器 → 工具」层级表；预设扩展授权按 server 分组、组头三态全选并级联到工具。
+- 验收：`test-console-static` 全过；`test-console-ui` **31/31、39 次写**；`test-control-center` **fail 0**；`verify:console-vendor` OK；全量 audit **103/103**。未做：其余 `js-yaml` 迁移（见 D24），以及表格的分组行/多选列/可配置限高（见 D23）。

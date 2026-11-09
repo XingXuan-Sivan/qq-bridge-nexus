@@ -105,12 +105,7 @@ export const OVERVIEW_FIELDS = {
   sendLimit: {
     fields: [
       { name: 'overviewSendLimit', type: 'custom', span: 2, html: SEND_LIMIT_HTML },
-      {
-        type: 'action',
-        id: 'sendLimitActions',
-        items: [{ id: 'sendLimitSave', label: '保存发言上限', variant: 'primary' }],
-        status: 'sendLimitMsg',
-      },
+      { name: 'sendLimitStatus', type: 'custom', span: 2, html: '<div class="meta" id="sendLimitMsg" role="status"></div>' },
     ],
   },
   silence: {
@@ -195,7 +190,6 @@ export const OVERVIEW_FIELDS = {
         type: 'action',
         id: 'dshActions',
         items: [
-          { id: 'dshEffortSave', label: '保存', variant: 'primary' },
           { id: 'dshCatalogRefresh', label: '刷新目录' },
         ],
         status: 'dshEffortMsg',

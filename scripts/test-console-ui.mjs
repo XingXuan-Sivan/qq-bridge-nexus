@@ -101,6 +101,10 @@ try {
       if (await toggle.count()) await toggle.click();
     }
     await nav.click();
+    // 配置页有未保存修改时会拦下切页（三选一弹窗）：测试里一律按「不保存，直接离开」继续，
+    // 弹窗本身在专门的用例里断言。
+    const leaveDialog = page.locator('#unsavedLeaveModal [data-leave="discard"]');
+    if (await leaveDialog.count()) await leaveDialog.click();
     await hydrate(view);
   }
   async function reveal(selector) {
@@ -126,6 +130,15 @@ try {
     assert.equal(response.status(), 200, `${method} ${path} should succeed`);
     assert.equal((await response.json()).ok, true);
     return fixture.requests.at(-1)?.body;
+  }
+  // 页面级保存条：输入事件到「脏」有 60ms 合并窗口，先等它出现，再点保存。
+  async function saveBarWrite(path, method = 'POST') {
+    // 保存按钮常驻：等它可用（=当前确有脏分区）再点，否则会点到禁用态。
+    await page.waitForFunction(() => {
+      const btn = document.getElementById('saveBarButton');
+      return !!btn && !btn.disabled && !document.getElementById('saveBar')?.hidden;
+    }, null, { timeout: 5000 });
+    return clickWrite('#saveBarButton', path, method);
   }
 
   await test('Legacy config IDs remain present and every DOM ID is unique', async () => {
@@ -170,19 +183,24 @@ try {
 
   await test('MCP page merges the tool reference and shows the real tool inventory', async () => {
     await navigate('mcp');
-    await page.waitForFunction(() => document.querySelectorAll('#mcpList [data-table]').length >= 2);
+    // 层级表：一行 server（可展开），展开后是它的工具；不再有第二张平铺的「工具参考」。
+    await page.waitForFunction(() => document.querySelectorAll('#mcpList tr.tree-parent').length >= 2);
+    assert.equal(await page.locator('#mcpList [data-table]').count(), 1, 'MCP 页只保留一张层级表');
+    const toggles = page.locator('#mcpList [data-tree-toggle]');
+    assert.equal(await toggles.count(), 2, '每个 server 一个展开按钮');
+    for (const toggle of await toggles.all()) await toggle.click();
+    await page.waitForTimeout(200);
     const text = await page.locator('#mcpList').innerText();
     assert.match(text, /snowluma_status/);
     assert.match(text, /demo_tool/);
     assert.match(text, /2 个 server · 2 个工具 · 1 个技能/);
     assert.equal(await page.locator('#mcpList .status-badge').count(), 0, 'MCP 标签统一用 .pill');
     assert.ok(await page.locator('#mcpList .pill').count() >= 2, '来源与状态标签应使用 .pill');
-    const externalActions = page.locator('#mcpList tr', { hasText: 'test-ext' }).locator('[data-mcp-act]');
+    const externalActions = page.locator('#mcpList tr.tree-parent', { hasText: 'test-ext' }).locator('[data-mcp-act]');
     assert.equal(await externalActions.count(), 3, '外部 MCP 操作列最多编辑/测试/删除三个');
     assert.equal(await page.locator('#mcpList [data-filter="source"]').count(), 1);
     assert.equal(await page.locator('#mcpList [data-filter="status"]').count(), 1);
-    assert.equal(await page.locator('#mcpList [data-filter="server"]').count(), 1);
-    await page.locator('#mcpList tr', { hasText: 'test-ext' }).locator('[data-mcp-act="delete"]').click();
+    await page.locator('#mcpList tr.tree-parent', { hasText: 'test-ext' }).locator('[data-mcp-act="delete"]').click();
     await page.waitForTimeout(350);
     const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
     assert.ok(
@@ -236,8 +254,8 @@ try {
     assert.match(await page.locator('#presetEditYaml').inputValue(), /qq-tool-restrict/);
     assert.equal(await page.locator('#presetValidate').count(), 1);
     assert.equal(await page.locator('#presetAuthPicker .preset-picker-group').count(), 3);
-    await page.waitForSelector('#presetYamlMount .cm-editor');
-    await page.locator('#presetYamlMount .cm-content').click();
+    await page.waitForSelector('#presetEditor .code-editor .cm-editor');
+    await page.locator('#presetEditor .code-editor .cm-content').click();
     await page.keyboard.press('Control+End');
     await page.keyboard.type('\n# ui cm smoke');
     assert.match(await page.locator('#presetEditYaml').inputValue(), /# ui cm smoke/);
@@ -348,7 +366,7 @@ try {
     await fill('ownerQQ', '100001');
     assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { ownerQQ: '100001', admins: [] });
     await check('secInterceptNotify', false);
-    assert.deepEqual(await clickWrite('#secSave', '/api/security'), { interceptNotify: false });
+    assert.deepEqual(await saveBarWrite('/api/security'), { interceptNotify: false });
   });
 
   // state/ 的 ACL 收紧需要管理员权限，未提权时桥接会明确报告 hardened:false。
@@ -380,8 +398,8 @@ try {
     await page.locator('[data-config-section="runtime"]').click();
     await fill('sendLimitMin', 7);
     await fill('sendLimitHour', 0);
-    assert.deepEqual(await clickWrite('#sendLimitSave', '/api/config/send-limit'), { maxSendPerMinute: 7, maxSendPerHour: 0 });
-    await page.waitForFunction(() => /已保存/.test(document.getElementById('sendLimitMsg')?.textContent || ''));
+    assert.deepEqual(await saveBarWrite('/api/config/send-limit'), { maxSendPerMinute: 7, maxSendPerHour: 0 });
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('saveBarResults')?.textContent || ''));
   });
 
   await test('Slang add, search, confirm modal, tab switching and parameter contracts', async () => {
@@ -797,16 +815,16 @@ try {
     // 会二次 accept 同一个 dialog 而抛错，所以只等响应，不重复处理。
     const [saved] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === '/api/dsh/model' && r.request().method() === 'POST'),
-      page.locator('#dshEffortSave').click(),
+      (async () => { await saveBarWrite('/api/dsh/model'); })(),
     ]);
     assert.equal(saved.status(), 200);
     assert.deepEqual(saved.request().postDataJSON(), { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'medium', vision: 'auto' });
-    await page.waitForFunction(() => document.getElementById('dshEffortMsg').textContent.includes('example-reasoner'));
+    await page.waitForFunction(() => /example-reasoner/.test(document.getElementById('saveBarResults')?.textContent || ''));
     // 改回默认，避免影响后续断言
     await page.locator('#dshProviderSelect').selectOption('deepseek-official');
     await page.locator('#dshModelSelect').selectOption('deepseek-flash');
     await page.locator('#dshEffortSelect').selectOption('max');
-    await page.locator('#dshEffortSave').click();
+    await saveBarWrite('/api/dsh/model');
     await page.waitForFunction(() => document.getElementById('dshProviderText').textContent === 'deepseek-official' && document.getElementById('dshEffortSelect').value === 'max');
   });
 

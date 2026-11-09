@@ -7,6 +7,7 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { MCP_FIELDS } from './fields.js';
+import { renderTerminalLines, terminalHtml, textToLines } from '../../components/terminal/terminal.js';
 
 const TRANSPORT_LABEL = {
   stdio: 'stdio',
@@ -71,7 +72,13 @@ function serverRow(server) {
   const description = server.status === 'error'
     ? ''
     : esc(server.note || server.description || '');
+  const tools = Array.isArray(server.tools) ? server.tools : [];
+  const child = `<div class="tree-tool-list">${tools.length
+    ? tools.map((tool) => `<div class="tree-tool"><code>${esc(toolName(tool))}</code><span class="meta">${esc(toolDescription(tool) || '—')}</span></div>`).join('')
+    : '<span class="meta">没有注册工具</span>'}</div>`;
   return {
+    key: server.id,
+    children: child,
     attrs: {
       'data-filter-source': server.source === 'external' ? 'external' : 'builtin',
       'data-filter-status': online ? 'running' : server.status === 'error' ? 'error' : 'stopped',
@@ -171,32 +178,7 @@ function render(data) {
     actions: `${warning}<button class="btn primary" type="button" data-mcp-new>新增 MCP</button>`,
   });
 
-  const tools = toolRows(servers);
-  const reference = dataTableHtml({
-    columns: [
-      { label: '服务器', width: '190px' },
-      { label: '工具', width: '250px' },
-      { label: '说明' },
-    ],
-    rows: tools,
-    pageSize: 20,
-    search: { placeholder: '搜索工具或说明…' },
-    refresh: true,
-    filters: [
-      {
-        id: 'server',
-        label: '服务器',
-        options: [
-          { value: 'all', label: '全部 server' },
-          ...servers.map((server) => ({ value: server.id, label: server.name || server.id })),
-        ],
-      },
-    ],
-    meta: `共 ${tools.length} 个工具`,
-    empty: '没有匹配的工具。',
-  });
-
-  list.innerHTML = `${overview}<h3 class="mcp-section-title">工具参考</h3>${reference}`;
+  list.innerHTML = overview;
   initDataTables(list, { onRefresh: () => { refreshMcp(true).catch(() => {}); } });
 }
 
@@ -361,7 +343,7 @@ function openLogs(id) {
     id: 'mcpLogs',
     title: `日志 · ${id}`,
     wide: true,
-    body: '<pre class="log-pre" id="mcpLogText">读取中…</pre>',
+    body: terminalHtml({ id: 'mcpLogText', height: 420, label: `${id} 日志`, placeholder: '读取中…' }),
     footer: '<button class="btn" type="button" data-modal-close>关闭</button>',
   });
   const overlayEl = layer.firstElementChild;
@@ -369,11 +351,10 @@ function openLogs(id) {
   openModal(overlayEl);
   wireModal(overlayEl, { onClose: () => overlayEl.remove() });
   api(`/api/extensions/mcp/${encodeURIComponent(id)}/logs?limit=300`).then((data) => {
-    const pre = document.getElementById('mcpLogText');
-    if (pre) pre.textContent = (data.lines ?? []).join('\n') || '（没有日志）';
+    const term = document.getElementById('mcpLogText');
+    if (term) renderTerminalLines(term, textToLines((data.lines ?? []).join('\n')), { placeholder: '（没有日志）' });
   }).catch((error) => {
-    const pre = document.getElementById('mcpLogText');
-    if (pre) pre.textContent = `读取失败：${error.message}`;
+    renderTerminalLines(document.getElementById('mcpLogText'), [`读取失败：${error.message}`], { scroll: false });
   });
 }
 

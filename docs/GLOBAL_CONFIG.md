@@ -1,8 +1,8 @@
 # 全局配置：三层模型与配置归一化方案
 
-> 状态：**G1–G3 已实施；G4–G5 待做**（2026-11-09）。
-> G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页已提交；G4 动态 picker / CM6 / 统一 `yaml` 与 G5 收尾待做。
-> 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.14。
+> 状态：**G1–G4 已提交；G5 部分完成**（2026-11-09）。
+> G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页 `aa2176a`、G4 动态 picker / CM6 / 统一 `yaml` `169da58`。G5 已完成文档收尾与控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）；其余 `js-yaml` 迁移按 D24 延后。
+> 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.16。
 
 ## 0. 结论
 
@@ -350,7 +350,7 @@ behaviorKind  = behavior.kind
 
 ### 6.1 页面结构
 
-单页 + 左侧子导航（参考 AstrBot「配置」页，但不照搬“所有配置一个文件”）：
+单页 + 顶部水平分区标签（复用站点通用的 `.page-tabs` / `.page-tab`，与记忆页同一套；不再维护左侧竖排导航）：
 
 ```text
 全局配置
@@ -358,20 +358,20 @@ behaviorKind  = behavior.kind
 ├─ 安全与静默        owner/admins、控制台令牌、拦截提示、手动静默、定时静默、发送总上限
 ├─ 准入              被动/主动两条名单（白名单/黑名单）、归属说明
 ├─ 行为档案          档案列表 + 编辑器（新建/复制/删除/设为默认？）
-├─ 工具与语音        QQ 工具开关、语音库、媒体限制、初始提示词上限
-└─ 配置位置          只读：本页各项写入哪个文件 / 哪个 state 文件
+└─ 拓展功能          QQ 工具开关、语音库、媒体限制、初始提示词上限
 ```
+
+- “配置位置”分区已删除：各项写入哪个文件由实现决定，不再在页面上做只读展示；代码编辑器只出现在 YAML/JSON 字段。
 
 - 顶部固定一条「三层模型」说明与跳转：`系统层（本页） / 预设层（预设页） / 会话层（会话与审批）`。
 - 每个分区底部保存（或全页底部 sticky 保存 + 脏分区标记）；保存失败只影响该分区，不整页回滚。
-- 右侧或底部「配置位置」只读展示，不提供任意文件编辑；代码编辑器只出现在 YAML/JSON 字段。
 - 诊断/通知（`state/` 权限、SnowLuma 排查）不进本页。
 
 ### 6.2 删除的页面/入口
 
 - `#social-v1`、`#social-v2`：页面、nav、router、`PAGE_FRAGMENTS`、静态基线全部删除；旧 hash 不重定向（用户要求不保留）。
 - `#access`：页面、nav、router 删除；其配置并入「安全与静默」；会话准入名单并入「准入」；旧 hash 不重定向。
-- `#overview` 保留“运行总览”，但移除重复的全局配置表单：模式/预设/模型/发言上限/静默改为摘要 + 「去全局配置」链接；活动日志保留。
+- `#overview` 保留“运行总览”，但移除重复的全局配置表单与「管理全局配置 →」入口：模式/预设/模型/发言上限/静默只保留摘要，配置统一从左侧导航进入；活动日志保留。
 - `#persona` 保留人格卡库；会话页仍可选择人格。
 
 ### 6.3 预设页的变化
@@ -416,13 +416,13 @@ behaviorKind  = behavior.kind
 
 要求：通用（YAML/JSON/以后其他文本）、唯一方案、无 CDN、能在零 bundler 的控制台里自托管。
 
-推荐：**CodeMirror 6 + `@codemirror/lang-yaml`**，用 esbuild 打成 vendor 文件，放 `public/console/vendor/codemirror.js`：
+推荐：**CodeMirror 6 + `@codemirror/lang-yaml`**，用 esbuild 打成 vendor 文件，放 `public/console/components/code-editor/vendor/codemirror.js`：
 
-- 一个组件/入口 `scripts/console-codemirror-entry.mjs`，API 只暴露 `createEditor/setValue/getValue`；
+- 一个组件/入口 `public/console/components/code-editor/entry.mjs`，API 暴露 `createEditor/EditorView/EditorState/Compartment/HighlightStyle/syntaxHighlighting/tags/yaml/basicSetup`（主题写在组件 JS 里，改配色不需要重建）；
 - 语言包按需注册：先 YAML，后面 JSON；不为每种文件另造编辑器；
 - 行号、搜索、括号匹配、折叠；不启用重型 lint（服务端校验为准）；
 - `script-src 'self'` 下自托管，不引 CDN；不引入 Monaco（体积/构建都重）。CSP 只给 `style-src` 加 nonce（`src/http/security.mjs` `consoleCsp`），CM6 运行时注入的样式因此可用。
-- 已落地（G4）：`scripts/build-console-vendor.mjs` 产出 `public/console/vendor/codemirror.js`（约 428KB）；`page.js` 的 `mountYamlEditor` 把 CM 挂到 `#presetYamlMount`，变更写回 `#presetEditYaml`，保存仍拿 textarea。
+- 已落地（G4，D21 调整目录）：`scripts/build-console-vendor.mjs` 产出 `public/console/components/code-editor/vendor/codemirror.js`（约 428KB）；`npm run verify:console-vendor` 重建到临时文件比对 sha256。预设页与行为档案都用 `attachTextareaEditor` 挂载，变更写回隐藏 textarea，保存仍拿 textarea。
 
 > 已拍板：CM6，不用 Ace/CM5；不再保留“待拍板”状态。
 
@@ -498,11 +498,11 @@ behaviorKind  = behavior.kind
 | G4 | 预设页动态 picker + 统一代码编辑器 + YAML Document | 注释保留测试、保存/应用/回滚 |
 | G5 | 文档/STATUS/配置说明收尾 | 提交、工作区干净 |
 
-状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a`、G4 `169da58` 已提交；G1–G4 已真机/门禁验收，G5 未开始，G5 还包含其余 `js-yaml` 使用统一迁移。G3/G4 的验收证据见 `docs/STATUS.md` 6.14/6.15。
+状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a`、G4 `169da58` 已提交；G5 的文档收尾与控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表）已完成，验收见 `docs/STATUS.md` 6.16。其余 `js-yaml` 使用统一迁移按 `PLAN_DEVIATIONS.md` D24 延后：4 处是 DSH 互操作/夹具，其余需逐处改 API 并回归，不与本轮混做。
 
 ## 11. 已拍板（2026-11-09，m31268）
 
-1. **编辑器**：CodeMirror 6 + `@codemirror/lang-yaml`，esbuild 自托管到 `public/console/vendor/`；只保留这一套，后续 JSON 复用同一个 `code-editor` 组件。
+1. **编辑器**：CodeMirror 6 + `@codemirror/lang-yaml`，esbuild 自托管到 `public/console/components/code-editor/vendor/`；只保留这一套，后续 JSON 复用同一个 `code-editor` 组件。
 2. **YAML 库**：桥接自有代码统一迁到 `yaml` 的 `parseDocument` / `Document.setIn` / `String(doc)`；`agent.cordis.yml` 继续原样保存。不保留第二个 YAML 库。
 3. **行为档案“默认”归属**：chat preset 必须显式绑定 `behavior`，不做隐式兜底；缺失或 `kind` 不匹配时启动失败（fail closed）。运维 Agent 不绑定行为档案。
 4. **准入名单位置**：放「全局配置 → 准入」。会话页只显示成员关系与生效结果，不重复编辑全局名单。

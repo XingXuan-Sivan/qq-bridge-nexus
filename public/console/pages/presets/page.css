@@ -6,11 +6,9 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-#presetEditYaml { font-family: var(--mono); font-size: 12px; line-height: 1.55; }
-.preset-yaml-mount { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-.preset-yaml-mount .cm-editor { min-height: 320px; max-height: 560px; font-size: 12px; }
-.preset-yaml-mount .cm-scroller { font-family: var(--mono); line-height: 1.55; overflow: auto; }
-.preset-yaml-mount .cm-focused { outline: none; }
+/* YAML 编辑器：共享 code-editor 组件（CM6），整行铺满，不再用 textarea 外观。 */
+.code-editor-field { width: 100%; }
+.code-editor-field .field-notes { margin-top: 6px; }
 #presetEditorActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 #presetEditorActions .meta { margin-left: 4px; }
 .preset-picker { display: flex; flex-direction: column; gap: 12px; }
@@ -24,3 +22,16 @@
 .preset-picker-item code { font-family: var(--mono); font-size: 11px; }
 .preset-picker-stale { opacity: .72; }
 .preset-picker .meta { font-size: 11px; }
+/* MCP 工具按 server 分组：每组占满一行，组头是三态全选，工具按列排。 */
+.preset-picker-server { grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--border-subtle); }
+.preset-picker-server:first-child { padding-top: 0; border-top: 0; }
+.preset-picker-server-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.preset-picker-server-head .meta { color: var(--muted); font-weight: 400; }
+.preset-picker-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 14px;
+  margin: 6px 0 2px 22px;
+}
+.preset-picker-tools.is-disabled { opacity: .55; }
+.preset-picker-note { margin-top: 8px; }

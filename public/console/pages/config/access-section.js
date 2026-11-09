@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 function renderAccessFieldGroups() {
   document.querySelectorAll('[data-access-fields]').forEach((host) => {
     const spec = ACCESS_FIELDS[host.dataset.accessFields];
-    if (spec) renderFields(host, spec.fields, { columns: 2 });
+    if (spec) renderFields(host, spec.fields, { columns: 1 });
   });
 }
 
@@ -123,7 +123,7 @@ export async function refreshWhitelist() {
 }
 
 export function loadSecurity() {
-  api('/api/security').then((r) => {
+  return api('/api/security').then((r) => {
     setSwitch($('secInterceptNotify'), r.security?.interceptNotify !== false);
     // state/ 的 ACL 是否收紧（Windows 上需要管理员权限，未提权时会失败）。
     // 明确警示 + 给出可复制的命令，而不是让用户以为已经安全。
@@ -157,6 +157,37 @@ async function changeConsoleToken(generate) {
   setMsg(msg, r.generated ? '已生成随机令牌，当前页面已自动使用。可点击显示后复制。' : '已保存新令牌', 'ok');
 }
 
+// ── 页面级保存分区 ────────────────────────────────────────────────────────
+// 安全开关与令牌是「一改就该立刻落盘」的整页配置，注册进 save-bar 后不再各带按钮；
+// 令牌放在最后保存：它换掉的是后续请求要用的凭据，改完必须让当前页先切过去。
+export const securitySection = {
+  id: 'security',
+  label: '安全拦截',
+  read: () => ({ interceptNotify: getSwitch($('secInterceptNotify')) }),
+  save: async (value) => {
+    const r = await api('/api/security', 'POST', { interceptNotify: !!value?.interceptNotify });
+    if (!r.ok) return { ok: false, message: r.error || '保存失败' };
+    await loadSecurity();
+    return { ok: true, message: '已保存，立即生效' };
+  },
+};
+
+export const tokenSection = {
+  id: 'consoleToken',
+  label: '控制台令牌',
+  read: () => ({ token: String($('consoleTokenInput')?.value ?? '').trim() }),
+  save: async (value) => {
+    const token = String(value?.token ?? '').trim();
+    if (token && token.length < 16) return { ok: false, message: '令牌至少需要 16 位' };
+    const r = await api('/api/console/token', 'POST', { token });
+    if (!r.ok) return { ok: false, message: r.error || '修改失败' };
+    localStorage.setItem('consoleToken', r.token);
+    $('consoleTokenInput').value = r.token;
+    setMsg($('consoleTokenMsg'), r.generated ? '已生成随机令牌，当前页面已自动使用' : '已保存新令牌，当前页面已自动使用', 'ok');
+    return { ok: true, message: r.generated ? '已生成随机令牌，当前页已切换' : '已保存，当前页已切换' };
+  },
+};
+
 export function init() {
   // 先渲染字段规格，下面所有 $('…') 才取得到节点；开关的点击委托也要在这个范围内显式绑。
   renderAccessFieldGroups();
@@ -182,14 +213,6 @@ export function init() {
     renderAdminRows();
   });
 
-  $('secSave').addEventListener('click', async () => {
-    const r = await api('/api/security', 'POST', { interceptNotify: getSwitch($('secInterceptNotify')) });
-    const msg = $('secMsg');
-    msg.textContent = r.ok ? '✅ 已保存' : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) loadSecurity();
-  });
-
   $('stateDirReharden').addEventListener('click', async () => {
     const msg = $('stateDirMsg');
     msg.textContent = '检测中…';
@@ -199,7 +222,6 @@ export function init() {
     loadSecurity();
   });
 
-  $('consoleTokenSave').addEventListener('click', () => changeConsoleToken(false));
   $('consoleTokenRandom').addEventListener('click', () => changeConsoleToken(true));
 
   // 「显示令牌」按钮：挂在输入框后面，避免在输入框里直接显示明文。

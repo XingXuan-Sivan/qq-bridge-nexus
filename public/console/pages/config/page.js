@@ -4,18 +4,62 @@
 // 不自己重复实现状态读取，避免两套轮询互相覆盖。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { getCurrentPage, onPageRefresh, setConsolePage, setPageLeaveGuard } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initTimeFields } from '../../components/time/time.js';
+import { askLeaveWithUnsaved, createSaveBar } from '../../components/save-bar/save-bar.js';
+import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { CONFIG_FIELDS } from './fields.js';
-import { init as initAccessPage } from './access-section.js';
-import { mountGlobalAccess } from '../sessions/page.js';
+import { init as initAccessPage, loadSecurity, securitySection, tokenSection } from './access-section.js';
+import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess } from '../sessions/page.js';
 import { initToolsSection } from './tools-section.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
+// 页面级保存条：init() 里创建；模块级只是为了 refreshOverviewPage 也能看到它。
+let saveBar = null;
+
+// ── 页面级保存分区 ──────────────────────────────────────────────────────────
+// 只有「改完该整页一起保存」的表单才注册到这里；表格型数据（管理员、定时静默、
+// 工具开关、行为档案）单独保存，不跟页面级保存绑在一起——否则一项失败就得全部重来。
+const dshModelSection = {
+  id: 'dshModel',
+  label: 'DSH 模型',
+  read: () => ({
+    provider: $('dshProviderSelect').value,
+    model: $('dshModelSelect').value,
+    reasoningEffort: $('dshEffortSelect').value,
+    vision: $('dshVisionSelect').value,
+  }),
+  save: async (payload) => {
+    // 第一次换到第三方提供方：保存前再确认一次隐私（与按钮时代同一道闸）。
+    if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
+      && !confirm(`${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`)) {
+      return { ok: true, skipped: true, message: '已取消（未切换提供方）' };
+    }
+    const r = await api('/api/dsh/model', 'POST', payload);
+    if (!r.ok) return { ok: false, message: r.error || '保存失败' };
+    await refreshDshModel();
+    return { ok: true, message: `已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效` };
+  },
+};
+
+const sendLimitSection = {
+  id: 'sendLimit',
+  label: '发言上限',
+  read: () => ({
+    maxSendPerMinute: Math.max(0, Math.round(Number($('sendLimitMin').value) || 0)),
+    maxSendPerHour: Math.max(0, Math.round(Number($('sendLimitHour').value) || 0)),
+  }),
+  save: async (value) => {
+    const r = await api('/api/config/send-limit', 'POST', value);
+    if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
+    requestStatusRefresh();
+    return { ok: true, message: '已保存，立即生效' };
+  },
+};
 
 // 静态块按字段规格渲染：页面只留卡片与宿主，控件不再手写。
 // bare 块（摘要指标）自带卡片外观，直接灌 HTML，不套字段外壳。
@@ -24,7 +68,7 @@ function renderOverviewFieldGroups() {
     const spec = CONFIG_FIELDS[host.dataset.overviewFields];
     if (!spec) return;
     if (spec.bare) { host.innerHTML = spec.html; return; }
-    renderFields(host, spec.fields, { columns: 2 });
+    renderFields(host, spec.fields, { columns: 1 });
   });
 }
 
@@ -355,6 +399,16 @@ async function loadSendLimit() {
 
 // ── 行为档案 ────────────────────────────────────────────────────────────────
 let behaviorCurrentId = '';
+let behaviorEditor = null;
+
+// 行为档案编辑器：CodeMirror 与隐藏 textarea 双向同步，保存/校验仍读 textarea。
+function setBehaviorText(value) {
+  const text = String(value ?? '');
+  if (behaviorEditor) behaviorEditor.setValue(text);
+  const area = $('behaviorText');
+  if (area) area.value = text;
+}
+
 async function refreshBehaviors(preferred) {
   const list = await api('/api/config/behaviors');
   const items = Array.isArray(list?.behaviors) ? list.behaviors : (Array.isArray(list?.items) ? list.items : []);
@@ -367,11 +421,11 @@ async function refreshBehaviors(preferred) {
 }
 
 async function loadBehavior(id) {
-  if (!id) { $('behaviorId').value = ''; $('behaviorText').value = ''; return; }
+  if (!id) { $('behaviorId').value = ''; setBehaviorText(''); return; }
   const r = await api(`/api/config/behaviors/${encodeURIComponent(id)}`);
   behaviorCurrentId = id;
   $('behaviorId').value = id;
-  $('behaviorText').value = r.text || '';
+  setBehaviorText(r.text || '');
   setMsg($('behaviorMsg'), `已加载 ${id}`, 'info');
 }
 
@@ -381,7 +435,7 @@ function bindBehaviorSection() {
   $('behaviorNew').addEventListener('click', () => {
     behaviorCurrentId = '';
     $('behaviorId').value = '';
-    $('behaviorText').value = 'version: 1\nkind: v2\nlabel: 新行为档案\ndescription: ""\nv2: {}\n';
+    setBehaviorText('version: 1\nkind: v2\nlabel: 新行为档案\ndescription: ""\nv2: {}\n');
     setMsg($('behaviorMsg'), '填入 id 与内容后点保存', 'info');
   });
   $('behaviorValidate').addEventListener('click', async () => {
@@ -414,7 +468,9 @@ function bindBehaviorSection() {
 
 function showConfigSection(name) {
   document.querySelectorAll('[data-config-section]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.configSection === name);
+    const active = button.dataset.configSection === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
   });
   document.querySelectorAll('[data-config-panel]').forEach((panel) => {
     const active = panel.dataset.configPanel === name;
@@ -427,16 +483,33 @@ function showConfigSection(name) {
 export function init() {
   // 先把字段规格渲染成 DOM，后面所有 $(id) 才取得到节点。
   renderOverviewFieldGroups();
-  // 六分区导航
+  // 五个水平分区标签（.page-tabs，与记忆页同一套组件）
   document.querySelectorAll('[data-config-section]').forEach((button) => {
     button.addEventListener('click', () => showConfigSection(button.dataset.configSection));
   });
   // 安全与静默：白名单 / 令牌 / 安全拦截由 access-section 统一渲染并绑定开关
   initAccessPage();
-  // 准入：复用会话页的全局名单组件
+  // 准入：复用会话页的全局名单组件；必须先挂载，保存条才能读到它的控件。
   mountGlobalAccess(document.querySelector('[data-sessions-access]'));
-  // 工具与语音：系统层工具开关 + 语音库调试
+  // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
+  saveBar = createSaveBar({
+    page: 'config',
+    sections: [securitySection, globalAccessSection, dshModelSection, sendLimitSection, tokenSection],
+  });
+  setPageLeaveGuard((from, to) => {
+    if (from !== 'config' || !saveBar?.isDirty()) return true;
+    void askLeaveWithUnsaved({ bar: saveBar }).then((answer) => {
+      if (answer === 'cancel') return;
+      if (answer === 'discard') saveBar.reset();
+      // skipGuard：确认已经做过，直接切；否则会再次弹窗。
+      setConsolePage(to, { skipGuard: true });
+    });
+    return false;
+  });
+  // 准入：复用会话页的全局名单组件（上面已挂载）；工具与语音：系统层工具开关 + 语音库调试
   initToolsSection();
+  // 行为档案：YAML 编辑器（CM6，整行铺满）；隐藏 textarea 继续作为保存/校验的数据源。
+  behaviorEditor = attachTextareaEditor($('behaviorText'), { language: 'yaml', height: '480px' });
   bindBehaviorSection();
   refreshBehaviors().catch((error) => setMsg($('behaviorMsg'), String(error?.message ?? error), 'err'));
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
@@ -468,24 +541,6 @@ export function init() {
   $('dshEffortSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
   $('dshVisionSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
   $('dshCatalogRefresh').addEventListener('click', () => refreshDshModel(true));
-  $('dshEffortSave').addEventListener('click', async () => {
-    const msg = $('dshEffortMsg');
-    const payload = {
-      provider: $('dshProviderSelect').value,
-      model: $('dshModelSelect').value,
-      reasoningEffort: $('dshEffortSelect').value,
-      vision: $('dshVisionSelect').value,
-    };
-    // 第一次换到第三方提供方：保存前再确认一次隐私
-    if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
-      && !confirm(`${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`)) return;
-    msg.textContent = '保存中…';
-    msg.className = 'meta';
-    const r = await api('/api/dsh/model', 'POST', payload);
-    msg.textContent = r.ok ? `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效` : ('❌ ' + (r.error || '保存失败'));
-    msg.className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) { await refreshDshModel(); setMsg(msg, `✅ 已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效`, 'ok'); }
-  });
 
   // 手动静默：同一个按钮按当前状态开启或关闭
   $('silentToggle').addEventListener('click', async () => {
@@ -541,22 +596,17 @@ export function init() {
     if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }
   });
 
-  // 发言上限
-  $('sendLimitSave').addEventListener('click', async () => {
-    const send = { maxSendPerMinute: Math.max(0, Math.round(Number($('sendLimitMin').value) || 0)), maxSendPerHour: Math.max(0, Math.round(Number($('sendLimitHour').value) || 0)) };
-    const r = await api('/api/config/send-limit', 'POST', send);
-    const msg = $('sendLimitMsg');
-    setMsg(msg, r.ok === false ? '❌ ' + (r.error || '保存失败') : '✅ 已保存', r.ok === false ? 'err' : 'ok');
-    requestStatusRefresh();
-  });
+  // 发言上限：保存入口在页面级保存条（见 init 里的 saveBar）；这里只留数据读取。
 
   // 进入本页 / 切回来：重读本页负责的配置型数据；摘要与活动日志仍由 app.js 写。
-  const refreshOverviewPage = () => setTimeout(() => {
+  const refreshOverviewPage = () => setTimeout(async () => {
     refreshPresets();
-    refreshDshModel();
     refreshSilence();
-    loadSendLimit().catch(() => {});
+    await Promise.allSettled([refreshDshModel(), loadSendLimit(), loadSecurity(), refreshGlobalAccess()]);
     requestStatusRefresh();
+    // 数据刚被重读：用户还没动过本页时把当前值重拍成基线（否则加载前拍的旧基线
+    // 会让「8 条」「真/假」这类异步回填的值一上来就算脏）。
+    if (saveBar) saveBar.adoptIfPristine();
   }, 0);
   onPageRefresh('config', refreshOverviewPage);
   refreshOverviewPage();

@@ -78,10 +78,11 @@ export const PRESETS_FIELDS = {
       {
         name: 'presetEditYaml',
         type: 'textarea',
-        label: 'agent.cordis.yml',
+        label: '',
         rows: 18,
         mono: true,
         span: 2,
+        className: 'code-editor-field',
       },
       {
         type: 'section',

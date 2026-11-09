@@ -25,12 +25,6 @@ export const ACCESS_FIELDS = {
   whitelist: {
     fields: [
       {
-        name: 'wlSummary',
-        type: 'custom',
-        span: 2,
-        html: `<div class="meta" id="wlSummary">按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里只保留管理员。</div>`,
-      },
-      {
         name: 'ownerQQ',
         type: 'text',
         label: '管理员 QQ',
@@ -42,18 +36,19 @@ export const ACCESS_FIELDS = {
         name: 'adminsBlock',
         type: 'custom',
         span: 2,
-        html: `<div class="meta">管理员（owner 之外）：可在自己的 QQ 私聊里审批、进入 closed-agent；每人的权限与上限单独设置。owner 永远不受此表限制。</div>
+        html: `<div class="table-toolbar">
+  <div class="table-toolbar-main">
+    <button type="button" id="adminAdd" class="btn small">+ 添加管理员</button>
+    <span class="meta" id="adminMsg"></span>
+  </div>
+  <div class="table-toolbar-side">
+    <button type="button" id="wlSave" class="btn small primary">保存管理员</button>
+  </div>
+</div>
 <table class="table admin-table">
   <thead><tr><th>QQ</th><th>称呼</th><th>权限</th><th>最高级别</th><th>通知</th><th>私聊被动豁免</th><th></th></tr></thead>
   <tbody id="adminRows"></tbody>
-</table>
-<div class="control-row u-mt-8"><button type="button" id="adminAdd" class="btn small">+ 添加管理员</button><span class="meta" id="adminMsg"></span></div>`,
-      },
-      {
-        type: 'action',
-        id: 'accessWhitelistActions',
-        items: [{ id: 'wlSave', label: '保存管理员', variant: 'primary' }],
-        status: 'wlMsg',
+</table>`,
       },
       { name: 'wlNote', type: 'custom', span: 2, html: '<div class="meta">保存后立即生效并写入 config.json。会话准入请看 <a href="#sessions">会话与审批</a>。</div>' },
     ],
@@ -66,12 +61,6 @@ export const ACCESS_FIELDS = {
         label: '拦截提示',
         hint: '开启：回复被安全拦截时会在群里提示；关闭：直接沉默，只在日志 / 活动记录里留下记录。',
       },
-      {
-        type: 'action',
-        id: 'accessSecurityActions',
-        items: [{ id: 'secSave', label: '保存安全设置', variant: 'primary' }],
-        status: 'secMsg',
-      },
       { name: 'accessStateWarn', type: 'custom', span: 2, html: STATE_WARN },
       { name: 'accessSnowWarn', type: 'custom', span: 2, html: SNOW_WARN },
     ],
@@ -83,17 +72,12 @@ export const ACCESS_FIELDS = {
         type: 'custom',
         label: '新令牌',
         span: 2,
-        html: `<span class="field-inline"><input type="password" id="consoleTokenInput" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password"></span>
-<div class="meta">用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌；修改后当前页面会自动使用新令牌。</div>`,
-      },
-      {
-        type: 'action',
-        id: 'accessTokenActions',
-        items: [
-          { id: 'consoleTokenSave', label: '保存令牌', variant: 'primary' },
-          { id: 'consoleTokenRandom', label: '生成随机令牌' },
-        ],
-        status: 'consoleTokenMsg',
+        html: `<div class="control-row">
+  <input type="password" id="consoleTokenInput" class="u-flex-1" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password">
+  <button type="button" class="btn small" id="consoleTokenRandom">生成随机令牌</button>
+</div>
+<div class="meta">用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌；修改后当前页面会自动使用新令牌。</div>
+<div class="meta" id="consoleTokenMsg" role="status"></div>`,
       },
     ],
   },

@@ -97,6 +97,17 @@
   --term-warn:#ffd479;
   --term-system:#7cc4ff;
   --term-cmd:#c9a7ff;
+  /* 代码编辑器：语法色跟 Monaco 默认主题（vs / vs-dark），容器色跟控制台面板。
+     只有 --syntax-* 与编辑器容器相关，勿与已有的 --code-fg（行内 code 前景）混用。 */
+  --editor-bg:var(--surface);
+  --editor-gutter:#8a8a8a;
+  --editor-selection:#add6ff;
+  --editor-active-line:#f3f3f3;
+  --syntax-comment:#008000;
+  --syntax-key:#0451a5;
+  --syntax-string:#a31515;
+  --syntax-number:#098658;
+  --syntax-keyword:#0000ff;
   /* 实心危险按钮/告警徽标底色 */
   --danger-solid:#cf222e;
   --radius:16px;
@@ -208,6 +219,16 @@
   --code-fg:#9fb2da;
   --code-fg-strong:#adc0e8;
   --pre-fg:#9ca8bd;
+  /* 代码编辑器（深色）：Monaco vs-dark 调色板；容器比卡片暗一档，编辑区才有「凹进去」的层次 */
+  --editor-bg:#0f141b;
+  --editor-gutter:#6b7688;
+  --editor-selection:#264f78;
+  --editor-active-line:#2a2d2e;
+  --syntax-comment:#6a9955;
+  --syntax-key:#9cdcfe;
+  --syntax-string:#ce9178;
+  --syntax-number:#b5cea8;
+  --syntax-keyword:#569cd6;
   --accent:#6b86ff;
   --accent-hover:#8098ff;
   --accent-border:#6b86ff;

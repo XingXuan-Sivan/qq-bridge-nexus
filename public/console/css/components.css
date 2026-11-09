@@ -90,7 +90,7 @@
   border:1px solid var(--border-strong);
   border-radius:50%
 }
-.active .mode-indicator {
+.mode-row button.active .mode-indicator {
   border:4px solid var(--accent);
   background:var(--surface)
 }
@@ -630,7 +630,8 @@ tr:last-child td {
 }
 /* .modal-overlay / .modal 系列在 components/modal/modal.css。 */
 .overview-footnote {
-  margin-top:18px;
+  grid-column:1/-1;
+  margin:0;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -929,7 +930,7 @@ tr:last-child td {
     width:10px;
     height:10px
   }
-  .active .mode-indicator {
+  .mode-row button.active .mode-indicator {
     border-width:3px
   }
   .row {

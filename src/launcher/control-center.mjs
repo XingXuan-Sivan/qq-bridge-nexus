@@ -59,6 +59,7 @@ setRoot(DEFAULT_ROOT);
 // 不复制、不参数化路径。控制中心不启动桥接也能独立读到（文件在磁盘上）。
 const SHARED_FILES = new Map([
   ['/shared/tokens.css', { file: path.join(DEFAULT_ROOT, 'public', 'console', 'css', 'tokens.css'), type: 'text/css; charset=utf-8' }],
+  ['/shared/terminal.css', { file: path.join(DEFAULT_ROOT, 'public', 'console', 'components', 'terminal', 'terminal.css'), type: 'text/css; charset=utf-8' }],
   ['/shared/theme-boot.js', { file: path.join(DEFAULT_ROOT, 'public', 'console', 'js', 'theme-boot.js'), type: 'text/javascript; charset=utf-8' }],
 ]);
 

@@ -22,6 +22,9 @@
 <link rel="stylesheet" href="/console/components/date/date.css">
 <link rel="stylesheet" href="/console/components/time/time.css">
 <link rel="stylesheet" href="/console/components/table/table.css">
+<link rel="stylesheet" href="/console/components/save-bar/save-bar.css">
+<link rel="stylesheet" href="/console/components/code-editor/code-editor.css">
+<link rel="stylesheet" href="/console/components/terminal/terminal.css">
 <link rel="stylesheet" href="/console/css/utilities.css">
 </head>
 <body>
@@ -81,7 +84,6 @@
 <section id="section-operations" data-page="operations" class="page-stack"><!-- 片段：pages/operations/page.html（三张卡片：测试发送 / 桥接控制 / 后台控制端引导） --></section>
     <section id="section-usage" data-page="usage" class="page-stack"><!-- 片段：pages/usage/page.html（两张卡片：令牌与花费 / 上下文压缩） --></section>
       </div>
-      <div class="overview-footnote" data-page="overview"><span id="accessSummary">正在读取全局准入…</span><button class="text-button" data-view="config">管理全局配置 →</button></div>
       <footer class="page-footer"><span>QQ Bridge · 连接日常，保持自主</span><span id="lastUpdated">等待首次同步</span></footer>
     </main>
   </div>
@@ -245,7 +247,7 @@
   <div class="toast" id="consoleToast" role="status" hidden></div>
   <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>
 
-<script src="/console/vendor/codemirror.js"></script>
+<script src="/console/components/code-editor/vendor/codemirror.js"></script>
 <script type="module" src="/console/js/app.js"></script>
 </body>
 </html>

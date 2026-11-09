@@ -15,34 +15,35 @@ export const SESSIONS_FIELDS = {
         type: 'custom',
         html: `
 <div class="meta" id="globalAccessSummary" aria-live="polite">正在读取…</div>
-<div class="access-columns">
-  <div class="access-field">
-    <div class="access-head">
-      <span class="access-title">被动行为</span>
-      <button type="button" class="field-switch" id="accessPassiveMode" role="switch" data-field="accessPassiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
-        <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
-      </button>
+<div class="form-stack">
+  <div class="field-row">
+    <label class="field-label" for="accessPassiveEntries">被动行为</label>
+    <div class="field-control">
+      <div class="control-row">
+        <button type="button" class="field-switch" id="accessPassiveMode" role="switch" data-field="accessPassiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
+          <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
+        </button>
+        <span class="meta">普通消息是否回复</span>
+      </div>
     </div>
-    <textarea id="accessPassiveEntries" rows="5" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001&#10;也可以写完整的 qq:group:… / qq:private:…"></textarea>
-    <p class="field-hint">普通消息是否回复。每行一个会话，支持 group:群号、private:QQ号；白名单为空=全部拒绝，黑名单为空=全部允许。</p>
   </div>
-  <div class="access-field">
-    <div class="access-head">
-      <span class="access-title">主动行为</span>
-      <button type="button" class="field-switch" id="accessProactiveMode" role="switch" data-field="accessProactiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
-        <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
-      </button>
+  <textarea id="accessPassiveEntries" rows="5" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001&#10;也可以写完整的 qq:group:… / qq:private:…"></textarea>
+  <p class="field-hint">每行一个会话，支持 group:群号、private:QQ号；白名单为空=全部拒绝，黑名单为空=全部允许。</p>
+  <div class="field-row">
+    <label class="field-label" for="accessProactiveEntries">主动行为</label>
+    <div class="field-control">
+      <div class="control-row">
+        <button type="button" class="field-switch" id="accessProactiveMode" role="switch" data-field="accessProactiveMode" aria-checked="true" data-on-label="白名单" data-off-label="黑名单">
+          <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
+        </button>
+        <span class="meta">定时任务与主动发言是否允许</span>
+      </div>
     </div>
-    <textarea id="accessProactiveEntries" rows="5" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001"></textarea>
-    <p class="field-hint">定时任务与 AI 主动发言是否允许。每行一个会话；白名单为空=全部拒绝，黑名单为空=全部允许。</p>
   </div>
+  <textarea id="accessProactiveEntries" rows="5" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001"></textarea>
+  <p class="field-hint">每行一个会话；白名单为空=全部拒绝，黑名单为空=全部允许。</p>
 </div>
 <p class="field-warn" id="accessWarning" hidden></p>`,
-      },
-      {
-        type: 'action',
-        items: [{ id: 'accessSave', label: '保存全局准入', variant: 'primary' }],
-        status: 'accessMsg',
       },
     ],
   },

@@ -58,15 +58,6 @@
   .dot.off { background: var(--err); }
   .toolbar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; background: var(--surface-subtle); }
   .toolbar input[type=search] { width: 170px; }
-  .term { flex: 1; min-height: 240px; overflow: auto; background: var(--term-bg); color: var(--term-fg); font: 12.5px/1.55 var(--font-mono); padding: 10px 12px; white-space: pre-wrap; word-break: break-all; }
-  .term .l { display: block; }
-  .term .t { color: var(--term-fg-dim); margin-right: 8px; user-select: none; }
-  .term .tag { color: var(--term-tag); margin-right: 6px; }
-  .term .stderr, .term .error { color: var(--term-err); }
-  .term .warn { color: var(--term-warn); }
-  .term .system { color: var(--term-system); }
-  .term .cmd { color: var(--term-cmd); }
-  .term .empty { color: var(--term-fg-dim); }
   .cmdline { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
   .cmdline input { flex: 1; font-family: var(--font-mono); }
   .cmdline .prompt { font-family: var(--font-mono); color: var(--accent); align-self: center; }

@@ -61,10 +61,12 @@ test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了�
   }
 });
 
-test('② 控制台：全局配置页有「发言上限」分组', () => {
+test('② 控制台：全局配置页有「发言上限」分组，保存走页面级保存条', () => {
   const html = readConsoleSource();
   assert.match(html, /data-overview-fields="sendLimit"/);
   const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
-  for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitSave', 'sendLimitHits']) assert.ok(hasId(id), id);
+  // 发言上限不再有独立保存按钮：并入配置页的页面级保存条（saveLimitSection → createSaveBar）。
+  for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitMsg', 'sendLimitHits']) assert.ok(hasId(id), id);
+  assert.match(html, /sendLimitSection/);
   assert.match(html, /renderSendLimitHits\(s\.sendLimit\)/, '状态刷新时显示被拦次数');
 });

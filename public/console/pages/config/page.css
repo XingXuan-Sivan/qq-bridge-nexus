@@ -114,44 +114,17 @@
   }
 }
 
-/* ── 全局配置：左侧分区导航 + 右侧分区面板 ─────────────────────────────── */
+/* ── 全局配置：水平分区标签 + 单列面板 ───────────────────────────────────
+   标签复用站点通用的 .page-tabs / .page-tab（与记忆页同一套），不再维护竖排导航。 */
 .config-layout {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-.config-nav {
-  position: sticky;
-  top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 18px;
 }
-.config-nav-item {
-  width: 100%;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-2);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-}
-.config-nav-item:hover { background: var(--surface-sunken); color: var(--text); }
-.config-nav-item.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-.config-body { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.config-tabs { margin: 0; }
+.config-tabs .page-tab { padding: 9px 16px; }
+.config-body { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 .config-layer-note {
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -162,9 +135,36 @@
   line-height: 1.7;
 }
 .config-layer-note strong { color: var(--text); margin-right: 8px; }
-.config-panel { display: flex; flex-direction: column; gap: 14px; }
+.config-panel { display: flex; flex-direction: column; gap: 22px; }
 .config-panel[hidden] { display: none; }
 .config-panel .card { margin: 0; }
+/* 卡片里的说明段是「标题的副行」：与下方第一行字段留出同样的行距，别贴着控件。 */
+.config-panel .card > .meta,
+.config-panel .card > p.meta { margin: 0 0 14px; }
+/* 配置页字段一律单列：两列会把 148px 标签列塞进半宽格子，标签与控件对不齐。 */
+.config-panel .form-cols { row-gap: 14px; }
+/* 固定保存条压在右下角，页面底部留出它的高度，最后一行按钮不会被挡住。 */
+.config-body { padding-bottom: 72px; }
+/* 单行控件不铺满整张卡：表单读起来是「标签 + 值」，不是「标签 + 一条长条」。
+   文本域、表格、编辑器仍是整行。 */
+.config-panel .field-control > input[type="text"],
+.config-panel .field-control > input[type="number"],
+.config-panel .field-control > input[type="password"],
+.config-panel .field-control > select {
+  max-width: 460px;
+}
+/* 令牌行：输入框按固定宽度收窄，两个按钮留在同一行，不被挤到卡片外面。 */
+.config-panel #consoleTokenInput {
+  flex: 0 1 420px;
+  max-width: 420px;
+}
+/* 全局准入：说明行与表单同一套纵向节奏；文本域铺满整行，不再缩进成两列。 */
+.config-panel #globalAccessSummary { margin: 0 0 14px; }
+.config-panel .access-textarea {
+  width: 100%;
+  min-height: 128px;
+  resize: vertical;
+}
 .config-placeholder {
   margin-top: 12px;
   padding: 18px;
@@ -174,9 +174,8 @@
   font-size: 13px;
   text-align: center;
 }
-#behaviorText { min-height: 360px; resize: vertical; line-height: 1.55; width: 100%; }
-.field-row:has(#behaviorText) > .field-control { flex-direction: column; align-items: stretch; }
-.field-row:has(#behaviorText) > .field-label { align-self: start; padding-top: 11px; }
+/* 行为档案编辑器（共享 code-editor 组件）：整行铺满，操作行紧跟其后。 */
+#behaviorText { display: none; }
 #behaviorActions { margin-top: 10px; }
 
 /* 工具与语音：工具清单用两列 checkbox；语音库是可选文件的列表，不占满整行。 */
@@ -204,12 +203,9 @@
 }
 
 @media (max-width: 900px) {
-  .config-layout { grid-template-columns: 1fr; }
-  .config-nav {
-    position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  .config-nav-item { width: auto; }
+  /* 窄屏标签横向滚动，不折行挤成两排。 */
+  .config-tabs { overflow-x: auto; scrollbar-width: none; }
+  .config-tabs::-webkit-scrollbar { display: none; }
+  .config-tabs .page-tab { white-space: nowrap; }
 }
 

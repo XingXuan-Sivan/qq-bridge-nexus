@@ -1,4 +1,4 @@
-﻿// 行为档案表单（v1 / v2）：只描述字段与取值映射，渲染交给 components/form。
+// 行为档案表单（v1 / v2）：只描述字段与取值映射，渲染交给 components/form。
 // 权威存储仍是 config/behaviors/<id>.yml；后端 GET 返回结构化 data，PUT 收 {data}。
 import { renderFields } from '../../components/form/form.js';
 
@@ -49,6 +49,7 @@ const V1_FIELDS = [
 
 // ── 二代仿真（social-v2）：按能力分组 ────────────────────────────────────────
 const V2_FIELDS = [
+  { type: 'section', card: true, label: '自动回复' },
   num('autoReplyCheckMs', '自动回复检查间隔', { hint: '毫秒' }),
   sw('provideRecommendations', '提供推荐值'),
   { type: 'section', card: true, label: '唤醒' },

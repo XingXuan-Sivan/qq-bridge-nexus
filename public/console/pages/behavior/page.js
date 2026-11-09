@@ -47,7 +47,7 @@ async function loadDoc(id) {
     fillBehaviorForm(panel, doc.kind, doc.data?.config ?? {});
     const label = document.getElementById('behaviorFormLabel');
     if (label) label.value = doc.data?.label ?? '';
-    setMsg(`${doc.id} · ${doc.kind} · ${doc.data?.label ?? ''}`);
+    setMsg('');
   } catch (error) {
     panel.innerHTML = '';
     setMsg(String(error?.message ?? error), 'err');

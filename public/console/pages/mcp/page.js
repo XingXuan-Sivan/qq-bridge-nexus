@@ -6,6 +6,7 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { MCP_FIELDS } from './fields.js';
 import { renderTerminalLines, terminalHtml, textToLines } from '../../components/terminal/terminal.js';
 
@@ -117,11 +118,12 @@ function detailMarkup(server) {
        <button class="btn small" type="button" data-mcp-act="logs" data-id="${esc(server.id)}">日志</button>
        <button class="btn small danger" type="button" data-mcp-act="delete" data-id="${esc(server.id)}">删除</button>`
     : '<span class="meta">内置 server 由桥接仓库提供，不能在这里修改。</span>';
-  const toolRows = tools.length
-    ? tools.map((tool) => `<div class="mcp-tool" data-mcp-tool data-filter-text="${esc(`${toolName(tool)} ${toolDescription(tool)}`.toLowerCase())}">
-        <code>${esc(toolName(tool))}</code><span class="meta">${esc(toolDescription(tool) || '—')}</span>
-      </div>`).join('')
-    : '<div class="meta">没有注册工具。</div>';
+  const toolRows = tools.map((tool) => ({
+    cells: [
+      `<code>${esc(toolName(tool))}</code>`,
+      esc(toolDescription(tool) || '—'),
+    ],
+  }));
   return `<div class="mcp-detail" data-mcp-detail="${esc(server.id)}">
     <header class="mcp-detail-head">
       <div class="mcp-detail-title">
@@ -133,11 +135,15 @@ function detailMarkup(server) {
     ${description ? `<p class="meta mcp-detail-note">${esc(description)}</p>` : ''}
     <div class="mcp-detail-actions">${actions}</div>
     <section class="mcp-tools">
-      <div class="mcp-tools-head">
-        <h4>工具 <span class="meta">${tools.length}</span></h4>
-        <input id="mcpToolSearch" class="search-input" type="search" placeholder="筛选工具名或说明…" aria-label="筛选工具" value="${esc(MCP_STATE.toolQuery)}">
-      </div>
-      <div class="mcp-tool-list" id="mcpToolList">${toolRows}</div>
+      <h4>工具 <span class="meta">${tools.length}</span></h4>
+      ${dataTableHtml({
+        columns: [{ label: '工具', width: 260 }, { label: '说明' }],
+        rows: toolRows,
+        pageSize: 10,
+        search: { placeholder: '筛选工具名或说明…' },
+        meta: `共 ${tools.length} 个工具`,
+        empty: tools.length ? '没有匹配的工具。' : '没有注册工具。',
+      })}
     </section>
   </div>`;
 }
@@ -171,20 +177,12 @@ function paintDetail() {
   if (!host) return;
   const server = MCP_STATE.servers.find((item) => item.id === MCP_STATE.selected) || null;
   host.innerHTML = detailMarkup(server);
-  filterToolList();
-}
-
-function filterToolList() {
-  const q = MCP_STATE.toolQuery.trim().toLowerCase();
-  for (const row of document.querySelectorAll('#mcpToolList [data-mcp-tool]')) {
-    row.hidden = Boolean(q) && !(row.dataset.filterText || '').includes(q);
-  }
+  initDataTables(host);
 }
 
 function selectServer(id) {
   if (!id || id === MCP_STATE.selected) return;
   MCP_STATE.selected = id;
-  MCP_STATE.toolQuery = '';
   paintDetail();
 }
 
@@ -496,7 +494,6 @@ export function init() {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
     if (target.id === 'mcpServerSearch') { MCP_STATE.query = target.value; paintList(); }
-    else if (target.id === 'mcpToolSearch') { MCP_STATE.toolQuery = target.value; filterToolList(); }
   });
   document.getElementById('mcpList')?.addEventListener('change', (event) => {
     const target = event.target;

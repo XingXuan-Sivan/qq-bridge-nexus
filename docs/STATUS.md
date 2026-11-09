@@ -341,3 +341,17 @@ npm run test:console-ui
 
 **验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、46 次写**；真机 `GET /api/config/behavior-default` 与 `GET /api/config/behaviors/social-v2`（含结构化 `data`）均 200；截图核对 v1/v2 两列表单、总览花费卡与连接卡同款、会话跳转落点。
 
+### 6.22 第四批：预设全表单化、总览四表组件化、外部人格进默认下拉（2026-11-10）
+
+1. **预设全表单化**：`agent.cordis.yml` 不再用 YAML 编辑器直改，改为按插件行生成表单（联网工具、QQ 工具边界、上下文压缩等；chat 与 agent 档共用一套「按插件 id 定义字段」的机制）。保存走 `PUT /api/extensions/presets/<id>/agent` 的 `{rows}`，后端按插件 id 定位行、只覆盖提交的键，未知键与注释保留；写前整份备份（`state/preset-editor-backups/`）。
+2. **新建预设与还原出厂**：预设页可从一个已有预设复制出新预设（`POST /api/extensions/presets/create`）；「还原出厂设置」从 `assets/default-presets/<id>/` 复制三件套回来（`POST …/factory`），两者都先备份。
+3. **prefix 统一**：5 个预设的 `persona.prefix` 全部写成 `|-` 字面块（保留原始空行与换行），出厂副本与源文件一致。
+4. **总览四表改用项目表格组件**：按会话、逐轮花费、最近调用流水、当前价目表都改用 `components/table` 的 `dataTableHtml`（自带工具栏、搜索、筛选、分页、每页条数）；逐轮花费的会话选择变成工具栏里的筛选，去掉了「加载逐轮明细」按钮；「其中 ¥0.91 来自更早的回合」「有模型未登记在价目表」两段说明移到表格外。
+5. **外部人格进默认下拉**：全局配置的「默认人格」下拉新增「外部人格」分组（来自 soulkit 角色卡）；选中后自动把该卡另存为内部人格并设为默认，之后即使 soulkit 断连也能继续使用。`GET /api/config/role-default` 增加 `external` 列表，POST 支持外部名字；顺手把 `roles/README.md` 从选项里排除。
+6. **MCP 工具区用标准表格**：右栏工具清单改用表格组件（搜索 + 分页 + 条数选择），不再手写列表。
+7. **测试适配**：侧栏分组顺序变化后，定时任务用例从「在管理分组之前」改为「黑话词库之后、扩展分组之前」。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、50 次写**；`test-scheduler` 7/0；全量 `test-audit` **103/103（exit 0）**；`test-control-center` fail 0；`verify:console-vendor` OK（`686ab8cb2bda`）；截图核对预设插件表单、总览四表、MCP 工具表格。
+
+**已知限制**：行为档案与预设的改动仍需重启桥接（预设需再「应用并安装」）才对正在运行的会话生效；外部人格被另存为内部后与原卡不再联动。
+

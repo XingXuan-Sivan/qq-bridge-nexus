@@ -4,29 +4,17 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { renderFields } from '../../components/form/form.js';
+import { bindSwitches, renderFields } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
+import { readAgentForm, renderAgentForm } from './agent-form.js';
 import { PRESETS_FIELDS } from './fields.js';
 import { behaviorFormHtml, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
 
 let presetsCache = [];
 let editingId = '';
-let originalYaml = '';
+let agentRows = [];
 let busy = false;
 let extensionCatalog = null;
-let yamlEditor = null;
-
-function setYamlEditorValue(value) {
-  if (!yamlEditor) return;
-  yamlEditor.setValue(value);
-}
-
-function mountYamlEditor() {
-  const textarea = document.getElementById('presetEditYaml');
-  if (!textarea || yamlEditor) return;
-  // 共享编辑器组件：整行铺满，编辑结果写回 textarea，保存/校验逻辑不用改。
-  yamlEditor = attachTextareaEditor(textarea, { language: 'yaml', height: '460px' });
-}
 
 function lines(value) {
   return String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -359,13 +347,17 @@ function readEditor() {
       },
       skills: { allow: lines(document.getElementById('presetEditSkillsAllow')?.value) },
     },
-    yaml: document.getElementById('presetEditYaml')?.value ?? '',
+    rows: readAgentForm(document.getElementById('presetAgentForm'), agentRows),
   };
 }
 
 async function fillEditor(preset) {
   editingId = preset.id;
-  originalYaml = preset.agentYaml ?? '';
+  agentRows = (preset.agent ?? []).map((row) => ({
+    id: String(row?.id ?? ''),
+    name: String(row?.name ?? ''),
+    config: Object.fromEntries(Object.entries(row ?? {}).filter(([key]) => key !== 'id' && key !== 'name')),
+  }));
   setField('presetEditName', preset.meta?.name ?? '');
   setField('presetEditDescription', preset.meta?.description ?? '');
   setField('presetEditOrder', preset.meta?.order ?? '');
@@ -373,15 +365,14 @@ async function fillEditor(preset) {
   setField('presetEditMcpToolsAllow', (preset.extensions?.mcp?.tools?.allow ?? []).join('\n'));
   setField('presetEditMcpToolsDeny', (preset.extensions?.mcp?.tools?.deny ?? []).join('\n'));
   setField('presetEditSkillsAllow', (preset.extensions?.skills?.allow ?? []).join('\n'));
-  setField('presetEditYaml', originalYaml);
-  setYamlEditorValue(originalYaml);
+  renderAgentForm(document.getElementById('presetAgentForm'), agentRows);
   await refreshExtensionCatalog({ quiet: true });
   renderAuthPicker(preset.extensions ?? {});
   document.getElementById('presetEditorTitle').textContent = `编辑预设 · ${preset.id}`;
   document.getElementById('presetEditorPath').textContent = `dsh/agent-presets/${preset.id}`;
   document.getElementById('presetEditMsg').textContent = preset.validation?.ok
-    ? `YAML 校验通过（${preset.validation.rows} 个插件行）`
-    : `YAML 有问题：${preset.validation?.error ?? '未知错误'}`;
+    ? `插件配置已载入（${preset.validation.rows} 个插件行）`
+    : `插件配置有问题：${preset.validation?.error ?? '未知错误'}`;
   document.getElementById('presetEditor').hidden = false;
   document.getElementById('presetEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
   await refreshPresetPrompt(preset.id);
@@ -404,14 +395,6 @@ async function openPreset(id) {
 async function savePreset({ apply = false } = {}) {
   if (!editingId || busy) return null;
   const draft = readEditor();
-  const yamlChanged = draft.yaml !== originalYaml;
-  if (yamlChanged) {
-    const check = await api('/api/extensions/presets/' + encodeURIComponent(editingId) + '/validate', 'POST', { yaml: draft.yaml });
-    if (!check.ok || !check.validation?.ok) {
-      document.getElementById('presetEditMsg').textContent = `未保存：${check.validation?.error ?? check.error ?? 'YAML 校验失败'}`;
-      return null;
-    }
-  }
   if (!draft.meta.name || !draft.meta.description || !Number.isInteger(draft.meta.order)) {
     document.getElementById('presetEditMsg').textContent = '未保存：名称、说明、排序都必须填写（排序为整数）';
     return null;
@@ -423,11 +406,8 @@ async function savePreset({ apply = false } = {}) {
     if (!meta.ok) throw new Error(meta.error || '保存元数据失败');
     const ext = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/extensions`, 'PUT', draft.extensions);
     if (!ext.ok) throw new Error(ext.error || '保存授权失败');
-    if (yamlChanged) {
-      const yaml = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/yaml`, 'PUT', { yaml: draft.yaml });
-      if (!yaml.ok) throw new Error(yaml.error || '保存 YAML 失败');
-      originalYaml = draft.yaml;
-    }
+    const agent = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/agent`, 'PUT', { rows: draft.rows });
+    if (!agent.ok) throw new Error(agent.error || '保存插件配置失败');
     document.getElementById('presetEditMsg').textContent = apply ? '源文件已保存，正在应用…' : '源文件已保存；点「应用并安装」才会进入 DSH';
     showConsoleToast('预设源文件已保存');
     if (apply) {
@@ -444,20 +424,6 @@ async function savePreset({ apply = false } = {}) {
     return null;
   } finally {
     busy = false;
-  }
-}
-
-async function validateYaml() {
-  if (!editingId) return;
-  const yaml = document.getElementById('presetEditYaml')?.value ?? '';
-  try {
-    const result = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/validate`, 'POST', { yaml });
-    if (!result.ok) throw new Error(result.error || '校验失败');
-    document.getElementById('presetEditMsg').textContent = result.validation?.ok
-      ? `YAML 校验通过（${result.validation.rows} 个插件行）`
-      : `YAML 有问题：${result.validation?.error}`;
-  } catch (error) {
-    document.getElementById('presetEditMsg').textContent = `校验失败：${error?.message ?? error}`;
   }
 }
 
@@ -490,12 +456,79 @@ async function rollbackPreset(id) {
   }
 }
 
+function setCreateMsg(text, tone = 'info') {
+  const el = document.getElementById('presetNewMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = tone === 'error' ? 'form-actions-status err' : (tone === 'ok' ? 'form-actions-status ok' : 'form-actions-status');
+}
+
+function refreshCreateOptions() {
+  const select = document.getElementById('presetNewFrom');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = presetsCache
+    .map((preset) => `<option value="${esc(preset.id)}">${esc(preset.id)} · ${esc(preset.meta?.name ?? preset.name ?? '')}</option>`)
+    .join('');
+  if (current && presetsCache.some((preset) => preset.id === current)) select.value = current;
+}
+
+async function createPresetFromForm() {
+  if (busy) return;
+  const id = document.getElementById('presetNewId')?.value.trim() ?? '';
+  const name = document.getElementById('presetNewName')?.value.trim() ?? '';
+  const from = document.getElementById('presetNewFrom')?.value ?? '';
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) {
+    setCreateMsg('id 只能用小写字母、数字与连字符，且以字母或数字开头', 'error');
+    return;
+  }
+  if (!from) {
+    setCreateMsg('请选择复制来源', 'error');
+    return;
+  }
+  busy = true;
+  setCreateMsg('正在创建…');
+  try {
+    const result = await api('/api/extensions/presets/create', 'POST', { id, from, name: name || undefined });
+    if (!result.ok) throw new Error(result.error || '创建失败');
+    setCreateMsg(`已创建 ${result.id}；正在打开编辑…`, 'ok');
+    await refreshPresets(true);
+    document.getElementById('presetNewId').value = '';
+    document.getElementById('presetNewName').value = '';
+    await openPreset(result.id);
+  } catch (error) {
+    setCreateMsg(error?.message ?? '创建失败', 'error');
+  } finally {
+    busy = false;
+  }
+}
+
+async function restoreFactoryPreset() {
+  if (!editingId || busy) return;
+  if (!confirm(`把 ${editingId} 还原为出厂版本？当前源文件会先备份到 state/preset-editor-backups。`)) return;
+  busy = true;
+  document.getElementById('presetEditMsg').textContent = '正在还原出厂版本…';
+  try {
+    const result = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/factory`, 'POST', {});
+    if (!result.ok) throw new Error(result.error || '还原失败');
+    showConsoleToast('已还原出厂版本；点「应用并安装」后生效');
+    await refreshPresets(true);
+    await openPreset(editingId);
+  } catch (error) {
+    document.getElementById('presetEditMsg').textContent = `还原失败：${error?.message ?? error}`;
+    showConsoleToast(error?.message ?? '还原失败', { tone: 'error' });
+  } finally {
+    busy = false;
+  }
+}
+
 async function refreshPresets(showError = false) {
   try {
     const data = await api('/api/extensions/presets');
     if (!data.ok) throw new Error(data.error || '读取预设失败');
     presetsCache = data.presets ?? [];
     renderList();
+    refreshCreateOptions();
   } catch (error) {
     if (showError) showConsoleToast(error?.message ?? '读取预设失败', { tone: 'error' });
   }
@@ -584,11 +617,14 @@ function showPresetsTab(name) {
 export function init() {
   const main = document.querySelector('[data-presets-fields="main"]');
   const edit = document.querySelector('[data-presets-fields="edit"]');
+  const create = document.querySelector('[data-presets-fields="create"]');
+  // 页面里的开关都是动态渲染的 role=switch 按钮，统一挂一次点击委托即可。
+  bindSwitches(document.querySelector('.presets-page'));
   if (main) renderFields(main, PRESETS_FIELDS.main.fields);
   if (edit) renderFields(edit, PRESETS_FIELDS.edit.fields);
+  if (create) renderFields(create, PRESETS_FIELDS.create.fields);
   const promptSlot = document.querySelector('[data-presets-fields="simPrompt"]');
   if (promptSlot) renderFields(promptSlot, PRESETS_FIELDS.simPrompt.fields);
-  mountYamlEditor();
   // 仿真提示词卡在字段规格里只是一个占位（presetPromptSlot），渲染后把卡片搬进去，
   // 位置就固定在「YAML 高级编辑」区块上方。
   const promptMount = document.getElementById('presetPromptMount');
@@ -625,9 +661,10 @@ export function init() {
     else if (button.dataset.presetAct === 'apply') void applyPreset(id);
     else if (button.dataset.presetAct === 'rollback') void rollbackPreset(id);
   });
-  document.getElementById('presetValidate')?.addEventListener('click', () => void validateYaml());
   document.getElementById('presetSave')?.addEventListener('click', () => void savePreset());
   document.getElementById('presetApply')?.addEventListener('click', () => void savePreset({ apply: true }));
+  document.getElementById('presetFactory')?.addEventListener('click', () => void restoreFactoryPreset());
+  document.getElementById('presetNewCreate')?.addEventListener('click', () => void createPresetFromForm());
   document.getElementById('presetRollback')?.addEventListener('click', () => {
     if (editingId) void rollbackPreset(editingId);
   });

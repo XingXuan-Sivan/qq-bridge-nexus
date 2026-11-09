@@ -77,24 +77,47 @@ export const PRESETS_FIELDS = {
       },
       {
         type: 'section',
-        label: 'YAML 高级编辑',
-        hint: '直接编辑 agent.cordis.yml；保存前校验插件行、persona 与 qq-tool-restrict。注释会原样保留。',
+        label: '插件配置',
+        hint: '按 agent.cordis.yml 的插件行逐项编辑；保存后仍要「应用并安装」才会进入 DSH。',
         card: true,
       },
       {
-        name: 'presetEditYaml',
-        type: 'textarea',
-        label: '',
-        rows: 18,
-        mono: true,
+        name: 'presetAgentForm',
+        type: 'custom',
         span: 2,
-        className: 'code-editor-field',
+        html: '<div id="presetAgentForm" class="agent-form-panel"></div>',
       },
       {
         type: 'section',
         label: '危险能力',
         hint: '当前 DSH 守卫是所有预设共用的一份 qq-tool-restrict；原生 read/write/pwsh 等工具不能按预设声明放行。需要高权限时请使用仓库里的 L1/L2/L3 运维预设。',
         card: true,
+      },
+    ],
+  },
+
+  // 新建预设：复制一个现有预设作为起点，id 即目录名。
+  create: {
+    fields: [
+      {
+        type: 'section',
+        label: '新建预设',
+        hint: '复制一个现有预设作为起点；id 只能用小写字母、数字与连字符。',
+        card: true,
+      },
+      { name: 'presetNewId', type: 'text', label: '预设 id', placeholder: 'my-preset' },
+      { name: 'presetNewName', type: 'text', label: '显示名', placeholder: '留空则用 id' },
+      {
+        name: 'presetNewFromRow',
+        type: 'custom',
+        span: 2,
+        html: '<div class="field-row"><label class="field-label" for="presetNewFrom">复制自</label><div class="field-control"><select id="presetNewFrom" class="u-w-190"></select></div></div>',
+      },
+      {
+        type: 'action',
+        id: 'presetNewActions',
+        items: [{ id: 'presetNewCreate', label: '新建预设', variant: 'primary' }],
+        status: 'presetNewMsg',
       },
     ],
   },

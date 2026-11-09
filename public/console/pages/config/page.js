@@ -415,9 +415,15 @@ async function loadRoleDefault() {
   const r = await api('/api/config/role-default');
   const current = r?.value ?? '';
   const options = Array.isArray(r?.options) ? r.options : [];
+  const external = Array.isArray(r?.external) ? r.external : [];
   select.innerHTML = '<option value="">不挂人格卡</option>'
-    + options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('');
-  select.value = options.includes(current) ? current : '';
+    + options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('')
+    + (external.length
+      ? '<optgroup label="外部人格（选中后另存为内部人格）">'
+        + external.map((name) => `<option value="${esc(name)}">${esc(name)}（外部）</option>`).join('')
+        + '</optgroup>'
+      : '');
+  select.value = options.includes(current) || external.includes(current) ? current : '';
 }
 
 const roleDefaultSection = {

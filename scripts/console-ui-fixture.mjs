@@ -652,6 +652,25 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         requests.push({ method, path, body });
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
       }
+      // 预设：新建 / 插件配置 / 还原出厂（表单化后控制台只走这三个写接口）。
+      if (method === 'POST' && path === '/api/extensions/presets/create') {
+        return json({ ok: true, id: body?.id ?? 'new-preset', from: body?.from ?? '', presets: [] });
+      }
+      const presetEdit = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(meta|extensions|yaml|validate|apply|rollback)$/);
+      if (presetEdit) {
+        const [, presetId, action] = presetEdit;
+        if (action === 'validate') return json({ ok: true, validation: { ok: true, rows: 3 } });
+        if (action === 'apply') return json({ ok: true, preset: presetStatusFixture(presetId), requiresRestart: true });
+        if (action === 'rollback') return json({ ok: true, restored: '2026-01-01-00-00-00-000' });
+        return json({ ok: true, id: presetId, preset: { id: presetId } });
+      }
+      const presetAction = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(agent|factory)$/);
+      if (presetAction) {
+        const [, presetId, action] = presetAction;
+        if (action === 'factory') return json({ ok: true, id: presetId, restored: ['preset.yml', 'agent.cordis.yml', 'extensions.yml'] });
+        if (method === 'PUT') return json({ ok: true, id: presetId, rows: Array.isArray(body?.rows) ? body.rows.length : 0 });
+        return json({ ok: true, preset: { id: presetId, rows: [] } });
+      }
       const demoPlugin = {
         id: 'demo-plugin', name: '演示插件', version: '0.1.0', status: 'active',
         description: '离线预览用的假插件，不加载任何代码。',
@@ -773,6 +792,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               meta: { name: 'QQ 群聊（一代）', description: '离线预览用的群聊预设。', order: 1 },
               extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
               extensionsExists: true,
+              agent: [
+                { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
+                { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
+                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
+              ],
               agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
               validation: { ok: true, rows: 2 },
               backups: [],
@@ -785,6 +809,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               meta: { name: 'QQ 群聊（二代）', description: '离线预览用的二代群聊预设。', order: 2 },
               extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
               extensionsExists: true,
+              agent: [
+                { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
+                { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
+                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
+              ],
               agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
               validation: { ok: true, rows: 2 },
               backups: [],
@@ -842,7 +871,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               stale: false,
             })),
           });
-          case '/api/config/role-default': return json({ ok: true, value: state.role ?? null, options: state.roles.slice() });
+          case '/api/config/role-default': return json({
+            ok: true,
+            value: state.role ?? null,
+            options: state.roles.slice(),
+            external: Object.keys(state.externalPersonas ?? {}).filter((name) => !state.roles.includes(name)),
+          });
           case '/api/roles': return json({
             roles: state.roles.slice(),
             summaries: state.roles.map((name) => {
@@ -1092,7 +1126,14 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           }
           case '/api/config/role-default': {
             const value = typeof body.value === 'string' ? body.value.trim() : '';
-            if (value && !state.roles.includes(value)) return json({ ok: false, error: `人格「${value}」不存在` }, 400);
+            if (value && !state.roles.includes(value)) {
+              // 外部人格：桥接会先另存为内部人格再设为默认，这里用同样的语义。
+              if (!state.externalPersonas || !state.externalPersonas[value]) {
+                return json({ ok: false, error: `人格「${value}」不存在` }, 400);
+              }
+              state.roles.push(value);
+              state.roleContents[value] = `【人格卡：${value}】\n（fixture 另存）`;
+            }
             state.role = value || null;
             return json({ ok: true, value: state.role, message: value ? `已设为「${value}」，下一条消息生效` : '已清空默认人格' });
           }

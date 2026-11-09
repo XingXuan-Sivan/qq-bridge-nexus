@@ -1990,6 +1990,7 @@ async function main() {
   const presetStore = createPresetStore({
     root: path.join(ROOT, 'dsh', 'agent-presets'),
     backupRoot: path.join(STATE_DIR, 'preset-editor-backups'),
+    factoryRoot: path.join(ROOT, 'assets', 'default-presets'),
     presetIds: PRESET_IDS,
     scriptsDir: path.join(ROOT, 'scripts'),
     log,
@@ -5964,7 +5965,18 @@ async function main() {
         }
         // DSH 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
         // 权威源仍是 dsh/agent-presets/<id>/，应用前备份，apply 负责 build + setup。
-        const presetRoute = url.pathname.match(/^\/api\/extensions\/presets(?:\/([a-z0-9-]+))?(?:\/(meta|extensions|yaml|validate|apply|rollback))?$/);
+        if (req.method === 'POST' && url.pathname === '/api/extensions/presets/create') {
+          try {
+            const body = await readBody();
+            const result = presetStore.createPreset(body ?? {});
+            ext.audit.append('extension.preset.created', { id: result.id, from: result.from });
+            sendJson({ ok: true, ...result, presets: presetStore.list() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+          }
+          return;
+        }
+        const presetRoute = url.pathname.match(/^\/api\/extensions\/presets(?:\/([a-z0-9-]+))?(?:\/(meta|extensions|yaml|agent|validate|apply|rollback|factory))?$/);
         if (presetRoute) {
           const id = presetRoute[1];
           const action = presetRoute[2];
@@ -5996,6 +6008,23 @@ async function main() {
               const body = await readBody();
               const result = presetStore.writeAgentYaml(id, String(body?.yaml ?? ''));
               ext.audit.append('extension.preset.yaml', { id });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'GET' && action === 'agent') {
+              sendJson({ ok: true, preset: presetStore.readAgent(id) });
+              return;
+            }
+            if (req.method === 'PUT' && action === 'agent') {
+              const body = await readBody();
+              const result = presetStore.writeAgentConfig(id, body?.rows ?? []);
+              ext.audit.append('extension.preset.agent', { id, rows: result.rows });
+              sendJson({ ok: true, ...result });
+              return;
+            }
+            if (req.method === 'POST' && action === 'factory') {
+              const result = presetStore.restoreFactory(id);
+              ext.audit.append('extension.preset.factory', { id });
               sendJson({ ok: true, ...result });
               return;
             }
@@ -6191,9 +6220,11 @@ async function main() {
         if (url.pathname === '/api/config/role-default') {
           if (req.method === 'GET') {
             const roles = fs.existsSync(ROLES_DIR)
-              ? fs.readdirSync(ROLES_DIR).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort()
+              ? fs.readdirSync(ROLES_DIR).filter((f) => f.endsWith('.md') && f !== 'README.md').map((f) => f.slice(0, -3)).sort()
               : [];
-            sendJson({ ok: true, value: configDefaultRoleName(), options: roles });
+            // 外部（provider）人格也进下拉：选中后由 POST 落成 roles/<name>.md 再设为默认。
+            const external = (await listExternalPersonas()).cards.map((c) => c.name).filter((n) => n && !roles.includes(n));
+            sendJson({ ok: true, value: configDefaultRoleName(), options: roles, external });
             return;
           }
           if (req.method === 'POST') {
@@ -6203,7 +6234,25 @@ async function main() {
               const name = sanitizeRoleName(raw);
               const file = resolveRoleFile(ROLES_DIR, name);
               if (!name || !file || !fs.existsSync(file)) {
-                sendJson({ ok: false, error: `人格「${raw}」不存在（roles/${name || raw}.md）` }, 400);
+                // 不在本地 roles/ 里：若它就是外部 provider 的人格卡，先另存为内部人格再设为默认。
+                const provider = externalPersonaProvider();
+                let text = readExternalPersonaCache().cards?.[raw]?.text || '';
+                if (!text && provider?.card) {
+                  try {
+                    const card = await provider.card(raw);
+                    text = String(card?.text ?? '').replace(CARD_HEADER_RE, '');
+                  } catch (error) {
+                    log(`控制台：读取外部人格「${raw}」失败：${error?.message || error}`);
+                  }
+                }
+                if (!name || !text) {
+                  sendJson({ ok: false, error: `人格「${raw}」不存在（roles/${name || raw}.md）` }, 400);
+                  return;
+                }
+                writeRoleContent(name, text);
+                setConfigDefaultRole(name);
+                log(`控制台：外部人格 ${name} 已另存为内部人格并设为默认（下一条消息生效）`);
+                sendJson({ ok: true, value: name, message: `已把外部人格「${name}」另存为内部人格并设为默认，下一条消息生效` });
                 return;
               }
               setConfigDefaultRole(name);

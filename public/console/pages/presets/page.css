@@ -66,3 +66,14 @@
 .behavior-form-panel .field-control > input[type="text"],
 .behavior-form-panel .field-control > input[type="number"],
 .behavior-form-panel .field-control > select { max-width: 460px; }
+
+/* 预设的插件配置表单：与行为档案表单同一套排版（两列、标签首行对齐、分组整宽）。 */
+.agent-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
+.agent-form-panel .form-cols { row-gap: 14px; }
+.agent-form-panel .form-section { width: 100%; margin: 0; padding: 14px 16px 6px; }
+.agent-form-panel .form-section + .form-section { margin-top: 14px; }
+.agent-form-panel .field-row { align-items: start; }
+.agent-form-panel .field-label { min-height: 40px; height: 40px; }
+.agent-form-panel .field-control > input[type="text"],
+.agent-form-panel .field-control > input[type="number"],
+.agent-form-panel .field-control > select { max-width: 460px; }

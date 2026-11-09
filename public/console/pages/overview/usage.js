@@ -4,6 +4,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh, setConsolePage } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { renderFields } from '../../components/form/form.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { USAGE_FIELDS } from './usage-fields.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
@@ -197,19 +198,19 @@ function usageTierTag(tier) {
   return '<span class="meta">—</span>';
 }
 
-function syncUsageKeySelect(keys) {
-  const sel = document.getElementById('usageKeySelect');
-  if (!sel) return;
-  if (!keys.includes(usageSelectedKey)) usageSelectedKey = keys[0] || '';
-  const signature = keys.join('\u0000');
-  if (sel.dataset.signature !== signature) {
-    sel.dataset.signature = signature;
-    sel.innerHTML = keys.length
-      ? keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('')
-      : '<option value="">（暂无会话）</option>';
-  }
-  // 每 3 秒的轮询不得覆盖用户正在操作的控件。
-  if (document.activeElement !== sel) sel.value = usageSelectedKey;
+function usageTable(box, { sig, ...opts }) {
+  // 3 秒轮询不得打断用户正在用的搜索/筛选/分页：数据没变就不重建。
+  if (box.dataset.usageSig === sig) return false;
+  box.dataset.usageSig = sig;
+  box.innerHTML = dataTableHtml(opts);
+  initDataTables(box);
+  return true;
+}
+
+function usageKeyFilterOptions(selected) {
+  return usageConversationsCache.length
+    ? usageConversationsCache.map((c) => ({ value: String(c.key ?? ''), label: String(c.key ?? '') }))
+    : [{ value: selected || '', label: selected || '（暂无会话）' }];
 }
 
 function renderUsageConversations(r) {
@@ -218,41 +219,56 @@ function renderUsageConversations(r) {
   const sym = r.symbol || '¥';
   usageConversationsCache = list;
   if (!list.length) {
+    box.dataset.usageSig = 'empty';
     box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>QQ 会话产生一次 LLM 调用后，这里会按群 / 好友列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
     return;
   }
-  const maxCost = Math.max(...list.map(x => Number(x.cost) || 0), 0);
-  let html = '<table><tr><th>会话</th><th>类型</th><th class="num">轮数</th><th class="num">步数</th><th class="num">未命中输入</th><th class="num">命中输入</th><th class="num">命中率</th><th class="num">输出</th><th class="num">花费</th><th>占比</th></tr>';
-  for (const c of list) {
+  const maxCost = Math.max(...list.map((x) => Number(x.cost) || 0), 0);
+  const rows = list.map((c) => {
     const key = String(c.key ?? '');
     const isInternal = key.startsWith('internal:');
     const type = isInternal ? '<span class="pill b">内部</span>'
       : (key.startsWith('private:') ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>');
     const b = c.buckets || {};
-    html += '<tr>'
-      + `<td class="usage-key"><a class="usage-key-link" href="#sessions" data-open-session="${esc(key)}" title="在「会话与审批」里查看">${esc(key)}</a></td>`
-      + `<td>${type}</td>`
-      + `<td class="num">${usageNum(c.turns)}</td>`
-      + `<td class="num">${usageNum(c.steps)}</td>`
-      + `<td class="num">${usageNum(b.cacheMiss)}</td>`
-      + `<td class="num">${usageNum(b.cacheHit)}</td>`
-      + `<td class="num">${usagePct(usageRate(b))}</td>`
-      + `<td class="num">${usageNum(b.output)}</td>`
-      + `<td class="num">${usageMoney(c.cost, sym)}</td>`
-      + `<td>${usageBar(maxCost > 0 ? (Number(c.cost) || 0) / maxCost : 0)}</td>`
-      + '</tr>';
-  }
-  html += '</table>';
+    return {
+      cells: [
+        '<a class="usage-key-link" href="#sessions" data-open-session="' + esc(key) + '">' + esc(key) + '</a>',
+        type,
+        usageNum(c.turns),
+        usageNum(c.steps),
+        usageNum(b.cacheMiss),
+        usageNum(b.cacheHit),
+        usagePct(usageRate(b)),
+        usageNum(b.output),
+        usageMoney(c.cost, sym),
+        usageBar(maxCost > 0 ? (Number(c.cost) || 0) / maxCost : 0),
+      ],
+    };
+  });
+  const sig = 'conv:' + list.map((c) => [c.key, c.cost, c.turns, c.steps, c.buckets?.cacheHit, c.buckets?.cacheMiss].join(',')).join('|');
+  const changed = usageTable(box, {
+    sig,
+    columns: [
+      { label: '会话', width: 260 }, { label: '类型', width: 80 }, { label: '轮数', width: 70 }, { label: '步数', width: 70 },
+      { label: '未命中输入', width: 110 }, { label: '命中输入', width: 110 }, { label: '命中率', width: 80 }, { label: '输出', width: 90 },
+      { label: '花费', width: 90 }, { label: '占比', width: 150 },
+    ],
+    rows,
+    pageSize: 10,
+    search: { placeholder: '搜索会话…' },
+    meta: '共 ' + list.length + ' 个会话',
+    empty: '没有匹配的会话。',
+  });
+  if (!changed) return;
+  applyUsageBarWidths(box);
   const totals = r.totals || {};
   if (Number(totals.unattributedCost) > 0) {
-    html += `<div class="meta u-p-8-10">其中 ${usageMoney(totals.unattributedCost, sym)} 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>`;
+    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">其中 ' + usageMoney(totals.unattributedCost, sym) + ' 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>');
   }
   if (totals.estimated) {
-    html += '<div class="meta u-p-8-10">⚠️ 有模型未登记在价目表里，这部分按 <code>deepseek-flash</code> 兜底价估算，可在 <code>config.json</code> 的 <code>pricing.models</code> 补充。</div>';
+    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">⚠️ 有模型未登记在价目表里，这部分按 <code>deepseek-flash</code> 兜底价估算，可在 <code>config.json</code> 的 <code>pricing.models</code> 补充。</div>');
   }
-  box.innerHTML = html;
-  applyUsageBarWidths(box);
-  // 会话名直接跳到「会话与审批」，并把搜索框预填成这个 key；逐轮明细仍由上方下拉选择。
+  // 会话名直接跳到「会话与审批」，并把搜索框预填成这个 key。
   box.querySelectorAll('[data-open-session]').forEach((link) => link.addEventListener('click', (ev) => {
     ev.preventDefault();
     const key = link.dataset.openSession;
@@ -269,75 +285,127 @@ function renderUsageConversations(r) {
 function renderUsageTurns(r) {
   const box = document.getElementById('usageTurns');
   const scope = document.getElementById('usageTurnScope');
-  const rows = r.turns || [];
+  const rowsData = r.turns || [];
   const sym = r.symbol || '¥';
+  const key = String(r.key || usageSelectedKey || '');
   if (scope) {
-    scope.textContent = `${esc(r.key || '')} ｜ 共 ${rows.length} 轮可追溯 ｜ 已归属 ${usageMoney(r.attributedCost, sym)}`
-      + (Number(r.unattributedCost) > 0 ? ` ｜ 未逐轮归属 ${usageMoney(r.unattributedCost, sym)}` : '');
+    scope.textContent = key
+      ? key + ' ｜ 共 ' + rowsData.length + ' 轮可追溯 ｜ 已归属 ' + usageMoney(r.attributedCost, sym)
+        + (Number(r.unattributedCost) > 0 ? ' ｜ 未逐轮归属 ' + usageMoney(r.unattributedCost, sym) : '')
+      : '—';
   }
-  if (!rows.length) {
+  if (!rowsData.length) {
+    box.dataset.usageSig = 'empty:' + key;
     box.innerHTML = '<span class="meta">该会话还没有可追溯的逐轮记录（只有累计值）。</span>';
     return;
   }
-  let html = '<table><tr><th class="num">轮次</th><th>结束时间</th><th class="num">步数</th><th class="num">未命中输入</th><th class="num">命中输入</th><th class="num">命中率</th><th class="num">输出</th><th class="num">花费</th><th>时段</th></tr>';
-  for (const t of rows) {
+  const rows = rowsData.map((t) => {
     const b = t.buckets || {};
-    html += '<tr>'
-      + `<td class="num">#${esc(t.turn)}</td>`
-      + `<td>${esc(usageTime(t.endedAt))}</td>`
-      + `<td class="num">${usageNum(t.steps)}</td>`
-      + `<td class="num">${usageNum(b.cacheMiss)}</td>`
-      + `<td class="num">${usageNum(b.cacheHit)}</td>`
-      + `<td class="num">${usagePct(usageRate(b))}</td>`
-      + `<td class="num">${usageNum(b.output)}</td>`
-      + `<td class="num">${usageMoney(t.cost, sym)}</td>`
-      + `<td>${usageTierTag(t.tier)}</td>`
-      + '</tr>';
-  }
-  box.innerHTML = html + '</table>';
+    return {
+      attrs: key ? { 'data-filter-key': key } : {},
+      cells: [
+        '#' + esc(t.turn),
+        esc(usageTime(t.endedAt)),
+        usageNum(t.steps),
+        usageNum(b.cacheMiss),
+        usageNum(b.cacheHit),
+        usagePct(usageRate(b)),
+        usageNum(b.output),
+        usageMoney(t.cost, sym),
+        usageTierTag(t.tier),
+      ],
+    };
+  });
+  const sig = 'turns:' + key + ':' + rowsData.length + ':' + rowsData.reduce((s, t) => s + (Number(t.cost) || 0), 0).toFixed(4);
+  const changed = usageTable(box, {
+    sig,
+    columns: [
+      { label: '轮次', width: 80 }, { label: '结束时间', width: 190 }, { label: '步数', width: 70 },
+      { label: '未命中输入', width: 110 }, { label: '命中输入', width: 110 }, { label: '命中率', width: 80 },
+      { label: '输出', width: 90 }, { label: '花费', width: 90 }, { label: '时段', width: 90 },
+    ],
+    rows,
+    filters: [{ id: 'key', label: '会话', value: key, options: usageKeyFilterOptions(key) }],
+    pageSize: 10,
+    meta: '共 ' + rowsData.length + ' 轮',
+    empty: '没有匹配的轮次。',
+  });
+  if (!changed) return;
+  // 筛选即加载：换会话后直接拉该会话的逐轮明细（不再有单独的「加载」按钮）。
+  const sel = box.querySelector('[data-filter="key"]');
+  if (sel) sel.addEventListener('change', () => {
+    usageSelectedKey = sel.value;
+    refreshUsageTurns();
+  });
 }
 
 function renderUsageRecent(r) {
   const box = document.getElementById('usageRecent');
   const list = r.entries || [];
   const sym = r.symbol || '¥';
-  if (!list.length) { box.innerHTML = '<span class="meta">（空）</span>'; return; }
-  let html = '<table><tr><th>时间</th><th>会话</th><th class="num">轮</th><th class="num">步</th><th class="num">未命中</th><th class="num">命中</th><th class="num">输出</th><th class="num">花费</th><th>时段</th></tr>';
-  for (const e of list) {
-    html += '<tr>'
-      + `<td>${esc(usageTime(e.time))}</td>`
-      + `<td>${esc(e.key || '未归属')}</td>`
-      + `<td class="num">#${esc(e.turn)}</td>`
-      + `<td class="num">${esc(e.step)}</td>`
-      + `<td class="num">${usageNum(e.cacheMiss)}</td>`
-      + `<td class="num">${usageNum(e.cacheHit)}</td>`
-      + `<td class="num">${usageNum(e.output)}</td>`
-      + `<td class="num">${usageMoney(e.cost, sym)}</td>`
-      + `<td>${usageTierTag(e.tier)}</td>`
-      + '</tr>';
+  if (!list.length) {
+    box.dataset.usageSig = 'empty';
+    box.innerHTML = '<span class="meta">（还没有调用记录）</span>';
+    return;
   }
-  box.innerHTML = html + '</table>';
+  const rows = list.map((e) => {
+    const b = e.buckets || {};
+    return {
+      cells: [
+        esc(usageTime(e.at)),
+        esc(e.key || '—'),
+        '#' + esc(e.turn),
+        usageNum(e.steps),
+        usageNum(b.cacheMiss),
+        usageNum(b.cacheHit),
+        usageNum(b.output),
+        usageMoney(e.cost, sym),
+        usageTierTag(e.tier),
+      ],
+    };
+  });
+  const sig = 'recent:' + list.map((e) => [e.at, e.key, e.turn, e.cost].join(',')).join('|');
+  usageTable(box, {
+    sig,
+    columns: [
+      { label: '时间', width: 190 }, { label: '会话', width: 200 }, { label: '轮', width: 70 }, { label: '步', width: 70 },
+      { label: '未命中', width: 100 }, { label: '命中', width: 100 }, { label: '输出', width: 90 }, { label: '花费', width: 90 }, { label: '时段', width: 90 },
+    ],
+    rows,
+    pageSize: 20,
+    meta: '最新 ' + list.length + ' 条',
+    empty: '没有匹配的调用。',
+  });
 }
 
 function renderUsagePrices(pt) {
   const box = document.getElementById('usagePrices');
-  if (!pt || !pt.models) { box.textContent = '（价目表不可用）'; return; }
+  if (!pt || !pt.models) { box.dataset.usageSig = ''; box.textContent = '（价目表不可用）'; return; }
   const sym = pt.symbol || '¥';
   const tier = pt.nowTier;
-  let html = `<div class="u-mb-6">价目表版本 <code>${esc(pt.version)}</code> ｜ 高峰时段为北京时间的 2 倍价（周一至周五 9:00-12:00、14:00-18:00，法定节假日除外，已内置 ${esc(pt.holidayCount)} 天假期）</div>`;
-  html += '<table><tr><th>模型</th><th class="num">缓存命中</th><th class="num">缓存未命中</th><th class="num">输出</th></tr>';
-  for (const [name, m] of Object.entries(pt.models)) {
-    // 单价与货币符号都可能来自 config.json 的 pricing 覆盖项（运维可写），
-    // 不能直接拼进 innerHTML：这里统一走 esc() （数字原样显示仍然是数字）。
+  const rows = Object.entries(pt.models).map(([name, m]) => {
+    // 单价与货币符号都可能来自 config.json 的 pricing 覆盖项（运维可写），统一走 esc()。
     const price = (v) => esc(sym + (Number.isFinite(Number(v)) ? Number(v) : (v ?? '')));
-    html += `<tr><td><code>${esc(name)}</code><div class="meta">${esc(m.label)}</div></td>`
-      + `<td class="num">${price(m.off?.cacheHit)}</td>`
-      + `<td class="num">${price(m.off?.cacheMiss)}</td>`
-      + `<td class="num">${price(m.off?.output)}</td></tr>`;
-  }
-  html += '</table>';
-  html += `<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（元 / 百万 token）。当前时刻属于 <b>${tier ? esc(tier.tierLabel) : '—'}</b>${tier?.estimated ? '，且价目表里没有 <code>' + esc(tier.model) + '</code>，按兜底价估算' : ''}。</div>`;
-  box.innerHTML = html;
+    return {
+      cells: [
+        '<code>' + esc(name) + '</code><div class="meta">' + esc(m.label) + '</div>',
+        price(m.off?.cacheHit),
+        price(m.off?.cacheMiss),
+        price(m.off?.output),
+      ],
+    };
+  });
+  const sig = 'prices:' + String(pt.version) + ':' + (tier?.tier || '') + ':' + (tier?.estimated ? '1' : '0');
+  const changed = usageTable(box, {
+    sig,
+    columns: [{ label: '模型', width: 300 }, { label: '缓存命中', width: 140 }, { label: '缓存未命中', width: 160 }, { label: '输出', width: 120 }],
+    rows,
+    pager: false,
+    meta: '价目表版本 ' + pt.version + ' ｜ 高峰时段为北京时间的 2 倍价（周一至周五 9:00-12:00、14:00-18:00，法定节假日除外，已内置 ' + pt.holidayCount + ' 天假期）',
+    empty: '（价目表为空）',
+  });
+  if (!changed) return;
+  box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（元 / 百万 token）。当前时刻属于 <b>' + (tier ? esc(tier.tierLabel) : '—') + '</b>' + (tier?.estimated ? '，且价目表里没有 <code>' + esc(tier.model) + '</code>，按兜底价估算' : '') + '。</div>');
 }
 
 async function refreshUsage() {
@@ -361,8 +429,8 @@ async function refreshUsage() {
       `${usageNum(t.turns)} 轮 ｜ ${usageNum(t.steps)} 步 ｜ 当前${r.nowTier?.tier === 'peak' ? '高峰' : '空闲'}时段`;
     renderUsageConversations(r);
     renderUsagePrices(r.priceTable ? { ...r.priceTable, nowTier: r.nowTier } : null);
-    syncUsageKeySelect((r.conversations || []).map(c => String(c.key ?? '')));
-    if (!document.getElementById('usageTurns').dataset.loaded && usageSelectedKey) refreshUsageTurns();
+    if (!usageSelectedKey) usageSelectedKey = String((r.conversations || [])[0]?.key ?? '');
+    if (usageSelectedKey) refreshUsageTurns();
     setMsg(msg, '每 3 秒自动同步', 'ok');
   } catch (error) {
     setMsg(msg, `❌ 读取失败：${error?.message || '未知错误'}`, 'err');
@@ -372,17 +440,16 @@ async function refreshUsage() {
 async function refreshUsageTurns() {
   const box = document.getElementById('usageTurns');
   if (!usageSelectedKey) {
-    box.innerHTML = '<span class="meta">选择一个会话后加载逐轮明细…</span>';
-    box.dataset.loaded = '';
+    box.dataset.usageSig = '';
+    box.innerHTML = '<span class="meta">（还没有会话）</span>';
     return;
   }
   try {
     const r = await api('/api/tokens/turns?key=' + encodeURIComponent(usageSelectedKey) + '&limit=200');
-    renderUsageTurns(r);
-    box.dataset.loaded = '1';
+    renderUsageTurns({ ...r, key: usageSelectedKey });
   } catch (error) {
-    box.innerHTML = `<span class="meta err">读取失败：${esc(error?.message || '未知错误')}</span>`;
-    box.dataset.loaded = '';
+    box.dataset.usageSig = '';
+    box.innerHTML = '<span class="meta err">读取失败：' + esc(error?.message || '未知错误') + '</span>';
   }
 }
 
@@ -443,11 +510,6 @@ export function init() {
     refreshUsageRecent();
     showConsoleToast('用量已刷新');
   });
-  document.getElementById('usageTurnsLoad').addEventListener('click', () => refreshUsageTurns());
-  document.getElementById('usageKeySelect').addEventListener('change', (ev) => {
-    usageSelectedKey = ev.target.value;
-    refreshUsageTurns();
-  });
   document.getElementById('usageClear').addEventListener('click', async () => {
     if (!confirm('确定清空 token 用量账本？累计花费与逐轮明细都会被删除，且不可恢复（下一次同步会从 DSH 重新拉取会话累计值）。')) return;
     const msg = document.getElementById('usageMsg');
@@ -460,7 +522,7 @@ export function init() {
     }
     usageSelectedKey = '';
     document.getElementById('usageTurnScope').textContent = '—';
-    document.getElementById('usageTurns').dataset.loaded = '';
+    document.getElementById('usageTurns').dataset.usageSig = '';
     refreshUsage();
     refreshUsageRecent();
   });

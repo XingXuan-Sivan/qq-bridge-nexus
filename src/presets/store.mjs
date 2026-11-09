@@ -117,17 +117,32 @@ export function validateAgentYaml(text) {
   return { ok: true, rows: parsed.length };
 }
 
-export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nodeExecutable = process.execPath, log = () => {}, now = Date.now }) {
+export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, scriptsDir, nodeExecutable = process.execPath, log = () => {}, now = Date.now }) {
   const ids = Array.isArray(presetIds) ? presetIds : [];
+  const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+  // 预设现在可以新建：目录里带 preset.yml 的都算已知预设（出厂 5 个只是初始值）。
+  function directoryIds() {
+    if (!fs.existsSync(root)) return [];
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && ID_RE.test(entry.name))
+      .filter((entry) => fs.existsSync(path.join(root, entry.name, 'preset.yml')))
+      .map((entry) => entry.name);
+  }
+
   const presetDir = (id) => {
     const value = String(id ?? '');
-    if (!ids.includes(value)) throw new Error(`未知预设：${value}`);
-    return path.join(root, value);
+    if (!ID_RE.test(value)) throw new Error(`非法预设 id：${value}`);
+    const dir = path.join(root, value);
+    if (!fs.existsSync(path.join(dir, 'preset.yml')) && !ids.includes(value)) {
+      throw new Error(`未知预设：${value}`);
+    }
+    return dir;
   };
   const fileFor = (id, name) => path.join(presetDir(id), name);
 
   function list() {
-    return ids.map((id) => {
+    return directoryIds().map((id) => {
       let meta = null;
       let error = null;
       try {
@@ -243,8 +258,91 @@ export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nod
     return { validation, backup: backupInfo };
   }
 
-  function listBackups(id) {
-    const dir = path.join(backupRoot, id);
+  // 结构化读：把插件行拆成 {id, name, config}，config 是除 id/name 外的键。
+  function readAgent(id) {
+    presetDir(id);
+    const agentYaml = fs.existsSync(fileFor(id, 'agent.cordis.yml'))
+      ? fs.readFileSync(fileFor(id, 'agent.cordis.yml'), 'utf8')
+      : '';
+    const validation = validateAgentYaml(agentYaml);
+    let rows = [];
+    if (validation.ok) {
+      rows = parse(agentYaml).map((row) => ({
+        id: String(row.id ?? ''),
+        name: String(row.name ?? ''),
+        config: Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'id' && key !== 'name')),
+      }));
+    }
+    return { id, rows, agentYaml, validation };
+  }
+
+  // 结构化写：按插件 id 定位行，只覆盖表单提交的键；文件里的未知键与注释保持原样。
+  function writeAgentConfig(id, patchRows) {
+    presetDir(id);
+    const patches = Array.isArray(patchRows) ? patchRows : [];
+    if (patches.length === 0) throw new Error('没有要保存的插件行');
+    const doc = readYamlDocument(fileFor(id, 'agent.cordis.yml'));
+    if (!doc || !Array.isArray(doc.toJS())) throw new Error('agent.cordis.yml 必须是非空的插件行列表');
+    const rows = doc.toJS();
+    for (const patch of patches) {
+      const pluginId = String(patch?.id ?? '').trim();
+      const index = rows.findIndex((row) => String(row?.id ?? '') === pluginId);
+      if (index < 0) throw new Error(`agent.cordis.yml 缺少插件行：${pluginId}`);
+      if (patch.name !== undefined) doc.setIn([index, 'name'], String(patch.name));
+      const config = patch.config && typeof patch.config === 'object' ? patch.config : {};
+      for (const [key, value] of Object.entries(config)) {
+        doc.setIn([index, key], value);
+      }
+    }
+    const text = String(doc);
+    const validation = validateAgentYaml(text);
+    if (!validation.ok) throw new Error(validation.error);
+    const backupInfo = backup(id, 'agent-config');
+    fs.writeFileSync(fileFor(id, 'agent.cordis.yml'), text, 'utf8');
+    log(`控制台：${id} agent.cordis.yml 已按表单保存`);
+    return { rows: validation.rows, backup: backupInfo };
+  }
+
+  function createPreset({ id, from, name, description } = {}) {
+    const value = String(id ?? '').trim();
+    if (!ID_RE.test(value)) throw new Error('预设 id 只能用小写字母、数字和连字符，且以字母/数字开头');
+    if (fs.existsSync(path.join(root, value, 'preset.yml'))) throw new Error(`预设已存在：${value}`);
+    const source = String(from ?? '').trim();
+    const sourceDir = presetDir(source);
+    const maxOrder = Math.max(0, ...list().map((item) => Number(item.order) || 0));
+    fs.mkdirSync(path.join(root, value), { recursive: true });
+    for (const file of PRESET_FILES) {
+      const src = path.join(sourceDir, file);
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(root, value, file));
+    }
+    const sourceMeta = normalizeMeta(readYamlFile(path.join(sourceDir, 'preset.yml')));
+    const doc = new Document({
+      name: String(name ?? '').trim() || `${sourceMeta.name}（副本）`,
+      description: String(description ?? '').trim() || `从「${sourceMeta.name}」复制`,
+      order: maxOrder + 1,
+    });
+    if (sourceMeta.behavior) doc.set('behavior', sourceMeta.behavior);
+    writeDocument(path.join(root, value, 'preset.yml'), doc);
+    log(`控制台：已新建预设 ${value}（复制自 ${source}）`);
+    return { id: value, from: source };
+  }
+
+  // 还原出厂：用 assets/default-presets/<id>/ 覆盖，覆盖前先整份备份。
+  function restoreFactory(id) {
+    const target = presetDir(id);
+    if (!factoryRoot) throw new Error('没有配置出厂预设目录');
+    const source = path.join(factoryRoot, id);
+    if (!fs.existsSync(source)) throw new Error(`没有该预设的出厂副本：${id}`);
+    const backupInfo = backup(id, 'before-factory');
+    for (const file of PRESET_FILES) {
+      const from = path.join(source, file);
+      if (fs.existsSync(from)) fs.copyFileSync(from, path.join(target, file));
+    }
+    log(`控制台：${id} 已还原为出厂版本`);
+    return { id, backup: backupInfo };
+  }
+
+  function listBackups(id) {    const dir = path.join(backupRoot, id);
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
@@ -298,5 +396,5 @@ export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nod
     }
   }
 
-  return { list, read, backup, writeMeta, writeExtensions, writeAgentYaml, listBackups, restore, apply, presetDir };
+  return { list, read, readAgent, backup, writeMeta, writeExtensions, writeAgentYaml, writeAgentConfig, createPreset, restoreFactory, listBackups, restore, apply, presetDir };
 }

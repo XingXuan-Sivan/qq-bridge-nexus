@@ -30,22 +30,16 @@ const CHART_HTML = `<div class="row usage-chart-controls" id="usageChartControls
 </div>
 <div class="meta u-mt-6" id="usageChartNote"></div>`;
 
-const CONVERSATIONS_HTML = `<div class="tool-log-table" id="usageConversations">加载中…</div>`;
+const CONVERSATIONS_HTML = `<div id="usageConversations">加载中…</div>`;
 
-const TURNS_CONTROLS_HTML = `<div class="row usage-controls">
-  <label class="sr-only" for="usageKeySelect">选择要查看逐轮明细的会话</label>
-  <select id="usageKeySelect"></select>
-  <button class="btn small" type="button" id="usageTurnsLoad">加载逐轮明细</button>
-</div>`;
-
-const TURNS_BODY_HTML = `<div class="tool-log-table" id="usageTurns">选择会话后加载逐轮明细…</div>`;
+const TURNS_BODY_HTML = `<div id="usageTurns">加载中…</div>`;
 
 const RECENT_HTML = `<details class="settings-group"><summary>最近调用流水（实时，最新 40 条）</summary><div class="settings-content">
-<div class="tool-log-table" id="usageRecent">（空）</div>
+<div id="usageRecent">（空）</div>
 </div></details>`;
 
 const PRICES_HTML = `<details class="settings-group"><summary>当前生效的价目表</summary><div class="settings-content">
-<div id="usagePrices" class="meta">读取中…</div>
+<div id="usagePrices">读取中…</div>
 </div></details>`;
 
 export const USAGE_FIELDS = {
@@ -65,7 +59,6 @@ export const USAGE_FIELDS = {
   },
   chart: { html: CHART_HTML },
   conversations: { html: CONVERSATIONS_HTML },
-  turnsControls: { html: TURNS_CONTROLS_HTML },
   turnsBody: { html: TURNS_BODY_HTML },
   recent: { html: RECENT_HTML },
   prices: { html: PRICES_HTML },

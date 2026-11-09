@@ -185,7 +185,8 @@ try {
     await navigate('mcp');
     // 主从布局：左栏是 server 列表，右栏是选中 server 的详情与工具清单。
     await page.waitForFunction(() => document.querySelectorAll('#mcpSplit .split-item').length >= 2);
-    assert.equal(await page.locator('#mcpList [data-table]').count(), 0, 'MCP 页不再用表格');
+    // 工具区由表格组件渲染（分页 + 工具栏搜索），不再是手写清单。
+    assert.equal(await page.locator('#mcpList [data-table]').count(), 1, 'MCP 工具区应使用表格组件');
     const summary = await page.locator('#mcpSummary').innerText();
     assert.match(summary, /2 个 server · 2 个工具 · 1 个技能/);
     assert.ok(await page.locator('#mcpSplit .split-item').first().getAttribute('aria-selected') === 'true', '默认选中第一个 server');
@@ -248,24 +249,27 @@ try {
     await page.click('#pluginDetailClose');
   });
 
-  await test('Preset page lists presets and opens the YAML editor', async () => {
+  await test('Preset page lists presets and edits plugin config as a form', async () => {
     await navigate('presets');
     await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
     const text = await page.locator('#presetList').innerText();
     assert.match(text, /qq-chat-v2/);
-    assert.match(text, /MCP：\*/);
     await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
     await page.waitForFunction(() => !document.getElementById('presetEditor').hidden);
     assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
-    assert.match(await page.locator('#presetEditYaml').inputValue(), /qq-tool-restrict/);
-    assert.equal(await page.locator('#presetValidate').count(), 1);
-    assert.equal(await page.locator('#presetAuthPicker .preset-picker-group').count(), 3);
-    await page.waitForSelector('#presetEditor .code-editor .cm-editor');
-    // 编辑卡里现在有两个编辑器（仿真提示词 + YAML），YAML 是后挂的那个。
-    await page.locator('#presetEditor .code-editor .cm-content').last().click();
-    await page.keyboard.press('Control+End');
-    await page.keyboard.type('\n# ui cm smoke');
-    assert.match(await page.locator('#presetEditYaml').inputValue(), /# ui cm smoke/);
+    await page.waitForSelector('#presetAgentForm .form-section');
+    assert.ok(await page.locator('[data-field="tool-web.search"]').count() === 1, '插件配置表单应有 tool-web.search 开关');
+    assert.ok(await page.locator('[data-field="qq-tool-restrict.profile"]').count() === 1, '插件配置表单应有 qq-tool-restrict.profile');
+    // 改一个开关再保存：走 PUT …/agent，表单数据是 {rows:[…]}。
+    await page.locator('[data-field="tool-web.search"]').click();
+    const saved = await clickWrite('#presetSave', '/api/extensions/presets/qq-chat-v2/agent', 'PUT');
+    const webRow = (saved.rows ?? []).find((row) => row.id === 'tool-web');
+    assert.equal(webRow?.config?.config?.search, true, '保存的 rows 应包含表单里改过的开关');
+    // 新建预设：复制 qq-chat-v2。
+    await page.fill('#presetNewId', 'ui-copy');
+    await page.selectOption('#presetNewFrom', 'qq-chat-v2');
+    const created = await clickWrite('#presetNewCreate', '/api/extensions/presets/create');
+    assert.equal(created.id, 'ui-copy');
   });
 
   await test('Global config renders field rows with aligned labels', async () => {
@@ -342,6 +346,8 @@ try {
     assert.deepEqual(await clickWrite('[data-role="契约测试角色"] [data-role-default]', '/api/config/role-default'), { value: '契约测试角色' });
     // 清除默认人格走全局配置页的下拉（空选项 = 不挂人格卡）。
     await navigate('config');
+    const roleOptions = await page.$$eval('#roleDefaultSelect option', (els) => els.map((el) => el.textContent));
+    assert.ok(roleOptions.some((text) => text.includes('（外部）')), '默认人格下拉应列出外部人格');
     await page.selectOption('#roleDefaultSelect', '');
     assert.deepEqual(await saveBarWrite('/api/config/role-default'), { value: '' });
     // 手动静默按钮在总览页；这里只校验表单契约与按钮可用，实际写请求由后端测试覆盖。
@@ -559,18 +565,24 @@ try {
     await navigate('overview');
     await page.waitForFunction(() => (document.getElementById('usageConversations')?.textContent || '').includes('group:123456789'));
 
-    // 下钻逐轮：用上方下拉选择会话后加载明细
-    await page.selectOption('#usageKeySelect', 'group:123456789');
-    await page.click('#usageTurnsLoad');
+    // 四张表统一由表格组件渲染（工具栏 / 分页都在组件内）
+    assert.equal(await page.locator('#usageConversations [data-table]').count(), 1, '按会话表应使用表格组件');
+    assert.equal(await page.locator('#usageConversations [data-pager]').count(), 1, '按会话表应带分页');
+    assert.equal(await page.locator('#usageRecent [data-table]').count(), 1, '最近流水应使用表格组件');
+    assert.equal(await page.locator('#usagePrices [data-table]').count(), 1, '价目表应使用表格组件');
+
+    // 下钻逐轮：会话选择器就在工具栏里，选中即加载（不再有「加载」按钮）
+    await page.selectOption('#usageTurns [data-filter="key"]', 'group:123456789');
     await page.waitForFunction(() => /#\d+/.test(document.getElementById('usageTurns')?.textContent || ''));
     const turns = await page.textContent('#usageTurns');
     assert.match(turns, /#42/, '逐轮明细应显示轮次编号');
     assert.match(turns, /步数/, '逐轮明细应显示步数');
     assert.match(turns, /空闲|高峰|跨时段/, '逐轮明细应标注峰谷时段');
     assert.match(turns, /¥/, '逐轮明细应显示每轮花费');
+    assert.equal(await page.locator('#usageTurns [data-pager]').count(), 1, '逐轮明细应带分页');
 
-    // 会话下拉与逐轮表同步
-    assert.equal(await page.inputValue('#usageKeySelect'), 'group:123456789', '下拉框应跟随选中的会话');
+    // 会话筛选与逐轮表同步
+    assert.equal(await page.inputValue('#usageTurns [data-filter="key"]'), 'group:123456789', '筛选器应跟随选中的会话');
 
     // 实时流水与价目表
     assert.match(await page.textContent('#usageRecent'), /group:123456789|private:100001/, '最近流水应列出采样');

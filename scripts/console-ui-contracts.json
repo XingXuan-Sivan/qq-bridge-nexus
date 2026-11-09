@@ -15,6 +15,71 @@
     }
   },
   {
+    "method": "PUT",
+    "path": "/api/extensions/presets/qq-chat-v2/meta",
+    "body": {
+      "name": "QQ 群聊（二代）",
+      "description": "离线预览用的二代群聊预设。",
+      "order": 2
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/extensions/presets/qq-chat-v2/extensions",
+    "body": {
+      "mcp": {
+        "allow": [
+          "*"
+        ],
+        "tools": {
+          "allow": [
+            "*"
+          ],
+          "deny": []
+        }
+      },
+      "skills": {
+        "allow": [
+          "*"
+        ]
+      }
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/api/extensions/presets/qq-chat-v2/agent",
+    "body": {
+      "rows": [
+        {
+          "id": "tool-web",
+          "config": {
+            "config": {
+              "search": true,
+              "fetch": false,
+              "searchTimeoutMs": 60000
+            }
+          }
+        },
+        {
+          "id": "qq-tool-restrict",
+          "config": {
+            "config": {
+              "profile": "chat"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/extensions/presets/create",
+    "body": {
+      "id": "ui-copy",
+      "from": "qq-chat-v2"
+    }
+  },
+  {
     "method": "POST",
     "path": "/api/config/behavior-default",
     "body": {

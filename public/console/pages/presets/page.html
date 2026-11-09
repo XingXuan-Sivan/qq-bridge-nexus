@@ -12,6 +12,7 @@
       </div>
       <div data-presets-fields="main"></div>
     </section>
+    <div data-presets-fields="create"></div>
     <section class="card span-all" id="presetEditor" hidden>
       <div class="card-head">
         <h2 id="presetEditorTitle">编辑预设</h2>
@@ -26,10 +27,10 @@
         <div data-presets-fields="simPrompt"></div>
       </section>
       <div class="form-actions" id="presetEditorActions">
-        <button id="presetValidate" class="btn" type="button">校验 YAML</button>
         <button id="presetSave" class="btn primary" type="button">保存源文件</button>
         <button id="presetApply" class="btn" type="button">应用并安装</button>
-        <button id="presetRollback" class="btn danger" type="button">回滚上一版</button>
+        <button id="presetRollback" class="btn" type="button">回滚上一版</button>
+        <button id="presetFactory" class="btn" type="button">还原出厂设置</button>
         <button id="presetCancelEdit" class="btn" type="button">收起</button>
         <span class="meta" id="presetEditMsg"></span>
       </div>

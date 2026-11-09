@@ -498,7 +498,7 @@ behaviorKind  = behavior.kind
 | G4 | 预设页动态 picker + 统一代码编辑器 + YAML Document | 注释保留测试、保存/应用/回滚 |
 | G5 | 文档/STATUS/配置说明收尾 | 提交、工作区干净 |
 
-状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a` 已提交并真机验收；G4 已实现动态 picker、CM6 编辑器与 preset store 的 YAML Document（`test-preset-store` 6/6、UI 31/31、static/HTTP boundary 通过、全量 audit 103/103），待提交；G5 未开始，G5 还包含其余 `js-yaml` 使用统一迁移。G3/G4 的验收证据见 `docs/STATUS.md` 6.14/6.15。
+状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a`、G4 `169da58` 已提交；G1–G4 已真机/门禁验收，G5 未开始，G5 还包含其余 `js-yaml` 使用统一迁移。G3/G4 的验收证据见 `docs/STATUS.md` 6.14/6.15。
 
 ## 11. 已拍板（2026-11-09，m31268）
 

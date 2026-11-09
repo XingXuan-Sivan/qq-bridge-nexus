@@ -243,7 +243,7 @@ npm run test:console-ui
 - 真机：桥接 job `pwsh-16c04ab424ba4ac8`，`reserved2`/`dshReady=true`；`#config` 六分区、行为列表/校验/保存、发言上限、37 个工具开关均可用，无 pageerror；语音库为空（本机无音频）。
 - 遗留：动态授权 picker、CM6 代码编辑器、统一 `yaml` Document（G4）；旧键清理与文档收尾（G5）。
 
-### 6.15 G4 预设编辑器增强（2026-11-09，已实现待提交）
+### 6.15 G4 预设编辑器增强（2026-11-09，已提交 `169da58`）
 
 - 动态 picker：预设页扩展授权区按 `/api/extensions` 真实 catalog 渲染「MCP 服务器 / MCP 工具 / 技能」三组复选框；工具值 `server__tool`；`*` 表示全部；失效条目保留并标“当前未安装”；picker 只写 allow，deny 仍走文本框/YAML。
 - CM6：`scripts/console-codemirror-entry.mjs` + `scripts/build-console-vendor.mjs`（esbuild iife，`ConsoleCM`）产出 `public/console/vendor/codemirror.js`（~428KB）；预设页把原 YAML textarea 隐藏，CM 编辑内容实时写回，保存/校验仍读 textarea。

@@ -24,9 +24,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
 import {
   assertPresetBehaviorBindings,
+  listBehaviorFiles,
   loadBehaviorProfiles,
   loadPresetBehaviorBindings,
+  readBehaviorFile,
   resolveBehavior,
+  validateBehaviorText,
+  writeBehaviorFile,
 } from './behaviors/index.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
@@ -4168,8 +4172,8 @@ async function main() {
       initialPromptMaxChars: base.initialPromptMaxChars,
       send: {
         ...(behavior.v2.send ?? {}),
-        maxSendPerMinute: base.send?.maxSendPerMinute,
-        maxSendPerHour: base.send?.maxSendPerHour,
+        maxSendPerMinute: cfg.limits?.send?.maxSendPerMinute,
+        maxSendPerHour: cfg.limits?.send?.maxSendPerHour,
       },
     };
   }
@@ -5262,7 +5266,7 @@ async function main() {
         // 管理端专用 v2 接口：带 agent token 的请求一律拒绝，防止 MCP 工具越权访问控制台功能
         // /api/socialV2/initial-prompt 也在这里：它是操作者写给 AI 的"环境背景"，
         // 让 AI 自己读/改等于把控制台的管理输入（以及未来可能写入的其它群信息）交给会话主体。
-        const adminOnlyV2Paths = ['/api/socialV2/rotate-token', '/api/socialV2/config', '/api/socialV2/activity', '/api/socialV2/reset', '/api/socialV2/states', '/api/socialV2/wake', '/api/socialV2/initial-prompt'];
+        const adminOnlyV2Paths = ['/api/socialV2/rotate-token', '/api/socialV2/activity', '/api/socialV2/reset', '/api/socialV2/states', '/api/socialV2/wake', '/api/socialV2/initial-prompt'];
         if (req.headers['x-agent-token'] && (adminOnlyV2Paths.includes(url.pathname) || (url.pathname === '/api/socialV2/feedback' && req.method === 'GET') || (url.pathname === '/api/socialV2/tool-log' && req.method === 'GET'))) {
           sendJson({ ok: false, error: '该接口仅控制台可用' }, 403);
           return;
@@ -5675,6 +5679,40 @@ async function main() {
             sendJson({ ok: false, error: '不支持的技能操作' }, 405);
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, error?.code === 'not_found' ? 404 : 400);
+          }
+          return;
+        }
+        // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
+        const behaviorRoute = url.pathname.match(/^\/api\/config\/behaviors(?:\/([a-z0-9][a-z0-9._-]{0,63}))?(?:\/(validate))?$/);
+        if (behaviorRoute) {
+          const id = behaviorRoute[1];
+          const action = behaviorRoute[2];
+          const behaviorsRoot = path.join(ROOT, 'config', 'behaviors');
+          try {
+            if (!id && req.method === 'GET') {
+              sendJson({ ok: true, behaviors: listBehaviorFiles({ root: behaviorsRoot }) });
+              return;
+            }
+            if (!id) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
+            if (req.method === 'GET') {
+              sendJson({ ok: true, ...readBehaviorFile({ root: behaviorsRoot, id }) });
+              return;
+            }
+            if (req.method === 'POST' && action === 'validate') {
+              const body = await readBody();
+              sendJson({ ok: true, behavior: validateBehaviorText({ id, text: body?.text }) });
+              return;
+            }
+            if (req.method === 'PUT' && !action) {
+              const body = await readBody();
+              const result = writeBehaviorFile({ root: behaviorsRoot, id, text: body?.text });
+              ext.audit.append('config.behavior.write', { id });
+              sendJson({ ok: true, ...result, requiresRestart: true });
+              return;
+            }
+            sendJson({ ok: false, error: '不支持的方法' }, 405);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '行为档案操作失败' }, 400);
           }
           return;
         }
@@ -7235,175 +7273,67 @@ async function main() {
           }
           return;
         }
-        // ── 二代仿真模式（reserved2）内部 Agent API ─────────────────────────
-        if (req.method === 'GET' && url.pathname === '/api/socialV2/config') {
-          sendJson({ ok: true, config: cfg.socialV2 ?? {} });
+        // ── 全局配置：发言上限（系统层 limits.send；不写回 socialV2） ─────────
+        if (req.method === 'GET' && url.pathname === '/api/config/send-limit') {
+          sendJson({ ok: true, send: cfg.limits?.send ?? { maxSendPerMinute: 0, maxSendPerHour: 0 } });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/config') {
+        if (req.method === 'POST' && url.pathname === '/api/config/send-limit') {
           const body = await readBody();
+          const readLimit = (value) => {
+            const n = Math.round(Number(value) || 0);
+            if (n < 0 || n > 10_000) throw new Error('发言上限必须是 0–10000 之间的整数');
+            return n;
+          };
+          let send;
+          try {
+            send = {
+              ...(cfg.limits?.send ?? {}),
+              maxSendPerMinute: readLimit(body.maxSendPerMinute),
+              maxSendPerHour: readLimit(body.maxSendPerHour),
+            };
+          } catch (error) {
+            sendJson({ ok: false, error: error.message }, 400);
+            return;
+          }
           const configFile = path.join(ROOT, 'config.json');
           const file = readConfigObject(configFile);
-          // current 必须是「当前**生效**的 socialV2」，而不是文件里恰好写着的那一份。
-          //
-          // config.json 里没有 socialV2 段（或该段不是普通对象）时，旧写法 current={} 会让下面所有
-          // `current.xxx ?? 默认` 的兜底全部落空，并把只剩本次提交字段的段落盘。最危险的一处是工具开关
-          // 归一化：`typeof merged.tools[k] !== 'boolean'` 时写的是 `current.tools?.[k] !== false` ——
-          // current 为空 → undefined !== false → true，于是**一次控制台保存就把默认关闭的
-          // setStickerRemark / sendVoice 静默打开**（它们默认 false 是有意的：一个是风险操作，
-          // 一个是需要先准备语音库的强表达）。cfg.socialV2 是「文件 + 默认值」深度合并后的运行时配置，
-          // 用它兜底才和真正生效的设置一致（也就不会再出现"文件里没有 → 保存一次就变了"）。
-          const fileV2 = (file.socialV2 && typeof file.socialV2 === 'object' && !Array.isArray(file.socialV2))
-            ? file.socialV2
-            : null;
-          const current = fileV2 ?? ((cfg.socialV2 && typeof cfg.socialV2 === 'object') ? cfg.socialV2 : {});
-          const merged = { ...current, ...body };
-          // 子对象必须是非 null 对象；null/数组/基本类型会覆盖默认值导致工具开关被绕过，这里直接保留当前值。
-          for (const sub of ['tools', 'wake', 'send', 'wait', 'proactive', 'sticker', 'feedback', 'context']) {
-            if (body[sub] !== undefined && (body[sub] === null || typeof body[sub] !== 'object' || Array.isArray(body[sub]))) {
-              merged[sub] = current[sub] ?? {};
-            }
-          }
-          if (merged.autoReplyCheckMs !== undefined) {
-            const n = Number(merged.autoReplyCheckMs);
-            merged.autoReplyCheckMs = Number.isFinite(n) ? Math.max(1000, Math.round(n)) : (current.autoReplyCheckMs ?? 30000);
-          }
-          // tools：只接受布尔开关
-          const toolFlags = ['getPrompt', 'getUnread', 'getRecent', 'socialState', 'sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'waitMessages', 'feedback', 'getMyRecent', 'getMessageDetail', 'getActiveMembers', 'setWakeConfig', 'markRead', 'memory', 'slangQuery', 'slangSubmit', 'getImages', 'getForwardMsg', 'sendPoke', 'listStickers', 'getStickerImage', 'sendSticker', 'setStickerRemark', 'stickerNote', 'collectSticker', 'getSelfImage', 'personProfile', 'requestMode', 'crossGroup', 'ownerRelay', 'ownerGroupAccess', 'webImage', 'sendVoice'];
-          if (body.tools && typeof body.tools === 'object') {
-            merged.tools = { ...(current.tools ?? {}), ...body.tools };
-            for (const k of toolFlags) {
-              if (typeof merged.tools[k] !== 'boolean') merged.tools[k] = current.tools?.[k] !== false;
-            }
-          }
-          // wake：数值与字符串数组归一化
-          if (body.wake && typeof body.wake === 'object') {
-            merged.wake = { ...(current.wake ?? {}), ...body.wake };
-            for (const k of ['sleepMinMs', 'sleepMaxMs', 'recommendedSleepMinMs', 'recommendedSleepMaxMs', 'recommendedProbability', 'batchWindowMs', 'maxWakePerMinute', 'maxWakePerHour', 'noActionLimit', 'maxWakeConfigReminders', 'preSleepWaitMs']) {
-              if (merged.wake[k] !== undefined) {
-                const n = Number(merged.wake[k]);
-                merged.wake[k] = Number.isFinite(n) ? n : current.wake?.[k] ?? 0;
-                // 毫秒/次数类字段统一非负取整；概率字段单独 clamp。
-                if (k !== 'recommendedProbability') merged.wake[k] = Math.max(0, Math.round(merged.wake[k]));
-              }
-            }
-            if (merged.wake.recommendedProbability !== undefined) merged.wake.recommendedProbability = Math.min(1, Math.max(0, Number(merged.wake.recommendedProbability) || 0));
-            if (merged.wake.preSleepWaitEnabled !== undefined) merged.wake.preSleepWaitEnabled = merged.wake.preSleepWaitEnabled === true;
-            if (merged.wake.recommendedDefaultInfinite !== undefined) merged.wake.recommendedDefaultInfinite = merged.wake.recommendedDefaultInfinite === true;
-            if (merged.wake.recommendedPoke !== undefined) merged.wake.recommendedPoke = merged.wake.recommendedPoke === true;
-            if (merged.wake.recommendedKeywords !== undefined) {
-              merged.wake.recommendedKeywords = (Array.isArray(merged.wake.recommendedKeywords) ? merged.wake.recommendedKeywords : String(merged.wake.recommendedKeywords).split(/[,，\s]+/)).map(String).filter(Boolean);
-            }
-            if (merged.wake.defaultMode !== 'active') merged.wake.defaultMode = 'diving';
-            if (merged.wake.recommendedHint !== undefined) merged.wake.recommendedHint = String(merged.wake.recommendedHint ?? '');
-          }
-          // send：数值归一化
-          if (body.send && typeof body.send === 'object') {
-            merged.send = { ...(current.send ?? {}), ...body.send };
-            for (const k of ['burstMaxMessages', 'burstIntervalMinMs', 'burstIntervalMaxMs', 'longGapProbability', 'longGapMinMs', 'longGapMaxMs', 'maxSendPerMinute', 'maxSendPerHour', 'maxMessageChars', 'maxGapMs', 'gapBaseMs', 'gapPerCharMs']) {
-              if (merged.send[k] !== undefined) {
-                const n = Number(merged.send[k]);
-                merged.send[k] = Number.isFinite(n) ? n : current.send?.[k] ?? 0;
-                // 次数/毫秒/字符数统一非负取整；概率字段单独 clamp。
-                if (k !== 'longGapProbability') merged.send[k] = Math.max(0, Math.round(merged.send[k]));
-              }
-            }
-            if (merged.send.longGapProbability !== undefined) merged.send.longGapProbability = Math.min(1, Math.max(0, Number(merged.send.longGapProbability) || 0));
-            if (merged.send.burstEnabled !== undefined) merged.send.burstEnabled = merged.send.burstEnabled === true;
-            if (merged.send.recommendedHint !== undefined) merged.send.recommendedHint = String(merged.send.recommendedHint ?? '');
-          }
-          // wait：数值归一化
-          if (body.wait && typeof body.wait === 'object') {
-            merged.wait = { ...(current.wait ?? {}), ...body.wait };
-            for (const k of ['defaultMs', 'minMs', 'maxMs', 'defaultQuietMs', 'minQuietAfterNewMs']) {
-              if (merged.wait[k] !== undefined) {
-                const n = Number(merged.wait[k]);
-                merged.wait[k] = Number.isFinite(n) ? Math.max(0, Math.round(n)) : current.wait?.[k] ?? 5000;
-              }
-            }
-          }
-          // proactive：主动机会参数
-          if (body.proactive && typeof body.proactive === 'object') {
-            merged.proactive = { ...(current.proactive ?? {}), ...body.proactive };
-            for (const k of ['checkIntervalMinMs', 'checkIntervalMaxMs', 'idleThresholdMs', 'probability']) {
-              if (merged.proactive[k] !== undefined) {
-                const n = Number(merged.proactive[k]);
-                merged.proactive[k] = Number.isFinite(n) ? n : current.proactive?.[k] ?? 0;
-                // 毫秒类字段统一非负取整；概率字段单独 clamp。
-                if (k !== 'probability') merged.proactive[k] = Math.max(0, Math.round(merged.proactive[k]));
-              }
-            }
-            if (merged.proactive.enabled !== undefined) merged.proactive.enabled = merged.proactive.enabled === true;
-            if (merged.proactive.probability !== undefined) merged.proactive.probability = Math.min(1, Math.max(0, Number(merged.proactive.probability) || 0));
-          }
-          // sticker：表情包体系参数归一化
-          if (body.sticker && typeof body.sticker === 'object') {
-            merged.sticker = { ...(current.sticker ?? {}), ...body.sticker };
-            if (merged.sticker.enabled !== undefined) merged.sticker.enabled = merged.sticker.enabled === true;
-            for (const k of ['syncTtlMs', 'maxListCount', 'promptMaxStickers']) {
-              if (merged.sticker[k] !== undefined) {
-                const n = Number(merged.sticker[k]);
-                merged.sticker[k] = Number.isFinite(n) ? Math.max(0, Math.round(n)) : current.sticker?.[k] ?? 0;
-              }
-            }
-            if (merged.sticker.maxListCount !== undefined) merged.sticker.maxListCount = Math.min(500, Math.max(1, merged.sticker.maxListCount));
-            if (merged.sticker.promptMaxStickers !== undefined) merged.sticker.promptMaxStickers = Math.min(30, Math.max(1, merged.sticker.promptMaxStickers));
-            if (merged.sticker.includeInPrompt !== undefined) merged.sticker.includeInPrompt = merged.sticker.includeInPrompt === true;
-            if (body.sticker.collect && typeof body.sticker.collect === 'object') {
-              merged.sticker.collect = { ...(current.sticker?.collect ?? {}), ...body.sticker.collect };
-              if (merged.sticker.collect.enabled !== undefined) merged.sticker.collect.enabled = merged.sticker.collect.enabled === true;
-              for (const k of ['maxPerMinute', 'maxPerHour', 'maxRemarkChars']) {
-                if (merged.sticker.collect[k] !== undefined) {
-                  const n = Number(merged.sticker.collect[k]);
-                  merged.sticker.collect[k] = Number.isFinite(n) ? Math.max(0, Math.round(n)) : current.sticker?.collect?.[k] ?? 0;
-                }
-              }
-            }
-          }
-          // feedback：数值/布尔归一化
-          if (body.feedback && typeof body.feedback === 'object') {
-            merged.feedback = { ...(current.feedback ?? {}), ...body.feedback };
-            if (merged.feedback.maxLength !== undefined) {
-              const n = Number(merged.feedback.maxLength);
-              merged.feedback.maxLength = Number.isFinite(n) ? Math.max(1, Math.round(n)) : current.feedback?.maxLength ?? 500;
-            }
-            if (merged.feedback.notifyOwnerOnError !== undefined) merged.feedback.notifyOwnerOnError = merged.feedback.notifyOwnerOnError === true;
-          }
-          // context：数值归一化
-          if (body.context && typeof body.context === 'object') {
-            merged.context = { ...(current.context ?? {}), ...body.context };
-            for (const k of ['recentLimit', 'unreadLimit', 'contextWindow']) {
-              if (merged.context[k] !== undefined) {
-                const n = Number(merged.context[k]);
-                merged.context[k] = Number.isFinite(n) ? Math.max(1, Math.round(n)) : current.context?.[k] ?? 20;
-              }
-            }
-            for (const [name, fallback, min, max] of [['wakeMessageLimit', 12, 1, 100], ['wakeRecentLimit', 4, 0, 20], ['wakeMaxChars', 6000, 500, 20000]]) {
-              const n = Number(merged.context[name] ?? fallback);
-              merged.context[name] = Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
-            }
-            if (merged.context.inlineWakeMessages !== undefined) merged.context.inlineWakeMessages = merged.context.inlineWakeMessages === true;
-          }
-          if (merged.enabled !== undefined) merged.enabled = merged.enabled === true;
-          if (merged.provideRecommendations !== undefined) merged.provideRecommendations = merged.provideRecommendations === true;
-          if (merged.agentPreset !== undefined) merged.agentPreset = String(merged.agentPreset ?? '');
-          file.socialV2 = merged;
+          file.limits = { ...(file.limits ?? {}), send };
           atomicWriteJson(configFile, file);
-          cfg.socialV2 = { ...(cfg.socialV2 ?? {}), ...merged };
-          // 仅当“会影响默认唤醒配置”的字段变化时，才同步到仍使用默认配置的现有会话。
-          // 避免只改发送/等待/工具开关时，意外重置正在等待的潜水/唤醒计划。
-          const WAKE_DEFAULT_KEYS = [
-            'defaultMode', 'recommendedDefaultInfinite',
-            'recommendedSleepMinMs', 'recommendedSleepMaxMs',
-            'recommendedProbability', 'recommendedKeywords',
-            'recommendedAtMention', 'recommendedNameMention', 'recommendedQuestion', 'recommendedPoke',
-            'sleepMinMs', 'sleepMaxMs', 'batchWindowMs'
-          ];
-          const wakeDefaultChanged = body.wake && typeof body.wake === 'object' &&
-            WAKE_DEFAULT_KEYS.some((k) => Object.prototype.hasOwnProperty.call(body.wake, k));
-          if (wakeDefaultChanged) refreshAllDefaultWakeConfigsV2();
-          log('控制台：二代仿真配置已更新');
-          sendJson({ ok: true, config: cfg.socialV2 });
+          cfg.limits = { ...(cfg.limits ?? {}), send: { ...(cfg.limits?.send ?? {}), ...send } };
+          cfg.socialV2 = {
+            ...(cfg.socialV2 ?? {}),
+            send: { ...(cfg.socialV2?.send ?? {}), ...send },
+          };
+          log(`控制台：发言上限已更新（每分钟 ${send.maxSendPerMinute} / 每小时 ${send.maxSendPerHour}）`);
+          sendJson({ ok: true, send });
+          return;
+        }
+        // ── 全局配置：QQ 工具开关（系统层 tools） ─────────────────────────
+        if (req.method === 'GET' && url.pathname === '/api/config/tools') {
+          sendJson({ ok: true, tools: cfg.tools ?? {} });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/config/tools') {
+          const body = await readBody();
+          if (!body.tools || typeof body.tools !== 'object' || Array.isArray(body.tools)) {
+            sendJson({ ok: false, error: 'tools 必须是对象' }, 400);
+            return;
+          }
+          const next = { ...(cfg.tools ?? {}) };
+          for (const [key, value] of Object.entries(body.tools)) {
+            if (!(key in next)) { sendJson({ ok: false, error: `未知工具：${key}` }, 400); return; }
+            if (typeof value !== 'boolean') { sendJson({ ok: false, error: `工具 ${key} 必须是布尔值` }, 400); return; }
+            next[key] = value;
+          }
+          const configFile = path.join(ROOT, 'config.json');
+          const file = readConfigObject(configFile);
+          file.tools = { ...(file.tools ?? {}), ...next };
+          atomicWriteJson(configFile, file);
+          cfg.tools = next;
+          try { ext.audit.append('config.tools.write', { keys: Object.keys(body.tools) }); } catch {}
+          log(`控制台：工具开关已更新（${Object.keys(body.tools).length} 项）`);
+          sendJson({ ok: true, tools: next });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/activity') {
@@ -9625,7 +9555,7 @@ async function main() {
             isOwnerPrivateKey: ext.isOwnerPrivateKey,
             isTargetAllowed: (targetKey) => v2SessionAllowed(targetKey),
             // 默认关闭的风险工具：必须显式 true 才放行（不沿用 v2ToolEnabled 的「非 false 即开」）
-            enabled: cfg.socialV2?.tools?.ownerRelay === true,
+            enabled: cfg.tools?.ownerRelay === true,
             targetGroupId: body.targetGroupId,
             instruction: body.instruction,
             maxChars: relayCfg.maxChars,
@@ -9672,7 +9602,7 @@ async function main() {
             isOwnerPrivateKey: ext.isOwnerPrivateKey,
             isTargetAllowed: (targetKey) => v2SessionAllowed(targetKey),
             // 默认关闭的跨会话能力：必须显式 true 才放行
-            enabled: cfg.socialV2?.tools?.ownerGroupAccess === true,
+            enabled: cfg.tools?.ownerGroupAccess === true,
             targetGroupId,
           });
           if (!check.ok) {
@@ -9889,7 +9819,7 @@ async function main() {
               tokenOk: !!req.headers['x-agent-token'] && agentTokenOk(sourceKey, req.headers['x-agent-token']) && v2SessionAllowed(sourceKey),
               isOwnerPrivateKey: ext.isOwnerPrivateKey,
               isTargetAllowed: (k) => v2SessionAllowed(k),
-              enabled: cfg.socialV2?.tools?.ownerGroupAccess === true,
+              enabled: cfg.tools?.ownerGroupAccess === true,
               targetGroupId,
             });
             if (!check.ok) {
@@ -10886,16 +10816,16 @@ async function main() {
   //   maxPixels —— 单张图解码像素上限（防图片炸弹），与 DSH 的 64MP 默认一致。
   //   maxCount  —— 单条消息最多处理几张（防止一次 @ 带 20 张图把模型上下文撑爆）。
   const maxMediaBytesLimit = (() => {
-    const n = Number(cfg.socialV2?.media?.maxBytes);
+    const n = Number(cfg.media?.maxBytes);
     return Number.isFinite(n) && n > 0 ? Math.min(20 * 1024 * 1024, Math.max(256 * 1024, Math.round(n))) : 8 * 1024 * 1024;
   })();
   const MAX_MEDIA_COUNT = (() => {
-    const n = Number(cfg.socialV2?.media?.maxCount);
+    const n = Number(cfg.media?.maxCount);
     return Number.isFinite(n) && n > 0 ? Math.min(8, Math.max(1, Math.round(n))) : 5;
   })();
   const MAX_MEDIA_BYTES = maxMediaBytesLimit; // 单条消息图片总字节上限
   const MAX_MEDIA_PIXELS = (() => {
-    const n = Number(cfg.socialV2?.media?.maxPixels);
+    const n = Number(cfg.media?.maxPixels);
     return Number.isFinite(n) && n > 0 ? Math.min(64_000_000, Math.max(1_000_000, Math.round(n))) : 64_000_000;
   })(); // 单张图片像素上限，防止“图片炸弹”解码拖垮 DSH
   const MAX_MEDIA_STORE_PER_KEY = 500; // 每个会话最多缓存多少条消息的媒体元数据，防止无限增长

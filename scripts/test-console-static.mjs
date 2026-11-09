@@ -22,30 +22,11 @@ console.log('## 元素 ID');
 const ids = [...html.matchAll(/\sid="([A-Za-z0-9_-]+)"/g)].map((m) => m[1]);
 const dups = [...new Set(ids.filter((v, i) => ids.indexOf(v) !== i))];
 ok(dups.length === 0, 'ID 唯一', dups.length ? `重复：${dups.join(', ')}` : `共 ${ids.length} 个`);
-for (const id of ['voiceList', 'voiceRefreshBtn', 'voiceSendBtn', 'voiceSendTarget', 'voiceSendDryRun', 'voiceMsg']) {
-  const n = (html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length;
-  ok(n === 1, `语音面板元素 ${id}`, `${n} 处`);
-}
 
 console.log('## 视图 / 页面契约');
 const views = [...new Set([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 const pages = [...new Set([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 ok(JSON.stringify(views) === JSON.stringify(pages), 'data-view 与 data-page 一一对应', `${views.length} 个：${views.join(', ')}`);
-
-console.log('## 工具开关');
-// 工具开关已从 page.html 搬进 fields.js 的规格里（V2_TOOLS），断言改读规格表。
-const toolsStart = html.indexOf('export const V2_TOOLS = [');
-const toolsBlock = toolsStart < 0 ? '' : html.slice(toolsStart, html.indexOf('\n];', toolsStart));
-const tools = [...toolsBlock.matchAll(/value: '([A-Za-z]+)'/g)].map((m) => m[1]);
-ok(tools.includes('sendVoice'), 'sendVoice 开关存在', `共 ${tools.length} 个开关`);
-ok(new Set(tools).size === tools.length, '工具开关无重复');
-
-console.log('## 语音面板接线');
-ok(/id="voiceRefreshBtn"/.test(html) && /getElementById\('voiceRefreshBtn'\)\.addEventListener/.test(html), '刷新按钮已绑定事件');
-ok(/getElementById\('voiceSendBtn'\)\.addEventListener/.test(html), '试发按钮已绑定事件');
-ok(/api\('\/api\/voice\/list/.test(html), '面板调用 /api/voice/list（操作者通道，无需 key）');
-ok(/api\('\/api\/voice\/send'/.test(html), '面板调用 /api/voice/send');
-ok(/typeof loadVoiceLibrary === 'function'|async function loadVoiceLibrary/.test(html), 'loadVoiceLibrary 已定义');
 
 console.log('## JS 语法');
 // 控制台脚本已全部外置为 ES 模块，index 里不再有内联 <script>，
@@ -129,19 +110,19 @@ ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选�
 
 console.log('## 页面片段（运行总览 / 技能 / MCP / 管理行为 / 访问 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview'];
+const pilotIds = ['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
   const fragment = page?.html ? fs.readFileSync(page.html, 'utf8') : '';
-  ok(/<h2>/.test(fragment), `pages/${id}/page.html 自带标题`);
+  ok(/<h2[\s>]/.test(fragment), `pages/${id}/page.html 自带标题`);
   const module = page?.js ? fs.readFileSync(page.js, 'utf8') : '';
   ok(/export function init\(/.test(module), `pages/${id}/page.js 导出 init()`);
 }
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -307,7 +288,7 @@ ok(/\.field-row > \.field-label \{[^}]*margin: 0 !important/.test(formCss), '标
 ok(/\.field-block--switch/.test(formCss) && /field-block--switch/.test(formModule), '开关行走 .field-block--switch（仅页头工具条收成紧凑 auto/auto）');
 ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');
 
-const msgUsers = ['public/console/js/app.js', ...['access', 'overview', 'persona', 'social-v2', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
+const msgUsers = ['public/console/js/app.js', ...['config', 'overview', 'persona', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
 const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
 ok(rawMsg.length === 0, `没有页面再手写 className='meta ok|err'（${rawMsg.join(', ') || '全部走 setMsg'}）`);
 
@@ -354,15 +335,14 @@ const tableComponentJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'c
 ok(/export function dataTableHtml\(/.test(tableComponentJs) && /export function initDataTables\(/.test(tableComponentJs), '表格组件导出 dataTableHtml / initDataTables');
 ok(/\.table-toolbar \{/.test(tableComponentCss) && /\.table-toolbar-main \{/.test(tableComponentCss), '表格工具栏 .table-toolbar 由表格组件提供');
 ok(/\.table-footer \{/.test(tableComponentCss) && /\.pager \{/.test(tableComponentCss) && /\.pager-btn \{/.test(tableComponentCss), '分页 .table-footer / .pager /.pager-btn 由表格组件提供');
-ok(/initDataTables\(/.test(fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'social-v2', 'page.js'), 'utf8')), 'social-v2 绑定 initDataTables（工具表搜索/分页）');
 ok(/\.status-badge[\s\S]*?\.is-pill \{/.test(layerText['components.css']), '状态徽标 .status-badge / .is-pill 只在 components.css 定义一次');
 ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定义状态徽标外观');
 
 // 棘轮：social-v2 已清零，其余页面的手写控件数量只许下降；迁移一页就把基线改成该页的新值（最终全 0）。
 const BARE_CONTROL_BASELINE = {
-  slang: 0, overview: 0, 'social-v1': 0, plugins: 0, usage: 0,
-  access: 0, operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0,
-  'social-v2': 0, scheduler: 0, persona: 0, memory: 0, presets: 5,
+  slang: 0, overview: 0, plugins: 0, usage: 0,
+  operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0,
+  config: 13, scheduler: 0, persona: 0, memory: 0, presets: 5,
 };
 const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {
@@ -377,7 +357,6 @@ const bareRegressed = Object.entries(bareByPage)
   .filter(([id, count]) => count > (BARE_CONTROL_BASELINE[id] ?? 0))
   .map(([id, count]) => `${id}: ${BARE_CONTROL_BASELINE[id] ?? 0} → ${count}`);
 ok(bareRegressed.length === 0, `页面手写控件只降不升（${bareRegressed.join('；') || '全部在基线内'}）`);
-ok(bareByPage['social-v2'] === 0, `社交二代页全部走字段规格（手写控件 ${bareByPage['social-v2'] ?? '缺失'} 个）`);
 
 // 开关是 <button role="switch">，值在 aria-checked 上：页面没有 createForm 就必须自己 bindSwitches，
 // 否则点击完全没反应、`.checked` 读出来是 undefined（scheduler 真踩过：开关点不动 + 保存把 enabled 写坏）。

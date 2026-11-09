@@ -19,6 +19,7 @@ else { initDateFields(); initTimeFields(); }
 /** 页面元数据：[标题, 大标题, 说明]。新增页面必须同时加进 #mainNav 的 data-view。 */
 export const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
+  config: ['全局配置', '把工具与能力，装进一套配置。', '运行模式、安全与静默、准入、行为档案与系统能力收在一页；预设页只保留预设本体。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
@@ -26,13 +27,10 @@ export const consolePages = {
   presets: ['预设', '把工具与能力，装进一套配置。', '编辑 DSH 预设的元数据、扩展授权与 YAML；保存源文件后点「应用」才会 build 并安装。'],
   mcp: ['MCP 与工具', '把外部能力，接成标准接口。', '查看桥接内置 MCP 的真实工具清单，并在本页管理外部 MCP；工具参考已并入本页。'],
   behaviors: ['管理行为', '命令与工具，一处看清。', '按注册表查看桥接命令（含迁移状态），并只读列出 DSH 会话命令与 Agent 工具。'],
-  'social-v2': ['二代仿真', '自主参与，恰到好处。', '管理 AI 的工具、唤醒与发言节奏。展开需要调整的分组，修改后保存参数。'],
-  'social-v1': ['一代仿真', '为自然对话，设定合适的节奏。', '调整参与概率、活跃周期和分条发送；所有配置项完整保留。'],
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
   memory: ['记忆', '记住该记的，忘掉该忘的。', '选择注入源、管理记忆 provider 预算与本机轻量记忆，查看最近注入与主动回忆，并决定是否把对话写回记忆服务。'],
   scheduler: ['定时任务', '到点的事，交给桥接记着。', '按时区和规则定时发消息，或叫 AI 到点来说；可以发给管理员私聊、白名单好友和群。'],
   usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
-  access: ['访问与安全', '明确边界，安心连接。', '管理允许对话的对象、管理员权限与控制台访问凭证。'],
   operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
 };
 
@@ -41,7 +39,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'access', 'social-v2', 'social-v1', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

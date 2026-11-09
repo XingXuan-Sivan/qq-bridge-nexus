@@ -44,8 +44,9 @@ test('cordis.patch.yml 的 entry id 恰好等于命名空间名', () => {
 });
 
 test('Config 是可用的 schemastery schema，且带 volatile 字段', () => {
-  const resolved = mod.Config({});
-  assert.equal(resolved.mode, 'reserved2', 'Config 默认 mode 应为 reserved2');
+  // @deepseek-ai/schemastery 的 Schema 在调用时返回的是**字段节点对象**，不是解析后的值；
+  // 默认值/volatile 都挂在节点 meta 上。直接读 meta，别再把节点当普通对象断言。
+  assert.equal(mod.Config.dict.mode.meta.default, 'reserved2', 'Config 默认 mode 应为 reserved2');
 
   // ③ volatile 标记。注意 schemastery 的 toJSON() 是**引用表**形状：
   //    顶层可能是 { uid, refs: { '<uid>': <node> } }，真正的 dict/字段在 refs 里，
@@ -67,7 +68,7 @@ test('Config 是可用的 schemastery schema，且带 volatile 字段', () => {
 
 test('schema 接受全部规范/历史 mode 拼写，拒绝非法值', () => {
   for (const mode of ['chat', 'closed-agent', 'reserved', 'reserved2', 'simulation']) {
-    assert.equal(mod.Config({ mode }).mode, mode, `${mode} 应被接受`);
+    assert.doesNotThrow(() => mod.Config({ mode }), `${mode} 应被接受`);
   }
   assert.throws(() => mod.Config({ mode: 'bogus' }), '非法 mode 必须被拒绝');
 });

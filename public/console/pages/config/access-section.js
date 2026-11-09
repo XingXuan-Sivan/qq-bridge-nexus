@@ -2,7 +2,7 @@ import { api } from '../../js/api.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
-import { ACCESS_FIELDS } from './fields.js';
+import { ACCESS_FIELDS } from './access-fields.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -160,7 +160,7 @@ async function changeConsoleToken(generate) {
 export function init() {
   // 先渲染字段规格，下面所有 $('…') 才取得到节点；开关的点击委托也要在这个范围内显式绑。
   renderAccessFieldGroups();
-  bindSwitches(document.getElementById('section-access'));
+  bindSwitches(document.getElementById('section-config'));
   $('wlSave').addEventListener('click', async () => {
     const r = await api('/api/whitelist', 'POST', {
       ownerQQ: $('ownerQQ').value.trim(),
@@ -221,5 +221,5 @@ export function init() {
   refreshWhitelist().catch(() => {});
   loadSecurity();
   // 重新进入本页时再读一次安全状态（state/ 权限可能刚被外部命令修好）。
-  onPageRefresh('access', () => loadSecurity());
+  onPageRefresh('config', () => loadSecurity());
 }

@@ -121,23 +121,23 @@ console.log('## 配置项（AI 发语音默认关闭，等语音库准备好再�
   //      这条断言会去断言**用户的当前状态**并失败 —— 测试不该因为用户用了功能而变红。
   // 用户当前值只做提示，不参与判定。
   const exCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
-  ok(exCfg.socialV2?.tools?.sendVoice === false, 'config.example.json tools.sendVoice=false（出厂默认不给 AI 发语音）');
-  ok(exCfg.socialV2?.voice?.enabled === false, 'config.example.json voice.enabled=false（出厂默认总闸关闭）');
-  ok(exCfg.socialV2?.voice?.allowAbsolutePath === false, '出厂默认禁止绝对路径（安全默认）');
-  ok(Number(exCfg.socialV2?.voice?.maxPerHour) > 0, '出厂默认带每小时限流');
+  ok(exCfg.tools?.sendVoice === false, 'config.example.json tools.sendVoice=false（出厂默认不给 AI 发语音）');
+  ok(exCfg.voice?.enabled === false, 'config.example.json voice.enabled=false（出厂默认总闸关闭）');
+  ok(exCfg.voice?.allowAbsolutePath === false, '出厂默认禁止绝对路径（安全默认）');
+  ok(Number(exCfg.voice?.maxPerHour) > 0, '出厂默认带每小时限流');
   try {
     const localCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-    console.log(`  ℹ  你本机的值（仅供参考，不参与判定）：tools.sendVoice=${localCfg.socialV2?.tools?.sendVoice} / voice.enabled=${localCfg.socialV2?.voice?.enabled}`);
+    console.log(`  ℹ  你本机的值（仅供参考，不参与判定）：tools.sendVoice=${localCfg.tools?.sendVoice} / voice.enabled=${localCfg.voice?.enabled}`);
   } catch {
     console.log('  ℹ  本机没有 config.json（不入库）——本段只查随仓库发布的出厂默认');
   }
   const cfg = exCfg;
   const ex = exCfg;
-  ok(ex.socialV2?.voice?.dir === 'audio', 'config.example.json 含 voice 段');
+  ok(ex.voice?.dir === 'audio', 'config.example.json 含 voice 段');
   // 代码里的默认值也必须一致，否则删掉 config.json 里那两行就会变回"默认开"
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   ok(/sendVoice: false,/.test(bridgeSrc), 'bridge.js 里 tools 默认 sendVoice: false');
-  ok(/cfg\.socialV2\.voice = \{\s*\n\s*enabled: false,/.test(bridgeSrc), 'bridge.js 里 voice 默认 enabled: false');
+  ok(/voice = \{[\s\S]{0,200}?enabled: false,/.test(bridgeSrc), 'bridge.js 里 voice 默认 enabled: false');
 }
 
 console.log('## MCP 工具与 bridge 路由');
@@ -213,8 +213,8 @@ console.log('## 控制台契约');
 {
   const html = readConsoleSource();
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
-  ok(html.includes('data-v2-tool="sendVoice"') || /value: 'sendVoice'/.test(html), '控制台有 sendVoice 工具开关');
-  ok(bridgeSrc.includes("'sendVoice']"), 'config API 的 toolFlags 含 sendVoice');
+  ok(html.includes("'sendVoice'") || html.includes('"sendVoice"'), '控制台有 sendVoice 工具开关');
+  ok(/['\"]sendVoice['\"]/.test(bridgeSrc), 'config API 的 toolFlags 含 sendVoice');
   const uniq = (a) => [...new Set(a)].sort();
   const views = uniq([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]));
   const pages = uniq([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]));

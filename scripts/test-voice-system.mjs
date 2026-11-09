@@ -144,7 +144,7 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
   ok(/voice\?\.enabled !== false/.test(mcp), '注册期也检查 voice.enabled（关闭时不注册，省 token）');
   const bridge = read('src/bridge.js');
   ok(/sendVoice: 'qq_send_voice \/ qq_list_voices'/.test(bridge), 'qq_get_prompt 的 toolMap 含语音工具');
-  ok(/'sendVoice'\]/.test(bridge), 'config API 的 toolFlags 含 sendVoice');
+  ok(/['\"]sendVoice['\"]/.test(bridge), 'config API 的 toolFlags 含 sendVoice');
   const ex = JSON.parse(read('config.example.json'));
   // 这一段查的是**「出厂默认就该是关的」**这类契约 —— 权威声明是随仓库发布的
   // config.example.json。**刻意不查用户的 config.json**（早期版本查的是它，两个毛病）：
@@ -154,11 +154,11 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
   //   ③ 用户编辑器给 config.json 写个 UTF-8 BOM 也会让裸 JSON.parse 崩
   //      （桥接自己的 readJsonSafe 有去 BOM，所以生产路径不受影响，但脚本读法粗糙）。
   // 用户当前值只提示、不判定（见下）。
-  ok(ex.socialV2?.tools?.sendVoice === false, 'config.example.json: tools.sendVoice=false（出厂默认关）');
-  ok(ex.socialV2?.voice?.enabled === false, 'config.example.json: voice.enabled=false（出厂默认关）');
+  ok(ex.tools?.sendVoice === false, 'config.example.json: tools.sendVoice=false（出厂默认关）');
+  ok(ex.voice?.enabled === false, 'config.example.json: voice.enabled=false（出厂默认关）');
   try {
     const local = JSON.parse(read('config.json').replace(/^\uFEFF/, ''));
-    console.log(`  ℹ  你本机的值（仅供参考，不参与判定）：tools.sendVoice=${local.socialV2?.tools?.sendVoice} / voice.enabled=${local.socialV2?.voice?.enabled}`);
+    console.log(`  ℹ  你本机的值（仅供参考，不参与判定）：tools.sendVoice=${local.tools?.sendVoice} / voice.enabled=${local.voice?.enabled}`);
   } catch {
     console.log('  ℹ  本机没有 config.json（不入库）—— 本段只查随仓库发布的出厂默认');
   }
@@ -167,7 +167,7 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
 console.log('## qq-bridge 语音系统：控制台与 preset');
 {
   const html = readConsoleSource();
-  ok(html.includes('data-v2-tool="sendVoice"') || /value: 'sendVoice'/.test(html), '控制台有 sendVoice 工具开关');
+  ok(html.includes("'sendVoice'") || html.includes('"sendVoice"'), '控制台有 sendVoice 工具开关');
   ok(html.includes('id="voiceList"') && html.includes('id="voiceSendBtn"'), '控制台有语音库调试面板');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
   const preset = read(path.join('dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'));

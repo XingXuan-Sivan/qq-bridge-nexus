@@ -1,8 +1,8 @@
 # 全局配置：三层模型与配置归一化方案
 
-> 状态：**方案稿，未实施**（2026-11-09）。
-> 本文只回答“配置放在哪、属于谁、以后怎么改”，不包含代码改动。等编辑器方案拍板、用户批准后再分批动工。
-> 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12。
+> 状态：**G1–G3 已实施；G4–G5 待做**（2026-11-09）。
+> G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页已提交；G4 动态 picker / CM6 / 统一 `yaml` 与 G5 收尾待做。
+> 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.14。
 
 ## 0. 结论
 
@@ -498,6 +498,8 @@ behaviorKind  = behavior.kind
 | G3 | 全局配置页（运行/安全/准入/行为档案/工具语音）+ 删除旧三页 | static/UI/audit，真机无旧入口 |
 | G4 | 预设页动态 picker + 统一代码编辑器 + YAML Document | 注释保留测试、保存/应用/回滚 |
 | G5 | 文档/STATUS/配置说明收尾 | 提交、工作区干净 |
+
+状态：G1 `f75949e`、G2 `4ace129`、G3 已实现并真机验收；G4/G5 未开始。G3 的验收证据见 `docs/STATUS.md` 6.14。
 
 ## 11. 已拍板（2026-11-09，m31268）
 

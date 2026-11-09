@@ -286,5 +286,6 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
   // 交接开关已从二代工具开关收进记忆页（memory.handover.enabled），原处不再留入口。
   assert.ok(!/handoverMemory/.test(html), '二代工具开关里不再有 handoverMemory');
   assert.match(html, /name: 'memHandover'/, '记忆页有交接开关');
-  assert.match(html, /(data-v2-tool="schedule"|value: 'schedule')/, '定时任务工具也有开关');
+  // 工具权限已从「二代工具开关」迁到预设授权；G3 阶段工具分区先占位，G4 再接动态 picker。
+  assert.match(html, /data-config-section="tools"/, '全局配置页有工具分区');
 });

@@ -367,6 +367,36 @@ MCP 删除回归新增了一条 `DELETE /api/extensions/mcp/test-ext`，`test-co
 
 **规则**：结构化保存必须在写盘前保留一段固定说明头（`src/presets/store.mjs` 的 `writeExtensions` 已加「扩展授权：由控制台预设编辑器维护…」），并在验收时 `git diff` 看格式变化；需要逐字节保留注释就只能走 YAML 原文编辑或 CST，不要假装结构化保存无损。
 
+### 1.63 删页不是只删目录：路由、静态基线和 legacy ID 会同时失配
+
+G3 删除 `access`/`social-v1`/`social-v2` 后，`test-console-ui` 连续报旧 ID 缺失、导航超时和 `Duplicate DOM IDs`（总 701、唯一 692）。重复 ID 来自 sessions 页仍挂着全局准入宿主，和 config 页的同一组 ID 同时渲染。
+
+**规则**：删页要同时改 `router.js` 的 `consolePages`/`PAGE_FRAGMENTS`、`index.html` 的 nav/section、`BARE_CONTROL_BASELINE`、`pilotIds`、`console-ui-retired-ids.json` 与所有旧契约；删除跨页共享块时先找它的所有宿主，再用真实全页 `[id]` 统计确认唯一，不要只看单页。
+
+### 1.64 `cfg.socialV2` 是行为视图，不是系统配置袋
+
+行为档案迁移后，`cfg.socialV2` 只代表当前会话的 v2 行为视图；`tools`/`voice`/`media`/`limits` 等系统键在 `cfg.*`。旧测试 fixture 仍传 `config.socialV2.tools`/`.sticker`，会在 `cfg.socialV2` 视图中读不到并报 `Cannot read properties of undefined`。
+
+**规则**：系统级开关走 `config.tools`/`config.voice`/`config.media`/`config.limits`；行为参数走 `behavior.v2`。测试夹层要显式分两处传，不能再用一个 `socialV2` 对象兜所有。
+
+### 1.65 行为视图的返回形状必须同时带 `.config` 与 `.v1/.v2`
+
+`normalizeBehavior` 一开始只返回 `.config`，桥接按 `.v1/.v2` 取行为体，结果行为被静默忽略、配置看着成功但完全没生效。修复为同时返回 `{ ..., config, [kind]: config }` 后才恢复。
+
+**规则**：新增“归一化视图”时先确认所有消费方读哪个键；保留一层兼容别名可以，但必须有测试直接断言生效值，不能只看保存 200。
+
+### 1.66 npm 安装会覆盖 SnowLuma SDK 的 ESM 扩展名补丁
+
+`@snowluma/sdk` 1.14.22 的 dist 相对 import 缺 `.js`，桥接启动会 `ERR_MODULE_NOT_FOUND`。补丁脚本 `_patch-sdk.mjs` 修好 13 个文件，但任何 `npm install` 都可能把包还原；之后再重启桥接就会挂。
+
+**规则**：安装依赖后若涉及 SDK，先跑 `_patch-sdk.mjs` 并 `import('@snowluma/sdk')` 验证，再重启桥接；不要把补丁后的 `node_modules` 当成持久状态。
+
+### 1.67 中文 YAML 不要用 PowerShell 写
+
+用 PowerShell 重写 `config/behaviors/default-v2.yml` 时出现中文乱码与换行粘连，YAML 解析后 `send` 段直接缺失。改用文件写入工具写干净 UTF-8 并校验字段值后才恢复。
+
+**规则**：含中文的 YAML/JSON/源码统一走 read/write/edit 工具；PowerShell 只做只读查看或 ASCII 配置，不用于重写文本。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

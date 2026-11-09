@@ -31,7 +31,7 @@ test('合法值原样使用；越界按 256KB / 40MB 截断；小数取整（saf
 test('桥接接线：发送与收藏表情用表情上限；图片识别与 qq_get_sticker_image 用 socialV2.media 上限', () => {
   const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
   assert.match(src, /const MAX_MEDIA_BYTES = maxMediaBytesLimit;/, '图片识别上限来自 socialV2.media.maxBytes（r4）');
-  assert.match(src, /cfg\.socialV2\?\.media\?\.maxBytes[\s\S]{0,200}: 8 \* 1024 \* 1024/, '图片识别默认 8MB（r4）');
+  assert.match(src, /cfg\.media\?\.maxBytes[\s\S]{0,200}: 8 \* 1024 \* 1024/, '图片识别默认 8MB（r4）');
   assert.match(src, /image = await safeFetchBuffer\(url, stickerMaxBytes\(cfg\)\);/, '发送收藏表情用表情上限');
   assert.match(src, /fetchOneBotImage\(media, \{ maxBytes: stickerMaxBytes\(cfg\) \}\)/, '收藏图片表情用表情上限');
   assert.match(src, /fetchFaceMedia\(media, \{ maxBytes: stickerMaxBytes\(cfg\) \}\)/, '收藏 QQ 表情用表情上限');
@@ -49,6 +49,8 @@ test('示例配置、桥接内置默认值与模块默认值一致', () => {
   const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
   assert.equal((src.match(/maxBytes: 10 \* 1024 \* 1024,/g) ?? []).length, 2, 'bridge.js 的两处表情默认值都是 10MB');
   const ex = JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'), 'utf8'));
-  assert.equal(ex.socialV2.sticker.maxBytes, DEFAULT_STICKER_MAX_BYTES);
+  assert.ok(!('socialV2' in ex), '示例配置不再包含 socialV2');
+  const behavior = fs.readFileSync(path.join(root, 'config', 'behaviors', 'default-v2.yml'), 'utf8');
+  assert.match(behavior, /maxBytes:\s*10485760/, '默认 v2 行为档案的表情上限是 10MB');
   assert.equal(stickerMaxBytes(ex), DEFAULT_STICKER_MAX_BYTES);
 });

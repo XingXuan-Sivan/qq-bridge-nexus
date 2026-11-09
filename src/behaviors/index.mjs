@@ -135,6 +135,61 @@ export function resolveBehavior(behaviors, behaviorId, { presetId = '' } = {}) {
   return behavior;
 }
 
+function behaviorFile(root, id) {
+  const value = String(id ?? '').trim();
+  if (!ID_RE.test(value)) throw new Error(`behavior id 不合法：${value}`);
+  return path.join(root, `${value}.yml`);
+}
+
+export function listBehaviorFiles({ root } = {}) {
+  if (!fs.existsSync(root)) throw new Error(`行为档案目录不存在：${root}`);
+  return fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
+    .map((entry) => {
+      const id = entry.name.replace(/\.ya?ml$/i, '');
+      const text = fs.readFileSync(path.join(root, entry.name), 'utf8').replace(/^\uFEFF/, '');
+      let parsed = null;
+      try { parsed = normalizeBehavior(id, YAML.parse(text)); } catch {}
+      return { id, file: entry.name, label: parsed?.label ?? '', kind: parsed?.kind ?? '', valid: !!parsed };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function readBehaviorFile({ root, id } = {}) {
+  const file = behaviorFile(root, id);
+  if (!fs.existsSync(file)) throw new Error(`行为档案不存在：${id}`);
+  return { id: String(id), text: fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '') };
+}
+
+/** 原样保存 YAML，保存前按行为档案 schema 校验；不重排文本，注释保留。 */
+export function validateBehaviorText({ id, text } = {}) {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  if (!source.trim()) throw new Error('YAML 不能为空');
+  let raw;
+  try { raw = YAML.parse(source); } catch (error) { throw new Error(`YAML 解析失败：${error?.message ?? error}`); }
+  return normalizeBehavior(String(id), raw);
+}
+
+export function writeBehaviorFile({ root, id, text } = {}) {
+  const file = behaviorFile(root, id);
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  if (!source.trim()) throw new Error('YAML 不能为空');
+  let raw;
+  try { raw = YAML.parse(source); } catch (error) { throw new Error(`YAML 解析失败：${error?.message ?? error}`); }
+  const normalized = normalizeBehavior(String(id), raw);
+  fs.mkdirSync(root, { recursive: true });
+  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  fs.mkdirSync(backupRoot, { recursive: true });
+  if (fs.existsSync(file)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(file, path.join(backupRoot, `${stamp}.yml`));
+  }
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(temp, source, 'utf8');
+  fs.renameSync(temp, file);
+  return { id: String(id), behavior: normalized, text: source };
+}
+
 export function behaviorSummary(behavior) {
   if (!behavior) return '';
   return `${behavior.label}（${behavior.kind}）`;

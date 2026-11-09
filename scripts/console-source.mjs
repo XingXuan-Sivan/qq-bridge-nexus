@@ -63,11 +63,20 @@ export function consolePageDirs(root = ROOT) {
     .map((id) => {
       const dir = path.join(pagesDir, id);
       const pick = (name) => (fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
-      return { id, dir, html: pick('page.html'), css: pick('page.css'), js: pick('page.js'), fields: pick('fields.js') };
+      // 一个页面可以拆成多个模块（例如 config/tools-section.js、config/access-section.js）；
+      // 静态断言按整个页面源码匹配，必须把它们一并纳入，否则新模块对测试不可见。
+      let scripts = [];
+      try {
+        scripts = fs.readdirSync(dir)
+          .filter((name) => name.endsWith('.js'))
+          .sort()
+          .map((name) => path.join(dir, name));
+      } catch {}
+      return { id, dir, html: pick('page.html'), css: pick('page.css'), js: pick('page.js'), fields: pick('fields.js'), scripts };
     });
 }
 
-/** 拼接顺序：index.html → css/{tokens,base,layout,components} → js/（app.js 优先）→ pages/<id>/{page.html,page.css,page.js}。 */
+/** 拼接顺序：index.html → css/{tokens,base,layout,components} → js/（app.js 优先）→ pages/<id>/{page.html,page.css,page.js,其余 .js,fields.js}。 */
 export function readConsoleSource(root = ROOT) {
   const paths = consoleSourcePaths(root);
   const read = (file, label) => {
@@ -79,8 +88,9 @@ export function readConsoleSource(root = ROOT) {
   const styles = [...paths.css, ...componentFiles.css].map((file) => read(file, path.relative(paths.dir, file)));
   const scripts = [...consoleScriptPaths(root), ...componentFiles.js].map((file) => read(file, path.basename(file)));
   // fields.js 是「字段规格」而非页面逻辑：控件已经搬进规格文件，静态断言必须能读到它。
-  const pages = consolePageDirs(root).flatMap((page) => [page.html, page.css, page.js, page.fields]
-    .filter(Boolean)
-    .map((file) => read(file, path.relative(paths.dir, file))));
+  const pages = consolePageDirs(root).flatMap((page) => {
+    const files = [page.html, page.css, page.js, ...(page.scripts ?? []), page.fields].filter(Boolean);
+    return [...new Set(files)].map((file) => read(file, path.relative(paths.dir, file)));
+  });
   return [read(paths.index, 'index.html'), ...styles, ...scripts, ...pages].join('\n');
 }

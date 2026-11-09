@@ -24,7 +24,10 @@ function call(port, pathname, { method = 'GET', headers = {}, body } = {}) {
 }
 
 test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了马上生效', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { send: { maxSendPerMinute: 2, maxSendPerHour: 60, burstIntervalMinMs: 0, burstIntervalMaxMs: 0, longGapProbability: 0, gapBaseMs: 0, gapPerCharMs: 0 } } } });
+  const h = await bridgeHarness({
+    config: { limits: { send: { maxSendPerMinute: 2, maxSendPerHour: 60 } } },
+    behavior: { v2: { send: { burstIntervalMinMs: 0, burstIntervalMaxMs: 0, longGapProbability: 0, gapBaseMs: 0, gapPerCharMs: 0 } } },
+  });
   h.setMode('reserved2');
   const server = h.startConsoleServer();
   if (!server.listening) await new Promise((r) => server.once('listening', r));
@@ -48,9 +51,9 @@ test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了�
     const asAgent = await call(port, '/api/status', { headers: { 'x-agent-call': '1', 'x-agent-token': token } });
     assert.equal(asAgent.json.sendLimit, undefined, 'AI 拿不到这份状态');
 
-    const saved = await call(port, '/api/socialV2/config', { method: 'POST', body: { send: { maxSendPerMinute: 10, maxSendPerHour: 100 } } });
+    const saved = await call(port, '/api/config/send-limit', { method: 'POST', body: { maxSendPerMinute: 10, maxSendPerHour: 100 } });
     assert.equal(saved.status, 200, saved.body);
-    assert.equal(saved.json.config.send.maxSendPerMinute, 10);
+    assert.equal(saved.json.send.maxSendPerMinute, 10);
     assert.notEqual((await send('五')).status, 429, '改了上限马上生效');
   } finally {
     await new Promise((r) => server.close(r));
@@ -58,12 +61,9 @@ test('① 被发言上限拦下：AI 知道原因、控制台看得见、改了�
   }
 });
 
-test('② 控制台：总览页有「发言上限」卡片', () => {
+test('② 控制台：全局配置页有「发言上限」分组', () => {
   const html = readConsoleSource();
-  const sec = html.slice(html.indexOf('<section id="section-sendlimit"'), html.indexOf('</section>', html.indexOf('<section id="section-sendlimit"')));
-  // 控件已搬进 pages/overview/fields.js：卡片里只剩宿主 div，控件 id 要在整份控制台源码里找。
-  // 工厂生成的控件只有 `name: 'x'`（渲染时才变成 id），手写 HTML 里的才是 `id="x"`。
-  assert.match(sec, /data-overview-fields="sendLimit"/);
+  assert.match(html, /data-overview-fields="sendLimit"/);
   const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
   for (const id of ['sendLimitMin', 'sendLimitHour', 'sendLimitSave', 'sendLimitHits']) assert.ok(hasId(id), id);
   assert.match(html, /renderSendLimitHits\(s\.sendLimit\)/, '状态刷新时显示被拦次数');

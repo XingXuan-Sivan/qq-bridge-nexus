@@ -31,6 +31,7 @@
     <nav id="mainNav">
       <div class="nav-label">工作空间</div>
       <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
+      <button data-view="config" class="nav-item"><span class="nav-icon" aria-hidden="true">⚙</span>全局配置</button>
       <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount" hidden></span></button>
       <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>
       <div class="nav-label">扩展</div>
@@ -40,14 +41,11 @@
       <button data-view="mcp" class="nav-item"><span class="nav-icon" aria-hidden="true">⇄</span>MCP</button>
       <button data-view="behaviors" class="nav-item"><span class="nav-icon" aria-hidden="true">⌥</span>管理行为</button>
       <div class="nav-label">聊天行为</div>
-      <button data-view="social-v2" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>二代仿真<span class="nav-note">V2</span></button>
-      <button data-view="social-v1" class="nav-item"><span class="nav-icon" aria-hidden="true">◇</span>一代仿真<span class="nav-note">V1</span></button>
       <button data-view="slang" class="nav-item"><span class="nav-icon" aria-hidden="true">▤</span>黑话词库</button>
       <button data-view="memory" class="nav-item"><span class="nav-icon" aria-hidden="true">◍</span>记忆</button>
       <button data-view="scheduler" class="nav-item"><span class="nav-icon" aria-hidden="true">◷</span>定时任务</button>
       <div class="nav-label">管理</div>
       <button data-view="usage" class="nav-item"><span class="nav-icon" aria-hidden="true">◧</span>令牌与花费</button>
-      <button data-view="access" class="nav-item"><span class="nav-icon" aria-hidden="true">⊙</span>访问与安全</button>
       <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
     </nav>
     <div class="sidebar-bottom"><span class="local-dot"></span>本地控制台<small>QQ ↔ DeepSeek Harness</small></div>
@@ -63,7 +61,8 @@
       </div>
       <div id="connectionAlert" class="connection-alert" role="alert" hidden></div>
       <div class="grid">
-        <section id="section-overview" data-page="overview" class="page-stack"><!-- 片段：pages/overview/page.html（摘要指标 / 运行模式 / 活动日志 / 发言上限 / 定时静默 / DSH 模型） --></section>
+        <section id="section-overview" data-page="overview" class="page-stack"><!-- 片段：pages/overview/page.html（摘要指标 / 活动日志） --></section>
+<section id="section-config" data-page="config" class="page-stack"><!-- 片段：pages/config/page.html（全局配置六分区） --></section>
 <section id="section-sessions" data-page="sessions" class="page-stack"><!-- 片段：pages/sessions/page.html（会话映射 / 挂起审批与提问） --></section>
 <section id="section-persona" data-page="persona" class="page-stack"><!-- 人格与角色页内容由 pages/persona/page.html 注入。 --></section>
 <section id="section-plugins" data-page="plugins" class="page-stack"><!-- 片段：pages/plugins/page.html（桥接插件 / 内置注入块 / 运行设置 / 安装） --></section>
@@ -72,25 +71,16 @@
     <section id="section-mcp" data-page="mcp" class="card span-all"></section>
     <section id="section-behaviors" data-page="behaviors" class="card span-all"></section>
     <section id="section-memory" data-page="memory" class="page-stack"><!-- 片段：pages/memory/page.html（注入 / provider / 本机轻量记忆 / 工具 / 写回 / 最近活动） --></section>
-<section id="section-social-v1" data-page="social-v1" class="page-stack">
-      <!-- 页面片段由路由器按需注入：pages/social-v1/page.html -->
-    </section>
-    <section id="section-social-v2" data-page="social-v2" class="page-stack">
-      <!-- 页面片段由路由器按需注入：pages/social-v2/page.html -->
-    </section>
     <section id="section-slang" data-page="slang" class="page-stack">
       <!-- 页面片段由路由器按需注入：pages/slang/page.html -->
     </section>
 <section id="section-scheduler" data-page="scheduler" class="page-stack">
       <!-- 片段：pages/scheduler/page.html（进入该页时注入；多卡片：总开关 / 谁可以登记 / 安全限制 / 任务列表 / 执行记录） -->
     </section>
-<section id="section-access" data-page="access" class="page-stack">
-      <!-- 片段：pages/access/page.html（三张卡片：白名单 / 安全拦截 / 访问令牌） -->
-    </section>
 <section id="section-operations" data-page="operations" class="page-stack"><!-- 片段：pages/operations/page.html（三张卡片：测试发送 / 桥接控制 / 后台控制端引导） --></section>
     <section id="section-usage" data-page="usage" class="page-stack"><!-- 片段：pages/usage/page.html（两张卡片：令牌与花费 / 上下文压缩） --></section>
       </div>
-      <div class="overview-footnote" data-page="overview"><span id="accessSummary">正在读取访问范围…</span><button class="text-button" data-view="access">管理访问范围 →</button></div>
+      <div class="overview-footnote" data-page="overview"><span id="accessSummary">正在读取全局准入…</span><button class="text-button" data-view="config">管理全局配置 →</button></div>
       <footer class="page-footer"><span>QQ Bridge · 连接日常，保持自主</span><span id="lastUpdated">等待首次同步</span></footer>
     </main>
   </div>

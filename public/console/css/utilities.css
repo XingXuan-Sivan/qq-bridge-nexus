@@ -82,3 +82,4 @@
 .u-flex-basis-220-mono { flex:1 1 220px; font-family:var(--font-mono) }
 .u-flex-basis-max-70 { flex:0 1 70px }
 .u-flex-basis-max-90 { flex:0 1 90px }
+.u-mono { font-family:var(--font-mono) }

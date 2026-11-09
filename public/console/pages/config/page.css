@@ -1,0 +1,215 @@
+/* 运行总览：六个块都按页面骨架排（page-stack + 每块 span-all），私有样式只补网格占位和两处内容形态。 */
+
+/* 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），宿主是 main 网格的直接子项
+   （#section-overview 是 display:contents），所以要给宿主也铺满整行。 */
+[data-overview-fields="metrics"] {
+  grid-column: 1 / -1;
+}
+.overview-summary {
+  margin-bottom: 0;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (max-width: 1180px) {
+  .overview-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* 活动日志是等宽文本：限高滚动，别把一个页面撑到几屏。 */
+.activity-log {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+/* 静默时段改成表格：列宽由 colgroup 固定（跟其它表格一样），窄屏横向滚动，
+   不会再把「开关/名称/时间段」挤成三行。表头与单元格样式沿用站点全局 th/td。 */
+.table-wrap .silence-table {
+  min-width: 820px;
+}
+.silence-table col.c-enable { width: 76px; }
+.silence-table col.c-name { width: 190px; }
+.silence-table col.c-time { width: 118px; }
+.silence-table col.c-skip { width: 132px; }
+.silence-table col.c-act { width: 56px; }
+.silence-table th {
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+.silence-table td {
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+.silence-table td > input[type="text"] {
+  width: 100%;
+}
+.silence-table .time-field {
+  display: flex;
+  width: 100%;
+}
+.silence-table .silence-days {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.silence-table .silence-days .select-wrap {
+  width: 100%;
+}
+.silence-table .silence-days [data-sil-custom] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.silence-table .field-switch {
+  white-space: nowrap;
+}
+.silence-table tr.off td {
+  opacity: 0.55;
+}
+
+/* 删除按钮：项目里没有 .btn-icon 的通用样式（时间/日期组件的类名是 .time-field-btn），
+   这里给时段表格的垃圾桶单独定义一块方形图标按钮，避免出现「空边框方块」。 */
+.silence-table button[data-sil-del] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: var(--control-h, 40px);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.silence-table button[data-sil-del] svg {
+  width: 16px;
+  height: 16px;
+}
+.silence-table button[data-sil-del]:hover {
+  color: var(--err);
+  border-color: var(--danger-border);
+  background: var(--danger);
+}
+
+/* 发言上限：两个数字框是固定宽度的小格子，不要被 .field-inline 的 flex:1 拉满整行。 */
+#section-sendlimit .field-inline { gap: 10px; }
+#section-sendlimit .field-inline > label { white-space: nowrap; }
+#section-sendlimit .field-inline > input[type="number"] {
+  flex: 0 0 auto;
+  width: 88px;
+}
+
+@media (max-width:760px) {
+  /* 窄屏只把指标改成两列；静默时段是表格，靠横向滚动保持列对齐。 */
+  .overview-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ── 全局配置：左侧分区导航 + 右侧分区面板 ─────────────────────────────── */
+.config-layout {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.config-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.config-nav-item {
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.config-nav-item:hover { background: var(--surface-sunken); color: var(--text); }
+.config-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.config-body { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.config-layer-note {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.config-layer-note strong { color: var(--text); margin-right: 8px; }
+.config-panel { display: flex; flex-direction: column; gap: 14px; }
+.config-panel[hidden] { display: none; }
+.config-panel .card { margin: 0; }
+.config-placeholder {
+  margin-top: 12px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+}
+#behaviorText { min-height: 360px; resize: vertical; line-height: 1.55; width: 100%; }
+.field-row:has(#behaviorText) > .field-control { flex-direction: column; align-items: stretch; }
+.field-row:has(#behaviorText) > .field-label { align-self: start; padding-top: 11px; }
+#behaviorActions { margin-top: 10px; }
+
+/* 工具与语音：工具清单用两列 checkbox；语音库是可选文件的列表，不占满整行。 */
+#toolsChecks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 22px;
+  margin: 12px 0 4px;
+}
+#toolsChecks .field-check-item { align-items: flex-start; padding: 5px 0; }
+#toolsChecks .field-check-item small { display: block; margin-top: 2px; line-height: 1.5; }
+.voice-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+.voice-item { display: flex; gap: 8px; align-items: center; padding: 3px 0; font-size: 13px; }
+@media (max-width: 900px) {
+  #toolsChecks { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .config-layout { grid-template-columns: 1fr; }
+  .config-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .config-nav-item { width: auto; }
+}
+

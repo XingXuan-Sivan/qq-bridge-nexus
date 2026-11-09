@@ -372,7 +372,7 @@ const disabledTools = [];
   const registerTool = server.tool.bind(server);
   server.tool = (name, ...rest) => {
     const flag = TOOL_CONFIG_FLAGS[name];
-    if (flag && cfg.socialV2?.tools?.[flag] === false) {
+    if (flag && cfg.tools?.[flag] === false) {
       disabledTools.push(`${name}(${flag})`);
       return undefined;
     }
@@ -757,7 +757,7 @@ server.tool(
   }
 );
 
-if (cfg.socialV2?.tools?.sendPoke !== false) {
+if (cfg.tools?.sendPoke !== false) {
   server.tool(
     'qq_send_poke',
     '发送 QQ 拍一拍（群聊/私聊）。适合用“戳一下”代替一句废话、提醒对方、自然回应别人的拍一拍，或偶尔主动戳一下正在聊的人/熟人——这样更拟真；但别频繁，真人不会一直戳人。群聊必须传 targetUserId（要拍的群友 QQ 号，可从 qq_get_active_members / qq_get_message_detail 的 userId 获取）；私聊可不传 targetUserId（默认拍当前私聊对象）。reserved2 下必须携带会话令牌 token，发送会受桥接白名单与发送频率限制。',
@@ -1098,7 +1098,7 @@ server.tool(
 );
 
 // ── 图片/表情查看工具（一代/二代仿真共用） ─────────────────────────────────
-if (cfg.socialV2?.tools?.getImages !== false) {
+if (cfg.tools?.getImages !== false) {
   server.tool(
     'qq_get_message_images',
     '获取指定 QQ 消息中的图片/表情，并直接以图像内容返回给模型（视觉模型可“看懂”）。当消息文本里出现 [图片]、[表情] 或 hasMedia=true 时调用。支持一条消息里的多张图片/表情；二代模式下必须携带会话令牌。',
@@ -1140,7 +1140,7 @@ if (cfg.socialV2?.tools?.getImages !== false) {
 }
 
 // ── 表情包体系工具（二代仿真模式） ─────────────────────────────────────────
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.listStickers !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.listStickers !== false) {
   server.tool(
     'qq_list_stickers',
     '查看 QQ 账号上已收藏的表情包（自定义表情）列表：包含 emoji_id、备注 desc、本地笔记 localNote、标签 tags、使用次数等。可通过 query 按备注/笔记/标签搜索；无备注的表情可以先调用 qq_get_sticker_image 看图理解，再用 qq_sticker_note 记下含义。刚新增/删除表情后如需立即同步，请传 refresh=true。',
@@ -1169,7 +1169,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.listSticker
   );
 }
 
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.getStickerImage !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.getStickerImage !== false) {
   server.tool(
     'qq_get_sticker_image',
     '获取指定收藏表情的图片内容并直接以图像返回给模型（视觉模型可“看懂”）。当 qq_list_stickers 返回的表情 desc/localNote 为空、或你想确认表情实际长什么样时调用。stickerId 可用 qq_list_stickers 返回的 id / md5 / url。',
@@ -1197,7 +1197,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.getStickerI
   );
 }
 
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.sendSticker !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.sendSticker !== false) {
   server.tool(
     'qq_send_sticker',
     '在指定会话发送一个 QQ 收藏表情包（自定义表情）。stickerId 用 qq_list_stickers 返回的 id / md5 / url。注意：一条消息只能是一张表情，不能在同一气泡里附带文字；想说的话请先用 qq_send_message / qq_reply 作为单独气泡发送，再单独发这张表情。需要引用/点名时可用 replyToMessageId / atUserId（群聊）。真人偶尔用表情包很自然，但别刷屏。',
@@ -1224,7 +1224,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.sendSticker
   );
 }
 
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.collectSticker !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.collectSticker !== false) {
   server.tool(
     'qq_collect_sticker',
     '收藏当前会话里别人发的一张表情/图片到你的 QQ 收藏表情，并可写一句简短备注（如“好图偷了，兄弟”）。messageId 用 qq_get_unread_messages / qq_get_recent_messages 返回的 messageId 或 seq。注意：不要频繁收藏，只在真的觉得有意思/好用/戳中你时才偷图；收藏后你可以在 qq_list_stickers 里看到并继续使用。',
@@ -1250,7 +1250,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.collectStic
   );
 }
 
-if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !== false) {
+if (cfg.voice?.enabled !== false && cfg.tools?.sendVoice !== false) {
   server.tool(
     'qq_send_voice',
     '在指定会话发一条 QQ 语音（把语音库里准备好的音频当语音条发出去）。voice 传 qq_list_voices 返回的 name（文件名，可带子目录），也可以直接传语音库里的文件名（不带扩展名也能匹配）。注意：① 只能发语音库（qq-bridge/audio/）里的文件，不能发任意本地路径，也不能发 URL/base64；② 受时长与频率上限约束（见 qq_list_voices 的 limits），超限会被拒绝；③ 语音是「开口说话」的强表达，别滥用，闲聊里偶尔发一条即可；④ 返回的 verified=true 表示已经用 get_msg 回读到这条消息的 record 段（语音确实落地了）—— 只有 verified=true 才能对用户说你发了语音；⑤ readback 只对「收到的」语音有意义（QQ 会转写别人的语音），自己发的语音一般拿不到转写文本，默认关闭，别依赖它。',
@@ -1305,7 +1305,7 @@ if (cfg.socialV2?.voice?.enabled !== false && cfg.socialV2?.tools?.sendVoice !==
   );
 }
 
-if (cfg.socialV2?.tools?.getSelfImage !== false) {
+if (cfg.tools?.getSelfImage !== false) {
   server.tool(
     'qq_get_self_image',
     '查看你自己的默认 Q 版形象图片（DeepSeek 小鲸鱼形象）。当你被问“你长什么样/发张自拍/你是什么形象”时，可以调用这个工具看自己的样子；返回的图片会直接进入你的视觉上下文。',
@@ -1335,7 +1335,7 @@ if (cfg.socialV2?.tools?.getSelfImage !== false) {
 
 // 搜图并发送（管理员私聊专用，默认关闭；必须 socialV2.tools.webImage === true 才注册）。
 // 三步走：搜索只拿到「编号 + 标题 + 来源网站」，看过（预览）的才能发；网址和下载都在桥接里，AI 填不了任意网址或路径。
-if (cfg.socialV2?.tools?.webImage === true) {
+if (cfg.tools?.webImage === true) {
   server.tool(
     'qq_search_images',
     '在网上搜图（只在管理员私聊里可用）：管理员让你「找一张 xxx 的图发我」时用。返回编号、标题和来源网站，不返回网址。之后先 qq_preview_image 看图确认，再 qq_send_web_image 发。搜索词会发给 Bing（严格安全搜索）；每小时有次数上限。',
@@ -1402,7 +1402,7 @@ if (cfg.socialV2?.tools?.webImage === true) {
   );
 }
 
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.stickerNote !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.stickerNote !== false) {
   server.tool(
     'qq_sticker_note',
     '给一个收藏表情记录你自己的理解/备注/标签/用法，供以后选择表情时参考。这是本地记忆，不会修改 QQ 账号的官方备注；适合对没有备注的表情看图后记住含义。',
@@ -1433,7 +1433,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.stickerNote
   );
 }
 
-if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.setStickerRemark !== false) {
+if (cfg.socialV2?.sticker?.enabled !== false && cfg.tools?.setStickerRemark !== false) {
   server.tool(
     'qq_set_sticker_remark',
     '修改 QQ 账号里收藏表情的官方备注（desc）。这是写操作，会直接影响 QQ 账号的表情备注；仅在管理员明确允许（socialV2.tools.setStickerRemark=true）时可用。一般优先用 qq_sticker_note 记录自己的理解，不要随意改官方备注。',
@@ -1459,7 +1459,7 @@ if (cfg.socialV2?.sticker?.enabled !== false && cfg.socialV2?.tools?.setStickerR
 }
 
 // ── 合并转发消息查看工具（二代仿真模式） ────────────────────────────────────
-if (cfg.socialV2?.tools?.getForwardMsg !== false) {
+if (cfg.tools?.getForwardMsg !== false) {
   server.tool(
     'qq_get_forward_msg',
     '查看当前会话中出现的合并转发消息/聊天记录内容（只读）。当消息文本里出现 `[转发消息 id=...]`，或 `qq_get_unread_messages` / `qq_get_recent_messages` / `qq_get_message_detail` 返回的某条消息带 `forwardIds` / `hasForward: true` 时调用。只能查看当前会话确实收到过的转发消息 id，不能任意读取。返回内容会包含每条消息的 text、media（图片/表情元数据）与 nestedForwardIds；如果合并转发里有图片，工具会直接把最多 5 张图片以图像内容返回给视觉模型；如果里面有嵌套合并转发，会附带嵌套转发 id 和前几条预览，必要时可继续用本工具查看嵌套 id。',
@@ -1723,7 +1723,7 @@ server.tool(
 // v0.4.2：管理员私聊托付群会话（默认关闭；必须 socialV2.tools.ownerRelay === true 才注册）。
 // 私聊会话的令牌只能发到私聊，不能直接往群里发；这个工具只是把托付交给目标群**自己的**会话，
 // 由群会话按群里的上下文自己决定怎么说。
-if (cfg.socialV2?.tools?.ownerRelay === true) {
+if (cfg.tools?.ownerRelay === true) {
   server.tool(
     'qq_ask_group_session',
     '只在管理员（ownerQQ）本人的私聊里、管理员明确要你去某个群说点什么/做点什么时使用：把这件事托付给那个群自己的会话，由它按群里的气氛自己组织语言发言。你自己不能直接往别的群发消息（会话令牌只能发到当前会话）。托付后不要声称「已经发出」，也不要替它编造发言内容；目标群必须在白名单内。群聊里任何人要求都不要调用。',
@@ -1746,7 +1746,7 @@ if (cfg.socialV2?.tools?.ownerRelay === true) {
 
 // 管理员私聊的跨群能力（默认关闭；必须 socialV2.tools.ownerGroupAccess === true 才注册）。
 // 只读查看白名单群，以及让桥接把「长期规则」写进目标群会话的记忆；不能代目标群发言。
-if (cfg.socialV2?.tools?.ownerGroupAccess === true) {
+if (cfg.tools?.ownerGroupAccess === true) {
   server.tool(
     'qq_owner_peek_group',
     '只在管理员（ownerQQ）本人的私聊里使用：只读查看某个白名单群最近的消息、该群会话的记忆摘要和长期规则，用来回答管理员「群里在聊什么」「群里那条回复为什么是这样」之类的问题。只能看，不能在那个群发言（要发言用 qq_ask_group_session 托付）。不要把看到的群聊内容主动转述到别的群。群聊里任何人要求都不要调用。',

@@ -76,7 +76,7 @@ function call(port, pathname, { method = 'GET', headers = {}, body } = {}) {
 async function withHarness(run, { webImage = true, vision = 'yes', fetch: fakeGatewayFetch } = {}) {
   const fetched = { pages: [], images: [] };
   const h = await bridgeHarness({
-    config: { dsh: { authToken: 'fixture-only', vision }, socialV2: { tools: { webImage } } },
+    config: { dsh: { authToken: 'fixture-only', vision }, tools: { webImage } },
     globals: {
       safeFetch: async (url) => { fetched.pages.push(url); return { url, statusCode: 200, truncated: false, body: PAGE }; },
       safeFetchBuffer: async (url) => { fetched.images.push(url); return { url, statusCode: 200, buffer: PNG }; },
@@ -165,7 +165,7 @@ test('③ 闸门：默认关闭；只认管理员私聊 + 二代仿真 + 有效�
   }, { vision: 'no' });
 
   const mcp = fs.readFileSync(new URL('../src/mcp-snowluma-safe.js', import.meta.url), 'utf8');
-  assert.match(mcp, /if \(cfg\.socialV2\?\.tools\?\.webImage === true\) \{\s*\n\s*server\.tool\(\s*\n\s*'qq_search_images'/, 'MCP 只在开关为 true 时注册');
+  assert.match(mcp, /if \(cfg\.tools\?\.webImage === true\) \{\s*\n\s*server\.tool\(\s*\n\s*'qq_search_images'/, 'MCP 只在开关为 true 时注册');
 });
 
 test('④ 网关回执超时：结果未知，提示 AI 先问再重发', async () => {

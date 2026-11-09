@@ -219,17 +219,26 @@ npm run test:console-ui
 - 验收：`test-preset-store` 5/5、static 全过、UI **32/32**、audit **102/102**；真机 GET 列表 5 个、GET 详情、validate 200/6 行、PUT extensions 200（已回滚测试写入）、apply 200（build+setup 均成功）、rollback 200（恢复后重新 apply 成功），无 pageerror。
 - 偏差：E15（共用 guard 拿不到 preset id，不提供按预设放行原生工具的假开关）。P0 `compress` 仍 Partial；P4/P5 后续子批。
 
-### 6.12 全局配置三层模型（2026-11-09，方案已拍板，G2 实施中）
+### 6.12 全局配置三层模型（2026-11-09，方案已拍板）
 
 - 文档：`docs/GLOBAL_CONFIG.md`（系统层 / 预设层 / 会话层、现有文件清单、目标布局、迁移映射、动态授权、代码编辑器与 YAML 保注释、分批计划）。
 - 已定（用户 m31113/m31268）：新页面命名「全局配置」；原「访问与安全」页配置并入「安全与静默」，旧页不保留入口/摘要；诊断/通知不进全局配置；配置页不按仿真模式拆分；旧 `social-v1` / `social-v2` / `access` 页面与旧配置键直接删除，不保留别名/兼容，迁移前用 git 建基线（方案 2）；编辑器选 CM6，YAML 统一到 `yaml`。
 - 核心结构调整：QQ 交互参数从 `config.social` / `config.socialV2` 移到 `config/behaviors/<id>.yml` 行为档案；预设 `preset.yml` 通过 `behavior:` 引用；会话层只保留 preset/模型/人格/提示词/准入；`socialV2.agentPreset` 与 `socialV2.enabled` 删除，默认 preset 统一为 `config.agentPreset`。
 - 实施进度见 6.13；逐项实施见 `docs/GLOBAL_CONFIG.md` §10（G1–G5）。
 
-### 6.13 G2 行为档案接入（2026-11-09，实施中，未提交）
+### 6.13 G2 行为档案接入（2026-11-09，已提交 `4ace129`）
 
 - 新增 `src/behaviors/index.mjs`、`config/behaviors/default-v1.yml`、`default-v2.yml`；`qq-chat`/`qq-chat-v2` 的 `preset.yml` 分别绑定 v1/v2。
-- `src/bridge.js` 已加载行为档案与 preset 绑定，`cfg.social`/`cfg.socialV2` 通过 `AsyncLocalStorage` 按会话 preset 视图取值；`handleIncoming`、调度投递、睡眠/主动定时器、唤醒提示已包 `withBehavior`。
+- `src/bridge.js` 已加载行为档案与 preset 绑定，`cfg.social`/`cfg.socialV2` 通过 `AsyncLocalStorage` 按会话 preset 视图取值；`handleIncoming`、调度投递、睡眠/主动定时器、唤醒提示已包 `withBehavior`；维护类 timer 用 `optional:true`，避免管理通道因 preset 未就绪被挡。
 - `config.json` 已迁移：删除 `social`/`socialV2`，新增 `tools`/`compact`/`voice`/`media`/`limits`；`config.example.json` 已同步新结构。`config.json` 仍被 `.gitignore` 排除，未入库。
 - 门禁：`test-behavior-profiles` 3/3、`test-integration-v030` 31/31、`test-sticker-collect` 8/8、`test-token-economy` 36/36、static 全过、audit 103/103、`node --check src/bridge.js` 通过、`git diff --check` 干净。
-- 未完成：UI 回归因本机未安装 Playwright 未跑；G3 删旧页/旧键、全局配置页、动态 picker、CM6/YAML Document 尚未开始；P0 `compress` 仍 Partial。
+- 遗留：UI 回归在 G3 阶段补跑；G3 已完成，G4/G5 待做；P0 `compress` 仍 Partial。
+
+### 6.14 G3 全局配置页（2026-11-09，已实现并真机验收）
+
+- 新增 `public/console/pages/config/`：左侧六分区「运行与模型 / 安全与静默 / 准入 / 行为档案 / 工具与语音 / 配置位置」，复用 overview/access/sessions 字段与逻辑，不重复 ID。
+- 删除 `public/console/pages/access/`、`social-v1/`、`social-v2/` 及 nav/router/PAGE_FRAGMENTS/index section；旧 hash 不重定向；overview 只留指标与活动日志。旧 `/api/socialV2/config` 已从 `src/bridge.js` 删除。
+- 新增 API：`/api/config/behaviors`（列表/读/校验/写，写前 normalize、备份 `state/behavior-backups`）、`/api/config/send-limit`、`/api/config/tools`（37 个 QQ 工具开关）；`/api/config/behaviors` 写后提示重启才生效。
+- 24 个旧 audit 失败项已按新配置结构迁移；`test-voice` 83/0、`test-voice-system` 50/0、`test-web-image` 5/5；全量 audit **103/103**；static 全过；UI **31/31**，contracts 已重录。
+- 真机：桥接 job `pwsh-16c04ab424ba4ac8`，`reserved2`/`dshReady=true`；`#config` 六分区、行为列表/校验/保存、发言上限、37 个工具开关均可用，无 pageerror；语音库为空（本机无音频）。
+- 遗留：动态授权 picker、CM6 代码编辑器、统一 `yaml` Document（G4）；旧键清理与文档收尾（G5）。

@@ -1,0 +1,101 @@
+<div class="config-layout">
+  <nav class="config-nav" aria-label="全局配置分区">
+    <button type="button" class="config-nav-item active" data-config-section="runtime">运行与模型</button>
+    <button type="button" class="config-nav-item" data-config-section="security">安全与静默</button>
+    <button type="button" class="config-nav-item" data-config-section="access">准入</button>
+    <button type="button" class="config-nav-item" data-config-section="behavior">行为档案</button>
+    <button type="button" class="config-nav-item" data-config-section="tools">工具与语音</button>
+    <button type="button" class="config-nav-item" data-config-section="paths">配置位置</button>
+  </nav>
+  <div class="config-body">
+    <div class="config-layer-note">
+      <strong>三层配置</strong>
+      <span>系统层管整台桥接；预设层决定 Agent 包；会话层只覆盖单个群 / 好友。运行模式是路由，不是预设。</span>
+    </div>
+
+    <section class="config-panel active" data-config-panel="runtime">
+      <section id="section-mode" class="card span-all">
+        <h2>运行模式</h2>
+        <div data-overview-fields="mode"></div>
+      </section>
+      <section id="section-sendlimit" class="card span-all">
+        <h2 data-note="保存后立即生效">发言上限</h2>
+        <div class="meta">二代仿真里每个群 / 私聊 AI 最多能发多少条，防止刷屏和账号风控；填 0 表示不限。</div>
+        <div data-overview-fields="sendLimit"></div>
+      </section>
+      <section id="section-dsh" class="card span-all">
+        <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
+        <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
+        <div data-overview-fields="dsh"></div>
+      </section>
+    </section>
+
+    <section class="config-panel" data-config-panel="security" hidden>
+      <section class="card span-all">
+        <h2>管理员与访问令牌</h2>
+        <div data-access-fields="whitelist"></div>
+        <div data-access-fields="token"></div>
+        <div data-access-fields="security"></div>
+      </section>
+      <section id="section-silent" class="card span-all">
+        <h2>静默与发言限制</h2>
+        <div data-overview-fields="silence"></div>
+      </section>
+    </section>
+
+    <section class="config-panel" data-config-panel="access" hidden>
+      <section class="card span-all">
+        <h2>全局准入</h2>
+        <div data-sessions-access></div>
+      </section>
+    </section>
+
+    <section class="config-panel" data-config-panel="behavior" hidden>
+      <section class="card span-all">
+        <h2>行为档案</h2>
+        <div class="meta">行为档案定义 QQ 交互参数（唤醒、发送节奏、主动机会、表情、上下文等），由预设通过 <code>behavior</code> 引用；不绑定运行模式。</div>
+        <div class="field-row">
+          <label class="field-label" for="behaviorSelect">选择档案</label>
+          <div class="field-control">
+            <div class="control-row">
+              <select id="behaviorSelect" class="u-w-190"></select>
+              <button type="button" class="btn small" id="behaviorRefresh">刷新</button>
+              <button type="button" class="btn small" id="behaviorNew">新建</button>
+            </div>
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="behaviorId">文件名</label>
+          <div class="field-control">
+            <div class="control-row">
+              <input id="behaviorId" type="text" class="u-w-190" placeholder="default-v2" autocomplete="off">
+              <span class="meta">小写字母/数字/点/横线；保存为 config/behaviors/&lt;id&gt;.yml</span>
+            </div>
+          </div>
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="behaviorText">YAML</label>
+          <div class="field-control">
+            <textarea id="behaviorText" rows="18" class="u-mono" spellcheck="false"></textarea>
+            <div class="form-actions" id="behaviorActions">
+              <button type="button" class="btn small" id="behaviorValidate">校验</button>
+              <button type="button" class="btn small primary" id="behaviorSave">保存</button>
+              <span class="meta" id="behaviorMsg"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="config-panel" data-config-panel="tools" hidden>
+      <div id="toolsPanel"></div>
+    </section>
+
+    <section class="config-panel" data-config-panel="paths" hidden>
+      <section class="card span-all">
+        <h2>配置位置</h2>
+        <div class="meta">系统层：<code>config.json</code>、<code>state/mode.json</code>、<code>state/sessions/defaults.json</code>、<code>plugins.json</code>。预设层：<code>dsh/agent-presets/&lt;id&gt;/</code> 与 <code>config/behaviors/&lt;id&gt;.yml</code>。会话层：<code>state/sessions/&lt;platform&gt;/&lt;kind&gt;/&lt;id&gt;.json</code>。</div>
+      </section>
+    </section>
+  </div>
+</div>

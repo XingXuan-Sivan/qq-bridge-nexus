@@ -77,10 +77,10 @@ test('接线：默认关闭、端点与 MCP 都要求显式 true、规则注入�
   const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
   const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
-  assert.equal(example.socialV2.tools.ownerGroupAccess, false, '模板默认关闭');
+  assert.equal(example.tools.ownerGroupAccess, false, '模板默认关闭');
   assert.equal((bridge.match(/ownerGroupAccess: false/g) ?? []).length, 2, '桥接两处运行时默认都是关闭');
-  assert.ok(bridge.includes('enabled: cfg.socialV2?.tools?.ownerGroupAccess === true'), '端点要求显式 true');
-  assert.ok(mcp.includes('if (cfg.socialV2?.tools?.ownerGroupAccess === true) {'), 'MCP 只在显式 true 时注册');
+  assert.ok(bridge.includes('enabled: cfg.tools?.ownerGroupAccess === true'), '端点要求显式 true');
+  assert.ok(mcp.includes('if (cfg.tools?.ownerGroupAccess === true) {'), 'MCP 只在显式 true 时注册');
   const store = fs.readFileSync(path.join(ROOT, 'src', 'memory', 'local-store.mjs'), 'utf8');
   assert.ok(store.includes('rulesPromptBlock('), '记忆摘要（每次唤醒注入）带上规则');
   assert.ok(bridge.includes('memoryText: localMemory.digest(check.targetKey)'), '查看视图的记忆摘要来自 store');

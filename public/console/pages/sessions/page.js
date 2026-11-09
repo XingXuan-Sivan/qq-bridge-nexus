@@ -181,7 +181,7 @@ function applyAccessPayload(data) {
   fillAccessForm();
 }
 
-async function refreshGlobalAccess() {
+export async function refreshGlobalAccess() {
   if (!document.getElementById('accessPassiveMode')) return;
   const msg = document.getElementById('accessMsg');
   try {
@@ -194,7 +194,7 @@ async function refreshGlobalAccess() {
   }
 }
 
-async function saveGlobalAccess() {
+export async function saveGlobalAccess() {
   const msg = document.getElementById('accessMsg');
   const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
   readAccessDraft();
@@ -818,7 +818,35 @@ async function detailClearMemory() {
 function refreshActive() {
   refreshSessions();
   refreshPending();
-  refreshGlobalAccess();
+}
+
+/** 渲染全局准入到任意宿主；config 页复用，sessions 页仍挂自己的宿主。 */
+export function mountGlobalAccess(host) {
+  if (!host) return;
+  if (!host.querySelector('#accessPassiveMode')) {
+    const spec = SESSIONS_FIELDS.access;
+    if (spec?.html) host.innerHTML = spec.html;
+    else if (spec?.fields) renderFields(host, spec.fields, { columns: 1 });
+  }
+  if (!host.dataset.accessBound) {
+    host.dataset.accessBound = '1';
+    bindSwitches(host);
+    host.addEventListener('click', (event) => {
+      if (!event.target.closest('[role="switch"]')) return;
+      queueMicrotask(() => { readAccessDraft(); renderAccessSummary(); });
+    });
+    host.addEventListener('input', (event) => {
+      if (!event.target.matches('textarea')) return;
+      readAccessDraft();
+      renderAccessSummary();
+    });
+  }
+  const save = document.getElementById('accessSave');
+  if (save && !save.dataset.accessBound) {
+    save.dataset.accessBound = '1';
+    save.addEventListener('click', () => { void saveGlobalAccess(); });
+  }
+  void refreshGlobalAccess();
 }
 
 export function init() {
@@ -848,28 +876,17 @@ export function init() {
     if (event.target.closest('[data-open-global-access]')) {
       if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
       closeModal(detailOverlay);
-      const panel = document.querySelector('[data-sessions-fields="access"]');
-      panel?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      document.getElementById('accessPassiveEntries')?.focus();
+      document.querySelector('[data-view="config"]')?.click();
+      setTimeout(() => {
+        document.querySelector('[data-config-section="access"]')?.click();
+        document.getElementById('accessPassiveEntries')?.focus();
+      }, 80);
       return;
     }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
     if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); }
   });
-
-  const accessHost = document.querySelector('[data-sessions-fields="access"]');
-  if (accessHost) bindSwitches(accessHost);
-  accessHost?.addEventListener('click', (event) => {
-    if (!event.target.closest('[role="switch"]')) return;
-    queueMicrotask(() => { readAccessDraft(); renderAccessSummary(); });
-  });
-  accessHost?.addEventListener('input', (event) => {
-    if (!event.target.matches('textarea')) return;
-    readAccessDraft();
-    renderAccessSummary();
-  });
-  document.getElementById('accessSave')?.addEventListener('click', () => { void saveGlobalAccess(); });
 
   document.querySelectorAll('[data-sessions-tab]').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.sessionsTab));

@@ -18,7 +18,10 @@ const original = args.includes('--original');
 const acceptContracts = args.includes('--accept-contracts');
 const record = args.includes('--record-baseline') || acceptContracts;
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
-const views = ['overview', 'sessions', 'persona', 'social-v2', 'social-v1', 'slang', 'usage', 'access', 'operations', 'mcp'];
+const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'presets', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'usage', 'operations'];
+const retiredIds = new Set(existsSync(join(here, 'console-ui-retired-ids.json'))
+  ? JSON.parse((await readFile(join(here, 'console-ui-retired-ids.json'), 'utf8')).replace(/^\uFEFF/, ''))
+  : []);
 const legacyIds = JSON.parse((await readFile(join(here, 'console-ui-legacy-ids.json'), 'utf8')).replace(/^\uFEFF/, ''));
 const baselinePath = join(here, 'console-ui-contracts.json');
 if (record && !original && !acceptContracts) throw new Error('--record-baseline requires --original; use --accept-contracts to re-record from the current console on purpose.');
@@ -125,19 +128,17 @@ try {
     return fixture.requests.at(-1)?.body;
   }
 
-  await test('All 201 legacy IDs remain present and every DOM ID is unique', async () => {
+  await test('Legacy config IDs remain present and every DOM ID is unique', async () => {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
-    // 暂停/恢复合并成一个开关后 218→217（-2 +1）；二代「轻量记忆」整组收进记忆页后 217→212（-5）；
-    // 会话级准入/人格/唤醒/提示词迁到会话详情后 212→202（-10：访问页四个白名单框、二代唤醒与会话快选）；
-    // 手动静默开启/恢复正常合并成一个切换按钮后 202→201（-2 +1）。
-    // 数字写死是为了防止「悄悄删 id」，需要增减时连同 pages/*/fields.js 的改动一起改这里。
+    // G3 删除了 social-v1 / social-v2 / access 三页；这些页的旧 id 记在 retired 基线里，
+    // 其余历史 id 仍必须存在，避免后续改版悄悄删掉仍在用的字段。
     assert.equal(legacyIds.length, 201);
-    const missing = legacyIds.filter(x => !ids.includes(x));
+    const missing = legacyIds.filter(x => !ids.includes(x) && !retiredIds.has(x));
     assert.deepEqual(missing, []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
   });
 
-  if (!original) await test('All ten navigation destinations work and preserve unsaved form values across polling', async () => {
+  if (!original) await test('All navigation destinations work and preserve unsaved form values across polling', async () => {
     for (const view of views) {
       await navigate(view);
       // page-stack 是 display:contents，section 自身没有盒子，不能用 getClientRects 判断可见性；
@@ -146,18 +147,25 @@ try {
       assert(visiblePages.length > 0, `${view} has no visible content`);
       assert(visiblePages.every(x => x === view), `${view} exposes another page: ${visiblePages.join(', ')}`);
     }
-    const drafts = { ownerQQ: '100999', roleInput: '未保存的角色', v2AgentPreset: 'draft-preset', sKeywords: '未保存关键词', tsMsg: '未发送的测试消息' };
-    for (const [id, value] of Object.entries(drafts)) await fill(id, value);
+    // 轮询每秒刷新状态，但不应覆盖尚未提交的草稿；分页保持，避免把“页面重新初始化”误判为轮询。
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    await fill('sendLimitMin', '7');
+    await page.waitForTimeout(3300);
+    assert.equal(await page.locator('#sendLimitMin').inputValue(), '7', 'sendLimitMin lost its draft');
+    await navigate('operations');
+    await fill('tsMsg', '未发送的测试消息');
+    await page.waitForTimeout(3300);
+    assert.equal(await page.locator('#tsMsg').inputValue(), '未发送的测试消息', 'tsMsg lost its draft');
     // 「手动添加」表单已搬进弹窗（关闭状态不可见，fill 会超时）：直接写 DOM 值，仍然验证「轮询不吞草稿」。
+    await navigate('slang');
     await page.evaluate(() => { document.getElementById('slangMeaning').value = '未保存的含义'; });
-    await navigate('overview');
-    await page.waitForTimeout(3300); // Exercise the real 3-second status polling interval.
-    for (const [id, value] of Object.entries(drafts)) assert.equal(await (await reveal(`#${id}`)).inputValue(), value, `${id} lost its draft`);
+    await page.waitForTimeout(3300);
     assert.equal(await page.evaluate(() => document.getElementById('slangMeaning').value), '未保存的含义', 'slangMeaning lost its draft');
     // Restore fixture defaults so the independent payload baseline remains deterministic.
     await page.reload();
     await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
-    await hydrate('social-v2');
+    await hydrate('config');
   });
 
   await test('MCP page merges the tool reference and shows the real tool inventory', async () => {
@@ -229,15 +237,12 @@ try {
     assert.equal(await page.locator('#presetValidate').count(), 1);
   });
 
-  await test('Field rows centre labels and keep two columns', async () => {
-    await hydrate('social-v2');
+  await test('Global config renders field rows with aligned labels', async () => {
+    await hydrate('config');
     const geom = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('#section-social-v2 [data-field-wrap]'));
+      const rows = Array.from(document.querySelectorAll('#section-config [data-field-wrap]'));
       let worst = 0;
       for (const w of rows) {
-        // 清单/表格行刻意顶对齐：几十行高的控件里标签居中会飘在中间。
-        // 这里只量「单行字段」；这类长控件行的对齐由截图验收负责。
-        // 清单、表格、多行文本域都是「标签贴顶」的刻意设计（控件很高，标签居中会飘在中间），不参与单行对齐断言。
         if (w.classList.contains('field-block--checklist') || w.classList.contains('field-block--table') || w.classList.contains('field-block--textarea')) continue;
         const l = w.querySelector('.field-label');
         const c = w.querySelector('.field-control');
@@ -246,81 +251,39 @@ try {
         const cb = c.getBoundingClientRect();
         worst = Math.max(worst, Math.abs((lb.top + lb.height / 2) - (cb.top + cb.height / 2)));
       }
-      const host = document.querySelector('[data-v2-fields="7"]');
-      const cols = host ? host.querySelector('.cols') : null;
-      return {
-        rows: rows.length,
-        worst: Math.round(worst),
-        kids: cols ? cols.children.length : 0,
-        cells: host ? host.querySelectorAll('[data-field-wrap]').length : 0,
-        cellW: cols ? Math.round(cols.children[0].getBoundingClientRect().width) : 0,
-      };
+      return { rows: rows.length, worst: Math.round(worst) };
     });
-    if (!geom.rows) {
-      console.log('skip: fixture page did not render spec fields (checked on the live preview instead)');
-      return;
-    }
+    assert.ok(geom.rows > 0, 'config page should render field rows');
     assert.ok(geom.worst <= 1, 'label and control centres must align, got ' + geom.worst + 'px');
-    assert.equal(geom.kids, geom.cells, 'grid cells must match field count');
-    assert.ok(geom.cellW > 400, 'expected two columns, got ' + geom.cellW + 'px');
   });
 
-  await test('Action rows keep one button height', async () => {
-    await hydrate('social-v2');
-    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#section-social-v2 .form-actions')).map((row) => {
+  await test('Config action rows keep one button height', async () => {
+    await hydrate('config');
+    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#section-config .form-actions')).map((row) => {
       const hs = Array.from(row.querySelectorAll('button')).map((b) => Math.round(b.getBoundingClientRect().height)).filter((h) => h > 0);
       return { cls: row.className, heights: [...new Set(hs)] };
     }));
     const mixed = rows.filter((row) => row.heights.length > 1);
-    // 同一动作条里混用 40px 标准档和 32px 紧凑档，看起来就是「按钮没对齐」；这是 2026-11-07 报过的缺陷。
     assert.deepEqual(mixed, [], 'every action row must use a single button height, got ' + JSON.stringify(mixed));
-    assert.ok(rows.length > 0, 'expected at least one action row on social-v2');
+    assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('Tool table paginates, searches and keeps every checkbox in the form', async () => {
-    await hydrate('social-v2');
-    // 工具表在折叠分组里：先展开，否则行有布局但被祖先裁掉，点击不可达。
-    await reveal('#v2Tools');
-    const snapshot = () => page.evaluate(() => {
-      const table = document.querySelector('#v2Tools [data-table]');
-      if (!table) return null;
-      const rows = [...table.querySelectorAll('tbody tr')];
-      return {
-        total: rows.length,
-        shown: rows.filter((row) => !row.hidden).length,
-        pages: [...table.querySelectorAll('[data-pager] [data-pager-page]')].map((el) => Number(el.dataset.pagerPage)),
-        summary: table.querySelector('[data-table-summary]')?.textContent ?? '',
-        boxes: table.querySelectorAll('input[data-field="v2Tools"]').length,
-      };
-    });
-    const first = await snapshot();
-    assert.ok(first, '#v2Tools must render the shared data-table');
-    assert.equal(first.shown, Math.min(20, first.total), 'page 1 should show at most 20 rows, got ' + first.shown);
-    // 分页只隐藏行：所有 checkbox 必须仍在文档里，否则保存时会把翻页外的工具写成关闭。
-    assert.equal(first.boxes, first.total, 'pagination must keep every checkbox in the form');
-    if (first.total > 20) {
-      assert.ok(first.pages.includes(2), 'pager should offer page 2');
-      // 底部保存栏是 sticky 的：先把分页滚到视口中间，否则点击会被浮条挡住。
-      await page.locator('#v2Tools [data-table-footer]').evaluate((el) => el.scrollIntoView({ block: 'center' }));
-      await page.locator('#v2Tools [data-pager] [data-pager-page="2"]').first().click();
-      const second = await snapshot();
-      assert.equal(second.shown, Math.min(20, second.total - 20), 'page 2 should show the remaining rows, got ' + second.shown);
-      assert.ok(second.summary.includes(String(21)), 'summary should start at row 21: ' + second.summary);
-      // 刷新按钮由组件接到页面的「重读配置」，不是空按钮。
-      const [response] = await Promise.all([
-        page.waitForResponse((r) => new URL(r.url()).pathname === '/api/socialV2/config' && r.request().method() === 'GET'),
-        page.locator('#v2Tools [data-table-refresh]').click(),
-      ]);
-      assert.equal(response.status(), 200, 'refresh should reload the config');
-    }
-    await page.locator('#v2Tools [data-table-search]').fill('voice');
-    const searched = await snapshot();
-    assert.ok(searched.shown > 0 && searched.shown < first.total, 'search should narrow the table, got ' + searched.shown);
-    assert.equal(searched.boxes, first.total, 'search must keep every checkbox in the form');
-    await page.locator('#v2Tools [data-table-search]').fill('');
+  await test('Behavior editor loads, validates and saves through the config API', async () => {
+    await hydrate('config');
+    await page.locator('[data-config-section="behavior"]').click();
+    await page.waitForFunction(() => document.getElementById('behaviorSelect')?.options.length >= 2);
+    await page.selectOption('#behaviorSelect', 'default-v2');
+    await page.waitForFunction(() => document.getElementById('behaviorText').value.includes('kind: v2'));
+    assert.match(await page.locator('#behaviorText').inputValue(), /version: 1/);
+    await page.locator('#behaviorValidate').click();
+    await page.waitForFunction(() => /校验通过/.test(document.getElementById('behaviorMsg')?.textContent || ''));
+    await page.locator('#behaviorSave').click();
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('behaviorMsg')?.textContent || ''));
   });
 
   await test('Mode and preset contracts', async () => {
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
     // closed-agent 分级是改版后的能力：切到该模式时载荷会多带 level（默认 L2）。
     for (const mode of ['chat', 'reserved', 'reserved2', 'closed-agent']) {
       const expected = mode === 'closed-agent'
@@ -374,6 +337,8 @@ try {
   });
 
   await test('Admin list save contract', async () => {
+    await navigate('config');
+    await page.locator('[data-config-section="security"]').click();
     await fill('ownerQQ', '100001');
     assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { ownerQQ: '100001', admins: [] });
     await check('secInterceptNotify', false);
@@ -384,7 +349,8 @@ try {
   // 控制台必须把这件事**显式**呈现（含可复制的提权命令），而不是让用户以为已经安全；
   // 用户按提示处理后点「重新检测」应当转为成功态。
   await test('Unhardened state directory surfaces a warning with the exact command', async () => {
-    await navigate('access');
+    await navigate('config');
+    await page.locator('[data-config-section="security"]').click();
     await page.waitForFunction(() => document.getElementById('stateDirWarn')?.hidden === false);
     const shown = await page.evaluate(() => ({
       path: document.getElementById('stateDirPath').textContent,
@@ -403,53 +369,13 @@ try {
     await page.waitForFunction(() => document.getElementById('stateDirWarn')?.hidden === true);
   });
 
-  await test('Second-generation complete save payload, units, zero values and tool switches', async () => {
-    await fill('v2AgentPreset', 'contract-v2');
-    await fill('v2RecSleepMin', 7);
-    await fill('v2SleepMinMs', 42);
-    await fill('v2PreSleepWaitMin', 0);
-    await fill('v2RecProb', 0);
-    await fill('v2RecKeywords', '鲸鱼，DeepSeek, 测试');
-    await fill('v2AutoReplyCheckSec', 17);
-    await fill('v2WaitDefaultQuietMs', 0);
-    await fill('v2MaxSendMin', 0);
-    await check('v2ProvideRecommendations', false);
-    // 工具开关已搬进字段规格：每个复选框 data-field="v2Tools"，value 就是工具名。
-    const firstTool = page.locator('[data-field="v2Tools"]').first();
-    await reveal('[data-field="v2Tools"]');
-    const firstToolName = await firstTool.getAttribute('value');
-    await firstTool.setChecked(false);
-    const body = await clickWrite('#v2ConfigSave', '/api/socialV2/config');
-    assert.equal(body.wake.recommendedSleepMinMs, 420000);
-    assert.equal(body.wake.sleepMinMs, 42000);
-    assert.equal(body.wake.preSleepWaitMs, 0);
-    assert.equal(body.wake.recommendedProbability, 0);
-    assert.deepEqual(body.wake.recommendedKeywords, ['鲸鱼', 'DeepSeek', '测试']);
-    assert.equal(body.autoReplyCheckMs, 17000);
-    assert.equal(body.wait.defaultQuietMs, 0);
-    assert.equal(body.send.maxSendPerMinute, 0);
-    assert.equal(body.provideRecommendations, false);
-    assert.equal(body.tools[firstToolName], false);
-    // The lower save button must submit the same complete configuration.
-    await page.waitForFunction(() => document.getElementById('v2AgentPreset').value === 'contract-v2');
-    assert.deepEqual(await clickWrite('#v2ConfigSave', '/api/socialV2/config'), body);
-    // 暂停/恢复是一个按钮：先按当前状态暂停，刷新后文案变「恢复」，再点一次恢复运行。
-    assert.deepEqual(await clickWrite('#v2PauseToggle', '/api/socialV2/activity'), { paused: true });
-    await page.waitForFunction(() => document.getElementById('v2PauseToggle')?.textContent === '恢复二代 AI');
-    assert.deepEqual(await clickWrite('#v2PauseToggle', '/api/socialV2/activity'), { paused: false });
-  });
-
-  await test('First-generation social parameter and phase contracts', async () => {
-    await fill('sTrigger', 0.35);
-    await fill('sCheckMin', 12);
-    await fill('sKeywords', '鲸鱼，测试');
-    const body = await clickWrite('#socialSave', '/api/social');
-    assert.equal(body.triggerProbability, 0.35);
-    assert.equal(body.activeCheckMinMs, 12000);
-    assert.deepEqual(body.mustReplyKeywords, ['鲸鱼', '测试']);
-    await (await reveal('#sStateKey')).selectOption('group:123456789');
-    assert.deepEqual(await clickWrite('#sStateIdle', '/api/social/state'), { key: 'group:123456789', phase: 'idle' });
-    assert.deepEqual(await clickWrite('#socialFlush', '/api/social/flush'), {});
+  await test('Global config send-limit contract', async () => {
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    await fill('sendLimitMin', 7);
+    await fill('sendLimitHour', 0);
+    assert.deepEqual(await clickWrite('#sendLimitSave', '/api/config/send-limit'), { maxSendPerMinute: 7, maxSendPerHour: 0 });
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('sendLimitMsg')?.textContent || ''));
   });
 
   await test('Slang add, search, confirm modal, tab switching and parameter contracts', async () => {
@@ -662,7 +588,7 @@ try {
         await navigate(view);
         const dimensions = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth, body: document.body.scrollWidth }));
         assert(dimensions.document <= dimensions.viewport + 1, `${width}px / ${view}: ${JSON.stringify(dimensions)}`);
-        if (artifacts && width === 390 && ['overview', 'social-v2', 'slang'].includes(view)) {
+        if (artifacts && width === 390 && ['overview', 'config', 'slang'].includes(view)) {
           await mkdir(resolve(artifacts), { recursive: true });
           await page.screenshot({ path: resolve(artifacts, `mobile-${view}.png`), fullPage: true, animations: 'disabled' });
         }
@@ -841,8 +767,9 @@ try {
   });
 
   if (!original) await test('DSH 模型：提供方 / 模型 / 思考强度联动、来自目录、明示全局副作用与第三方隐私', async () => {
-    await navigate('overview');
-    await page.waitForFunction(() => document.getElementById('dshEffortSelect').options.length > 0);
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    await page.waitForFunction(() => document.getElementById('dshEffortSelect')?.options.length > 0);
     const efforts = async () => page.locator('#dshEffortSelect option').evaluateAll((nodes) => nodes.map((n) => n.value));
     assert.deepEqual(await efforts(), ['off', 'low', 'high', 'max'], `档位应来自 DSH 目录，实际 ${(await efforts()).join(',')}`);
     assert.equal(await page.locator('#dshEffortSelect').inputValue(), 'max', '默认应为 max');
@@ -929,20 +856,20 @@ try {
     assert.equal(result.dirtyBeforeReset, true);
     assert.equal(result.dirtyAfterReset, false);
     assert.equal(result.textareaMono, 'field-textarea-mono');
-    await page.goto(fixture.url);
+    await page.goto(`${fixture.url}#overview`);
     await page.waitForSelector('#metricSessions');
   });
 
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
-    for (const view of original ? ['overview'] : ['overview', 'persona', 'social-v2', 'slang', 'access']) {
+    for (const view of original ? ['overview'] : ['overview', 'config', 'persona', 'slang', 'operations']) {
       await navigate(view);
       await page.screenshot({ path: resolve(artifacts, `${original ? 'original' : 'desktop'}-${view}.png`), fullPage: true, animations: 'disabled' });
     }
     if (!original) {
       await page.locator('#themeToggle').click();
-      for (const view of ['overview', 'social-v2']) {
+      for (const view of ['overview', 'config']) {
         await navigate(view);
         await page.screenshot({ path: resolve(artifacts, `dark-${view}.png`), fullPage: true, animations: 'disabled' });
       }

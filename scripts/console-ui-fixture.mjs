@@ -398,6 +398,12 @@ export function makeFixtureState() {
     },
     socialStates: { 'group:123456789': { phase: 'active' }, 'group:100003': { phase: 'idle' } },
     v2: { enabled: true, agentPreset: 'qq-chat-v2', provideRecommendations: true, tools: {} },
+    behaviors: {
+      'default-v1': 'version: 1\nkind: v1\nlabel: 默认 v1\ndescription: 离线示例\nv1:\n  triggerProbability: 0.2\n',
+      'default-v2': 'version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n',
+    },
+    limits: { send: { maxSendPerMinute: 8, maxSendPerHour: 60 } },
+    tools: { getPrompt: true, getUnread: true, getRecent: true, socialState: true, sendMessage: true, sendVoice: true },
     // 会话初始提示词（离线示例）：整段内容都是虚构的演示文本。
     initPrompt: '离线示例：这是一个演示用的群聊环境说明，不会写进任何真实配置。',
     slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'qq-chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
@@ -650,6 +656,26 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
       if (method === 'DELETE' && path.startsWith('/api/extensions/mcp/')) {
         return json({ ok: true, id: decodeURIComponent(path.split('/').pop()) });
+      }
+      const behaviorMatch = path.match(/^\/api\/config\/behaviors(?:\/([^/]+))?(?:\/(validate))?$/);
+      if (behaviorMatch) {
+        const [, behaviorId, action] = behaviorMatch;
+        if (method === 'GET' && !behaviorId) {
+          return json({ ok: true, behaviors: Object.keys(state.behaviors).map((id) => ({ id, file: `${id}.yml`, label: id, kind: id.endsWith('v2') ? 'v2' : 'v1', valid: true })) });
+        }
+        if (method === 'GET' && behaviorId) return json({ ok: true, id: behaviorId, text: state.behaviors[behaviorId] ?? '' });
+        if (method === 'POST' && action === 'validate') return json({ ok: true, validation: { ok: true } });
+        if (method === 'PUT' && behaviorId) { state.behaviors[behaviorId] = String(body?.text ?? ''); return json({ ok: true, requiresRestart: true }); }
+      }
+      if (path === '/api/config/send-limit') {
+        if (method === 'GET') return json({ ok: true, send: state.limits.send });
+        state.limits.send = { maxSendPerMinute: Number(body?.maxSendPerMinute) || 0, maxSendPerHour: Number(body?.maxSendPerHour) || 0 };
+        return json({ ok: true, send: state.limits.send });
+      }
+      if (path === '/api/config/tools') {
+        if (method === 'GET') return json({ ok: true, tools: state.tools });
+        state.tools = { ...state.tools, ...(body?.tools || {}) };
+        return json({ ok: true, tools: state.tools });
       }
       if (method === 'GET') {
         switch (path) {

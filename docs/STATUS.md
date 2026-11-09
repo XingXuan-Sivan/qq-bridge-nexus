@@ -218,3 +218,11 @@ npm run test:console-ui
 - 控制台：新增「预设」页（技能与 MCP 之间），列表显示预设/名称/说明/授权/操作（编辑、应用、回滚），说明 3 行截断；编辑区内联三段（基本信息/扩展授权/YAML 高级编辑）+ 危险能力提示，保存先校验 YAML，应用后提示新会话生效、已开始会话需重建/重启 DSH。
 - 验收：`test-preset-store` 5/5、static 全过、UI **32/32**、audit **102/102**；真机 GET 列表 5 个、GET 详情、validate 200/6 行、PUT extensions 200（已回滚测试写入）、apply 200（build+setup 均成功）、rollback 200（恢复后重新 apply 成功），无 pageerror。
 - 偏差：E15（共用 guard 拿不到 preset id，不提供按预设放行原生工具的假开关）。P0 `compress` 仍 Partial；P4/P5 后续子批。
+
+### 6.12 全局配置三层模型（2026-11-09，方案稿，未实施）
+
+- 文档：`docs/GLOBAL_CONFIG.md`（系统层 / 预设层 / 会话层、现有文件清单、目标布局、迁移映射、动态授权、代码编辑器与 YAML 保注释、分批计划）。
+- 已定（用户 m31113）：新页面命名「全局配置」；原「访问与安全」页配置并入「安全与静默」，旧页不保留入口/摘要；诊断/通知不进全局配置；配置页不按仿真模式拆分；旧 `social-v1` / `social-v2` / `access` 页面与旧配置键直接删除，不保留别名/兼容，迁移前用 git 建基线（方案 2）。
+- 核心结构调整：QQ 交互参数从 `config.social` / `config.socialV2` 移到 `config/behaviors/<id>.yml` 行为档案；预设 `preset.yml` 通过 `behavior:` 引用；会话层只保留 preset/模型/人格/提示词/准入；`socialV2.agentPreset` 与 `socialV2.enabled` 删除，默认 preset 统一为 `config.agentPreset`。
+- 待拍板：代码编辑器选 CodeMirror 6（需 esbuild 自托管 vendor）还是 Ace 单文件（零构建）；YAML 库是否从 `js-yaml` 统一迁到 `yaml`（Document API 保注释）；准入名单放全局配置「准入」还是保留会话页；诊断/通知入口归属。
+- 当前没有代码改动；`docs/README.md` 已加入本文索引。逐项实施见 `docs/GLOBAL_CONFIG.md` §10（G1–G5）。

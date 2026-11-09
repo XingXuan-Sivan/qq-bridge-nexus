@@ -1,5 +1,7 @@
 # 配置说明（v0.3.0 起新增的字段）
 
+> **2026-11-09 规划**：配置结构将按 [GLOBAL_CONFIG.md](../GLOBAL_CONFIG.md) 的三层模型重构；`social` / `socialV2` 的行为字段会迁入 `config/behaviors/*.yml`，`social-v1` / `social-v2` / `access` 页面会删除。本文只描述**当前版本**的字段，实施后同步改写。
+
 原版字段（`dsh.*`、`snowluma.*`、`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
 本文只列 v0.3.0 起新增的配置段、工具开关和状态文件。所有字段都可省略，省略即取下表默认值；**默认值都是安全的**。
 修改 `config.json` 后需要重启桥接；修改 `socialV2.tools.*` 还需要重启 DSH（MCP 工具清单在 DSH 启动时读取）。

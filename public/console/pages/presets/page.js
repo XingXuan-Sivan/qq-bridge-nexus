@@ -132,25 +132,29 @@ function renderAuthPicker(extensions = {}) {
     host.innerHTML = '<span class="meta">目录读取失败，下面仍可手写授权；点「刷新目录」重试。</span>';
     return;
   }
-  const mcpValues = unique(extensions.mcp?.allow ?? []);
-  const toolValues = unique(extensions.mcp?.tools?.allow ?? []);
-  const skillValues = unique(extensions.skills?.allow ?? []);
+  const mcpValues = new Set(unique(extensions.mcp?.allow ?? []));
+  const toolValues = new Set(unique(extensions.mcp?.tools?.allow ?? []));
+  const skillValues = new Set(unique(extensions.skills?.allow ?? []));
+  const box = (group, value, checked) => '<input type="checkbox" data-auth-box="1" data-picker-group="' + group + '" value="' + esc(value) + '"' + (checked ? ' checked' : '') + '>';
+  const table = (rows, columns, meta) => (rows.length
+    ? dataTableHtml({ columns, rows, pager: false, pageSize: rows.length, meta })
+    : '<p class="meta">目录里没有这一项。</p>');
   const servers = (catalog.mcp ?? []).map((server) => ({
-    value: server.id,
-    note: server.status === 'online' ? '在线' : '读取失败',
+    cells: [box('mcp', server.id, mcpValues.has(server.id)), '<code>' + esc(server.id) + '</code>', server.status === 'online' ? '在线' : '读取失败'],
   }));
-  const tools = catalogTools(catalog).map((tool) => ({ value: tool.label, note: tool.online ? '' : '服务不可用' }));
+  const tools = catalogTools(catalog).map((tool) => ({
+    cells: [box('tools', tool.label, toolValues.has(tool.label)).replace('<input ', '<input data-picker-owner="' + esc(tool.server || '') + '" '), '<code>' + esc(tool.label) + '</code>', esc(tool.server || ''), tool.online ? '可用' : '服务不可用'],
+  }));
   const skills = (catalog.skills ?? []).map((skill) => ({
-    value: skill.id,
-    note: skill.source === 'dsh' ? 'DSH' : skill.source === 'repo' ? '仓库' : '外部',
+    cells: [box('skills', skill.id, skillValues.has(skill.id)), '<code>' + esc(skill.id) + '</code>', skill.source === 'dsh' ? 'DSH' : skill.source === 'repo' ? '仓库' : '外部'],
   }));
   host.innerHTML = [
     '<div class="preset-picker-note"><span>勾选会写入下面的 allow 列表；<code>*</code> 表示全部。deny 仍走 YAML/文本框。</span><button class="btn small" type="button" id="presetAuthRefresh">刷新目录</button></div>',
-    pickerGroup('MCP 服务器', 'mcp', servers, mcpValues),
-    toolPickerGroup(tools, toolValues),
-    pickerGroup('技能', 'skills', skills, skillValues, { stalePrefix: '技能' }),
+    '<section class="card is-group"><details class="settings-group" open><summary>MCP 服务器</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="mcp"' + (mcpValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(servers, [{ label: '授权', width: '64px' }, { label: '服务器' }, { label: '状态', width: '110px' }], (catalog.mcp ?? []).length + ' 个 server') + '</div></details></section>',
+    '<section class="card is-group"><details class="settings-group" open><summary>MCP 工具</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="tools"' + (toolValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(tools, [{ label: '授权', width: '64px' }, { label: '工具' }, { label: '所属 server', width: '160px' }, { label: '状态', width: '110px' }], tools.length + ' 个工具') + '</div></details></section>',
+    '<section class="card is-group"><details class="settings-group" open><summary>技能</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="skills"' + (skillValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(skills, [{ label: '授权', width: '64px' }, { label: '技能' }, { label: '来源', width: '110px' }], skills.length + ' 个技能') + '</div></details></section>',
   ].join('');
-  syncToolServerChecks(host);
+  initDataTables(host);
   syncToolDisabled(host);
 }
 
@@ -654,6 +658,10 @@ export function init() {
     if (target.matches('[data-picker-server-all]')) {
       const owner = target.dataset.pickerServerAll;
       host.querySelectorAll(`[data-picker-owner="${CSS.escape(owner)}"]`).forEach((input) => { input.checked = target.checked; });
+    }
+    // 勾选 server 行 = 级联勾选它下面的所有工具。
+    if (target.matches('[data-picker-group="mcp"]')) {
+      host.querySelectorAll('[data-picker-owner="' + CSS.escape(target.value) + '"]').forEach((input) => { input.checked = target.checked; });
     }
     if (target.matches('[data-picker-group], [data-picker-wild], [data-picker-server-all]')) {
       syncAuthPicker();

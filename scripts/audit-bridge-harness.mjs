@@ -127,8 +127,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     }
     return out;
   };
-  for (const id of ['default-v1', 'default-v2']) {
-    const kind = id === 'default-v1' ? 'v1' : 'v2';
+  for (const id of ['social-v1', 'social-v2']) {
+    const kind = id === 'social-v1' ? 'v1' : 'v2';
     const source = parseYaml(fs.readFileSync(path.join(root, 'config/behaviors', `${id}.yml`), 'utf8'));
     source[kind] = mergeBehavior(source[kind] || {}, behavior[kind] || {});
     fs.writeFileSync(path.join(temp, 'config/behaviors', `${id}.yml`), stringifyYaml(source));

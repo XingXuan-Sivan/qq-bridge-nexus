@@ -30,7 +30,6 @@ export const consolePages = {
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
   memory: ['记忆', '记住该记的，忘掉该忘的。', '选择注入源、管理记忆 provider 预算与本机轻量记忆，查看最近注入与主动回忆，并决定是否把对话写回记忆服务。'],
   scheduler: ['定时任务', '到点的事，交给桥接记着。', '按时区和规则定时发消息，或叫 AI 到点来说；可以发给管理员私聊、白名单好友和群。'],
-  usage: ['令牌与花费', '每一次思考，都算得清楚。', '实时查看 AI 的 token 消耗与花费，可下钻到每个群、每个好友、每一轮对话。'],
   operations: ['调试与运维', '让桥接，始终井然有序。', '测试消息、引导 AI，或维护桥接进程与会话工作区。'],
 };
 
@@ -39,7 +38,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

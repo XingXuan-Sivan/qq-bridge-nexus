@@ -393,6 +393,9 @@ export function renderFields(host, spec, options = {}) {
     const item = raw ?? {};
     if (item.type === 'section') {
       closeSection();
+      // 分组必须落在栅格外面：若前面已有字段，先关掉 .form-cols，
+      // 否则 fieldset 会被塞进栅格当列，整套 section 变成一列窄条。
+      closeGrid();
       if (item.card === true) {
         out.push(`<section class="form-section form-section--card"><div class="form-section-head"><h3>${esc(item.label ?? '')}</h3></div>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
         sectionClose = '</section>';

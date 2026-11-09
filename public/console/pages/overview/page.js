@@ -3,6 +3,7 @@
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { renderFields, bindSwitches } from '../../components/form/form.js';
 import { OVERVIEW_FIELDS } from './fields.js';
+import { init as initUsage } from './usage.js';
 
 function renderOverviewFieldGroups() {
   document.querySelectorAll('[data-overview-fields]').forEach((host) => {
@@ -20,6 +21,7 @@ function requestStatusRefresh() {
 export function init() {
   renderOverviewFieldGroups();
   bindSwitches(document.getElementById('section-overview') || document);
+  initUsage();
   onPageRefresh('overview', () => {
     if (getCurrentPage() === 'overview') requestStatusRefresh();
   });

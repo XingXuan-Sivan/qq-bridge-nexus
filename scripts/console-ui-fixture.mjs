@@ -409,9 +409,14 @@ export function makeFixtureState() {
     socialStates: { 'group:123456789': { phase: 'active' }, 'group:100003': { phase: 'idle' } },
     v2: { enabled: true, agentPreset: 'qq-chat-v2', provideRecommendations: true, tools: {} },
     behaviors: {
-      'default-v1': 'version: 1\nkind: v1\nlabel: 默认 v1\ndescription: 离线示例\nv1:\n  triggerProbability: 0.2\n',
-      'default-v2': 'version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n',
+      'social-v1': 'version: 1\nkind: v1\nlabel: 默认 v1\ndescription: 离线示例\nv1:\n  triggerProbability: 0.2\n',
+      'social-v2': 'version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n',
     },
+    behaviorDocs: {
+      'social-v1': { id: 'social-v1', kind: 'v1', label: '一代仿真默认行为', description: '离线示例', config: { triggerProbability: 0.2, contextWindow: 20 } },
+      'social-v2': { id: 'social-v2', kind: 'v2', label: '二代仿真默认行为', description: '离线示例', config: { autoReplyCheckMs: 300000, provideRecommendations: true, wake: { defaultMode: 'diving' }, send: { burstEnabled: true } } },
+    },
+    behaviorDefault: 'social-v2',
     limits: { send: { maxSendPerMinute: 8, maxSendPerHour: 60 } },
     tools: { getPrompt: true, getUnread: true, getRecent: true, socialState: true, sendMessage: true, sendVoice: true },
     // 会话初始提示词（离线示例）：整段内容都是虚构的演示文本。
@@ -678,12 +683,27 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       const behaviorMatch = path.match(/^\/api\/config\/behaviors(?:\/([^/]+))?(?:\/(validate))?$/);
       if (behaviorMatch) {
         const [, behaviorId, action] = behaviorMatch;
+        const docs = state.behaviorDocs;
         if (method === 'GET' && !behaviorId) {
-          return json({ ok: true, behaviors: Object.keys(state.behaviors).map((id) => ({ id, file: `${id}.yml`, label: id, kind: id.endsWith('v2') ? 'v2' : 'v1', valid: true })) });
+          return json({ ok: true, behaviors: Object.values(docs).map((doc) => ({ id: doc.id, file: doc.id + '.yml', label: doc.label, kind: doc.kind, valid: true })) });
         }
-        if (method === 'GET' && behaviorId) return json({ ok: true, id: behaviorId, text: state.behaviors[behaviorId] ?? '' });
+        if (method === 'GET' && behaviorId) {
+          const doc = docs[behaviorId];
+          if (!doc) return json({ ok: false, error: '行为档案不存在' }, 404);
+          return json({ ok: true, id: doc.id, text: '', header: '', kind: doc.kind, label: doc.label, description: doc.description, data: { version: 1, kind: doc.kind, label: doc.label, description: doc.description, config: doc.config } });
+        }
         if (method === 'POST' && action === 'validate') return json({ ok: true, validation: { ok: true } });
-        if (method === 'PUT' && behaviorId) { state.behaviors[behaviorId] = String(body?.text ?? ''); return json({ ok: true, requiresRestart: true }); }
+        if (method === 'PUT' && behaviorId) {
+          const data = body?.data;
+          docs[behaviorId] = { id: behaviorId, kind: data?.kind || docs[behaviorId]?.kind || 'v2', label: data?.label || behaviorId, description: data?.description ?? '', config: data?.config ?? {} };
+          return json({ ok: true, id: behaviorId, requiresRestart: true });
+        }
+      }
+      if (path === '/api/config/behavior-default') {
+        if (method === 'GET') return json({ ok: true, value: state.behaviorDefault ?? null, options: (state.behaviorDocs ? Object.values(state.behaviorDocs) : []).map((doc) => ({ id: doc.id, label: doc.label, kind: doc.kind })) });
+        const value = typeof body?.value === 'string' ? body.value.trim() : '';
+        state.behaviorDefault = value || null;
+        return json({ ok: true, value: state.behaviorDefault, message: value ? '已设为「' + value + '」，下一条消息生效' : '已清空默认行为档案' });
       }
       if (path === '/api/config/send-limit') {
         if (method === 'GET') return json({ ok: true, send: state.limits.send });

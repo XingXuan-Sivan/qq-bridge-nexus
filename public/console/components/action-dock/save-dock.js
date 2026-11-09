@@ -102,8 +102,14 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
   }
 
   function reset(sectionId) {
-    const section = list.find((s) => s.id === sectionId);
-    if (section) baseline.set(section.id, snapshotOf(readSection(section)));
+    if (sectionId) {
+      const section = list.find((s) => s.id === sectionId);
+      if (section) baseline.set(section.id, snapshotOf(readSection(section)));
+    } else {
+      // 整页丢弃：先清「用户改过」标记，随后调用方会重读服务端数据；
+      // 重读完成后 adoptIfPristine() 会用最新值重拍基线，避免把刚丢弃的编辑当成新基线。
+      touched = false;
+    }
     paint();
   }
 

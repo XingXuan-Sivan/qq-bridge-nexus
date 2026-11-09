@@ -320,3 +320,24 @@ npm run test:console-ui
 
 **有意保留**：外部人格不提供「删除」（soulkit 侧避免记忆悬空）；外部编辑不开放 soul 与角色本体；soulkit 的绑定/切换仍走它自己的 `/api/bindings`。
 
+### 6.20 控制台第三批：侧栏重排与令牌花费并入总览（2026-11-10）
+
+1. **侧栏按使用场景重排**：分组顺序改为「管理 → 聊天行为 → 扩展」。管理：运行总览、调试与运维、会话与审批、全局配置；聊天行为：人格与角色、记忆、黑话词库、定时任务；扩展：预设、插件、技能、MCP、管理行为。预设图标从 `⚙`（与全局配置重复）改成 `◈`。
+2. **令牌与花费并入运行总览**：独立页 `pages/usage/` 删除，模块搬到 `pages/overview/usage.js`（字段规格 `usage-fields.js`、样式 `usage.css`）；两张卡（令牌与花费 / 上下文压缩）追加到 `pages/overview/page.html` 的 `#section-usage`，用 `display: contents` 落回主栅格；`router.js` 的 `PAGE_META`/`PAGE_FRAGMENTS` 移除 `usage`，旧 `#usage` 链接自动回落到运行总览。导航的「令牌与花费」按钮删除，面包屑首段改「管理」。
+3. **行为档案文件改名**：`config/behaviors/{default-v1,default-v2}.yml` → `{social-v1,social-v2}.yml`；`qq-chat` / `qq-chat-v2` 的 `preset.yml` 绑定同步改为 `social-v1` / `social-v2`；测试夹具、契约、静态/UI 用例与文档中的旧 id 一并更新。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、46 次写**；`test-behavior-profiles` fail 0；`test-sticker-limits` fail 0；截图核对侧栏顺序、面包屑与总览底部两张用量卡（1440×1000，无 pageerror）。
+
+**下一步（P7）**：行为档案并入预设页的「行为档案 / 预设」两个标签页；全局配置删掉行为档案分区，只在「运行与模型」增加默认行为档案选择；删除改名/新建/直接编辑文件入口，改为按 schema 的全表单编辑；默认行为档案落到 `config.json`。
+
+### 6.21 行为档案表单化与总览收口（2026-11-10）
+
+1. **行为档案并入预设页**：预设页改为「预设 / 行为档案」两个标签；行为档案按 v1（27 项）/ v2（wake/send/wait/proactive/sticker/context/feedback 分组）全部表单化，保存走 `PUT /api/config/behaviors/<id>` 的 `{data}`（后端保留文件头注释、按 schema 重排 YAML、写前整份备份）。字段多时按表单组件的 md 断点自动两列，窄屏回落单列；带 hint 的行标签对齐输入框首行。
+2. **默认行为档案**：全局配置「运行与模型」新增默认行为档案卡（在默认人格卡上方）；`config.json` 的 `behavior.default` 是全局默认，预设 `behavior:` 绑定优先；`GET/POST /api/config/behavior-default`；档案 kind 需与运行模式一致。
+3. **全局配置删掉行为档案分区**：标签页回到 4 个（运行与模型 / 安全与静默 / 准入 / 拓展功能）。
+4. **花费概览并入指标卡样式**：去掉「花费概览」标题与独立卡片外观，直接复用顶部连接指标卡的 `.overview-summary` 外壳；四个指标、说明文字与「刷新 / 清空账本」都在同一张卡内，同步提示固定为「每 3 秒自动同步」。
+5. **会话跳转**：按会话表的会话名改为链接，点击跳到「会话与审批」并预填该会话 key 到搜索框；逐轮明细仍由上方下拉选择后加载。
+6. **表单组件修复**：`renderFields` 在遇到 `type: 'section'` 时先关闭已打开的 `.form-cols` 栅格，否则分组会被塞进栅格当列（v2 表单整段变成窄条）。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、46 次写**；真机 `GET /api/config/behavior-default` 与 `GET /api/config/behaviors/social-v2`（含结构化 `data`）均 200；截图核对 v1/v2 两列表单、总览花费卡与连接卡同款、会话跳转落点。
+

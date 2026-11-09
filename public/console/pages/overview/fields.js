@@ -102,6 +102,22 @@ export const OVERVIEW_FIELDS = {
   activity: {
     fields: [{ name: 'overviewActivity', type: 'custom', span: 2, html: ACTIVITY_HTML }],
   },
+  behaviorDefault: {
+    fields: [
+      {
+        name: 'behaviorDefaultPanel',
+        type: 'custom',
+        span: 2,
+        html: `<div class="field-row">
+  <span class="field-label">默认行为档案</span>
+  <div class="field-control"><div class="role-default-control">
+    <select id="behaviorDefaultSelect" class="u-w-190"><option value="">（未设置，预设必须自带 behavior）</option></select>
+    <div class="field-hint">预设在 <code>preset.yml</code> 里绑定 <code>behavior</code> 时以预设为准；这里只在预设未绑定时兜底。档案 kind 必须与运行模式一致。</div>
+  </div></div>
+</div>`,
+      },
+    ],
+  },
   roleDefault: {
     fields: [
       {

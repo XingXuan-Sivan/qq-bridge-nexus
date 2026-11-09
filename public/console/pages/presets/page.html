@@ -1,29 +1,59 @@
-<section class="card span-all">
-  <div class="card-head">
-    <h2>DSH 预设</h2>
-    <span class="meta">权威源在 dsh/agent-presets；保存后点「应用」才会 build 并安装到 DSH。</span>
+<section class="presets-page">
+  <div class="page-tabs" role="tablist" aria-label="预设与行为档案">
+    <button type="button" class="page-tab active" role="tab" aria-selected="true" data-presets-tab="presets">预设</button>
+    <button type="button" class="page-tab" role="tab" aria-selected="false" data-presets-tab="behaviors">行为档案</button>
   </div>
-  <div data-presets-fields="main"></div>
-</section>
-<section class="card span-all" id="presetEditor" hidden>
-  <div class="card-head">
-    <h2 id="presetEditorTitle">编辑预设</h2>
-    <span class="meta" id="presetEditorPath"></span>
+
+  <div class="presets-panel" data-presets-panel="presets">
+    <section class="card span-all">
+      <div class="card-head">
+        <h2>DSH 预设</h2>
+        <span class="meta">权威源在 dsh/agent-presets；保存后点「应用」才会 build 并安装到 DSH。</span>
+      </div>
+      <div data-presets-fields="main"></div>
+    </section>
+    <section class="card span-all" id="presetEditor" hidden>
+      <div class="card-head">
+        <h2 id="presetEditorTitle">编辑预设</h2>
+        <span class="meta" id="presetEditorPath"></span>
+      </div>
+      <div data-presets-fields="edit"></div>
+      <section class="preset-prompt" id="presetPrompt" hidden>
+        <div class="preset-prompt-head">
+          <h3>仿真提示词</h3>
+        </div>
+        <p class="meta">存在本预设的 <code>persona.prefix</code>：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件并同步到 DSH，需要重启 DSH 生效。</p>
+        <div data-presets-fields="simPrompt"></div>
+      </section>
+      <div class="form-actions" id="presetEditorActions">
+        <button id="presetValidate" class="btn" type="button">校验 YAML</button>
+        <button id="presetSave" class="btn primary" type="button">保存源文件</button>
+        <button id="presetApply" class="btn" type="button">应用并安装</button>
+        <button id="presetRollback" class="btn danger" type="button">回滚上一版</button>
+        <button id="presetCancelEdit" class="btn" type="button">收起</button>
+        <span class="meta" id="presetEditMsg"></span>
+      </div>
+    </section>
   </div>
-  <div data-presets-fields="edit"></div>
-  <section class="preset-prompt" id="presetPrompt" hidden>
-    <div class="preset-prompt-head">
-      <h3>仿真提示词</h3>
-    </div>
-    <p class="meta">存在本预设的 <code>persona.prefix</code>：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件并同步到 DSH，需要重启 DSH 生效。</p>
-    <div data-presets-fields="simPrompt"></div>
-  </section>
-  <div class="form-actions" id="presetEditorActions">
-    <button id="presetValidate" class="btn" type="button">校验 YAML</button>
-    <button id="presetSave" class="btn primary" type="button">保存源文件</button>
-    <button id="presetApply" class="btn" type="button">应用并安装</button>
-    <button id="presetRollback" class="btn danger" type="button">回滚上一版</button>
-    <button id="presetCancelEdit" class="btn" type="button">收起</button>
-    <span class="meta" id="presetEditMsg"></span>
+
+  <div class="presets-panel" data-presets-panel="behaviors" hidden>
+    <section class="card span-all">
+      <div class="card-head">
+        <h2>行为档案</h2>
+        <span class="meta">描述 QQ 里怎么说话、怎么等待；预设通过 <code>behavior</code> 引用，未绑定时用全局配置里的「默认行为档案」。</span>
+      </div>
+      <div class="form-stack">
+        <div class="field-row">
+          <label class="field-label" for="behaviorFormSelect">选择档案</label>
+          <div class="field-control">
+            <div class="control-row">
+              <select id="behaviorFormSelect" class="u-w-190"></select>
+              <button type="button" class="btn small" id="behaviorFormRefresh">刷新</button>
+            </div>
+          </div>
+        </div>
+        <div id="behaviorFormPanel" class="behavior-form-panel"></div>
+      </div>
+    </section>
   </div>
 </section>

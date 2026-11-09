@@ -7,6 +7,7 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { PRESETS_FIELDS } from './fields.js';
+import { behaviorFormHtml, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
 
 let presetsCache = [];
 let editingId = '';
@@ -500,6 +501,86 @@ async function refreshPresets(showError = false) {
   }
 }
 
+// ── 行为档案（标签页）────────────────────────────────────────────────────────
+let behaviorDoc = null;
+
+function setBehaviorFormMsg(text, tone = 'info') {
+  const el = document.getElementById('behaviorFormMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = `meta ${tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : ''}`.trim();
+}
+
+async function refreshBehaviorList(preferred) {
+  const select = document.getElementById('behaviorFormSelect');
+  if (!select) return;
+  const list = await api('/api/config/behaviors');
+  const items = Array.isArray(list?.behaviors) ? list.behaviors : [];
+  select.innerHTML = items.length
+    ? items.map((item) => `<option value="${esc(item.id)}">${esc(item.label || item.id)}（${esc(item.kind || '?')}）</option>`).join('')
+    : '<option value="">（没有行为档案）</option>';
+  if (!items.length) {
+    document.getElementById('behaviorFormPanel').innerHTML = '<p class="meta">config/behaviors 下没有可用的行为档案。</p>';
+    behaviorDoc = null;
+    return;
+  }
+  const want = preferred || behaviorDoc?.id || items[0].id;
+  if (items.some((item) => item.id === want)) select.value = want;
+  await loadBehaviorDoc(select.value);
+}
+
+async function loadBehaviorDoc(id) {
+  const panel = document.getElementById('behaviorFormPanel');
+  if (!panel || !id) return;
+  setBehaviorFormMsg('读取中…');
+  try {
+    const doc = await api(`/api/config/behaviors/${encodeURIComponent(id)}`);
+    if (!doc?.ok) throw new Error(doc?.error || '读取失败');
+    behaviorDoc = doc;
+    panel.innerHTML = behaviorFormHtml(doc.kind, { id: doc.id });
+    fillBehaviorForm(panel.querySelector('[data-behavior-form]'), doc.kind, doc.data?.config ?? {});
+    const label = document.getElementById('behaviorFormLabel');
+    if (label) label.value = doc.data?.label ?? '';
+    setBehaviorFormMsg(`${doc.id} · ${doc.kind} · ${doc.data?.label ?? ''}`);
+  } catch (error) {
+    panel.innerHTML = '';
+    setBehaviorFormMsg(String(error?.message ?? error), 'err');
+  }
+}
+
+async function saveBehaviorDoc() {
+  if (!behaviorDoc) return;
+  const panel = document.getElementById('behaviorFormPanel');
+  const form = panel?.querySelector('[data-behavior-form]');
+  if (!form) return;
+  const config = readBehaviorForm(form, behaviorDoc.kind);
+  const label = String(document.getElementById('behaviorFormLabel')?.value ?? '').trim() || behaviorDoc.data?.label || behaviorDoc.id;
+  const description = behaviorDoc.data?.description ?? '';
+  setBehaviorFormMsg('保存中…');
+  try {
+    const r = await api(`/api/config/behaviors/${encodeURIComponent(behaviorDoc.id)}`, 'PUT', {
+      data: { version: 1, kind: behaviorDoc.kind, label, description, config },
+    });
+    if (!r?.ok) throw new Error(r?.error || '保存失败');
+    setBehaviorFormMsg('✅ 已保存；重启桥接后生效', 'ok');
+    await loadBehaviorDoc(behaviorDoc.id);
+  } catch (error) {
+    setBehaviorFormMsg(`❌ ${String(error?.message ?? error)}`, 'err');
+  }
+}
+
+function showPresetsTab(name) {
+  document.querySelectorAll('[data-presets-tab]').forEach((button) => {
+    const active = button.dataset.presetsTab === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  document.querySelectorAll('[data-presets-panel]').forEach((panel) => {
+    panel.hidden = panel.dataset.presetsPanel !== name;
+  });
+  if (name === 'behaviors' && !behaviorDoc) void refreshBehaviorList();
+}
+
 export function init() {
   const main = document.querySelector('[data-presets-fields="main"]');
   const edit = document.querySelector('[data-presets-fields="edit"]');
@@ -522,6 +603,19 @@ export function init() {
     setPromptMsg('已取消编辑');
   });
   document.getElementById('simPromptReset')?.addEventListener('click', () => void resetPresetPrompt());
+
+  // 标签页：预设 / 行为档案（行为档案只读结构、按 schema 表单编辑；不提供新建/改名/改文件）
+  document.querySelectorAll('[data-presets-tab]').forEach((button) => {
+    button.addEventListener('click', () => showPresetsTab(button.dataset.presetsTab));
+  });
+  document.getElementById('behaviorFormSelect')?.addEventListener('change', (event) => {
+    const id = event.target.value;
+    if (id) void loadBehaviorDoc(id);
+  });
+  document.getElementById('behaviorFormRefresh')?.addEventListener('click', () => void refreshBehaviorList());
+  document.getElementById('behaviorFormPanel')?.addEventListener('click', (event) => {
+    if (event.target.closest('#behaviorFormSave')) void saveBehaviorDoc();
+  });
 
   document.getElementById('presetList')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-preset-act]');

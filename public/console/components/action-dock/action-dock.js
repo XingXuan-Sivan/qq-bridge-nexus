@@ -108,12 +108,20 @@ export function createActionDock({ actions = [], page = '', shape = 'circle', id
 
   document.body.appendChild(root);
   paintVisibility();
+  // 切页（hash 变化）时立即重算可见性：不依赖下一次 refresh，避免浮动组跨页残留。
+  const onPageChange = () => paintVisibility();
+  window.addEventListener('hashchange', onPageChange);
+  window.addEventListener('popstate', onPageChange);
   return {
     el: root,
     button: (actionId) => buttons.get(actionId)?.button || null,
     update,
     paint: paintVisibility,
-    destroy() { root.remove(); },
+    destroy() {
+      window.removeEventListener('hashchange', onPageChange);
+      window.removeEventListener('popstate', onPageChange);
+      root.remove();
+    },
   };
 }
 
@@ -122,4 +130,5 @@ export const DOCK_ICONS = {
   save: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  undo: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7 4 12l5 5"/><path d="M4 12h10a5 5 0 0 1 0 10h-3"/></svg>',
 };

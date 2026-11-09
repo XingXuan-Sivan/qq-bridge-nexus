@@ -56,8 +56,6 @@
   background: var(--surface-chip-strong, var(--surface-chip));
   border-color: var(--border-subtle);
 }
-.action-dock-btn[data-tone="danger"] { color: var(--err, #c0392b); }
-.action-dock-btn[data-tone="danger"]:hover:not(:disabled) { border-color: var(--err, #c0392b); }
 
 .action-dock-icon { display: inline-flex; }
 .action-dock-icon svg { display: block; }

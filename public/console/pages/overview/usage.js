@@ -1,11 +1,10 @@
-// 用量与花费页（两张卡片：令牌与花费 / 上下文压缩）。
-// 页面片段由路由器注入，本模块只负责：绑事件、注册刷新、自己做首次加载与轮询。
+// 令牌与花费 / 上下文压缩：已并入运行总览页，本模块由 overview/page.js 调 init()。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { getCurrentPage, onPageRefresh, setConsolePage } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { renderFields } from '../../components/form/form.js';
-import { USAGE_FIELDS } from './fields.js';
+import { USAGE_FIELDS } from './usage-fields.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
 // 为什么不用图表库：控制台 CSP 是 default-src 'self'，不能引外部脚本；
@@ -231,7 +230,7 @@ function renderUsageConversations(r) {
       : (key.startsWith('private:') ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>');
     const b = c.buckets || {};
     html += '<tr>'
-      + `<td class="usage-key"><button class="usage-key-button" data-usage-key="${esc(key)}" aria-pressed="${key === usageSelectedKey}">${esc(key)}</button></td>`
+      + `<td class="usage-key"><a class="usage-key-link" href="#sessions" data-open-session="${esc(key)}" title="在「会话与审批」里查看">${esc(key)}</a></td>`
       + `<td>${type}</td>`
       + `<td class="num">${usageNum(c.turns)}</td>`
       + `<td class="num">${usageNum(c.steps)}</td>`
@@ -253,12 +252,17 @@ function renderUsageConversations(r) {
   }
   box.innerHTML = html;
   applyUsageBarWidths(box);
-  box.querySelectorAll('[data-usage-key]').forEach(btn => btn.addEventListener('click', () => {
-    usageSelectedKey = btn.dataset.usageKey;
-    box.querySelectorAll('[data-usage-key]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.usageKey === usageSelectedKey)));
-    const sel = document.getElementById('usageKeySelect');
-    if (sel) sel.value = usageSelectedKey;
-    refreshUsageTurns();
+  // 会话名直接跳到「会话与审批」，并把搜索框预填成这个 key；逐轮明细仍由上方下拉选择。
+  box.querySelectorAll('[data-open-session]').forEach((link) => link.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    const key = link.dataset.openSession;
+    setConsolePage('sessions');
+    setTimeout(() => {
+      const input = document.querySelector('[data-sessions-panel="sessions"] [data-table-search]');
+      if (!input) return;
+      input.value = key;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }, 150);
   }));
 }
 
@@ -359,7 +363,7 @@ async function refreshUsage() {
     renderUsagePrices(r.priceTable ? { ...r.priceTable, nowTier: r.nowTier } : null);
     syncUsageKeySelect((r.conversations || []).map(c => String(c.key ?? '')));
     if (!document.getElementById('usageTurns').dataset.loaded && usageSelectedKey) refreshUsageTurns();
-    setMsg(msg, `✅ 已同步于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`, 'ok');
+    setMsg(msg, '每 3 秒自动同步', 'ok');
   } catch (error) {
     setMsg(msg, `❌ 读取失败：${error?.message || '未知错误'}`, 'err');
   }
@@ -390,25 +394,12 @@ async function refreshUsageRecent() {
   }
 }
 
-// ── 上下文压缩（socialV2.compact）───────────────────────────────────────────
-async function loadCompactConfig() {
-  const r = await api('/api/compact/config');
-  if (!r.ok) return;
-  document.querySelectorAll('input[name="compactMode"]').forEach((c) => { c.checked = c.value === r.mode; });
-  const wan = document.getElementById('compactWan');
-  if (document.activeElement !== wan) wan.value = Math.round(r.thresholdTokens / 10_000);
-  const list = (r.sessions || []).sort((a, b) => b.inputTokens - a.inputTokens).slice(0, 6);
-  document.getElementById('compactSessions').textContent = list.length
-    ? '上一步读了多少：' + list.map((x) => `${x.key} ${Math.round(x.inputTokens / 10_000)} 万`).join('，')
-    : '桥接这次启动后还没有会话跑过，暂时看不到每个会话读了多少';
-}
-
-// 切进本页时四块数据一起刷；首次注入也走同一条路径。
+// ── 页面数据 ────────────────────────────────────────────────────────────────
+// 切进本页时三块数据一起刷；首次注入也走同一条路径。
 function refreshUsagePage() {
   refreshUsage();
   refreshUsageChart();
   refreshUsageRecent();
-  loadCompactConfig();
 }
 
 // 渲染指标块、图表控件、表格宿主与压缩设置。必须在 init() 最前面跑：
@@ -428,8 +419,7 @@ function renderUsageFields() {
 export function init() {
   renderUsageFields();
   // 标题旁的小字提示原先是 index.html 里的 data-note；片段化后在这里补（与 app.js 对静态 section 的做法一致）。
-  document.querySelector('#section-usage-ledger h2').dataset.note = '每 3 秒自动同步';
-  document.querySelector('#section-compact h2').dataset.note = '保存后下一轮结束时生效';
+  document.querySelector('#section-usage-summary h2')?.setAttribute('data-note', '每 3 秒自动同步');
 
   document.getElementById('usageChartControls').addEventListener('click', (ev) => {
     const hoursBtn = ev.target.closest('[data-usage-hours]');
@@ -475,23 +465,10 @@ export function init() {
     refreshUsageRecent();
   });
 
-  document.getElementById('compactSave').addEventListener('click', async () => {
-    const mode = (document.querySelector('input[name="compactMode"]:checked') || {}).value;
-    const msg = document.getElementById('compactMsg');
-    if (!mode) { setMsg(msg, '请先选一种压缩方式', 'err'); return; }
-    const r = await api('/api/compact/config', 'POST', { mode, thresholdWan: Number(document.getElementById('compactWan').value) });
-    msg.textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
-    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
-    if (r.ok) loadCompactConfig();
-  });
-  document.getElementById('compactWan').addEventListener('focus', () => { const e = document.querySelector('input[name="compactMode"][value="early"]'); if (e) e.checked = true; });
+  // 用量看板只在运行总览可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
+  setInterval(() => { if (getCurrentPage() !== 'overview') return; refreshUsage(); refreshUsageChart(); refreshUsageRecent(); }, 3000);
 
-  // 用量看板只在本页可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
-  setInterval(() => { if (getCurrentPage() !== 'usage') return; refreshUsage(); refreshUsageChart(); refreshUsageRecent(); }, 3000);
-  // 压缩设置每 60 秒同步一次（别的窗口改过 config.json 也能跟上）；不在本页时不打接口。
-  setInterval(() => { if (getCurrentPage() === 'usage') loadCompactConfig(); }, 60_000);
-
-  onPageRefresh('usage', () => setTimeout(() => refreshUsagePage(), 0));
+  onPageRefresh('overview', () => setTimeout(() => refreshUsagePage(), 0));
   // 首次进入时片段刚注入，延后一拍再刷，避免在 DOM / 样式就绪前空转。
   setTimeout(() => refreshUsagePage(), 0);
 }

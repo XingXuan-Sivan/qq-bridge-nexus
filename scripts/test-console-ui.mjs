@@ -18,7 +18,7 @@ const original = args.includes('--original');
 const acceptContracts = args.includes('--accept-contracts');
 const record = args.includes('--record-baseline') || acceptContracts;
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
-const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'presets', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'usage', 'operations'];
+const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'presets', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'operations'];
 const retiredIds = new Set(existsSync(join(here, 'console-ui-retired-ids.json'))
   ? JSON.parse((await readFile(join(here, 'console-ui-retired-ids.json'), 'utf8')).replace(/^\uFEFF/, ''))
   : []);
@@ -299,17 +299,24 @@ try {
     assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('Behavior editor loads, validates and saves through the config API', async () => {
+  await test('默认行为档案在全局配置，行为档案表单在预设页', async () => {
     await hydrate('config');
-    await page.locator('[data-config-section="behavior"]').click();
-    await page.waitForFunction(() => document.getElementById('behaviorSelect')?.options.length >= 2);
-    await page.selectOption('#behaviorSelect', 'default-v2');
-    await page.waitForFunction(() => document.getElementById('behaviorText').value.includes('kind: v2'));
-    assert.match(await page.locator('#behaviorText').inputValue(), /version: 1/);
-    await page.locator('#behaviorValidate').click();
-    await page.waitForFunction(() => /校验通过/.test(document.getElementById('behaviorMsg')?.textContent || ''));
-    await page.locator('#behaviorSave').click();
-    await page.waitForFunction(() => /已保存/.test(document.getElementById('behaviorMsg')?.textContent || ''));
+    assert.equal(await page.locator('[data-config-section="behavior"]').count(), 0);
+    await page.waitForFunction(() => document.getElementById('behaviorDefaultSelect')?.options.length >= 2);
+    assert.equal(await page.locator('#behaviorDefaultSelect').inputValue(), 'social-v2');
+    await page.selectOption('#behaviorDefaultSelect', 'social-v1');
+    await saveBarWrite('/api/config/behavior-default');
+    assert.deepEqual(fixture.requests.at(-1).body, { value: 'social-v1' });
+
+    await navigate('presets');
+    await page.locator('[data-presets-tab="behaviors"]').click();
+    await page.waitForFunction(() => document.getElementById('behaviorFormSelect')?.options.length >= 2);
+    await page.waitForFunction(() => document.getElementById('behaviorFormLabel')?.value === '一代仿真默认行为');
+    await fill('contextWindow', '25');
+    await clickWrite('#behaviorFormSave', '/api/config/behaviors/social-v1', 'PUT');
+    const body = fixture.requests.at(-1).body;
+    assert.equal(body.data.kind, 'v1');
+    assert.equal(body.data.config.contextWindow, 25);
   });
 
   await test('Mode and preset contracts', async () => {
@@ -521,7 +528,7 @@ try {
 
   if (!original) await test('Token usage panel renders totals, per-conversation and per-turn cost', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await navigate('usage');
+    await navigate('overview');
     await page.waitForFunction(() => document.getElementById('metricUsageTokens')?.textContent !== '—');
 
     // 四个总览指标
@@ -538,8 +545,23 @@ try {
     assert.match(conversations, /¥/, '按会话表应显示花费列');
     assert.match(conversations, /未命中输入/, '按会话表应拆分缓存命中 / 未命中');
 
-    // 下钻逐轮：点会话行 → 加载该会话的逐轮花费
-    await page.click('#usageConversations [data-usage-key="group:123456789"]');
+    // 会话名是链接：点它跳到「会话与审批」，并把搜索框预填成这个 key
+    await page.click('#usageConversations [data-open-session="group:123456789"]');
+    await page.waitForFunction(() => location.hash === '#sessions');
+    await page.waitForFunction(
+      () => (document.querySelector('[data-sessions-panel="sessions"] [data-table-search]')?.value || '') === 'group:123456789',
+    );
+    assert.equal(
+      await page.inputValue('[data-sessions-panel="sessions"] [data-table-search]'),
+      'group:123456789',
+      '跳转后应把会话 key 预填进搜索框',
+    );
+    await navigate('overview');
+    await page.waitForFunction(() => (document.getElementById('usageConversations')?.textContent || '').includes('group:123456789'));
+
+    // 下钻逐轮：用上方下拉选择会话后加载明细
+    await page.selectOption('#usageKeySelect', 'group:123456789');
+    await page.click('#usageTurnsLoad');
     await page.waitForFunction(() => /#\d+/.test(document.getElementById('usageTurns')?.textContent || ''));
     const turns = await page.textContent('#usageTurns');
     assert.match(turns, /#42/, '逐轮明细应显示轮次编号');
@@ -557,7 +579,7 @@ try {
 
   if (!original) await test('Token usage trend chart renders bars, tiers and range/metric switching', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await navigate('usage');
+    await navigate('overview');
     await page.waitForFunction(() => document.querySelectorAll('#usageChart svg rect.usage-bar-off, #usageChart svg rect.usage-bar-peak').length > 0);
 
     // 柱：空闲与高峰两类都要画出来（fixture 按真实峰谷规则生成）

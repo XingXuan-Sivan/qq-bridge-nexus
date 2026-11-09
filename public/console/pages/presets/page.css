@@ -50,3 +50,19 @@
 .preset-prompt .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .preset-prompt .meta.ok { color: var(--ok, #2f8f5b); }
 .preset-prompt .meta.err { color: var(--danger); }
+
+/* P7：预设页两个标签页（预设 / 行为档案）。面板本身不画框，卡片直接落到页面主栅格。 */
+.presets-page { display: contents; }
+.presets-panel { display: contents; }
+.presets-panel[hidden] { display: none; }
+.behavior-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
+.behavior-form-panel .form-cols { row-gap: 14px; }
+.behavior-form-panel .behavior-form { width: 100%; }
+.behavior-form-panel .form-section { width: 100%; margin: 0; padding: 14px 16px 6px; }
+.behavior-form-panel .form-section + .form-section { margin-top: 14px; }
+/* 带「毫秒」等 hint 的行：标签对齐输入框首行，而不是整行（含 hint）的垂直中心。 */
+.behavior-form-panel .field-row { align-items: start; }
+.behavior-form-panel .field-label { min-height: 40px; height: 40px; }
+.behavior-form-panel .field-control > input[type="text"],
+.behavior-form-panel .field-control > input[type="number"],
+.behavior-form-panel .field-control > select { max-width: 460px; }

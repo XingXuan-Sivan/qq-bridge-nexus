@@ -1,9 +1,43 @@
 <h2 class="sr-only">运行总览</h2>
 <div data-overview-fields="metrics"></div>
 
+<!-- 花费与调用：卡片按「先看总数、再看走势与明细」排列；#section-usage 只是样式作用域，display:contents 不参与布局。 -->
+<div id="section-usage">
+<section id="section-usage-summary" class="overview-summary overview-summary--spend span-all">
+  <div class="overview-metric-grid" data-usage-fields="summary"></div>
+  <p class="meta">累计总量取 <code>tokenUsage</code> 投影，逐轮明细由 <code>assistant/message</code> 折算；金额按 DeepSeek 官方价目表，区分高峰 / 空闲（高峰单价为空闲的 2 倍）。</p>
+  <div class="row" data-usage-fields="actions"></div>
+</section>
+
+<p class="overview-footnote" id="accessSummary">正在读取全局准入…</p>
+
+<section id="section-usage-chart" class="card span-all">
+  <h2>消耗走势</h2>
+  <div data-usage-fields="chart"></div>
+</section>
+
+<section id="section-usage-conversations" class="card span-all">
+  <h2>按会话（群 / 私聊）</h2>
+  <div data-usage-fields="conversations"></div>
+</section>
+
+<section id="section-usage-turns" class="card span-all">
+  <h2 data-note="先选会话，再加载明细">逐轮花费</h2>
+  <p class="meta" id="usageTurnScope">—</p>
+  <div data-usage-fields="turnsControls"></div>
+  <div data-usage-fields="turnsBody"></div>
+</section>
+
+<section class="card is-group span-all">
+  <div data-usage-fields="recent"></div>
+</section>
+
+<section class="card is-group span-all">
+  <div data-usage-fields="prices"></div>
+</section>
+</div>
+
 <section id="section-activity" class="card span-all">
   <h2 data-note="每 3 秒自动同步">活动日志（最近 100 条）</h2>
   <div data-overview-fields="activity"></div>
 </section>
-
-<p class="overview-footnote" id="accessSummary">正在读取全局准入…</p>

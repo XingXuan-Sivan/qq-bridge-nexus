@@ -25,6 +25,8 @@ import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/stor
 import {
   assertPresetBehaviorBindings,
   listBehaviorFiles,
+  readBehaviorDocument,
+  writeBehaviorData,
   loadBehaviorProfiles,
   loadPresetBehaviorBindings,
   readBehaviorFile,
@@ -860,6 +862,24 @@ function setConfigDefaultRole(name) {
   file.role = role;
   atomicWriteJson(configFile, file);
   if (bridgeCfg) bridgeCfg.role = { ...(bridgeCfg.role ?? {}), default: name ?? undefined };
+}
+
+/** 全局默认行为档案：预设没绑定 behavior 时兜底（预设在 preset.yml 里绑定时仍以预设为准）。 */
+function configDefaultBehaviorName(cfgValue = bridgeCfg) {
+  const raw = cfgValue?.behavior?.default;
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  return cfgValue?.behaviors?.has?.(value) ? value : null;
+}
+
+function setConfigDefaultBehavior(name) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  const behavior = { ...(file.behavior ?? {}) };
+  if (name) behavior.default = name; else delete behavior.default;
+  file.behavior = behavior;
+  atomicWriteJson(configFile, file);
+  if (bridgeCfg) bridgeCfg.behavior = { ...(bridgeCfg.behavior ?? {}), default: name ?? undefined };
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
 // silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
@@ -4242,7 +4262,8 @@ async function main() {
     const mode = effectiveMode(key);
     if (mode === 'chat' || mode === 'closed-agent') return null;
     const presetId = modePreset(key, mode, cfg);
-    const behaviorId = presetId ? cfg.presetBehaviors.get(presetId) : '';
+    // 预设绑定优先；没绑定（例如控制台新建的预设）时用全局默认行为档案兜底。
+    const behaviorId = (presetId ? cfg.presetBehaviors.get(presetId) : '') || configDefaultBehaviorName(cfg);
     const behavior = resolveBehavior(cfg.behaviors, behaviorId, { presetId: presetId || key });
     if (mode === 'reserved' && behavior.kind !== 'v1') {
       throw new Error(`预设 ${presetId} 的行为档案 kind=${behavior.kind}，但会话 ${key} 运行在一代仿真`);
@@ -5917,7 +5938,8 @@ async function main() {
             }
             if (!id) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
             if (req.method === 'GET') {
-              sendJson({ ok: true, ...readBehaviorFile({ root: behaviorsRoot, id }) });
+              // 表单需要结构化 data；文本仍原样返回，供备份/排查使用。
+              sendJson({ ok: true, ...readBehaviorDocument({ root: behaviorsRoot, id }) });
               return;
             }
             if (req.method === 'POST' && action === 'validate') {
@@ -5927,8 +5949,10 @@ async function main() {
             }
             if (req.method === 'PUT' && !action) {
               const body = await readBody();
-              const result = writeBehaviorFile({ root: behaviorsRoot, id, text: body?.text });
-              ext.audit.append('config.behavior.write', { id });
+              const result = body?.data
+                ? writeBehaviorData({ root: behaviorsRoot, id, data: body.data })
+                : writeBehaviorFile({ root: behaviorsRoot, id, text: body?.text });
+              ext.audit.append('config.behavior.write', { id, form: !!body?.data });
               sendJson({ ok: true, ...result, requiresRestart: true });
               return;
             }
@@ -6193,7 +6217,29 @@ async function main() {
             return;
           }
         }
-        // 这张卡有没有会话在用（全局是它，或者有会话单独指定了它）：改它的内容时才需要让会话重新读卡
+        // 全局配置页的「默认行为档案」下拉：预设没有 behavior 绑定时用它兜底（绑定仍以 preset.yml 为准）。
+        if (url.pathname === '/api/config/behavior-default') {
+          const options = [...(cfg.behaviors?.entries?.() ?? [])].map(([id, behavior]) => ({ id, label: behavior.label, kind: behavior.kind }));
+          if (req.method === 'GET') {
+            sendJson({ ok: true, value: configDefaultBehaviorName(cfg), options });
+            return;
+          }
+          if (req.method === 'POST') {
+            const body = await readBody();
+            const raw = typeof body.value === 'string' ? body.value.trim() : '';
+            if (raw) {
+              if (!cfg.behaviors?.has?.(raw)) { sendJson({ ok: false, error: `行为档案「${raw}」不存在` }, 400); return; }
+              setConfigDefaultBehavior(raw);
+              log(`控制台：默认行为档案已设为 ${raw}（下一条消息生效）`);
+              sendJson({ ok: true, value: raw, message: `已设为「${raw}」，下一条消息生效；档案 kind 需与运行模式一致` });
+            } else {
+              setConfigDefaultBehavior(null);
+              log('控制台：默认行为档案已清空（预设未绑定的仿真会话将拒绝启动）');
+              sendJson({ ok: true, value: null, message: '已清空默认行为档案' });
+            }
+            return;
+          }
+        }
         const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, sessions.keys());
         // 按会话设置人格卡（逻辑在 src/role-per-key.js）：use = default（跟全局）/ off（不挂卡）/ role（用 role 这张卡）
         if (req.method === 'POST' && url.pathname === '/api/roles/assign') {

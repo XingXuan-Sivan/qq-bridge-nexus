@@ -11,16 +11,26 @@ import { getSwitch, renderFields, setSwitch } from '../../components/form/form.j
 import { initTimeFields } from '../../components/time/time.js';
 import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
 import { DOCK_ICONS } from '../../components/action-dock/action-dock.js';
-import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { CONFIG_FIELDS } from './fields.js';
 import { init as initAccessPage, loadSecurity, securitySection, tokenSection } from './access-section.js';
 import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess } from '../sessions/page.js';
 import { initToolsSection } from './tools-section.js';
+import { mountCompact } from './compact.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
 // 页面级保存条：init() 里创建；模块级只是为了 refreshOverviewPage 也能看到它。
 let saveBar = null;
+let compactPanel = null;
+
+// 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
+// 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
+async function reloadConfigSections() {
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadBehaviorDefault(), refreshGlobalAccess()]);
+  compactPanel?.load();
+  requestStatusRefresh();
+  if (saveBar) saveBar.adoptIfPristine();
+}
 
 // ── 页面级保存分区 ──────────────────────────────────────────────────────────
 // 只有「改完该整页一起保存」的表单才注册到这里；表格型数据（管理员、定时静默、
@@ -422,74 +432,29 @@ const roleDefaultSection = {
   },
 };
 
-// ── 行为档案 ────────────────────────────────────────────────────────────────
-let behaviorCurrentId = '';
-let behaviorEditor = null;
-
-// 行为档案编辑器：CodeMirror 与隐藏 textarea 双向同步，保存/校验仍读 textarea。
-function setBehaviorText(value) {
-  const text = String(value ?? '');
-  if (behaviorEditor) behaviorEditor.setValue(text);
-  const area = $('behaviorText');
-  if (area) area.value = text;
+// ── 默认行为档案（config.json 的 behavior.default）──────────────────────────────
+async function loadBehaviorDefault() {
+  const select = $('behaviorDefaultSelect');
+  if (!select) return;
+  const r = await api('/api/config/behavior-default');
+  const current = r?.value ?? '';
+  const options = Array.isArray(r?.options) ? r.options : [];
+  select.innerHTML = '<option value="">（未设置，预设必须自带 behavior）</option>'
+    + options.map((item) => '<option value="' + esc(item.id) + '">' + esc(item.label || item.id) + '（' + esc(item.kind) + '）</option>').join('');
+  select.value = options.some((item) => item.id === current) ? current : '';
 }
 
-async function refreshBehaviors(preferred) {
-  const list = await api('/api/config/behaviors');
-  const items = Array.isArray(list?.behaviors) ? list.behaviors : (Array.isArray(list?.items) ? list.items : []);
-  const select = $('behaviorSelect');
-  select.innerHTML = items.map((item) => `<option value="${esc(item.id)}">${esc(item.id)}${item.valid === false ? '（损坏）' : ''}</option>`).join('');
-  if (!items.length) { select.innerHTML = '<option value="">（没有行为档案）</option>'; return; }
-  const want = preferred || behaviorCurrentId || select.value || items[0].id;
-  if (items.some((item) => item.id === want)) select.value = want;
-  await loadBehavior(select.value);
-}
-
-async function loadBehavior(id) {
-  if (!id) { $('behaviorId').value = ''; setBehaviorText(''); return; }
-  const r = await api(`/api/config/behaviors/${encodeURIComponent(id)}`);
-  behaviorCurrentId = id;
-  $('behaviorId').value = id;
-  setBehaviorText(r.text || '');
-  setMsg($('behaviorMsg'), `已加载 ${id}`, 'info');
-}
-
-function bindBehaviorSection() {
-  $('behaviorSelect').addEventListener('change', () => loadBehavior($('behaviorSelect').value).catch((error) => setMsg($('behaviorMsg'), String(error?.message ?? error), 'err')));
-  $('behaviorRefresh').addEventListener('click', () => refreshBehaviors().catch((error) => setMsg($('behaviorMsg'), String(error?.message ?? error), 'err')));
-  $('behaviorNew').addEventListener('click', () => {
-    behaviorCurrentId = '';
-    $('behaviorId').value = '';
-    setBehaviorText('version: 1\nkind: v2\nlabel: 新行为档案\ndescription: ""\nv2: {}\n');
-    setMsg($('behaviorMsg'), '填入 id 与内容后点保存', 'info');
-  });
-  $('behaviorValidate').addEventListener('click', async () => {
-    const id = $('behaviorId').value.trim();
-    const msg = $('behaviorMsg');
-    if (!id) { setMsg(msg, '先填文件名', 'err'); return; }
-    setMsg(msg, '校验中…', 'info');
-    try {
-      const r = await api(`/api/config/behaviors/${encodeURIComponent(id)}/validate`, 'POST', { text: $('behaviorText').value });
-      setMsg(msg, r?.ok ? '✅ YAML 与字段校验通过' : `❌ ${r?.error || '校验失败'}`, r?.ok ? 'ok' : 'err');
-    } catch (error) {
-      setMsg(msg, `❌ ${String(error?.message ?? error)}`, 'err');
-    }
-  });
-  $('behaviorSave').addEventListener('click', async () => {
-    const id = $('behaviorId').value.trim();
-    const msg = $('behaviorMsg');
-    if (!id) { setMsg(msg, '先填文件名', 'err'); return; }
-    setMsg(msg, '保存中…', 'info');
-    try {
-      const r = await api(`/api/config/behaviors/${encodeURIComponent(id)}`, 'PUT', { text: $('behaviorText').value });
-      if (!r?.ok) throw new Error(r?.error || '保存失败');
-      await refreshBehaviors(id);
-      setMsg(msg, '✅ 已保存；重启桥接后生效', 'ok');
-    } catch (error) {
-      setMsg(msg, `❌ ${String(error?.message ?? error)}`, 'err');
-    }
-  });
-}
+const behaviorDefaultSection = {
+  id: 'behaviorDefault',
+  label: '默认行为档案',
+  read: () => ({ value: $('behaviorDefaultSelect')?.value ?? '' }),
+  save: async (value) => {
+    const r = await api('/api/config/behavior-default', 'POST', { value: value?.value ?? '' });
+    if (!r?.ok) return { ok: false, message: r?.error || '保存失败' };
+    await loadBehaviorDefault();
+    return { ok: true, message: r.message || '已保存，下一条消息生效' };
+  },
+};
 
 function showConfigSection(name) {
   document.querySelectorAll('[data-config-section]').forEach((button) => {
@@ -519,14 +484,14 @@ export function init() {
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, roleDefaultSection, dshModelSection, sendLimitSection, tokenSection],
+    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, dshModelSection, sendLimitSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',
-      icon: DOCK_ICONS.close,
-      tone: 'danger',
+      icon: DOCK_ICONS.undo,
+      primary: true,
       disabled: true,
-      onClick: () => { saveBar?.refresh(); },
+      onClick: () => { saveBar?.reset(); void reloadConfigSections(); },
     }],
   });
   setPageLeaveGuard((from, to) => {
@@ -536,7 +501,7 @@ export function init() {
     if (!saveBar.isTouched()) { saveBar.refresh(); return true; }
     void askLeaveWithUnsaved({ bar: saveBar }).then((answer) => {
       if (answer === 'cancel') return;
-      if (answer === 'discard') saveBar.reset();
+      if (answer === 'discard') { saveBar.reset(); void reloadConfigSections(); }
       // skipGuard：确认已经做过，直接切；否则会再次弹窗。
       setConsolePage(to, { skipGuard: true });
     });
@@ -544,10 +509,8 @@ export function init() {
   });
   // 准入：复用会话页的全局名单组件（上面已挂载）；工具与语音：系统层工具开关 + 语音库调试
   initToolsSection();
-  // 行为档案：YAML 编辑器（CM6，整行铺满）；隐藏 textarea 继续作为保存/校验的数据源。
-  behaviorEditor = attachTextareaEditor($('behaviorText'), { language: 'yaml', height: '480px' });
-  bindBehaviorSection();
-  refreshBehaviors().catch((error) => setMsg($('behaviorMsg'), String(error?.message ?? error), 'err'));
+  // 上下文压缩：从运行总览搬来，跟运行与模型放同一分区。
+  compactPanel = mountCompact(document.querySelector('[data-config-compact]'));
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
 
@@ -638,11 +601,7 @@ export function init() {
   const refreshOverviewPage = () => setTimeout(async () => {
     refreshPresets();
     refreshSilence();
-    await Promise.allSettled([refreshDshModel(), loadSendLimit(), loadSecurity(), refreshGlobalAccess(), loadRoleDefault()]);
-    requestStatusRefresh();
-    // 数据刚被重读：用户还没动过本页时把当前值重拍成基线（否则加载前拍的旧基线
-    // 会让「8 条」「真/假」这类异步回填的值一上来就算脏）。
-    if (saveBar) saveBar.adoptIfPristine();
+    await reloadConfigSections();
   }, 0);
   onPageRefresh('config', refreshOverviewPage);
   refreshOverviewPage();

@@ -3,7 +3,6 @@
     <button type="button" class="page-tab active" role="tab" aria-selected="true" data-config-section="runtime">运行与模型</button>
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="security">安全与静默</button>
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="access">准入</button>
-    <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="behavior">行为档案</button>
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="tools">拓展功能</button>
   </div>
   <div class="config-body">
@@ -11,6 +10,11 @@
       <section id="section-mode" class="card span-all">
         <h2>运行模式</h2>
         <div data-overview-fields="mode"></div>
+      </section>
+      <section id="section-behaviordefault" class="card span-all">
+        <h2 data-note="下一条消息生效">默认行为档案</h2>
+        <p class="meta">预设在 preset.yml 里绑定了 behavior 时以预设为准；这里只在预设未绑定时兜底。档案 kind 必须与运行模式一致：一代仿真用 v1，二代仿真用 v2。</p>
+        <div data-overview-fields="behaviorDefault"></div>
       </section>
       <section id="section-roledefault" class="card span-all">
         <h2 data-note="下一条消息生效">默认人格</h2>
@@ -26,6 +30,10 @@
         <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
         <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
         <div data-overview-fields="dsh"></div>
+      </section>
+      <section id="section-compact-config" class="card span-all">
+        <h2 data-note="保存后下一轮结束时生效">上下文压缩</h2>
+        <div data-config-compact></div>
       </section>
     </section>
 
@@ -53,42 +61,6 @@
       <section class="card span-all">
         <h2>全局准入</h2>
         <div data-sessions-access></div>
-      </section>
-    </section>
-
-    <section class="config-panel" data-config-panel="behavior" hidden>
-      <section class="card span-all">
-        <h2>行为档案</h2>
-        <p class="meta">行为档案定义 QQ 交互参数（唤醒、发送节奏、主动机会、表情、上下文等），由预设通过 <code>behavior</code> 引用；不绑定运行模式。</p>
-        <div class="form-stack">
-          <div class="field-row">
-            <label class="field-label" for="behaviorSelect">选择档案</label>
-            <div class="field-control">
-              <div class="control-row">
-                <select id="behaviorSelect" class="u-w-190"></select>
-                <button type="button" class="btn small" id="behaviorRefresh">刷新</button>
-                <button type="button" class="btn small" id="behaviorNew">新建</button>
-              </div>
-            </div>
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="behaviorId">文件名</label>
-            <div class="field-control">
-              <div class="control-row">
-                <input id="behaviorId" type="text" class="u-w-190" placeholder="default-v2" autocomplete="off">
-                <span class="meta">小写字母/数字/点/横线；保存为 config/behaviors/&lt;id&gt;.yml</span>
-              </div>
-            </div>
-          </div>
-          <div class="field-block">
-            <textarea id="behaviorText" rows="18" class="u-mono" spellcheck="false"></textarea>
-            <div class="form-actions" id="behaviorActions">
-              <button type="button" class="btn small" id="behaviorValidate">校验</button>
-              <button type="button" class="btn small primary" id="behaviorSave">保存</button>
-              <span class="meta" id="behaviorMsg"></span>
-            </div>
-          </div>
-        </div>
       </section>
     </section>
 

@@ -161,6 +161,75 @@ export function readBehaviorFile({ root, id } = {}) {
   return { id: String(id), text: fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '') };
 }
 
+/** 把文件开头的注释块（# …）原样留下，序列化时只重写 YAML 主体。 */
+function splitHeader(text) {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
+  let index = 0;
+  while (index < lines.length && (/^\s*#/.test(lines[index]) || lines[index].trim() === '')) index += 1;
+  const header = lines.slice(0, index).join('\n').replace(/\s+$/, '');
+  return { header, body: lines.slice(index).join('\n') };
+}
+
+function behaviorDocumentText(header, data) {
+  const body = YAML.stringify({
+    version: data.version,
+    kind: data.kind,
+    label: data.label,
+    description: data.description ?? '',
+    [data.kind]: data.config,
+  }, { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true }).replace(/\n+$/, '');
+  const head = String(header ?? '').replace(/\s+$/, '');
+  return `${head ? `${head}\n\n` : ''}${body}\n`;
+}
+
+/** 结构化读：给控制台表单用。保留原文与头部注释，避免表单保存吃掉注释。 */
+export function readBehaviorDocument({ root, id } = {}) {
+  const { text } = readBehaviorFile({ root, id });
+  const { header } = splitHeader(text);
+  const behavior = validateBehaviorText({ id, text });
+  return {
+    id: behavior.id,
+    text,
+    header,
+    kind: behavior.kind,
+    label: behavior.label,
+    description: behavior.description,
+    data: { version: behavior.version, kind: behavior.kind, label: behavior.label, description: behavior.description, config: behavior.config },
+  };
+}
+
+/** 结构化写：先按 schema 校验，再保留头部注释重排 YAML；写前备份旧文件。 */
+export function writeBehaviorData({ root, id, data } = {}) {
+  const file = behaviorFile(root, id);
+  const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '') : '';
+  const header = existing ? splitHeader(existing).header : '';
+  const normalized = normalizeBehavior(String(id), {
+    version: data?.version ?? 1,
+    kind: data?.kind,
+    label: data?.label,
+    description: data?.description ?? '',
+    [String(data?.kind)]: data?.config,
+  });
+  const text = behaviorDocumentText(header, {
+    version: normalized.version,
+    kind: normalized.kind,
+    label: normalized.label,
+    description: normalized.description,
+    config: normalized.config,
+  });
+  fs.mkdirSync(root, { recursive: true });
+  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  fs.mkdirSync(backupRoot, { recursive: true });
+  if (fs.existsSync(file)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.copyFileSync(file, path.join(backupRoot, `${stamp}.yml`));
+  }
+  const temp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(temp, text, 'utf8');
+  fs.renameSync(temp, file);
+  return { id: normalized.id, behavior: normalized, text };
+}
+
 /** 原样保存 YAML，保存前按行为档案 schema 校验；不重排文本，注释保留。 */
 export function validateBehaviorText({ id, text } = {}) {
   const source = String(text ?? '').replace(/\r\n/g, '\n');

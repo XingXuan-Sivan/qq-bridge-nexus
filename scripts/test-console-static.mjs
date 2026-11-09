@@ -102,7 +102,7 @@ ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选�
 
 console.log('## 页面片段（运行总览 / 技能 / MCP / 管理行为 / 访问 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview'];
+const pilotIds = ['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
@@ -114,7 +114,7 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'usage', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -209,9 +209,9 @@ const inlineWidthInHtml = (() => {
 ok(inlineWidthInHtml === 0, `HTML 里不再用内联 style 写固定宽度（剩 ${inlineWidthInHtml} 处）`);
 const overviewPageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'overview', 'page.css'), 'utf8');
 ok(/\.overview-summary/.test(overviewPageCss) && /@media \(max-width:760px\) \{/.test(overviewPageCss), '概览页私有规则（含窄屏覆盖）在 pages/overview/page.css');
-const usagePageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'usage', 'page.css'), 'utf8');
+const usagePageCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'overview', 'usage.css'), 'utf8');
 ok(/#section-usage \.usage-chart/.test(usagePageCss) && !/#section-usage/.test(layerText['components.css']),
-  '用量页私有规则在 pages/usage/page.css，组件层不再含页面选择器');
+  '令牌与花费的私有规则在 pages/overview/usage.css，组件层不再含页面选择器');
 
 console.log('## 浏览器标签图标');
 const faviconPath = path.join(ROOT, 'public', 'console', 'img', 'favicon.svg');
@@ -287,7 +287,7 @@ ok(/\.field-row > \.field-label \{[^}]*margin: 0 !important/.test(formCss), '标
 ok(/\.field-block--switch/.test(formCss) && /field-block--switch/.test(formModule), '开关行走 .field-block--switch（仅页头工具条收成紧凑 auto/auto）');
 ok(!/\bstyle=\"/.test(formModule), '表单组件不用内联 style（CSP style-src \'self\'）');
 
-const msgUsers = ['public/console/js/app.js', ...['config', 'overview', 'persona', 'usage'].map((id) => `public/console/pages/${id}/page.js`)];
+const msgUsers = ['public/console/js/app.js', 'public/console/pages/config/page.js', 'public/console/pages/overview/page.js', 'public/console/pages/overview/usage.js', 'public/console/pages/persona/page.js'];
 const rawMsg = msgUsers.filter((rel) => /className = 'meta (ok|err)'/.test(fs.readFileSync(path.join(ROOT, rel), 'utf8')));
 ok(rawMsg.length === 0, `没有页面再手写 className='meta ok|err'（${rawMsg.join(', ') || '全部走 setMsg'}）`);
 
@@ -341,7 +341,8 @@ ok(!/^\.status-badge \{/m.test(layerText['layout.css']), 'layout.css 不再定�
 const BARE_CONTROL_BASELINE = {
   slang: 0, overview: 0, plugins: 0, usage: 0,
   operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0,
-  config: 13, scheduler: 0, persona: 0, memory: 0, presets: 5,
+  // presets：P7 加了「行为档案」标签页的选择档案下拉 + 刷新（其余控件由表单组件生成）。
+  config: 13, scheduler: 0, persona: 0, memory: 0, presets: 7,
 };
 const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {
@@ -350,7 +351,9 @@ for (const page of consolePageDirs(ROOT)) {
   // 弹窗右上角的关闭按钮属于 modal 组件的固定结构，不算「页面手写控件」。
   const raw = (text.match(/<(input|button|select|textarea)\b/g) || []).length;
   const modalChrome = (text.match(/<button class="modal-close"/g) || []).length;
-  bareByPage[page.id] = raw - modalChrome;
+  // 分区标签是 .page-tabs 组件的固定结构，不属于「手写表单控件」。
+  const tabButtons = (text.match(/<button[^>]*class="[^"]*page-tab[^"]*"/g) || []).length;
+  bareByPage[page.id] = raw - modalChrome - tabButtons;
 }
 const bareRegressed = Object.entries(bareByPage)
   .filter(([id, count]) => count > (BARE_CONTROL_BASELINE[id] ?? 0))

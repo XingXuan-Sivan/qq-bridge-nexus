@@ -169,15 +169,15 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
   });
 });
 
-test('⑤ 控制台：令牌与花费页有「上下文压缩」卡片', () => {
+test('⑤ 控制台：全局配置的「运行与模型」有上下文压缩卡片', () => {
   const html = readConsoleSource();
-  const sec = html.slice(html.indexOf('<section id="section-compact"'), html.indexOf('</section>', html.indexOf('<section id="section-compact"')));
-  assert.match(sec, /data-page="usage"/);
-  // 控件已搬进 pages/usage/fields.js：卡片片段只断言宿主，控件在整份源码里找。
-  assert.match(sec, /data-usage-fields="compactMode"/);
-  assert.match(sec, /data-usage-fields="compactActions"/);
+  // 卡片宿主在 config/page.html，控件由 pages/config/compact.js 生成。
+  assert.match(html, /id="section-compact-config"/);
+  assert.match(html, /data-config-compact/);
   for (const v of ['early', 'dsh']) assert.ok(html.includes(`name="compactMode" value="${v}"`), v);
   assert.match(html, /id="compactWan"[^>]*min="5"[^>]*max="80"/);
-  // 按钮 id 由 action 规格生成（源码里是 id: 'compactSave'），按 id 名匹配即可。
+  // 按钮 id 写在 compact.js 的模板里，按 id 名匹配即可。
   assert.match(html, /compactSave/);
+  // 运行总览不再保留压缩卡（整块已搬到全局配置）。
+  assert.ok(!/id="section-compact"/.test(html), '总览不应再有上下文压缩卡');
 });

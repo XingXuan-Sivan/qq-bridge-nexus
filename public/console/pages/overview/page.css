@@ -113,3 +113,41 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* 令牌与花费：并入总览后不再单独成页。外层用 contents 让各张卡直接落到主栅格，
+   否则这个 div 自己占一列，卡片会被挤成窄条。 */
+#section-usage {
+  display: contents;
+}
+
+/* 花费概览：与顶部连接指标卡同款外壳（.overview-summary），但内部改为「指标网格 + 说明 + 操作」。 */
+.overview-summary--spend {
+  display: block;
+  padding: 23px 26px;
+}
+.overview-summary--spend .overview-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0 -26px;
+}
+.overview-summary--spend .overview-metric-grid .metric {
+  padding: 0 26px;
+}
+.overview-summary--spend .overview-metric-grid .metric:last-child {
+  border-right: 0;
+}
+.overview-summary--spend > .meta {
+  margin: 16px 0 0;
+}
+.overview-summary--spend > .row {
+  margin-top: 12px;
+}
+@media (max-width: 900px) {
+  .overview-summary--spend .overview-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 18px;
+  }
+  .overview-summary--spend .overview-metric-grid .metric:nth-child(2n) {
+    border-right: 0;
+  }
+}

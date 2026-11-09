@@ -110,8 +110,8 @@ function modePreset(key, mode, cfg) {
 ```text
 config.json                         # 只放系统层
 config/behaviors/
-  default-v1.yml                    # 一代默认行为档案
-  default-v2.yml                    # 二代默认行为档案
+  social-v1.yml                    # 一代默认行为档案
+  social-v2.yml                    # 二代默认行为档案
   <custom-id>.yml                   # 以后可新增/复制
 state/
   mode.json                         # 当前运行模式（运行态）
@@ -123,11 +123,11 @@ state/
   ...
 dsh/agent-presets/
   qq-chat/
-    preset.yml                      # 增加 behavior: default-v1
+    preset.yml                      # 增加 behavior: social-v1
     extensions.yml
     agent.cordis.yml
   qq-chat-v2/
-    preset.yml                      # 增加 behavior: default-v2
+    preset.yml                      # 增加 behavior: social-v2
     extensions.yml
     agent.cordis.yml
   qq-agent-readonly/                # 运维 Agent，不引用行为档案
@@ -143,17 +143,17 @@ roles/*.md
 ### 3.1 为什么行为档案单独放
 
 - 行为参数是 QQ 交互层，不是 DSH Agent 的提示词/工具；混在 `agent.cordis.yml` 里会让 DSH 预设包变成“桥接私有格式”。
-- 多个预设可以共享同一套行为（例如两个不同人设的二代预设都用 `default-v2`），不需要复制 64 个字段。
+- 多个预设可以共享同一套行为（例如两个不同人设的二代预设都用 `social-v2`），不需要复制 64 个字段。
 - 全局配置页可以独立于预设编辑行为库；预设页只做选择，不复制整份表单。
 - 文件在 `config/` 下、可被 git 追踪；不塞进 `state/`（否则会被误认为运行态缓存）。
 
 ### 3.2 行为档案 schema
 
-`config/behaviors/default-v2.yml` 建议：
+`config/behaviors/social-v2.yml` 建议：
 
 ```yaml
 schema: 1
-id: default-v2
+id: social-v2
 kind: reserved2          # legacy | reserved2；决定字段校验和 UI 分组
 name: 二代仿真默认
 description: 二代仿真的默认唤醒、发送、主动与表情行为。
@@ -237,7 +237,7 @@ autoReplyCheckMs: 30000
 provideRecommendations: true
 ```
 
-`default-v1.yml` 使用一代字段（`triggerProbability`、`activeCheckMinMs`、`activeDuration*`、`idle*`、`burst*`、`proactive*` 等），结构同样分 `send`/`proactive` 等组，`kind: legacy`。
+`social-v1.yml` 使用一代字段（`triggerProbability`、`activeCheckMinMs`、`activeDuration*`、`idle*`、`burst*`、`proactive*` 等），结构同样分 `send`/`proactive` 等组，`kind: legacy`。
 
 > 注：字段名以当前 `src/bridge.js` 的归一化对象为准；上表是目标结构，迁移时逐字段对照，不凭页面 label 猜。
 
@@ -297,8 +297,8 @@ provideRecommendations: true
 
 | 当前键 | 目标 |
 | --- | --- |
-| `social.*`（v1 全量行为） | `config/behaviors/default-v1.yml`；`social.enabled` 删除，由 mode 决定 |
-| `socialV2.wake/send 行为部分/wait/proactive/sticker/context/feedback/autoReplyCheckMs/provideRecommendations` | `config/behaviors/default-v2.yml` |
+| `social.*`（v1 全量行为） | `config/behaviors/social-v1.yml`；`social.enabled` 删除，由 mode 决定 |
+| `socialV2.wake/send 行为部分/wait/proactive/sticker/context/feedback/autoReplyCheckMs/provideRecommendations` | `config/behaviors/social-v2.yml` |
 | `socialV2.agentPreset` | 删除，统一用 `config.agentPreset` |
 | `socialV2.enabled` | 删除，由 mode 决定；不再有“选了 reserved2 但 v2 关着”的第二开关 |
 | `socialV2.tools` | `config.tools`（全局工具面） |
@@ -458,7 +458,7 @@ behaviorKind  = behavior.kind
 
 ### 9.2 后端
 
-1. 新建 `config/behaviors/default-v1.yml`、`default-v2.yml`，从**归一化后的** `cfg.social` / `cfg.socialV2` 逐字段生成；不要只读 raw config（很多默认值在代码里）。
+1. 新建 `config/behaviors/social-v1.yml`、`social-v2.yml`，从**归一化后的** `cfg.social` / `cfg.socialV2` 逐字段生成；不要只读 raw config（很多默认值在代码里）。
 2. 给 `qq-chat` / `qq-chat-v2` 的 `preset.yml` 加 `behavior:`；`qq-agent-*` 不引用。
 3. 新增行为档案 loader/validator，启动时校验；`resolveBehavior(preset)` 替代所有 `cfg.social` / `cfg.socialV2` 行为读取点。
 4. `modePreset` 删除 `socialV2.agentPreset` 分支，只留 `profile.presetId` → `config.agentPreset`。

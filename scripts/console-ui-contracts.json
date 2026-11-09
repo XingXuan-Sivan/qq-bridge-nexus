@@ -16,16 +16,50 @@
   },
   {
     "method": "POST",
-    "path": "/api/config/behaviors/default-v2/validate",
+    "path": "/api/config/behavior-default",
     "body": {
-      "text": "version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n"
+      "value": "social-v1"
     }
   },
   {
     "method": "PUT",
-    "path": "/api/config/behaviors/default-v2",
+    "path": "/api/config/behaviors/social-v1",
     "body": {
-      "text": "version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n"
+      "data": {
+        "version": 1,
+        "kind": "v1",
+        "label": "一代仿真默认行为",
+        "description": "离线示例",
+        "config": {
+          "triggerProbability": 0.2,
+          "contextWindow": 25,
+          "activeCheckMinMs": 0,
+          "activeCheckMaxMs": 0,
+          "activeReplyDelayMinMs": 0,
+          "activeReplyDelayMaxMs": 0,
+          "activeDurationEnabled": false,
+          "activeDurationMinMs": 0,
+          "activeDurationMaxMs": 0,
+          "idleWindowMs": 0,
+          "idleRetryProbability": 0,
+          "idleRetryWaitMs": 0,
+          "proactiveEnabled": false,
+          "proactiveIdleThresholdMs": 0,
+          "proactiveCheckMinMs": 0,
+          "proactiveCheckMaxMs": 0,
+          "proactiveProbability": 0,
+          "skipProbability": 0,
+          "surrenderProbability": 0,
+          "maxReplyChars": 0,
+          "mustReplyKeywords": [],
+          "burstEnabled": false,
+          "burstIntervalMinMs": 0,
+          "burstIntervalMaxMs": 0,
+          "longGapProbability": 0,
+          "longGapMinMs": 0,
+          "longGapMaxMs": 0
+        }
+      }
     }
   },
   {

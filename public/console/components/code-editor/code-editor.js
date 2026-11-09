@@ -32,7 +32,9 @@ function editorTheme(CM) {
       color: 'var(--editor-gutter)',
       borderRight: '1px solid var(--border-subtle)',
     },
-    '.cm-activeLine': { backgroundColor: 'var(--editor-active-line)' },
+    // 只有半透明底色才不会盖住选区：CM 的 .cm-selectionLayer 是 z-index:-2 的子层，
+    // 活跃行若用不透明背景，单选一行内的选区会整段「消失」。
+    '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--accent) 7%, transparent)' },
     '.cm-activeLineGutter': { backgroundColor: 'transparent', color: 'var(--text)' },
     '.cm-selectionBackground': { backgroundColor: 'var(--editor-selection) !important' },
     '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--editor-selection) !important' },

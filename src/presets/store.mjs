@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import yaml from 'js-yaml';
+import { Document, parse, parseDocument } from 'yaml';
 
 const execFileAsync = promisify(execFile);
 const PRESET_FILES = ['preset.yml', 'extensions.yml', 'agent.cordis.yml'];
@@ -29,7 +29,24 @@ function readYamlFile(file) {
   if (!fs.existsSync(file)) return null;
   const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
   if (!raw.trim()) return null;
-  return yaml.load(raw);
+  return parse(raw);
+}
+
+const EXTENSIONS_HEADER = '# 扩展授权：由控制台预设编辑器维护；缺文件或空文件 = 全部拒绝。\n';
+
+function readYamlDocument(file) {
+  if (!fs.existsSync(file)) return null;
+  const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+  if (!raw.trim()) return null;
+  const doc = parseDocument(raw);
+  if (doc.errors.length) throw new Error(`YAML 解析失败：${doc.errors[0].message}`);
+  return doc;
+}
+
+function writeDocument(file, doc, header = '') {
+  let text = String(doc);
+  if (header && !text.startsWith(header)) text = header + text;
+  fs.writeFileSync(file, text, 'utf8');
 }
 
 function normalizeList(value) {
@@ -72,7 +89,7 @@ export function normalizeMeta(raw) {
 export function validateAgentYaml(text) {
   let parsed;
   try {
-    parsed = yaml.load(String(text ?? ''));
+    parsed = parse(String(text ?? ''));
   } catch (error) {
     return { ok: false, error: `YAML 解析失败：${error?.message ?? error}` };
   }
@@ -177,7 +194,23 @@ export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nod
   function writeMeta(id, raw) {
     const meta = normalizeMeta(raw);
     const backupInfo = backup(id, 'meta');
-    fs.writeFileSync(fileFor(id, 'preset.yml'), yaml.dump(meta, { lineWidth: -1, noRefs: true }), 'utf8');
+    const file = fileFor(id, 'preset.yml');
+    let doc;
+    try {
+      doc = readYamlDocument(file);
+    } catch (error) {
+      throw error;
+    }
+    if (!doc || !doc.contents) doc = new Document({});
+    const keys = ['name', 'description', 'order', 'behavior'];
+    for (const key of keys) {
+      if (key === 'behavior' && !meta.behavior) doc.delete(key);
+      else doc.set(key, meta[key]);
+    }
+    for (const key of Object.keys(doc.toJS() ?? {})) {
+      if (!keys.includes(key)) doc.delete(key);
+    }
+    writeDocument(file, doc);
     log(`控制台：${id} preset.yml 已更新`);
     return { meta, backup: backupInfo };
   }
@@ -185,7 +218,14 @@ export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nod
   function writeExtensions(id, raw) {
     const extensions = normalizeExtensions(raw);
     const backupInfo = backup(id, 'extensions');
-    fs.writeFileSync(fileFor(id, 'extensions.yml'), '# 扩展授权：由控制台预设编辑器维护；缺文件或空文件 = 全部拒绝。\n' + yaml.dump(extensions, { lineWidth: -1, noRefs: true }), 'utf8');
+    const file = fileFor(id, 'extensions.yml');
+    const doc = readYamlDocument(file) || new Document({});
+    if (!doc.contents) doc.contents = doc.createNode({});
+    doc.setIn(['mcp', 'allow'], extensions.mcp.allow);
+    doc.setIn(['mcp', 'tools', 'allow'], extensions.mcp.tools.allow);
+    doc.setIn(['mcp', 'tools', 'deny'], extensions.mcp.tools.deny);
+    doc.setIn(['skills', 'allow'], extensions.skills.allow);
+    writeDocument(file, doc, EXTENSIONS_HEADER);
     log(`控制台：${id} extensions.yml 已更新`);
     return { extensions, backup: backupInfo };
   }

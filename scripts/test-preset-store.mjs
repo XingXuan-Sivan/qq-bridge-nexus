@@ -64,6 +64,23 @@ test('restore 回滚到最近一次备份', () => {
   fs.rmSync(f.root, { recursive: true, force: true });
 });
 
+test('Document 写回保留 meta/extensions 注释与文件头', () => {
+  const f = fixture();
+  const dir = path.join(f.root, 'qq-chat');
+  fs.writeFileSync(path.join(dir, 'preset.yml'), '# 手写注释：不要丢\nname: QQ 聊天\ndescription: 默认聊天预设\norder: 10\n');
+  fs.writeFileSync(path.join(dir, 'extensions.yml'), '# 扩展授权：由控制台预设编辑器维护；缺文件或空文件 = 全部拒绝。\n# 业务注释：保留\nmcp:\n  allow: [old]\n');
+  const store = createPresetStore(f);
+  store.writeMeta('qq-chat', { name: '新名字', description: '新说明', order: 3 });
+  store.writeExtensions('qq-chat', { mcp: { allow: ['new'], tools: { allow: [], deny: [] } }, skills: { allow: [] } });
+  const metaText = fs.readFileSync(path.join(dir, 'preset.yml'), 'utf8');
+  const extText = fs.readFileSync(path.join(dir, 'extensions.yml'), 'utf8');
+  assert.match(metaText, /手写注释：不要丢/);
+  assert.match(extText, /业务注释：保留/);
+  assert.equal((extText.match(/扩展授权：由控制台预设编辑器维护/g) ?? []).length, 1);
+  assert.match(extText, /allow:\s*\n?\s*- new/);
+  fs.rmSync(f.root, { recursive: true, force: true });
+});
+
 test('normalizeExtensions 去重/去空/补默认', () => {
   const value = normalizeExtensions({ mcp: { allow: ['a', 'a', ''], tools: { deny: ['x', 'x'] } } });
   assert.deepEqual(value.mcp.allow, ['a']);

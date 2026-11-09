@@ -235,6 +235,12 @@ try {
     assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
     assert.match(await page.locator('#presetEditYaml').inputValue(), /qq-tool-restrict/);
     assert.equal(await page.locator('#presetValidate').count(), 1);
+    assert.equal(await page.locator('#presetAuthPicker .preset-picker-group').count(), 3);
+    await page.waitForSelector('#presetYamlMount .cm-editor');
+    await page.locator('#presetYamlMount .cm-content').click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\n# ui cm smoke');
+    assert.match(await page.locator('#presetEditYaml').inputValue(), /# ui cm smoke/);
   });
 
   await test('Global config renders field rows with aligned labels', async () => {

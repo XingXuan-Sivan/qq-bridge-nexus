@@ -577,6 +577,14 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
     };
     await walkBinary(resolve(dir, 'img'), '/console/img');
     await walkBinary(resolve(dir, 'fonts'), '/console/fonts');
+    // 自托管 vendor（CodeMirror）：运行时也走 /console/vendor/。
+    for (const entry of await readdir(resolve(dir, 'vendor'), { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
+      assets.set(`/console/vendor/${entry.name}`, {
+        body: await readFile(resolve(dir, 'vendor', entry.name)),
+        type: 'text/javascript; charset=utf-8',
+      });
+    }
     // 页面片段：pages/<id>/{page.html,page.css,page.js} 按浏览器真实请求路径提供。
     for (const id of await readdir(resolve(dir, 'pages')).catch(() => [])) {
       const pageDir = resolve(dir, 'pages', id);

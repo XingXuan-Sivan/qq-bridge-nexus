@@ -28,6 +28,12 @@ export const PRESETS_FIELDS = {
         card: true,
       },
       {
+        name: 'presetAuthPicker',
+        type: 'custom',
+        span: 2,
+        html: '<div id="presetAuthPicker" class="preset-picker">正在读取真实 MCP / 技能目录…</div>',
+      },
+      {
         name: 'presetEditMcpAllow',
         type: 'textarea',
         label: '允许 MCP',

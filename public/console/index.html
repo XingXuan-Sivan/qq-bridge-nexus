@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="csp-nonce" content="__CSP_NONCE__">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>QQ 桥接控制台</title>
@@ -244,6 +245,7 @@
   <div class="toast" id="consoleToast" role="status" hidden></div>
   <noscript><div class="connection-alert">控制台需要启用 JavaScript 才能加载状态及保存设置。</div></noscript>
 
+<script src="/console/vendor/codemirror.js"></script>
 <script type="module" src="/console/js/app.js"></script>
 </body>
 </html>

@@ -397,6 +397,18 @@ G3 删除 `access`/`social-v1`/`social-v2` 后，`test-console-ui` 连续报旧 
 
 **规则**：含中文的 YAML/JSON/源码统一走 read/write/edit 工具；PowerShell 只做只读查看或 ASCII 配置，不用于重写文本。
 
+### 1.68 静态资源白名单不认新目录，vendor 会 401/404
+
+CM6 bundle 放 `public/console/vendor/` 后，浏览器直接报 401：`src/bridge.js` 的静态白名单正则只允许 `js|css|img|fonts|pages`，新目录未列入。补 `vendor` 段后页面才拿到脚本；UI fixture 也要单独挂 `/console/vendor/*.js`，否则离线预览每页 4 个 404。
+
+**规则**：新增自托管资源目录（vendor/、worker/、wasm/）时同时改三处：bridge 静态白名单、fixture 资源表、static/UI 资源断言。
+
+### 1.69 CM6 注入样式需要 style-src nonce，不能靠 unsafe-inline
+
+CSP 原为 `style-src 'self'`，CodeMirror 运行时插入 `<style>` 被拒，编辑器空白且 pageerror 报 CSP。不能放宽成 `'unsafe-inline'`；改为每请求随机 nonce：`consoleCsp(nonce)` 只在 `style-src` 追加 `'nonce-...'`，`serveConsolePage` 替换 HTML 的 `__CSP_NONCE__`，CM6 从 `<meta name="csp-nonce">` 读值并注册 `EditorView.cspNonce`。`script-src` 仍保持 `'self'`。
+
+**规则**：第三方编辑器/组件若动态注入样式，优先 nonce，不放 `'unsafe-inline'`；nonce 必须按响应生成，不能写死。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

@@ -24,6 +24,13 @@ export const SECURITY_HEADERS = Object.freeze({
   'Referrer-Policy': 'no-referrer',
 });
 
+/** 控制台文档允许 CodeMirror 的样式 nonce（script-src 仍保持 'self'）。 */
+export function consoleCsp(nonce) {
+  const safe = String(nonce ?? '').replace(/[^A-Za-z0-9+/=_-]/g, '');
+  if (!safe) return CONTENT_SECURITY_POLICY;
+  return CONTENT_SECURITY_POLICY.replace("style-src 'self'", `style-src 'self' 'nonce-${safe}'`);
+}
+
 /** 在安全头基础上追加/覆盖本次响应特有的头（不修改冻结的原对象）。 */
 export function securityHeaders(extra = {}) {
   return { ...SECURITY_HEADERS, ...extra };

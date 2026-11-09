@@ -242,3 +242,12 @@ npm run test:console-ui
 - 24 个旧 audit 失败项已按新配置结构迁移；`test-voice` 83/0、`test-voice-system` 50/0、`test-web-image` 5/5；全量 audit **103/103**；static 全过；UI **31/31**，contracts 已重录。
 - 真机：桥接 job `pwsh-16c04ab424ba4ac8`，`reserved2`/`dshReady=true`；`#config` 六分区、行为列表/校验/保存、发言上限、37 个工具开关均可用，无 pageerror；语音库为空（本机无音频）。
 - 遗留：动态授权 picker、CM6 代码编辑器、统一 `yaml` Document（G4）；旧键清理与文档收尾（G5）。
+
+### 6.15 G4 预设编辑器增强（2026-11-09，已实现待提交）
+
+- 动态 picker：预设页扩展授权区按 `/api/extensions` 真实 catalog 渲染「MCP 服务器 / MCP 工具 / 技能」三组复选框；工具值 `server__tool`；`*` 表示全部；失效条目保留并标“当前未安装”；picker 只写 allow，deny 仍走文本框/YAML。
+- CM6：`scripts/console-codemirror-entry.mjs` + `scripts/build-console-vendor.mjs`（esbuild iife，`ConsoleCM`）产出 `public/console/vendor/codemirror.js`（~428KB）；预设页把原 YAML textarea 隐藏，CM 编辑内容实时写回，保存/校验仍读 textarea。
+- CSP：`src/http/security.mjs` 的 `consoleCsp(nonce)` 只给 `style-src` 加 nonce；`src/http/static.mjs` 的 `serveConsolePage` 替换 `__CSP_NONCE__`；`src/bridge.js` 的 `/`、`/console/` 使用随机 nonce；`/console/vendor/` 纳入静态白名单。真机无 CSP/JS 错误。
+- YAML Document：`src/presets/store.mjs` 改 `yaml` 的 `parseDocument`/`setIn`/`String(doc)`，meta/extensions 保存保留原注释；`test-preset-store` 6/6（含顶部注释与 `EXTENSIONS_HEADER` 不重复）。
+- 回归：UI 31/31（含 picker 3 组、CM 挂载与 textarea 同步）、static 全过、`test-http-boundary` 0 fail、全量 audit 103/103。
+- 遗留：其余 12 处 `js-yaml`（bridge/dsh-client/preset-prompt/web-search/skill-store/preset-policy/build/setup/测试）统一迁移留在 G5；临时 `_pw-*`/`_picker*.png`/`tools-patch-sdk.mjs` 提交前清理，SDK 补丁由 `scripts/patch-snowluma-sdk.mjs` postinstall 负责。

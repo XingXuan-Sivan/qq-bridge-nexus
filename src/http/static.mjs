@@ -3,7 +3,7 @@
 // 任何一步没通过都返回同一个 404，不区分原因、不回显路径。
 import fs from 'node:fs';
 import path from 'node:path';
-import { securityHeaders } from './security.mjs';
+import { consoleCsp, securityHeaders } from './security.mjs';
 
 export const STATIC_MIME = Object.freeze({
   '.html': 'text/html; charset=utf-8',
@@ -103,6 +103,30 @@ export function serveStaticFile(res, resolved) {
   res.writeHead(200, securityHeaders({
     'content-type': resolved.mime,
     'content-length': String(body.length),
+  }));
+  res.end(body);
+  return true;
+}
+
+/** 控制台文档：注入每次请求的 CSP nonce，只给 CodeMirror 的样式表使用。 */
+export function serveConsolePage(res, resolved, nonce) {
+  if (!resolved?.ok) {
+    res.writeHead(404, securityHeaders({ 'content-type': 'application/json; charset=utf-8' }));
+    res.end(JSON.stringify({ ok: false, error: 'not found' }, null, 2));
+    return false;
+  }
+  let body;
+  try {
+    body = fs.readFileSync(resolved.abs, 'utf8').replace('__CSP_NONCE__', String(nonce ?? ''));
+  } catch {
+    res.writeHead(404, securityHeaders({ 'content-type': 'application/json; charset=utf-8' }));
+    res.end(JSON.stringify({ ok: false, error: 'not found' }, null, 2));
+    return false;
+  }
+  res.writeHead(200, securityHeaders({
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': String(Buffer.byteLength(body)),
+    'content-security-policy': consoleCsp(nonce),
   }));
   res.end(body);
   return true;

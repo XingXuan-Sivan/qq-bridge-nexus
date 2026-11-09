@@ -416,16 +416,15 @@ behaviorKind  = behavior.kind
 
 要求：通用（YAML/JSON/以后其他文本）、唯一方案、无 CDN、能在零 bundler 的控制台里自托管。
 
-推荐：**CodeMirror 6 + `@codemirror/lang-yaml`**，用 esbuild 打成单个/少量 vendor 文件，放 `public/console/vendor/codemirror/`：
+推荐：**CodeMirror 6 + `@codemirror/lang-yaml`**，用 esbuild 打成 vendor 文件，放 `public/console/vendor/codemirror.js`：
 
-- 一个组件 `components/code-editor/`，API 只暴露 `mount/getValue/setValue/focus/setReadOnly`；
+- 一个组件/入口 `scripts/console-codemirror-entry.mjs`，API 只暴露 `createEditor/setValue/getValue`；
 - 语言包按需注册：先 YAML，后面 JSON；不为每种文件另造编辑器；
 - 行号、搜索、括号匹配、折叠；不启用重型 lint（服务端校验为准）；
-- `script-src 'self'` 下自托管，不引 CDN；不引入 Monaco（体积/构建都重）。
+- `script-src 'self'` 下自托管，不引 CDN；不引入 Monaco（体积/构建都重）。CSP 只给 `style-src` 加 nonce（`src/http/security.mjs` `consoleCsp`），CM6 运行时注入的样式因此可用。
+- 已落地（G4）：`scripts/build-console-vendor.mjs` 产出 `public/console/vendor/codemirror.js`（约 428KB）；`page.js` 的 `mountYamlEditor` 把 CM 挂到 `#presetYamlMount`，变更写回 `#presetEditYaml`，保存仍拿 textarea。
 
-备选：CodeMirror 5 或 Ace 单文件（零 bundler、集成更快），但维护与扩展性弱；如果用户更看重“不新增构建步骤”，选 Ace 单文件，仍只保留这一套。
-
-> 待拍板：CM6（需要新增一个 esbuild 构建脚本 + vendor 产物）vs Ace（单文件、老但零构建）。两者只能选一个，不能同时存在。
+> 已拍板：CM6，不用 Ace/CM5；不再保留“待拍板”状态。
 
 ### 8.2 YAML 库
 
@@ -437,7 +436,7 @@ behaviorKind  = behavior.kind
 - 预设结构化保存（meta/extensions）全部改走 `yaml` Document；`js-yaml` 从桥接自有代码中移除，避免两个 YAML 库并存；
 - DSH 自己 bundle 里的 `js-yaml` 不属于桥接依赖，保持不动。
 
-迁移影响：目前 `src/presets/store.mjs`、`src/extensions/skill-store.mjs`、`src/extensions/preset-policy.mjs`、`scripts/build-agent-preset-patches.mjs`、`scripts/setup-dsh.mjs` 及若干测试使用 `js-yaml`；改为 `yaml` 后逐一改 import 与 API。若评估发现 DSH 脚本的 `js-yaml` 是外部契约，则只允许“DSH 侧保持、桥接侧单一”的边界，并在文档写清，不能出现第三套。
+迁移影响：目前 `src/presets/store.mjs` 已改 `yaml` Document（`writeMeta`/`writeExtensions` 保注释，`test-preset-store` 6/6）；`src/extensions/skill-store.mjs`、`src/extensions/preset-policy.mjs`、`src/bridge.js`、`src/dsh-client.js`、`src/preset-prompt.js`、`src/web-search.js`、`scripts/build-agent-preset-patches.mjs`、`scripts/setup-dsh.mjs` 及 4 个测试仍 `import yaml from 'js-yaml'`。这些属于 G5 的统一迁移项；在完成前不删 `js-yaml` 依赖，避免半迁移。DSH 自己 bundle 里的 `js-yaml` 不属于桥接依赖，保持不动。
 
 ### 8.3 保存交互
 
@@ -499,7 +498,7 @@ behaviorKind  = behavior.kind
 | G4 | 预设页动态 picker + 统一代码编辑器 + YAML Document | 注释保留测试、保存/应用/回滚 |
 | G5 | 文档/STATUS/配置说明收尾 | 提交、工作区干净 |
 
-状态：G1 `f75949e`、G2 `4ace129`、G3 已实现并真机验收；G4/G5 未开始。G3 的验收证据见 `docs/STATUS.md` 6.14。
+状态：G1 `f75949e`、G2 `4ace129`、G3 `aa2176a` 已提交并真机验收；G4 已实现动态 picker、CM6 编辑器与 preset store 的 YAML Document（`test-preset-store` 6/6、UI 31/31、static/HTTP boundary 通过、全量 audit 103/103），待提交；G5 未开始，G5 还包含其余 `js-yaml` 使用统一迁移。G3/G4 的验收证据见 `docs/STATUS.md` 6.14/6.15。
 
 ## 11. 已拍板（2026-11-09，m31268）
 

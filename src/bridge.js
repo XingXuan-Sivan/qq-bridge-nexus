@@ -45,7 +45,7 @@ import { resolveConnectionUpdate } from './upstream/snowluma-conn-update.mjs';
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 // HTTP 边界（docs/HTTP_BOUNDARY.md）：安全响应头集中一处，静态资源守卫在 src/http/static.mjs。
 import { SECURITY_HEADERS } from './http/security.mjs';
-import { resolveStaticPath, serveStaticFile } from './http/static.mjs';
+import { resolveStaticPath, serveConsolePage, serveStaticFile } from './http/static.mjs';
 import { extractForwardIds, forwardIdFromData, sanitizeForwardId, formatForwardResponse } from './forward.js';
 import {
   createSlowFetchCache,
@@ -5070,7 +5070,7 @@ async function main() {
       // gate/ 是 401 门页自己的样式/脚本：页面被拒时浏览器仍要能取到它们，否则又会白屏。
       // 注意门页是整页文档，不能放进 pages/——那里会被 console-source 拼进控制台源码。
       // components/ 是组件目录（js 与 css 同住），按 docs/CONSOLE_UI.md 的约定放行。
-      if (req.method === 'GET' && /^\/console\/(?:css|components|js|img|fonts|pages|gate)\//.test(url.pathname)) {
+      if (req.method === 'GET' && /^\/console\/(?:css|components|js|img|fonts|pages|gate|vendor)\//.test(url.pathname)) {
         serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), url.pathname, { prefix: '/console/' }));
         return;
       }
@@ -5326,12 +5326,7 @@ async function main() {
             res.end('控制台页面缺失：public/console/index.html');
             return;
           }
-          serveStaticFile(res, resolved);
-          return;
-        }
-        if (req.method === 'GET' && url.pathname === '/console/') {
-          // 带斜杠的 /console/ 与 '/' 同义：都返回控制台页面（鉴权已在上方完成）。
-          serveStaticFile(res, resolveStaticPath(path.join(ROOT, 'public', 'console'), '/', { prefix: '/' }));
+          serveConsolePage(res, resolved, crypto.randomBytes(16).toString('base64'));
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/status') {

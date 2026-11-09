@@ -11,9 +11,129 @@ let presetsCache = [];
 let editingId = '';
 let originalYaml = '';
 let busy = false;
+let extensionCatalog = null;
+let yamlEditor = null;
+
+function setYamlEditorValue(value) {
+  if (!yamlEditor) return;
+  const current = yamlEditor.state.doc.toString();
+  if (current === value) return;
+  yamlEditor.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+}
+
+function mountYamlEditor() {
+  const textarea = document.getElementById('presetEditYaml');
+  if (!textarea || yamlEditor || !window.ConsoleCM?.createEditor) return;
+  const mount = document.createElement('div');
+  mount.className = 'preset-yaml-mount';
+  mount.id = 'presetYamlMount';
+  textarea.parentNode.insertBefore(mount, textarea);
+  textarea.hidden = true;
+  yamlEditor = window.ConsoleCM.createEditor(mount, textarea.value, (value) => {
+    textarea.value = value;
+  });
+}
 
 function lines(value) {
   return String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function unique(values) {
+  return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))];
+}
+
+function pickerChecked(values, value) {
+  return values.includes('*') || values.includes(value);
+}
+
+function catalogTools(catalog) {
+  return (catalog?.mcp ?? []).flatMap((server) => (server.tools ?? []).map((tool) => ({
+    server: server.id,
+    name: tool.name,
+    label: `${server.id}__${tool.name}`,
+    description: tool.description ?? '',
+    online: server.status === 'online',
+  })));
+}
+
+function pickerGroup(title, key, items, values, { stalePrefix = '' } = {}) {
+  const known = new Set(items.map((item) => item.value));
+  const stale = values.filter((value) => value !== '*' && !known.has(value));
+  const rows = items.map((item) => `
+    <label class="preset-picker-item">
+      <input type="checkbox" data-picker-group="${key}" value="${esc(item.value)}"${pickerChecked(values, item.value) ? ' checked' : ''}>
+      <span><code>${esc(item.value)}</code>${item.note ? ` <span class="meta">${esc(item.note)}</span>` : ''}</span>
+    </label>`).join('');
+  const staleRows = stale.map((value) => `
+    <label class="preset-picker-item preset-picker-stale">
+      <input type="checkbox" data-picker-group="${key}" value="${esc(value)}" checked>
+      <span><code>${esc(value)}</code> <span class="meta">${esc(stalePrefix)}当前未安装，保留</span></span>
+    </label>`).join('');
+  const wildcard = `
+    <label class="preset-picker-wild">
+      <input type="checkbox" data-picker-wild="${key}"${values.includes('*') ? ' checked' : ''}>
+      全部允许（写入 *）
+    </label>`;
+  return `
+    <div class="preset-picker-group">
+      <div class="preset-picker-head"><strong>${esc(title)}</strong>${wildcard}</div>
+      <div class="preset-picker-list">${rows || '<span class="meta">没有可选项</span>'}${staleRows}</div>
+    </div>`;
+}
+
+function renderAuthPicker(extensions = {}) {
+  const host = document.getElementById('presetAuthPicker');
+  if (!host) return;
+  const catalog = extensionCatalog;
+  if (!catalog) {
+    host.innerHTML = '<span class="meta">目录读取失败，下面仍可手写授权；点「刷新目录」重试。</span>';
+    return;
+  }
+  const mcpValues = unique(extensions.mcp?.allow ?? []);
+  const toolValues = unique(extensions.mcp?.tools?.allow ?? []);
+  const skillValues = unique(extensions.skills?.allow ?? []);
+  const servers = (catalog.mcp ?? []).map((server) => ({
+    value: server.id,
+    note: server.status === 'online' ? '在线' : '读取失败',
+  }));
+  const tools = catalogTools(catalog).map((tool) => ({ value: tool.label, note: tool.online ? '' : '服务不可用' }));
+  const skills = (catalog.skills ?? []).map((skill) => ({
+    value: skill.id,
+    note: skill.source === 'dsh' ? 'DSH' : skill.source === 'repo' ? '仓库' : '外部',
+  }));
+  host.innerHTML = [
+    '<div class="preset-picker-note"><span>勾选会写入下面的 allow 列表；<code>*</code> 表示全部。deny 仍走 YAML/文本框。</span><button class="btn small" type="button" id="presetAuthRefresh">刷新目录</button></div>',
+    pickerGroup('MCP 服务器', 'mcp', servers, mcpValues),
+    pickerGroup('MCP 工具', 'tools', tools, toolValues, { stalePrefix: '工具' }),
+    pickerGroup('技能', 'skills', skills, skillValues, { stalePrefix: '技能' }),
+  ].join('');
+}
+
+function syncAuthPicker() {
+  const host = document.getElementById('presetAuthPicker');
+  if (!host) return;
+  const values = (group) => {
+    if (host.querySelector(`[data-picker-wild="${group}"]`)?.checked) return ['*'];
+    return unique([...host.querySelectorAll(`input[data-picker-group="${group}"]:checked`)].map((input) => input.value));
+  };
+  setField('presetEditMcpAllow', values('mcp').join('\n'));
+  setField('presetEditMcpToolsAllow', values('tools').join('\n'));
+  setField('presetEditSkillsAllow', values('skills').join('\n'));
+}
+
+async function refreshExtensionCatalog({ quiet = false } = {}) {
+  try {
+    const data = await api('/api/extensions');
+    if (!data.ok) throw new Error(data.error || '读取扩展目录失败');
+    extensionCatalog = data;
+    if (!quiet) showConsoleToast('扩展目录已刷新');
+    const editor = document.getElementById('presetEditor');
+    if (editor && !editor.hidden) renderAuthPicker(readEditor().extensions);
+  } catch (error) {
+    if (!quiet) showConsoleToast(error?.message ?? '读取扩展目录失败', { tone: 'error' });
+    extensionCatalog = null;
+    renderAuthPicker();
+  }
 }
 
 function authSummary(preset) {
@@ -93,7 +213,7 @@ function readEditor() {
   };
 }
 
-function fillEditor(preset) {
+async function fillEditor(preset) {
   editingId = preset.id;
   originalYaml = preset.agentYaml ?? '';
   setField('presetEditName', preset.meta?.name ?? '');
@@ -104,6 +224,9 @@ function fillEditor(preset) {
   setField('presetEditMcpToolsDeny', (preset.extensions?.mcp?.tools?.deny ?? []).join('\n'));
   setField('presetEditSkillsAllow', (preset.extensions?.skills?.allow ?? []).join('\n'));
   setField('presetEditYaml', originalYaml);
+  setYamlEditorValue(originalYaml);
+  await refreshExtensionCatalog({ quiet: true });
+  renderAuthPicker(preset.extensions ?? {});
   document.getElementById('presetEditorTitle').textContent = `编辑预设 · ${preset.id}`;
   document.getElementById('presetEditorPath').textContent = `dsh/agent-presets/${preset.id}`;
   document.getElementById('presetEditMsg').textContent = preset.validation?.ok
@@ -119,7 +242,7 @@ async function openPreset(id) {
   try {
     const data = await api('/api/extensions/presets/' + encodeURIComponent(id));
     if (!data.ok) throw new Error(data.error || '读取预设失败');
-    fillEditor(data.preset);
+    await fillEditor(data.preset);
   } catch (error) {
     showConsoleToast(error?.message ?? '读取预设失败', { tone: 'error' });
   } finally {
@@ -232,6 +355,7 @@ export function init() {
   const edit = document.querySelector('[data-presets-fields="edit"]');
   if (main) renderFields(main, PRESETS_FIELDS.main.fields);
   if (edit) renderFields(edit, PRESETS_FIELDS.edit.fields);
+  mountYamlEditor();
 
   document.getElementById('presetList')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-preset-act]');
@@ -250,6 +374,12 @@ export function init() {
   document.getElementById('presetCancelEdit')?.addEventListener('click', () => {
     document.getElementById('presetEditor').hidden = true;
     editingId = '';
+  });
+  document.getElementById('presetAuthPicker')?.addEventListener('change', (event) => {
+    if (event.target.matches('[data-picker-group], [data-picker-wild]')) syncAuthPicker();
+  });
+  document.getElementById('presetAuthPicker')?.addEventListener('click', (event) => {
+    if (event.target.closest('#presetAuthRefresh')) void refreshExtensionCatalog();
   });
   onPageRefresh('presets', () => refreshPresets(true));
   void refreshPresets();

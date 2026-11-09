@@ -1,3 +1,5 @@
+/* 预设页的容器只做排版：两张卡直接落到页面栅格。 */
+.presets-page { display: contents; }
 #presetEditor .form-section--card { margin-bottom: 14px; }
 /* 预设列表：新建按钮独立一行、靠右（表格组件 actions 槽位在部分布局下宽度塌陷，单独放更稳）。 */
 .preset-list-bar { display: flex; justify-content: flex-end; margin-bottom: 10px; }

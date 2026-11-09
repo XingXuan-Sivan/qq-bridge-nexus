@@ -125,19 +125,6 @@ export function behaviorFields(kind) {
   return kind === 'v1' ? V1_FIELDS : V2_FIELDS;
 }
 
-export function behaviorFormHtml(kind, { id } = {}) {
-  return `<div class="field-row">
-    <label class="field-label" for="behaviorFormLabel">名称</label>
-    <div class="field-control"><input id="behaviorFormLabel" class="u-w-190" type="text" maxlength="40" autocomplete="off"></div>
-  </div>
-  <div class="behavior-form" data-behavior-form data-behavior-kind="${kind}"></div>
-  <div class="form-actions" id="behaviorFormActions">
-    <button type="button" class="btn small primary" id="behaviorFormSave">保存</button>
-    <span class="meta" id="behaviorFormMsg" role="status"></span>
-  </div>
-  <p class="meta">保存写入 <code>config/behaviors/${id}.yml</code>（先备份旧文件）；桥接重启后生效。</p>`;
-}
-
 export function fillBehaviorForm(host, kind, config = {}) {
   const values = {};
   for (const item of behaviorFields(kind)) {

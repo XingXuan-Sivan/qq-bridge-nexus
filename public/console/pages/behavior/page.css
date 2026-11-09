@@ -1,0 +1,21 @@
+/* 行为档案：分组卡直接落到页面栅格，不再用一张大卡包住所有分组。 */
+.behavior-page .behavior-groups {
+  display: contents;
+}
+.behavior-page .behavior-groups .form-section--card {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 22px 26px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+.behavior-page .behavior-groups .form-section--card > legend {
+  padding: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.behavior-page .behavior-groups .form-cols {
+  row-gap: 14px;
+}

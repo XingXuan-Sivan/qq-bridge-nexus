@@ -114,7 +114,7 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'presets', 'behavior', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -343,6 +343,8 @@ const BARE_CONTROL_BASELINE = {
   operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0,
   // presets：P7 加了「行为档案」标签页的选择档案下拉 + 刷新（其余控件由表单组件生成）。
   config: 13, scheduler: 0, persona: 0, memory: 0, presets: 7,
+  // behavior：独立页保留了「选择档案 + 刷新 + 名称 + 保存」四个手写控件。
+  behavior: 4,
 };
 const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {

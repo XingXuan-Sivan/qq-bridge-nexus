@@ -314,7 +314,7 @@ try {
     assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('默认行为档案在全局配置，行为档案表单在预设页', async () => {
+  await test('默认行为档案在全局配置，行为档案独立成页', async () => {
     await hydrate('config');
     assert.equal(await page.locator('[data-config-section="behavior"]').count(), 0);
     await page.waitForFunction(() => document.getElementById('behaviorDefaultSelect')?.options.length >= 2);
@@ -323,8 +323,7 @@ try {
     await saveBarWrite('/api/config/behavior-default');
     assert.deepEqual(fixture.requests.at(-1).body, { value: 'social-v1' });
 
-    await navigate('presets');
-    await page.locator('[data-presets-tab="behaviors"]').click();
+    await navigate('behavior');
     await page.waitForFunction(() => document.getElementById('behaviorFormSelect')?.options.length >= 2);
     await page.waitForFunction(() => document.getElementById('behaviorFormLabel')?.value === '一代仿真默认行为');
     await page.locator('#behaviorFormPanel [data-field="contextWindow"]').fill('25');

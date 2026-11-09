@@ -62,7 +62,7 @@ const KEY = 'group:456';
 async function withHarness(botRequest, run, { tempDir } = {}) {
   const h = await bridgeHarness({
     botRequest,
-    config: { socialV2: { sticker: { collect: { tempDir: tempDir ?? '' } } } },
+    config: { media: { stickerTempDir: tempDir ?? '' } },
     globals: { safeFetchBuffer: async () => ({ buffer: GIF }) },
   });
   try {

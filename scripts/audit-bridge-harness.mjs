@@ -57,6 +57,9 @@ import { createExtensionHub } from '../src/extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs';
 // P3 预设编辑器：bridge 直接 import，夹具按同名补回。
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from '../src/presets/store.mjs';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { assertPresetBehaviorBindings, loadBehaviorProfiles, loadPresetBehaviorBindings, resolveBehavior } from '../src/behaviors/index.mjs';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
 import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
@@ -95,7 +98,7 @@ import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null } = {}) {
+export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {} } = {}) {
   // 取 realpath：macOS 默认的 /var/folders 是 /private/var/folders 的软链接，而语音库解析会返回 realpath（挡 symlink 逃逸），
   // 不先归一的话「库内路径」断言在真实 Mac 上会因为前缀不同而失败。
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qq-audit-bridge-')));
@@ -107,6 +110,32 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     consoleToken: 'fixture-console-token', slang: { enabled: false }, ...config,
   }));
   if (savedState) fs.writeFileSync(path.join(temp, 'state/sessions.json'), JSON.stringify(savedState));
+  // 行为档案与预设绑定：bridge 启动时会强制加载；夹具复制真实文件，避免空目录直接 fail closed。
+  fs.mkdirSync(path.join(temp, 'config/behaviors'), { recursive: true });
+  const mergeBehavior = (base, patch) => {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return base;
+    const out = { ...base };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value && typeof value === 'object' && !Array.isArray(value)
+        && base[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
+        out[key] = mergeBehavior(base[key], value);
+      } else {
+        out[key] = value;
+      }
+    }
+    return out;
+  };
+  for (const id of ['default-v1', 'default-v2']) {
+    const kind = id === 'default-v1' ? 'v1' : 'v2';
+    const source = parseYaml(fs.readFileSync(path.join(root, 'config/behaviors', `${id}.yml`), 'utf8'));
+    source[kind] = mergeBehavior(source[kind] || {}, behavior[kind] || {});
+    fs.writeFileSync(path.join(temp, 'config/behaviors', `${id}.yml`), stringifyYaml(source));
+  }
+  for (const id of PRESET_IDS) {
+    const dir = path.join(temp, 'dsh/agent-presets', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(path.join(root, 'dsh/agent-presets', id, 'preset.yml'), path.join(dir, 'preset.yml'));
+  }
   // r4：额外状态文件（用于测试"启动时读到损坏/旧版文件"这类路径）。
   for (const [rel, content] of Object.entries(files)) {
     const target = path.join(temp, rel);
@@ -252,7 +281,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   bot.onPrivateMessage(async (event) => {`);
   const timers = new Set();
   const context = vm.createContext({
-    fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, console: { log() {}, error() {} },
+    fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, AsyncLocalStorage,
+    assertPresetBehaviorBindings, loadBehaviorProfiles, loadPresetBehaviorBindings, resolveBehavior,
+    console: { log() {}, error() {} },
     fetch: fakeFetch,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。

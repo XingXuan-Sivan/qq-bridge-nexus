@@ -87,6 +87,8 @@ const tests = [
   'test-plugin-config-schema.mjs',
   // 预设编辑器源文件存储（P3）：元数据/扩展授权校验、备份恢复、YAML 结构底线。
   'test-preset-store.mjs',
+  // 行为档案（全局配置）：YAML 校验、预设绑定、坏文件 fail closed。
+  'test-behavior-profiles.mjs',
   // 人格三层解析：会话覆盖 → provider → 全局本地卡，off 硬覆盖，缺卡时继续往下落。
   'test-persona-resolve.mjs',
   // soulkit 人格适配器：协议三态、标题行剥离、ETag、坏响应抛错。

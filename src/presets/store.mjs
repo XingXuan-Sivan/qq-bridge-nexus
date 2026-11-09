@@ -62,7 +62,11 @@ export function normalizeMeta(raw) {
   if (!description) throw new Error('preset.yml 缺少 description');
   const order = Number(source.order);
   if (!Number.isFinite(order) || !Number.isInteger(order)) throw new Error('preset.yml 的 order 必须是整数');
-  return { name, description, order };
+  const behavior = String(source.behavior ?? '').trim();
+  if (behavior && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(behavior)) {
+    throw new Error('preset.yml 的 behavior 必须是行为档案 id');
+  }
+  return { name, description, order, behavior };
 }
 
 export function validateAgentYaml(text) {
@@ -127,6 +131,7 @@ export function createPresetStore({ root, backupRoot, presetIds, scriptsDir, nod
         name: meta?.name ?? id,
         description: meta?.description ?? '',
         order: meta?.order ?? null,
+        behavior: meta?.behavior ?? '',
         editable: true,
         error,
         hasExtensions: fs.existsSync(fileFor(id, 'extensions.yml')),

@@ -219,10 +219,17 @@ npm run test:console-ui
 - 验收：`test-preset-store` 5/5、static 全过、UI **32/32**、audit **102/102**；真机 GET 列表 5 个、GET 详情、validate 200/6 行、PUT extensions 200（已回滚测试写入）、apply 200（build+setup 均成功）、rollback 200（恢复后重新 apply 成功），无 pageerror。
 - 偏差：E15（共用 guard 拿不到 preset id，不提供按预设放行原生工具的假开关）。P0 `compress` 仍 Partial；P4/P5 后续子批。
 
-### 6.12 全局配置三层模型（2026-11-09，方案稿，未实施）
+### 6.12 全局配置三层模型（2026-11-09，方案已拍板，G2 实施中）
 
 - 文档：`docs/GLOBAL_CONFIG.md`（系统层 / 预设层 / 会话层、现有文件清单、目标布局、迁移映射、动态授权、代码编辑器与 YAML 保注释、分批计划）。
-- 已定（用户 m31113）：新页面命名「全局配置」；原「访问与安全」页配置并入「安全与静默」，旧页不保留入口/摘要；诊断/通知不进全局配置；配置页不按仿真模式拆分；旧 `social-v1` / `social-v2` / `access` 页面与旧配置键直接删除，不保留别名/兼容，迁移前用 git 建基线（方案 2）。
+- 已定（用户 m31113/m31268）：新页面命名「全局配置」；原「访问与安全」页配置并入「安全与静默」，旧页不保留入口/摘要；诊断/通知不进全局配置；配置页不按仿真模式拆分；旧 `social-v1` / `social-v2` / `access` 页面与旧配置键直接删除，不保留别名/兼容，迁移前用 git 建基线（方案 2）；编辑器选 CM6，YAML 统一到 `yaml`。
 - 核心结构调整：QQ 交互参数从 `config.social` / `config.socialV2` 移到 `config/behaviors/<id>.yml` 行为档案；预设 `preset.yml` 通过 `behavior:` 引用；会话层只保留 preset/模型/人格/提示词/准入；`socialV2.agentPreset` 与 `socialV2.enabled` 删除，默认 preset 统一为 `config.agentPreset`。
-- 待拍板：代码编辑器选 CodeMirror 6（需 esbuild 自托管 vendor）还是 Ace 单文件（零构建）；YAML 库是否从 `js-yaml` 统一迁到 `yaml`（Document API 保注释）；准入名单放全局配置「准入」还是保留会话页；诊断/通知入口归属。
-- 当前没有代码改动；`docs/README.md` 已加入本文索引。逐项实施见 `docs/GLOBAL_CONFIG.md` §10（G1–G5）。
+- 实施进度见 6.13；逐项实施见 `docs/GLOBAL_CONFIG.md` §10（G1–G5）。
+
+### 6.13 G2 行为档案接入（2026-11-09，实施中，未提交）
+
+- 新增 `src/behaviors/index.mjs`、`config/behaviors/default-v1.yml`、`default-v2.yml`；`qq-chat`/`qq-chat-v2` 的 `preset.yml` 分别绑定 v1/v2。
+- `src/bridge.js` 已加载行为档案与 preset 绑定，`cfg.social`/`cfg.socialV2` 通过 `AsyncLocalStorage` 按会话 preset 视图取值；`handleIncoming`、调度投递、睡眠/主动定时器、唤醒提示已包 `withBehavior`。
+- `config.json` 已迁移：删除 `social`/`socialV2`，新增 `tools`/`compact`/`voice`/`media`/`limits`；`config.example.json` 已同步新结构。`config.json` 仍被 `.gitignore` 排除，未入库。
+- 门禁：`test-behavior-profiles` 3/3、`test-integration-v030` 31/31、`test-sticker-collect` 8/8、`test-token-economy` 36/36、static 全过、audit 103/103、`node --check src/bridge.js` 通过、`git diff --check` 干净。
+- 未完成：UI 回归因本机未安装 Playwright 未跑；G3 删旧页/旧键、全局配置页、动态 picker、CM6/YAML Document 尚未开始；P0 `compress` 仍 Partial。

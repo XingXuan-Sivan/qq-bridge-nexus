@@ -14,7 +14,7 @@ let tests = 0;
 
 async function test(name, run, { observe = false } = {}) {
   tests++;
-  const h = await bridgeHarness({ config: { socialV2: {
+  const h = await bridgeHarness({ behavior: { v2: {
     wake: { preSleepWaitEnabled: observe, preSleepWaitMs: 1000 },
     wait: { minMs: 100, maxMs: 2000, minQuietAfterNewMs: 0 },
     proactive: { enabled: false },

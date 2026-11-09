@@ -20,7 +20,14 @@ import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken, res
 import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
+import {
+  assertPresetBehaviorBindings,
+  loadBehaviorProfiles,
+  loadPresetBehaviorBindings,
+  resolveBehavior,
+} from './behaviors/index.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -167,6 +174,8 @@ import { configureKeys, key as buildKey, parseKey, platformOfConfig, idOfKey, is
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
+// 行为档案按会话生效：入口处 run(view)，下游沿用现有 cfg.social/cfg.socialV2 读取。
+const behaviorContext = new AsyncLocalStorage();
 const STATE_DIR = path.join(ROOT, 'state');
 const STATE_FILE = path.join(STATE_DIR, 'sessions.json');
 // 会话档案目录（SESSION_SUBSYSTEM.md §3）：默认策略 + 每会话一个文件。
@@ -1283,6 +1292,66 @@ function loadConfig() {
   if (file.admin?.maxElevatedMs) cfg.admin.maxElevatedMs = { L1: 14400000, L2: 7200000, L3: 3600000, ...file.admin.maxElevatedMs };
   // 跨群协作：默认关闭；链接是有向的、按能力授权（见 src/social/cross-group.js）。
   cfg.crossGroup = { enabled: false, links: [], ...(file.crossGroup ?? {}) };
+
+  // 系统级 v2 配置：从旧 socialV2 拆出，迁移后只保留 config.* 这些新键。
+  cfg.tools = { ...cfg.socialV2.tools, ...(file.tools ?? {}) };
+  cfg.compact = normalizeCompactConfig(file.compact ?? cfg.socialV2.compact);
+  cfg.voice = { ...cfg.socialV2.voice, ...(file.voice ?? {}) };
+  cfg.media = { ...cfg.socialV2.media, ...(file.media ?? {}) };
+  cfg.limits = {
+    send: {
+      maxSendPerMinute: Number(file.limits?.send?.maxSendPerMinute ?? cfg.socialV2.send?.maxSendPerMinute) || 0,
+      maxSendPerHour: Number(file.limits?.send?.maxSendPerHour ?? cfg.socialV2.send?.maxSendPerHour) || 0,
+    },
+    initialPromptMaxChars: Number(file.limits?.initialPromptMaxChars ?? cfg.socialV2.initialPromptMaxChars) || 2000,
+  };
+
+  // 行为档案：QQ 交互参数按预设绑定，不再塞在 config.social/socialV2。
+  cfg.behaviors = loadBehaviorProfiles({ root: path.join(ROOT, 'config', 'behaviors'), log });
+  cfg.presetBehaviors = loadPresetBehaviorBindings({
+    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    presetIds: PRESET_IDS,
+    log,
+  });
+  assertPresetBehaviorBindings({
+    bindings: cfg.presetBehaviors,
+    behaviors: cfg.behaviors,
+    chatPresetIds: ['qq-chat', 'qq-chat-v2'],
+  });
+
+  // 默认 v1/v2 视图：没有会话上下文时（启动、全局 API）使用默认预设的行为。
+  const chatV1Behavior = cfg.behaviors.get(cfg.presetBehaviors.get('qq-chat'));
+  const chatV2Behavior = cfg.behaviors.get(cfg.presetBehaviors.get('qq-chat-v2'));
+  const legacyV2 = cfg.socialV2;
+  let defaultSocialV1 = { enabled: true, ...(chatV1Behavior?.v1 ?? {}) };
+  let defaultSocialV2 = {
+    ...legacyV2,
+    ...(chatV2Behavior?.v2 ?? {}),
+    tools: cfg.tools,
+    compact: cfg.compact,
+    voice: cfg.voice,
+    media: cfg.media,
+    initialPromptMaxChars: cfg.limits.initialPromptMaxChars,
+    send: {
+      ...(chatV2Behavior?.v2?.send ?? {}),
+      maxSendPerMinute: cfg.limits.send.maxSendPerMinute,
+      maxSendPerHour: cfg.limits.send.maxSendPerHour,
+    },
+  };
+  // 迁移期兼容：旧代码仍读写 cfg.social/cfg.socialV2；getter 返回当前会话行为视图，
+  // setter 只更新默认视图（G3/G4 删除这些旧入口后一并移除）。
+  Object.defineProperty(cfg, 'social', {
+    configurable: true,
+    enumerable: true,
+    get: () => behaviorContext.getStore()?.social ?? defaultSocialV1,
+    set: (value) => { defaultSocialV1 = value; },
+  });
+  Object.defineProperty(cfg, 'socialV2', {
+    configurable: true,
+    enumerable: true,
+    get: () => behaviorContext.getStore()?.socialV2 ?? defaultSocialV2,
+    set: (value) => { defaultSocialV2 = value; },
+  });
 
   return cfg;
 }
@@ -2591,7 +2660,7 @@ async function main() {
     let emojiId = '';
     if (!addOk && looksLikePathOnlyError(addRes) && validated?.buffer && await isNapCatBackend()) {
       // NapCat：add_custom_face 只接受本地文件路径。把**已校验的字节**写进桥接自建的临时文件交给它，用完即删。
-      const tmp = writeTempSticker(validated.buffer, validated.mimeType || mimeFromBuffer(validated.buffer), stickerTempBase({ configured: cfg.socialV2?.sticker?.collect?.tempDir }));
+      const tmp = writeTempSticker(validated.buffer, validated.mimeType || mimeFromBuffer(validated.buffer), stickerTempBase({ configured: cfg.media?.stickerTempDir }));
       try {
         assertSendAllowed();
         addRes = await bot.request('add_custom_face', { file: tmp.file, md5: tmp.md5, file_size: String(tmp.size), file_name: tmp.name, is_origin: true });
@@ -3615,6 +3684,10 @@ async function main() {
     return null;
   }
   async function deliverScheduled(task, target, { manual, scheduledAt }) {
+    return withBehavior(target, () => deliverScheduledImpl(task, target, { manual, scheduledAt }));
+  }
+
+  async function deliverScheduledImpl(task, target, { manual, scheduledAt }) {
     const tz = task.timezone || scheduler.snapshot().settings.timezone;
     const whenText = describeInstant(Date.now(), tz);
     const manualSilent = theManualSilence();
@@ -4057,6 +4130,64 @@ async function main() {
     }
     const wanted = mode === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
     return resolvePresetName(wanted, { strict: true }) || undefined;
+  }
+
+  /** 会话当前使用的行为档案；聊天/运维模式不需要 QQ 行为，返回 null。 */
+  function behaviorFor(key) {
+    const mode = effectiveMode(key);
+    if (mode === 'chat' || mode === 'closed-agent') return null;
+    const presetId = modePreset(key, mode, cfg);
+    const behaviorId = presetId ? cfg.presetBehaviors.get(presetId) : '';
+    const behavior = resolveBehavior(cfg.behaviors, behaviorId, { presetId: presetId || key });
+    if (mode === 'reserved' && behavior.kind !== 'v1') {
+      throw new Error(`预设 ${presetId} 的行为档案 kind=${behavior.kind}，但会话 ${key} 运行在一代仿真`);
+    }
+    if (mode === 'reserved2' && behavior.kind !== 'v2') {
+      throw new Error(`预设 ${presetId} 的行为档案 kind=${behavior.kind}，但会话 ${key} 运行在二代仿真`);
+    }
+    return behavior;
+  }
+
+  /** 行为档案 + 系统级配置的运行时视图（迁移期兼容未搬走的系统键）。 */
+  function behaviorConfigFor(key) {
+    const behavior = behaviorFor(key);
+    if (!behavior) return {};
+    if (behavior.kind === 'v1') return behavior.v1;
+    return behaviorV2View(behavior);
+  }
+
+  function behaviorV2View(behavior) {
+    const base = cfg.socialV2 ?? {};
+    return {
+      ...base,
+      ...behavior.v2,
+      tools: base.tools ?? {},
+      compact: base.compact,
+      voice: base.voice,
+      media: base.media,
+      initialPromptMaxChars: base.initialPromptMaxChars,
+      send: {
+        ...(behavior.v2.send ?? {}),
+        maxSendPerMinute: base.send?.maxSendPerMinute,
+        maxSendPerHour: base.send?.maxSendPerHour,
+      },
+    };
+  }
+
+  /** 在会话行为上下文中执行；聊天/运维模式不需要 QQ 行为，直接执行。 */
+  function withBehavior(key, fn, { optional = false } = {}) {
+    let behavior;
+    try {
+      behavior = behaviorFor(key);
+    } catch (error) {
+      // 管理通道（/panic、审批、确认码等）必须先于仿真行为生效；预设清单暂时读不到时也不能挡住它。
+      if (!optional) throw error;
+      log(`[behavior] 行为档案缺失，按管理通道继续：${error?.message ?? error}`);
+      return fn();
+    }
+    if (!behavior) return fn();
+    if (behavior.kind === 'v1') return behaviorContext.run({ social: behavior.v1, socialV2: cfg.socialV2 }, fn);
+    return behaviorContext.run({ social: cfg.social, socialV2: behaviorV2View(behavior) }, fn);
   }
 
   /** 判断一个会话 key 是否仍被当前模式/白名单允许（供唤醒调度与 HTTP 路由共用）。 */
@@ -13216,7 +13347,7 @@ async function main() {
   function looksLikeAdminChannelText(raw) {
     const segs = Array.isArray(raw?.message) ? raw.message : [];
     const text = String(raw?.raw_message ?? segs.map((s) => s?.data?.text ?? '').join(''));
-    return /确认\s*\d{4,8}|\/confirm|确认请回复|审批\s*#\d+|模式已变更|管理通道|动态码|TOTP|^\s*\/(mode|level|perm|permission|panic|cancel|approvals|audit|whois|person|note|share|say|review|admin)\b/i.test(text);
+    return /确认\s*\d{4,8}|\/confirm|确认请回复|审批\s*#\d+|模式已变更|管理通道|动态码|TOTP|^\s*\/(mode|level|perm|permission|panic|cancel|approvals|audit|whois|person|note|share|say|review|admin)\b|^\s*(通过|拒绝)(\s*#?\d+)?\s*$/i.test(text);
   }
 
   // waitMs > 0：最多等这么久，等不到返回 { pending: true, messageId }（后台继续取，结果进缓存；不负缓存）。
@@ -13932,6 +14063,10 @@ async function main() {
   }
 
   async function sendWakePromptV2(key, reason) {
+    return withBehavior(key, () => sendWakePromptV2Impl(key, reason));
+  }
+
+  async function sendWakePromptV2Impl(key, reason) {
     if (cfg.socialV2?.enabled === false) return;
     if (effectiveMode(key) !== 'reserved2' || socialV2.paused) return;
     // 手动静默：按环节统一拦截所有唤醒（定时静默是另一套，顺序不影响结果）。
@@ -14303,6 +14438,10 @@ async function main() {
   }
 
   function setupSleepTimerV2(key) {
+    return withBehavior(key, () => setupSleepTimerV2Impl(key), { optional: true });
+  }
+
+  function setupSleepTimerV2Impl(key) {
     if (cfg.socialV2?.enabled === false) return;
     if (!isSessionAllowedInCurrentMode(key)) return;
     const st = getSocialV2State(key);
@@ -14350,6 +14489,10 @@ async function main() {
   }
 
   function scheduleProactiveCheckV2(key) {
+    return withBehavior(key, () => scheduleProactiveCheckV2Impl(key), { optional: true });
+  }
+
+  function scheduleProactiveCheckV2Impl(key) {
     if (cfg.socialV2?.proactive?.enabled === false) return;
     if (socialV2.paused || !proactiveAllowed(key)) return;
     if (effectiveMode(key) !== 'reserved2') return;
@@ -14604,6 +14747,12 @@ async function main() {
 
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
     const key = convKey(kind, id);
+    return withBehavior(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts), {
+      optional: looksLikeAdminChannelText(event),
+    });
+  }
+
+  async function handleIncomingImpl(key, kind, id, event, cfg, opts = {}) {
     // 补收（src/backfill.js）：断线期间错过、恢复后从历史接口拉回来的消息。只当聊天内容记下：
     // 不执行任何命令 / 审批 / 确认码 / 角色切换，只在二代仿真里进未读。
     const backfill = opts.backfill || null;

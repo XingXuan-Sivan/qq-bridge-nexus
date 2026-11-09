@@ -165,7 +165,7 @@ await test('agent token 既读不到初始提示词，也改不了它', async ()
 
 // ── 4. 输入校验 ───────────────────────────────────────────────────────────────
 await test('非法 key / 超长 / 缺 text 都被拒，且不会误删已有内容', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { initialPromptMaxChars: 100 } } });
+  const h = await bridgeHarness({ config: { limits: { initialPromptMaxChars: 100 } } });
   try {
     assert.equal(h.initialPromptMaxChars(), 100);
     assert.equal(h.setInitialPrompt('qq:group:456', 'x'.repeat(100)).ok, true, '正好到上限允许');
@@ -207,7 +207,7 @@ await test('非法 key / 超长 / 缺 text 都被拒，且不会误删已有内�
 await test('initialPromptMaxChars 的越界配置被收敛到 100~8000', async () => {
   const cases = [[1, 100], [50, 100], [2000, 2000], [99999, 8000], ['300', 300], [-5, 2000], ['abc', 2000], [0, 2000]];
   for (const [input, expected] of cases) {
-    const h = await bridgeHarness({ config: { socialV2: { initialPromptMaxChars: input } } });
+    const h = await bridgeHarness({ config: { limits: { initialPromptMaxChars: input } } });
     try { assert.equal(h.initialPromptMaxChars(), expected, `initialPromptMaxChars=${JSON.stringify(input)}`); }
     finally { await h.close(); }
   }
@@ -264,7 +264,7 @@ await test('手动唤醒在会话未 bootstrap 时必须走 bootstrap（否则�
 
 // ── 8. 端到端：真实进线消息 → bootstrap 唤醒 → 投递的 prompt 带环境说明 ────────
 await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的 prompt 带初始提示词', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { wake: { batchWindowMs: 1000 } } } });
+  const h = await bridgeHarness({ behavior: { v2: { wake: { batchWindowMs: 1000 } } } });
   try {
     h.setMode('reserved2');
     h.setInitialPrompt('qq:group:456', ENV_TEXT);

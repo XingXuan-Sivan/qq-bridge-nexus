@@ -2,19 +2,29 @@
 // 保存只改权威源；「应用」才调用 build-agent-preset-patches + setup-dsh。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
+import { onPageRefresh } from '../../js/router.js';
 import { bindSwitches, renderFields } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
-import { readAgentForm, renderAgentForm } from './agent-form.js';
 import { PRESETS_FIELDS } from './fields.js';
-import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
+import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 
 let presetsCache = [];
 let editingId = '';
-let agentRows = [];
 let busy = false;
 let extensionCatalog = null;
+
+// 授权草稿：复选框/下拉只改这里，保存时整体写回 extensions.yml。
+// 用 Set 而不是每次从 DOM 反推，目录里暂时没有的旧条目（stale）才不会在保存时丢掉。
+const auth = {
+  mcpWild: false,
+  servers: new Set(),
+  toolsWild: false,
+  toolAllow: new Set(),
+  toolDeny: new Set(),
+  skillsWild: false,
+  skills: new Set(),
+};
 
 function lines(value) {
   return String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -22,10 +32,6 @@ function lines(value) {
 
 function unique(values) {
   return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))];
-}
-
-function pickerChecked(values, value) {
-  return values.includes('*') || values.includes(value);
 }
 
 function catalogTools(catalog) {
@@ -38,136 +44,214 @@ function catalogTools(catalog) {
   })));
 }
 
-function pickerGroup(title, key, items, values, { stalePrefix = '' } = {}) {
-  const known = new Set(items.map((item) => item.value));
-  const stale = values.filter((value) => value !== '*' && !known.has(value));
-  const rows = items.map((item) => `
-    <label class="preset-picker-item">
-      <input type="checkbox" data-picker-group="${key}" value="${esc(item.value)}"${pickerChecked(values, item.value) ? ' checked' : ''}>
-      <span><code>${esc(item.value)}</code>${item.note ? ` <span class="meta">${esc(item.note)}</span>` : ''}</span>
-    </label>`).join('');
-  const staleRows = stale.map((value) => `
-    <label class="preset-picker-item preset-picker-stale">
-      <input type="checkbox" data-picker-group="${key}" value="${esc(value)}" checked>
-      <span><code>${esc(value)}</code> <span class="meta">${esc(stalePrefix)}当前未安装，保留</span></span>
-    </label>`).join('');
-  const wildcard = `
-    <label class="preset-picker-wild">
-      <input type="checkbox" data-picker-wild="${key}"${values.includes('*') ? ' checked' : ''}>
-      全部允许（写入 *）
-    </label>`;
-  return `
-    <div class="preset-picker-group">
-      <div class="preset-picker-head"><strong>${esc(title)}</strong>${wildcard}</div>
-      <div class="preset-picker-list">${rows || '<span class="meta">没有可选项</span>'}${staleRows}</div>
-    </div>`;
+// ── 授权草稿 ────────────────────────────────────────────────────────────────
+function allServerIds() {
+  return [...new Set([...(extensionCatalog?.mcp ?? []).map((server) => server.id), ...auth.servers])];
 }
 
-// MCP 工具按 server 分组：server 行是「全选该 server 的工具」的三态复选框，
-// 工具行单独勾选；写回时仍是一个扁平 allow 列表（server__tool），与旧数据结构兼容。
-function toolPickerGroup(items, values) {
-  const groups = new Map();
-  for (const item of items) {
-    const server = item.value.includes('__') ? item.value.slice(0, item.value.indexOf('__')) : '（未分组）';
-    if (!groups.has(server)) groups.set(server, []);
-    groups.get(server).push(item);
-  }
-  const known = new Set(items.map((item) => item.value));
-  const stale = values.filter((value) => value !== '*' && !known.has(value));
-  const body = [...groups.entries()].map(([server, list]) => {
-    const rows = list.map((item) => {
-      const short = item.value.includes('__') ? item.value.slice(item.value.indexOf('__') + 2) : item.value;
-      return `<label class="preset-picker-item preset-picker-tool">
-        <input type="checkbox" data-picker-group="tools" data-picker-owner="${esc(server)}" value="${esc(item.value)}"${pickerChecked(values, item.value) ? ' checked' : ''}>
-        <span><code>${esc(short)}</code>${item.note ? ` <span class="meta">${esc(item.note)}</span>` : ''}</span>
-      </label>`;
-    }).join('');
-    return `<div class="preset-picker-server">
-      <label class="preset-picker-server-head">
-        <input type="checkbox" data-picker-server-all="${esc(server)}">
-        <strong>${esc(server)}</strong><span class="meta">${list.length} 个工具</span>
-      </label>
-      <div class="preset-picker-tools">${rows}</div>
-    </div>`;
-  }).join('');
-  const staleRows = stale.map((value) => `
-    <label class="preset-picker-item preset-picker-stale">
-      <input type="checkbox" data-picker-group="tools" value="${esc(value)}" checked>
-      <span><code>${esc(value)}</code> <span class="meta">工具当前未安装，保留</span></span>
-    </label>`).join('');
-  return `
-    <div class="preset-picker-group">
-      <div class="preset-picker-head"><strong>MCP 工具</strong>${`<label class="preset-picker-wild"><input type="checkbox" data-picker-wild="tools"${values.includes('*') ? ' checked' : ''}> 全部允许（写入 *）</label>`}</div>
-      <div class="preset-picker-list">${body || '<span class="meta">没有可选项</span>'}${staleRows}</div>
-      <div class="meta preset-picker-note">按 server 勾选会级联到它下面的工具；deny 仍走 YAML/文本框。</div>
-    </div>`;
+function allSkillIds() {
+  return [...new Set([...(extensionCatalog?.skills ?? []).map((skill) => skill.id), ...auth.skills])];
 }
 
-// 勾了「全部允许（*）」时细分勾选不生效：直接禁用并压暗，避免「勾了却没用」。
-function syncToolDisabled(host = document.getElementById('presetAuthPicker')) {
-  if (!host) return;
-  const wild = host.querySelector('[data-picker-wild="tools"]');
-  const locked = Boolean(wild?.checked);
-  host.querySelectorAll('[data-picker-group="tools"], [data-picker-server-all]').forEach((input) => { input.disabled = locked; });
-  host.querySelectorAll('.preset-picker-tools').forEach((box) => box.classList.toggle('is-disabled', locked));
+function resetAuthDraft(extensions = {}) {
+  const mcp = unique(extensions.mcp?.allow ?? []);
+  const toolAllow = unique(extensions.mcp?.tools?.allow ?? []);
+  const toolDeny = unique(extensions.mcp?.tools?.deny ?? []);
+  const skills = unique(extensions.skills?.allow ?? []);
+  auth.mcpWild = mcp.includes('*');
+  auth.servers = new Set(mcp.filter((value) => value !== '*'));
+  auth.toolsWild = toolAllow.includes('*');
+  auth.toolAllow = new Set(toolAllow.filter((value) => value !== '*'));
+  auth.toolDeny = new Set(toolDeny.filter((value) => value !== '*'));
+  auth.skillsWild = skills.includes('*');
+  auth.skills = new Set(skills.filter((value) => value !== '*'));
 }
 
-// 让每个 server 的三态复选框跟上工具勾选状态。
-function syncToolServerChecks(host = document.getElementById('presetAuthPicker')) {
-  if (!host) return;
-  host.querySelectorAll('[data-picker-server-all]').forEach((box) => {
-    const owner = box.dataset.pickerServerAll;
-    const tools = [...host.querySelectorAll(`[data-picker-owner="${CSS.escape(owner)}"]`)];
-    const checked = tools.filter((tool) => tool.checked).length;
-    box.checked = tools.length > 0 && checked === tools.length;
-    box.indeterminate = checked > 0 && checked < tools.length;
-  });
+// 写回时按目录顺序排：勾选顺序不该影响 extensions.yml 的 diff。
+function catalogOrder(values, ids) {
+  const order = new Map(ids.map((id, index) => [id, index]));
+  return [...values].sort((a, b) => (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER));
 }
 
-function renderAuthPicker(extensions = {}) {
-  const host = document.getElementById('presetAuthPicker');
-  if (!host) return;
-  const catalog = extensionCatalog;
-  if (!catalog) {
-    host.innerHTML = '<span class="meta">目录读取失败，下面仍可手写授权；点「刷新目录」重试。</span>';
-    return;
-  }
-  const mcpValues = new Set(unique(extensions.mcp?.allow ?? []));
-  const toolValues = new Set(unique(extensions.mcp?.tools?.allow ?? []));
-  const skillValues = new Set(unique(extensions.skills?.allow ?? []));
-  const box = (group, value, checked) => '<input type="checkbox" data-auth-box="1" data-picker-group="' + group + '" value="' + esc(value) + '"' + (checked ? ' checked' : '') + '>';
-  const table = (rows, columns, meta) => (rows.length
-    ? dataTableHtml({ columns, rows, pager: false, pageSize: rows.length, meta })
-    : '<p class="meta">目录里没有这一项。</p>');
-  const servers = (catalog.mcp ?? []).map((server) => ({
-    cells: [box('mcp', server.id, mcpValues.has(server.id)), '<code>' + esc(server.id) + '</code>', server.status === 'online' ? '在线' : '读取失败'],
-  }));
-  const tools = catalogTools(catalog).map((tool) => ({
-    cells: [box('tools', tool.label, toolValues.has(tool.label)).replace('<input ', '<input data-picker-owner="' + esc(tool.server || '') + '" '), '<code>' + esc(tool.label) + '</code>', esc(tool.server || ''), tool.online ? '可用' : '服务不可用'],
-  }));
-  const skills = (catalog.skills ?? []).map((skill) => ({
-    cells: [box('skills', skill.id, skillValues.has(skill.id)), '<code>' + esc(skill.id) + '</code>', skill.source === 'dsh' ? 'DSH' : skill.source === 'repo' ? '仓库' : '外部'],
-  }));
-  host.innerHTML = [
-    '<div class="preset-picker-note"><span>勾选会写入下面的 allow 列表；<code>*</code> 表示全部。deny 仍走 YAML/文本框。</span><button class="btn small" type="button" id="presetAuthRefresh">刷新目录</button></div>',
-    '<section class="card is-group"><details class="settings-group" open><summary>MCP 服务器</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="mcp"' + (mcpValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(servers, [{ label: '授权', width: '64px' }, { label: '服务器' }, { label: '状态', width: '110px' }], (catalog.mcp ?? []).length + ' 个 server') + '</div></details></section>',
-    '<section class="card is-group"><details class="settings-group" open><summary>MCP 工具</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="tools"' + (toolValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(tools, [{ label: '授权', width: '64px' }, { label: '工具' }, { label: '所属 server', width: '160px' }, { label: '状态', width: '110px' }], tools.length + ' 个工具') + '</div></details></section>',
-    '<section class="card is-group"><details class="settings-group" open><summary>技能</summary><div class="settings-content"><label class="preset-picker-wild"><input type="checkbox" data-picker-wild="skills"' + (skillValues.has('*') ? ' checked' : '') + '>全部允许（写入 *）</label>' + table(skills, [{ label: '授权', width: '64px' }, { label: '技能' }, { label: '来源', width: '110px' }], skills.length + ' 个技能') + '</div></details></section>',
-  ].join('');
-  initDataTables(host);
-  syncToolDisabled(host);
-}
-
-function syncAuthPicker() {
-  const host = document.getElementById('presetAuthPicker');
-  if (!host) return;
-  const values = (group) => {
-    if (host.querySelector(`[data-picker-wild="${group}"]`)?.checked) return ['*'];
-    return unique([...host.querySelectorAll(`input[data-picker-group="${group}"]:checked`)].map((input) => input.value));
+export function authExtensions() {
+  const serverIds = (extensionCatalog?.mcp ?? []).map((server) => server.id);
+  const skillIds = (extensionCatalog?.skills ?? []).map((skill) => skill.id);
+  const toolLabels = catalogTools(extensionCatalog).map((tool) => tool.label);
+  return {
+    mcp: {
+      allow: auth.mcpWild ? ['*'] : catalogOrder(auth.servers, serverIds),
+      tools: {
+        allow: auth.toolsWild ? ['*'] : catalogOrder(auth.toolAllow, toolLabels),
+        deny: catalogOrder(auth.toolDeny, toolLabels),
+      },
+    },
+    skills: { allow: auth.skillsWild ? ['*'] : catalogOrder(auth.skills, skillIds) },
   };
-  setField('presetEditMcpAllow', values('mcp').join('\n'));
-  setField('presetEditMcpToolsAllow', values('tools').join('\n'));
-  setField('presetEditSkillsAllow', values('skills').join('\n'));
+}
+
+function catalogMissing(host) {
+  host.innerHTML = `<p class="meta">目录读取失败，授权表暂不可用。<button class="btn small" type="button" data-auth-refresh>重试</button></p>`;
+}
+
+function tableOf(rows, columns, meta, select = null, actions = '') {
+  return dataTableHtml({ columns, rows, pageSize: Math.max(rows.length, 1), meta, select, actions });
+}
+
+function renderServers() {
+  const host = document.getElementById('presetMcpServers');
+  if (!host) return;
+  if (!extensionCatalog) { catalogMissing(host); return; }
+  const servers = extensionCatalog.mcp ?? [];
+  const known = new Set(servers.map((server) => server.id));
+  const rows = servers.map((server) => ({
+    cells: [
+      selectCellHtml({
+        value: server.id,
+        checked: auth.mcpWild || auth.servers.has(server.id),
+        label: `允许 ${server.id}`,
+        attrs: { 'data-auth-server': server.id },
+      }),
+      `<code>${esc(server.id)}</code>`,
+      server.source === 'external' ? '外部' : '内置',
+      server.status === 'online' ? '在线' : '不可用',
+      String(server.toolCount ?? server.tools?.length ?? 0),
+    ],
+  }));
+  // 目录里已经没有、但文件里仍写着的 server：保留显示，取消勾选即删除。
+  for (const value of auth.servers) {
+    if (known.has(value)) continue;
+    rows.push({
+      cells: [
+        selectCellHtml({
+          value,
+          checked: true,
+          label: `允许 ${value}`,
+          attrs: { 'data-auth-server': value },
+        }),
+        `<code>${esc(value)}</code>`,
+        '<span class="meta">目录中未找到</span>',
+        '<span class="meta">保留原值</span>',
+        '—',
+      ],
+    });
+  }
+  host.innerHTML = rows.length
+    ? tableOf(rows, [
+      { label: '服务器' },
+      { label: '来源', width: '90px' },
+      { label: '状态', width: '110px' },
+      { label: '工具数', width: '80px' },
+    ], `${servers.length} 个 server`, {
+      label: '授权',
+      attrs: { 'data-select-group': 'servers' },
+    }, '<button class="btn small" type="button" data-auth-refresh>刷新目录</button>')
+    : '<p class="meta">目录里没有 MCP 服务器。</p>';
+  initDataTables(host);
+}
+
+function allowedServers() {
+  return (extensionCatalog?.mcp ?? []).filter((server) => auth.mcpWild || auth.servers.has(server.id));
+}
+
+function renderStaleTools() {
+  const known = new Set(catalogTools(extensionCatalog).map((tool) => tool.label));
+  const stale = [...new Set([...auth.toolAllow, ...auth.toolDeny])].filter((value) => !known.has(value));
+  if (!stale.length) return '';
+  const rows = stale.map((value) => {
+    const state = auth.toolAllow.has(value) ? '允许' : '拒绝';
+    return {
+      cells: [
+        `<code>${esc(value)}</code>`,
+        `<span class="meta">${state}</span>`,
+        `<button class="btn small danger" type="button" data-auth-tool-remove="${esc(value)}">移除</button>`,
+      ],
+    };
+  });
+  return `<div class="preset-auth-stale"><p class="meta">下面这些工具在当前目录里找不到（server 离线或已卸载），保存时会原样保留；点「移除」才会删掉。</p>`
+    + tableOf(rows, [{ label: '工具条目', width: '320px' }, { label: '状态', width: '90px' }, { label: '操作', width: '90px' }], `${rows.length} 个保留项`)
+    + '</div>';
+}
+
+// 工具表：只列「上面已允许的 server」的工具；勾上=允许，不勾=拒绝（拒绝优先于允许）。
+function renderTools() {
+  const host = document.getElementById('presetMcpTools');
+  if (!host) return;
+  if (!extensionCatalog) { catalogMissing(host); return; }
+  const servers = allowedServers();
+  const rows = [];
+  for (const server of servers) {
+    for (const tool of server.tools ?? []) {
+      const label = `${server.id}__${tool.name}`;
+      rows.push({
+        cells: [
+          selectCellHtml({
+            value: label,
+            checked: auth.toolsWild ? !auth.toolDeny.has(label) : auth.toolAllow.has(label) && !auth.toolDeny.has(label),
+            label: `允许 ${label}`,
+            attrs: { 'data-auth-tool': label, 'data-auth-server': server.id },
+          }),
+          `<code>${esc(server.id)}</code>`,
+          `<code>${esc(tool.name)}</code>`,
+          `<span class="preset-tool-desc">${esc(tool.description || '—')}</span>`,
+        ],
+      });
+    }
+  }
+  host.innerHTML = (rows.length
+    ? tableOf(rows, [
+      { label: '服务器' },
+      { label: '工具', width: '220px' },
+      { label: '说明' },
+    ], `${rows.length} 个工具`, { label: '授权', attrs: { 'data-select-group': 'tools' } })
+    : `<p class="meta">${servers.length ? '这些 server 没有暴露工具。' : '还没有允许任何 MCP 服务器。'}</p>`)
+    + renderStaleTools();
+  initDataTables(host);
+}
+
+function renderSkills() {
+  const host = document.getElementById('presetSkills');
+  if (!host) return;
+  if (!extensionCatalog) { catalogMissing(host); return; }
+  const skills = extensionCatalog.skills ?? [];
+  const known = new Set(skills.map((skill) => skill.id));
+  const rows = skills.map((skill) => ({
+    cells: [
+      selectCellHtml({
+        value: skill.id,
+        checked: auth.skillsWild || auth.skills.has(skill.id),
+        label: `允许 ${skill.id}`,
+        attrs: { 'data-auth-skill': skill.id },
+      }),
+      `<code>${esc(skill.id)}</code>`,
+      skill.source === 'dsh' ? 'DSH' : skill.source === 'repo' ? '仓库' : '外部',
+      `<span class="preset-tool-desc">${esc(skill.description || '—')}</span>`,
+    ],
+  }));
+  for (const value of auth.skills) {
+    if (known.has(value)) continue;
+    rows.push({
+      cells: [
+        selectCellHtml({ value, checked: true, label: `允许 ${value}`, attrs: { 'data-auth-skill': value } }),
+        `<code>${esc(value)}</code>`,
+        '<span class="meta">目录中未找到</span>',
+        '<span class="meta">保留原值</span>',
+      ],
+    });
+  }
+  host.innerHTML = rows.length
+    ? tableOf(rows, [
+      { label: '技能', width: '220px' },
+      { label: '来源', width: '90px' },
+      { label: '说明' },
+    ], `${skills.length} 个技能`, { label: '授权', attrs: { 'data-select-group': 'skills' } })
+    : '<p class="meta">目录里没有技能。</p>';
+  initDataTables(host);
+}
+
+function renderAuth() {
+  renderServers();
+  renderTools();
+  renderSkills();
 }
 
 async function refreshExtensionCatalog({ quiet = false } = {}) {
@@ -176,12 +260,11 @@ async function refreshExtensionCatalog({ quiet = false } = {}) {
     if (!data.ok) throw new Error(data.error || '读取扩展目录失败');
     extensionCatalog = data;
     if (!quiet) showConsoleToast('扩展目录已刷新');
-    const editor = document.getElementById('presetEditor');
-    if (editor && !editor.hidden) renderAuthPicker(readEditor().extensions);
+    renderAuth();
   } catch (error) {
     if (!quiet) showConsoleToast(error?.message ?? '读取扩展目录失败', { tone: 'error' });
     extensionCatalog = null;
-    renderAuthPicker();
+    renderAuth();
   }
 }
 
@@ -338,6 +421,71 @@ async function resetPresetPrompt() {
   }
 }
 
+// ── 插件配置（agent.cordis.yml 全文）──────────────────────────────────────
+// 配置项数量多、还会随插件版本变化，逐项表单化成本高且容易漏；改成整份 YAML 编辑器，
+// 后端保存时仍走同一套校验（非空数组、每行 id/name、必须含 persona 与 qq-tool-restrict）。
+let agentYamlEditor = null;
+let agentYamlPreset = '';
+let agentYamlOriginal = '';
+
+function agentYamlEl(id) { return document.getElementById(id); }
+
+function setAgentYamlMsg(text, tone) {
+  const el = agentYamlEl('agentYamlMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = tone === 'ok' ? 'meta ok' : tone === 'err' ? 'meta err' : 'meta';
+}
+
+function setAgentYamlEditing(editing) {
+  agentYamlEl('agentYamlEdit').disabled = editing;
+  agentYamlEl('agentYamlSave').disabled = !editing;
+  agentYamlEl('agentYamlCancel').disabled = !editing;
+  agentYamlEditor?.setReadOnly(!editing);
+}
+
+function mountAgentYamlEditor() {
+  const textarea = agentYamlEl('presetAgentYamlText');
+  if (!textarea || agentYamlEditor) return;
+  agentYamlEditor = attachTextareaEditor(textarea, { language: 'yaml', height: '460px', readOnly: true });
+}
+
+function fillAgentYaml(preset) {
+  agentYamlPreset = preset.id;
+  agentYamlOriginal = preset.agentYaml ?? '';
+  agentYamlEditor?.setValue(agentYamlOriginal);
+  setAgentYamlEditing(false);
+  agentYamlEl('presetAgentYamlStatus').textContent = preset.validation?.ok
+    ? `${preset.validation.rows} 个插件行 · dsh/agent-presets/${preset.id}/agent.cordis.yml`
+    : `配置有问题：${preset.validation?.error ?? '未知错误'}`;
+  setAgentYamlMsg('');
+}
+
+async function saveAgentYaml() {
+  if (!agentYamlPreset || busy) return;
+  const yaml = agentYamlEditor?.getValue() ?? '';
+  if (yaml.trim() === agentYamlOriginal.trim()) {
+    setAgentYamlMsg('内容没有变化');
+    setAgentYamlEditing(false);
+    return;
+  }
+  busy = true;
+  setAgentYamlMsg('保存中…');
+  try {
+    const r = await api(`/api/extensions/presets/${encodeURIComponent(agentYamlPreset)}/yaml`, 'PUT', { yaml });
+    if (!r.ok) { setAgentYamlMsg(r.error || '保存失败', 'err'); return; }
+    agentYamlOriginal = yaml;
+    setAgentYamlEditing(false);
+    setAgentYamlMsg(`已保存（${r.validation?.rows ?? '?'} 个插件行），重启 DSH 生效`, 'ok');
+    showConsoleToast('插件配置已保存');
+    await refreshPresets(true);
+  } catch (error) {
+    setAgentYamlMsg('保存失败：' + (error?.message ?? error), 'err');
+  } finally {
+    busy = false;
+  }
+}
+
 function readEditor() {
   return {
     meta: {
@@ -345,37 +493,18 @@ function readEditor() {
       description: document.getElementById('presetEditDescription')?.value.trim() ?? '',
       order: Number(document.getElementById('presetEditOrder')?.value),
     },
-    extensions: {
-      mcp: {
-        allow: lines(document.getElementById('presetEditMcpAllow')?.value),
-        tools: {
-          allow: lines(document.getElementById('presetEditMcpToolsAllow')?.value),
-          deny: lines(document.getElementById('presetEditMcpToolsDeny')?.value),
-        },
-      },
-      skills: { allow: lines(document.getElementById('presetEditSkillsAllow')?.value) },
-    },
-    rows: readAgentForm(document.getElementById('presetAgentForm'), agentRows),
+    extensions: authExtensions(),
   };
 }
 
 async function fillEditor(preset) {
   editingId = preset.id;
-  agentRows = (preset.agent ?? []).map((row) => ({
-    id: String(row?.id ?? ''),
-    name: String(row?.name ?? ''),
-    config: Object.fromEntries(Object.entries(row ?? {}).filter(([key]) => key !== 'id' && key !== 'name')),
-  }));
   setField('presetEditName', preset.meta?.name ?? '');
   setField('presetEditDescription', preset.meta?.description ?? '');
   setField('presetEditOrder', preset.meta?.order ?? '');
-  setField('presetEditMcpAllow', (preset.extensions?.mcp?.allow ?? []).join('\n'));
-  setField('presetEditMcpToolsAllow', (preset.extensions?.mcp?.tools?.allow ?? []).join('\n'));
-  setField('presetEditMcpToolsDeny', (preset.extensions?.mcp?.tools?.deny ?? []).join('\n'));
-  setField('presetEditSkillsAllow', (preset.extensions?.skills?.allow ?? []).join('\n'));
-  renderAgentForm(document.getElementById('presetAgentForm'), agentRows);
+  resetAuthDraft(preset.extensions ?? {});
+  fillAgentYaml(preset);
   await refreshExtensionCatalog({ quiet: true });
-  renderAuthPicker(preset.extensions ?? {});
   document.getElementById('presetEditorTitle').textContent = `编辑预设 · ${preset.id}`;
   document.getElementById('presetEditorPath').textContent = `dsh/agent-presets/${preset.id}`;
   document.getElementById('presetEditMsg').textContent = preset.validation?.ok
@@ -418,8 +547,6 @@ async function savePreset({ apply = false } = {}) {
     if (!meta.ok) throw new Error(meta.error || '保存元数据失败');
     const ext = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/extensions`, 'PUT', draft.extensions);
     if (!ext.ok) throw new Error(ext.error || '保存授权失败');
-    const agent = await api(`/api/extensions/presets/${encodeURIComponent(editingId)}/agent`, 'PUT', { rows: draft.rows });
-    if (!agent.ok) throw new Error(agent.error || '保存插件配置失败');
     document.getElementById('presetEditMsg').textContent = apply ? '源文件已保存，正在应用…' : '源文件已保存；点「应用并安装」才会进入 DSH';
     showConsoleToast('预设源文件已保存');
     if (apply) {
@@ -472,52 +599,51 @@ function setCreateMsg(text, tone = 'info') {
   const el = document.getElementById('presetNewMsg');
   if (!el) return;
   el.textContent = text;
-  el.className = tone === 'error' ? 'form-actions-status err' : (tone === 'ok' ? 'form-actions-status ok' : 'form-actions-status');
+  el.className = tone === 'error' ? 'meta err' : (tone === 'ok' ? 'meta ok' : 'meta');
 }
 
-function refreshCreateOptions() {
-  const select = document.getElementById('presetNewFrom');
-  if (!select) return;
-  const current = select.value;
-  select.innerHTML = presetsCache
-    .map((preset) => `<option value="${esc(preset.id)}">${esc(preset.id)} · ${esc(preset.meta?.name ?? preset.name ?? '')}</option>`)
-    .join('');
-  if (current && presetsCache.some((preset) => preset.id === current)) select.value = current;
+// 新建预设：与其它页面同一套字段规格 + 同一套弹窗排版（.field-block / .field-row / .field-notes）。
+function newPresetFields() {
+  const options = [{ value: '', label: '空白预设（不复制，含最小骨架）' }].concat(
+    presetsCache.map((preset) => ({ value: preset.id, label: `${preset.id} · ${preset.name || preset.id}` })),
+  );
+  return [
+    {
+      name: 'presetNewId',
+      type: 'text',
+      label: '预设 id',
+      placeholder: 'my-preset',
+      hint: '只能用小写字母、数字与连字符，且以字母或数字开头；它就是目录名。',
+    },
+    {
+      name: 'presetNewName',
+      type: 'text',
+      label: '名称',
+      placeholder: '留空则用「来源名（副本）」',
+      hint: '空白预设必须填写名称。',
+    },
+    {
+      name: 'presetNewFrom',
+      type: 'select',
+      label: '创建方式',
+      options,
+      hint: '选一个现有预设会整份复制它的 preset.yml / extensions.yml / agent.cordis.yml。',
+    },
+  ];
 }
 
-// 新建预设：走项目统一弹窗，字段与编辑区的基础信息保持同一套排版。
 function openCreatePresetModal() {
   const existing = document.getElementById('presetCreateModal');
   if (existing) { openModal(existing); return; }
-  const options = presetsCache
-    .map((preset) => `<option value="${esc(preset.id)}">${esc(preset.id)} · ${esc(preset.name || preset.id)}</option>`)
-    .join('');
-  const body = `
-    <div class="field-row">
-      <label class="field-label" for="presetNewId">预设 id</label>
-      <div class="field-control">
-        <input class="input" id="presetNewId" placeholder="my-preset" autocomplete="off">
-        <p class="field-hint">只能用小写字母、数字与连字符，且以字母或数字开头。</p>
-      </div>
-    </div>
-    <div class="field-row">
-      <label class="field-label" for="presetNewName">名称</label>
-      <div class="field-control">
-        <input class="input" id="presetNewName" placeholder="留空则用「来源名（副本）」">
-      </div>
-    </div>
-    <div class="field-row">
-      <label class="field-label" for="presetNewFrom">复制自</label>
-      <div class="field-control"><select class="input" id="presetNewFrom">${options}</select></div>
-    </div>
-    <p class="meta" id="presetNewMsg" role="status"></p>`;
   document.body.insertAdjacentHTML('beforeend', modalHtml({
     id: 'presetCreateModal',
     title: '新建预设',
-    body,
+    wide: true,
+    body: '<div class="form-stack" id="presetNewFields"></div><p class="meta" id="presetNewMsg" role="status"></p>',
     footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="presetNewCreate">创建</button>',
   }));
   const overlay = document.getElementById('presetCreateModal');
+  renderFields(overlay.querySelector('#presetNewFields'), newPresetFields(), { layout: 'inline', columns: 1 });
   wireModal(overlay, { onClose: () => overlay.remove() });
   overlay.querySelector('#presetNewCreate').addEventListener('click', () => void createPresetFromForm());
   openModal(overlay);
@@ -533,14 +659,18 @@ async function createPresetFromForm() {
     setCreateMsg('id 只能用小写字母、数字与连字符，且以字母或数字开头', 'error');
     return;
   }
-  if (!from) {
-    setCreateMsg('请选择复制来源', 'error');
+  if (!from && !name) {
+    setCreateMsg('空白预设需要填写名称；也可以选一个现有预设作为模板', 'error');
     return;
   }
   busy = true;
   setCreateMsg('正在创建…');
   try {
-    const result = await api('/api/extensions/presets/create', 'POST', { id, from, name: name || undefined });
+    const result = await api('/api/extensions/presets/create', 'POST', {
+      id,
+      from: from || undefined,
+      name: name || undefined,
+    });
     if (!result.ok) throw new Error(result.error || '创建失败');
     setCreateMsg(`已创建 ${result.id}；正在打开编辑…`, 'ok');
     document.getElementById('presetCreateModal')?.remove();
@@ -600,13 +730,86 @@ async function refreshPresets(showError = false) {
     if (!data.ok) throw new Error(data.error || '读取预设失败');
     presetsCache = data.presets ?? [];
     renderList();
-    refreshCreateOptions();
   } catch (error) {
     if (showError) showConsoleToast(error?.message ?? '读取预设失败', { tone: 'error' });
   }
 }
 
-// ── 行为档案（标签页）────────────────────────────────────────────────────────
+// ── 授权区事件（委托到编辑容器：卡里的表格会整块重渲染）────────────────────
+function onAuthChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  // 表头全选框（组件已把它管辖的行勾好，这里按 DOM 的最终勾选态回写草稿）。
+  if (target.matches('[data-select-all]')) {
+    const group = target.dataset.selectGroup;
+    const on = target.checked;
+    if (group === 'servers') {
+      auth.mcpWild = on;
+      auth.servers = new Set(on ? allServerIds() : []);
+      renderServers();
+      renderTools();
+    } else if (group === 'tools') {
+      auth.toolsWild = on;
+      auth.toolAllow.clear();
+      auth.toolDeny.clear();
+      renderTools();
+    } else if (group === 'skills') {
+      auth.skillsWild = on;
+      auth.skills = new Set(on ? allSkillIds() : []);
+      renderSkills();
+    }
+    return;
+  }
+  if (target.matches('input[data-auth-tool]')) {
+    const label = target.dataset.authTool;
+    if (target.checked) {
+      auth.toolDeny.delete(label);
+      auth.toolAllow.add(label);
+    } else if (auth.toolsWild) {
+      // allow 仍是 *：用 deny 表达「这一个不要」，新加的工具仍然默认允许。
+      auth.toolDeny.add(label);
+    } else {
+      auth.toolAllow.delete(label);
+    }
+    return;
+  }
+  // 注意：工具行的复选框同时带 data-auth-server（用于级联），必须先判 data-auth-tool。
+  if (target.matches('input[data-auth-server]:not([data-auth-tool])')) {
+    const id = target.dataset.authServer;
+    // 原来写的是 *：第一次手动取消某一行时，把 * 展开成当时的完整列表再删这一项。
+    if (auth.mcpWild) {
+      auth.mcpWild = false;
+      auth.servers = new Set(allServerIds());
+    }
+    if (target.checked) auth.servers.add(id); else auth.servers.delete(id);
+    renderServers();
+    renderTools();
+    return;
+  }
+  if (target.matches('input[data-auth-skill]')) {
+    const id = target.dataset.authSkill;
+    if (auth.skillsWild) {
+      auth.skillsWild = false;
+      auth.skills = new Set(allSkillIds());
+    }
+    if (target.checked) auth.skills.add(id); else auth.skills.delete(id);
+  }
+}
+
+function onAuthClick(event) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest('[data-auth-refresh]')) { void refreshExtensionCatalog(); return; }
+  const remove = target.closest('[data-auth-tool-remove]');
+  if (remove) {
+    const value = remove.dataset.authToolRemove;
+    auth.toolAllow.delete(value);
+    auth.toolDeny.delete(value);
+    renderTools();
+  }
+}
+
+// ── 页面入口 ────────────────────────────────────────────────────────────────
 export function init() {
   const main = document.querySelector('[data-presets-fields="main"]');
   const edit = document.querySelector('[data-presets-fields="edit"]');
@@ -616,12 +819,12 @@ export function init() {
   if (edit) renderFields(edit, PRESETS_FIELDS.edit.fields);
   const promptSlot = document.querySelector('[data-presets-fields="simPrompt"]');
   if (promptSlot) renderFields(promptSlot, PRESETS_FIELDS.simPrompt.fields);
-  // 仿真提示词卡在字段规格里只是一个占位（presetPromptSlot），渲染后把卡片搬进去，
-  // 位置就固定在「YAML 高级编辑」区块上方。
+  // 仿真提示词是独立卡片：字段规格里只留一个占位槽，渲染后把卡片内容搬进去。
   const promptMount = document.getElementById('presetPromptMount');
   const promptCard = document.getElementById('presetPrompt');
   if (promptMount && promptCard) promptMount.appendChild(promptCard);
   mountPromptEditor();
+  mountAgentYamlEditor();
   document.getElementById('simPromptEdit')?.addEventListener('click', () => setPromptEditing(true));
   document.getElementById('simPromptSave')?.addEventListener('click', () => void savePresetPrompt());
   document.getElementById('simPromptCancel')?.addEventListener('click', () => {
@@ -630,14 +833,20 @@ export function init() {
     setPromptMsg('已取消编辑');
   });
   document.getElementById('simPromptReset')?.addEventListener('click', () => void resetPresetPrompt());
+  document.getElementById('agentYamlEdit')?.addEventListener('click', () => setAgentYamlEditing(true));
+  document.getElementById('agentYamlSave')?.addEventListener('click', () => void saveAgentYaml());
+  document.getElementById('agentYamlCancel')?.addEventListener('click', () => {
+    agentYamlEditor?.setValue(agentYamlOriginal);
+    setAgentYamlEditing(false);
+    setAgentYamlMsg('已取消编辑');
+  });
 
-    document.getElementById('presetList')?.addEventListener('click', (event) => {
+  document.getElementById('presetList')?.addEventListener('click', (event) => {
     const button = event.target.closest('[data-preset-act]');
     if (!button) return;
     const id = button.dataset.presetId;
     if (button.dataset.presetAct === 'edit') void openPreset(id);
     else if (button.dataset.presetAct === 'apply') void applyPreset(id);
-    else if (button.dataset.presetAct === 'rollback') void rollbackPreset(id);
     else if (button.dataset.presetAct === 'delete') void deletePreset(id);
   });
   document.getElementById('presetSave')?.addEventListener('click', () => void savePreset());
@@ -650,29 +859,9 @@ export function init() {
     document.getElementById('presetEditor').hidden = true;
     editingId = '';
   });
-  document.getElementById('presetAuthPicker')?.addEventListener('change', (event) => {
-    const target = event.target;
-    const host = document.getElementById('presetAuthPicker');
-    if (!host) return;
-    // 勾 server 行 = 级联勾选它下面的所有工具；再统一刷新三态与 allow 列表。
-    if (target.matches('[data-picker-server-all]')) {
-      const owner = target.dataset.pickerServerAll;
-      host.querySelectorAll(`[data-picker-owner="${CSS.escape(owner)}"]`).forEach((input) => { input.checked = target.checked; });
-    }
-    // 勾选 server 行 = 级联勾选它下面的所有工具。
-    if (target.matches('[data-picker-group="mcp"]')) {
-      host.querySelectorAll('[data-picker-owner="' + CSS.escape(target.value) + '"]').forEach((input) => { input.checked = target.checked; });
-    }
-    if (target.matches('[data-picker-group], [data-picker-wild], [data-picker-server-all]')) {
-      syncAuthPicker();
-      syncToolServerChecks(host);
-      syncToolDisabled(host);
-    }
-  });
-  document.getElementById('presetAuthPicker')?.addEventListener('click', (event) => {
-    if (event.target.closest('#presetAuthRefresh')) void refreshExtensionCatalog();
-  });
+  const editor = document.getElementById('presetEditor');
+  editor?.addEventListener('change', onAuthChange);
+  editor?.addEventListener('click', onAuthClick);
   onPageRefresh('presets', () => refreshPresets(true));
   void refreshPresets();
 }
-

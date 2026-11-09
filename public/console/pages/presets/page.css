@@ -21,42 +21,23 @@
 .code-editor-field .field-notes { margin-top: 6px; }
 #presetEditorActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 #presetEditorActions .meta { margin-left: 4px; }
-.preset-picker { display: flex; flex-direction: column; gap: 12px; }
-.preset-picker-note { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
-.preset-picker-group { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--panel-2); }
-.preset-picker-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.preset-picker-wild { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-.preset-picker-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 14px; }
-.preset-picker-item { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.5; }
-.preset-picker-item input { margin-top: 3px; }
-.preset-picker-item code { font-family: var(--mono); font-size: 11px; }
-.preset-picker-stale { opacity: .72; }
-.preset-picker .meta { font-size: 11px; }
-/* MCP 工具按 server 分组：每组占满一行，组头是三态全选，工具按列排。 */
-.preset-picker-server { grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--border-subtle); }
-.preset-picker-server:first-child { padding-top: 0; border-top: 0; }
-.preset-picker-server-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
-.preset-picker-server-head .meta { color: var(--muted); font-weight: 400; }
-.preset-picker-tools {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 6px 14px;
-  margin: 6px 0 2px 22px;
-}
-.preset-picker-tools.is-disabled { opacity: .55; }
-.preset-picker-note { margin-top: 8px; }
-/* 仿真提示词卡：挂在「YAML 高级编辑」上方，与编辑器同宽。 */
+/* 扩展授权：MCP 卡里是「服务器表 + 工具表」两张联动表，技能卡是单独一张表。 */
+.preset-auth { display: flex; flex-direction: column; gap: 10px; }
+.preset-auth .table-wrap { margin: 0; }
+/* 多选列只放一个复选框，别让表头/单元格的默认内边距把它撑宽。 */
+.preset-auth th.table-select,
+.preset-auth td:has(> .table-check) { width: 44px; padding-left: 8px; padding-right: 8px; }
+/* 工具表与服务器表同卡：用虚线分隔，不另起卡片/子卡片。 */
+.preset-auth-tools { padding-top: 12px; margin-top: 2px; border-top: 1px dashed var(--border-subtle); }
+.preset-auth-stale { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px dashed var(--border-subtle); }
+.preset-tool-desc { color: var(--muted); font-size: 12px; }
+/* 仿真提示词：内容挂在「仿真提示词」卡片里，卡框与标题由 form-section--card 提供。 */
 .preset-prompt {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 0 18px;
-  margin: 0 0 6px;
-  border-bottom: 1px dashed var(--border-subtle);
 }
 .preset-prompt[hidden] { display: none; }
-.preset-prompt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.preset-prompt-head h3 { margin: 0; font-size: 14px; }
 .preset-prompt .form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .preset-prompt .meta.ok { color: var(--ok, #2f8f5b); }
 .preset-prompt .meta.err { color: var(--danger); }
@@ -69,13 +50,11 @@
 .behavior-form-panel .form-cols { row-gap: 14px; }
 .behavior-form-panel .behavior-form { width: 100%; }
 /* 分组各自一张卡：外层只是排版容器，不再重复画卡。 */
-.behavior-form-panel .form-section--card,
-.agent-form-panel .form-section--card {
+.behavior-form-panel .form-section--card {
   width: 100%;
   margin: 0;
 }
-.behavior-form-panel .form-section--card + .form-section--card,
-.agent-form-panel .form-section--card + .form-section--card {
+.behavior-form-panel .form-section--card + .form-section--card {
   margin-top: 14px;
 }
 /* 带「毫秒」等 hint 的行：标签对齐输入框首行，而不是整行（含 hint）的垂直中心。 */
@@ -84,12 +63,3 @@
 .behavior-form-panel .field-control > input[type="text"],
 .behavior-form-panel .field-control > input[type="number"],
 .behavior-form-panel .field-control > select { max-width: 460px; }
-
-/* 预设的插件配置表单：与行为档案表单同一套排版（两列、标签首行对齐、分组整宽）。 */
-.agent-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
-.agent-form-panel .form-cols { row-gap: 14px; }
-.agent-form-panel .field-row { align-items: start; }
-.agent-form-panel .field-label { min-height: 40px; height: 40px; }
-.agent-form-panel .field-control > input[type="text"],
-.agent-form-panel .field-control > input[type="number"],
-.agent-form-panel .field-control > select { max-width: 460px; }

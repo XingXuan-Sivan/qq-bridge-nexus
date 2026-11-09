@@ -257,7 +257,7 @@ try {
     await page.click('#pluginDetailClose');
   });
 
-  await test('Preset page lists presets and edits plugin config as a form', async () => {
+  await test('Preset page lists presets and edits agent YAML as a code editor', async () => {
     await navigate('presets');
     await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
     const text = await page.locator('#presetList').innerText();
@@ -265,14 +265,18 @@ try {
     await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
     await page.waitForFunction(() => !document.getElementById('presetEditor').hidden);
     assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
-    await page.waitForSelector('#presetAgentForm .form-section');
-    assert.ok(await page.locator('[data-field="tool-web.search"]').count() === 1, '插件配置表单应有 tool-web.search 开关');
-    assert.ok(await page.locator('[data-field="qq-tool-restrict.profile"]').count() === 1, '插件配置表单应有 qq-tool-restrict.profile');
-    // 改一个开关再保存：走 PUT …/agent，表单数据是 {rows:[…]}。
-    await page.locator('[data-field="tool-web.search"]').click();
-    const saved = await clickWrite('#presetSave', '/api/extensions/presets/qq-chat-v2/agent', 'PUT');
-    const webRow = (saved.rows ?? []).find((row) => row.id === 'tool-web');
-    assert.equal(webRow?.config?.config?.search, true, '保存的 rows 应包含表单里改过的开关');
+    // 插件配置不再是逐项表单：整份 agent.cordis.yml 进代码编辑器，保存走 PUT …/yaml。
+    await page.waitForSelector('#presetAgentYamlText', { state: 'attached' });
+    const yamlText = await page.evaluate(() => document.getElementById('presetAgentYamlText').value);
+    assert.match(yamlText, /tool-web/, '插件配置编辑器应载入 agent.cordis.yml');
+    assert.match(await page.locator('#presetAgentYamlStatus').innerText(), /插件行/);
+    await page.click('#agentYamlEdit');
+    await page.evaluate(() => {
+      const area = document.getElementById('presetAgentYamlText');
+      area._codeEditorHandle.setValue(area.value.replace('search: false', 'search: true'));
+    });
+    const saved = await clickWrite('#agentYamlSave', '/api/extensions/presets/qq-chat-v2/yaml', 'PUT');
+    assert.match(saved.yaml, /search: true/, '保存的 yaml 应包含编辑器里的改动');
     // 新建预设：工具栏按钮打开弹窗，复制 qq-chat-v2。
     await page.click('#presetNewOpen');
     await page.waitForSelector('#presetCreateModal.open');

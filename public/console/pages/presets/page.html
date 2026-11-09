@@ -8,20 +8,15 @@
   </section>
 
   <div class="page-stack" id="presetEditor" hidden>
-    <section class="card span-all">
-      <div class="card-head">
-        <h2 id="presetEditorTitle">编辑预设</h2>
-        <span class="meta" id="presetEditorPath"></span>
-      </div>
-    </section>
+    <!-- 编辑态只用一行说明做分隔，不再单独占一张卡片（与运行总览的 footnote 同一套样式）。 -->
+    <p class="overview-footnote">
+      <span id="presetEditorTitle">编辑预设</span>
+      <span id="presetEditorPath"></span>
+    </p>
     <div class="preset-edit-fields" data-presets-fields="edit"></div>
-    <section class="card span-all" id="presetPrompt" hidden>
-      <div class="preset-prompt-head">
-        <h3>仿真提示词</h3>
-      </div>
-      <p class="meta">存在本预设的 <code>persona.prefix</code>：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件并同步到 DSH，需要重启 DSH 生效。</p>
+    <div class="preset-prompt" id="presetPrompt" hidden>
       <div data-presets-fields="simPrompt"></div>
-    </section>
+    </div>
     <section class="card span-all">
       <div class="form-actions" id="presetEditorActions">
         <button id="presetSave" class="btn primary" type="button">保存源文件</button>

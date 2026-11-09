@@ -805,8 +805,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
                 { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
               ],
-              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
-              validation: { ok: true, rows: 2 },
+              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              validation: { ok: true, rows: 3 },
               backups: [],
             },
           });
@@ -822,8 +822,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
                 { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
               ],
-              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
-              validation: { ok: true, rows: 2 },
+              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              validation: { ok: true, rows: 3 },
               backups: [],
             },
           });

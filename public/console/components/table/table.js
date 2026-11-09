@@ -9,12 +9,29 @@ import { esc } from '../../js/ui.js';
 
 const PAGE_SIZES = [10, 20, 50];
 
+/** 多选列的表头单元格：勾上即全选本表所有行（Element Plus 式三段态）。 */
+function selectHeadCell(column) {
+  const attrs = Object.entries(column.selectAttrs || {})
+    .map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('');
+  return `<label class="table-check"><input type="checkbox" data-select-all${attrs} aria-label="${esc(column.label || '全选')}"></label>`;
+}
+
 /**
- * @param {Array<{label:string, width?:number|string}>} columns
+ * 多选列的行内单元格（与 dataTableHtml 的 `select` 选项配套）。
+ * 勾上=选中；表头全选框由 initDataTables 自动维护。
+ * @param {{value:string, checked?:boolean, disabled?:boolean, label?:string, attrs?:object}} options
+ */
+export function selectCellHtml({ value, checked = false, disabled = false, label = '', attrs = {} }) {
+  const extra = Object.entries(attrs).map(([name, val]) => ` ${esc(name)}="${esc(String(val))}"`).join('');
+  return `<label class="table-check"><input type="checkbox" value="${esc(value)}" data-select-row${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}${label ? ` aria-label="${esc(label)}"` : ''}${extra}></label>`;
+}
+
+/**
+ * @param {Array<{label:string, width?:number|string, select?:boolean, selectAttrs?:object}>} columns
  * @param {Array<Array<string>>} rows 单元格已是 HTML 片段，调用方自己 esc
  */
 export function tableHtml(columns, rows) {
-  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}${column.select ? ' class="table-select"' : ''}>${column.select ? selectHeadCell(column) : esc(column.label)}</th>`).join('')}</tr></thead>`;
   // 行可以只给单元格数组，也可以给 `{ cells, attrs }`：attrs 落到 <tr> 上，
   // 供工具栏的筛选器按 data-filter-<id> 读取（例如会话页按平台 / 类型筛）。
   const body = rows.map((row) => {
@@ -23,7 +40,7 @@ export function tableHtml(columns, rows) {
       .map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('');
     return `<tr${attrs}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
   }).join('');
-  return `<table>${head}<tbody>${body}</tbody></table>`;
+  return `<table${columns.some((column) => column.select) ? ' data-select' : ''}>${head}<tbody>${body}</tbody></table>`;
 }
 
 /**
@@ -120,6 +137,9 @@ function pagerHtml(page, pages) {
  * @param {string} [options.actions] 工具栏右侧的动作按钮 HTML（例如「新增」）
  * @param {string} [options.empty] 无数据/无匹配时的提示
  * @param {boolean} [options.pager=true]
+ * @param {{label?:string, width?:number|string, attrs?:object}} [options.select] 给了就在最前面加一列多选（表头即全选）
+ *   多选列默认 44px（只容纳一个复选框）。表体是 table-layout:fixed，若所有列都写了 width，
+ *   剩余宽度会按比例摊到每一列，把多选列也撑宽——所以用了 select 的表要留一列不写 width 来吸收剩余宽度。
  */
 export function dataTableHtml({
   columns,
@@ -133,6 +153,7 @@ export function dataTableHtml({
   actions = '',
   empty = '没有匹配的数据。',
   pager = true,
+  select = null,
 }) {
   const hasToolbar = Boolean(search || refresh || filters.length || meta || actions);
   const filterHtml = filters.map((filter) => `<select class="table-filter" data-filter="${esc(filter.id)}" aria-label="${esc(filter.label)}">`
@@ -161,9 +182,12 @@ export function dataTableHtml({
     </label>
   </div>`
     : '';
+  const allColumns = select
+    ? [{ label: select.label || '全选', width: select.width || '44px', select: true, selectAttrs: select.attrs || {} }, ...columns]
+    : columns;
   return `<div class="data-table" data-table data-page-size="${esc(String(pageSize))}" data-empty="${esc(empty)}">
   ${toolbar}
-  <div class="table-wrap">${tableHtml(columns, rows)}<div class="table-empty" data-table-empty hidden>${esc(empty)}</div></div>
+  <div class="table-wrap">${tableHtml(allColumns, rows)}<div class="table-empty" data-table-empty hidden>${esc(empty)}</div></div>
   ${footer}
 </div>`;
 }
@@ -184,6 +208,30 @@ function setupDataTable(table, hooks) {
   const tbody = table.querySelector('tbody');
   if (!tbody) return;
   table.dataset.ready = '1';
+
+  // 多选列：表头勾上 = 全选（不分页/筛选，按整表算，与 Element Plus 一致），
+  // 行勾选变化时回写三段态（全选 / 不确定 / 未选）。
+  const selectAll = table.querySelector('thead [data-select-all]');
+  if (selectAll) {
+    const allBoxes = () => [...table.querySelectorAll('tbody input[data-select-row]')];
+    const rowBoxes = () => allBoxes().filter((box) => !box.disabled);
+    const syncSelectAll = () => {
+      const boxes = allBoxes();
+      const checked = boxes.filter((box) => box.checked).length;
+      // 整表都禁用（例如「全部允许 *」时逐项不可改）时，表头仍显示「全勾」但不可点。
+      selectAll.disabled = boxes.length === 0 || rowBoxes().length === 0;
+      selectAll.checked = boxes.length > 0 && checked === boxes.length;
+      selectAll.indeterminate = checked > 0 && checked < boxes.length;
+    };
+    selectAll.addEventListener('change', () => {
+      for (const box of rowBoxes()) box.checked = selectAll.checked;
+      syncSelectAll();
+    });
+    table.addEventListener('change', (event) => {
+      if (event.target?.matches?.('input[data-select-row]')) syncSelectAll();
+    });
+    syncSelectAll();
+  }
   const rows = [...tbody.rows];
   const emptyBox = table.querySelector('[data-table-empty]');
   const searchInput = table.querySelector('[data-table-search]');

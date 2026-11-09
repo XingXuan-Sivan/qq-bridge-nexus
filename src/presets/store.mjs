@@ -189,6 +189,8 @@ export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, sc
       extensionsExists,
       agentYaml,
       validation,
+      // 插件配置表单要按行渲染：详情接口一次给全，页面不必再单独请求 /agent。
+      agent: readAgent(id).rows,
       files: Object.fromEntries(PRESET_FILES.map((name) => [name, fs.existsSync(fileFor(id, name))])),
     };
   }
@@ -304,26 +306,66 @@ export function createPresetStore({ root, backupRoot, factoryRoot, presetIds, sc
     return { rows: validation.rows, backup: backupInfo };
   }
 
+  // 空白预设的最小骨架：人格 + 提问/待办 + QQ 工具边界，不含任何本地工具。
+  // 与 qq-chat 的差异只在提示词与工具面，安全边界（qq-tool-restrict）一样保留。
+  const BLANK_AGENT_YAML = `# 手工创建的空白预设：只保留人格、提问、待办与 QQ 工具边界。
+# 没有任何本地工具（无 shell / 文件 / 子代理）；需要更多能力时在控制台「插件配置」里补行。
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: |-
+      （在这里写人格与行为提示词。）
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: qq-tool-restrict
+  name: ./qq-tool-restrict.mjs
+  config: {}
+`;
+
   function createPreset({ id, from, name, description } = {}) {
     const value = String(id ?? '').trim();
     if (!ID_RE.test(value)) throw new Error('预设 id 只能用小写字母、数字和连字符，且以字母/数字开头');
-    if (fs.existsSync(path.join(root, value, 'preset.yml'))) throw new Error(`预设已存在：${value}`);
+    const dir = path.join(root, value);
+    if (fs.existsSync(path.join(dir, 'preset.yml'))) throw new Error(`预设已存在：${value}`);
     const source = String(from ?? '').trim();
-    const sourceDir = presetDir(source);
+    const displayName = String(name ?? '').trim();
     const maxOrder = Math.max(0, ...list().map((item) => Number(item.order) || 0));
-    fs.mkdirSync(path.join(root, value), { recursive: true });
+    // from 为空 = 不用模板，直接给一份可启动的最小骨架。
+    if (!source) {
+      if (!displayName) throw new Error('空白预设需要填写名称');
+      fs.mkdirSync(dir, { recursive: true });
+      const doc = new Document({
+        name: displayName,
+        description: String(description ?? '').trim() || '手工创建',
+        order: maxOrder + 1,
+      });
+      writeDocument(path.join(dir, 'preset.yml'), doc);
+      fs.writeFileSync(path.join(dir, 'agent.cordis.yml'), BLANK_AGENT_YAML, 'utf8');
+      log(`控制台：已新建空白预设 ${value}`);
+      return { id: value, from: '' };
+    }
+    const sourceDir = presetDir(source);
+    fs.mkdirSync(dir, { recursive: true });
     for (const file of PRESET_FILES) {
       const src = path.join(sourceDir, file);
-      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(root, value, file));
+      if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, file));
     }
     const sourceMeta = normalizeMeta(readYamlFile(path.join(sourceDir, 'preset.yml')));
     const doc = new Document({
-      name: String(name ?? '').trim() || `${sourceMeta.name}（副本）`,
+      name: displayName || `${sourceMeta.name}（副本）`,
       description: String(description ?? '').trim() || `从「${sourceMeta.name}」复制`,
       order: maxOrder + 1,
     });
     if (sourceMeta.behavior) doc.set('behavior', sourceMeta.behavior);
-    writeDocument(path.join(root, value, 'preset.yml'), doc);
+    writeDocument(path.join(dir, 'preset.yml'), doc);
     log(`控制台：已新建预设 ${value}（复制自 ${source}）`);
     return { id: value, from: source };
   }

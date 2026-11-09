@@ -365,8 +365,22 @@ npm run test:console-ui
 
 **验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、50 次写**；`test-preset-store` 6/0；`test-qq-preset-contract` 8/0；`test-preset-prompt` 13/0；全量 `test-audit` **103/103（exit 0）**；`test-control-center` fail 0；`verify:console-vendor` OK（`686ab8cb2bda`）。
 
-**未完成（下一批）**：
-- 行为档案独立成侧栏页（用原预设图标；预设页换一个新图标；放在「聊天行为」组、人格与角色之前），并把两张表单改成页面级卡片（不再用一张大卡包住分组卡，卡片间距与全局配置页一致）。
-- 预设编辑页的「扩展授权」改为表格：MCP 用主从表（左侧 server、右侧工具，支持级联勾选），技能与插件同样从 `/api/extensions` 自动读取并列表勾选；不再用现在的勾选块。
-- 预设页整体排版（当前仍是列表 + 编辑两张卡，用户反馈「杂乱」）。
+**未完成（下一批）**：以上三条（行为档案独立成页与页面级卡片、扩展授权改表格、预设页整体排版）已在 6.24 完成，此清单作废。
+
+### 6.24 第六批：预设编辑区重组、授权表格化与 YAML 编辑器（2026-11-10）
+
+1. **编辑区拆成页面级卡片**：删掉「编辑预设」标题卡，改为一行 `.overview-footnote` 文本（`编辑预设 · <id>` + `dsh/agent-presets/<id>`，与运行总览的白名单说明同款）；卡片顺序固定为 基本信息 / 扩展授权 · MCP / 扩展授权 · 技能 / 仿真提示词 / 插件配置 / 危险能力。
+2. **仿真提示词独立成卡**：`presetPromptSlot` 之前在 `renderFields` 里被上一张卡片吞掉（`type:'section'` 一直开到下一个 section），导致卡片套卡片；现在字段规格里单独声明「仿真提示词」section，`#presetPrompt` 作为独立卡片的容器，内部仍是 CodeMirror 编辑器与编辑/保存/取消/还原。
+3. **扩展授权改成两张联动表**：MCP 服务器与 MCP 工具同在一张卡（不再左右分栏），先勾服务器，工具表只列已勾服务器的工具；技能单独一张卡。三张表都从 `GET /api/extensions` 自动读取，勾选=允许、不勾=拒绝；目录里没有但 `extensions.yml` 里仍写着的条目以「目录中未找到 / 保留原值」保留，保存时不丢；「刷新目录」按钮移进表格工具栏。
+4. **表格组件新增通用多选列**：`dataTableHtml({select})` / `selectCellHtml()`，表头带三段态全选框（全选 / 半选 / 清空），列宽默认 44px；`tableHtml` 给带多选列的表加 `data-select`，配合 `table-layout:fixed` 时留一列不写宽度来吸收剩余宽度（否则固定列会按比例被撑宽，多选列会变成几十上百像素）。
+5. **去掉卡片外的「全部允许（*）」工具栏**：与表格表头的全选语义重复，已删除。`*` 的读取语义保留：`allow: ['*']` 仍显示为全选；手动取消某行时把 `*` 展开成当时的明确列表再删（工具在 `*` 下取消则写 `deny`，新工具仍默认允许）。写回按目录顺序排序，勾选顺序不影响 diff。
+6. **插件配置改 YAML 编辑器**：不再为每个插件、每个配置键生成表单（成本过高、字段永远追不全），改为与仿真提示词同款的 CodeMirror「yaml」编辑器，只读展示 `agent.cordis.yml` 全文，点「编辑」解锁、「保存」走 `PUT /api/extensions/presets/<id>/yaml`（后端先 `validateAgentYaml` 再整份备份）。`public/console/pages/presets/agent-form.js` 删除。
+7. **新建预设弹窗统一**：改用 `modalHtml` + `renderFields({layout:'inline'})` 的 `.form-stack`，与「新建定时任务」弹窗同款行距与标签列；「复制自」多一个「空白预设（不复制，含最小骨架）」，后端 `createPreset` 允许 `from` 为空（persona / tool-ask-user / tool-todo / qq-tool-restrict 四行骨架）。
+8. **提示词源改读出厂 YAML**：`src/preset-defaults.js` 不再读 `assets/default-prompts/<id>.md`，改为解析 `assets/default-presets/<id>/agent.cordis.yml` 的 `persona.prefix`；`assets/default-prompts/` 整个删除（旧 `.md` 是 `>-` 折叠时代留下的副本，丢了空行，与 YAML 权威内容不一致）。
+9. **详情接口补插件行**：`PresetStore.read()` 返回 `agent`（`readAgent().rows`），修「插件配置卡恒空」。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、48 次写**（预设用例改为「改 YAML → 保存」并重录契约）；`test-preset-prompt` 13/13；真机重启桥接后 `GET /api/preset/sim-prompt?preset=qq-chat-v2` 返回 9199 字符（来自出厂 YAML）；真机截图核对授权两表（多选列 44px、无卡片外全选栏）与 YAML 卡片。
+
+**已知限制**：MCP 工具表仍一次渲染全部工具（当前 48 行，卡片较高），分页/搜索框可按需再加；工具说明较长时行高偏大。
+
 

@@ -16,59 +16,9 @@
   },
   {
     "method": "PUT",
-    "path": "/api/extensions/presets/qq-chat-v2/meta",
+    "path": "/api/extensions/presets/qq-chat-v2/yaml",
     "body": {
-      "name": "QQ 群聊（二代）",
-      "description": "离线预览用的二代群聊预设。",
-      "order": 2
-    }
-  },
-  {
-    "method": "PUT",
-    "path": "/api/extensions/presets/qq-chat-v2/extensions",
-    "body": {
-      "mcp": {
-        "allow": [
-          "*"
-        ],
-        "tools": {
-          "allow": [
-            "*"
-          ],
-          "deny": []
-        }
-      },
-      "skills": {
-        "allow": [
-          "*"
-        ]
-      }
-    }
-  },
-  {
-    "method": "PUT",
-    "path": "/api/extensions/presets/qq-chat-v2/agent",
-    "body": {
-      "rows": [
-        {
-          "id": "tool-web",
-          "config": {
-            "config": {
-              "search": true,
-              "fetch": false,
-              "searchTimeoutMs": 60000
-            }
-          }
-        },
-        {
-          "id": "qq-tool-restrict",
-          "config": {
-            "config": {
-              "profile": "chat"
-            }
-          }
-        }
-      ]
+      "yaml": "- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: true\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n"
     }
   },
   {

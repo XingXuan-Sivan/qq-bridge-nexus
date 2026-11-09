@@ -1,4 +1,8 @@
-// 预设页字段规格：主列表 + 内联编辑卡（元数据 / 扩展授权 / YAML 高级编辑）。
+// 预设页字段规格：主列表 + 内联编辑卡（元数据 / 扩展授权 / 插件配置）。
+//
+// 扩展授权是两张页面级卡片：MCP（服务器表 + 工具表联动）与技能。
+// 卡里只放 custom 槽位，表格由 page.js 按 /api/extensions 的真实目录渲染；
+// 这里不再出现要手填的 allow/deny 文本框。
 export const PRESETS_FIELDS = {
   main: {
     fields: [
@@ -21,53 +25,44 @@ export const PRESETS_FIELDS = {
       { name: 'presetEditName', type: 'text', label: '名称', span: 2 },
       { name: 'presetEditDescription', type: 'text', label: '说明', span: 2 },
       { name: 'presetEditOrder', type: 'number', label: '排序', hint: '数字越小越靠前。' },
+
       {
         type: 'section',
-        label: '扩展授权',
-        hint: 'extensions.yml：决定该预设能看见哪些外部 MCP 与技能；留空列表表示全部拒绝。',
+        label: '扩展授权 · MCP',
+        hint: 'extensions.yml 的 mcp.allow 与 mcp.tools.allow / deny：先勾选服务器（一个都不勾表示全部拒绝），下面的工具表只列已勾选服务器的工具，勾上=允许、不勾=拒绝（拒绝优先）。',
         card: true,
       },
       {
-        name: 'presetAuthPicker',
+        name: 'presetMcpServers',
         type: 'custom',
         span: 2,
-        html: '<div id="presetAuthPicker" class="preset-picker">正在读取真实 MCP / 技能目录…</div>',
+        html: '<div class="preset-auth" id="presetMcpServers">正在读取 MCP 目录…</div>',
       },
       {
-        name: 'presetEditMcpAllow',
-        type: 'textarea',
-        label: '允许 MCP',
-        rows: 3,
-        mono: true,
-        placeholder: 'server-id 或 *',
-        hint: '每行一个 server id；* 表示全部。',
+        name: 'presetMcpTools',
+        type: 'custom',
+        span: 2,
+        html: '<div class="preset-auth preset-auth-tools" id="presetMcpTools">正在读取 MCP 目录…</div>',
+      },
+
+      {
+        type: 'section',
+        label: '扩展授权 · 技能',
+        hint: 'extensions.yml 的 skills.allow：勾选这个预设能加载的技能；一个都不勾表示全部拒绝。',
+        card: true,
       },
       {
-        name: 'presetEditSkillsAllow',
-        type: 'textarea',
-        label: '允许技能',
-        rows: 3,
-        mono: true,
-        placeholder: 'skill-id 或 *',
-        hint: '每行一个技能 id；* 表示全部。',
+        name: 'presetSkills',
+        type: 'custom',
+        span: 2,
+        html: '<div class="preset-auth" id="presetSkills">正在读取技能目录…</div>',
       },
+
       {
-        name: 'presetEditMcpToolsAllow',
-        type: 'textarea',
-        label: '允许工具',
-        rows: 3,
-        mono: true,
-        placeholder: 'tool-name 或 *',
-        hint: '每行一个 MCP 工具名；留空表示不额外放行。',
-      },
-      {
-        name: 'presetEditMcpToolsDeny',
-        type: 'textarea',
-        label: '禁用工具',
-        rows: 3,
-        mono: true,
-        placeholder: 'tool-name',
-        hint: 'deny 优先于 allow。',
+        type: 'section',
+        label: '仿真提示词',
+        hint: '本预设 persona.prefix：规定 AI 怎么调工具、怎么参与群聊。保存会写回源文件，重启 DSH 生效。',
+        card: true,
       },
       {
         name: 'presetPromptSlot',
@@ -75,18 +70,40 @@ export const PRESETS_FIELDS = {
         span: 2,
         html: '<div id="presetPromptMount"></div>',
       },
+
       {
         type: 'section',
         label: '插件配置',
-        hint: '按 agent.cordis.yml 的插件行逐项编辑；保存后仍要「应用并安装」才会进入 DSH。',
+        hint: 'agent.cordis.yml 全文：直接在编辑器里改，保存时后端会校验语法与必填插件行；保存后仍要「应用并安装」才会进入 DSH。',
         card: true,
       },
       {
-        name: 'presetAgentForm',
+        name: 'presetAgentYamlHead',
         type: 'custom',
         span: 2,
-        html: '<div id="presetAgentForm" class="agent-form-panel"></div>',
+        html: '<span class="meta" id="presetAgentYamlStatus">加载中…</span>',
       },
+      {
+        name: 'presetAgentYamlText',
+        type: 'textarea',
+        label: '',
+        rows: 18,
+        mono: true,
+        span: 2,
+        readonly: true,
+        className: 'code-editor-field',
+      },
+      {
+        type: 'action',
+        id: 'presetAgentYamlActions',
+        items: [
+          { id: 'agentYamlEdit', label: '编辑' },
+          { id: 'agentYamlSave', label: '保存 YAML', variant: 'primary' },
+          { id: 'agentYamlCancel', label: '取消' },
+        ],
+        status: 'agentYamlMsg',
+      },
+
       {
         type: 'section',
         label: '危险能力',
@@ -96,8 +113,7 @@ export const PRESETS_FIELDS = {
     ],
   },
 
-  // 新建预设：复制一个现有预设作为起点，id 即目录名。
-  // 仿真提示词：跟随当前预设的 persona.prefix。放在编辑卡里、YAML 高级编辑上方，
+  // 仿真提示词：跟随当前预设的 persona.prefix。放在编辑卡里、插件配置上方，
   // 控件仍走统一的字段渲染（页面里不手写 input/textarea/button）。
   simPrompt: {
     fields: [

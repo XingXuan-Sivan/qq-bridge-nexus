@@ -375,21 +375,27 @@ th {
 }
 /* 列宽走 data-w 属性而不是内联 style：CSP 去掉 unsafe-inline 后，HTML 里的 style 属性会被拦掉。
    用到的宽度都是固定值，集中在这里登记；新增列宽先加规则，再在模板里写 data-w。 */
+th[data-w="44"] { width:44px }
 th[data-w="60"] { width:60px }
 th[data-w="70"] { width:70px }
 th[data-w="80"] { width:80px }
 th[data-w="84"] { width:84px }
+th[data-w="90"] { width:90px }
 th[data-w="92"] { width:92px }
 th[data-w="100"] { width:100px }
 th[data-w="110"] { width:110px }
 th[data-w="118"] { width:118px }
 th[data-w="120"] { width:120px }
 th[data-w="140"] { width:140px }
+th[data-w="150"] { width:150px }
 th[data-w="160"] { width:160px }
+th[data-w="170"] { width:170px }
+th[data-w="180"] { width:180px }
 th[data-w="200"] { width:200px }
 th[data-w="220"] { width:220px }
 th[data-w="260"] { width:260px }
 th[data-w="300"] { width:300px }
+th[data-w="320"] { width:320px }
 th,td {
   padding:13px 12px;
   border-bottom:1px solid var(--card-border);

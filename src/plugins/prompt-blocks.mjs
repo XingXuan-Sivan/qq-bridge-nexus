@@ -48,6 +48,8 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
   const stats = { renders: 0, injected: 0, skipped: 0 };
   // id -> { enabled?: boolean, maxChars?: number|null }，来自 config.json.promptBlocks。
   let overrides = {};
+  // config.limits.promptBlocks.perBlockDefault：只兜底没有单独配上限的内置块。
+  let perBlockDefault = 0;
 
   function validate(definition) {
     if (!definition || typeof definition !== 'object') return '定义必须是对象';
@@ -78,9 +80,13 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
   /** 生效值：有覆盖用覆盖，否则用注册时的默认值。`maxChars: null` = 不限。 */
   function effective(block) {
     const override = overrides[block.id] || {};
+    let maxChars = override.maxChars !== undefined ? override.maxChars : block.maxCharsDefault;
+    // 全局默认上限只兜底「内置块且没有单独配上限」的情况：插件块内部各段有自己的预算，
+    // 在这里再切一刀会让插件作者无法表达“整块不限”。
+    if (maxChars === null && perBlockDefault > 0 && block.owner === 'core') maxChars = perBlockDefault;
     return {
       enabled: override.enabled !== undefined ? override.enabled : block.enabledDefault,
-      maxChars: override.maxChars !== undefined ? override.maxChars : block.maxCharsDefault,
+      maxChars,
     };
   }
 
@@ -126,9 +132,14 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     }
   }
 
-  /** 整体替换覆盖表（bridge 在配置变更与启动时调用）。 */
-  function setOverrides(next = {}) {
+  /**
+   * 整体替换覆盖表（bridge 在配置变更与启动时调用）。
+   * @param {object} next config.json.promptBlocks
+   * @param {{perBlockDefault?: number}} options config.limits.promptBlocks.perBlockDefault
+   */
+  function setOverrides(next = {}, options = {}) {
     overrides = {};
+    perBlockDefault = Number(options?.perBlockDefault) > 0 ? Number(options.perBlockDefault) : 0;
     if (!next || typeof next !== 'object') return;
     for (const [id, value] of Object.entries(next)) {
       if (!PROMPT_BLOCK_ID_RE.test(id) || !value || typeof value !== 'object') continue;

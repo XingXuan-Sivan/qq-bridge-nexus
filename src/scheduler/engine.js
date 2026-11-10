@@ -97,9 +97,12 @@ export function inQuietHours(ms, limits, tz) {
  *   onOutcome?: (payload: { task: object, outcomes: Array<{target:string,status:string,reason?:string}>, manual: boolean, source: string }) => void,
  * }} deps
  */
-export function createScheduler({ file, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false, taskKinds = null, onOutcome = null }) {
+export function createScheduler({ file, settings: externalSettings = null, onSettingsChange = null, deliver, validateTarget, ownerKey, holidays = [], now = Date.now, log = () => {}, audit = () => {}, sensitive = () => false, taskKinds = null, onOutcome = null }) {
   const holidaySet = new Set(holidays);
-  let data = { version: 1, settings: normalizeSettings(), tasks: [], history: [], counters: {}, nextId: 1 };
+  // 设置的新家是 config.json 的 `scheduler` 段；只有不传 settings / onSettingsChange 的老用法
+  // （测试、一次性脚本）才把 settings 继续写在 state/scheduler.json 里。
+  const useExternal = externalSettings !== null || typeof onSettingsChange === 'function';
+  let data = { version: 1, settings: normalizeSettings(externalSettings ?? {}), tasks: [], history: [], counters: {}, nextId: 1 };
   let timer = null;
   let ticking = false;
   let writable = true;
@@ -109,12 +112,17 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
       data = {
         version: 1,
-        settings: normalizeSettings(raw.settings),
+        settings: useExternal ? data.settings : normalizeSettings(raw.settings),
         tasks: Array.isArray(raw.tasks) ? raw.tasks.filter((t) => t && Number.isInteger(t.id)) : [],
         history: Array.isArray(raw.history) ? raw.history.slice(-HISTORY_MAX) : [],
         counters: raw.counters && typeof raw.counters === 'object' ? raw.counters : {},
         nextId: Number.isInteger(raw.nextId) ? raw.nextId : 1,
       };
+      // 首次迁移：config 里还没有 scheduler 段、状态文件里却存着 settings → 搬到 config。
+      if (useExternal && !externalSettings && raw.settings && typeof onSettingsChange === 'function') {
+        data.settings = normalizeSettings(raw.settings);
+        onSettingsChange(data.settings);
+      }
       for (const t of data.tasks) {
         try { t.schedule = normalizeSchedule(t.schedule); } catch (error) { t.enabled = false; t.lastResult = 'invalid'; t.lastReason = error.message; }
       }
@@ -128,9 +136,13 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
   }
   function save() {
     if (!writable) return;
+    // 设置已在 config.json 时，状态文件只存任务与计数，避免两处各说各话。
+    const payload = useExternal
+      ? { version: data.version, tasks: data.tasks, history: data.history, counters: data.counters, nextId: data.nextId }
+      : data;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmp, file);
   }
 
@@ -274,6 +286,7 @@ export function createScheduler({ file, deliver, validateTarget, ownerKey, holid
       const merged = normalizeSettings({ ...data.settings, ...patch, limits: { ...data.settings.limits, ...(patch?.limits ?? {}) } });
       data.settings = merged;
       for (const t of data.tasks) refreshNext(t);
+      if (useExternal && typeof onSettingsChange === 'function') onSettingsChange(merged);
       save();
       audit('scheduler.settings_updated', { source, enabled: merged.enabled, limits: merged.limits, allowAiGroup: merged.allowAiGroup });
       return merged;

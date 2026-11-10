@@ -46,12 +46,12 @@
 | 文件 | 当前内容 | 归属判断 |
 | --- | --- | --- |
 | `config.json` | `dsh`、`role`、`snowluma`、`ownerQQ`、`admins`、`sessionCwd`、`agentPreset`、`workspaceTitle`、`ackMessage`、`sendDelayMs`、`questionTimeoutMs`、`consolePort`、`consoleToken`、`pricing`、`security`、`continuity`、`admin`、`crossGroup`、`slang`、`social`、`socialV2`、`webSearch`、`promptBlocks`、`platform`、`memory` | 系统层；`social`/`socialV2` 的行为部分要移出 |
-| `plugins.json` | 插件内核开关/目录/限额/审计/安装/过滤/人格缓存；`plugins.<id>.enabled/config` | 系统层（插件页维护） |
+| `config.json > plugins` | 插件内核开关/目录/限额/审计/安装/过滤/人格缓存；`plugins.<id>.enabled/config`。P3 起从 `plugins.json` 迁入，旧文件改名为 `plugins.json.bak` | 系统层（插件页维护） |
 | `state/mode.json` | `mode`、`closedAgentPreset`、`level` | 系统层运行态；全局配置页编辑，但不是“源文件” |
 | `state/current-role.json` | `role`、`mode` | 运行态 |
 | `state/persona-cache.json` | `version`、`provider`、`entries` | 运行态缓存 |
-| `state/prompt-blocks.json` | 按会话 key 的注入块覆盖 | 运行态/系统层 |
-| `state/scheduler.json` | 任务、历史、计数器、设置 | 系统层（定时任务页） |
+| `state/prompt-block-state.json` | 按会话 key 的注入块投递记账（`fp` / `at` / `wakes`）；原 `prompt-blocks.json`，启动时自动改名 | 运行态/系统层 |
+| `state/scheduler.json` | 任务、历史、计数器、`nextId`（**不再存 settings**，设置已迁 `config.json > scheduler`） | 运行态 + 系统层（定时任务页） |
 | `state/local-memory.json` | 轻量记忆条目 | 运行态（记忆页） |
 | `state/social-v2.json` | `paused`、`conversations` | 运行态消息缓存，**不是配置** |
 | `state/slang.json` / `state/stickers.json` | 词库/表情缓存 | 运行态/资源 |
@@ -108,7 +108,7 @@ function modePreset(key, mode, cfg) {
 ## 3. 目标文件布局
 
 ```text
-config.json                         # 只放系统层
+config.json                         # 只放系统层：含 scheduler / silence / plugins / promptBlocks / limits 等段
 config/behaviors/
   social-v1.yml                    # 一代默认行为档案
   social-v2.yml                    # 二代默认行为档案
@@ -119,7 +119,9 @@ state/
     defaults.json                   # 默认准入
     <platform>/<group|private>/<id>.json
   extensions/
-  scheduler.json
+  scheduler.json                    # 任务/历史/计数器/nextId（settings 在 config.json）
+  silence-schedule.json             # 只留 override（时间段配置在 config.json）
+  prompt-block-state.json           # 注入块投递记账
   ...
 dsh/agent-presets/
   qq-chat/
@@ -136,7 +138,6 @@ dsh/agent-presets/
 extensions/
   mcp/<id>/server.json
   skills/<id>/SKILL.md
-plugins.json
 roles/*.md
 ```
 
@@ -248,7 +249,12 @@ provideRecommendations: true
 ```jsonc
 {
   "dsh": { /* baseUrl/provider/model/reasoningEffort/auth/vision */ },
-  "role": { "maxInjectChars": 6000 },
+  "role": { "default": "soulkit:saren", "saveApply": "nextWake" },
+  "limits": {
+    "promptBlocks": { "total": 0, "perBlockDefault": 0 },
+    "personaInjectChars": 6000,
+    "send": { /* 不变 */ }
+  },
   "snowluma": { /* 网关地址与令牌 */ },
   "ownerQQ": "2897715886",
   "admins": [ /* 管理员表 */ ],
@@ -288,7 +294,7 @@ provideRecommendations: true
 - `social`、`socialV2`、`socialV2.agentPreset`、`socialV2.enabled`：删除；
 - 会话行为/人格/提示词/准入成员：在 `state/sessions/`；
 - 预设人设、guard、扩展授权：在 `dsh/agent-presets/`；
-- 插件配置：在 `plugins.json`；
+- 插件配置：P3 起在 `config.json > plugins`（`plugins.json` 只看不回写，迁移后改名 .bak）；
 - 外部 MCP 配置与秘密：在 `extensions/mcp/` 与 `state/extensions/secrets.json`。
 
 ## 4. 迁移映射

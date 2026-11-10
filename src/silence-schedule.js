@@ -180,15 +180,25 @@ export function describeRange(range) {
  * 定时静默的状态机：读写配置、算当前状态、临时恢复、检测开始 / 结束。
  * @param {{ file: string, holidays?: Iterable<string>, now?: () => number, log?: (m) => void }} deps
  */
-export function createSilenceSchedule({ file, holidays = [], now = Date.now, log = () => {} }) {
+export function createSilenceSchedule({ file, config: initialConfig = null, onChange = null, holidays = [], now = Date.now, log = () => {} }) {
   const holidaySet = new Set(holidays);
-  let config = normalizeSilenceConfig(DEFAULT_SILENCE);
+  // 设置的新家是 config.json 的 `silence.schedule` 段；state/silence-schedule.json 只剩「临时恢复」。
+  const useExternal = initialConfig !== null || typeof onChange === 'function';
+  let config = normalizeSilenceConfig(initialConfig ?? DEFAULT_SILENCE);
   let override = null; // { rangeId, untilMs }：定时静默期间点了「恢复正常」
   let lastActiveKey = null;
   let writable = true;
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    config = normalizeSilenceConfig(raw.config ?? raw);
+    if (useExternal) {
+      // 首次迁移：config 里还没有 schedule、状态文件里却存着 → 搬到 config。
+      if (initialConfig === null && raw.config && typeof onChange === 'function') {
+        config = normalizeSilenceConfig(raw.config);
+        onChange(config);
+      }
+    } else {
+      config = normalizeSilenceConfig(raw.config ?? raw);
+    }
     if (raw.override && Number(raw.override.untilMs) > now()) override = { rangeId: String(raw.override.rangeId), untilMs: Number(raw.override.untilMs) };
   } catch (error) {
     if (error?.code !== 'ENOENT') { writable = false; log(`⚠️ 定时静默设置读取失败，已降级为只读：${error?.message ?? error}`); }
@@ -197,7 +207,8 @@ export function createSilenceSchedule({ file, holidays = [], now = Date.now, log
     if (!writable) return;
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ config, override }, null, 2), { encoding: 'utf8', mode: 0o600 });
+    const payload = useExternal ? { override } : { config, override };
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), { encoding: 'utf8', mode: 0o600 });
     fs.renameSync(tmp, file);
   }
   /** 当前生效的定时静默（考虑临时恢复）；没有返回 null。 */
@@ -211,7 +222,13 @@ export function createSilenceSchedule({ file, holidays = [], now = Date.now, log
   return {
     config: () => config,
     isWritable: () => writable,
-    update(raw) { config = normalizeSilenceConfig(raw); override = null; save(); return config; },
+    update(raw) {
+      config = normalizeSilenceConfig(raw);
+      override = null;
+      if (useExternal && typeof onChange === 'function') onChange(config);
+      save();
+      return config;
+    },
     current,
     /** 某时刻会不会处在定时静默（不看临时恢复；给定时任务的预览用）。 */
     activeAt: (t) => activeWindow(config, t, { holidays: holidaySet }),

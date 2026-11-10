@@ -272,9 +272,7 @@ async function refreshPlugins() {
     const data = await api('/api/plugins');
     const plugins = Array.isArray(data?.plugins) ? data.plugins : [];
     const personaSource = data?.persona?.plugin ? `插件 ${data.persona.plugin}` : 'roles/*.md';
-    const blockList = Array.isArray(data?.promptBlocks?.blocks) ? data.promptBlocks.blocks : [];
-    const blockText = blockList.length ? ` · 注入块：${blockList.length} 个（总预算 ${Number(data.promptBlocks?.maxTotalChars) || 0} 字）` : '';
-    meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}${blockText}`;
+    meta.textContent = `启用：${data?.enabled === false ? '否' : '是'} · 目录：${data?.dir || 'plugins'} · 人格来源：${personaSource}`;
     renderPluginSettings(data);
     if (!plugins.length) {
       list.innerHTML = '<div class="meta">没有发现插件。把插件放到 <code>plugins/&lt;id&gt;/</code> 后重启桥接，或在下面安装。</div>';
@@ -312,49 +310,9 @@ async function refreshPlugins() {
   }
 }
 
-// 把 /api/plugins 的配置节填进「注入块」「运行设置」两块表单；
+// 把 /api/plugins 的配置节填进「运行设置」表单；
 // 正在编辑的输入框不覆盖，避免 15 秒自动刷新把用户刚敲的数字冲掉。
-const BLOCK_STATUS_TEXT = {
-  injected: ['正常', 'pill g'],
-  truncated: ['截断', 'pill r'],
-  budget: ['超预算跳过', 'pill r'],
-  error: ['失败', 'pill r'],
-  off: ['已关闭', 'pill'],
-  empty: ['空', 'pill'],
-  idle: ['未调用', 'pill'],
-};
-
-function blockRowsHtml(blocks) {
-  return `<div class="table-wrap"><table class="table-block-settings">
-    <thead><tr><th data-w="64">启用</th><th data-w="210">块</th><th data-w="120">来源</th><th data-w="70">优先级</th><th data-w="130">上限</th><th data-w="90">最近字数</th><th>状态</th><th data-w="130">最近</th></tr></thead>
-    <tbody>${blocks.map((block) => {
-      const [label, cls] = BLOCK_STATUS_TEXT[block.lastStatus] || [block.lastStatus || '未调用', 'pill'];
-      const owner = block.owner || (block.pluginId === 'core' ? 'core' : `plugin:${block.pluginId}`);
-      const detail = block.lastError ? ` title="${esc(block.lastError)}"` : '';
-      const when = block.lastRunAt ? new Date(block.lastRunAt).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
-      const chars = block.lastRunAt ? (block.maxChars ? `${Number(block.lastChars) || 0} / ${block.maxChars}` : `${Number(block.lastChars) || 0}`) : '—';
-      return `<tr data-block-row="${esc(block.id)}">
-        <td><button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button></td>
-        <td><code>${esc(block.id)}</code><div class="meta">${esc(block.label || '')}</div></td>
-        <td class="meta">${esc(owner)}</td>
-        <td class="meta">${Number(block.priority) || 0}</td>
-        <td><input type="number" data-block-max="${esc(block.id)}" min="1" max="100000" step="100" value="${block.maxChars ?? ''}" placeholder="不限"${detail}></td>
-        <td class="meta">${chars}</td>
-        <td><span class="${cls}">${esc(label)}</span>${Number(block.calls) ? `<div class="meta">调用 ${Number(block.calls)} 次</div>` : ''}</td>
-        <td class="meta">${esc(when)}</td>
-      </tr>`;
-    }).join('')}</tbody>
-  </table></div>`;
-}
-
 function renderPluginSettings(data) {
-  const rows = document.getElementById('promptBlockRows');
-  const blocks = Array.isArray(data?.promptBlocks?.blocks) ? data.promptBlocks.blocks : [];
-  if (rows && !document.activeElement?.closest('#promptBlockRows')) {
-    rows.innerHTML = blocks.length ? blockRowsHtml(blocks) : '<div class="meta">还没有注册任何注入块。</div>';
-    if (blocks.length) bindSwitches(rows);
-  }
-
   const group = document.getElementById('pluginRuntimeGroup');
   if (group && !document.activeElement?.closest('#pluginRuntimeGroup')) {
     const filter = document.getElementById('pluginFilterInbound');
@@ -367,27 +325,6 @@ function renderPluginSettings(data) {
     if (timeout) timeout.value = data?.limits?.hookTimeoutMs ?? '';
     if (append) append.value = data?.limits?.maxPromptAppendChars ?? '';
     if (install) setSwitch(install, data?.install?.enabled !== false);
-  }
-}
-
-async function savePromptBlockSettings() {
-  const msg = document.getElementById('promptBlockMsg');
-  const promptBlocks = {};
-  document.querySelectorAll('[data-block-enabled]').forEach((switchEl) => {
-    const id = switchEl.dataset.blockEnabled;
-    const maxInput = document.querySelector(`[data-block-max="${CSS.escape(id)}"]`);
-    const raw = maxInput?.value?.trim() ?? '';
-    promptBlocks[id] = { enabled: getSwitch(switchEl), maxChars: raw === '' ? null : Number(raw) };
-  });
-  if (!Object.keys(promptBlocks).length) { if (msg) msg.textContent = '没有可保存的块'; return; }
-  if (msg) msg.textContent = '保存中…';
-  try {
-    await api('/api/config/promptBlocks', 'PATCH', { promptBlocks });
-    if (msg) msg.textContent = '已保存，立即生效';
-    showConsoleToast('注入块设置已保存');
-    refreshPlugins().catch(() => {});
-  } catch (error) {
-    if (msg) msg.textContent = `保存失败：${error?.message || '未知错误'}`;
   }
 }
 
@@ -468,7 +405,6 @@ export function init() {
   wireModal(document.getElementById('pluginDetailOverlay'), { onClose: () => { pluginDetailId = null; } });
   document.getElementById('pluginInstallZipBtn').addEventListener('click', () => { installPluginFromZip().catch(() => {}); });
   document.getElementById('pluginInstallPathBtn').addEventListener('click', () => { installPluginFromPath().catch(() => {}); });
-  document.getElementById('promptBlockSave').addEventListener('click', () => { savePromptBlockSettings().catch(() => {}); });
   document.getElementById('pluginSettingsSave').addEventListener('click', () => { savePluginRuntimeSettings().catch(() => {}); });
   document.getElementById('pluginPersistSave').addEventListener('click', () => { savePluginPersistEnabled().catch(() => {}); });
   onPageRefresh('plugins', () => { refreshPlugins().catch(() => {}); });

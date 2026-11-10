@@ -1,0 +1,32 @@
+/* 注入块页只补两处：预览文本区的高度（.code-area 默认给编辑器留了 280px 高度），
+   以及表格里数字输入、开关、状态在窄单元格里不换行。其余全部复用组件样式。 */
+.pb-preview-text {
+  min-height: 0;
+  max-height: 420px;
+  margin-top: 12px;
+}
+
+#pbTable .data-table th,
+#pbTable .data-table td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+#pbTable .data-table th {
+  white-space: nowrap;
+}
+
+#pbTable .data-table .field-switch {
+  gap: 8px;
+  margin: 0;
+  white-space: nowrap;
+}
+
+#pbTable .data-table code {
+  white-space: nowrap;
+}
+
+#pbTable .data-table [data-block-max] {
+  width: 92px;
+  min-width: 92px;
+}

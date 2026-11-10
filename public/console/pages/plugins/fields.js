@@ -69,15 +69,6 @@ const PERSIST_FIELDS = [
 export const PLUGINS_FIELDS = {
   toolbar: { fields: TOOLBAR },
   list: { html: '<div id="pluginsList" class="tile-list">加载中…</div>' },
-  promptBlockActions: {
-    fields: [
-      {
-        type: 'action',
-        items: [{ id: 'promptBlockSave', label: '保存注入块', variant: 'primary' }],
-        status: 'promptBlockMsg',
-      },
-    ],
-  },
   runtime: { fields: RUNTIME_FIELDS },
   install: { html: INSTALL_HTML },
   installPath: { fields: INSTALL_PATH_FIELDS },

@@ -771,6 +771,33 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             taskTypes: [],
             settings: { watch: false, filters: { inbound: false }, limits: { hookTimeoutMs: 2000, maxPromptAppendChars: 4000 }, install: { enabled: true } },
           });
+          case '/api/prompt-blocks': return json({
+            ok: true,
+            profiles: ['wake', 'reminder', 'context'],
+            slots: ['head', 'identity', 'behavior', 'resources', 'situation', 'action', 'tail'],
+            limits: { total: 0, perBlockDefault: 0, personaInjectChars: 6000, roleInjectMaxChars: 6000 },
+            stats: { total: 26, maxTotalChars: 0, renders: 12, injected: 40, skipped: 1 },
+            blocks: [
+              { id: 'core-role', pluginId: 'core', owner: 'core', label: '当前角色', priority: 100, slot: 'identity', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 220, lastStatus: 'injected' },
+              { id: 'core-identity', pluginId: 'core', owner: 'core', label: '你的身份', priority: 110, slot: 'identity', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 180, lastStatus: 'injected' },
+              { id: 'core-stickers', pluginId: 'core', owner: 'core', label: '表情包策略', priority: 170, slot: 'resources', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: false, maxChars: 1200, calls: 8, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 0, lastStatus: 'off' },
+              { id: 'core-wake-task', pluginId: 'core', owner: 'core', label: '这次要做什么', priority: 100, slot: 'action', timing: 'reason', reasons: ['bootstrap', 'timeout', 'replyCheck'], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 640, lastStatus: 'injected' },
+              { id: 'core-slang', pluginId: 'core', owner: 'core', label: '群聊黑话表', priority: 110, slot: 'tail', timing: 'on-change', reasons: [], profiles: ['context'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 96, lastStatus: 'injected' },
+            ],
+          });
+          case '/api/prompt-preview': return json({
+            ok: true,
+            profile: 'wake',
+            reason: 'atMention',
+            key: 'qq:group:123456789',
+            chars: 812,
+            maxTotalChars: 0,
+            text: '【当前角色】演示角色（完整角色卡请调用 qq_get_prompt 查看）\n\n【你的身份】离线预览。\n\n【此刻状态】未读 1 条。',
+            blocks: [
+              { id: 'core-role', slot: 'identity', status: 'injected', chars: 220, text: '【当前角色】演示角色' },
+              { id: 'core-identity', slot: 'identity', status: 'injected', chars: 180, text: '【你的身份】离线预览。' },
+            ],
+          });
           case '/api/commands': return json({
             ok: true,
             bridge: { builtin: [{ id: 'reset', name: '/reset', aliases: ['/new'], scope: 'all', permission: 'owner', group: '会话', description: '重置会话' }], plugin: [] },
@@ -1166,6 +1193,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
       if (method === 'POST') {
         switch (path) {
+          case '/api/prompt-preview':
+            return json({ ok: true, profile: body.profile || 'wake', reason: body.reason || 'atMention', key: body.key || 'qq:group:123456789', chars: 812, maxTotalChars: 0, text: '【当前角色】演示角色（完整角色卡请调用 qq_get_prompt 查看）\n\n【你的身份】离线预览。', blocks: [{ id: 'core-role', slot: 'identity', status: 'injected', chars: 220, text: '【当前角色】演示角色' }] });
+          case '/api/config/promptBlocks':
+            return json({ ok: true, promptBlocks: body.promptBlocks ?? {}, limits: body.limits ?? { total: 0, perBlockDefault: 0 }, coreBlocks: { blocks: [], total: 0, maxTotalChars: 0 } });
           case '/api/compact/config': {
             if (body.mode === 'early' && !(Number(body.thresholdWan) >= 5 && Number(body.thresholdWan) <= 80)) return json({ ok: false, error: '压缩阈值要在 5～80 万 token 之间' }, 400);
             state.compactMode = body.mode; if (body.mode === 'early') state.compactThreshold = Number(body.thresholdWan) * 10000;

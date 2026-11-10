@@ -23,7 +23,7 @@
 | 1 | 「运行档案」vs「运行方案」 | 注入稿 §1/#7 用档案；运行稿全篇用方案 | 统一叫**运行方案**（plan）。"档案"只留 DSH 预设→**能力预设**、行为→**行为档案**、会话→**会话设置**。 |
 | 2 | 权限级别是否保留 | 注入稿 §1/#5 保留 L1/L2/L3；运行稿 §3.1 删除 | **删除**。级别只是 `LEVEL_PERMISSION_PRESET` / `LEVEL_AGENT_PRESET` 的配对名（`src/admin/dsh-permission.js:17-42`），改为能力预设的 `sandbox` 字段。 |
 | 3 | 配置键 | 注入稿 §3.8 `runtimeProfiles` + `defaultProfile`；运行稿 §10 `runtime.plans` + `state/runtime.json` | 按运行稿：**定义进 `config.runtime.plans`，激活指针进 `state/runtime.json`**。 |
-| 4 | 人格注入上限的归属 | 注入稿 §3.5 说删 `config.role.maxInjectChars`；运行稿 §3.3 说"暂留原处" | **归注入块**：`config.promptBlocks['core-persona'].maxChars` + `settings.saveApply`。全局配置卡保留"注入上限"输入框，但读写落到块配置（一个值一个来源）。 |
+| 4 | 人格注入上限的归属 | 注入稿 §3.5 说删 `config.role.maxInjectChars`；运行稿 §3.3 说"暂留原处" | **独立成 `config.limits.personaInjectChars`**（P2 已实现，旧键 `role.maxInjectChars` 只读兼容）。它限制的是角色卡正文长度，不是块的截断长度，所以不进 `promptBlocks[...]`；全局配置卡继续保留输入框，读写都落这一处。 |
 | 5 | 保存栏改造方案 | 注入稿 §4 仍是"内容流 sticky + main 预留高度" | **已作废**。实际实现是：浮层默认隐藏、有未保存内容才浮现、可见时只设 `#mainContent` 的 `scroll-padding-bottom`（不占布局），撤销会重读服务端并重拍基线。文档按实现改写。 |
 | 6 | 会话覆盖存哪 | 注入稿 §3.8 写 `sessions.json > sessionOverrides` | **已目录化**：`state/sessions/qq/<group\|private>/<id>.json`（`src/session/directory.mjs`，`SESSION_DIR_VERSION = 2`）。`byKey` 已在 P7 迁进 `profile.persona`（`src/bridge.js:856-863`），`state/current-role.json` 只剩回退作用。 |
 | 7 | 全局人格的源 | 注入稿 §5.2 把 `current-role.json > role` 当全局源 | **`config.role.default` 才是唯一事实源**（`src/bridge.js:861`）；`current-role.json.role` 只做旧版本回退。迁移时只取 `config.role.default`。 |
@@ -31,7 +31,7 @@
 | 9 | 块清单不全 | 注入稿 §2.3 列 19 块，只说"其余 5 处没归一" | 按代码反推，实际是 **26 块 + 3 种提示词档案**（第 6 节；`wake` 23 块 + `context` 2 块 + `reminder` 1 块）。原因尾巴（10 个分支）、一次性通知（读卡/令牌/补写/中继/定时）、快照提示、收尾提醒都不在原清单里。 |
 | 10 | 块作用域 `runtime` | 注入稿 §2.2 允许 `scopes: ['global','runtime','session']` | v1 **只做 `global`**；字段保留解析但非 global 一律按 global 处理并在页面标注"按方案覆盖尚未开放"。理由：方案只有三个字段，塞块覆盖会破坏模型；而人格/行为已经能表达差异。 |
 | 11 | 行为 kind 的 `render()` 与块重叠 | 运行稿 §3.2 让 kind 输出"提示词片段：参与度/唤醒/等待节奏"；注入稿把这些做成块 | **文本归块，值归 kind**。kind 只提供 `view(ctx)`（现值来自 `behaviorConfigFor` / `behaviorV2View`）与字段规格；若将来某种行为要独有文案，由它**注册自己的块**（owner = `behavior:<id>`），而不是加第二个文本出口。 |
-| 12 | 注入预算数值 | 注入稿用 "总 200k"；注册表默认 `maxTotalChars = 4000`；`plugins.json` 是 4000 | 统一成 `config.limits.promptBlocks = { total, perBlockDefault }`，单位字符。默认值不拍脑袋：P1 的 golden 用例量出真实分布后取 p95 + 20%，页面上显示"已用 / 总预算"并允许改。 |
+| 12 | 注入预算数值 | 注入稿用 "总 200k"；注册表默认 `maxTotalChars = 4000`；`plugins.json` 是 4000 | 统一成 `config.limits.promptBlocks = { total, perBlockDefault }`，单位字符。P2 先落 **0 = 不限**（与重构前等价，不凭空加闸门）；等真机跑一段、拿到每轮字数分布再定默认值，页面上显示"已用 / 总预算"并允许改。 |
 | 13 | 危险沙箱的确认强度 | 运行稿 §6 说 `danger-full-access` 加一次"我了解风险" | **保留 TOTP**：任何含工具的方案切换要 owner 确认码；目标沙箱是 `danger-full-access` 时再加 TOTP（沿用 `getTotpSecret`），"我了解风险"作为第三个输入框。开发者导向不等于把已有的强确认拆掉。 |
 | 14 | 收尾提醒是第二套提示词 | 注入稿只建模唤醒提示词；`buildWakeReminderPromptV2`（`src/bridge.js:14757`）自己拼角色/身份/令牌 | 装配器支持 **`profile: 'wake' \| 'reminder'`**，块声明出现在哪些 profile。否则收尾提醒会继续复制三段文本并与块配置漂移。 |
 
@@ -107,19 +107,20 @@
     "qq-agent-full": { "sandbox": "danger-full-access", "grants": { "disable": [] }, "platform": "qq" }
   },
   "limits": {
-    "promptBlocks": { "total": 40000, "perBlockDefault": 8000 },   // 具体默认值 P1 实测后定
+    "promptBlocks": { "total": 0, "perBlockDefault": 0 },          // 0 = 不限；实测分布后给默认值
+    "personaInjectChars": 6000,                                    // 人格卡注入上限（原 config.role.maxInjectChars）
     "send": { "...": "不变" }
   },
   "scheduler": { /* 原 state/scheduler.json > settings */ },
   "plugins":   { /* 原 plugins.json */ },
   "silence":   { "schedule": { /* 原 state/silence-schedule.json */ }, "manual": null },
   "promptBlocks": {
-    "core-persona": { "enabled": true, "maxChars": 6000, "settings": { "saveApply": "nextWake" } }
+    "core-persona-refresh": { "enabled": true, "maxChars": null, "settings": {} }
   }
 }
 ```
 
-删除：`agentPreset`、`socialV2.agentPreset`、`closedAgentPreset`、`behavior.default`、`role`（`default` → `defaults.persona`，`maxInjectChars`/`saveApply` → `core-persona`）。
+删除：`agentPreset`、`socialV2.agentPreset`、`closedAgentPreset`、`behavior.default`、`role`（`default` → `defaults.persona`，`maxInjectChars` → `limits.personaInjectChars`，`saveApply` → 页面本地状态）。
 
 ### 5.2 `state/`
 
@@ -128,8 +129,9 @@
 | `runtime.json` | `{ "version": 1, "active": { "qq": "social-v2" } }` |
 | `sessions/**/<id>.json` | 去掉 `mode` / `presetId`，改为 `planId`；`persona` / `model` / `wake` / `binding` 不变 |
 | `prompt-block-state.json` | 原 `prompt-blocks.json`（只记投递：`fp` / `at` / `wakes`） |
-| `scheduler.json` | 只剩 `tasks` / `history` / `counters` / `nextId` |
-| `mode.json` / `silence-schedule.json` / `current-role.json` | 迁移后删除（备份 `.bak`） |
+| `scheduler.json` | 只剩 `tasks` / `history` / `counters` / `nextId`（设置已迁 `config.scheduler`） |
+| `silence-schedule.json` | 只剩 `override`（时间段已迁 `config.silence.schedule`） |
+| `mode.json` / `current-role.json` | P4 迁移后删除（备份 `.bak`）；`current-role.json` 的 `silent` 已在 P3 迁到 `config.silence.manual` |
 
 ### 5.3 注入块配置
 
@@ -201,7 +203,7 @@
 - `wake` 档案的装配不设总字数闸门（`renderProfileSync(..., { maxTotalChars: 0 })`）：重构前这些段落本来就没有总预算，先保证等价；总预算与逐块上限的配置化在 P2 落到 `config.limits.promptBlocks`。
 - `wakePromptCtx()` 一次取齐状态（角色、令牌、未读、唤醒条件、托付、定时说明、快照之外的动态内容），块只读 ctx，不自己查状态。预览接口会复用同一份 ctx。
 - 快照本体仍在 `deliverPromptNow` 里生成（它依赖投递时的实时状态），但**那段话归 `core-snapshot` 块**，投递处只做「渲染 + 追加」。
-- `core-persona` 的注入上限（`config.role.maxInjectChars`）在 P2 迁移为 `promptBlocks['core-persona'].maxChars`；本阶段仍走原路径，行为不变。
+- `core-persona-refresh` 的注入上限独立于块预算：人格卡有自己的裁剪阈值 `config.limits.personaInjectChars`（原 `config.role.maxInjectChars`，兼容读旧键），它限制的是「本次唤醒附带的角色卡」长度，不是整个块的截断长度，因此不塞进 `promptBlocks[...].maxChars`。
 
 ## 7. 执行顺序
 
@@ -209,7 +211,7 @@
 | --- | --- | --- | --- |
 | **P0** | 本文 + 两份旧稿加"以本文为准"的头注；不再动代码 | 无 | 否 |
 | **P1** | 注入块内核：注册表 v2（slot/timing/profiles/settings/priority/refresh）、单一装配器（wake+reminder）、26 块迁移、`buildWakePromptV2Core` 退化为「建 ctx + renderProfileSync」、`withSlangContext` 改走 context 档案、快照进块、golden 逐字节夹具 | 无（golden 等价） | 是（验证真实投递） |
-| **P2** | 注入块页 + 插件页移除注入块卡；预算与人格上限迁到 `config.limits.promptBlocks` / `core-persona`；`prompt-blocks.json` 改名 | 无 | 否（前端） |
+| **P2** | 注入块页（`GET /api/prompt-blocks`、`POST /api/prompt-preview`、表格里改开关与上限）+ 插件页移除注入块卡；预算与人格上限迁到 `config.limits.promptBlocks` / `config.limits.personaInjectChars`；`prompt-blocks.json` 改名 `prompt-block-state.json` | 无 | 是（新接口 + 状态文件改名） |
 | **P3** | 配置归一（非运行部分）：`plugins.json` → `config.plugins`、`scheduler.settings` → `config.scheduler`、静默 → `config.silence`、`current-role.json` 的 `silent` → `config.silence.manual` | 无（等价迁移，备份） | 是（读配置） |
 | **P4** | 运行方案数据层：`plans.mjs` / `capabilities.mjs` / `resolvePlan` / `legacyMode` 投影 / `state/runtime.json` / plan-control（确认、审计、TOTP、闲置回落、重启不继承）/ 切换 API / 迁移脚本（干跑+备份+幂等） | 无（等价映射） | 是 |
 | **P5** | 运行方案控制台：新页、全局配置删模式卡、会话详情合并、导航与总览 | 无 | 否 |

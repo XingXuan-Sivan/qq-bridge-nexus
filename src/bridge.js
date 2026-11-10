@@ -138,7 +138,7 @@ import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
 // 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
-import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from './plugins/prompt-blocks.mjs';
+import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE, PROMPT_BLOCK_PROFILES, PROMPT_BLOCK_SLOTS } from './plugins/prompt-blocks.mjs';
 // 记忆 provider 注册表（docs/MEMORY_SUBSYSTEM.md）：注入只选一个 provider，同步直取、异步读预热缓存。
 import { createMemoryRegistry, normalizeMemoryConfig } from './memory/registry.mjs';
 import { createMemoryIngest } from './memory/ingest.mjs';
@@ -860,7 +860,10 @@ function readRoleState() {
   }
   // 全局默认人格的唯一事实源是 config.json 的 role.default（见 /api/config/role-default）；
   // 老版本写在 state/current-role.json 的 role 只作为回退，避免升级后人格突然变空。
-  return { ...base, role: configDefaultRoleName() ?? base.role ?? null, byKey };
+  // 手动静默同理由：config.silence.manual 优先，state 里的 silent 只作旧数据回退（下次写盘时迁走）。
+  const manualSilent = bridgeCfg?.silence?.manual ? normalizeManualSilence(bridgeCfg.silence.manual) : null;
+  const silent = manualSilent ?? base.silent;
+  return { ...base, role: configDefaultRoleName() ?? base.role ?? null, mode: silent ? 'silent' : 'active', silent, byKey };
 }
 /** config.json 的 role.default：名字不合法或人格文件不存在时视为未设置。 */
 function configDefaultRoleName() {
@@ -885,6 +888,18 @@ function setConfigDefaultRole(name) {
   file.role = role;
   atomicWriteJson(configFile, file);
   if (bridgeCfg) bridgeCfg.role = { ...(bridgeCfg.role ?? {}), default: name ?? undefined };
+}
+
+/**
+ * 写 config.json 的任意一段（P3 配置归一的统一出口）：读-改-写整份文件，保留其它段。
+ * 传 `undefined` 表示删掉该段。写成功后同步内存里的 cfg，避免同一进程里读到旧值。
+ */
+function saveConfigSection(key, value) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  if (value === undefined) delete file[key]; else file[key] = value;
+  atomicWriteJson(configFile, file);
+  if (bridgeCfg) bridgeCfg[key] = value;
 }
 
 // ── 外部人格引用与缓存 ──────────────────────────────────────────────────────
@@ -979,14 +994,21 @@ function setConfigDefaultBehavior(name) {
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
 // silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
+// P3：手动静默策略存 config.json 的 silence.manual；state/current-role.json 只留 role/byKey（mode 作兼容标记）。
+function persistManualSilence(silent) {
+  const next = silent ? normalizeManualSilence(silent) : null;
+  saveConfigSection('silence', { ...(bridgeCfg?.silence ?? {}), manual: next });
+}
 function writeRoleState(role, mode, silent = undefined) {
   const current = readRoleState();
   const nextSilent = mode === 'silent' ? normalizeManualSilence(silent ?? current.silent ?? {}) : null;
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', silent: nextSilent, byKey: {} }));
+  persistManualSilence(nextSilent);
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: role ?? null, mode: mode ?? 'active', silent: null, byKey: {} }));
 }
 function writeRoleStateFull(next) {
   const normalized = normalizeRoleState(next);
-  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: normalized.role, mode: normalized.mode, silent: normalized.silent, byKey: {} }));
+  persistManualSilence(normalized.silent);
+  atomicWriteJson(ROLE_STATE_FILE, serializeRoleState({ role: normalized.role, mode: normalized.mode, silent: null, byKey: {} }));
   applyRoleAssignmentsToProfiles(normalized.byKey);
   saveState();
 }
@@ -1049,6 +1071,33 @@ function normalizePromptBlocks(raw) {
     out[id] = conf;
   }
   return out;
+}
+
+/**
+ * 注入预算（`config.limits.promptBlocks`）：0 表示不限。
+ *
+ * 单块默认上限只对「没有单独配置 maxChars 的块」生效——单独配过的块以自己的值为准，
+ * 这样升级不会悄悄改掉用户已经调好的块。
+ */
+function normalizePromptBlockLimits(raw) {
+  const out = { total: 0, perBlockDefault: 0 };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const key of ['total', 'perBlockDefault']) {
+    const value = Number(raw[key]);
+    if (Number.isInteger(value) && value >= 0 && value <= 200000) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * 人格卡注入上限（字符）：新键 `limits.personaInjectChars`，旧键 `role.maxInjectChars` 只读兼容。
+ */
+function normalizePersonaInjectChars(raw) {
+  const fromLimits = Number(raw?.limits?.personaInjectChars);
+  if (Number.isInteger(fromLimits) && fromLimits > 0) return fromLimits;
+  const legacy = Number(raw?.role?.maxInjectChars);
+  if (Number.isInteger(legacy) && legacy > 0) return legacy;
+  return ROLE_INJECT_MAX_CHARS_DEFAULT;
 }
 
 /**
@@ -1464,7 +1513,9 @@ function loadConfig() {
   cfg.dsh.vision = normalizeVisionSetting(cfg.dsh.vision);
 
   // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
-  cfg.role = { maxInjectChars: ROLE_INJECT_MAX_CHARS_DEFAULT, ...(file.role ?? {}) };
+  // 存储键已迁到 `limits.personaInjectChars`；`role.maxInjectChars` 只读兼容。
+  // 先展开旧 `role` 再写 maxInjectChars，保证新键优先于旧键。
+  cfg.role = { ...(file.role ?? {}), maxInjectChars: normalizePersonaInjectChars(file) };
   roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
   roleSaveApplyDefault = cfg.role.saveApply === 'immediate' ? 'immediate' : 'nextWake';
   if (roleInjectMaxChars !== cfg.role.maxInjectChars) {
@@ -1526,6 +1577,8 @@ function loadConfig() {
       maxSendPerHour: Number(file.limits?.send?.maxSendPerHour ?? cfg.socialV2.send?.maxSendPerHour) || 0,
     },
     initialPromptMaxChars: Number(file.limits?.initialPromptMaxChars ?? cfg.socialV2.initialPromptMaxChars) || 2000,
+    personaInjectChars: cfg.role.maxInjectChars,
+    promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
 
   // 行为档案：QQ 交互参数按预设绑定，不再塞在 config.social/socialV2。
@@ -2259,14 +2312,31 @@ async function main() {
       render: (ctx) => `【提醒】你还没有完成回合收尾。请调用 qq_set_wake_config 设置下一次唤醒条件（例如继续潜水多久、@/名字/关键词/提问/概率/指定成员等），或者调用 qq_mark_read 表示你看过且决定不接。这是为了防止你忘记收尾后进入“永眠”。注意：设置潜水前先用 qq_wait_for_messages(timeoutMs=${ctx.preSleepMs}) 完成沉睡前观察；等待期间有人说话时查看 newMessages，判断不需要你参与即可收尾。`
     });
 
-    corePromptBlocks.setOverrides(cfg.promptBlocks);
+    corePromptBlocks.setOverrides(cfg.promptBlocks, { perBlockDefault: cfg.limits?.promptBlocks?.perBlockDefault ?? 0 });
   };
   registerCoreBlocks();
+  // P3 迁移：插件配置从 plugins.json 搬进 config.json 的 plugins 段（原文件备份成 .bak）。
+  if (!cfg.plugins) {
+    const legacyPluginsFile = path.join(ROOT, 'plugins.json');
+    const legacyPlugins = fs.existsSync(legacyPluginsFile) ? readJsonSafe(legacyPluginsFile, null) : null;
+    if (legacyPlugins && typeof legacyPlugins === 'object') {
+      cfg.plugins = legacyPlugins;
+      saveConfigSection('plugins', legacyPlugins);
+      try {
+        fs.renameSync(legacyPluginsFile, `${legacyPluginsFile}.bak`);
+        log('插件配置已迁入 config.json（原 plugins.json 备份为 plugins.json.bak）');
+      } catch (error) {
+        log(`⚠️ plugins.json 备份失败（配置已迁入 config.json）：${error?.message ?? error}`);
+      }
+    }
+  }
   try {
     plugins = await createPluginKernel({
       rootDir: ROOT,
       stateDir: STATE_DIR,
       log,
+      config: cfg.plugins ?? null,
+      saveConfig: (next) => saveConfigSection('plugins', next),
       deps: {
         commandRegistry,
         memoryRegistry,
@@ -4107,6 +4177,9 @@ async function main() {
   }
   const scheduler = createScheduler({
     file: path.join(STATE_DIR, 'scheduler.json'),
+    // P3 起设置存在 config.json 的 scheduler 段；状态文件只留任务、历史、计数器。
+    settings: cfg.scheduler ?? null,
+    onSettingsChange: (next) => saveConfigSection('scheduler', next),
     deliver: deliverScheduled,
     validateTarget: schedulerTargetError,
     ownerKey: schedulerOwnerKey,
@@ -4125,12 +4198,33 @@ async function main() {
   scheduler.load();
 
   // ── 定时静默（逻辑在 src/silence-schedule.js）：按时间段让 AI 停下来省 token ─────────────────
-  const silence = createSilenceSchedule({ file: path.join(STATE_DIR, 'silence-schedule.json'), holidays: CN_HOLIDAYS, log: (m) => log(m) });
+  // P3：时间段配置存在 config.json 的 silence.schedule；状态文件只留「临时恢复」。
+  const silence = createSilenceSchedule({
+    file: path.join(STATE_DIR, 'silence-schedule.json'),
+    config: cfg.silence?.schedule ?? null,
+    onChange: (next) => {
+      const merged = { ...(cfg.silence ?? {}), schedule: next };
+      cfg.silence = merged;
+      saveConfigSection('silence', merged);
+    },
+    holidays: CN_HOLIDAYS,
+    log: (m) => log(m),
+  });
   // ── 角色卡变更后重新读卡（逻辑在 src/role-refresh.js）：记下每个会话读到的是哪一版卡 ─────────────
   const roleRefresh = createRoleRefreshTracker({ file: path.join(STATE_DIR, 'role-seen.json'), onError: (e) => log(`⚠️ 角色卡版本记录读写失败：${e?.message ?? e}`) });
 
   // ── 不常变的大块只在变化时完整注入（逻辑在 src/prompt-blocks.js）：黑话表、表情包策略与常用表情 ─────
-  const promptBlocks = createBlockTracker({ file: path.join(STATE_DIR, 'prompt-blocks.json'), onError: (e) => log(`⚠️ 提示块记录读写失败：${e?.message ?? e}`) });
+  // 投递记账（指纹 / 唤醒次数）。文件名与注入块的定义分开：这里存的是**运行时状态**，
+  // 旧版叫 prompt-blocks.json，改名时做一次性迁移，避免丢掉「已发过完整块」的记录。
+  const promptBlockStateFile = path.join(STATE_DIR, 'prompt-block-state.json');
+  const legacyPromptBlockStateFile = path.join(STATE_DIR, 'prompt-blocks.json');
+  if (!fs.existsSync(promptBlockStateFile) && fs.existsSync(legacyPromptBlockStateFile)) {
+    try {
+      fs.renameSync(legacyPromptBlockStateFile, promptBlockStateFile);
+      log('注入块状态文件已迁移：state/prompt-blocks.json → state/prompt-block-state.json');
+    } catch (e) { log(`⚠️ 注入块状态文件迁移失败：${e?.message ?? e}`); }
+  }
+  const promptBlocks = createBlockTracker({ file: promptBlockStateFile, onError: (e) => log(`⚠️ 提示块记录读写失败：${e?.message ?? e}`) });
   /** 完整的表情块（与唤醒提示里原来那段一致；关掉表情体系或不附带时为空）。 */
   function stickerBlockTextV2() {
     const stickerCfg = cfg.socialV2?.sticker ?? {};
@@ -5794,6 +5888,36 @@ async function main() {
           }
           return;
         }
+        // 注入块：读配置与运行状态、预览渲染（写配置仍走 /api/config/promptBlocks）。
+        if (req.method === 'GET' && url.pathname === '/api/prompt-blocks') {
+          const status = corePromptBlocks.status();
+          sendJson({
+            ok: true,
+            profiles: PROMPT_BLOCK_PROFILES,
+            slots: PROMPT_BLOCK_SLOTS,
+            limits: {
+              ...cfg.limits.promptBlocks,
+              personaInjectChars: cfg.limits.personaInjectChars,
+              roleInjectMaxChars: roleInjectMaxChars,
+            },
+            blocks: status.blocks,
+            stats: { total: status.total, maxTotalChars: status.maxTotalChars, renders: status.renders, injected: status.injected, skipped: status.skipped },
+          });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/prompt-preview') {
+          try {
+            const body = await readBody();
+            const profile = PROMPT_BLOCK_PROFILES.includes(body?.profile) ? body.profile : 'wake';
+            const key = typeof body?.key === 'string' ? body.key.trim() : '';
+            if (!key) throw new Error('请先选择一个会话');
+            const reason = typeof body?.reason === 'string' && body.reason.trim() ? body.reason.trim() : 'atMention';
+            sendJson({ ok: true, ...promptPreview(key, profile, reason) });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+          }
+          return;
+        }
         // 内置注入块开关（写 config.json）：与插件配置分开存，独立校验、独立原子写。
         if (req.method === 'PATCH' && url.pathname === '/api/config/promptBlocks') {
           try {
@@ -5813,10 +5937,14 @@ async function main() {
               merged[id] = next;
             }
             const normalized = normalizePromptBlocks(merged);
+            const limits = body?.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
+              ? normalizePromptBlockLimits({ ...(raw.limits?.promptBlocks ?? {}), ...body.limits })
+              : normalizePromptBlockLimits(raw.limits?.promptBlocks);
             cfg.promptBlocks = normalized;
+            cfg.limits.promptBlocks = limits;
             registerCoreBlocks();
-            atomicWriteJson(file, { ...raw, promptBlocks: normalized });
-            sendJson({ ok: true, promptBlocks: normalized, coreBlocks: corePromptBlocks.status() });
+            atomicWriteJson(file, { ...raw, promptBlocks: normalized, limits: { ...(raw.limits ?? {}), promptBlocks: limits } });
+            sendJson({ ok: true, promptBlocks: normalized, limits, coreBlocks: corePromptBlocks.status() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
           }
@@ -6812,8 +6940,12 @@ async function main() {
           const saveApply = normalizeApplyMode(body.saveApply ?? roleSaveApplyDefault);
           const configFile = path.join(ROOT, 'config.json');
           const file = readConfigObject(configFile);
-          file.role = { ...(file.role ?? {}), maxInjectChars: next, saveApply };
+          // 上限存在 `limits.personaInjectChars`；顺手删掉旧键 role.maxInjectChars，避免两处各说各话。
+          file.limits = { ...(file.limits ?? {}), personaInjectChars: next };
+          if (file.role && typeof file.role === 'object') delete file.role.maxInjectChars;
+          file.role = { ...(file.role ?? {}), saveApply };
           atomicWriteJson(configFile, file);
+          cfg.limits = { ...(cfg.limits ?? {}), personaInjectChars: next };
           cfg.role = { ...(cfg.role ?? {}), maxInjectChars: next, saveApply };
           roleInjectMaxChars = next;
           roleSaveApplyDefault = saveApply;
@@ -14930,7 +15062,9 @@ async function main() {
   }
 
   function buildWakePromptV2Core(key, reason, blockPlan = null) {
-    return corePromptBlocks.renderProfileSync('wake', wakePromptCtx(key, reason, blockPlan)).text;
+    return corePromptBlocks.renderProfileSync('wake', wakePromptCtx(key, reason, blockPlan), {
+      maxTotalChars: Number(cfg.limits?.promptBlocks?.total) || 0,
+    }).text;
   }
 
   function buildWakeReminderPromptV2(key) {
@@ -14941,6 +15075,25 @@ async function main() {
       agentToken: st.agentToken,
       preSleepMs: Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000),
     }).text;
+  }
+
+  /**
+   * 注入块页的「按某个会话、某个原因预览」：走真实 ctx 与真实拼装，但**只读**——
+   * 不取走托付/定时说明、不记账、不排队。预算与生产一致（wake 受总预算约束）。
+   */
+  function promptPreview(key, profile, reason) {
+    const wakeCtx = wakePromptCtx(key, reason, { sticker: { full: true }, slang: { full: true } });
+    let ctx;
+    if (profile === 'reminder') {
+      ctx = { roleName: wakeCtx.roleName, identityText: wakeCtx.identityText, agentToken: wakeCtx.agentToken, preSleepMs: wakeCtx.preSleepMs };
+    } else if (profile === 'context') {
+      ctx = { nowText: `【当前时间】${new Date().toLocaleString('zh-CN', { hour12: false })}（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`, slangText: cfg.slang?.enabled === false ? '' : buildSlangContext(slangEntries, cfg.slang?.injectMax ?? 8) };
+    } else {
+      ctx = wakeCtx;
+    }
+    const budget = profile === 'wake' ? Number(cfg.limits?.promptBlocks?.total) || 0 : 0;
+    const result = corePromptBlocks.renderProfileSync(profile, ctx, { maxTotalChars: budget });
+    return { profile, reason, key, text: result.text, chars: result.chars, maxTotalChars: budget, blocks: result.blocks };
   }
 
   async function sendWakePromptV2(key, reason) {

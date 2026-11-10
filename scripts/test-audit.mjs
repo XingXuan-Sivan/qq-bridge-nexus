@@ -130,6 +130,10 @@ const tests = [
   // 注入块重构（P1）：唤醒提示词按 slot/priority 拼装后，逐字节等于重构前的 golden 夹具
   // （4 种配置 × 14 个唤醒原因 + 收尾提醒），防止「谁来拼」的改动顺手改了「拼出什么」。
   'test-prompt-golden.mjs',
+  // 注册表 v2 语义（P2）：槽位顺序、reason 前缀匹配、profiles 筛选、单块/总预算、插件块豁免默认上限。
+  'test-prompt-registry.mjs',
+  // 配置归一（P3）：定时任务/定时静默/插件配置的设置存 config，状态文件只留运行态，旧文件首读迁移。
+  'test-config-unify.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
   'test-skills-index.mjs',
   // 外部技能存储（P3）：frontmatter 校验、写入/备份/启停/删除、ZIP 导入与路径边界。

@@ -71,12 +71,20 @@ export function pluginIdFromPath(pluginDir, filePath) {
  * @param {(message: string) => void} options.log
  * @param {object} [options.deps]    { sendToQQ, hasSession, fetch, now, random }
  */
-export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) {
+export async function createPluginKernel({ rootDir, stateDir, log, config: initialConfig = null, saveConfig = null, deps = {} }) {
   const logLine = (message) => log?.(message);
-  const loaded = loadConfig(path.join(rootDir, PLUGIN_CONFIG_FILE));
+  // P3：插件配置的新家是 config.json 的 plugins 段；老用法（不传 config/saveConfig）仍读写 plugins.json。
+  const loaded = initialConfig
+    ? normalizeConfig(initialConfig)
+    : loadConfig(path.join(rootDir, PLUGIN_CONFIG_FILE));
   const config = loaded.config;
   const warnings = [...(loaded.warnings ?? [])];
   if (loaded.error) warnings.push(loaded.error);
+  const persist = (next) => {
+    if (typeof saveConfig === 'function') { saveConfig(next); return; }
+    writeConfigFile(path.join(rootDir, PLUGIN_CONFIG_FILE), next);
+  };
+  const persistErrorText = () => (typeof saveConfig === 'function' ? '写入 config.json 的 plugins 段失败' : `写入 ${PLUGIN_CONFIG_FILE} 失败`);
 
   const auditFile = path.join(stateDir, 'plugin-audit.jsonl');
   const audit = createAuditLog({
@@ -1051,9 +1059,9 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       const { config: next, warnings } = normalizeConfig(raw);
       if (warnings.length) return { ok: false, error: warnings.join('；'), warnings };
       try {
-        writeConfigFile(path.join(rootDir, PLUGIN_CONFIG_FILE), next);
+        persist(next);
       } catch (error) {
-        return { ok: false, error: `写入 ${PLUGIN_CONFIG_FILE} 失败：${error?.message ?? error}` };
+        return { ok: false, error: `${persistErrorText()}：${error?.message ?? error}` };
       }
       Object.assign(config, next);
       entry.config = applied.value;
@@ -1104,7 +1112,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
       try {
         writeConfigFile(file, next);
       } catch (error) {
-        return { ok: false, error: `写入 ${PLUGIN_CONFIG_FILE} 失败：${error?.message ?? error}` };
+        return { ok: false, error: `${persistErrorText()}：${error?.message ?? error}` };
       }
 
       const watchChanged = next.watch !== config.watch;

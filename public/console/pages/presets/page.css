@@ -47,7 +47,6 @@
 .presets-panel { display: contents; }
 .presets-panel[hidden] { display: none; }
 .behavior-form-panel { display: flex; flex-direction: column; gap: 14px; --field-label-w: 170px; }
-.behavior-form-panel .form-cols { row-gap: 14px; }
 .behavior-form-panel .behavior-form { width: 100%; }
 /* 分组各自一张卡：外层只是排版容器，不再重复画卡。 */
 .behavior-form-panel .form-section--card {

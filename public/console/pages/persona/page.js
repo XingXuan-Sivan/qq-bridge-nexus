@@ -2,6 +2,7 @@
 // 编辑走弹窗（人格名 + 提示词编辑器），注入上限与生效方式在「全局配置 › 人格与行为」。
 import { tableToolbarHtml } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
+import { renderFields } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
@@ -105,6 +106,7 @@ function renderStatus() {
     modeText.textContent = active
       ? (active.source === 'local' ? '内部人格' : `${active.provider}${active.stale ? ' · 缓存' : ' · 在线'}`)
       : '跟随仿真提示词';
+    modeText.className = active && active.source !== 'local' && !active.stale ? 'pill g' : (active?.stale ? 'pill r' : 'pill n');
   }
 }
 
@@ -131,30 +133,7 @@ function ensureEditor() {
     id: 'personaEditor',
     title: '编辑人格',
     wide: true,
-    body: `
-      <div class="form-stack">
-        <div class="field-block" id="personaNameBlock">
-          <label class="field-label" for="personaName">人格名</label>
-          <div class="field-control">
-            <input class="input" id="personaName" type="text" maxlength="40" autocomplete="off">
-          </div>
-          <div class="meta" id="personaNameNote"></div>
-        </div>
-        <div class="field-block">
-          <label class="field-label" for="personaText">人格提示词</label>
-          <div class="field-control">
-            <textarea class="code-editor-field" id="personaText" rows="16"></textarea>
-          </div>
-          <div class="meta" id="personaTextNote">这一段会拼在仿真提示词之后，决定「AI 是谁、怎么说话」。保存即生效。</div>
-        </div>
-        <div class="field-block" id="personaSaveAsBlock" hidden>
-          <label class="field-label" for="personaSaveAsName">另存为内部人格</label>
-          <div class="field-control">
-            <input class="input" id="personaSaveAsName" type="text" maxlength="40" autocomplete="off">
-          </div>
-          <div class="meta">点下面「另存为内部」时写入 roles/&lt;名字&gt;.md；同名文件会先备份。</div>
-        </div>
-      </div>`,
+    body: '<div class="form-stack" id="personaEditorBody"></div>',
     footer: `
       <span class="status-badge" id="personaEditMsg"></span>
       <span class="grow"></span>
@@ -165,6 +144,34 @@ function ensureEditor() {
   });
   const overlay = wrap.firstElementChild;
   document.body.appendChild(overlay);
+  renderFields(overlay.querySelector('#personaEditorBody'), [
+    {
+      type: 'text',
+      name: 'personaName',
+      label: '人格名',
+      maxlength: 40,
+      required: true,
+      hint: '内部人格名：中文 / 字母 / 数字 / 横线，保存后写入 roles/。',
+    },
+    {
+      type: 'custom',
+      name: 'personaTextSlot',
+      label: '人格提示词',
+      className: 'field-block--stacked',
+      html: '<textarea class="code-editor-field" id="personaText" rows="16"></textarea>',
+      hint: '这一段会拼在仿真提示词之后，决定「AI 是谁、怎么说话」。保存即生效。',
+    },
+    {
+      type: 'text',
+      name: 'personaSaveAsName',
+      label: '另存为内部人格',
+      maxlength: 40,
+      hint: '点下面「另存为内部」时写入 roles/<名字>.md；同名文件会先备份。',
+    },
+  ], { columns: 1 });
+  // 兼容既有测试与外部脚本：保留原来的块级 id（组件用 data-field-wrap 标记外层）。
+  overlay.querySelector('[data-field-wrap="personaName"]')?.setAttribute('id', 'personaNameBlock');
+  overlay.querySelector('[data-field-wrap="personaSaveAsName"]')?.setAttribute('id', 'personaSaveAsBlock');
   wireModal(overlay, { onClose: () => { editing = null; } });
   const textarea = overlay.querySelector('#personaText');
   codeHandle = attachTextareaEditor(textarea, { language: 'text', height: '380px' });
@@ -173,7 +180,7 @@ function ensureEditor() {
     title: overlay.querySelector('.modal-head h3'),
     name: overlay.querySelector('#personaName'),
     nameBlock: overlay.querySelector('#personaNameBlock'),
-    nameNote: overlay.querySelector('#personaNameNote'),
+    nameNote: overlay.querySelector('#personaName-hint'),
     text: textarea,
     msg: overlay.querySelector('#personaEditMsg'),
     saveAsBlock: overlay.querySelector('#personaSaveAsBlock'),

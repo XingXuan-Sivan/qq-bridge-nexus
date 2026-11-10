@@ -493,6 +493,16 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 **规则**：元素选择器只给中性外观（背景、边框、圆角、基础 padding）；控件几何（高度、flex 居中、左右 padding）只挂在语义类上（`.btn`、`.btn.small`、`button.small`、`button.primary`、`button.danger`）。导航、标签页、卡片这类「长相像按钮但不是控件」的组件，永远不要被控件标尺接管。
 
+### 1.85 手写弹窗先问「表单组件能不能拼」，再考虑 `custom`
+
+人格编辑弹窗原来手写 `.field-block > .field-row > label + input`，还用了不存在的 `class="input"`；重构时直接交给 `renderFields`：人名用 `text`（自带 `hint`、`required`、`maxlength`），提示词用 `custom` 槽 + `className:'field-block--stacked'`（标签在控件上方），再补一个 `text` 做「另存为内部人格名」。字段的说明、标签列、行距全部由组件负责，页面里只剩一个 `form-stack` 宿主。
+
+**规则**：
+- 弹窗里只要字段能拆成 text / number / textarea / select / radio / switch / custom 中的一种，就用 `renderFields`，不要手写 `.field-block`；
+- 组件渲染后 DOM id 会落在控件上，但外层的「块」没有旧 id。需要兼容既有测试/脚本时，用 `[data-field-wrap]` 把旧 id 补回外层，**不要**为了兼容把控件搬回手写；
+- 同一间距只留一个来源：`.form-cols` 的 `row-gap` 已统一走 `--form-row-gap`（14px），页面不要再写 `row-gap:14px` 覆盖；
+- 徽标统一 `.pill`（`pill g/r/n/b`），`status-badge` 只用于弹窗底栏那种纯文本状态位；按钮统一 `class="btn small"`，`class="small"` 是历史写法。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

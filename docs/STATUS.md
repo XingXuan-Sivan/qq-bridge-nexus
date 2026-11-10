@@ -499,5 +499,17 @@ npm run test:console-ui
 
 **已知限制**：「发给谁」弹窗里的对象列表来自 `/api/scheduler` 的 `targets`（白名单好友 + 群），没有昵称解析，只能显示「好友 QQ 号 / 群号」；对象数量受 `maxTargets` 限制，超过时弹窗内提示、必须减少选择才能应用。
 
+### 6.34 第十六批：人格弹窗改表单组件、行距与徽标统一（2026-11-10）
+
+1. **人格编辑弹窗不再手写控件**：`pages/persona/page.js` 的弹窗体改由 `renderFields` 渲染——人格名（`text` + `required` + `maxlength`）、人格提示词（`custom` 槽 + `field-block--stacked` 的代码编辑器）、另存为内部人格名（`text`）。原来的 `class="input"` 是未定义的死类名，一并删掉；动态说明改写到字段自带的 `#personaName-hint`。
+2. **保留旧 id 兼容**：组件用 `data-field-wrap` 标记字段外层，渲染后把 `personaNameBlock`、`personaSaveAsBlock` 两个旧 id 补回外层节点，既有 UI 测试与外部脚本不用改。
+3. **表单行距归一**：`.form-cols` 的行距从 16px 改为 `var(--form-row-gap, 14px)`，并删掉 `config`、`behavior`、`presets` 三页各自写的 `row-gap: 14px` 覆盖——同一个间距只保留一个来源。
+4. **徽标统一 `.pill`**：定时任务状态、静默状态、当前人格来源从 `status-badge is-pill ok/err` 改成 `pill g / pill r / pill n / pill b`；`status-badge` 只留作纯文本状态位（例如弹窗底栏的保存提示）。
+5. **按钮类名统一**：`behaviors`、`plugins` 里 `class="small"` 的 5 个按钮改成 `class="btn small"`，与其它页面一致（高度本来就都是 32px）。
+
+**验收**：`node --check` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；`test-scheduler` **7/7**；`test-console-static` 全部通过；全量 `test-audit` **103/103**；真机截图确认人格弹窗字段、提示词编辑器、`#personaSaveAsBlock` 兼容 id、定时任务绿色 `pill`、插件卡 32px 按钮都正常。
+
+**已知限制**：这一批只动了「自己引入的手写控件 + 重复样式」，`sessions` 详情弹窗、`config` 的管理员/静默两张可编辑表、`scheduler` 的动态计划编辑器仍是手写结构（下一批处理，见巡检清单 B/C 批）。
+
 
 

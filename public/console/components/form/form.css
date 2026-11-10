@@ -764,7 +764,7 @@
 
 /* 规格渲染（renderFields）的栅格：行距与分组间距统一由这里给 */
 .form-cols {
-  row-gap: var(--space-4, 16px);
+  row-gap: var(--form-row-gap, 14px);
 }
 .form-section + .form-section {
   margin-top: var(--space-6, 24px);

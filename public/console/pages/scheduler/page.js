@@ -66,7 +66,7 @@ function renderScheduler() {
   setSwitch(schedEl('schedAllowAiGroup'), st.allowAiGroup);
   const pill = schedEl('schedStatePill');
   pill.textContent = st.enabled ? (r.writable === false ? '只读（数据文件读取失败）' : '运行中') : '已关闭';
-  pill.className = st.enabled && r.writable !== false ? 'status-badge is-pill ok' : 'status-badge is-pill err';
+  pill.className = st.enabled && r.writable !== false ? 'pill g' : 'pill r';
   schedEl('schedLimits').innerHTML = SCHED_LIMIT_FIELDS.map(([k, label, unit]) => `<div><label for="schedLim_${k}">${esc(label)}（${esc(unit)}）</label><input type="number" id="schedLim_${k}" min="0" value="${esc(st.limits[k])}" title="默认 ${esc(r.defaults?.limits?.[k] ?? '')}"></div>`).join('');
   setSwitch(schedEl('schedQuietEnabled'), st.limits.quietEnabled);
   schedEl('schedQuietStart').value = st.limits.quietStart;

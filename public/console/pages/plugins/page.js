@@ -291,8 +291,8 @@ async function refreshPlugins() {
       const permissions = (plugin.permissions || []).map((permission) => `<span class="pill">${esc(permission)}</span>`).join('');
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
       const toggle = plugin.status === 'active'
-        ? `<button class="small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
-        : `<button class="small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
+        ? `<button class="btn small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
+        : `<button class="btn small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       const failures = Number(counters.hookErrors) || 0;
       return `<div class="tile">
         <div class="tile-head"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="pill b">v${esc(plugin.version || '—')}</span></div>
@@ -303,7 +303,7 @@ async function refreshPlugins() {
           <span class="pill">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="pill r">失败 ${failures}</span>` : ''}
         </div>
         ${error}
-        <div class="row tile-actions">${toggle}<button class="small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
+        <div class="row tile-actions">${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="btn small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
       </div>`;
     }).join('');
   } catch (error) {

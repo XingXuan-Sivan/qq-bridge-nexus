@@ -49,7 +49,7 @@ function behaviorTable(rows) {
             : '<span class="pill n">所有人</span>';
         const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
         const action = entry.source === 'plugin'
-          ? `<button class="small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
+          ? `<button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
           : '<span class="meta">—</span>';
         const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
         return [

@@ -280,7 +280,12 @@ function syncTransportFields() {
   if (arbitrary) arbitrary.hidden = transport !== 'stdio';
   if (privateNet) privateNet.hidden = transport === 'stdio';
   const logs = field('mcpEditLogs');
-  if (logs) logs.hidden = !editingId;
+  if (logs) {
+    // 日志按钮一直留在底栏：新建时还没有 server，置灰并说明原因，不要让它凭空消失。
+    logs.hidden = false;
+    logs.disabled = !editingId;
+    logs.title = editingId ? `查看 ${editingId} 的日志` : '保存之后才能查看日志';
+  }
 }
 
 function fillEditor(config = null) {
@@ -301,6 +306,7 @@ function fillEditor(config = null) {
   setSwitch(field('mcpEditAllowArbitrary'), config?.allowArbitraryCommand === true);
   setSwitch(field('mcpEditAllowPrivate'), config?.allowPrivateNetwork === true);
   field('mcpEditSecrets').value = '';
+  field('mcpEditSecrets')._codeEditorHandle?.setValue('');
   const configText = JSON.stringify(connectionConfig(config), null, 2);
   transportDrafts.set(transport, configText);
   const configField = field('mcpEditConfig');
@@ -375,11 +381,16 @@ async function openEditor(id = '') {
   fillEditor(config);
   openModal(layer);
   bindSwitches(layer);
-  // 连接配置用项目自带编辑器；textarea 本身仍保存内容，提交时照旧读它。
+  // 连接配置与凭据都用项目自带编辑器（整行、标签在上）；textarea 本身仍保存内容，提交时照旧读它。
   const configField = field('mcpEditConfig');
   if (configField) {
     const handle = attachTextareaEditor(configField, { language: 'json', height: '320px' });
     handle?.setValue?.(configField.value);
+  }
+  const secretsField = field('mcpEditSecrets');
+  if (secretsField) {
+    const handle = attachTextareaEditor(secretsField, { language: 'text', height: '160px' });
+    handle?.setValue?.(secretsField.value);
   }
   syncTransportFields();
 }

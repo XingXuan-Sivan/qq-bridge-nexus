@@ -24,13 +24,17 @@ function applyValue() {
 
 function visibleItems() {
   const q = roleQuery.trim().toLowerCase();
-  return model.items.filter((item) => {
+  const items = model.items.filter((item) => {
     if (roleFilter === 'local' && item.source !== 'local') return false;
     if (roleFilter === 'provider' && item.source !== 'provider') return false;
     if (roleFilter === 'cached' && !item.stale) return false;
     if (!q) return true;
     return `${item.name} ${item.description ?? ''} ${item.provider ?? ''}`.toLowerCase().includes(q);
   });
+  // 排序：默认卡置顶，其次内部卡，再外部在线卡，最后离线的缓存卡；同组按名字排。
+  const rank = (item) => (item.default ? 0 : item.stale ? 3 : item.source === 'local' ? 1 : 2);
+  return items.sort((a, b) => rank(a) - rank(b)
+    || String(a.name).localeCompare(String(b.name), 'zh-Hans-CN'));
 }
 
 function badgesHtml(item) {

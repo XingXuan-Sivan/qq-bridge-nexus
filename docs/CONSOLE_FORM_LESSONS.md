@@ -445,6 +445,24 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 **规则**：弹窗底栏统一 `日志 / 测试连接 / 取消 / 保存`（无该动作就不出现，位置不变），危险动作靠左、主操作最右；整行编辑器/代码块用 `field-block--stacked`（标签在控件上方、左对齐），不要再拼「左标签右控件」的双列；弹窗内的动作按钮全部进底栏，表单体里只留字段。
 
+### 1.76 `th[data-w]` 是白名单：写未登记的列宽看起来「没生效」
+
+黑话表格一开始把列宽写成 `56 / 52 / 96 / 190 / 145 / 270`，实际渲染出来每列都是 140：`table-layout:fixed` 下，`th[data-w="…"]` 只有 `components.css` 里登记过的值才有 `width` 规则（44/60/70/80/84/90/92/100/110/118/120/140/150/160/170/180/200/220/260/300/320），未登记的值拿不到宽度，剩余空间被平均分摊。
+
+**规则**：先查 `components.css` 的 `th[data-w]` 白名单，只从这里取值；确实需要新宽度就先把规则加进白名单，再在页面里用。列宽总和要等于内容区宽度（当前 1070），否则会出现横向滚动或平均分摊。
+
+### 1.77 表格的主操作走 `dataTableHtml({actions})`，不要再放在卡片头
+
+黑话页「手动添加」原先在 `.card-head` 里，和表格自带的「刷新 / 搜索」分成两处；用户要求「工具栏必须对齐表格自带的那条」。`dataTableHtml` 的 `actions` 会渲染到 `.table-toolbar-side`（与分页统计同一侧），并且因为表格每次刷新都会重建按钮，绑定要改成 document 级委托（`event.target.closest('#slangAddOpen')`），不要再 `getElementById(...).addEventListener`。
+
+### 1.78 长文本列用「截断 + title」而不是整段输出
+
+黑话表把「含义 / 用法 / 示例 / 参考来源 / 语境证据」整段渲染，单行高度能到 700px，一屏只看得到一条。做法：`clampCell(text, max)` 截到 N 字并写 `title="全文"`，CSS 用 `.cell-clamp{-webkit-line-clamp:2}`；列太多时优先合并（语境证据折进「词条」单元格的第一条），而不是硬塞 9 列导致横向滚动。
+
+### 1.79 图标按钮没有通用类，按页定义一块方形样式
+
+项目里没有 `.btn-icon` 的基础样式（`components.css` 只有 `:not(.btn-icon)` 的排除选择器），时段表格、概览页都是按页写 `width:36px;height:var(--control-h,40px);border:1px solid transparent;border-radius:8px`，hover 变 `--err` + `--danger` 底。黑话表沿用同一套（`.slang-list .row-actions .btn-icon`），**不要**给全局加一个 `.btn-icon` 然后指望各页自动对齐。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

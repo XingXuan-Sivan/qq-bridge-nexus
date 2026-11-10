@@ -82,17 +82,27 @@ function setSlangTab(tab) {
   renderSlangPanel();
 }
 
+/** 表格里只放摘要：超长内容截断并塞进 title，完整内容去「编辑」里看。 */
+function clampCell(text, max = 120) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return '';
+  const short = raw.length > max ? `${raw.slice(0, max)}…` : raw;
+  return `<div class="cell-clamp" title="${esc(raw)}">${esc(short)}</div>`;
+}
+
+const TRASH_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" '
+  + 'stroke-width="1.8" stroke-linecap="round" aria-hidden="true">'
+  + '<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+
 /** 一行 = 一个单元格数组；表格组件负责 thead/tbody 与分页、搜索。 */
 function slangRowCells(e, status) {
   const checked = slangSelected.has(e.id) ? ' checked' : '';
   const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
-  const meaning = e.meaning ? esc(e.meaning) : (status === 'candidate'
-    ? '<span class="meta">待研究</span>' + (guessHtml ? `<br>${guessHtml}<br><button class="btn small" type="button" data-slang-adopt="${esc(e.id)}" title="把推测填进编辑框，改好后再保存">采用为含义</button>` : '')
+  const meaning = e.meaning ? clampCell(e.meaning, 120) : (status === 'candidate'
+    ? '<span class="meta">待研究</span>'
+      + (guessHtml ? `<div class="cell-clamp" title="${esc(e.lastGuess?.meaning || '')}">${guessHtml}</div>`
+        + `<button class="btn small" type="button" data-slang-adopt="${esc(e.id)}" title="把推测填进编辑框，改好后再保存">采用为含义</button>` : '')
     : '<span class="meta">无</span>');
-  const meaningCell = meaning
-    + (e.usage ? '<br><span class="meta">用法：' + esc(e.usage) + '</span>' : '')
-    + (e.example ? '<br><span class="meta">例：' + esc(e.example) + '</span>' : '')
-    + (e.risk ? '<br><span class="meta">风险：' + esc(e.risk) + '</span>' : '');
   const actions = [];
   if (status === 'candidate') {
     actions.push(`<button class="btn small" type="button" data-slang-confirm="${esc(e.id)}">确认</button>`);
@@ -103,15 +113,21 @@ function slangRowCells(e, status) {
   } else {
     actions.push(`<button class="btn small" type="button" data-slang-restore="${esc(e.id)}">恢复候选</button>`);
   }
-  actions.push(`<button class="btn small danger" type="button" data-slang-del="${esc(e.id)}">删</button>`);
+  actions.push(`<button class="btn-icon" type="button" data-slang-del="${esc(e.id)}" title="删除" aria-label="删除 ${esc(e.content)}">${TRASH_SVG}</button>`);
+  const sourceLinks = slangSourcesHtml(e);
+  const evidence = Array.isArray(e.evidence) ? e.evidence : [];
+  const evidenceLine = evidence[0]?.text
+    ? `<div class="cell-clamp" title="${esc(evidence.map((x) => x.text).filter(Boolean).join('\n'))}">`
+      + `<span class="meta">${esc(evidence[0].text)}</span></div>`
+    : '';
   return [
     `<input type="checkbox" data-slang-select="${esc(e.id)}"${checked} aria-label="选择 ${esc(e.content)}">`,
-    `<b>${esc(e.content)}</b><br><span class="${slangStatusClass(status)}">${slangStatusLabel(status)}</span>`,
+    `<b>${esc(e.content)}</b><br><span class="${slangStatusClass(status)}">${slangStatusLabel(status)}</span>${evidenceLine}`,
     esc(e.count),
     esc(slangSourceLabel(e)),
-    meaningCell,
-    slangSourcesHtml(e),
-    slangEvidenceHtml(e),
+    meaning,
+    clampCell(e.usage, 80) || '<span class="meta">—</span>',
+    sourceLinks ? `<div class="cell-clamp">${sourceLinks}</div>` : '<span class="meta">—</span>',
     `<div class="row-actions">${actions.join('')}</div>`,
   ];
 }
@@ -136,20 +152,21 @@ function renderSlangPanel() {
   const list = slangEntriesCache.filter((e) => slangInTab(e, tab));
   host.innerHTML = dataTableHtml({
     columns: [
-      { label: '选择', width: 56 },
-      { label: '词条', width: 170 },
+      { label: '选择', width: 60 },
+      { label: '词条', width: 140 },
       { label: '次数', width: 70 },
-      { label: '来源', width: 100 },
-      { label: '含义 / 用法 / 示例' },
-      { label: '参考来源', width: 150 },
-      { label: '语境证据', width: 190 },
-      { label: '操作', width: 200 },
+      { label: '来源', width: 80 },
+      { label: '含义', width: 200 },
+      { label: '用法', width: 150 },
+      { label: '参考来源', width: 110 },
+      { label: '操作', width: 260 },
     ],
     rows: list.map((e) => slangRowCells(e, status)),
     pageSize: 20,
     sizes: [20, 50, 100],
     search: { placeholder: tab === 'rejected' ? '搜索词条 / 拒绝原因' : '搜索词条 / 含义 / 用法 / 示例 / 来源' },
     refresh: true,
+    actions: '<button class="btn" id="slangAddOpen" type="button">手动添加</button>',
     empty: slangEmptyText(tab, status),
   });
   initDataTables(host, { onRefresh: () => { void refreshSlang(); } });
@@ -369,8 +386,11 @@ export function init() {
   });
 
   // 手动添加：弹窗打开 → 填词条/含义 → 保存（旧的「添加入库」按钮改为弹窗里的提交）。
+  // 按钮在表格自带工具栏里，每次刷新都会重建，所以用 document 级委托。
   const addOverlay = document.getElementById('slangAddOverlay');
-  document.getElementById('slangAddOpen').addEventListener('click', () => {
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest('#slangAddOpen')) return;
     for (const id of ['slangContent', 'slangMeaning', 'slangUsage', 'slangExample']) document.getElementById(id).value = '';
     openModal(addOverlay);
     document.getElementById('slangContent').focus();

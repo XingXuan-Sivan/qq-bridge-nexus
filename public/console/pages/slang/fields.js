@@ -17,9 +17,6 @@ const bar = (status, buttons) => `<div class="slang-bar">
 
 export const SLANG_FIELDS = {
   tabs: { html: TABS_HTML },
-  listActions: {
-    html: `<div class="row-actions"><button class="btn" id="slangAddOpen" type="button">手动添加</button></div>`,
-  },
   barCandidate: {
     html: bar('slangCandidate', `
     <button class="btn small" id="slangBatchResearch" type="button">批量送研究</button>

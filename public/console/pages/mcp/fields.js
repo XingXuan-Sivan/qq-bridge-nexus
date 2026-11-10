@@ -48,9 +48,11 @@ export const MCP_FIELDS = {
       {
         name: 'mcpEditSecrets',
         type: 'textarea',
-        label: '凭据',
-        rows: 3,
+        label: '内容',
+        rows: 6,
+        mono: true,
         span: 2,
+        className: 'field-block--stacked',
         placeholder: '例如：\napiKey=sk-...\nauthorization=Bearer ...',
         hint: '每行 name=value；在连接配置里用 secret:name 引用。',
       },

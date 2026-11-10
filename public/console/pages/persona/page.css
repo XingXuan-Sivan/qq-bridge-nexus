@@ -29,11 +29,7 @@
   gap: 6px;
 }
 
-/* 工具条宽度：与 MCP 页同一标尺（搜索框 320px、筛选按内容收窄）。 */
-#roleSearch {
-  flex: 0 1 320px;
-  max-width: 320px;
-}
-#roleFilter {
-  flex: 0 0 160px;
+/* 空状态占满整行：卡片墙是 grid，不写这条会缩在左侧一格里。 */
+#roleList > .empty-state {
+  grid-column: 1 / -1;
 }

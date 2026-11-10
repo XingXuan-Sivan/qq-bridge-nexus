@@ -25,3 +25,35 @@
 /* 分栏标签跟内容在同一张卡里：标签条紧贴卡片标题，下沿细线直接接到操作条 */
 .card > .slang-tabs { margin: 10px 0 0; }
 .slang-panel > .slang-bar:first-child { padding-top: 12px; }
+
+/* 长文本列只显示摘要：两行截断，完整内容在 title 里（含义/用法/参考来源/语境证据共用）。 */
+.slang-list .cell-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.slang-list .cell-clamp--3 {
+  -webkit-line-clamp: 3;
+}
+
+/* 垃圾桶按钮：项目没有通用 .btn-icon，按 config 页时段表格的写法给本页单独定义。 */
+.slang-list .row-actions .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: var(--control-h, 40px);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.slang-list .row-actions .btn-icon:hover {
+  color: var(--err);
+  border-color: var(--danger-border);
+  background: var(--danger);
+}

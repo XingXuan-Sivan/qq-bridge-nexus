@@ -4,24 +4,10 @@
 const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
   <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
   <div class="metric"><span>SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
-  <div class="metric"><span>当前运行模式</span><strong id="metricMode">—</strong><small id="metricRole">正在读取角色</small></div>
+  <div class="metric"><span>当前运行方案</span><strong id="metricMode">—</strong><small id="metricRole">正在读取角色</small></div>
   <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
   <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
 </div>`;
-
-const MODE_HTML = `<div class="mode-row" id="modeRow">
-  <button data-mode="chat" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>聊天模式</strong><small>白名单内，随时对话</small></button>
-  <button data-mode="closed-agent" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>封闭 Agent</strong><small>仅管理员私聊，L1/L2/L3 分级</small></button>
-  <button data-mode="reserved" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>一代仿真</strong><small>按策略自然参与群聊</small></button>
-  <button data-mode="reserved2" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>二代仿真</strong><small>自主阅读、发言与潜水</small></button>
-</div>`;
-
-// 管理通道状态：只读一行。紧急关闭按钮已挪到「调试与运维 › 桥接控制」，与重启/清空工作区同组，
-// 避免在运行模式卡里误点（这里本来就是低频破坏性操作）。
-const ADMIN_ROW = `<div class="control-row">
-  <span class="meta control-grow" id="adminStatus">管理通道状态读取中…</span>
-</div>
-<div class="meta">切换后即时保存。仿真参数可在左侧对应页面调整；封闭 Agent 仅允许管理员私聊。v0.3.0 起所有模式变更都会私聊通知管理员，并写入 state/admin/audit.jsonl；高权限闲置超时自动回落。</div>`;
 
 const ACTIVITY_HTML = `<pre id="activity" class="activity-log">（空）</pre>`;
 
@@ -75,30 +61,6 @@ const DSH_NOTES = `<div id="dshModelNotices"></div>
 export const OVERVIEW_FIELDS = {
   // 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），不能再套 .card 或字段外壳。
   metrics: { bare: true, html: METRICS_HTML },
-  mode: {
-    fields: [
-      { name: 'overviewMode', type: 'custom', span: 2, html: MODE_HTML },
-      {
-        name: 'closedPreset',
-        type: 'select',
-        label: 'DSH 预设',
-        options: [{ value: '', label: '（DSH 默认 preset）' }],
-        hint: '封闭 Agent 自选 DSH 预设（仅 admin.allowCustomAgentPreset=true 时对 L2/L3 生效，且没有审批闸门）。',
-      },
-      {
-        name: 'closedLevel',
-        type: 'select',
-        label: '权限级别',
-        value: 'L2',
-        options: [
-          { value: 'L1', label: 'L1 本地只读（只读工具白名单）' },
-          { value: 'L2', label: 'L2 工作区读写（危险操作需审批）' },
-          { value: 'L3', label: 'L3 高权限（需 TOTP 动态码 + 每次审批）' },
-        ],
-      },
-      { name: 'overviewAdmin', type: 'custom', span: 2, html: ADMIN_ROW },
-    ],
-  },
   activity: {
     fields: [{ name: 'overviewActivity', type: 'custom', span: 2, html: ACTIVITY_HTML }],
   },

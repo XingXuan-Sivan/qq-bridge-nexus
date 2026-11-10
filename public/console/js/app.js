@@ -73,18 +73,13 @@ function renderSnowlumaHealth(sl) {
 async function refresh() {
   try {
     const s = await api('/api/status');
-    document.querySelectorAll('#modeRow button').forEach(b => (b.classList.toggle('active', b.dataset.mode === s.mode), b.setAttribute('aria-pressed', String(b.dataset.mode === s.mode))));
+    // 运行方案与权限级别由「运行方案」页负责切换；这里只把当前生效值投影到概览指标。
     const modeLabel = s.mode === 'reserved' ? '一代仿真模式' : s.mode === 'reserved2' ? '二代仿真模式' : s.mode === 'closed-agent' ? '封闭 Agent' : '聊天模式';
-    updateOverview(s, s.mode === 'closed-agent' && s.level ? `${modeLabel}（${s.level}）` : modeLabel);
-    const adminEl = document.getElementById('adminStatus');
-    if (adminEl) adminEl.textContent = `当前级别 ${s.level || 'L0'}；待确认申请 ${s.adminPendingRequests ?? 0}；待审批 ${s.pendingApprovals ?? 0}`;
-    const levelSel = document.getElementById('closedLevel');
-    if (levelSel && s.mode === 'closed-agent' && s.level && document.activeElement !== levelSel) levelSel.value = s.level;
+    // P5 起总览显示方案名（方案是唯一入口）；旧模式名只在方案缺失时兜底。
+    updateOverview(s, s.planLabel || (s.mode === 'closed-agent' && s.level ? `${modeLabel}（${s.level}）` : modeLabel));
     const activityEl = document.getElementById('activity');
     if (activityEl) activityEl.textContent = s.activity || '（空）';
     renderSendLimitHits(s.sendLimit);
-    const presetSel = document.getElementById('closedPreset');
-    if (presetSel && document.activeElement !== presetSel) presetSel.value = s.closedAgentPreset || '';
   } catch (e) {
     const status = document.getElementById('statusText');
     if (status) status.textContent = '连接中断 · 请检查桥接服务';

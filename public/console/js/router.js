@@ -20,6 +20,7 @@ else { initDateFields(); initTimeFields(); }
 export const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
   config: ['全局配置', '把工具与能力，装进一套配置。', '运行模式、安全与静默、准入、行为档案与系统能力收在一页；预设页只保留预设本体。'],
+  runtime: ['运行方案', '把能力、行为与受众，配成一套方案。', '切换运行方案；确认、审计与回落仍由管理通道负责。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
@@ -40,7 +41,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory', 'runtime']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

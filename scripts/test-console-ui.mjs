@@ -153,7 +153,7 @@ try {
     const ids = await page.locator('[id]').evaluateAll(nodes => nodes.map(x => x.id));
     // G3 删除了 social-v1 / social-v2 / access 三页；这些页的旧 id 记在 retired 基线里，
     // 其余历史 id 仍必须存在，避免后续改版悄悄删掉仍在用的字段。
-    assert.equal(legacyIds.length, 198);
+    assert.equal(legacyIds.length, 196);
     const missing = legacyIds.filter(x => !ids.includes(x) && !retiredIds.has(x));
     assert.deepEqual(missing, []);
     assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
@@ -377,19 +377,28 @@ try {
     assert.equal(body?.data?.config?.contextWindow, 25);
   });
 
-  await test('Mode and preset contracts', async () => {
-    await navigate('config');
-    await page.locator('[data-config-section="runtime"]').click();
-    // closed-agent 分级是改版后的能力：切到该模式时载荷会多带 level（默认 L2）。
-    for (const mode of ['chat', 'reserved', 'reserved2', 'closed-agent']) {
-      const expected = mode === 'closed-agent'
-        ? { mode, closedAgentPreset: '', level: 'L2' }
-        : { mode, closedAgentPreset: '' };
-      assert.deepEqual(await clickWrite(`#modeRow [data-mode="${mode}"]`, '/api/mode'), expected);
-    }
-    const select = await reveal('#closedPreset');
-    await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/mode') && r.request().method() === 'POST'), select.selectOption('qq-chat-v2')]);
-    assert.deepEqual(fixture.requests.at(-1).body, { mode: 'closed-agent', closedAgentPreset: 'qq-chat-v2', level: 'L2' });
+  await test('Runtime plan switch contracts', async () => {
+    await navigate('runtime');
+    // 切换走运行方案页：方案 id 由下拉给出，OTP 留空；确认、审计与回落仍由管理通道负责。
+    await reveal('#runtimePlan');
+    await page.selectOption('#runtimePlan', 'social-v2');
+    assert.deepEqual(await clickWrite('#runtimeSwitch', '/api/runtime/switch'), { planId: 'social-v2', totp: '' });
+  });
+
+  await test('Runtime plan editor contracts', async () => {
+    await navigate('runtime');
+    await reveal('#runtimeNew');
+    await page.click('#runtimeNew');
+    await page.waitForSelector('#runtimePlanEditor .modal', { timeout: 5000 });
+    await page.fill('#runtimeEditId', 'my-agent');
+    await page.fill('#runtimeEditLabel', '我的 Agent');
+    await page.selectOption('#runtimeEditTools', 'qq-chat');
+    await page.selectOption('#runtimeEditBehavior', 'social-v2');
+    await page.selectOption('#runtimeEditAudience', 'owner');
+    await page.fill('#runtimeEditNote', '带人格进群');
+    assert.deepEqual(await clickWrite('#runtimeEditSave', '/api/runtime/plans'), {
+      id: 'my-agent', label: '我的 Agent', tools: 'qq-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+    });
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {

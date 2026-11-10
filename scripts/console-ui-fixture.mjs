@@ -657,6 +657,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         requests.push({ method, path, body });
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
       }
+      // 运行方案：删除自定义方案（前缀匹配，id 在路径里）。
+      if (method === 'DELETE' && path.startsWith('/api/runtime/plans/')) return json({ ok: true });
       // 预设：新建 / 插件配置 / 还原出厂（表单化后控制台只走这三个写接口）。
       if (method === 'POST' && path === '/api/extensions/presets/create') {
         return json({ ok: true, id: body?.id ?? 'new-preset', from: body?.from ?? '', presets: [] });
@@ -758,6 +760,30 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
             return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
           }
+          case '/api/config/behaviors': return json({
+            ok: true,
+            behaviors: [
+              { id: 'social-v1', label: '一代仿真', kind: 'v1' },
+              { id: 'social-v2', label: '二代仿真', kind: 'v2' },
+            ],
+            configDefaultBehavior: 'social-v2',
+            presetBehaviors: {},
+          });
+          case '/api/runtime/plans': return json({
+            ok: true,
+            platform: 'qq',
+            active: state.planId || 'social-v2',
+            fallbackPlan: 'social-v2',
+            resetOnRestart: false,
+            idleMinutes: 10,
+            legacy: { mode: state.mode, level: state.level || 'L0' },
+            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', tools: 'qq-chat-v2', behavior: 'social-v2', audience: 'access' },
+            plans: [
+              { id: 'chat', label: '聊天', note: '白名单内随时对话', tools: 'qq-chat', behavior: 'none', audience: 'access', builtin: true },
+              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', tools: 'qq-chat-v2', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', tools: 'qq-agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
+            ],
+          });
           case '/api/presets': return json({ presets: [{ id: 'qq-chat-v2', trust: 'user' }, { id: 'qq-chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
           // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。
@@ -1216,6 +1242,13 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (body.name === '小鲸鱼') { state.restoredWhale = true; return json({ ok: true, name: '小鲸鱼', created: false, unchanged: false, backup: '小鲸鱼-20261026-090000.md', refresh: { apply: body.apply || 'nextWake', woke: [], pending: 2 } }); }
             state.restoredTsundere = true; return json({ ok: true, name: body.name, created: true, unchanged: false, backup: null, refresh: { apply: body.apply || 'nextWake', notActive: true } });
           case '/api/stickers/describe': state.stickerDescribed = true; return json({ ok: true, started: true, total: 21, undescribed: 10, running: true, progress: { done: 0, total: 10 }, last: null, blocker: '', model: 'deepseek-flash', max: 20 });
+          case '/api/runtime/plans': {
+            if (!body?.id) return json({ ok: false, error: '方案 id 或能力预设不合法' }, 400);
+            state.customPlans = state.customPlans || {};
+            state.customPlans[body.id] = { ...body };
+            return json({ ok: true, plan: body });
+          }
+          case '/api/runtime/switch': state.planId = body.planId; return json({ ok: true, active: body.planId, plan: { id: body.planId }, mode: state.mode, level: state.level || 'L0', dshSynced: true });
           case '/api/mode': state.mode = body.mode; state.closedAgentPreset = body.closedAgentPreset; return json({ ok: true, dshSynced: true });
           case '/api/persona/external/card': {
             const card = state.externalPersonas[body.name];

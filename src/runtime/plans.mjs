@@ -157,3 +157,40 @@ export function planIdForLegacy(mode, level = 'L0') {
 export function findPlan(plans, planId) {
   return (plans || []).find((plan) => plan.id === planId) ?? null;
 }
+
+/** 只保留要写进配置的字段：builtin 是投影出来的，不落盘。 */
+export function planToConfig(plan) {
+  const normalized = normalizePlan(plan);
+  if (!normalized) return null;
+  const { builtin, ...rest } = normalized;
+  return rest;
+}
+
+/**
+ * 在自定义方案列表里新增或更新一条。内置方案的 id 不允许占用（要改就克隆）。
+ * @returns {{plans:object[], plan:object}} 新的自定义方案数组（不含内置）
+ */
+export function upsertCustomPlan(current, input) {
+  const plan = planToConfig(input);
+  if (!plan) throw new Error('方案 id 或能力预设不合法');
+  if (BUILTIN_PLANS.some((builtin) => builtin.id === plan.id)) {
+    throw new Error('内置方案是只读的，请先克隆一份再改');
+  }
+  const list = (Array.isArray(current) ? current : []).map(planToConfig).filter(Boolean);
+  const index = list.findIndex((item) => item.id === plan.id);
+  if (index >= 0) list[index] = plan;
+  else list.push(plan);
+  return { plans: list, plan };
+}
+
+/** 删除一条自定义方案；内置不可删。 */
+export function removeCustomPlan(current, planId) {
+  if (BUILTIN_PLANS.some((builtin) => builtin.id === planId)) {
+    throw new Error('内置方案不能删除');
+  }
+  const list = (Array.isArray(current) ? current : []).map(planToConfig).filter(Boolean);
+  const next = list.filter((item) => item.id !== planId);
+  if (next.length === list.length) throw new Error('没有这个方案');
+  return next;
+}
+

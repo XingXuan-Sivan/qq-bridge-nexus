@@ -87,44 +87,22 @@
   },
   {
     "method": "POST",
-    "path": "/api/mode",
+    "path": "/api/runtime/switch",
     "body": {
-      "mode": "chat",
-      "closedAgentPreset": ""
+      "planId": "social-v2",
+      "totp": ""
     }
   },
   {
     "method": "POST",
-    "path": "/api/mode",
+    "path": "/api/runtime/plans",
     "body": {
-      "mode": "reserved",
-      "closedAgentPreset": ""
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/api/mode",
-    "body": {
-      "mode": "reserved2",
-      "closedAgentPreset": ""
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/api/mode",
-    "body": {
-      "mode": "closed-agent",
-      "closedAgentPreset": "",
-      "level": "L2"
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/api/mode",
-    "body": {
-      "mode": "closed-agent",
-      "closedAgentPreset": "qq-chat-v2",
-      "level": "L2"
+      "id": "my-agent",
+      "label": "我的 Agent",
+      "tools": "qq-chat",
+      "behavior": "social-v2",
+      "audience": "owner",
+      "note": "带人格进群"
     }
   },
   {

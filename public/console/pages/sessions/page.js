@@ -619,16 +619,12 @@ function renderDetail(data) {
 
   renderFields(formHost('run'), [
     {
-      name: 'detailMode', type: 'select', label: '模式', value: data.mode || 'inherit',
-      options: [['inherit', '跟随全局'], ['chat', '聊天模式'], ['reserved', '一代仿真'], ['reserved2', '二代仿真']]
-        .map(([value, label]) => ({ value, label })),
-      hint: `当前生效：${data.effectiveMode || '—'}`,
-    },
-    {
-      name: 'detailPresetId', type: 'select', label: 'DSH 预设', value: data.presetId || '',
-      options: [{ value: '', label: '跟随模式默认' }, ...(Array.isArray(data.presets) ? data.presets : [])
-        .map((id) => ({ value: id, label: id }))],
-      hint: '只影响这个会话的 DSH 会话；保存后下次唤醒按指纹自动重建。',
+      name: 'detailPlan', type: 'select', label: '运行方案', value: data.planId || '',
+      options: [
+        { value: '', label: `跟随全局（当前：${data.activePlan?.label || data.activePlan?.id || '—'}）` },
+        ...(Array.isArray(data.plans) ? data.plans : []).map((p) => ({ value: p.id, label: p.label || p.id })),
+      ],
+      hint: '方案决定能力预设、行为档案与受众；模型与人格在下面单独设置。',
     },
     {
       name: 'detailModelProvider', type: 'select', label: '模型', value: data.model?.provider || '',
@@ -774,11 +770,8 @@ function buildDetailPatch() {
   const displayName = String(document.getElementById('detailDisplayName')?.value ?? '').trim();
   if (displayName !== String(data.displayName || '')) patch.displayName = displayName;
 
-  const mode = document.getElementById('detailMode')?.value || 'inherit';
-  if (mode !== (data.mode || 'inherit')) patch.mode = mode;
-
-  const presetId = document.getElementById('detailPresetId')?.value || '';
-  if (presetId !== (data.presetId || '')) patch.presetId = presetId;
+  const planId = document.getElementById('detailPlan')?.value || '';
+  if (planId !== (data.planId || '')) patch.planId = planId;
 
   const provider = document.getElementById('detailModelProvider')?.value || '';
   const model = provider

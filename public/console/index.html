@@ -37,13 +37,14 @@
     <nav id="mainNav">
       <div class="nav-label">管理</div>
       <button data-view="overview" class="nav-item active" aria-current="page"><span class="nav-icon" aria-hidden="true">◫</span>运行总览</button>
-      <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
       <button data-view="sessions" class="nav-item"><span class="nav-icon" aria-hidden="true">☷</span>会话与审批<span class="nav-count" id="pendingCount" hidden></span></button>
-      <button data-view="presets" class="nav-item"><span class="nav-icon" aria-hidden="true">▦</span>预设</button>
+      <button data-view="runtime" class="nav-item"><span class="nav-icon" aria-hidden="true">◎</span>运行方案</button>
       <button data-view="config" class="nav-item"><span class="nav-icon" aria-hidden="true">⚙</span>全局配置</button>
+      <button data-view="operations" class="nav-item"><span class="nav-icon" aria-hidden="true">⌘</span>调试与运维</button>
       <div class="nav-label">聊天行为</div>
       <button data-view="prompt-blocks" class="nav-item"><span class="nav-icon" aria-hidden="true">❏</span>注入块</button>
       <button data-view="behavior" class="nav-item"><span class="nav-icon" aria-hidden="true">◈</span>行为档案</button>
+      <button data-view="presets" class="nav-item"><span class="nav-icon" aria-hidden="true">▦</span>预设</button>
       <button data-view="persona" class="nav-item"><span class="nav-icon" aria-hidden="true">◉</span>人格与角色</button>
       <button data-view="memory" class="nav-item"><span class="nav-icon" aria-hidden="true">◍</span>记忆</button>
       <button data-view="slang" class="nav-item"><span class="nav-icon" aria-hidden="true">▤</span>黑话词库</button>
@@ -69,6 +70,7 @@
       <div class="grid">
         <section id="section-overview" data-page="overview" class="page-stack"><!-- 片段：pages/overview/page.html（摘要指标 / 活动日志） --></section>
 <section id="section-config" data-page="config" class="page-stack"><!-- 片段：pages/config/page.html（全局配置六分区） --></section>
+<section id="section-runtime" data-page="runtime" class="page-stack"><!-- 片段：pages/runtime/page.html（当前方案 / 切换 / 清单） --></section>
 <section id="section-sessions" data-page="sessions" class="page-stack"><!-- 片段：pages/sessions/page.html（会话映射 / 挂起审批与提问） --></section>
 <section id="section-persona" data-page="persona" class="page-stack"><!-- 人格与角色页内容由 pages/persona/page.html 注入。 --></section>
 <section id="section-plugins" data-page="plugins" class="page-stack"><!-- 片段：pages/plugins/page.html（桥接插件 / 内置注入块 / 运行设置 / 安装） --></section>

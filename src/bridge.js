@@ -84,7 +84,7 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
-import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from './runtime/plans.mjs';
+import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
@@ -5860,9 +5860,12 @@ async function main() {
             });
             return;
           }
+          const statusPlan = activePlan();
           sendJson({
             mode: currentMode,
             level: currentLevel,
+            planId: statusPlan?.id ?? null,
+            planLabel: statusPlan?.label ?? null,
             closedAgentPreset,
             adminPendingRequests: ext.controller.pendingRequests().length,
             botAccount,
@@ -6848,6 +6851,43 @@ async function main() {
           });
           return;
         }
+        // 保存 / 更新一套自定义方案（P5）：内置方案只读，要改先克隆。
+        if (req.method === 'POST' && url.pathname === '/api/runtime/plans') {
+          const body = await readBody();
+          try {
+            const current = cfg.runtime?.plans;
+            const { plans: nextPlans, plan } = upsertCustomPlan(current, body);
+            const merged = { ...(cfg.runtime ?? {}), plans: nextPlans };
+            cfg.runtime = merged;
+            saveConfigSection('runtime', merged);
+            runtimeState = null; // 下次 ensureRuntime() 重新读配置里的定义
+            ensureRuntime();
+            sendJson({ ok: true, plan, plans: runtimePlans });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message || '保存失败' }, 400);
+          }
+          return;
+        }
+        // 删除一套自定义方案；正在使用的方案不允许直接删（先切走）。
+        if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/plans/')) {
+          const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/runtime/plans/'.length)));
+          if (planId && ensureRuntime().get() === planId) {
+            sendJson({ ok: false, error: '这套方案正在使用，先切到别的方案再删' }, 409);
+            return;
+          }
+          try {
+            const nextPlans = removeCustomPlan(cfg.runtime?.plans, planId);
+            const merged = { ...(cfg.runtime ?? {}), plans: nextPlans };
+            cfg.runtime = merged;
+            saveConfigSection('runtime', merged);
+            runtimeState = null;
+            ensureRuntime();
+            sendJson({ ok: true, plans: runtimePlans });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message || '删除失败' }, 400);
+          }
+          return;
+        }
         // 切换 / 清除人格后的生效方式：nextWake = 各会话下一次唤醒时带上新卡；immediate = 现在就唤醒一次。
         // 聊天模式 / 一代仿真每条消息都带角色卡，切换本来就立即生效。
         // onlyKeys：只看这些会话（按会话设置人格时只管保存的那一个，不顺带叫醒别的还没读新卡的会话）
@@ -7702,6 +7742,10 @@ async function main() {
               wake,
               mode: profile?.mode ?? 'inherit',
               effectiveMode: effectiveMode(key),
+              // P5：会话级的运行方案下拉（跟随全局 = null）。presetId 仍保留供旧客户端读取。
+              planId: profile?.planId ?? null,
+              plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, tools: p.tools, audience: p.audience, builtin: p.builtin })),
+              activePlan: activePlan()?.id ?? null,
               presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
               model: profile?.model ?? null,
@@ -7743,6 +7787,12 @@ async function main() {
             if (Object.hasOwn(body, 'mode')) {
               if (!['inherit', 'chat', 'reserved', 'reserved2'].includes(body.mode)) { sendJson({ ok: false, error: '运行模式取值无效' }, 400); return; }
               patch.mode = body.mode;
+            }
+            if (Object.hasOwn(body, 'planId')) {
+              const raw = String(body.planId ?? '').trim();
+              if (!raw) patch.planId = null;
+              else if (!findPlan(runtimePlans, normalizeRuntimePlanId(raw))) { sendJson({ ok: false, error: '没有这个运行方案' }, 400); return; }
+              else patch.planId = raw;
             }
             if (Object.hasOwn(body, 'presetId')) {
               const raw = String(body.presetId ?? '').trim();

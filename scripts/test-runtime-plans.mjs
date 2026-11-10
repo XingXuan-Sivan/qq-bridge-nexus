@@ -12,6 +12,9 @@ import {
   legacyLevelOfPlan,
   planIdForLegacy,
   findPlan,
+  upsertCustomPlan,
+  removeCustomPlan,
+  planToConfig,
 } from '../src/runtime/plans.mjs';
 import { createRuntimeState, RUNTIME_STATE_VERSION } from '../src/runtime/active.mjs';
 
@@ -74,4 +77,23 @@ test('激活指针：首次迁移只写一次，之后 set/get 持久化', () =>
   again.set('qq', '');
   assert.equal(again.get(), null, '空串 = 清掉指针');
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).active, {});
+});
+
+test('自定义方案：新增/更新落盘字段、内置 id 拒绝、删除保护', () => {
+  const created = upsertCustomPlan([], {
+    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+  });
+  assert.equal(created.plans.length, 1);
+  assert.deepEqual(created.plans[0], {
+    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+  });
+  const updated = upsertCustomPlan(created.plans, { ...created.plans[0], label: '改名后', builtin: true });
+  assert.equal(updated.plans.length, 1);
+  assert.equal(updated.plans[0].label, '改名后');
+  assert.equal(planToConfig(updated.plans[0]).builtin, undefined);
+  assert.throws(() => upsertCustomPlan([], { id: 'chat', tools: 'qq-chat' }), /内置方案/);
+  assert.throws(() => removeCustomPlan(updated.plans, 'chat'), /内置方案/);
+  const afterDelete = removeCustomPlan(updated.plans, 'my-agent');
+  assert.deepEqual(afterDelete, []);
+  assert.throws(() => removeCustomPlan(afterDelete, 'my-agent'), /没有这个方案/);
 });

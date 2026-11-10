@@ -98,67 +98,6 @@ function renderOverviewFieldGroups() {
   });
 }
 
-// ── 运行模式 ────────────────────────────────────────────────────────────────
-function setActiveMode(mode) {
-  document.querySelectorAll('#modeRow button').forEach((b) => {
-    const active = b.dataset.mode === mode;
-    b.classList.toggle('active', active);
-    b.setAttribute('aria-pressed', String(active));
-  });
-}
-
-async function refreshPresets() {
-  try {
-    const r = await api('/api/presets');
-    const sel = $('closedPreset');
-    sel.innerHTML = '';
-    // 空值 = 使用 DSH 自己声明的默认 preset（closed-agent 的推荐选择）
-    const defOpt = document.createElement('option');
-    defOpt.value = '';
-    defOpt.textContent = '（DSH 默认 preset）';
-    sel.appendChild(defOpt);
-    for (const p of r.presets) {
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = p.id + (p.trust === 'user' ? '（用户）' : '');
-      sel.appendChild(opt);
-    }
-  } catch {} finally {
-    // 选项填好后再让 app.js 刷新一次状态：refresh() 会带回 closedAgentPreset，
-    // 否则它可能在空选项上先跑，选中的 preset 看起来「丢了」。
-    requestStatusRefresh();
-  }
-}
-
-async function saveMode(mode) {
-  // 不再硬编码 'router-standard'（DSH 0.1.5 已无此 preset）；
-  // 留空表示让桥接使用 DSH 自己声明的默认 preset。
-  const preset = $('closedPreset').value || '';
-  const body = { mode, closedAgentPreset: preset };
-  if (mode === 'closed-agent') {
-    body.level = $('closedLevel').value || 'L2';
-    if (body.level === 'L3') {
-      const code = prompt('L3 高权限需要验证器上的 6 位动态码（TOTP）：');
-      if (!code) return { ok: false };
-      body.totp = code.trim();
-    }
-  }
-  const r = await api('/api/mode', 'POST', body);
-  if (r.ok) {
-    // 先把按钮切过去给即时反馈；随后 app.js 的 refresh() 以服务端状态为准。
-    setActiveMode(mode);
-    requestStatusRefresh();
-    // 桥接会把模式写穿到 DSH 设置；写穿失败时本地值会在下一次 5 秒轮询被覆盖回滚。
-    // 不提示的话用户只会看到「刚切过去又自己变回来了」，无从判断原因。
-    if (r.dshSynced === false) {
-      alert('模式已写入本地，但未能同步到 DSH 设置（DSH 未运行？）——\n下一次轮询（约 5 秒）会把模式改回去。请检查 DSH 与桥接日志。');
-    }
-  } else {
-    alert(r.error || '切换失败');
-  }
-  return r;
-}
-
 // ── DSH 模型与思考强度 ──────────────────────────────────────────────────────
 // 提供方 / 模型 / 思考强度三个下拉联动，选项全部来自桥接转发的 DSH 模型目录（GET /api/dsh/model 的 providers）；
 // 目录取不到时只显示当前配置（保存会被服务端拒绝）。服务端会再校验一次，页面只负责好用。
@@ -568,20 +507,6 @@ export function init() {
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
 
-  // 运行模式
-  const modeHeading = document.querySelector('#section-mode h2');
-  if (modeHeading) modeHeading.dataset.note = '选择后即时生效';
-  document.querySelectorAll('#modeRow button').forEach((b) => b.addEventListener('click', async () => {
-    if (b.disabled) return;
-    await saveMode(b.dataset.mode);
-  }));
-  $('closedPreset').addEventListener('change', async () => {
-    // 切换预设立即保存（若当前是 closed-agent 则即时生效，否则供下次切换使用）
-    const active = document.querySelector('#modeRow button.active');
-    const mode = active ? active.dataset.mode : 'chat';
-    await saveMode(mode);
-  });
-
   // DSH 模型与思考强度
   $('dshProviderSelect').addEventListener('change', () => { dshFillModels(); dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
   $('dshModelSelect').addEventListener('change', () => { dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
@@ -647,7 +572,6 @@ export function init() {
 
   // 进入本页 / 切回来：重读本页负责的配置型数据；摘要与活动日志仍由 app.js 写。
   const refreshOverviewPage = () => setTimeout(async () => {
-    refreshPresets();
     refreshSilence();
     await reloadConfigSections();
   }, 0);

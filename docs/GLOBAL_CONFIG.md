@@ -39,6 +39,7 @@
 
 - 删除 `social-v1`、`social-v2`、`access` 三个页面及导航/路由/片段；
 - 新增 `config`（「全局配置」），放在「管理行为」之后、「定时任务」之前；
+- 新增 `prompt-blocks`（「注入块」）与 `runtime`（「运行方案」）两页：前者是提示词拼装的唯一入口（插件页不再有注入块卡）；后者是"能力预设 + 行为档案 + 受众"的唯一切换入口（全局配置页不再有「运行模式」卡）；
 - 保留 `presets`（预设层）、`sessions`（会话层）、`persona`（人格卡库）、`behaviors`（命令/工具参考）、`mcp`/`skills`/`plugins`（扩展注册）、`memory`/`scheduler`/`usage`/`operations`。
 
 ### 2.2 当前文件与内容

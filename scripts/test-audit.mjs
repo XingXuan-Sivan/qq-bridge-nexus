@@ -134,6 +134,8 @@ const tests = [
   'test-prompt-registry.mjs',
   // 配置归一（P3）：定时任务/定时静默/插件配置的设置存 config，状态文件只留运行态，旧文件首读迁移。
   'test-config-unify.mjs',
+  // 运行方案（P4）：定义归一、legacy 投影、激活指针的一次性迁移。
+  'test-runtime-plans.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
   'test-skills-index.mjs',
   // 外部技能存储（P3）：frontmatter 校验、写入/备份/启停/删除、ZIP 导入与路径边界。

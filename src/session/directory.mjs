@@ -92,6 +92,8 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     displayName: normalizeString(raw.displayName, 120),
     ...(legacyAccess ? { legacyAccess } : {}),
     mode: MODE_VALUES.has(raw.mode) ? raw.mode : 'inherit',
+    // 运行方案覆盖（P4）：与 mode 二选一，planId 优先；保留 mode 兼容旧数据。
+    planId: normalizeString(raw.planId, 40) || null,
     persona: { mode: personaMode, name: personaMode === 'card' ? personaName || null : null },
     prompt: { initialText, updatedAt: Number(promptRaw.updatedAt) > 0 ? Number(promptRaw.updatedAt) : 0 },
     wake: { config: wakeRaw.config && typeof wakeRaw.config === 'object' ? wakeRaw.config : null },
@@ -127,6 +129,7 @@ export function createProfile(key, patch = {}, now = Date.now) {
     key: canonical,
     displayName: '',
     mode: 'inherit',
+    planId: null,
     persona: { mode: 'inherit', name: null },
     prompt: { initialText: '', updatedAt: 0 },
     wake: { config: null },
@@ -159,7 +162,7 @@ export function createProfile(key, patch = {}, now = Date.now) {
 export function applyPatch(profile, patch, now = Date.now) {
   const next = structuredClone(profile);
   const p = patch && typeof patch === 'object' ? patch : {};
-  for (const field of ['displayName', 'mode', 'presetId']) {
+  for (const field of ['displayName', 'mode', 'planId', 'presetId']) {
     if (Object.hasOwn(p, field)) next[field] = p[field];
   }
   if (p.persona && typeof p.persona === 'object') {

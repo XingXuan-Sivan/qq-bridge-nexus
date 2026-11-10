@@ -98,9 +98,9 @@
 {
   "defaults": { "behavior": "social-v2", "persona": "soulkit:saren" },
   "runtime": {
-    "plans": [ /* 自定义方案；内置在代码里，只读 */ ],
-    "fallbackPlan": "chat",
-    "idleMinutes": 15,
+    "plans": [ /* 自定义方案；内置 6 条在 src/runtime/plans.mjs，只读 */ ],
+    "fallbackPlan": "social-v2",
+    "idleMinutes": 10,
     "resetOnRestart": true
   },
   "capabilities": {                 // 键 = DSH 预设 id
@@ -213,7 +213,7 @@
 | **P1** | 注入块内核：注册表 v2（slot/timing/profiles/settings/priority/refresh）、单一装配器（wake+reminder）、26 块迁移、`buildWakePromptV2Core` 退化为「建 ctx + renderProfileSync」、`withSlangContext` 改走 context 档案、快照进块、golden 逐字节夹具 | 无（golden 等价） | 是（验证真实投递） |
 | **P2** | 注入块页（`GET /api/prompt-blocks`、`POST /api/prompt-preview`、表格里改开关与上限）+ 插件页移除注入块卡；预算与人格上限迁到 `config.limits.promptBlocks` / `config.limits.personaInjectChars`；`prompt-blocks.json` 改名 `prompt-block-state.json` | 无 | 是（新接口 + 状态文件改名） |
 | **P3** | 配置归一（非运行部分）：`plugins.json` → `config.plugins`、`scheduler.settings` → `config.scheduler`、静默 → `config.silence`、`current-role.json` 的 `silent` → `config.silence.manual` | 无（等价迁移，备份） | 是（读配置） |
-| **P4** | 运行方案数据层：`plans.mjs` / `capabilities.mjs` / `resolvePlan` / `legacyMode` 投影 / `state/runtime.json` / plan-control（确认、审计、TOTP、闲置回落、重启不继承）/ 切换 API / 迁移脚本（干跑+备份+幂等） | 无（等价映射） | 是 |
+| **P4** | 运行方案数据层：`src/runtime/plans.mjs`（6 条内置 + 归一 + legacy 投影 + `planIdForLegacy`）、`src/runtime/active.mjs`（`state/runtime.json` 指针、一次性迁移、原子写）、`effectiveMode` 改用方案投影、会话档案新增 `planId`、`GET /api/runtime/plans` / `POST /api/runtime/switch`（确认、审计、TOTP、回落仍走 `mode-control`） | 无（等价映射） | 是 |
 | **P5** | 运行方案控制台：新页、全局配置删模式卡、会话详情合并、导航与总览 | 无 | 否 |
 | **P6** | 拆三处硬编码：agent 进群、agent 带行为、kind 解耦 | **有**（能力放开） | 是 |
 | **P7** | 行为 kind 接口 + 行为档案表格页；能力预设 provider + 页面（沙箱、grants）；工具目录改名 + 调用入口 `grants` 校验 | 无（默认等价） | 是 |

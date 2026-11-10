@@ -84,6 +84,8 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
+import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from './runtime/plans.mjs';
+import { createRuntimeState } from './runtime/active.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
 import {
@@ -1100,6 +1102,13 @@ function normalizePersonaInjectChars(raw) {
   return ROLE_INJECT_MAX_CHARS_DEFAULT;
 }
 
+/** 运行方案 id：只接受与注册表同形的短横线小写 id，非法值一律视为「没配」。 */
+function normalizeRuntimePlanId(value) {
+  if (typeof value !== 'string') return '';
+  const id = value.trim();
+  return /^[a-z][a-z0-9-]{1,39}$/.test(id) ? id : '';
+}
+
 /**
  * 平台段：`platform.id`（默认 qq）。
  *
@@ -1580,6 +1589,17 @@ function loadConfig() {
     personaInjectChars: cfg.role.maxInjectChars,
     promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
+
+  // 运行方案（P4）：定义在 config.runtime.plans，当前指针在 state/runtime.json。
+  // 旧 state/mode.json 只作为首次迁移的输入；之后 mode/level 由方案的 legacy 投影得出。
+  cfg.runtime = {
+    plans: Array.isArray(file.runtime?.plans) ? file.runtime.plans : [],
+    fallbackPlan: normalizeRuntimePlanId(file.runtime?.fallbackPlan) || 'social-v2',
+    idleMinutes: Number(file.runtime?.idleMinutes) > 0 ? Number(file.runtime.idleMinutes) : 10,
+    resetOnRestart: file.runtime?.resetOnRestart !== false,
+  };
+  // 方案数组只原样保留；归一与合并内置动作留给 ensureRuntime()（配置重载后也能刷新）。
+
 
   // 行为档案：QQ 交互参数按预设绑定，不再塞在 config.social/socialV2。
   cfg.behaviors = loadBehaviorProfiles({ root: path.join(ROOT, 'config', 'behaviors'), log });
@@ -3784,6 +3804,9 @@ async function main() {
   let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
+  // 运行方案（P4）：定义来自 config.runtime.plans，指针来自 state/runtime.json；currentMode 是它的 legacy 投影。
+  let runtimePlans = [];
+  let runtimeState = null;
   let lastMode = currentMode;
   // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
   // 旧版本这里硬编码 'router-standard'，但 DSH 0.1.5 已移除该 preset，硬编码会导致
@@ -3922,9 +3945,35 @@ async function main() {
     }
     return keys.filter(Boolean);
   }
+  /** 运行方案：数据层单例（定义随 config 重载刷新，指针在 state/runtime.json）。 */
+  function ensureRuntime() {
+    if (!runtimeState) {
+      runtimePlans = normalizePlans(bridgeCfg?.runtime?.plans);
+      runtimeState = createRuntimeState({
+        file: path.join(STATE_DIR, 'runtime.json'),
+        platform: bridgeCfg?.platform?.id ?? RUNTIME_PLATFORM,
+        fallbackPlanId: bridgeCfg?.runtime?.fallbackPlan ?? 'social-v2',
+        log,
+      });
+    }
+    return runtimeState;
+  }
+
+  /** 当前生效方案（缺失/非法时回落到默认方案，不抛错）。 */
+  function activePlan() {
+    const rt = ensureRuntime();
+    const id = rt.get() ?? rt.fallbackPlanId;
+    return findPlan(runtimePlans, id) ?? findPlan(BUILTIN_PLANS, 'social-v2') ?? BUILTIN_PLANS[0];
+  }
+
   function effectiveMode(key) {
     const privileged = canEnterClosedAgent(key);
-    return resolveEffectiveMode(currentMode, state.profiles?.[key]?.mode, { owner: isOwnerPrivate(key), privileged });
+    const profile = state.profiles?.[key];
+    // 会话级覆盖：planId 优先（P4 起），老档案仍可能只有 mode。
+    const override = profile?.planId
+      ? legacyModeOfPlan(findPlan(runtimePlans, profile.planId))
+      : profile?.mode;
+    return resolveEffectiveMode(currentMode, override, { owner: isOwnerPrivate(key), privileged });
   }
   /** 是否还有任何会话会跑二代仿真（全局 v2，或有人固定 v2）。用于全局接口的总开关。 */
   function anyV2Session() {
@@ -4051,6 +4100,12 @@ async function main() {
     applyRuntimeModeTransition(fromMode, mode);
     currentMode = mode;
     currentLevel = mode === 'closed-agent' ? level : 'L0';
+    // 方案指针跟着走：调用方指定了 planId 就用它，否则按旧「模式 + 级别」折算。
+    try {
+      ensureRuntime().set(RUNTIME_PLATFORM, normalizeRuntimePlanId(ctx.planId) || planIdForLegacy(mode, level));
+    } catch (error) {
+      log(`⚠️ 写入运行方案指针失败：${error?.message ?? error}`);
+    }
     if (mode === 'closed-agent') lastAgentLevel = currentLevel;
     // owner 的会话会因此换新（或稍后从休眠恢复，那时会改成「恢复」交接）：下一条发给它的消息带上私聊交接
     if (fromMode !== mode || fromLevel !== currentLevel) {
@@ -5072,7 +5127,14 @@ async function main() {
           const r = await ext.controller.initialize(actualMode);
           const c = ext.controller.current();
           if (c.mode && c.mode !== currentMode && r.action !== 'fallback') currentMode = c.mode;
-          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action });
+          // P4：方案的激活指针。启动校验可能已经回落过（applyModeChange 已写入），这里只补「从没有过」的情况。
+          const rt = ensureRuntime();
+          const migrated = rt.migrateOnce(planIdForLegacy(currentMode, currentLevel));
+          if (!migrated.migrated) {
+            const plan = findPlan(runtimePlans, rt.get()) ?? findPlan(BUILTIN_PLANS, rt.fallbackPlanId);
+            if (plan) currentMode = legacyModeOfPlan(plan);
+          }
+          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: rt.get() });
         } catch (error) {
           log(`⚠️ 管理控制器启动校验失败：${error?.message ?? error}；按安全模式运行`);
           if (currentMode === 'closed-agent') { currentMode = L0_MODES.includes(cfg.admin?.safeMode) ? cfg.admin.safeMode : 'reserved2'; }
@@ -6739,6 +6801,51 @@ async function main() {
             return;
           }
           sendJson({ ok: true, mode: currentMode, level: currentLevel, closedAgentPreset, dshSynced: lastObservedDshMode === currentMode });
+          return;
+        }
+        // 运行方案（P4）：读定义与当前指针。控制台用它渲染「运行方案」页与会话下拉。
+        if (req.method === 'GET' && url.pathname === '/api/runtime/plans') {
+          const rt = ensureRuntime();
+          const plan = activePlan();
+          sendJson({
+            ok: true,
+            platform: rt.platform,
+            plans: runtimePlans,
+            active: rt.get(),
+            activePlan: plan,
+            fallbackPlan: rt.fallbackPlanId,
+            legacy: { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) },
+            resetOnRestart: cfg.runtime?.resetOnRestart !== false,
+            idleMinutes: cfg.runtime?.idleMinutes ?? 10,
+          });
+          return;
+        }
+        // 按方案切换：确认 / 审计 / TOTP / 回落仍走管理控制器，方案的 legacy 投影只用来定格目标。
+        if (req.method === 'POST' && url.pathname === '/api/runtime/switch') {
+          const body = await readBody();
+          const planId = normalizeRuntimePlanId(body.planId);
+          const plan = findPlan(runtimePlans, planId);
+          if (!plan) {
+            sendJson({ ok: false, error: '没有这个运行方案' }, 400);
+            return;
+          }
+          if (!controllerReady) await initControllerOnce(currentMode);
+          const target = { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) };
+          const r = await ext.controller.consoleSet(target, { totp: body.totp ?? null });
+          if (!r.ok) {
+            sendJson({ ok: false, error: r.error, mode: currentMode, level: currentLevel }, r.error?.includes('TOTP') ? 403 : 409);
+            return;
+          }
+          // consoleSet 内部按 legacy 折算写了指针；自定义方案要把它校正回真正的 planId。
+          ensureRuntime().set(RUNTIME_PLATFORM, plan.id);
+          sendJson({
+            ok: true,
+            plan,
+            active: plan.id,
+            mode: currentMode,
+            level: currentLevel,
+            dshSynced: lastObservedDshMode === currentMode,
+          });
           return;
         }
         // 切换 / 清除人格后的生效方式：nextWake = 各会话下一次唤醒时带上新卡；immediate = 现在就唤醒一次。

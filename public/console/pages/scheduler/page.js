@@ -7,7 +7,7 @@ import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../componen
 import { initDateFields } from '../../components/date/date.js';
 import { initTimeFields } from '../../components/time/time.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
-import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
+import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ function renderScheduler() {
       t.pendingConfirm ? '<span class="pill r">待你确认</span>' : ''].join(' ');
     const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta u-mt-2">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
     return [
-      `<input type="checkbox" data-sched-toggle="${t.id}" ${t.enabled ? 'checked' : ''} aria-label="启用 #${t.id}">`,
+      checkCellHtml({ value: String(t.id), checked: Boolean(t.enabled), label: `启用 #${t.id}`, attrs: { 'data-sched-toggle': t.id } }),
       `<b>#${t.id} ${esc(t.name)}</b><div class="u-mt-4">${badges}</div><div class="meta u-mt-4">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div>`,
       `${esc(t.scheduleText)}<div class="meta u-mt-2">${t.nextRunText ? '下次：' + esc(t.nextRunText) : '没有下一次'}${t.maxRuns ? `；已执行 ${t.runs} / ${t.maxRuns}` : ''}</div>`,
       t.targets.map((k) => `<span class="sched-chip u-cursor-default">${esc(targetLabel(k))}</span>`).join(''),

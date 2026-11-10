@@ -503,6 +503,24 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 - 同一间距只留一个来源：`.form-cols` 的 `row-gap` 已统一走 `--form-row-gap`（14px），页面不要再写 `row-gap:14px` 覆盖；
 - 徽标统一 `.pill`（`pill g/r/n/b`），`status-badge` 只用于弹窗底栏那种纯文本状态位；按钮统一 `class="btn small"`，`class="small"` 是历史写法。
 
+### 1.86 `pageSize: rows.length` 等于「永远只有一页」
+
+预设编辑页的授权表用 `tableOf(rows, …)`，里面写的是 `pageSize: Math.max(rows.length, 1)`。服务器表只有 4 条时看不出问题；换到工具表（qq-chat-v2 的 `*` 允许全部 server，48 个工具）就变成「分页不生效、一屏全出来」，用户报的是「有时」——其实是行数一多就必然出现。
+
+**规则**：表格的每页条数固定写 10 或 20，不要拿 `rows.length` 当页大小；「不想分页」时用 `pager:false` 表达，而不是把 pageSize 调大。
+
+### 1.87 行内布尔单元格统一走 `checkCellHtml`，不要手写 `<input type=checkbox>`
+
+定时任务的「启用」列原来是裸 `<input type="checkbox">`（没有 `label.table-check` 包裹，尺寸与对齐都跟表格多选列不一样）；QQ 工具的「开关」列则是手写 `<label class="table-check"><input …></label>`，样式对、但重复了组件逻辑。
+
+**规则**：`components/table/table.js` 现在导出 `checkCellHtml({value, checked, label, attrs})`——多选列用它（`rowSelect:true` 由 `selectCellHtml` 转发），启用/开关这类逐行布尔也用它。不要再在页面里拼 `table-check` 或裸 checkbox。
+
+### 1.88 自定义块的控件比 40px 高时，标签会掉到中间
+
+访问令牌那行的控件是「输入框 + 按钮 + 状态行」的 `custom` 槽，整块约 90px；`.field-row` 是 `align-items:center`，于是「新令牌」标签垂直居中，看起来像压在输入框下沿、和其它行不对齐。
+
+**规则**：控件高于一行时给字段加 `className:'field-block--top'`（标签顶部对齐 + `padding-top:10px`），并把解释文案改成字段的 `hint`，不要塞进 `html` 里当 `.meta`——注解区由组件渲染，间距和左缘才对得上。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

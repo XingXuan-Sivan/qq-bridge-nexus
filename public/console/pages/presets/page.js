@@ -94,7 +94,8 @@ function catalogMissing(host) {
 }
 
 function tableOf(rows, columns, meta, select = null, actions = '', refresh = false) {
-  return dataTableHtml({ columns, rows, pageSize: Math.max(rows.length, 1), meta, select, actions, refresh });
+  // 固定每页 10 条：授权表里工具可能有几十个，之前按 rows.length 当页大小导致「总是全显示」。
+  return dataTableHtml({ columns, rows, pageSize: 10, meta, select, actions, refresh });
 }
 
 function renderServers() {

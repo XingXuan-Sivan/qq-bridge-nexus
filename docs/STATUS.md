@@ -511,5 +511,18 @@ npm run test:console-ui
 
 **已知限制**：这一批只动了「自己引入的手写控件 + 重复样式」，`sessions` 详情弹窗、`config` 的管理员/静默两张可编辑表、`scheduler` 的动态计划编辑器仍是手写结构（下一批处理，见巡检清单 B/C 批）。
 
+### 6.35 第十七批：授权表分页、行内勾选组件化、令牌行对齐（2026-11-10）
+
+1. **预设授权表恢复分页**：`pages/presets/page.js` 的 `tableOf()` 把 `pageSize` 从 `Math.max(rows.length, 1)` 改成固定 10——之前行数一多（`qq-chat-v2` 允许全部 server 时 48 个工具）就整屏铺开，看起来像「分页偶尔失效」。
+2. **行内布尔单元格统一**：`components/table/table.js` 新增导出 `checkCellHtml({value, checked, label, attrs, rowSelect})`，`selectCellHtml` 复用它。定时任务列表的「启用」列从裸 `<input type="checkbox">` 改成它，QQ 工具表的「开关」列也不再手写 `<label class="table-check">`——两处与表格多选列同一套外观与对齐。
+3. **QQ 工具表每页 10 条**：`pages/config/tools-section.js` 的 `dataTableHtml` 增加 `pageSize: 10`（37 项分 4 页）。
+4. **访问令牌行对齐**：`pages/config/access-fields.js` 给令牌字段加 `className:'field-block--top'`（新变体：标签顶部对齐 + `padding-top`），说明文案改成字段 `hint` 由组件渲染；`components/form/form.css` 增加 `.field-block--top` 两条规则。
+5. **踩坑记录 1.86–1.88**：`pageSize: rows.length` 等于永远一页；行内布尔统一 `checkCellHtml`；控件高于一行时标签会垂直居中、要用 `field-block--top` + `hint`。
+
+**验收**：`node --check` 全过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；`test-scheduler` **7/7**；真机确认预设工具表 48 行只显示 10 行、QQ 工具表 37 项分 4 页、定时任务勾选与表格多选同款、令牌标签与输入框同一基线。
+
+**已知限制**：`tableOf` 固定 10 条后，授权表里超过 10 行的表（工具表）需要翻页才能看全；筛选/搜索会重置到第 1 页。
+
+
 
 

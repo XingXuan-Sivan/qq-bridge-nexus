@@ -17,13 +17,22 @@ function selectHeadCell(column) {
 }
 
 /**
+ * 行内布尔单元格：多选列、启用开关、逐行勾选都用它，保证是同一套 `.table-check` 外观。
+ * @param {{value?:string, checked?:boolean, disabled?:boolean, label?:string, attrs?:object, rowSelect?:boolean}} options
+ */
+export function checkCellHtml({ value = '', checked = false, disabled = false, label = '', attrs = {}, rowSelect = false }) {
+  const extra = Object.entries(attrs).map(([name, val]) => ` ${esc(name)}="${esc(String(val))}"`).join('');
+  const selectMark = rowSelect ? ' data-select-row' : '';
+  return `<label class="table-check"><input type="checkbox"${value ? ` value="${esc(value)}"` : ''}${selectMark}${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}${label ? ` aria-label="${esc(label)}"` : ''}${extra}></label>`;
+}
+
+/**
  * 多选列的行内单元格（与 dataTableHtml 的 `select` 选项配套）。
  * 勾上=选中；表头全选框由 initDataTables 自动维护。
  * @param {{value:string, checked?:boolean, disabled?:boolean, label?:string, attrs?:object}} options
  */
 export function selectCellHtml({ value, checked = false, disabled = false, label = '', attrs = {} }) {
-  const extra = Object.entries(attrs).map(([name, val]) => ` ${esc(name)}="${esc(String(val))}"`).join('');
-  return `<label class="table-check"><input type="checkbox" value="${esc(value)}" data-select-row${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}${label ? ` aria-label="${esc(label)}"` : ''}${extra}></label>`;
+  return checkCellHtml({ value, checked, disabled, label, attrs, rowSelect: true });
 }
 
 /**

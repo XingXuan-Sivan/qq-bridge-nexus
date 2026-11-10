@@ -2,7 +2,7 @@
 // 工具权限的按预设细化在预设页的 extensions.yml；这里只保留全局开关，避免两处各写一套解析。
 import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { checkCellHtml, dataTableHtml, initDataTables } from '../../components/table/table.js';
 
 // [key, 工具名, 说明, 分类]。分类用于表格筛选；新增工具时补上第四项。
 const TOOLS = [
@@ -104,7 +104,7 @@ function toolsTableHtml() {
       `<code>${esc(label)}</code>`,
       `<span class="table-tag">${esc(category)}</span>`,
       `<span class="meta">${esc(desc)}</span>`,
-      `<label class="table-check"><input type="checkbox" data-tool="${esc(key)}" aria-label="启用 ${esc(label)}"></label>`,
+      checkCellHtml({ value: key, label: `启用 ${label}`, attrs: { 'data-tool': key } }),
     ],
   }));
   return dataTableHtml({
@@ -115,6 +115,7 @@ function toolsTableHtml() {
       { label: '开关', width: 80 },
     ],
     rows,
+    pageSize: 10,
     search: { placeholder: '搜索工具名或说明…' },
     filters: [{ id: 'cat', label: '分类', options: [{ value: 'all', label: '全部分类' }, ...TOOL_CATEGORIES.map((c) => ({ value: c, label: c }))] }],
     meta: `共 ${TOOLS.length} 项`,

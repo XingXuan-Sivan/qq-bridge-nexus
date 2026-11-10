@@ -72,11 +72,12 @@ export const ACCESS_FIELDS = {
         type: 'custom',
         label: '新令牌',
         span: 2,
+        className: 'field-block--top',
+        hint: '用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌；修改后当前页面会自动使用新令牌。',
         html: `<div class="control-row">
   <input type="password" id="consoleTokenInput" class="u-flex-1" placeholder="输入新令牌（至少 16 位），留空则生成随机" autocomplete="new-password">
   <button type="button" class="btn small" id="consoleTokenRandom">生成随机令牌</button>
 </div>
-<div class="meta">用于打开本控制台 / 调用管理 API 的令牌。可手动输入新令牌保存，或留空生成随机令牌；修改后当前页面会自动使用新令牌。</div>
 <div class="meta" id="consoleTokenMsg" role="status"></div>`,
       },
     ],

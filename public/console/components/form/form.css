@@ -406,6 +406,15 @@
   align-items: start;
 }
 
+/* 标签跟着控件第一行走：控件本身是「输入框 + 下方状态行」这类组合时用。 */
+.field-block--top > .field-row {
+  align-items: flex-start;
+}
+
+.field-block--top > .field-row > .field-label {
+  padding-top: 10px;
+}
+
 /* 标签在上：整行编辑器这类控件，把标签挪到控件上方，控件独占一行。 */
 .field-block--stacked > .field-row {
   grid-template-columns: minmax(0, 1fr);

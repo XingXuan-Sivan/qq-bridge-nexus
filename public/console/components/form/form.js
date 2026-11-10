@@ -368,6 +368,26 @@ const FIELD_FACTORIES = {
  * `span` 表示占几列（默认 1；等于 columns 时整行）。
  * options.layout = 'grid'（默认，铺 .cols 栅格）| 'inline'（不铺栅格，字段直接排在父级 flex 行里，用于工具栏条）。
  */
+/**
+ * 把 textarea/input 的 `maxlength` 与 `counter: true` 生成的计数连起来。
+ * 计数器 HTML 由工厂输出，但输入时需要有人更新它的文本；组件里统一在这里绑，
+ * 页面只负责在渲染完成后调一次（重复调用不会重复绑定）。
+ */
+export function bindCounters(root = document) {
+  root.querySelectorAll('textarea[maxlength], input[maxlength]').forEach((el) => {
+    if (!el.id || el.dataset.counterBound === '1') return;
+    const counter = root.querySelector(`[data-counter-for="${el.id}"]`);
+    if (!counter) return;
+    el.dataset.counterBound = '1';
+    const max = el.getAttribute('maxlength');
+    const update = () => {
+      counter.textContent = max ? `${el.value.length} / ${max}` : String(el.value.length);
+    };
+    el.addEventListener('input', update);
+    update();
+  });
+}
+
 export function renderFields(host, spec, options = {}) {
   if (!host) throw new Error('renderFields: 缺少容器');
   const columns = Math.max(1, Math.min(4, Number(options.columns) || 2));

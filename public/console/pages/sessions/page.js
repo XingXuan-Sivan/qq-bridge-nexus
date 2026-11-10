@@ -7,7 +7,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { bindCounters, bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { SESSIONS_FIELDS } from './fields.js';
 
@@ -430,37 +430,6 @@ let detailCache = null;
 let detailDirty = false;
 let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
 
-function detailRow(label, control, hint = '') {
-  return `<div class="control-row"><span class="control-label">${esc(label)}</span>`
-    + `<div class="control-grow">${control}${hint ? `<div class="field-hint">${esc(hint)}</div>` : ''}</div></div>`;
-}
-
-function detailSelect(id, value, options) {
-  return `<select id="${esc(id)}">${options.map(([v, label]) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select>`;
-}
-
-function detailCheck(id, label, checked) {
-  return `<label class="field-check-item"><input type="checkbox" id="${esc(id)}"${checked ? ' checked' : ''}>${esc(label)}</label>`;
-}
-
-function detailAccessItem(axis, label, summary) {
-  const allowed = summary?.[axis] === 'allow';
-  return `<label class="field-check-item"><input type="checkbox" data-detail-access="${axis}"${allowed ? ' checked' : ''}>${esc(label)}</label>`;
-}
-
-function detailAccessCard(access) {
-  const passiveMode = access?.passiveMode === 'deny' ? 'deny' : 'allow';
-  const proactiveMode = access?.proactiveMode === 'deny' ? 'deny' : 'allow';
-  return `<div class="detail-card">
-        <h4>准入</h4>
-        <div class="meta">这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。</div>
-        <div class="detail-access-list">
-          ${detailAccessItem('passive', '被动行为', access)}
-          ${detailAccessItem('proactive', '主动行为', access)}
-        </div>
-        <div class="field-hint">被动行为 ${accessModeLabel(passiveMode)} · 主动行为 ${accessModeLabel(proactiveMode)}　<button class="access-link" type="button" data-open-global-access>调整全局准入</button></div>
-      </div>`;
-}
 function detailDshLabel(health, sessionId) {
   if (!sessionId) return '<span class="pill">未建</span>';
   const status = health?.status || 'unknown';
@@ -502,13 +471,15 @@ function personaUidOf(item) {
   return `${item.provider}:${item.id}`;
 }
 
-function personaSelectHtml(current, mode) {
+/**
+ * 人格卡下拉的选项：本地卡与外部卡分组交给 select 字段的 `group` 支持；
+ * 旧档案里只存外部卡名字时，按名字唯一匹配回 `provider:id`，保存一次就迁移成引用。
+ */
+function personaSelectOptions(current) {
   const items = Array.isArray(detailPersonas) ? detailPersonas : [];
   let currentUid = current
     ? (String(current).includes(':') ? String(current) : `local:${current}`)
     : '';
-  // 旧档案里可能只存了外部卡的名字（如「魅魔」）：按名字唯一匹配到 provider 卡，
-  // 显示时自动落到 `provider:id`，保存一次就把旧值迁成引用。
   if (currentUid && !items.some((item) => personaUidOf(item) === currentUid)) {
     const byName = items.filter((item) => item.source !== 'local' && item.name === current);
     if (byName.length === 1) currentUid = personaUidOf(byName[0]);
@@ -518,16 +489,15 @@ function personaSelectHtml(current, mode) {
     const group = item.source === 'local' ? '本地人格' : `外部人格 · ${item.provider || 'provider'}`;
     if (!groups.has(group)) groups.set(group, []);
     const label = `${item.name || item.id}${item.stale ? '（缓存）' : ''}`;
-    groups.get(group).push([personaUidOf(item), label]);
+    groups.get(group).push({ value: personaUidOf(item), label });
   }
   if (currentUid && !items.some((item) => personaUidOf(item) === currentUid)) {
-    groups.set('当前值', [[currentUid, currentUid]]);
+    groups.set('当前值', [{ value: currentUid, label: currentUid }]);
   }
-  const options = [...groups].map(([group, list]) => `<optgroup label="${esc(group)}">`
-    + list.map(([value, label]) => `<option value="${esc(value)}"${value === currentUid ? ' selected' : ''}>${esc(label)}</option>`).join('')
-    + '</optgroup>').join('');
-  return `<select id="detailPersonaName"${mode === 'card' ? '' : ' disabled'}>`
-    + '<option value="">选择人格卡</option>' + options + '</select>';
+  return {
+    uid: currentUid,
+    options: [...groups].map(([group, options]) => ({ group, options })),
+  };
 }
 
 function detailModelOptions(providerId) {
@@ -572,6 +542,22 @@ function renderDetail(data) {
   const access = data.access || {};
   const persona = data.persona || {};
   const prompt = data.prompt || {};
+  const personaPick = personaSelectOptions(persona.name);
+  const maxPrompt = Number(prompt.maxChars) || 2000;
+  const personaMode = persona.mode || 'inherit';
+  const accessValue = ACCESS_AXES.filter(([axis]) => access[axis] === 'allow').map(([axis]) => axis);
+  const wakeValue = [
+    ['atMention', triggers.atMention], ['nameMention', triggers.nameMention],
+    ['question', triggers.question], ['poke', triggers.poke],
+  ].filter(([, on]) => on === true).map(([id]) => id);
+  // 卡片单列排布；卡内的字段宿主交给 renderFields（两列），只读块与按钮行直接写 HTML。
+  const card = (title, meta, host, extra = '') => `<div class="detail-card">`
+    + `<h4>${esc(title)}</h4>`
+    + (meta ? `<div class="meta">${esc(meta)}</div>` : '')
+    + (host ? `<div data-detail-form="${esc(host)}"></div>` : '')
+    + extra
+    + '</div>';
+
   body.innerHTML = `
     <div class="session-detail-head">
       <span class="session-detail-key">${esc(data.key)}</span>
@@ -579,50 +565,12 @@ function renderDetail(data) {
       <span class="meta">${data.sessionId ? esc(data.sessionId) : '还没有 DSH 会话，下一条消息到达时会自动创建'}</span>
     </div>
     <div class="session-detail-grid">
-      <div class="detail-card">
-        <h4>显示名</h4>
-        <div class="meta">自定义名会同步写 DSH 侧栏标题；留空则用默认的「QQ·群 / QQ·私聊 + ID」。</div>
-        ${detailRow('名称', `<input id="detailDisplayName" type="text" maxlength="60" value="${esc(data.displayName || '')}" placeholder="留空使用默认名">`)}
-      </div>
-
-      ${detailAccessCard(access)}
-
-      <div class="detail-card">
-        <h4>运行</h4>
-        <div class="meta">默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。</div>
-        ${detailRow('模式', detailSelect('detailMode', data.mode || 'inherit', [['inherit', '跟随全局'], ['chat', '聊天模式'], ['reserved', '一代仿真'], ['reserved2', '二代仿真']]), `当前生效：${esc(data.effectiveMode || '—')}`)}
-        ${detailRow('DSH 预设', detailSelect('detailPresetId', data.presetId || '', [['', '跟随模式默认'], ...(Array.isArray(data.presets) ? data.presets : []).map((id) => [id, id])]), '只影响这个会话的 DSH 会话；保存后下次唤醒按指纹自动重建。')}
-        ${detailRow('模型', detailSelect('detailModelProvider', data.model?.provider || '', [['', '跟随全局'], ...(detailCatalog || []).map((p) => [p.id, p.name || p.id])]), `当前生效：${esc(data.effectiveModel?.provider || '—')} / ${esc(data.effectiveModel?.model || '—')}`)}
-        ${detailRow('具体模型', detailSelect('detailModel', data.model?.model || '', []))}
-        ${detailRow('思考强度', detailSelect('detailModelReasoning', data.model?.reasoning || '', []), '保存会话模型会同步写 DSH 全局默认，Web GUI 里新建会话也会用这个模型；本会话按自己的模型能力决定能否看图。')}
-      </div>
-
-      <div class="detail-card">
-        <h4>人格</h4>
-        <div class="meta">继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。</div>
-        ${detailRow('模式', detailSelect('detailPersonaMode', persona.mode || 'inherit', [['inherit', '继承全局'], ['card', '指定人格卡'], ['off', '不挂卡']]))}
-        ${detailRow('人格卡', personaSelectHtml(persona.name, persona.mode || 'inherit'), persona.resolved?.name && persona.mode === 'inherit' ? `当前实际使用：${persona.resolved.name}` : '')}
-      </div>
-
-      <div class="detail-card">
-        <h4>初始提示词</h4>
-        <div class="meta">只在 AI 第一次进入这个会话时读一次；留空表示没有初始提示词。</div>
-        <textarea id="detailPrompt" maxlength="${Number(prompt.maxChars) || 2000}" placeholder="例如：这是一个偏技术的闲聊群…">${esc(prompt.text || '')}</textarea>
-        <div class="field-hint"><span id="detailPromptCount">${String(prompt.text || '').length}</span> / ${Number(prompt.maxChars) || 2000} 字</div>
-      </div>
-
-      <div class="detail-card">
-        <h4>唤醒</h4>
-        <div class="meta">这里只改最常见的触发条件；更细的批次窗口等参数仍在「二代仿真」页。</div>
-        ${detailRow('模式', detailSelect('detailWakeMode', wake.mode === 'active' ? 'active' : 'diving', [['diving', '潜水'], ['active', '活跃']]))}
-        <div class="control-row"><span class="control-label">触发</span><div class="control-grow"><div class="detail-readonly">
-          ${detailCheck('detailWakeAt', '@ 唤醒', triggers.atMention === true)}
-          ${detailCheck('detailWakeName', '名字唤醒', triggers.nameMention === true)}
-          ${detailCheck('detailWakeQuestion', '提问唤醒', triggers.question === true)}
-          ${detailCheck('detailWakePoke', '拍一拍', triggers.poke === true)}
-        </div></div></div>
-        ${detailRow('关键词', `<input id="detailWakeKeywords" type="text" value="${esc(Array.isArray(triggers.keywords) ? triggers.keywords.join(', ') : '')}" placeholder="逗号分隔">`)}
-      </div>
+      ${card('显示名', '自定义名会同步写 DSH 侧栏标题；留空则用默认的「QQ·群 / QQ·私聊 + ID」。', 'displayName')}
+      ${card('准入', '这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', 'access', '<div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
+      ${card('运行', '默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。', 'run')}
+      ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
+      ${card('初始提示词', '', 'prompt')}
+      ${card('唤醒', '这里只改最常见的触发条件；更细的批次窗口等参数仍在「二代仿真」页。', 'wake')}
 
       <div class="detail-card">
         <h4>记忆</h4>
@@ -630,7 +578,7 @@ function renderDetail(data) {
         <div class="detail-readonly" id="detailMemory"><span class="meta">读取中…</span></div>
         <div class="detail-actions">
           <button class="btn small danger" type="button" data-detail-clear-memory>清空本会话记忆</button>
-          <a class="btn small" href="#memory">去记忆页</a>
+          <button class="btn small" type="button" data-detail-nav="memory">去记忆页</button>
         </div>
       </div>
 
@@ -638,10 +586,10 @@ function renderDetail(data) {
         <h4>定时任务</h4>
         <div class="meta">指向这个会话的定时任务（只读）；增删改仍在「定时任务」页。</div>
         <div class="detail-readonly" id="detailTasks"><span class="meta">读取中…</span></div>
-        <div class="detail-actions"><a class="btn small" href="#scheduler">去定时任务</a></div>
+        <div class="detail-actions"><button class="btn small" type="button" data-detail-nav="scheduler">去定时任务</button></div>
       </div>
 
-      <div class="detail-card detail-card--wide detail-danger">
+      <div class="detail-card detail-danger">
         <h4>危险操作</h4>
         <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话。</div>
         <div class="detail-actions">
@@ -651,6 +599,92 @@ function renderDetail(data) {
         ${data.sessionId ? '' : '<div class="field-hint">还没有 DSH 会话：下一条消息到达时会自动创建；也可以现在重建一次。</div>'}
       </div>
     </div>`;
+
+  const formHost = (id) => body.querySelector(`[data-detail-form="${id}"]`);
+  const accessHint = `被动行为 ${accessModeLabel(access?.passiveMode === 'deny' ? 'deny' : 'allow')}`
+    + ` · 主动行为 ${accessModeLabel(access?.proactiveMode === 'deny' ? 'deny' : 'allow')}`;
+  const personaHint = persona.resolved?.name && personaMode === 'inherit'
+    ? `当前实际使用：${persona.resolved.name}` : '';
+
+  renderFields(formHost('displayName'), [
+    { name: 'detailDisplayName', type: 'text', label: '名称', span: 2, maxlength: 60, value: data.displayName || '', placeholder: '留空使用默认名' },
+  ], { columns: 2 });
+
+  renderFields(formHost('access'), [
+    {
+      name: 'detailAccess', type: 'checkboxGroup', label: '允许', inline: true, columns: 2,
+      value: accessValue, options: ACCESS_AXES.map(([value, label]) => ({ value, label })), hint: accessHint,
+    },
+  ], { columns: 2 });
+
+  renderFields(formHost('run'), [
+    {
+      name: 'detailMode', type: 'select', label: '模式', value: data.mode || 'inherit',
+      options: [['inherit', '跟随全局'], ['chat', '聊天模式'], ['reserved', '一代仿真'], ['reserved2', '二代仿真']]
+        .map(([value, label]) => ({ value, label })),
+      hint: `当前生效：${data.effectiveMode || '—'}`,
+    },
+    {
+      name: 'detailPresetId', type: 'select', label: 'DSH 预设', value: data.presetId || '',
+      options: [{ value: '', label: '跟随模式默认' }, ...(Array.isArray(data.presets) ? data.presets : [])
+        .map((id) => ({ value: id, label: id }))],
+      hint: '只影响这个会话的 DSH 会话；保存后下次唤醒按指纹自动重建。',
+    },
+    {
+      name: 'detailModelProvider', type: 'select', label: '模型', value: data.model?.provider || '',
+      options: [{ value: '', label: '跟随全局' }, ...(detailCatalog || []).map((p) => ({ value: p.id, label: p.name || p.id }))],
+      hint: `当前生效：${data.effectiveModel?.provider || '—'} / ${data.effectiveModel?.model || '—'}`,
+    },
+    { name: 'detailModel', type: 'select', label: '具体模型', value: data.model?.model || '', options: [{ value: '', label: '跟随全局' }] },
+    {
+      name: 'detailModelReasoning', type: 'select', label: '思考强度', value: data.model?.reasoning || '',
+      options: [{ value: '', label: '跟随全局' }],
+      hint: '保存会话模型会同步写 DSH 全局默认，Web GUI 里新建会话也会用这个模型；本会话按自己的模型能力决定能否看图。',
+    },
+  ], { columns: 2 });
+
+  renderFields(formHost('persona'), [
+    {
+      name: 'detailPersonaMode', type: 'select', label: '模式', value: personaMode,
+      options: [['inherit', '继承全局'], ['card', '指定人格卡'], ['off', '不挂卡']]
+        .map(([value, label]) => ({ value, label })),
+    },
+    {
+      name: 'detailPersonaName', type: 'select', label: '人格卡', value: personaPick.uid,
+      options: personaPick.options, placeholder: '选择人格卡',
+      disabled: personaMode !== 'card', hint: personaHint,
+    },
+  ], { columns: 2 });
+
+  renderFields(formHost('prompt'), [
+    {
+      name: 'detailPrompt', type: 'textarea', label: '提示词', span: 2, rows: 4,
+      maxlength: maxPrompt, counter: true, value: prompt.text || '',
+      placeholder: '例如：这是一个偏技术的闲聊群…',
+      hint: '只在 AI 第一次进入这个会话时读一次；留空表示没有初始提示词。',
+    },
+  ], { columns: 2 });
+
+  renderFields(formHost('wake'), [
+    {
+      name: 'detailWakeMode', type: 'select', label: '模式', value: wake.mode === 'active' ? 'active' : 'diving',
+      options: [{ value: 'diving', label: '潜水' }, { value: 'active', label: '活跃' }],
+    },
+    {
+      name: 'detailWakeTriggers', type: 'checkboxGroup', label: '触发', inline: true, columns: 2,
+      value: wakeValue,
+      options: [
+        { value: 'atMention', label: '@ 唤醒' }, { value: 'nameMention', label: '名字唤醒' },
+        { value: 'question', label: '提问唤醒' }, { value: 'poke', label: '拍一拍' },
+      ],
+    },
+    {
+      name: 'detailWakeKeywords', type: 'text', label: '关键词', span: 2,
+      value: Array.isArray(triggers.keywords) ? triggers.keywords.join(', ') : '', placeholder: '逗号分隔',
+    },
+  ], { columns: 2 });
+
+  bindCounters(body);
   body.querySelectorAll('select').forEach((el) => el.dispatchEvent(new Event('change', { bubbles: true })));
   syncDetailModelSelects(data.model?.model || data.effectiveModel?.model || '', data.model?.reasoning || '');
   document.getElementById('detailModelProvider')?.addEventListener('change', () => syncDetailModelSelects('', ''));
@@ -667,10 +701,6 @@ function renderDetail(data) {
   };
   personaModeEl?.addEventListener('change', syncPersonaSelect);
   syncPersonaSelect();
-  const promptEl = document.getElementById('detailPrompt');  promptEl?.addEventListener('input', () => {
-    const counter = document.getElementById('detailPromptCount');
-    if (counter) counter.textContent = String(promptEl.value.length);
-  });
   void loadDetailMemory(data.key);
   void loadDetailTasks(data.key);
   detailRendering = false;
@@ -782,9 +812,12 @@ function buildDetailPatch() {
   const promptText = String(document.getElementById('detailPrompt')?.value ?? '');
   if (promptText !== String(data.prompt?.text || '')) patch.prompt = { text: promptText };
 
+  const accessAllowed = new Set(
+    [...document.querySelectorAll('input[name="detailAccess"]:checked')].map((el) => el.value),
+  );
   const accessPatch = {};
   for (const [axis] of ACCESS_AXES) {
-    const allowed = document.querySelector(`[data-detail-access="${axis}"]`)?.checked === true;
+    const allowed = accessAllowed.has(axis);
     if (allowed !== (data.access?.[axis] === 'allow')) accessPatch[axis] = allowed ? 'allow' : 'deny';
   }
   if (Object.keys(accessPatch).length) patch.access = accessPatch;
@@ -792,11 +825,14 @@ function buildDetailPatch() {
   const wake = data.wake && typeof data.wake === 'object' ? data.wake : {};
   const baseTriggers = wake.triggers && typeof wake.triggers === 'object' ? wake.triggers : {};
   const nextMode = document.getElementById('detailWakeMode')?.value === 'active' ? 'active' : 'diving';
+  const wakeTriggers = new Set(
+    [...document.querySelectorAll('input[name="detailWakeTriggers"]:checked')].map((el) => el.value),
+  );
   const triggerState = {
-    atMention: document.getElementById('detailWakeAt')?.checked === true,
-    nameMention: document.getElementById('detailWakeName')?.checked === true,
-    question: document.getElementById('detailWakeQuestion')?.checked === true,
-    poke: document.getElementById('detailWakePoke')?.checked === true,
+    atMention: wakeTriggers.has('atMention'),
+    nameMention: wakeTriggers.has('nameMention'),
+    question: wakeTriggers.has('question'),
+    poke: wakeTriggers.has('poke'),
     keywords: String(document.getElementById('detailWakeKeywords')?.value || '')
       .split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 50),
   };
@@ -954,7 +990,12 @@ export function init() {
     }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
-    if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); }
+    if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); return; }
+    const nav = event.target.closest('[data-detail-nav]');
+    if (nav) {
+      closeModal(detailOverlay);
+      window.location.hash = nav.dataset.detailNav || '';
+    }
   });
 
   document.querySelectorAll('[data-sessions-tab]').forEach((btn) => {

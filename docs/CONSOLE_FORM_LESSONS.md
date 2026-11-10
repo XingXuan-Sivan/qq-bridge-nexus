@@ -521,6 +521,23 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 **规则**：控件高于一行时给字段加 `className:'field-block--top'`（标签顶部对齐 + `padding-top:10px`），并把解释文案改成字段的 `hint`，不要塞进 `html` 里当 `.meta`——注解区由组件渲染，间距和左缘才对得上。
 
+### 1.89 详情弹窗里的字段也要走 `renderFields`，补丁按 `name` 收集
+
+会话详情原来是 9 张卡 + 一堆 `detailRow/detailSelect/detailCheck` 手写辅助：卡片两列、字段是「左标签 + 右控件」，和页面里的表单是两套结构。
+
+**做法**：卡片壳自己写（`h4 + meta + 宿主 div`），宿主交给 `renderFields(host, fields, {columns:2})`；卡片外层网格改成单列，于是「卡片一列、卡内两列」。
+
+**注意**：控件 id 变成 `name` 生成后，补丁读取不能再写 `document.getElementById('detailWakeAt')`，要按语义收集：
+`[...document.querySelectorAll('input[name="detailWakeTriggers"]:checked')].map((el) => el.value)`。否则改了一个字段、另一个字段的旧值读不到，保存会静默丢改动。
+
+### 1.90 组件给了计数器 DOM，还要有人更新它
+
+`textareaField({ counter: true, maxlength })` 只输出 `<span class="field-counter" data-counter-for="…">`，组件本身**没有**输入监听——不补绑定，计数会一直是初始值。
+
+**做法**：`components/form/form.js` 提供 `bindCounters(root)`，在 `renderFields` 之后调一次；它只在有 `[data-counter-for]` 时绑定，重复调用不会重复挂监听。
+
+另外：宿主 div 不要再写 `class="form-cols"`——`renderFields` 自己会插入 `.cols.form-cols`，套两层会出现「12 列里再 12 列」的栅格，字段宽度算不对。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

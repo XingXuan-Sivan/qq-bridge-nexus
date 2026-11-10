@@ -524,6 +524,20 @@ npm run test:console-ui
 
 **已知限制**：`tableOf` 固定 10 条后，授权表里超过 10 行的表（工具表）需要翻页才能看全；筛选/搜索会重置到第 1 页。
 
+### 6.36 第十八批：会话详情改字段规格、卡片单列（2026-11-10）
+
+1. **详情卡片改单列、卡内两列**：`pages/sessions/page.css` 的 `.session-detail-grid` 从两列改 `minmax(0, 1fr)`；每张卡里的字段容器交给 `renderFields(host, fields, {columns:2})`，所以卡片铺满宽度、字段两列排布。
+2. **六张可编辑卡全部字段化**：显示名（text）、准入（checkboxGroup）、运行（5 个 select）、人格（模式 + 人格卡 select）、初始提示词（textarea + 计数器）、唤醒（模式 + 触发 checkboxGroup + 关键词 text）。删掉 `detailRow/detailSelect/detailCheck/detailAccessItem/detailAccessCard` 五个手写辅助函数。
+3. **人格卡下拉用组件分组**：`personaSelectOptions()` 生成 `{group, options}`，由 `selectField` 渲染 `<optgroup>`；模式不是「指定人格卡」时 `disabled`，切模式时同步。
+4. **补丁读取改按 name 收集**：准入读 `input[name="detailAccess"]:checked`，唤醒触发读 `input[name="detailWakeTriggers"]:checked`，不再依赖 `data-detail-access` / `detailWakeAt` 等 id。
+5. **组件补通用计数器绑定**：`components/form/form.js` 新增 `bindCounters(root)`——`counter: true` 生成的计数 DOM 之前没人更新；会话详情提示词用它显示 `N / 2000`。
+6. **只读块与跳转**：记忆/定时任务卡保留只读内容，按钮改 `btn small`；「去记忆页/去定时任务」改成 `data-detail-nav` 按钮（hash 跳转，避免 `<a class="btn">` 没有按钮底样式）。
+
+**验收**：`node --check` 全过；`test-console-static`、`test-console-ui`（**33/33、45 次写**）、`test-role-per-key`、`test-v2-initial-prompt` 全过；真机（3111）确认 9 张卡单列、字段两列（435px/张）、人格下拉 6 个选项分 2 组、切「指定人格卡」后可写、提示词计数器 `5 / 2000` 实时更新、保存补丁为 `{displayName, persona:{mode:'card',name:'soulkit:saren'}, prompt:{text}, access:{proactive:'allow'}}`（用路由拦截验证，未写真实档案）。
+
+**已知限制**：卡片顺序固定，不支持拖动/折叠；唤醒的批次窗口、概率等参数仍在「二代仿真」页；提示词上限来自 `prompt.maxChars`，会话页不提供修改入口。
+
+
 
 
 

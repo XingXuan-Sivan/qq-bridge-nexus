@@ -47,7 +47,8 @@
 }
 .session-detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 卡片单列铺满：详情里的卡片内容多寡不同，两列会让高度差很大的卡片并排。 */
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 16px;
 }
@@ -69,18 +70,6 @@
 .detail-card .meta {
   margin-bottom: 12px;
 }
-.detail-card .field-row + .field-row {
-  margin-top: 10px;
-}
-.detail-card .control-row + .control-row {
-  margin-top: 10px;
-}
-/* 详情里的行标签统一宽度并右对齐：否则「模式」（2 字）与「人格卡」（3 字）宽度不同，
-   控件左边缘会参差，看起来像标签和控件没对齐。 */
-.detail-card .control-row > .control-label {
-  flex: 0 0 84px;
-  text-align: right;
-}
 .detail-card textarea {
   min-height: 120px;
 }
@@ -89,6 +78,10 @@
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 14px;
+}
+/* 卡片里上一行是字段时，动作按钮和控件左边缘对齐，而不是贴卡片左边。 */
+.detail-actions--indent {
+  padding-left: calc(var(--field-label-w, 148px) + var(--space-4, 20px));
 }
 .detail-readonly {
   display: flex;
@@ -111,23 +104,6 @@
 }
 
 /* 详情里的准入：两个并排复选框，不写额外说明。 */
-.detail-access-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 32px;
-  margin: 2px 0 4px;
-}
-.detail-access-list .field-check-item { min-height: 32px; }
-.access-link {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--primary);
-  font: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-.access-link:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .session-detail-grid { grid-template-columns: minmax(0, 1fr); }
 }

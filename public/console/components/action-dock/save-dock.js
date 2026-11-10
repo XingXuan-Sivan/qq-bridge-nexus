@@ -28,16 +28,22 @@ function snapshotOf(value) {
  *   scope?: Element,
  *   page?: string,
  *   shape?: 'circle'|'square',
+ *   autoHide?: boolean,
  *   actions?: Array<object>,
  * }} options
  */
-export function createSaveDock({ sections = [], scope = null, page = '', shape = 'circle', actions = [] } = {}) {
+export function createSaveDock({ sections = [], scope = null, page = '', shape = 'circle', autoHide = true, actions = [] } = {}) {
   const list = sections.filter((s) => s && s.id && typeof s.read === 'function' && typeof s.save === 'function');
   const baseline = new Map();
   const watchScope = scope || document.getElementById('mainContent') || document.body;
   let busy = false;
+  // 正在跑的是保存还是撤销：按钮文案要跟着变，别把「正在撤销」写成「保存中」。
+  let busyKind = '';
   let scheduled = 0;
   let hideTimer = 0;
+  // 浮层只在真的有东西可看时出现：有未保存修改、正在保存、或刚出了保存结果。
+  // 平时什么都不显示，页面也就不需要给它在底部留高度。
+  let contentVisible = false;
   // 用户是否在本页动过任何字段。异步数据回填不算「动过」，
   // 所以首次加载完成后可以安全地把当前值重拍成基线。
   let touched = false;
@@ -52,6 +58,8 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
   const dock = createActionDock({
     page,
     shape,
+    autoHide,
+    visibleWhen: () => contentVisible,
     actions: [
       ...actions,
       { id: 'save', label: '保存修改', icon: DOCK_ICONS.save, primary: true, onClick: () => { void saveAll(); } },
@@ -70,15 +78,17 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
 
   function paint() {
     const dirty = dirtySections();
+    // 先收空的结果面板，再算可见性：否则浮层会多留一拍才消失。
+    if (!busy && !dirty.length && elsResultsEmpty()) results.hidden = true;
+    contentVisible = busy || !results.hidden || dirty.length > 0;
     dock.paint();
     dock.update('save', {
       badge: busy ? null : (dirty.length || null),
       disabled: busy || dirty.length === 0,
-      label: busy ? '保存中…' : (dirty.length ? `保存 ${dirty.length} 项修改` : '已保存'),
+      label: busy ? (busyKind === 'discard' ? '正在撤销…' : '保存中…') : (dirty.length ? `保存 ${dirty.length} 项修改` : '已保存'),
     });
     // 页面可以额外挂一个「撤销未保存的修改」动作：没有脏值时同样禁用。
     if (dock.button('discard')) dock.update('discard', { disabled: busy || dirty.length === 0 });
-    if (!busy && !dirty.length && elsResultsEmpty()) results.hidden = true;
   }
 
   function elsResultsEmpty() {
@@ -107,10 +117,37 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
       if (section) baseline.set(section.id, snapshotOf(readSection(section)));
     } else {
       // 整页丢弃：先清「用户改过」标记，随后调用方会重读服务端数据；
-      // 重读完成后 adoptIfPristine() 会用最新值重拍基线，避免把刚丢弃的编辑当成新基线。
+      // 重读完成后 adoptIfPristine() 会用最新值重拍基线。
+      // 重读可能失败、adoptIfPristine() 也可能因为 busy/touched 跳过——需要「点了就一定变干净」
+      // 的调用方请用 discard()。
       touched = false;
     }
     paint();
+  }
+
+  /**
+   * 丢弃未保存修改：先让调用方重读服务端数据（restore），完成后无条件把当前值重拍成基线。
+   * 不依赖重读成功、也不受 touched/busy 影响：用户点「丢弃」后浮层必须立刻变回「已保存」并收起。
+   */
+  async function discard(restore) {
+    if (busy) return false;
+    busy = true;
+    busyKind = 'discard';
+    touched = false;
+    clearTimeout(hideTimer);
+    paint();
+    try {
+      await restore?.();
+    } finally {
+      for (const section of list) baseline.set(section.id, snapshotOf(readSection(section)));
+      results.replaceChildren();
+      results.hidden = true;
+      busy = false;
+      busyKind = '';
+      touched = false;
+      paint();
+    }
+    return true;
   }
 
   function schedule() {
@@ -153,6 +190,7 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
       return true;
     }
     busy = true;
+    busyKind = 'save';
     paint();
     const items = [];
     for (const section of pending) {
@@ -173,6 +211,7 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
       }
     }
     busy = false;
+    busyKind = '';
     renderResults(items);
     paint();
     return items.every((r) => r.ok || r.skipped);
@@ -212,6 +251,7 @@ export function createSaveDock({ sections = [], scope = null, page = '', shape =
     refresh,
     adoptIfPristine,
     reset,
+    discard,
     paint,
     saveAll,
     isDirty: () => dirtySections().length > 0,

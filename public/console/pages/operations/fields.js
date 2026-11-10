@@ -32,13 +32,14 @@ export const OPERATIONS_FIELDS = {
         items: [
           { id: 'restartBtn', label: '重启桥接', variant: 'danger', status: 'restartMsg' },
           { id: 'clearWsBtn', label: '清空 QQ 聊天工作区', variant: 'danger', status: 'clearWsMsg' },
+          { id: 'panicBtn', label: '紧急关闭', variant: 'danger', status: 'panicMsg' },
         ],
       },
       {
         name: 'maintenanceNote',
         type: 'custom',
         span: 2,
-        html: '<div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。</div>',
+        html: '<div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。紧急关闭会立即回到 L0 群友模式，并停止进行中的高权限会话（两者都不可撤销）。</div>',
       },
     ],
   },

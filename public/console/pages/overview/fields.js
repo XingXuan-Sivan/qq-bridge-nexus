@@ -16,10 +16,10 @@ const MODE_HTML = `<div class="mode-row" id="modeRow">
   <button data-mode="reserved2" aria-pressed="false"><span class="mode-indicator" aria-hidden="true"></span><strong>二代仿真</strong><small>自主阅读、发言与潜水</small></button>
 </div>`;
 
-// 管理通道状态 + 紧急关闭：状态是长文本，单独一行；按钮与它同行右对齐。
+// 管理通道状态：只读一行。紧急关闭按钮已挪到「调试与运维 › 桥接控制」，与重启/清空工作区同组，
+// 避免在运行模式卡里误点（这里本来就是低频破坏性操作）。
 const ADMIN_ROW = `<div class="control-row">
   <span class="meta control-grow" id="adminStatus">管理通道状态读取中…</span>
-  <button type="button" id="adminPanic" class="btn danger">紧急关闭（回到安全模式）</button>
 </div>
 <div class="meta">切换后即时保存。仿真参数可在左侧对应页面调整；封闭 Agent 仅允许管理员私聊。v0.3.0 起所有模式变更都会私聊通知管理员，并写入 state/admin/audit.jsonl；高权限闲置超时自动回落。</div>`;
 

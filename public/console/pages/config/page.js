@@ -543,7 +543,7 @@ export function init() {
       icon: DOCK_ICONS.undo,
       primary: true,
       disabled: true,
-      onClick: () => { saveBar?.reset(); void reloadConfigSections(); },
+      onClick: () => { void saveBar?.discard(reloadConfigSections); },
     }],
   });
   setPageLeaveGuard((from, to) => {
@@ -553,7 +553,9 @@ export function init() {
     if (!saveBar.isTouched()) { saveBar.refresh(); return true; }
     void askLeaveWithUnsaved({ bar: saveBar }).then((answer) => {
       if (answer === 'cancel') return;
-      if (answer === 'discard') { saveBar.reset(); void reloadConfigSections(); }
+      // 丢弃要重读服务端数据，不能等它跑完再切页（那期间守卫会再拦一次）；先放行，
+      // 重读完成后 discard() 自己会把基线校准干净。
+      if (answer === 'discard') void saveBar.discard(reloadConfigSections);
       // skipGuard：确认已经做过，直接切；否则会再次弹窗。
       setConsolePage(to, { skipGuard: true });
     });
@@ -573,12 +575,6 @@ export function init() {
     if (b.disabled) return;
     await saveMode(b.dataset.mode);
   }));
-  $('adminPanic').addEventListener('click', async () => {
-    if (!confirm('立即回到安全模式（L0 群友模式）？进行中的高权限会话会被停止。')) return;
-    const r = await api('/api/admin/panic', 'POST', {});
-    if (!r.ok) alert(r.error || '紧急关闭失败，请直接停止桥接进程');
-    requestStatusRefresh();
-  });
   $('closedPreset').addEventListener('change', async () => {
     // 切换预设立即保存（若当前是 closed-agent 则即时生效，否则供下次切换使用）
     const active = document.querySelector('#modeRow button.active');

@@ -1,4 +1,4 @@
-// 竖向浮动操作组：右下角一列图标按钮，任何页面都能用（保存只是其中一种动作）。
+// 浮动操作组：默认右下角一列图标按钮，任何页面都能用（保存只是其中一种动作）。
 //
 // 用法：
 //   const dock = createActionDock({
@@ -12,8 +12,11 @@
 //
 // 约定：
 // - 组件只管「一组按钮长什么样、怎么摆」，不关心保存语义；需要脏值跟踪的页面用 save-dock.js。
-// - 默认常驻（只在本页显示，不随滚动/空闲隐藏），形状由 `shape`（circle / square）决定，
-//   颜色一律取主题令牌，不写死品牌色。
+// - 浮层不该向页面要空间：位置是 fixed，页面不预留内边距；可见时只把滚动容器的
+//   scroll-padding-bottom 放大到栏高，聚焦/滚动到页尾的控件不会被它压住（不改布局）。
+// - `autoHide` + `visibleWhen`：只有需要的时候才出现（例如有未保存修改），平时完全不占视线；
+//   出现时仍是原来的竖排圆按钮，不改既有样式。
+// - 形状由 `shape`（circle / square）决定，颜色一律取主题令牌，不写死品牌色。
 // - 每个按钮都必须有 label：它是 aria-label 与原生 title，图标本身对读屏隐藏。
 import { getCurrentPage } from '../../js/router.js';
 
@@ -55,11 +58,16 @@ function buildButton(action) {
  *     badge?:number|string,primary?:boolean,tone?:string}>,
  *   page?: string,
  *   shape?: 'circle'|'square',
+ *   autoHide?: boolean,
+ *   visibleWhen?: (() => boolean)|null,
  *   id?: string,
  *   className?: string,
  * }} options
  */
-export function createActionDock({ actions = [], page = '', shape = 'circle', id = 'actionDock', className = '' } = {}) {
+export function createActionDock({
+  actions = [], page = '', shape = 'circle',
+  autoHide = false, visibleWhen = null, id = 'actionDock', className = '',
+} = {}) {
   const root = document.createElement('div');
   root.className = 'action-dock' + (className ? ' ' + className : '');
   root.id = id;
@@ -74,8 +82,30 @@ export function createActionDock({ actions = [], page = '', shape = 'circle', id
     root.appendChild(button);
   }
 
+  /**
+   * 浮层不向页面要内边距：可见时只放大滚动容器的 scroll-padding-bottom（只影响滚动定位，
+   * 不参与布局），这样聚焦或滚动到页尾的控件不会被浮层压住，页面也不会留出空白条。
+   */
+  function syncScrollPadding() {
+    const main = $('mainContent');
+    if (!main) return;
+    if (root.hidden) {
+      main.style.removeProperty('scroll-padding-bottom');
+      return;
+    }
+    const height = Math.ceil(root.getBoundingClientRect().height) || 0;
+    main.style.setProperty('scroll-padding-bottom', `${height + 24}px`);
+  }
+
+  function shouldShow() {
+    if (page && getCurrentPage() !== page) return false;
+    if (!autoHide) return true;
+    return typeof visibleWhen === 'function' ? visibleWhen() === true : false;
+  }
+
   function paintVisibility() {
-    root.hidden = page ? getCurrentPage() !== page : false;
+    root.hidden = !shouldShow();
+    syncScrollPadding();
   }
 
   function update(actionId, patch = {}) {
@@ -108,8 +138,10 @@ export function createActionDock({ actions = [], page = '', shape = 'circle', id
 
   document.body.appendChild(root);
   paintVisibility();
-  // 切页（hash 变化）时立即重算可见性：不依赖下一次 refresh，避免浮动组跨页残留。
+  // 切页时立即重算可见性：导航按钮走 pushState，不会触发 hashchange；
+  // hashchange/popstate 只兜底手动改地址栏与前进后退。
   const onPageChange = () => paintVisibility();
+  document.addEventListener('console:page-change', onPageChange);
   window.addEventListener('hashchange', onPageChange);
   window.addEventListener('popstate', onPageChange);
   return {
@@ -118,8 +150,11 @@ export function createActionDock({ actions = [], page = '', shape = 'circle', id
     update,
     paint: paintVisibility,
     destroy() {
+      document.removeEventListener('console:page-change', onPageChange);
       window.removeEventListener('hashchange', onPageChange);
       window.removeEventListener('popstate', onPageChange);
+      const main = $('mainContent');
+      if (main) main.style.removeProperty('scroll-padding-bottom');
       root.remove();
     },
   };

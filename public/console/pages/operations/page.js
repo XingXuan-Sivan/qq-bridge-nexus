@@ -41,6 +41,20 @@ export function init() {
     // 会话表与活动日志由各自页面在进入时刷新；全局指标由 app.js 的轮询更新。
   });
 
+  // 紧急关闭：从「全局配置 › 运行模式」搬来，和重启/清空工作区同组（都是破坏性动作，
+  // 放在运维页才不容易误点）。行为与原来一致：二次确认 → 回到 L0 → 刷新状态。
+  document.getElementById('panicBtn').addEventListener('click', async () => {
+    if (!confirm('立即回到安全模式（L0 群友模式）？进行中的高权限会话会被停止。')) return;
+    const msg = document.getElementById('panicMsg');
+    msg.className = 'form-actions-status';
+    msg.textContent = '正在关闭…';
+    const r = await api('/api/admin/panic', 'POST', {});
+    msg.textContent = r.ok ? '✅ 已回到 L0 群友模式' : ('❌ ' + (r.error || '紧急关闭失败，请直接停止桥接进程'));
+    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
+    // 模式确实变了：请顶栏与总览指标立刻补一次状态，不等下一轮轮询。
+    document.dispatchEvent(new Event('console:refresh-status'));
+  });
+
   document.getElementById('aiNotifySend').addEventListener('click', async () => {
     const kind = document.getElementById('aiNotifyKind').value;
     const id = document.getElementById('aiNotifyId').value.trim();

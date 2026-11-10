@@ -151,6 +151,7 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   // 离开当前页前让页面自己确认（未保存修改）；返回 false 表示用户取消了这次切页。
   if (!skipGuard && page !== currentConsolePage && pageLeaveGuard && pageLeaveGuard(currentConsolePage, page) === false) return false;
+  const previousPage = currentConsolePage;
   currentConsolePage = page;
   if (persist) rememberPage(page);
   // 只切「页面宿主」（main 里的 section）的显隐：分页器按钮也带 data-page 的数字属性，
@@ -161,6 +162,9 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
     if (el.dataset.page === page && !PAGE_FRAGMENTS.has(page)) el.dataset.pageReady = '1';
   });
   void hydratePage(page);
+  // 导航按钮走的是 pushState，不会触发 hashchange/popstate；挂在 body 上的浮动组件
+  // （如右下角操作组）只能靠这个事件知道自己该不该显示，否则会跨页残留。
+  document.dispatchEvent(new CustomEvent('console:page-change', { detail: { page, from: previousPage } }));
   document.querySelectorAll('#mainNav [data-view]').forEach((button) => {
     const selected = button.dataset.view === page;
     button.classList.toggle('active', selected);

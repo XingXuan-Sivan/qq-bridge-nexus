@@ -132,9 +132,6 @@
 .config-panel .card > .meta,
 .config-panel .card > p.meta { margin: 0 0 14px; }
 /* 配置页字段一律单列：两列会把 148px 标签列塞进半宽格子，标签与控件对不齐。 */
-
-/* 固定保存条压在右下角，页面底部留出它的高度，最后一行按钮不会被挡住。 */
-.config-body { padding-bottom: 72px; }
 /* 单行控件不铺满整张卡：表单读起来是「标签 + 值」，不是「标签 + 一条长条」。
    文本域、表格、编辑器仍是整行。 */
 .config-panel .field-control > input[type="text"],

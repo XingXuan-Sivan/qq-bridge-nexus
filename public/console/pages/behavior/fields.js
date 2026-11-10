@@ -1,6 +1,11 @@
 // 行为档案页的静态字段：选择档案（下拉 + 刷新）与显示名。
 // 动态的 v1/v2 表单由 presets/behavior-form.js 按 schema 生成，不在这里。
 export const BEHAVIOR_FIELDS = {
+  list: {
+    fields: [
+      { name: 'behaviorTable', type: 'custom', span: 2, html: '<div id="behaviorTable"></div>' },
+    ],
+  },
   main: {
     fields: [
       {

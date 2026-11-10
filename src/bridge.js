@@ -34,6 +34,7 @@ import {
   validateBehaviorText,
   writeBehaviorFile,
 } from './behaviors/index.mjs';
+import { listKinds } from './behaviors/kinds/index.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -86,6 +87,7 @@ import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
+import { createCapabilityRegistry, GATEABLE_TOOLS } from './runtime/capabilities.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
 import {
@@ -3806,6 +3808,7 @@ async function main() {
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
   // 运行方案（P4）：定义来自 config.runtime.plans，指针来自 state/runtime.json；currentMode 是它的 legacy 投影。
   let runtimePlans = [];
+  let runtimePlansSource = null;
   let runtimeState = null;
   let lastMode = currentMode;
   // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
@@ -3947,8 +3950,13 @@ async function main() {
   }
   /** 运行方案：数据层单例（定义随 config 重载刷新，指针在 state/runtime.json）。 */
   function ensureRuntime() {
+    // 方案清单跟着 config 走：配置重载（或 POST 后置空）时按新引用重算，避免用旧清单。
+    const source = bridgeCfg?.runtime?.plans ?? null;
+    if (runtimePlansSource !== source) {
+      runtimePlans = normalizePlans(source);
+      runtimePlansSource = source;
+    }
     if (!runtimeState) {
-      runtimePlans = normalizePlans(bridgeCfg?.runtime?.plans);
       runtimeState = createRuntimeState({
         file: path.join(STATE_DIR, 'runtime.json'),
         platform: bridgeCfg?.platform?.id ?? RUNTIME_PLATFORM,
@@ -3960,20 +3968,96 @@ async function main() {
   }
 
   /** 当前生效方案（缺失/非法时回落到默认方案，不抛错）。 */
+  let capabilityRegistry = null;
+  let capabilitySource = null;
+
+  /** 能力预设的桥接侧补丁（沙箱 + 工具授予）；catalog 就是 DSH 预设目录 + 方案用到的预设。 */
+  function ensureCapabilities() {
+    const catalog = [...new Set([...PRESET_IDS, ...normalizePlans(bridgeCfg.runtime?.plans).map((plan) => plan.tools)])]
+      .filter(Boolean)
+      .map((id) => ({ id, label: id, builtin: PRESET_IDS.includes(id) }));
+    const source = JSON.stringify({ catalog, config: bridgeCfg.capabilities ?? {} });
+    if (!capabilityRegistry || source !== capabilitySource) {
+      capabilitySource = source;
+      capabilityRegistry = createCapabilityRegistry({
+        catalog,
+        config: bridgeCfg.capabilities ?? {},
+        onChange: (next) => saveConfigSection('capabilities', next),
+      });
+    }
+    return capabilityRegistry;
+  }
+
+  /** 这套方案允许调用该工具吗？只覆盖 GATEABLE_TOOLS 里的写工具，读工具仍看全局开关。 */
+  function capabilityAllows(key, flag) {
+    if (!GATEABLE_TOOLS.some((tool) => tool.flag === flag)) return true;
+    const plan = sessionPlanOf(key);
+    if (!plan?.tools) return true;
+    return ensureCapabilities().grantsOf(plan.tools, flag);
+  }
+
   function activePlan() {
     const rt = ensureRuntime();
     const id = rt.get() ?? rt.fallbackPlanId;
     return findPlan(runtimePlans, id) ?? findPlan(BUILTIN_PLANS, 'social-v2') ?? BUILTIN_PLANS[0];
   }
 
+  /** 某会话固定的方案（只看档案，不看全局指针）。 */
+  function sessionPlanOf(key) {
+    const planId = state.profiles?.[key]?.planId;
+    if (!planId) return null;
+    ensureRuntime(); // 方案清单是懒建的：先确保 runtimePlans 已按当前 config 归一。
+    return findPlan(runtimePlans, planId);
+  }
+
+  /**
+   * 某会话当前生效的方案：会话固定优先，否则全局方案。
+   * 全局指针只有在与 currentMode 投影一致时才采信 —— 指针落后（改配置、迁移、或管理通道
+   * 写入失败）时宁可退回旧投影，也不要让「引擎说 chat、能力却是 agent」这种半截状态。
+   */
+  function planOf(key) {
+    const sessionPlan = sessionPlanOf(key);
+    if (sessionPlan) return sessionPlan;
+    const plan = activePlan();
+    if (!plan) return null;
+    return legacyModeOfPlan(plan) === currentMode ? plan : null;
+  }
+
+  /** 受众为 owner 的方案只允许管理员私聊使用（取代旧 closed-agent 全局排他）。 */
+  function planAudienceBlocks(key) {
+    const plan = planOf(key);
+    if (!plan || plan.audience !== 'owner') return false;
+    return !(isOwnerPrivate(key) || isAdminPrivate(key));
+  }
+
+  function behaviorKindOf(behaviorId) {
+    if (!behaviorId || behaviorId === 'none') return '';
+    // cfg.behaviors 是 loadBehaviorProfiles() 返回的 Map（控制台列表才用 entries()）。
+    const registry = cfg.behaviors ?? null;
+    if (registry?.get) return registry.get(behaviorId)?.kind ?? '';
+    return (registry ?? []).find?.((item) => item.id === behaviorId)?.kind ?? '';
+  }
+
+  /** 方案 → 引擎：行为 kind 决定仿真引擎，工具决定聊天 / Agent。三者都是数据，不是枚举。 */
+  function planMode(plan) {
+    if (!plan) return null;
+    const raw = plan.behavior ?? 'none';
+    const behaviorId = raw === 'inherit' ? configDefaultBehaviorName(cfg) : raw;
+    const kind = behaviorKindOf(behaviorId);
+    if (kind === 'v2') return 'reserved2';
+    if (kind === 'v1') return 'reserved';
+    return legacyModeOfPlan({ ...plan, behavior: 'none' });
+  }
+
   function effectiveMode(key) {
-    const privileged = canEnterClosedAgent(key);
     const profile = state.profiles?.[key];
-    // 会话级覆盖：planId 优先（P4 起），老档案仍可能只有 mode。
-    const override = profile?.planId
-      ? legacyModeOfPlan(findPlan(runtimePlans, profile.planId))
-      : profile?.mode;
-    return resolveEffectiveMode(currentMode, override, { owner: isOwnerPrivate(key), privileged });
+    // 会话固定了方案：引擎完全由该方案决定（行为 kind → 仿真引擎，工具 → 聊天/Agent）。
+    if (profile?.planId) {
+      const plan = sessionPlanOf(key);
+      if (plan) return planMode(plan) ?? currentMode;
+    }
+    // 否则用全局方案；老档案的 mode 覆盖仍然生效（迁移期兼容）。
+    return resolveEffectiveMode(currentMode, profile?.mode);
   }
   /** 是否还有任何会话会跑二代仿真（全局 v2，或有人固定 v2）。用于全局接口的总开关。 */
   function anyV2Session() {
@@ -3993,6 +4077,7 @@ async function main() {
   }
   function passiveAllowed(key) {
     if (!isUsableMode(effectiveMode(key))) return false;
+    if (planAudienceBlocks(key)) return false;
     return profileAccessAllowed('passive', key);
   }
   /** 当前生效的会话 key（供控制台下拉、定时目标、群成员对账等枚举用）。 */
@@ -4012,6 +4097,7 @@ async function main() {
   function proactiveAllowed(key) {
     const mode = effectiveMode(key);
     if (mode === 'inactive' || mode === 'closed-agent') return false;
+    if (planAudienceBlocks(key)) return false;
     return profileAccessAllowed('proactive', key);
   }
   function schedulerTargetAllowed(key) {
@@ -4617,6 +4703,10 @@ async function main() {
       const plan = closedAgentPlan();
       return plan.ok ? (plan.agentPreset || undefined) : undefined;
     }
+    // P6：会话固定的能力预设优先（全局方案的引擎已投影进 currentMode，能力仍走下面旧分支）。
+    const fixedTools = sessionPlanOf(key)?.tools;
+    const planPreset = fixedTools ? resolvePresetName(fixedTools, { strict: true }) : '';
+    if (planPreset) return planPreset;
     // 会话档案可以固定 preset；否则按模式推导。
     const override = state.profiles?.[key]?.presetId;
     if (override && mode !== 'closed-agent') {
@@ -4627,21 +4717,20 @@ async function main() {
     return resolvePresetName(wanted, { strict: true }) || undefined;
   }
 
-  /** 会话当前使用的行为档案；聊天/运维模式不需要 QQ 行为，返回 null。 */
+  /**
+   * 会话当前使用的行为档案。P6 起只看方案：none = 不带行为，inherit = 预设绑定 → 全局默认，
+   * 其余按档案 id 解析。是否「有仿真引擎」由 behavior kind 决定（planMode），不再看模式枚举。
+   */
   function behaviorFor(key) {
-    const mode = effectiveMode(key);
-    if (mode === 'chat' || mode === 'closed-agent') return null;
-    const presetId = modePreset(key, mode, cfg);
-    // 预设绑定优先；没绑定（例如控制台新建的预设）时用全局默认行为档案兜底。
-    const behaviorId = (presetId ? cfg.presetBehaviors.get(presetId) : '') || configDefaultBehaviorName(cfg);
-    const behavior = resolveBehavior(cfg.behaviors, behaviorId, { presetId: presetId || key });
-    if (mode === 'reserved' && behavior.kind !== 'v1') {
-      throw new Error(`预设 ${presetId} 的行为档案 kind=${behavior.kind}，但会话 ${key} 运行在一代仿真`);
-    }
-    if (mode === 'reserved2' && behavior.kind !== 'v2') {
-      throw new Error(`预设 ${presetId} 的行为档案 kind=${behavior.kind}，但会话 ${key} 运行在二代仿真`);
-    }
-    return behavior;
+    const plan = planOf(key);
+    const raw = plan?.behavior ?? 'none';
+    if (raw === 'none') return null;
+    const presetId = modePreset(key, effectiveMode(key), cfg);
+    const behaviorId = raw === 'inherit'
+      ? ((presetId ? cfg.presetBehaviors.get(presetId) : '') || configDefaultBehaviorName(cfg))
+      : raw;
+    if (!behaviorId || behaviorId === 'none') return null;
+    return resolveBehavior(cfg.behaviors, behaviorId, { presetId: presetId || key });
   }
 
   /** 行为档案 + 系统级配置的运行时视图（迁移期兼容未搬走的系统键）。 */
@@ -5363,7 +5452,9 @@ async function main() {
 
   // ── 本地控制台（独立 Web 面板，不依赖 DSH WebUI） ───────────────────────────
   // 模式/角色/静默状态都存 state/*.json，桥接即时感知；此服务只读写这些文件。
-  function v2ToolEnabled(flag) {
+  function v2ToolEnabled(flag, key = '') {
+    // 会话固定了方案时，方案的能力授予可以再收紧一层（只影响 GATEABLE_TOOLS 里的写工具）。
+    if (key && !capabilityAllows(key, flag)) return false;
     // 记忆工具已收编到记忆页（S5）：memory.providers['local-digest'].tools.enabled 优先，
     // 未显式配置时才回落到旧的 socialV2.tools.memory（兼容旧配置，不丢开关）。
     if (flag === 'memory') {
@@ -6544,6 +6635,11 @@ async function main() {
           }
           return;
         }
+        // 行为类型（kind）注册表：字段规格的唯一来源，控制台按它渲染表单。
+        if (url.pathname === '/api/behaviors/kinds' && req.method === 'GET') {
+          sendJson({ ok: true, kinds: listKinds() });
+          return;
+        }
         // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
         const behaviorRoute = url.pathname.match(/^\/api\/config\/behaviors(?:\/([a-z0-9][a-z0-9._-]{0,63}))?(?:\/(validate))?$/);
         if (behaviorRoute) {
@@ -6552,7 +6648,13 @@ async function main() {
           const behaviorsRoot = path.join(ROOT, 'config', 'behaviors');
           try {
             if (!id && req.method === 'GET') {
-              sendJson({ ok: true, behaviors: listBehaviorFiles({ root: behaviorsRoot }) });
+              // 「被引用」= 哪些运行方案把这个档案当作行为；换行为时先看这里再删。
+              const plans = normalizePlans(bridgeCfg.runtime?.plans);
+              const behaviors = listBehaviorFiles({ root: behaviorsRoot }).map((entry) => ({
+                ...entry,
+                usedBy: plans.filter((plan) => plan.behavior === entry.id).map((plan) => plan.id),
+              }));
+              sendJson({ ok: true, behaviors });
               return;
             }
             if (!id) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
@@ -6821,6 +6923,29 @@ async function main() {
             resetOnRestart: cfg.runtime?.resetOnRestart !== false,
             idleMinutes: cfg.runtime?.idleMinutes ?? 10,
           });
+          return;
+        }
+        // 能力预设的桥接侧补丁（沙箱 / 工具授予）：只读列表 + 单条保存。
+        if (req.method === 'GET' && url.pathname === '/api/runtime/capabilities') {
+          const plans = normalizePlans(bridgeCfg.runtime?.plans);
+          const capabilities = ensureCapabilities().list().map((entry) => ({
+            ...entry,
+            usedBy: plans.filter((plan) => plan.tools === entry.id).map((plan) => plan.id),
+          }));
+          sendJson({ ok: true, gateable: GATEABLE_TOOLS, capabilities });
+          return;
+        }
+        if (req.method === 'PATCH' && url.pathname.startsWith('/api/runtime/capabilities/')) {
+          const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
+          const body = await readBody();
+          try {
+            const saved = ensureCapabilities().save(capabilityId, { sandbox: body?.sandbox, grants: body?.grants, note: body?.note });
+            capabilityRegistry = null;
+            ext.audit.append('runtime.capability.write', { id: capabilityId, sandbox: saved.sandbox, grants: saved.grants });
+            sendJson({ ok: true, capability: saved, capabilities: ensureCapabilities().list() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '保存失败' }, 400);
+          }
           return;
         }
         // 按方案切换：确认 / 审计 / TOTP / 回落仍走管理控制器，方案的 legacy 投影只用来定格目标。
@@ -8723,7 +8848,7 @@ async function main() {
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('markRead')) { sendJson({ ok: false, error: '工具未启用：qq_mark_read' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('markRead', key)) { sendJson({ ok: false, error: '工具未启用：qq_mark_read' }, 403); return; }
           const st = getSocialV2State(key);
           // 注意：不带 throughSeq 的调用会清空全部未读，这是**有意保留的兼容语义**
           // （旧 preset 与「没有水位」的收尾调用；见 acknowledgeMessagesV2 的注释与
@@ -8765,11 +8890,11 @@ async function main() {
           if (!key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('setWakeConfig')) { sendJson({ ok: false, error: '工具未启用：qq_set_wake_config' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('setWakeConfig', key)) { sendJson({ ok: false, error: '工具未启用：qq_set_wake_config' }, 403); return; }
           const st = getSocialV2State(key);
           const throughSeq = requestedReadThroughSeqV2(st, body, !!req.headers['x-agent-token']);
           // Preserve the deployed behavior: with markRead disabled, update wake configuration only.
-          const acknowledgeOnClose = throughSeq !== null && v2ToolEnabled('markRead');
+          const acknowledgeOnClose = throughSeq !== null && v2ToolEnabled('markRead', key);
           const input = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? body.config : {};
           const current = st.wakeConfig;
           const inputTriggers = input.triggers && typeof input.triggers === 'object' && !Array.isArray(input.triggers) ? input.triggers : {};
@@ -9051,7 +9176,7 @@ async function main() {
           }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: agentTokenMismatchMessage(key, req.headers['x-agent-token']) }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendBurst')) { sendJson({ ok: false, error: '工具未启用：qq_send_burst' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendBurst', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_burst' }, 403); return; }
           if (effectiveMode(key) !== 'reserved2') {
             sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403);
             return;
@@ -9180,7 +9305,7 @@ async function main() {
           }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: agentTokenMismatchMessage(key, req.headers['x-agent-token']) }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendMessage')) { sendJson({ ok: false, error: '工具未启用：qq_send_message' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendMessage', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_message' }, 403); return; }
           if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           const keyMatch = parseKey(key);
@@ -9293,7 +9418,7 @@ async function main() {
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送拍一拍必须携带 agent token' }, 403); return; }
           if (!agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: agentTokenMismatchMessage(key, req.headers['x-agent-token']) }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (!v2ToolEnabled('sendPoke')) { sendJson({ ok: false, error: '工具未启用：qq_send_poke' }, 403); return; }
+          if (!v2ToolEnabled('sendPoke', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_poke' }, 403); return; }
           if (socialV2.paused) { sendJson({ ok: false, error: '二代 AI 已暂停，不能发送拍一拍' }, 403); return; }
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
@@ -9677,7 +9802,7 @@ async function main() {
           if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!token) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           if (!agentTokenOk(key, token)) { sendJson({ ok: false, error: agentTokenMismatchMessage(key, token) }, 403); return; }
-          if (!v2ToolEnabled('sendVoice')) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
+          if (!v2ToolEnabled('sendVoice', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
           if (shouldBlockSilentReply(key)) { sendJson({ ok: false, error: '静默模式已开启，当前不允许发送' }, 403); return; }
           const keyMatch = parseKey(key);
@@ -9748,7 +9873,7 @@ async function main() {
           }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: agentTokenMismatchMessage(key, req.headers['x-agent-token']) }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendSticker')) { sendJson({ ok: false, error: '工具未启用：qq_send_sticker' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('sendSticker', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_sticker' }, 403); return; }
           if (effectiveMode(key) !== 'reserved2') { sendJson({ ok: false, error: '该接口仅 reserved2 模式可用' }, 403); return; }
           if (!req.headers['x-agent-token']) { sendJson({ ok: false, error: 'reserved2 模式发送必须携带 agent token' }, 403); return; }
           const keyMatch = parseKey(key);
@@ -9847,7 +9972,7 @@ async function main() {
           if (!key || !messageRef) { sendJson({ ok: false, error: 'key 和 messageId/seq 不能为空' }, 400); return; }
           if (req.headers['x-agent-token'] && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (req.headers['x-agent-token'] && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (req.headers['x-agent-token'] && !v2ToolEnabled('collectSticker')) { sendJson({ ok: false, error: '工具未启用：qq_collect_sticker' }, 403); return; }
+          if (req.headers['x-agent-token'] && !v2ToolEnabled('collectSticker', key)) { sendJson({ ok: false, error: '工具未启用：qq_collect_sticker' }, 403); return; }
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400); return; }
           const st = getSocialV2State(key);
@@ -9895,7 +10020,7 @@ async function main() {
           if (agentCall && !key) { sendJson({ ok: false, error: 'key 不能为空' }, 400); return; }
           if (agentCall && !agentTokenOk(key, req.headers['x-agent-token'])) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (agentCall && !v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (agentCall && !v2ToolEnabled('sendVoice')) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
+          if (agentCall && !v2ToolEnabled('sendVoice', key)) { sendJson({ ok: false, error: '工具未启用：qq_send_voice' }, 403); return; }
           const wantProbe = url.searchParams.get('probe') !== '0';
           try {
             const files = listAudioFiles(voice.dir);
@@ -10435,7 +10560,7 @@ async function main() {
           const token = String(req.headers['x-agent-token'] ?? '');
           if (!token || !agentTokenOk(key, token)) { sendJson({ ok: false, error: 'agent token 无效' }, 403); return; }
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403); return; }
-          if (!v2ToolEnabled('schedule')) { sendJson({ ok: false, error: '工具未启用：qq_schedule_*' }, 403); return; }
+          if (!v2ToolEnabled('schedule', key)) { sendJson({ ok: false, error: '工具未启用：qq_schedule_*' }, 403); return; }
           if (key !== schedulerOwnerKey()) { sendJson({ ok: false, error: '定时任务只能在管理员的私聊里登记；群里不能用。请直接告诉对方做不到，不要口头答应。' }, 403); return; }
           const snap = scheduler.snapshot();
           if (!snap.settings.enabled) { sendJson({ ok: false, error: '管理员关闭了定时任务功能。请直接告诉管理员现在做不到，不要口头答应。' }, 403); return; }

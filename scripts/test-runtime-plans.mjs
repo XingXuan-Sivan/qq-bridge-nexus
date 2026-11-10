@@ -97,3 +97,12 @@ test('自定义方案：新增/更新落盘字段、内置 id 拒绝、删除保
   assert.deepEqual(afterDelete, []);
   assert.throws(() => removeCustomPlan(afterDelete, 'my-agent'), /没有这个方案/);
 });
+
+test('legacy 投影按行为优先：Agent 工具 + 仿真行为仍是仿真引擎', () => {
+  // 行为决定引擎，工具只决定能力 —— 允许「带人格的 Agent 进群聊」这类组合。
+  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner' }), 'reserved2');
+  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'social-v1' }), 'reserved');
+  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'none' }), 'closed-agent');
+  assert.equal(legacyModeOfPlan({ tools: 'qq-chat', behavior: 'social-v2' }), 'reserved2');
+  assert.equal(legacyModeOfPlan({ tools: 'qq-chat', behavior: 'none' }), 'chat');
+});

@@ -14,7 +14,7 @@
 1. **覆盖不污染全局**：会话级配置只在该会话生效，任何读取失败都回落全局默认，绝不把会话值写回全局配置。
 2. **准入只有一个真相**：被动/主动的判定只读 `state/sessions/defaults.json` 的两份名单；会话档案里不再有准入字段，也不再有自己的允许/拒绝状态。
 3. **两态即语义**：每个轴只有 `allow`（白名单：默认拒绝、名单内允许）与 `deny`（黑名单：默认允许、名单内拒绝）两种模式；没有 `off`，也没有「显式拒绝优先」。管理命令、审批与 owner 私聊走独立通道，不受名单影响。
-4. **运行模式不是过滤器**：`chat` / `reserved` / `reserved2` 是会话实际跑哪套仿真；`closed-agent` 是全局排他模式，不开放给会话级。
+4. **运行模式不是过滤器**：`chat` / `reserved` / `reserved2` 是会话实际跑哪套仿真；`closed-agent` 是全局引擎（P6 起不再 owner 排他，「谁能用」由运行方案 `audience` 决定），不开放给会话级。
 5. **DSH 实例可丢弃**：任何 RPC 返回 `session/not-found` 只允许「退役 → 重建 → 重试一次」；不允许无限重建，也不允许静默不回复。
 6. **迁移一次、无旧读**：成功后删除旧文件与旧键，正式版本没有兼容读分支、没有 `.bak`、没有双写。
 7. **服务端校验权限**：owner/管理员边界在 HTTP 层校验；控制台隐藏按钮只是体验，不是授权。
@@ -25,7 +25,7 @@
 | --- | --- |
 | 准入轴 | 被动、主动两根独立轴；每根轴一条全局名单，模式二选一：白名单（默认拒绝）或黑名单（默认允许） |
 | 迁移默认 | 完全保持现状：按旧默认选模式（旧默认 deny → 白名单，旧默认 allow → 黑名单），再把升级当次实际允许/拒绝的会话写成名单；不保留每会话三态 |
-| 运行模式 | 会话可固定 `chat` / `reserved` / `reserved2`；closed-agent 仍全局排他，不开放会话级 |
+| 运行模式 | 会话可固定方案（P4 起 `planId`）；closed-agent 是全局引擎、不开放会话级，「谁能用」由方案 `audience` 决定（P6） |
 | 覆盖范围 | P1：显示名、准入（只读全局名单成员关系）、人格、提示词、唤醒、记忆清空、DSH 状态；P2：运行模式、预设、模型 |
 | 存储与迁移 | 一次性迁到 `state/sessions/` 目录（`defaults.json` + 每会话文件）；正式版本无旧文件、旧键、兼容读、`.bak` |
 | 清空上下文 | 拆成「重建 DSH 会话」与「重置会话状态」两个动作 |
@@ -227,18 +227,28 @@ resolve(axis, key):
 
 ```
 effectiveMode(key):
-  if globalMode == 'closed-agent':
-      return isOwnerOrAdminPrivate(key) ? 'closed-agent' : 'inactive'
-  return profile.mode == 'inherit' ? globalMode : profile.mode
+  if profile.planId:
+      plan = findPlan(profile.planId)
+      return planMode(plan)            # 行为 kind → reserved/reserved2，工具 → chat/closed-agent
+  return globalMode == 'closed-agent' ? 'closed-agent'
+       : profile.mode == 'inherit' ? globalMode : profile.mode
+
+planMode(plan):                      # P6：引擎由行为决定，能力由工具决定
+  behavior = plan.behavior == 'inherit' ? configDefaultBehavior : plan.behavior
+  kind = behavior 的 kind            # v1 / v2 / 空
+  kind == 'v2' ? 'reserved2'
+  kind == 'v1' ? 'reserved'
+  plan.tools 是 qq-agent-* ? 'closed-agent' : 'chat'
 ```
 
-- `globalMode` 仍是 `config.json.currentMode`，但含义变成「默认模式」；会话可固定 `chat` / `reserved` / `reserved2`。
-- **closed-agent 全局排他**：它开启时，所有会话级 chat/v1/v2 覆盖暂停，只保留 owner/管理员私聊；退出后按各自覆盖恢复。这样不会出现高权限 agent 与公开仿真混跑。
-- 会话级 `mode` 改变会改变预设、工具集、提示词结构、记忆块与模型默认值，必须进入执行指纹（见 5.3）。
+- `globalMode` 仍是 `config.json.currentMode`，含义是「全局方案的投影」；方案是唯一入口（P4/P5）。
+- **closed-agent 不再是 owner 排他**：P6 起它是全局引擎，覆盖不能把它盖回 chat/仿真；「哪些会话真的能用」由方案 `audience` 判定（`audience:'owner'` 只给管理员私聊，见 `planAudienceBlocks`），准入轴仍是第二道闸门。
+- 行为与工具解耦后可以组合出「Agent 工具 + 仿真行为 + 任意受众」，因此 `legacyModeOfPlan` 采用**行为优先**投影（`social-v2`→`reserved2`、`social-v1`→`reserved`、`qq-agent-*`→`closed-agent`、其余 `chat`）。
+- 会话级方案/模式改变会改变预设、工具集、提示词结构、记忆块与模型默认值，必须进入执行指纹（见 5.3）。
 
 ### 5.2 预设与模型
 
-- 预设：`profile.presetId` 优先；否则由有效模式推导（chat → `qq-chat`，reserved → `qq-chat`，reserved2 → `qq-chat-v2`；closed-agent 由管理员级别固定）。保存前校验安全清单。
+- 预设：P6 起**方案能力优先**（`plan.tools`，如 `qq-chat-v2` / `qq-agent-workspace`）；否则 `profile.presetId`；再否则由有效模式推导（chat → `qq-chat`，reserved → `qq-chat`，reserved2 → `qq-chat-v2`；closed-agent 由管理级别固定）。保存前校验安全清单。
 - 模型：`profile.model` 优先；否则用 `cfg.dsh` 全局默认。校验 provider/model 是否在 DSH 目录中；不在则拒绝保存并提示。
 - 会话级模型/预设保存后不保证当前 DSH 会话立刻换模型：下一次唤醒前按指纹判断重建；UI 明示「下次唤醒生效」。
 
@@ -270,7 +280,7 @@ effectiveMode(key):
 
 | 项 | 行为 |
 | --- | --- |
-| 运行模式 | `inherit` / `chat` / `reserved` / `reserved2`；closed-agent 不出现 |
+| 运行方案 | 会话固定 `planId`（P4 起）；旧 `mode` 仅迁移期兼容，closed-agent 不出现在会话级 |
 | DSH 预设 | `inherit`（按模式推导）/ 安全清单内指定 |
 | 模型 | `inherit` / 指定 provider + model + 思考强度 |
 | 定时任务 | 详情页只读列出指向本会话的任务；不在此改任务 |

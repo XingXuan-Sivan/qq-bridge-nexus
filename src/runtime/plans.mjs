@@ -129,12 +129,18 @@ export function normalizePlans(raw) {
   return merged;
 }
 
-/** 方案对应的旧模式（供 `effectiveMode` 与旧调用点投影；不是新的配置项）。 */
+/**
+ * 方案对应的旧模式（供 `effectiveMode` 与旧调用点投影；不是新的配置项）。
+ *
+ * P6 起**行为优先**：有社会行为 kind 的方案跑仿真引擎，工具只决定能力。
+ * 这样「Agent 工具 + 仿真行为 + 任意受众」可以组合出来（例如带人格的 Agent 进群聊），
+ * 不再被「工具是 qq-agent-* 就只能闭门当 Agent」写死。
+ */
 export function legacyModeOfPlan(plan) {
   if (!plan) return 'chat';
-  if (String(plan.tools || '').startsWith('qq-agent-')) return 'closed-agent';
   if (plan.behavior === 'social-v2') return 'reserved2';
   if (plan.behavior === 'social-v1') return 'reserved';
+  if (String(plan.tools || '').startsWith('qq-agent-')) return 'closed-agent';
   return 'chat';
 }
 

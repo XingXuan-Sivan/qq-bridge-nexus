@@ -4,7 +4,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { renderFields } from '../../components/form/form.js';
+import { renderFields, checkListField } from '../../components/form/form.js';
 import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { onPageRefresh } from '../../js/router.js';
 import { RUNTIME_FIELDS } from './fields.js';
@@ -16,6 +16,8 @@ const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
 let payload = null;
 let presets = [];
 let behaviors = [];
+let capabilities = [];
+let gateable = [];
 
 function el(id) {
   return document.getElementById(id);
@@ -99,6 +101,105 @@ function renderTable() {
   initDataTables(host);
 }
 
+function capabilityById(id) {
+  return capabilities.find((item) => item.id === id) ?? null;
+}
+
+function capsMarkup() {
+  if (!capabilities.length) return '<div class="meta">还没有可用的能力预设。</div>';
+  const rows = capabilities.map((cap) => [
+    `<code>${esc(cap.id)}</code>`,
+    `<span class="pill${cap.sandbox === 'danger-full-access' ? ' r' : ''}">${esc(cap.sandbox)}</span>`,
+    cap.grants?.disable?.length
+      ? cap.grants.disable.map((flag) => `<span class="pill">${esc(gateable.find((t) => t.flag === flag)?.label || flag)}</span>`).join(' ')
+      : '<span class="meta">全部允许</span>',
+    cap.usedBy?.length ? cap.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ') : '<span class="meta">未被方案引用</span>',
+    `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
+  ]);
+  return dataTableHtml({
+    columns: [
+      { label: '能力预设', width: '200' },
+      { label: '沙箱', width: '180' },
+      { label: '禁用工具' },
+      { label: '被方案引用', width: '200' },
+      { label: '操作', width: '90' },
+    ],
+    rows,
+    pageSize: 10,
+    meta: `共 ${capabilities.length} 项`,
+    empty: '没有匹配的能力预设。',
+  });
+}
+
+function renderCaps() {
+  const host = el('runtimeCaps');
+  if (!host) return;
+  host.innerHTML = capsMarkup();
+  initDataTables(host);
+}
+
+function capabilityModalHtml(cap) {
+  return modalHtml({
+    id: 'runtimeCapEditor',
+    title: `能力预设 · ${cap.id}`,
+    body: '<div class="form-stack" id="runtimeCapFields"></div>',
+    footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="runtimeCapSave">保存</button>',
+  });
+}
+
+/** 弹窗里的字段也走 renderFields：沙箱、禁用工具、备注三块。 */
+function renderCapabilityFields(cap) {
+  const host = el('runtimeCapFields');
+  if (!host) return;
+  const disabled = new Set(cap.grants?.disable ?? []);
+  const grantsHtml = checkListField({
+    id: 'runtimeCapGrants',
+    label: '禁用工具',
+    options: gateable.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
+    value: [...disabled],
+    columns: 2,
+    hint: '勾上 = 禁用；只对固定使用这个能力预设的方案生效。',
+  });
+  renderFields(host, [
+    { name: 'runtimeCapSandbox', type: 'select', label: '沙箱', options: [
+      { value: 'read-only', label: '只读' },
+      { value: 'workspace-write', label: '工作区读写' },
+      { value: 'danger-full-access', label: '完全访问（危险）' },
+    ], value: cap.sandbox, hint: '这里只记录口径；真正的沙箱由 DSH 权限预设执行。' },
+    { name: 'runtimeCapGrantsBlock', type: 'custom', span: 1, html: grantsHtml },
+    { name: 'runtimeCapNote', type: 'text', label: '备注', value: cap.note || '' },
+  ], { columns: 1 });
+}
+
+function openCapabilityEditor(id) {
+  const cap = capabilityById(id);
+  if (!cap) return;
+  document.body.insertAdjacentHTML('beforeend', capabilityModalHtml(cap));
+  const overlay = el('runtimeCapEditor');
+  openModal(overlay);
+  renderCapabilityFields(cap);
+  const sandbox = overlay.querySelector('#runtimeCapSandbox');
+  wireModal(overlay);
+  overlay.querySelector('#runtimeCapSave')?.addEventListener('click', async () => {
+    const next = {
+      sandbox: sandbox?.value ?? cap.sandbox,
+      grants: {
+        disable: [...overlay.querySelectorAll('[name="runtimeCapGrants"]:checked')].map((box) => box.value),
+      },
+      note: overlay.querySelector('#runtimeCapNote')?.value ?? '',
+    };
+    try {
+      const r = await api(`/api/runtime/capabilities/${encodeURIComponent(id)}`, 'PATCH', next);
+      if (!r?.ok) throw new Error(r?.error || '保存失败');
+      showConsoleToast('能力预设已保存');
+      overlay.remove();
+      await load();
+    } catch (error) {
+      showConsoleToast(`保存失败：${error?.message ?? error}`, 'err');
+    }
+  });
+}
+
 function renderSummary() {
   const host = el('runtimeSummary');
   if (host) host.innerHTML = summaryHtml();
@@ -106,16 +207,20 @@ function renderSummary() {
 
 async function load() {
   try {
-    const [plans, presetList, behaviorList] = await Promise.allSettled([
+    const [plans, presetList, behaviorList, caps] = await Promise.allSettled([
       api('/api/runtime/plans'),
       api('/api/presets'),
       api('/api/config/behaviors'),
+      api('/api/runtime/capabilities'),
     ]);
     if (plans.status !== 'fulfilled') throw plans.reason;
     payload = plans.value;
     presets = presetList.status === 'fulfilled' ? (presetList.value?.presets ?? []) : [];
     behaviors = behaviorList.status === 'fulfilled' ? (behaviorList.value?.behaviors ?? []) : [];
+    capabilities = caps.status === 'fulfilled' ? (caps.value?.capabilities ?? []) : [];
+    gateable = caps.status === 'fulfilled' ? (caps.value?.gateable ?? []) : [];
     renderSummary();
+    renderCaps();
     fillPlanOptions();
     renderTable();
   } catch (error) {
@@ -335,6 +440,7 @@ export function init() {
   renderFields(hostFor('summary'), RUNTIME_FIELDS.summary.fields, { columns: 2 });
   renderFields(hostFor('switch'), RUNTIME_FIELDS.switch.fields, { columns: 2 });
   renderFields(hostFor('table'), RUNTIME_FIELDS.table.fields, { columns: 2 });
+  renderFields(hostFor('caps'), RUNTIME_FIELDS.caps.fields, { columns: 2 });
   const btn = el('runtimeSwitch');
   if (btn) btn.addEventListener('click', () => { void switchPlan(); });
   const host = hostFor('table');
@@ -353,6 +459,13 @@ export function init() {
       }
       const delId = target.dataset.planDel;
       if (delId) void deletePlan(delId);
+    });
+  }
+  const capsHost = hostFor('caps');
+  if (capsHost) {
+    capsHost.addEventListener('click', (event) => {
+      const id = event.target.closest('[data-cap-edit]')?.dataset.capEdit;
+      if (id) openCapabilityEditor(id);
     });
   }
   onPageRefresh('runtime', () => { void load(); });

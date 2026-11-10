@@ -401,6 +401,19 @@ try {
     });
   });
 
+  await test('Runtime capability grants contracts', async () => {
+    await navigate('runtime');
+    await reveal('#runtimeCaps [data-cap-edit]');
+    await page.click('#runtimeCaps [data-cap-edit]');
+    await page.waitForSelector('#runtimeCapEditor .modal', { timeout: 5000 });
+    await page.check('[name="runtimeCapGrants"][value="sendPoke"]');
+    assert.deepEqual(await clickWrite('#runtimeCapSave', '/api/runtime/capabilities/qq-chat', 'PATCH'), {
+      sandbox: 'workspace-write',
+      grants: { disable: ['sendPoke'] },
+      note: '',
+    });
+  });
+
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {
     await navigate('persona');
     // 新建人格走弹窗：人格名 + 提示词编辑器（弹窗关闭后列表里出现新卡）。

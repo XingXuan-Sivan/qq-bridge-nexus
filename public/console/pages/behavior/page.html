@@ -1,5 +1,11 @@
 <section class="page-stack behavior-page">
   <section class="card span-all">
+    <h2>档案清单</h2>
+    <p class="meta">档案是资源，被运行方案的「行为」字段引用；被引用的档案改名不影响引用，删除前先确认没有被方案使用。</p>
+    <div data-behavior-fields="list"></div>
+  </section>
+
+  <section class="card span-all">
     <h2>行为档案</h2>
     <p class="meta">描述 QQ 里怎么说话、怎么等待；预设通过 behavior 引用，未绑定时用全局配置里的「默认行为档案」。保存写入 <code>config/behaviors</code>，重启桥接后生效。</p>
     <div class="form-stack" data-behavior-fields="main"></div>

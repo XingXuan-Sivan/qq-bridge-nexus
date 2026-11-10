@@ -71,26 +71,11 @@
 }
 ```
 
-**provider 接口**（对称于行为档案的 kind 接口）：
+**已实现的形态**（P7，见 `src/runtime/capabilities.mjs`）：能力 = DSH 目录里的预设（权威源 `dsh/agent-presets/<id>/`）+ 桥接侧补丁 `config.capabilities[presetId] = { sandbox, grants: { disable: [...] }, note }`。注册表按「DSH 目录 ∪ 方案用到的预设」懒建，`save()` 只写桥接侧补丁，绝不改写 DSH 预设源文件；`grants.disable` 的 9 个写工具是固定的可收紧集合（`GATEABLE_TOOLS`），执行侧由 `v2ToolEnabled(flag, key)` 按会话固定方案拦截（403 语义）。
 
-```js
-// src/runtime/capabilities.mjs —— 注册表；首个实现是 dsh
-export const id = 'dsh';
-export const platform = 'qq';
-export function list() {}              // [{ id, label, preset, sandboxOptions, toolSummary, error }]
-export function read(id) {}
-export function save(id, patch) {}     // 写预设源文件 / 沙箱 / 收窄
-export function install(id) {}         // 应用并安装（原有 preset-store 动作）
-export function validate(cap) {}       // 预设存在、沙箱在目录里、收窄键合法
-```
+**为什么不是异步 provider 接口**：能力目录在本机是同步可读的目录结构，引入 Promise 只会在唤醒路径上多一层 await 且无收益；将来接第二个 agent 运行时，把 `catalog` 的来源换掉即可，注册表契约不变。
 
-- 首个实现 `dsh` 组合三样现有东西：`src/presets/store.mjs`（目录即清单、支持新建、`builtin` 来自 factoryRoot）、`api.permissionPresets.catalog()`（沙箱选项，`src/bridge.js:3783`）、桥接侧 `config/capabilities.json`（沙箱与 `grants`，**不写进 DSH 的 `preset.yml`**，避免污染 DSH schema）。
-- `sandbox` 保存时对照目录，不在目录里给警告；运行时 DSH 拒绝就 fail-closed。
-- **删除 `FORBIDDEN_PERMISSION_PRESETS` 硬禁**。UI 标"无审批"，切换时要求一次性确认（见 §6）。
-- `qq-chat` / `qq-chat-v2` 也注册，`sandbox` 为空、`grants` 为空。
-- 将来接别的 agent 运行时（别的 harness 或别的权限模型）= 再加一个 provider，控制台与方案编辑器不改。
-
-### 3.2 行为档案（behavior）
+## 3.2 行为档案（behavior）
 
 已有：`config/behaviors/<id>.yml`（`version / kind / label / description / config`），`kind: v1 | v2`，由 `src/behaviors/index.mjs` 读写。**本轮把它接口化**：
 

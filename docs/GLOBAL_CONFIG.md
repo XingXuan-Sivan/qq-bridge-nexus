@@ -243,6 +243,10 @@ provideRecommendations: true
 
 > 注：字段名以当前 `src/bridge.js` 的归一化对象为准；上表是目标结构，迁移时逐字段对照，不凭页面 label 猜。
 
+### 3.2.1 能力预设的桥接侧补丁（`capabilities`）
+
+`config.json > capabilities` 只放桥接自己那半份信息：`{ "<presetId>": { sandbox, grants: { disable: [...] }, note } }`。权威能力仍在 `dsh/agent-presets/<id>/`；`sandbox` 是口径记录（真正执行在 DSH 侧），`grants.disable` 列出被收紧的写工具（`sendMessage/sendBurst/sendPoke/sendSticker/sendVoice/collectSticker/schedule/markRead/setWakeConfig`），由 `v2ToolEnabled(flag, key)` 按会话固定方案在执行前拦掉。
+
 ### 3.3 `config.json` 目标结构
 
 迁移完成后 `config.json` 只保留系统层。目标形状如下（省略号表示沿用当前子字段）：

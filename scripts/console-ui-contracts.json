@@ -106,6 +106,19 @@
     }
   },
   {
+    "method": "PATCH",
+    "path": "/api/runtime/capabilities/qq-chat",
+    "body": {
+      "sandbox": "workspace-write",
+      "grants": {
+        "disable": [
+          "sendPoke"
+        ]
+      },
+      "note": ""
+    }
+  },
+  {
     "method": "POST",
     "path": "/api/roles/create",
     "body": {

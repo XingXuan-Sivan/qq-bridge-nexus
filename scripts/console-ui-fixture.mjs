@@ -13,6 +13,7 @@ import { join as joinPath } from 'node:path';
 import { createScheduler } from '../src/scheduler/engine.js';
 import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
+import { listKinds } from '../src/behaviors/kinds/index.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -760,6 +761,25 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
             return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
           }
+          case '/api/behaviors/kinds': return json({ ok: true, kinds: listKinds() });
+          case '/api/runtime/capabilities': return json({
+            ok: true,
+            gateable: [
+              { flag: 'sendMessage', label: '发送消息' },
+              { flag: 'sendBurst', label: '分多条发送' },
+              { flag: 'sendPoke', label: '拍一拍' },
+              { flag: 'sendSticker', label: '发表情' },
+              { flag: 'sendVoice', label: '发语音' },
+              { flag: 'collectSticker', label: '收藏表情' },
+              { flag: 'schedule', label: '定时任务' },
+              { flag: 'markRead', label: '标记已读' },
+              { flag: 'setWakeConfig', label: '调唤醒配置' },
+            ],
+            capabilities: [
+              { id: 'qq-chat', sandbox: 'workspace-write', grants: { disable: [] }, usedBy: ['chat'] },
+              { id: 'qq-chat-v2', sandbox: 'workspace-write', grants: { disable: [] }, usedBy: ['social-v2'] },
+            ],
+          });
           case '/api/config/behaviors': return json({
             ok: true,
             behaviors: [
@@ -1183,6 +1203,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         }
       }
       if (method === 'PATCH' || method === 'DELETE') {
+        if (method === 'PATCH' && path.startsWith('/api/runtime/capabilities/')) {
+          const id = decodeURIComponent(path.slice('/api/runtime/capabilities/'.length));
+          state.capabilityPatches = state.capabilityPatches ?? {};
+          state.capabilityPatches[id] = body;
+          return json({ ok: true, capability: { id, sandbox: body.sandbox, grants: body.grants, note: body.note } });
+        }
         if (path === '/api/memory/sessions' && method === 'DELETE') {
           const key = String(body.key || '');
           const existed = Boolean(state.memoryEntries && state.memoryEntries[key]);

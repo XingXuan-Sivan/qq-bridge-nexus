@@ -48,10 +48,6 @@ function providerStatusLine(id) {
   return parts.join(' · ');
 }
 
-function switchHtml(id, on, onLabel = '开', offLabel = '关') {
-  return `<button type="button" class="field-switch" role="switch" id="${esc(id)}" data-field="${esc(id)}" data-on-label="${esc(onLabel)}" data-off-label="${esc(offLabel)}" aria-checked="${on ? 'true' : 'false'}"><span class="field-switch-track" aria-hidden="true"></span><span>${esc(on ? onLabel : offLabel)}</span></button>`;
-}
-
 function renderProviderRadios(providers) {
   const host = document.getElementById('memoryProviderRadios');
   if (!host) return;
@@ -63,13 +59,37 @@ function renderProviderRadios(providers) {
     </label>`).join('');
 }
 
+// status.providers 只带 id/label（内核清单），插件标记不一定在；核心 provider 只有本机实现。
+const CORE_PROVIDERS = new Set(['local-digest']);
+
+function providerFields(p, conf, status) {
+  const isPlugin = p.plugin ? p.plugin !== 'core' : !CORE_PROVIDERS.has(p.id);
+  const fields = [
+    { name: `memProviderEnabled-${p.id}`, type: 'switch', label: '启用', checked: conf.enabled !== false },
+  ];
+  if (isPlugin) {
+    fields.push({
+      name: `memProviderBaseUrl-${p.id}`, type: 'text', label: '服务地址', span: 3,
+      value: conf.baseUrl ?? '', placeholder: 'http://127.0.0.1:3110',
+    });
+  }
+  fields.push({
+    name: `memProviderMaxChars-${p.id}`, type: 'number', label: '单次上限', unit: '字',
+    value: conf.maxChars ?? '', min: 0, max: 100000, step: 100, placeholder: '跟随注入',
+    hint: `留空表示跟随注入上限（${status.maxChars ?? '—'} 字）。`,
+  });
+  fields.push({
+    name: `memProviderTimeout-${p.id}`, type: 'number', label: '超时', unit: 'ms',
+    value: Number(conf.timeoutMs) || 900, min: 100, max: 10000, step: 100,
+  });
+  return fields;
+}
+
 function renderProviderCards(providers) {
   const host = document.getElementById('memoryProviders');
   if (!host) return;
   host.innerHTML = providers.map((p) => {
-    const conf = lastConfig?.providers?.[p.id] ?? {};
     const status = (lastStatus?.providers ?? []).find((x) => x.id === p.id) ?? {};
-    const isPlugin = p.plugin && p.plugin !== 'core';
     return `
       <div class="memory-provider" data-provider="${esc(p.id)}">
         <div class="memory-provider-head">
@@ -78,15 +98,20 @@ function renderProviderCards(providers) {
           <span class="pill">${p.sync ? '同步' : '异步'} · ${p.capabilities?.write ? '可写' : '只读'}</span>
           <span class="meta">${esc(providerStatusLine(p.id))}</span>
         </div>
-        <div class="memory-provider-fields">
-          <label class="memory-field"><span>启用</span>${switchHtml(`memProviderEnabled-${p.id}`, conf.enabled !== false)}</label>
-          ${isPlugin ? `<label class="memory-field"><span>服务地址</span><input type="text" id="memProviderBaseUrl-${esc(p.id)}" value="${esc(conf.baseUrl ?? '')}" placeholder="http://127.0.0.1:3110"></label>` : ''}
-          <label class="memory-field"><span>单次上限（字）</span><input type="number" id="memProviderMaxChars-${esc(p.id)}" min="0" max="100000" step="100" value="${conf.maxChars ?? ''}" placeholder="跟随注入" title="留空=跟随注入上限（${status.maxChars ?? ''} 字）"></label>
-          <label class="memory-field"><span>超时（ms）</span><input type="number" id="memProviderTimeout-${esc(p.id)}" min="100" max="10000" step="100" value="${Number(conf.timeoutMs) || 900}"></label>
-        </div>
+        <div data-provider-fields></div>
         ${status.lastError ? `<div class="meta err">最近错误：${esc(status.lastError)}</div>` : ''}
       </div>`;
   }).join('');
+  providers.forEach((p) => {
+    const card = host.querySelector(`.memory-provider[data-provider="${p.id}"]`);
+    const slot = card?.querySelector('[data-provider-fields]');
+    if (!slot) return;
+    const conf = lastConfig?.providers?.[p.id] ?? {};
+    const status = (lastStatus?.providers ?? []).find((x) => x.id === p.id) ?? {};
+    renderFields(slot, providerFields(p, conf, status), { columns: 3 });
+  });
+  // 卡片每次刷新都会重建，开关的点击需要重新挂；bindSwitches 只处理还没绑过的元素。
+  bindSwitches(host);
 }
 
 function renderHistory(history) {

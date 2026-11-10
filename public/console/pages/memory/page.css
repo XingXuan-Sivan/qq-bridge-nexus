@@ -42,27 +42,9 @@
 .memory-provider-head strong { font-size: 14px; }
 .memory-provider-head code { font-size: 12px; color: var(--muted); }
 .memory-provider-head .meta { margin-left: auto; }
-.memory-provider-fields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 18px;
-}
-.memory-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.memory-field input[type="number"] { width: 108px; }
-.memory-field input[type="text"] { width: 228px; }
 
 /* 本机记忆：会话表与条目表都复用通用表格组件，标签复用 .page-tabs，不再另定义样式。 */
 
 @media (max-width: 1100px) {
   .memory-provider-head .meta { margin-left: 0; }
-  .memory-field input[type="text"] { width: 100%; }
-  .memory-field { flex: 1 1 220px; }
 }

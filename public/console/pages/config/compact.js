@@ -2,44 +2,37 @@
 // 数据仍在桥接的 socialV2.compact；这里只做表单与读写，不碰运行总览。
 import { api } from '../../js/api.js';
 import { setMsg } from '../../components/message/message.js';
+import { renderFields } from '../../components/form/form.js';
 
-const HTML = `<div class="usage-compact">
-  <div class="field-block">
-    <div class="field-row">
-      <span class="field-label">压缩方式</span>
-      <div class="field-control">
-        <div class="field-inline">
-          <label><input type="radio" name="compactMode" value="early"> 提前压缩（桥接自己压，最省）</label>
-          <label><input type="radio" name="compactMode" value="dsh"> 交给 DSH 自己压缩</label>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="field-block">
-    <div class="field-row">
-      <span class="field-label">提前压缩阈值</span>
-      <div class="field-control">
-        <span class="field-inline">
-          <input id="compactWan" type="number" min="5" max="80" step="1" aria-label="提前压缩阈值（万 token）">
-          <span class="field-unit">万 token</span>
-        </span>
-      </div>
-    </div>
-    <div class="field-notes"><p class="field-hint">默认 30；数字越小越省钱，很早的聊天细节也越早变成摘要（可填 5～80）。</p></div>
-  </div>
-  <p class="meta usage-compact-note">提前压缩：桥接把较早的历史换成一段摘要，最近约 15 万 token 原样保留；每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。交给 DSH：deepseek-flash 的窗口是 100 万，DSH 在窗口的 80% 左右自己压缩，保留细节最多，但每一步读得最多、最贵。</p>
-  <div class="row u-mt-10-between">
-    <span class="meta u-m-0" id="compactSessions">—</span>
-    <div class="form-actions">
-      <button class="btn primary" type="button" id="compactSave">保存压缩设置</button>
-      <span class="form-actions-status" id="compactMsg" role="status"></span>
-    </div>
+const FIELDS = [
+  {
+    name: 'compactMode', type: 'radio', label: '压缩方式',
+    options: [
+      { value: 'early', label: '提前压缩（桥接自己压，最省）' },
+      { value: 'dsh', label: '交给 DSH 自己压缩' },
+    ],
+  },
+  {
+    name: 'compactWan', type: 'number', label: '提前压缩阈值', unit: '万 token',
+    min: 5, max: 80, step: 1,
+    hint: '默认 30；数字越小越省钱，很早的聊天细节也越早变成摘要（可填 5～80）。',
+  },
+];
+
+const HTML = `<div class="form-stack" id="compactForm"></div>
+<p class="meta usage-compact-note">提前压缩：桥接把较早的历史换成一段摘要，最近约 15 万 token 原样保留；每个会话两次自动压缩至少隔 2 小时，会话正忙时不压，等它空下来。交给 DSH：deepseek-flash 的窗口是 100 万，DSH 在窗口的 80% 左右自己压缩，保留细节最多，但每一步读得最多、最贵。</p>
+<div class="row u-mt-10-between">
+  <span class="meta u-m-0" id="compactSessions">—</span>
+  <div class="form-actions">
+    <button class="btn primary" type="button" id="compactSave">保存压缩设置</button>
+    <span class="form-actions-status" id="compactMsg" role="status"></span>
   </div>
 </div>`;
 
 export function mountCompact(host) {
   if (!host) return null;
   host.innerHTML = HTML;
+  renderFields(document.getElementById('compactForm'), FIELDS, { columns: 1 });
 
   async function load() {
     const r = await api('/api/compact/config');

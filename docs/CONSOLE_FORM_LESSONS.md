@@ -538,6 +538,20 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 另外：宿主 div 不要再写 `class="form-cols"`——`renderFields` 自己会插入 `.cols.form-cols`，套两层会出现「12 列里再 12 列」的栅格，字段宽度算不对。
 
+### 1.91 动态卡片里的字段也要走 `renderFields`，但值要显式传
+
+记忆 Provider 卡是按接口返回的 provider 列表动态生成的，之前每个卡片里手写 `<label class="memory-field"><span>启用</span><input …>`；换成字段规格后卡片仍然动态，但字段由 `renderFields` 渲染。
+
+两个坑：
+- **值不会自动回填**。`switchField` 认 `checked`、`numberField` / `textField` 认 `value`，规格里不写就是空值——上线后一保存就把用户配置清空了。规格里必须显式带 `value` / `checked`。
+- **每次重绘要重新绑开关**。`renderFields` 只输出 DOM，`field-switch` 的点击要靠 `bindSwitches(root)`；卡片 `innerHTML` 重建后旧监听就没了。渲染完补一次 `bindSwitches(host)`（它只处理未绑过的元素，重复调用安全）。
+
+### 1.92 接口里的元数据不一定齐全，核心/插件判定要有显式名单
+
+`/api/memory` 的 `status.providers` 只返回 `id` 与 `label`，没有 `plugin`；如果按 `p.plugin && p.plugin !== 'core'` 判断，插件 provider 会被当成核心，界面就少一个「服务地址」字段，保存后 baseUrl 反而被丢掉。
+
+**规则**：核心实现用本地名单判定（`CORE_PROVIDERS`），其余默认按插件处理；不要依赖接口「顺带返回」的字段做功能分支。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

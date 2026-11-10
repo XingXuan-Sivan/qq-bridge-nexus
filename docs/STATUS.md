@@ -537,6 +537,18 @@ npm run test:console-ui
 
 **已知限制**：卡片顺序固定，不支持拖动/折叠；唤醒的批次窗口、概率等参数仍在「二代仿真」页；提示词上限来自 `prompt.maxChars`，会话页不提供修改入口。
 
+### 6.37 第十九批：记忆 Provider 卡与上下文压缩改字段规格（2026-11-10）
+
+1. **记忆 Provider 卡字段化**：卡片头保留（名称、id、同步/可写、最近调用），卡内从一行手写 `.memory-field` 改成 `renderFields(..., {columns:3})` 的 3–4 个字段——启用（switch）、服务地址（text，仅插件 provider，占满整行）、单次上限（number，字）、超时（number，ms）；值从 `config.providers` 回填，空上限仍表示「跟随注入」。
+2. **刷新后开关可再点**：卡片每次刷新都重建 DOM，渲染完补一次 `bindSwitches(host)`（`bindSwitches` 只处理未绑过的元素，重复调用安全）。顺带修掉旧实现「刷新后开关点不动」的隐患。
+3. **核心 / 插件 provider 判定**：`/api/memory` 的 `status.providers` 只提供 `id`、`label`，没有 `plugin` 字段；改为本地核心名单 `CORE_PROVIDERS = new Set(['local-digest'])`，其余一律按插件 provider 处理（决定是否显示「服务地址」）。
+4. **上下文压缩字段化**：`pages/config/compact.js` 从手写 `.field-block` 改成字段规格——`radio(compactMode)` + `number(compactWan, unit:'万 token', 5–80)`；说明段落、会话用量、保存按钮保持原样；删除 `page.css` 里 `.usage-compact` / `.field-inline` / `input[type=number]` 的旧排版覆盖。
+5. **清理死代码**：移除 `memory/page.js` 的 `switchHtml()` 与 `.memory-field`、`.memory-provider-fields` 两条样式。
+
+**验收**：`node --check` 全过；`test-console-static`、`test-console-ui`（**33/33、45 次写**）、全量 `test-audit` **103/103**；真机确认两张 provider 卡分别 3 / 4 个字段（local-digest 的「单次上限」为空、超时 900；soulkit 的服务地址回填 `http://127.0.0.1:3110`、上限 1200、超时 900），压缩区单选为「交给 DSH 自己压缩」、阈值 8 万。
+
+**已知限制**：provider 卡仍是动态渲染，没有「新增 provider」入口（内核当前只注册 local-digest 与 soulkit）；压缩阈值只能填 5–80 万 token。
+
 
 
 

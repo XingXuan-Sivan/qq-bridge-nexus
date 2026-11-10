@@ -93,8 +93,8 @@ function catalogMissing(host) {
   host.innerHTML = `<p class="meta">目录读取失败，授权表暂不可用。<button class="btn small" type="button" data-auth-refresh>重试</button></p>`;
 }
 
-function tableOf(rows, columns, meta, select = null, actions = '') {
-  return dataTableHtml({ columns, rows, pageSize: Math.max(rows.length, 1), meta, select, actions });
+function tableOf(rows, columns, meta, select = null, actions = '', refresh = false) {
+  return dataTableHtml({ columns, rows, pageSize: Math.max(rows.length, 1), meta, select, actions, refresh });
 }
 
 function renderServers() {
@@ -144,7 +144,7 @@ function renderServers() {
     ], `${servers.length} 个 server`, {
       label: '授权',
       attrs: { 'data-select-group': 'servers' },
-    }, '<button class="btn small" type="button" data-auth-refresh>刷新目录</button>')
+    }, '', { label: '刷新目录', attrs: { 'data-auth-refresh': '' } })
     : '<p class="meta">目录里没有 MCP 服务器。</p>';
   initDataTables(host);
 }

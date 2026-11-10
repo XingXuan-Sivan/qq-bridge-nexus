@@ -6,8 +6,8 @@ import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initDateFields } from '../../components/date/date.js';
 import { initTimeFields } from '../../components/time/time.js';
-import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
+import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────
@@ -64,7 +64,6 @@ function renderScheduler() {
   setSwitch(schedEl('schedEnabled'), st.enabled);
   setSwitch(schedEl('schedAllowAiPrivate'), st.allowAiPrivate);
   setSwitch(schedEl('schedAllowAiGroup'), st.allowAiGroup);
-  if (document.activeElement !== schedEl('schedTimezone')) tzSet(schedEl('schedTimezone'), st.timezone);
   const pill = schedEl('schedStatePill');
   pill.textContent = st.enabled ? (r.writable === false ? '只读（数据文件读取失败）' : '运行中') : '已关闭';
   pill.className = st.enabled && r.writable !== false ? 'status-badge is-pill ok' : 'status-badge is-pill err';
@@ -234,7 +233,7 @@ function schedPayload() {
     maxRuns: schedEl('schedMaxRuns').value ? Number(schedEl('schedMaxRuns').value) : null,
     missedPolicy: schedEl('schedMissed').value,
     runDuringSilence: schedEl('schedSilence').value === 'run',
-    targets: [...document.querySelectorAll('[data-sched-target]')].filter((c) => c.checked).map((c) => c.dataset.schedTarget),
+    targets: [...schedTargetKeys],
     kind,
     ...(pluginKind ? { payload } : (kind === 'ai' ? { instruction: content } : { text: content })),
   };
@@ -251,11 +250,108 @@ function renderSchedPluginKinds() {
   if (kinds.some((k) => k.id === current)) select.value = current;
 }
 
+// 「发给谁」不再把好友/群铺成一排 chip：单元格只显示摘要，点「选择对象」开弹窗，
+// 弹窗里管理员私聊是开关，其余对象用表格组件的多选列。
+let schedTargetKeys = new Set();
+let schedTargetOverlay = null;
+
+function schedTargetList() {
+  return (schedState?.targets || []).filter((t) => t.kind !== 'owner');
+}
+
+function schedTargetSummary() {
+  const all = schedState?.targets || [];
+  const picked = all.filter((t) => schedTargetKeys.has(t.key));
+  if (!picked.length) return '未选择';
+  const owner = picked.some((t) => t.kind === 'owner');
+  const rest = picked.filter((t) => t.kind !== 'owner');
+  return [owner ? '管理员私聊' : '', rest.length ? `${rest.length} 个对象` : ''].filter(Boolean).join(' + ');
+}
+
 function renderSchedTargets(selected) {
-  const r = schedState;
-  schedEl('schedTargets').innerHTML = (r?.targets || []).map((t) => `<label class="sched-chip ${selected.includes(t.key) ? 'on' : ''} spaced"><input type="checkbox" data-sched-target="${esc(t.key)}" ${selected.includes(t.key) ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')
-    || '<span class="meta">没有可选的发送对象（白名单为空，且没配 ownerQQ）</span>';
-  schedEl('schedTargets').querySelectorAll('[data-sched-target]').forEach((c) => c.addEventListener('change', () => c.parentElement.classList.toggle('on', c.checked)));
+  schedTargetKeys = new Set(selected || []);
+  const host = schedEl('schedTargets');
+  if (!host) return;
+  const all = schedState?.targets || [];
+  host.textContent = schedTargetSummary();
+  host.dataset.empty = schedTargetKeys.size ? '' : '1';
+  host.title = all.filter((t) => schedTargetKeys.has(t.key)).map((t) => t.label).join('\n');
+}
+
+function ensureSchedTargetModal() {
+  if (schedTargetOverlay) return schedTargetOverlay;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = modalHtml({
+    id: 'schedTargetOverlay',
+    title: '选择发送对象',
+    wide: true,
+    body: '<div class="form-stack"><div id="schedTargetSwitch"></div><div id="schedTargetTable"></div></div>',
+    footer: '<span class="modal-status" id="schedTargetMsg"></span>'
+      + '<button class="btn" type="button" id="schedTargetCancel">取消</button>'
+      + '<button class="btn primary" type="button" id="schedTargetApply">确定</button>',
+  });
+  const overlay = wrap.firstElementChild;
+  document.body.appendChild(overlay);
+  renderFields(overlay.querySelector('#schedTargetSwitch'), [
+    { name: 'schedTargetOwner', type: 'switch', label: '发送到管理员私聊', hint: '只发给 ownerQQ；和其它对象可以同时选。' },
+  ], { layout: 'inline', columns: 1 });
+  bindSwitches(overlay);
+  wireModal(overlay, {});
+  overlay.querySelector('#schedTargetCancel').addEventListener('click', () => closeModal(overlay));
+  overlay.querySelector('#schedTargetApply').addEventListener('click', () => applySchedTargets());
+  schedTargetOverlay = overlay;
+  return overlay;
+}
+
+function renderSchedTargetTable() {
+  const host = schedTargetOverlay?.querySelector('#schedTargetTable');
+  if (!host) return;
+  const rows = schedTargetList();
+  host.innerHTML = dataTableHtml({
+    columns: [
+      { label: '类型', width: 90 },
+      { label: '对象', width: 260 },
+      { label: '对象 ID' },
+    ],
+    rows: rows.map((t) => [
+      selectCellHtml({ value: t.key, checked: schedTargetKeys.has(t.key), label: `选择 ${t.label}` }),
+      t.kind === 'group' ? '群' : '好友',
+      `<b>${esc(t.label)}</b>`,
+      `<span class="meta">${esc(t.key)}</span>`,
+    ]),
+    pageSize: 10,
+    select: { label: '选择', width: 60 },
+    search: { placeholder: '搜索名称或 ID…' },
+    empty: '白名单里没有可选的好友或群。',
+  });
+  initDataTables(host);
+}
+
+function openSchedTargetPicker() {
+  const overlay = ensureSchedTargetModal();
+  const owner = (schedState?.targets || []).find((t) => t.kind === 'owner');
+  const ownerSwitch = overlay.querySelector('#schedTargetOwner');
+  ownerSwitch.disabled = !owner;
+  setSwitch(ownerSwitch, !!owner && schedTargetKeys.has(owner.key));
+  renderSchedTargetTable();
+  schedMsg('schedTargetMsg', owner ? '' : '没有配置 ownerQQ，只能发给好友或群。');
+  openModal(overlay);
+}
+
+function applySchedTargets() {
+  const overlay = schedTargetOverlay;
+  if (!overlay) return;
+  const picked = [...overlay.querySelectorAll('input[data-select-row]:checked')].map((c) => c.value);
+  const owner = (schedState?.targets || []).find((t) => t.kind === 'owner');
+  if (owner && getSwitch(overlay.querySelector('#schedTargetOwner'))) picked.unshift(owner.key);
+  const limit = Number(schedState?.limits?.maxTargets) || 0;
+  if (limit && picked.length > limit) {
+    schedMsg('schedTargetMsg', `最多选 ${limit} 个对象（当前 ${picked.length} 个）`, false);
+    return;
+  }
+  renderSchedTargets(picked);
+  closeModal(overlay);
+  schedPreview();
 }
 
 function openSchedEditor(task = null) {
@@ -318,7 +414,7 @@ export function init() {
   bindSwitches(schedEditorOverlay());
   // Esc / 点遮罩关闭时清掉编辑态，避免下次「新建」带着上一个任务的 id 走 PATCH。
   wireModal(schedEditorOverlay(), { onClose: () => { schedEditingId = null; } });
-  document.getElementById('schedTimezone').innerHTML = tzOptionsHtml(false);
+  schedEl('schedTargetPick').addEventListener('click', openSchedTargetPicker);
   document.getElementById('schedTaskTz').innerHTML = tzOptionsHtml(true);
 
   schedEl('schedType').addEventListener('change', () => {
@@ -353,7 +449,6 @@ schedEl('schedSave').addEventListener('click', async () => {
 schedEl('schedSettingsSave').addEventListener('click', async () => {
   const r = await api('/api/scheduler/settings', 'POST', {
     enabled: getSwitch(schedEl('schedEnabled')),
-    timezone: schedEl('schedTimezone').value || 'Asia/Shanghai',
     allowAiPrivate: getSwitch(schedEl('schedAllowAiPrivate')),
     allowAiGroup: getSwitch(schedEl('schedAllowAiGroup')),
   });

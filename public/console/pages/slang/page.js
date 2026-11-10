@@ -4,7 +4,7 @@ import { api } from '../../js/api.js';
 import { esc } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { SLANG_FIELDS } from './fields.js';
 
@@ -96,7 +96,6 @@ const TRASH_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" s
 
 /** 一行 = 一个单元格数组；表格组件负责 thead/tbody 与分页、搜索。 */
 function slangRowCells(e, status) {
-  const checked = slangSelected.has(e.id) ? ' checked' : '';
   const guessHtml = status === 'candidate' && !e.meaning ? slangGuessHtml(e) : '';
   const meaning = e.meaning ? clampCell(e.meaning, 120) : (status === 'candidate'
     ? '<span class="meta">待研究</span>'
@@ -121,7 +120,7 @@ function slangRowCells(e, status) {
       + `<span class="meta">${esc(evidence[0].text)}</span></div>`
     : '';
   return [
-    `<input type="checkbox" data-slang-select="${esc(e.id)}"${checked} aria-label="选择 ${esc(e.content)}">`,
+    selectCellHtml({ value: e.id, checked: slangSelected.has(e.id), label: `选择 ${e.content}` }),
     `<b>${esc(e.content)}</b><br><span class="${slangStatusClass(status)}">${slangStatusLabel(status)}</span>${evidenceLine}`,
     esc(e.count),
     esc(slangSourceLabel(e)),
@@ -152,7 +151,6 @@ function renderSlangPanel() {
   const list = slangEntriesCache.filter((e) => slangInTab(e, tab));
   host.innerHTML = dataTableHtml({
     columns: [
-      { label: '选择', width: 60 },
       { label: '词条', width: 140 },
       { label: '次数', width: 70 },
       { label: '来源', width: 80 },
@@ -164,6 +162,7 @@ function renderSlangPanel() {
     rows: list.map((e) => slangRowCells(e, status)),
     pageSize: 20,
     sizes: [20, 50, 100],
+    select: { label: '选择', width: 60 },
     search: { placeholder: tab === 'rejected' ? '搜索词条 / 拒绝原因' : '搜索词条 / 含义 / 用法 / 示例 / 来源' },
     refresh: true,
     actions: '<button class="btn" id="slangAddOpen" type="button">手动添加</button>',
@@ -171,33 +170,23 @@ function renderSlangPanel() {
   });
   initDataTables(host, { onRefresh: () => { void refreshSlang(); } });
   bindSlangRowEvents(host, status);
-  updateSlangSelectAll(status);
-}
-
-function visibleSelectedIds(host) {
-  // 只认「当前页可见」的勾选：分页只是 hidden，所以按 hidden 过滤一遍，
-  // 避免「全选本页」把别的页里的行也带上。
-  return [...host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')]
-    .filter((cb) => cb.checked)
-    .map((cb) => cb.dataset.slangSelect);
-}
-
-function updateSlangSelectAll(status) {
-  const id = status === 'candidate' ? 'slangCandidateSelectAll' : status === 'confirmed' ? 'slangConfirmedSelectAll' : 'slangRejectedSelectAll';
-  const el = document.getElementById(id);
-  const host = document.getElementById(slangHostId(status));
-  if (!el || !host) return;
-  const boxes = [...host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')];
-  el.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
-  el.indeterminate = boxes.some((cb) => cb.checked) && !el.checked;
 }
 
 function bindSlangRowEvents(host, status) {
-  host.querySelectorAll('[data-slang-select]').forEach((cb) => cb.addEventListener('change', () => {
-    const id = cb.dataset.slangSelect;
-    if (cb.checked) slangSelected.add(id); else slangSelected.delete(id);
-    updateSlangSelectAll(status);
-  }));
+  // 多选列由表格组件生成（表头全选 + 行 data-select-row）；这里只把勾选状态同步进集合。
+  host.addEventListener('change', (event) => {
+    const box = event.target;
+    if (!(box instanceof HTMLInputElement) || box.type !== 'checkbox') return;
+    if (box.matches('[data-select-all]')) {
+      for (const row of host.querySelectorAll('tbody input[data-select-row]')) {
+        if (row.checked) slangSelected.add(row.value); else slangSelected.delete(row.value);
+      }
+      return;
+    }
+    if (box.matches('input[data-select-row]')) {
+      if (box.checked) slangSelected.add(box.value); else slangSelected.delete(box.value);
+    }
+  });
   host.querySelectorAll('[data-slang-confirm]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangConfirm, 'confirm')));
   host.querySelectorAll('[data-slang-edit]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangEdit, 'edit')));
   host.querySelectorAll('[data-slang-adopt]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangAdopt, 'edit', { adoptGuess: true })));
@@ -309,22 +298,6 @@ export function init() {
   bindSwitches(document.getElementById('slangAddOverlay'));
 
   document.querySelectorAll('.slang-tab').forEach((btn) => btn.addEventListener('click', () => setSlangTab(btn.dataset.slangTab)));
-
-  const selectAll = {
-    candidate: 'slangCandidateSelectAll',
-    confirmed: 'slangConfirmedSelectAll',
-    rejected: 'slangRejectedSelectAll',
-  };
-  for (const [status, id] of Object.entries(selectAll)) {
-    document.getElementById(id).addEventListener('change', (ev) => {
-      const host = document.getElementById(slangHostId(status));
-      for (const cb of host.querySelectorAll('tbody tr:not([hidden]) input[data-slang-select]')) {
-        cb.checked = ev.target.checked;
-        if (cb.checked) slangSelected.add(cb.dataset.slangSelect); else slangSelected.delete(cb.dataset.slangSelect);
-      }
-      ev.target.indeterminate = false;
-    });
-  }
 
   document.getElementById('slangBatchResearch').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');

@@ -305,9 +305,11 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.match(html, /<section id="section-scheduler" data-page="scheduler"/);
   // 控件已搬进 fields.js：静态 HTML 里只留占位 div，id 由 renderFields 在运行时生成。
   // 所以这里认「模板里的 id」或「字段规格里的 name」两种写法（同 test-v2-initial-prompt 的 occurrences 思路）。
-  for (const id of ['schedEnabled', 'schedTimezone', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory', 'schedPluginKindRow', 'schedPluginKind', 'schedPayloadJson']) {
+  for (const id of ['schedEnabled', 'schedAllowAiPrivate', 'schedAllowAiGroup', 'schedLimits', 'schedList', 'schedEditor', 'schedType', 'schedTargets', 'schedPreview', 'schedHistory', 'schedPluginKindRow', 'schedPluginKind', 'schedPayloadJson']) {
     assert.ok(html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`), `${id} 出现在模板或字段规格中`);
   }
+  // 全局配置已经有 config.timezone，定时任务页不再暴露第二份默认时区。
+  assert.ok(!html.includes('schedTimezone'), '定时任务页不再有默认时区控件');
   assert.match(html, /taskTypes/, '任务类型来自 /api/scheduler 的 taskTypes');
   assert.match(html, /renderSchedPluginKinds\(\)/, '编辑器会按注册类型重建下拉');
   assert.match(html, /api\('\/api\/scheduler\/preview', 'POST'/);
@@ -318,7 +320,7 @@ test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务�
   assert.match(html, /onPageRefresh\('scheduler', \(\) => setTimeout\(\(\) => refreshScheduler\(\), 0\)\);/, '直接打开 #scheduler 时推迟到脚本跑完再刷新');
   // 时区下拉抽成 js/timezone.js（定时任务页与定时静默共用）；初始化在片段注入后的 init() 里跑，不再有「早于 schedEl」的限制。
   assert.match(html, /export function tzOptionsHtml\(withFollow\)/);
-  assert.match(html, /document\.getElementById\('schedTimezone'\)\.innerHTML = tzOptionsHtml\(false\);/);
+  // 默认时区只在全局配置里维护，任务页只保留单条任务的「任务时区」下拉。
   assert.match(html, /document\.getElementById\('schedTaskTz'\)\.innerHTML = tzOptionsHtml\(true\);/);
 });
 

@@ -11,7 +11,6 @@ const TABS_HTML = `<div class="slang-tabs">
 </div>`;
 
 const bar = (status, buttons) => `<div class="slang-bar">
-  <label class="slang-check"><input type="checkbox" id="${status}SelectAll"> 全选本页</label>
   ${buttons}
 </div>`;
 

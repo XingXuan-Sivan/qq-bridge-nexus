@@ -1,1 +1,21 @@
 /* 定时任务页：当前完全复用公共样式；这一页若出现私有样式，写在这里，不要回流 css/app.css。 */
+
+/* 「发给谁」的摘要行：文本占满剩余宽度，按钮固定在右侧，长名单用省略号。 */
+.sched-target-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.sched-target-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sched-target-summary[data-empty="1"] {
+  color: var(--muted);
+}

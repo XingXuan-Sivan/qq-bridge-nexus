@@ -118,11 +118,8 @@ function toolsTableHtml() {
     search: { placeholder: '搜索工具名或说明…' },
     filters: [{ id: 'cat', label: '分类', options: [{ value: 'all', label: '全部分类' }, ...TOOL_CATEGORIES.map((c) => ({ value: c, label: c }))] }],
     meta: `共 ${TOOLS.length} 项`,
-    actions: `<button type="button" class="btn small" data-tools-bulk="on">全开</button>
-      <button type="button" class="btn small" data-tools-bulk="off">全关</button>
-      <button type="button" class="btn small primary" id="toolsSave">保存工具开关</button>
+    actions: `<button type="button" class="btn small primary" id="toolsSave">保存工具开关</button>
       <span id="toolsMsg" class="form-actions-status"></span>`,
-    pager: false,
   });
 }
 
@@ -180,13 +177,6 @@ export function initToolsSection() {
   </section>`;
   initDataTables(document.getElementById('toolsTable'));
   document.getElementById('toolsSave').addEventListener('click', saveTools);
-  host.querySelectorAll('[data-tools-bulk]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const on = button.dataset.toolsBulk === 'on';
-      host.querySelectorAll('input[data-tool]').forEach((input) => { input.checked = on; });
-      toolsMsg(on ? '已全开，记得保存' : '已全关，记得保存', true);
-    });
-  });
   document.getElementById('voiceRefreshBtn').addEventListener('click', () => loadVoice(true));
   document.getElementById('voiceSendBtn').addEventListener('click', sendVoice);
   document.getElementById('voiceSendDryRun').addEventListener('click', (event) => {

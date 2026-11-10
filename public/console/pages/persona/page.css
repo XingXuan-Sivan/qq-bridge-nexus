@@ -9,6 +9,7 @@
   display: block;
   flex: 1;
   width: 100%;
+  height: auto;
   padding: 0;
   border: 0;
   background: none;

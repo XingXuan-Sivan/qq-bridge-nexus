@@ -158,8 +158,7 @@ label {
 }
 /* 搜索框外观在 components/search-box/search-box.css（input.search-box）。 */
 input:focus,textarea:focus,select:focus {
-  border-color:var(--accent-border-focus);
-  box-shadow:0 0 0 3px var(--accent-ring)
+  border-color:var(--accent-border-focus)
 }
 input::placeholder,textarea::placeholder {
   color:var(--placeholder)
@@ -180,6 +179,21 @@ input[type=radio] {
   margin:0;
   flex-shrink:0;
   cursor:pointer
+}
+/* 单选统一成「圆环」：未选中 1px 细边，选中加粗成环，与文案卡上的 .mode-indicator 同一视觉。 */
+input[type=radio] {
+  appearance:none;
+  -webkit-appearance:none;
+  border:1px solid var(--border-strong,var(--border));
+  border-radius:50%;
+  background:var(--surface)
+}
+input[type=radio]:checked {
+  border:5px solid var(--accent);
+  background:var(--surface)
+}
+input[type=radio]:focus-visible {
+  outline:none
 }
 input[type=number] {
   font-variant-numeric:tabular-nums

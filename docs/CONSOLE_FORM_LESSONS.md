@@ -475,6 +475,24 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 **规则**：同一张卡里成列的「标签 + 控件」行，标签列固定宽度并右对齐；宽度取该卡最长标签（含 padding）向上取整，不要用 `auto` 让它跟着字数变。
 
+### 1.82 裸 `button` 必须和 `.btn` 同一标尺
+
+原来是「裸 button 用 padding 撑高（约 39.5px）+ `.btn` 固定 40px」，同一行里一个加了 `.btn`、一个没加，就会差 1–2px，看起来像「同尺寸按钮大小不一致」。现在裸 `button` 直接拿 `height:var(--control-h)`、`padding:0 15px`、`inline-flex` 居中，`button.small` 同样拿 `--control-h-sm`；`.btn` 只保留类名兼容。
+
+**规则**：控件的尺寸只由 token（`--control-h` / `--control-h-sm` / `--control-px*`）决定，不用 padding 把高度撑出来。卡片式按钮（`.mode-row button`、`.tile-body`）要显式写 `height:auto`，否则会被 40px 压扁。
+
+### 1.83 多选表优先用表格组件的 `select`，不要自己画表头全选
+
+手写的「选择」列 + 页面级「全选本页」复选框，要自己维护三段态、翻页可见性、和批量集合的同步；组件已经有 `select`（表头 `[data-select-all]` + 行 `data-select-row`，自带 indeterminate）。黑话表切到组件后，只需在容器上监听 change 把勾选同步进集合即可。
+
+**规则**：表格需要多选时传 `select:{label,width}`，行首用 `selectCellHtml()` 生成；不要另写全选按钮。组件表头全选是「整表」语义（不分页/筛选），批量操作要按这个语义向用户说明。
+
+### 1.84 别用元素选择器（`button`）承载控件几何
+
+上一轮为了让裸按钮和 `.btn` 同高，把 `height:40px`、`inline-flex`、`justify-content:center` 直接写在 `button` 上。结果侧栏 `.nav-item`、标签页 `.page-tab` 也是 `button`：导航文字从左侧对齐变成居中（看着像「缩进乱了」），标签页的计数与下划线也被 40px 盒子的基线带偏。
+
+**规则**：元素选择器只给中性外观（背景、边框、圆角、基础 padding）；控件几何（高度、flex 居中、左右 padding）只挂在语义类上（`.btn`、`.btn.small`、`button.small`、`button.primary`、`button.danger`）。导航、标签页、卡片这类「长相像按钮但不是控件」的组件，永远不要被控件标尺接管。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

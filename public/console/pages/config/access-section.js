@@ -34,7 +34,7 @@ function ensureCapsEditor() {
   host.innerHTML = modalHtml({
     id: 'adminCapsModal',
     title: '编辑管理员权限',
-    body: '<div class="form-stack" id="adminCapsBody"></div>'
+    body: '<div class="field-checklist" id="adminCapsBody"></div>'
       + '<div class="meta u-mt-8">权限决定该管理员在自己的私聊里能做什么；点「应用」后还要保存管理员才会写进 config.json。</div>',
     footer: '<button class="btn" type="button" data-modal-close>取消</button>'
       + '<button class="btn primary" type="button" id="adminCapsApply">应用</button>',

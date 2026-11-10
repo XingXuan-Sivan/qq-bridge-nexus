@@ -222,6 +222,10 @@
   gap: 4px 14px;
   width: 100%;
 }
+/* 弹窗宽度富余时让复选项自动排成多列，不要永远一列占满整行。 */
+.modal .field-checklist {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
 .field-check-item {
   display: flex;
   align-items: flex-start;

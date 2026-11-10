@@ -211,8 +211,11 @@
               <div class="field-control"><select id="schedMissed"><option value="grace">补发时间内补发，否则跳过</option><option value="skip">直接跳过</option></select></div>
             </div></div>
             <div class="field-block"><div class="field-row">
-              <span class="field-label">发给谁（可多选）</span>
-              <div class="field-control" id="schedTargets"></div>
+              <span class="field-label">发给谁</span>
+              <div class="field-control sched-target-row">
+                <span class="sched-target-summary" id="schedTargets">未选择</span>
+                <button class="btn small" type="button" id="schedTargetPick">选择对象</button>
+              </div>
             </div></div>
             <div class="field-block"><div class="field-row">
               <span class="field-label">内容形式</span>

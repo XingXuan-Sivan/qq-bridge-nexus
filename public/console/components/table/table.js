@@ -143,9 +143,18 @@ export function tableToolbarHtml({ refresh = false, filters = [], search = null,
   const searchHtml = search
     ? `<input type="search" class="search-box search-box--w240"${search.id ? ` id="${esc(search.id)}"` : ''} data-table-search${search.value ? ` value="${esc(search.value)}"` : ''} placeholder="${esc(search.placeholder || '搜索…')}" aria-label="${esc(search.placeholder || '搜索')}">`
     : '';
+  const refreshHtml = refresh
+    ? (() => {
+      const label = typeof refresh === 'object' && refresh.label ? refresh.label : '刷新';
+      const attrs = typeof refresh === 'object' && refresh.attrs
+        ? Object.entries(refresh.attrs).map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('')
+        : '';
+      return `<button type="button" class="btn" data-table-refresh${attrs}>${esc(label)}</button>`;
+    })()
+    : '';
   return `<div class="table-toolbar">
     <div class="table-toolbar-main">
-      ${refresh ? '<button type="button" class="btn" data-table-refresh>刷新</button>' : ''}
+      ${refreshHtml}
       ${filterHtml}
       ${searchHtml}
     </div>

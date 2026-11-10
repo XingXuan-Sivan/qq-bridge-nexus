@@ -474,3 +474,30 @@ npm run test:console-ui
 
 **已知限制**：会话人格改动同样要等下一条消息才生效（与其它会话字段一致）；provider 离线且没有缓存时无法把会话指到该卡；权限弹窗与「保存管理员」是两段式，勾选后需再点一次保存才会写入 `config.json`。
 
+### 6.32 第十四批：按钮尺寸、单选圈、多选表格与零散统一（2026-11-10）
+
+1. **按钮同标尺**：裸 `button` 之前只有 `padding:9px 15px`（高度由内容撑，约 39.5px），和固定 40px 的 `.btn` 差 1–2px；现在裸 `button` 直接采用 `.btn` 的 `height:var(--control-h)` + `padding:0 15px` + `inline-flex` 居中，`button.small` 同步改成 `height:var(--control-h-sm)` + `padding:0 11px`。同尺寸按钮不再因为有没有 `.btn` 而高低不一，`取消` 与 `保存任务` 现在都是 40px。
+2. **单选圈统一**：`input[type=radio]` 改为 `appearance:none` 的 16px 圆环（未选 1px 细边，选中 5px 强调色环、中心留空），与文案卡上的 `.mode-indicator`（12px、4px 环）同一视觉；复选框保持 16px `accent-color` 方形，两者尺寸对齐。
+3. **去掉额外焦点圈**：删除全局 `:focus-visible` 的 3px 外框（以及 `input/textarea/select:focus` 的 `box-shadow` 光环）；选中卡片/控件只保留自身 1px 边框，不再在边框外再套一圈粗蓝边。
+4. **多选表格统一**：黑话词库的「选择」列改用表格组件自带的 `select`（表头 `[data-select-all]` 全选 + 行 `data-select-row`），删掉批量栏里的「全选本页」和 `updateSlangSelectAll()`；QQ 工具表删掉「全开 / 全关」两个表外按钮（行内开关仍逐个可点），并打开组件自带分页（37 项按每页 20 条分页）。
+5. **预设授权工具条**：「刷新目录」从右侧动作区移到工具栏左侧（`tableToolbarHtml` 的 `refresh` 参数支持 `{ label, attrs }`，默认仍是「刷新」）。
+6. **定时任务去时区**：删掉「默认时区」下拉，设置面板只剩启用开关与安全限制；时区统一由全局配置的 `config.timezone` 决定。单条任务里的「任务时区」保持不动。
+7. **踩坑记录**：`docs/CONSOLE_FORM_LESSONS.md` 追加 1.82–1.83（裸按钮必须与 `.btn` 同标尺；多选表优先用组件 `select`，不要自己画表头全选）。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；真机（3111，Edge）核对：调度器设置面板无时区、保存按钮与开关行同高，定时任务弹窗「取消 / 保存任务」均 40px；黑话表 580 行带表头全选、无「全选本页」，QQ 工具表有分页且无全开/全关；预设授权表「刷新目录」在工具栏左侧；选中模式卡只有 1px 边框与圆环指示器；人格卡正文未被 40px 固定高度压扁；无 console 错误。
+
+**已知限制**：组件表头全选按「整表」而不是「当前页」计算（与 Element Plus 一致），黑话批量操作会带上其它分页里的行；`button.small` 与 `.btn.small` 尺寸相同但仍保留两套类名，历史页面不需要改类名。
+
+### 6.33 第十五批：控件标尺回归修正、弹窗多选多列与「发给谁」弹窗（2026-11-10）
+
+1. **按钮标尺的根因修正**：上一批把 `height:40px` + `inline-flex` + 居中直接加在 `button` 元素上，连侧栏 `.nav-item`、标签页 `.page-tab` 也被当成控件接管——文字从左侧对齐变成居中、标签页的数字和下划线错位。现在裸 `button` 只保留中性外观（背景/边框/圆角/`padding:9px 15px`），控件标尺只挂在 `.btn`、`.btn.small`、`button.small`、`button.primary`、`button.danger` 这些语义类上：同尺寸按钮仍然同高（40px / 32px），导航与标签页恢复各自的内容布局。
+2. **弹窗里的多选自动多列**：`.modal .field-checklist` 改成 `repeat(auto-fit, minmax(190px, 1fr))`，空间够时自动排 2–3 列，不再一项占满一行；管理员「编辑权限」弹窗的容器也从 `.form-stack` 改成 `.field-checklist`，4 个权限在 634px 宽度下排成 3 列。
+3. **定时任务「发给谁」改成摘要 + 弹窗**：编辑表单里只显示「管理员私聊 / N 个对象」摘要和一个「选择对象」按钮；点开 `#schedTargetOverlay` 用表格组件的多选列列出好友与群（类型 / 对象 / 对象 ID，可搜索、每页 10 条），「发送到管理员私聊」放在表格上方的开关里。应用时按 `maxTargets` 校验，超限只在弹窗内提示、不写回；保存载荷的 `targets` 改从选择集合读取，不再扫 DOM 里的 checkbox。
+4. **测试同步**：`scripts/test-scheduler.mjs` 删掉两处已过时的 `schedTimezone` 断言（默认时区只在全局配置里），保留 `schedTaskTz`（单条任务时区）的断言。
+
+**验收**：`node --check` 对 `pages/scheduler/page.js`、`pages/config/access-section.js` 通过；`test-scheduler` **7/7**；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；真机（3111，Edge）：侧栏条目 41px、左对齐与图标间距恢复，标签页 36px、数字与下划线不再重叠；「发给谁」摘要行 40px 高，弹窗表格 9 行可选、管理员私聊开关生效、应用后摘要从「管理员私聊」变为「1 个对象」；权限弹窗 3 列排布；无 console 错误。
+
+**已知限制**：「发给谁」弹窗里的对象列表来自 `/api/scheduler` 的 `targets`（白名单好友 + 群），没有昵称解析，只能显示「好友 QQ 号 / 群号」；对象数量受 `maxTargets` 限制，超过时弹窗内提示、必须减少选择才能应用。
+
+
+

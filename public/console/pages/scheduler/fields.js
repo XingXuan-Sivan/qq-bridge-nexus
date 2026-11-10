@@ -10,7 +10,6 @@ export const SCHED_FIELDS = {
   header: {
     fields: [
       { name: 'schedEnabled', type: 'switch', label: '启用定时任务' },
-      { name: 'schedTimezone', type: 'select', label: '默认时区', options: [] },
     ],
   },
   headerActions: {

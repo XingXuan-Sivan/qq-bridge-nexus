@@ -76,7 +76,16 @@ button,a,input,textarea,select,summary {
   outline-offset:4px
 }
 :focus-visible {
-  outline:3px solid var(--focus-ring)
+  outline:none
+}
+/* 选中的卡片/按钮只要自身边框，不再额外套一圈焦点框。 */
+button:focus,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline:none
 }
 [hidden] {
   display:none!important
@@ -88,14 +97,17 @@ a {
 p {
   margin:0
 }
-/* 裸 button 只给通用外观（卡片、导航、工具条都能用），高度仍由内容撑。
-   40px 控件标尺只给 .btn：.metric-link / .nav-item 这类卡片式按钮若被强制 40px 会压扁裁切。 */
+/* 裸 button 只给通用外观（卡片、导航、标签页都能用），高度由各自内容撑。
+   40px 控件标尺只给 .btn / button.small：.nav-item、.page-tab 这类按钮如果被强制
+   height + inline-flex 接管，文字会从左侧对齐变成居中、下划线也会错位。 */
 button {
   background:var(--surface);
   border:1px solid var(--border);
   border-radius:9px;
   color:var(--text);
   padding:9px 15px;
+  line-height:1.2;
+  white-space:nowrap;
   transition:background .15s,border-color .15s,color .15s
 }
 /* 表单与工具栏里的标准按钮：与输入框同高（高度来自 --control-h，内边距只负责左右）。 */
@@ -118,6 +130,17 @@ button.active,.primary {
   border-color:var(--accent);
   color:var(--on-solid)
 }
+/* 主/危险按钮就是控件按钮：即使没写 .btn，也按 40px 标尺渲染。
+   导航、标签页不会带 .primary/.danger，所以不受影响。 */
+button.primary,
+button.danger {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  height:var(--control-h,40px);
+  padding:0 var(--control-px-btn,15px)
+}
 button.danger {
   background:var(--danger);
   border-color:var(--danger-border);
@@ -128,7 +151,8 @@ button.danger:hover {
 }
 button.small {
   font-size:12px;
-  padding:7px 11px
+  height:var(--control-h-sm,32px);
+  padding:0 11px
 }
 /* 次级控件按钮：32px，仍与输入框同标尺（用于清单/表格行内）。 */
 .btn.small {

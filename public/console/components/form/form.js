@@ -313,16 +313,19 @@ export function statusBadge({ id = '', text = '', tone = '', pill = true, dot = 
   return `<span class="${cls}"${id ? ` id="${esc(id)}"` : ''} role="status">${esc(text)}</span>`;
 }
 
-/** 行内动作条：按钮组 + 右侧（或紧随）状态位，用于「加载 / 清空 / 提示」这类工具行。 */
+/** 行内动作条：按钮组 + 右侧（或紧随）状态位，用于「加载 / 清空 / 提示」这类工具行。
+ *  每个 item 可以自带 status/statusText，用于「多个按钮各带一个状态位」的场景。 */
 export function inlineActions({ items = [], status = '', statusText = '', className = '' }) {
-  const buttons = items.map((item) => {
+  const parts = [];
+  for (const item of items) {
     // 默认「标准」40px（与输入框同高）；只有明确写 small:true 的紧凑行（卡片头、表格行）才降一档。
     // 同一行动作条里不要混用两档——高度不一致看起来像没对齐（2026-11-07 修过）。
     const cls = ['btn', item.variant === 'danger' ? 'danger' : '', item.variant === 'primary' ? 'primary' : '', item.small === true ? 'small' : '', item.className ?? ''].filter(Boolean).join(' ');
-    return `<button type="button"${item.id ? ` id="${esc(item.id)}"` : ''}${cls ? ` class="${esc(cls)}"` : ''}>${esc(item.label)}</button>`;
-  }).join('');
+    parts.push(`<button type="button"${item.id ? ` id="${esc(item.id)}"` : ''}${cls ? ` class="${esc(cls)}"` : ''}>${esc(item.label)}</button>`);
+    if (item.status) parts.push(`<span class="form-actions-status" id="${esc(item.status)}">${esc(item.statusText ?? '')}</span>`);
+  }
   const statusHtml = status ? `<span class="form-actions-status" id="${esc(status)}">${esc(statusText)}</span>` : '';
-  return `<div class="form-actions form-actions--inline${className ? ` ${esc(className)}` : ''}">${buttons}${statusHtml}</div>`;
+  return `<div class="form-actions form-actions--inline${className ? ` ${esc(className)}` : ''}">${parts.join('')}${statusHtml}</div>`;
 }
 
 export function formActions({ primary = '保存', secondary = [], sticky = false, meta = '' }) {

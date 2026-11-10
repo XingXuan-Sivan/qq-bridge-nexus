@@ -313,12 +313,11 @@ test('④ QQ 命令 /role 只改当前会话', async () => {
   });
 });
 
-test('⑤ 控制台：人格页把按会话设置人格迁到会话详情', () => {
-  // P1 起，单会话人格不再写在 persona 页，而是会话详情的「人格」卡；persona 页只留指路说明。
+test('⑤ 控制台：人格页不再提供按会话设置人格，统一在会话详情里改', () => {
+  // 单会话人格只放在会话详情的「人格」卡；persona 页的指路卡已按用户要求移除。
   const html = readConsoleSource();
-  assert.match(html, /data-group="assign"/, 'persona 页保留入口卡');
-  assert.ok(html.includes('去会话与审批'), 'persona 页说明已迁移');
-  assert.match(html, /href="#sessions"/, 'persona 页给出跳转');
+  assert.ok(!html.includes('data-group="assign"'), 'persona 页不再保留入口卡');
+  assert.ok(!html.includes('去会话与审批'), 'persona 页不再有迁移说明卡');
   assert.ok(html.includes('id="sessionDetailSave"'), '会话详情底栏有统一保存按钮');
   assert.ok(html.includes('detailPersonaMode'), '会话详情有人格模式选择');
   assert.ok(html.includes('id="detailPersonaName"'), '会话详情有人格名输入');

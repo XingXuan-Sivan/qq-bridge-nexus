@@ -394,4 +394,19 @@ npm run test:console-ui
 
 **已知限制**：`prefix` 写在 flow mapping 里（`config: { prefix: '' }`）不属于上述四种形态，会落到 insert 模式并在 `config` 下补一个 `prefix` 键（YAML 视为重复键，可能解析失败）；本仓库五个预设都不用这种写法。
 
+### 6.26 第八批：人格入口收缩、运维页顺序与「主动行为/会话重建」修复（2026-11-10）
+
+1. **人格页移除「按会话设置人格」卡**：那张卡只剩「已迁到会话与审批页」的说明，按用户要求整块删除（单会话人格仍在会话详情的「人格」卡里改）；`persona/page.css` 的 `.assign-row/.assign-key` 一并删除。
+2. **全局配置标签顺序**：改为 运行与模型 → 准入 → 安全与静默 → 拓展功能（准入前移）。
+3. **运维页卡片顺序与按钮行**：测试发送 → 后台控制端引导 → 桥接控制；「重启桥接」「清空 QQ 聊天工作区」并排一行、间距 8px（与 `.tile-actions` / `#presetEditorActions` 等其它页面同排按钮一致）。`form.js` 的 `inlineActions` 支持每个 item 自带 `status`，两个按钮各自保留状态位（id 仍是 `restartMsg` / `clearWsMsg`）。
+4. **外部人格另存为内部后即可编辑/设为默认**：`POST /api/persona/external/save-as-role` 落盘前先 `validateRoleName`（与 `/api/roles`、`role-default` 同一套清洗），正文走 `validateRoleContent`，并返回清洗后的 `name`；前端改用返回名。此前名字含空格/`·`/括号时文件能写进去，但 `/api/roles/content`、`/api/config/role-default` 按清洗后的名字查不到，表现就是「不能编辑、不能设为默认」。
+5. **控制台写请求统一 JSON**：`js/api.js` 的 `api()` 对非 GET 一律带 `content-type: application/json` 与 JSON 体（无参补 `{}`），修「重建 DSH 会话」「插件重载」等无 body POST 被 CSRF 中间件拦成 415 `请求必须是 application/json`。
+6. **主动行为按权限即时生效**：`scheduleSocialReply` 增加 `proactive` 标记，定时器触发时若主动且 `proactiveAllowed(key)` 已为假则跳过；`scheduleProactiveCheckV2Impl` 的回调开头复查 `socialV2.paused` / 准入 / 当前模式。`PATCH /api/access` 保存后调用 `rescheduleProactiveChecksAfterAccessChange()`，立刻撤销被拒会话的 v2 主动定时器、给新放开的会话补排——此前已排队的计时器会在关掉主动后照常触发一次。
+7. **会话重建与自愈**：`POST /api/sessions/<key>/rebuild` 不再要求本地已有映射（无映射时直接建新会话并返回 `created:true`），路由按 403/404/502 映射错误；`isSessionNotFoundError` 增加 `session/archived`、`session/gone` 与「已归档/已删除」等判定；`ensureSession` 复用映射前先查 DSH 侧 health，`missing` 就退役重建；启动后每 5 分钟跑一次 `reconcileDshSessions`。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **33/33、49 次写**（新增外部人格用例）；`test-role-per-key` 5/5（第 ⑤ 条改为断言 persona 页不再有 assign 卡）；全量 `test-audit` **103/103、exit 0**。真机：运维页截图核对卡片顺序与 8px 间距；Playwright 核对人格页无 assign 卡、配置页 tab 顺序；`POST /api/persona/external/save-as-role {as:'zz probe'}` 返回 `name:'zzprobe'`，`GET /api/roles/content` 200 且可设为默认（验证后已改回并删除临时角色）；`POST /api/sessions/group%3A999999/rebuild` 带 JSON 返回 200/`created:true`（证明 415 已修），探测会话随后用 `/api/session/reset` 归档清理。
+
+**已知限制**：主动行为修复只作用于「已排队尚未触发的那一次」与之后的排程，已经发出的消息无法撤回；「DSH 侧会话被删 → 下一条消息自动重建」仍建议在真实群观察一次（代码路径已覆盖 archived/gone，但本机没有可安全复现的真实群会话）。
+
+
 

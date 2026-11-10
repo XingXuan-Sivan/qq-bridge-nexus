@@ -27,15 +27,12 @@ export const OPERATIONS_FIELDS = {
     fields: [
       {
         type: 'action',
-        id: 'maintenanceRestart',
-        items: [{ id: 'restartBtn', label: '重启桥接', variant: 'danger' }],
-        status: 'restartMsg',
-      },
-      {
-        type: 'action',
-        id: 'maintenanceClear',
-        items: [{ id: 'clearWsBtn', label: '清空 QQ 聊天工作区', variant: 'danger' }],
-        status: 'clearWsMsg',
+        id: 'maintenanceActions',
+        className: 'form-actions--pair',
+        items: [
+          { id: 'restartBtn', label: '重启桥接', variant: 'danger', status: 'restartMsg' },
+          { id: 'clearWsBtn', label: '清空 QQ 聊天工作区', variant: 'danger', status: 'clearWsMsg' },
+        ],
       },
       {
         name: 'maintenanceNote',

@@ -350,9 +350,11 @@ async function saveExternalAsRole(name, text, asArg) {
   if (!target) { setRoleMsg('请填写内部人格名', false); return ''; }
   const r = await api('/api/persona/external/save-as-role', 'POST', { name, as: target, text: text || undefined });
   if (!r?.ok) { setRoleMsg('❌ ' + (r?.error || '另存失败'), false); return ''; }
-  setRoleMsg(`✅ 已另存为内部人格「${target}」（${r.chars} 字符）`, true);
+  // 服务端会按人格名规则清洗落盘名，用返回值而不是用户输入，保证后续「编辑 / 设为默认」找得到。
+  const saved = r.name || target;
+  setRoleMsg(`✅ 已另存为内部人格「${saved}」（${r.chars} 字符）`, true);
   await refreshRoles();
-  return target;
+  return saved;
 }
 
 async function useExternalAsDefault(name) {

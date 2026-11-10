@@ -3507,6 +3507,7 @@ async function main() {
   // DSH 重启期间收到的 QQ 消息先入队（不丢），DSH 恢复后按序补投。
   let dshReady = false;
   let dshCheckStarted = false;
+  let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
   let lastMode = currentMode;
@@ -4708,6 +4709,14 @@ async function main() {
         // 启动/DSH 重启后对账一次：把 DSH 侧已经不存在的绑定标成 missing，
         // 详情页能看到、也能点重建；真正重建仍由下一条消息或用户触发。
         void reconcileDshSessions().catch((error) => log(`⚠️ DSH 会话对账异常：${error?.message ?? error}`));
+        // 运行中也定期对账：用户在 DSH 控制台手动删/归档会话后，不必等投递失败才发现。
+        if (!dshReconcileTimer) {
+          dshReconcileTimer = setInterval(() => {
+            if (!dshReady) return;
+            void reconcileDshSessions().catch((error) => log(`⚠️ 周期对账异常：${error?.message ?? error}`));
+          }, 5 * 60 * 1000);
+          dshReconcileTimer.unref?.();
+        }
         if (currentMode === 'reserved2') {
           // 首次确定模式为 reserved2 后再恢复持久化的有限睡眠定时器，
           // 避免在 initial chat 模式下设置定时器导致 timeout 唤醒被模式守卫吞掉。
@@ -5819,9 +5828,13 @@ async function main() {
           let body = {};
           try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
           const name = String(body?.name ?? '').trim();
-          const as = String(body?.as ?? name).trim();
           const text = String(body?.text ?? '').trim();
-          if (!name || !as) { sendJson({ ok: false, error: '缺少 name / as' }, 400); return; }
+          if (!name) { sendJson({ ok: false, error: '缺少 name' }, 400); return; }
+          // 落盘名必须和 /api/roles、/api/config/role-default 用的清洗规则一致：
+          // 否则外部卡名里带空格/「·」/括号时，文件写进去了却查不到，表现为「不能编辑、不能设为默认」。
+          let as;
+          try { as = validateRoleName(String(body?.as ?? name).trim() || name); }
+          catch (error) { sendJson({ ok: false, error: String(error?.message ?? error) }, 400); return; }
           const cache = readExternalPersonaCache();
           const content = text || String(cache.cards[name]?.text ?? '').replace(CARD_HEADER_RE, '').trim();
           if (!content) { sendJson({ ok: false, error: '没有可写入的正文' }, 400); return; }
@@ -5830,7 +5843,7 @@ async function main() {
               fs.mkdirSync(ROLE_BACKUP_DIR, { recursive: true });
               fs.copyFileSync(roleFilePath(as), path.join(ROLE_BACKUP_DIR, `${as}-${Date.now()}.md`));
             }
-            writeRoleContent(as, content);
+            writeRoleContent(as, validateRoleContent(content));
             sendJson({ ok: true, name: as, chars: content.length, message: `已另存为内部人格「${as}」` });
           } catch (error) {
             sendJson({ ok: false, error: String(error?.message ?? error) }, 500);
@@ -6988,20 +7001,25 @@ async function main() {
             return;
           }
           const sessionId = sessions.get(key);
-          if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           if (req.method === 'GET' && dshSessionMatch[2] === 'dsh') {
+            if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
             sendJson({ ok: true, key, sessionId, health: getDshHealth(key, sessionId) });
             return;
           }
           if (req.method === 'POST' && dshSessionMatch[2] === 'rebuild') {
+            // 不要求本地已有绑定：档案还在、映射丢了（手动删过 state 或旧版本残留）时，
+            // 「重建」的语义就是重新建一个 DSH 会话。
             try {
               const r = await rebuildSession(key);
               sendJson({ ok: true, key, ...r, health: getDshHealth(key, r.sessionId) });
             } catch (error) {
-              sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status === 404 ? 404 : 502);
+              const message = String(error?.message ?? error);
+              const status = error?.status === 404 ? 404 : (/不允许会话/.test(message) ? 403 : 502);
+              sendJson({ ok: false, error: message }, status);
             }
             return;
           }
+          if (!sessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           sendJson({ ok: false, error: '不支持的请求' }, 405);
           return;
         }
@@ -7221,6 +7239,7 @@ async function main() {
             }
             state.defaults = next;
             saveState();
+            rescheduleProactiveChecksAfterAccessChange();
             try { ext.audit.append('access.update', { passive: summarizeAccessConfig(next).passive ?? null, proactive: summarizeAccessConfig(next).proactive ?? null }); } catch { /* 审计尽力而为 */ }
             log(`控制台：全局准入名单已更新（被动 ${next.passive.mode}/${next.passive.entries.length}，主动 ${next.proactive.mode}/${next.proactive.entries.length}）`);
             sendJson({ ok: true, access: next, summary: summarizeAccessConfig(next), affected });
@@ -11759,6 +11778,11 @@ async function main() {
       // reset/清空工作区期间旧映射可能尚未清理；发现代际不匹配必须丢弃旧会话，防止复活。
       if (!isCurrentSession(key, existing)) {
         retireSession(key);
+      } else if (getDshHealth(key, existing).status === 'missing') {
+        // 周期性对账已经确认 DSH 侧没有这个会话（手动删除/归档）：本地映射作废并重建，
+        // 不要等第一条消息投递失败再补救。
+        log(`会话 ${key} 在 DSH 侧已被删除或归档（对账结果），退役本地映射并重建`);
+        retireSession(key);
       } else {
         const applied = await ensureChatModel(existing, key);
         // DSH 侧会话已不存在（DSH 重启、异常退出、归档竞态）：本地映射已经失效，
@@ -12919,6 +12943,8 @@ async function main() {
       Number(cfg.social?.activeReplyDelayMinMs ?? 2000),
       Number(cfg.social?.activeReplyDelayMaxMs ?? 8000),
       '活跃超时退场',
+      true,
+      null,
       true
     );
     log(`社交模式：${key} 活跃超过时长上限，提示 AI 收尾退场`);
@@ -12939,7 +12965,15 @@ async function main() {
   function isSessionNotFoundError(error) {
     const code = String(error?.code ?? '').toLowerCase();
     const message = String(error?.message ?? error ?? '');
-    return code === 'session/not-found' || /session[\/\s_-]*not[-\s]?found/i.test(message);
+    // DSH 对「被删除」与「被归档」给的不是同一个错误：前者 session/not-found，
+    // 后者常见 session/archived（或在消息里写 archived / gone）。两者都必须触发自愈，
+    // 否则控制台手动删掉的会话会一直对着旧 id 投递，看起来就是「不会自动重建」。
+    return code === 'session/not-found'
+      || code === 'session/archived'
+      || code === 'session/gone'
+      || /session[\/\s_-]*not[-\s]?found/i.test(message)
+      || /session[\/\s_-]*(archived|gone)/i.test(message)
+      || /会话[^。]{0,12}(不存在|已归档|已删除)/.test(message);
   }
   const SESSION_HEAL_WINDOW_MS = 60_000;
   const SESSION_HEAL_MAX = 3;
@@ -12975,20 +13009,17 @@ async function main() {
   const sessionRebuilds = new Map(); // key -> Promise，避免连点两次并发重建
   function rebuildSession(rawKey) {
     const key = apiKey(rawKey);
-    if (!sessions.get(key)) {
-      const error = new Error('会话不存在');
-      error.status = 404;
-      return Promise.reject(error);
-    }
     if (sessionRebuilds.has(key)) return sessionRebuilds.get(key);
     const promise = (async () => {
-      const oldSessionId = sessions.get(key);
-      retireSession(key);
+      // 允许「映射丢了但档案还在」的会话直接重建：控制台点「重建」的语义是
+      // 「给我一个新的 DSH 会话」，而不是「只有已绑定的才能重建」。
+      const oldSessionId = sessions.get(key) ?? null;
+      if (oldSessionId) retireSession(key);
       const sessionId = await ensureSession(key);
       markDshHealth(key, sessionId, 'online');
-      ext.audit.append('session.rebuild', { key, oldSessionId, sessionId });
-      log(`控制台：重建会话 ${key}（${oldSessionId} → ${sessionId}）`);
-      return { oldSessionId, sessionId };
+      ext.audit.append('session.rebuild', { key, oldSessionId, sessionId, created: !oldSessionId });
+      log(`控制台：重建会话 ${key}（${oldSessionId ?? '未绑定'} → ${sessionId}）`);
+      return { oldSessionId, sessionId, created: !oldSessionId };
     })();
     sessionRebuilds.set(key, promise);
     return promise.finally(() => {
@@ -13202,7 +13233,7 @@ async function main() {
     }
   }
 
-  function scheduleSocialReply(key, promptText, minDelay, maxDelay, label, farewell = false, media = null) {
+  function scheduleSocialReply(key, promptText, minDelay, maxDelay, label, farewell = false, media = null, proactive = false) {
     const delay = randInt(minDelay, maxDelay);
     log(`社交模式：${label} ${key}，延迟 ${Math.round(delay / 1000)}s 后投递`);
     const timer = setTimeout(() => {
@@ -13210,6 +13241,12 @@ async function main() {
       if (timers) {
         timers.delete(timer);
         if (timers.size === 0) social.pendingTimers.delete(key);
+      }
+      // 排队期间可能关掉了这个会话的主动权限（或整个社交模式）：主动发言必须作废，
+      // 被动回应的定时器不受影响——它们由入站消息直接触发。
+      if (proactive && !proactiveAllowed(key)) {
+        log(`社交模式：${key} 已失去主动权限，跳过排队的「${label}」`);
+        return;
       }
       deliverPrompt(key, promptText, { farewell, media: media ?? [] }).catch((error) => log(`社交投递异常 ${key}: ${error?.message ?? error}`));
     }, delay);
@@ -13252,7 +13289,10 @@ async function main() {
                   key, promptText,
                   Number(cfg.social?.activeReplyDelayMinMs ?? 2000),
                   Number(cfg.social?.activeReplyDelayMaxMs ?? 8000),
-                  '主动开话题'
+                  '主动开话题',
+                  false,
+                  null,
+                  true
                 );
                 log(`社交模式：${key} 观望期主动开话题，进入活跃`);
               }
@@ -13314,7 +13354,10 @@ async function main() {
                 key, promptText,
                 Number(cfg.social?.activeReplyDelayMinMs ?? 2000),
                 Number(cfg.social?.activeReplyDelayMaxMs ?? 8000),
-                '冷场试探'
+                '冷场试探',
+                false,
+                null,
+                true
               );
               log(`社交模式：${key} 冷场，AI 试探性说一句`);
             } else {
@@ -14834,6 +14877,15 @@ async function main() {
     st.proactiveTimer = null;
   }
 
+  // 准入名单热更新：已被拒绝的会话立刻撤掉已排队的主动检查，新放开的会话补排一次。
+  // 定时器回调本身也会复查权限（双保险：这里是「立刻停」，那里是「真的到点时再确认」）。
+  function rescheduleProactiveChecksAfterAccessChange() {
+    for (const key of [...socialV2.conversations.keys()]) {
+      if (socialV2.paused || !proactiveAllowed(key) || effectiveMode(key) !== 'reserved2') cancelProactiveCheckV2(key);
+      else scheduleProactiveCheckV2(key);
+    }
+  }
+
   function scheduleProactiveCheckV2(key) {
     return withBehavior(key, () => scheduleProactiveCheckV2Impl(key), { optional: true });
   }
@@ -14850,6 +14902,14 @@ async function main() {
     const delay = Math.floor(min + Math.random() * (max - min));
     st.proactiveTimer = setTimeout(() => {
       st.proactiveTimer = null;
+      // 排队期间可能关掉了主动权限 / 暂停了仿真 / 切了模式：这一拍直接作废，
+      // 不重排（权限或模式恢复时 scheduleProactiveCheckV2 会被重新调用）。
+      if (cfg.socialV2?.proactive?.enabled === false) return;
+      if (socialV2.paused || !proactiveAllowed(key)) {
+        log(`[reserved2] ${key} 已失去主动权限，跳过本次主动机会检查`);
+        return;
+      }
+      if (effectiveMode(key) !== 'reserved2') return;
       ensureWakeableV2(st, { key });
       const idleThreshold = Number(p.idleThresholdMs) || 15 * 60 * 1000;
       const idle = Date.now() - (st.lastIncomingAt || 0);

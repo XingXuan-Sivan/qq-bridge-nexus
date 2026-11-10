@@ -679,6 +679,18 @@
   color: var(--muted);
 }
 
+/* 多个按钮各带状态位时（桥接控制这类）：按钮间距对齐其它页面的同排按钮（8px），
+   状态位为空时直接不占位，避免「按钮之间空一大段」。 */
+.form-actions--pair {
+  column-gap: 8px;
+}
+.form-actions--pair .form-actions-status:empty {
+  display: none;
+}
+.form-actions--pair .form-actions-status:not(:empty) {
+  margin-right: 6px;
+}
+
 /* 动作行的状态位：成功/失败都要能看见颜色，且不撑高行（保存按钮 40px，状态位只占文字行高）。 */
 .form-actions-status {
   font-size: 12px;

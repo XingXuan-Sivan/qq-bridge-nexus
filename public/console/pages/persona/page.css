@@ -1,38 +1,4 @@
-/* 人格与角色页：只放本页私有的列表行样式；控件与字段布局一律走 components/。
-   行结构对齐字段行（148px 标签列 + 20px 间距），这样列表里的控件与上下字段落在同一条竖线。 */
-
-.assign-row {
-  display: flex;
-  align-items: center;
-  column-gap: var(--space-4, 20px);
-  row-gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 0;
-  border-top: 1px solid var(--border-subtle);
-  min-width: 0;
-}
-.assign-row:first-child {
-  border-top: 0;
-  padding-top: 2px;
-}
-/* 第一列充当标签列：固定 148px、右对齐、颜色弱化。 */
-.assign-row > :first-child {
-  flex: 0 0 var(--field-label-w, 148px);
-  min-width: 0;
-  text-align: right;
-}
-.assign-key {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-/* 下拉框由 select 组件包一层 .select-wrap，宽度约束要加在 wrapper 上（加在 select 上会被包层挡住）。 */
-.assign-row > .select-wrap {
-  flex: 0 1 240px;
-  min-width: 180px;
-  width: auto;
-}
+/* 人格与角色页：只放本页私有的列表行样式；控件与字段布局一律走 components/。 */
 
 /* 人格卡片：整卡是一个 div，主体是铺满的按钮，行内操作单独一行靠右。 */
 .tile-body {

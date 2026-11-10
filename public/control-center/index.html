@@ -115,7 +115,7 @@
     <!-- 接入实例：列表 + 详情 -->
     <div id="pview-instances" role="tabpanel" aria-labelledby="ptab-instances" class="split" hidden>
       <section class="card" aria-label="实例列表">
-        <div class="card-head"><h3>接入实例</h3><span class="grow"></span><button id="instAddBtn">添加</button></div>
+        <div class="card-head"><h3>接入实例</h3><span class="grow"></span><button class="primary" id="instAddBtn">添加实例</button></div>
         <ul class="list" id="instList"></ul>
         <div class="note note-pad" id="instProvidersNote"></div>
       </section>
@@ -353,11 +353,11 @@
         <div class="panel-sub" id="svcFormPanel">
           <h3 id="svcFormTitle">添加服务</h3>
           <div class="form">
-            <label for="svcId">服务 ID</label><input type="text" id="svcId" placeholder="soulkit（小写字母、数字、连字符）" autocomplete="off">
+            <label for="svcId">服务 ID</label><input type="text" id="svcId" placeholder="my-service（小写字母、数字、连字符）" autocomplete="off">
             <label for="svcName">显示名称</label><input type="text" id="svcName" placeholder="留空就用 ID" autocomplete="off">
             <label for="svcCommand">启动命令</label><input type="text" id="svcCommand" placeholder="node，或可执行文件的完整路径" autocomplete="off">
-            <label for="svcArgs">命令参数</label><textarea id="svcArgs" rows="3" placeholder="每行一个参数，例如：&#10;bin/soulkit.mjs&#10;serve"></textarea>
-            <label for="svcCwd">工作目录</label><input type="text" id="svcCwd" placeholder="相对项目根目录，例如 ..\DSHBot\soulkit" autocomplete="off">
+            <label for="svcArgs">命令参数</label><textarea id="svcArgs" rows="3" placeholder="每行一个参数，例如：&#10;app.js&#10;--port 8080"></textarea>
+            <label for="svcCwd">工作目录</label><input type="text" id="svcCwd" placeholder="相对项目根目录，例如 ..\services\demo" autocomplete="off">
             <label for="svcEnv">环境变量</label><textarea id="svcEnv" rows="3" placeholder="每行一个 KEY=VALUE（可选）"></textarea>
             <label for="svcPort">端口</label><input type="number" id="svcPort" min="1" max="65535" placeholder="可选：用来看端口是否在线">
             <label for="svcHealth">健康检查</label><input type="text" id="svcHealth" placeholder="可选：http://127.0.0.1:3110/health" autocomplete="off">

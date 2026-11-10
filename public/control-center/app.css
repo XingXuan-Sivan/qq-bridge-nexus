@@ -89,7 +89,7 @@
   .tile .k { color: var(--muted); font-size: 12.5px; }
   .tile .v { font-size: 20px; font-weight: 600; margin-top: 2px; }
   .tile .v.small { font-size: 14px; font-weight: 500; }
-  .split { display: grid; grid-template-columns: 280px 1fr; gap: 14px; min-height: 0; }
+  .split { display: grid; grid-template-columns: 280px 1fr; gap: 14px; min-height: 0; align-items: start; }
   @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
   .list { list-style: none; margin: 0; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
   .list button { width: 100%; text-align: left; display: flex; gap: 8px; align-items: center; border-color: transparent; background: transparent; }
@@ -106,7 +106,7 @@
   .soon { color: var(--muted); font-style: italic; }
   .backends { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
   .bcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .bcard.on { border-color: color-mix(in srgb, var(--ok) 60%, var(--border)); background: color-mix(in srgb, var(--ok) 5%, var(--surface)); }
+  .bcard.on { border-color: color-mix(in srgb, var(--ok) 60%, var(--border)); }
   .bcard .bhead { display: flex; align-items: center; gap: 10px; }
   .bcard .bhead h3 { margin: 0; font-size: 16px; }
   .bcard dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }

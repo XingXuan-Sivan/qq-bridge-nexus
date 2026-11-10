@@ -415,8 +415,9 @@ npm run test:console-ui
 3. **新增接口**：`GET /api/services`、`POST /api/services`（创建）、`POST /api/services/:id/save|delete|start|stop|restart`、`GET /api/services/:id/logs?after=`；`stateSnapshot` 增加 `services`（含运行态、PID、端口探测、健康检查、重启次数）与 `platform.providers`。
 4. **控制中心第三个大标签「服务」**：左侧服务列表（内置 + 自定义），右侧详情（状态/端口/目录/健康检查/日志）与添加、编辑、删除表单；完全复用页面现有 `.split + .list + .form + .info + .term` 与 `panel-sub` 折叠条，没有为服务页单独写一套表单/终端布局。基础控件规则从「text/search/password/select」扩展到 `textarea`、`input[type=number|url]`，让新表单的输入框与页面其它表单同一套内边距与圆角（原先这三类控件没有命中基础规则，观感不一致）。内置服务只能改显示名与自动重启（启动命令、目录仍由各自的程序面板管理）。
 5. **接入后端卡片改为动态生成**：按 `GET /api/platform/providers` 的 `available` 列表画卡（含 `os` 元数据，内置两项保留短名），未知/新 provider 给通用卡——只显示平台侧连接状态和「去接入实例」按钮，不再伪装成本机可一键开启的程序；平台没运行或旧版本时回落到内置 `BUILTIN_BACKENDS` 两项。
-6. **边框统一**：`.bcard` 与 `.bcard.on` 都保持 1px 边框；只删掉运行态原来那条 3px 内阴影（它让「已启动」卡片的边比其它卡粗一圈），绿色描边与 5% 绿底保留，运行状态仍然一眼可辨。
+6. **边框统一**：`.bcard` 与 `.bcard.on` 都保持 1px 边框、同一底色；只删掉运行态原来那条 3px 内阴影（它让「已启动」卡片的边比其它卡粗一圈），绿色描边保留，运行状态仍然一眼可辨，但已启动/未启动的背景色完全一致。
+7. **列表卡与添加按钮统一**：`.split` 增加 `align-items: start`，服务页与接入实例页的左侧列表卡都按内容高度（不再被右侧详情拉满整列、留出大片空白）；「接入实例」的添加按钮改成 `primary` 的「添加实例」，与「添加服务」同款。服务表单占位文本去掉 soulkit，改用通用示例（`my-service`、`app.js --port 8080`、`..\services\demo`），后端非法 ID 提示同样用 `my-service`。
 
-**验收**：`test-control-center` **23/23**（新增服务注册表用例：内置四项、落盘、创建自定义服务、启停、日志、改名、删除内置 400、删除自定义、非法 ID/缺命令 400 全过）；`test-linux-support` 9/9（内置兜底表断言改为 `BUILTIN_BACKENDS` 形态，仍要求 SnowLuma 声明 Windows / Linux、NapCat 声明 macOS / Windows / Linux）；`test-console-static` 全部通过（控制中心引用的样式令牌齐全）；全量 `test-audit` **103/103、exit 0**。真机（3099）Playwright 走完「添加服务 → 启动 → 日志出现服务输出 → 停止 → 删除 → 列表归零」全流程，无 console 错误；截图核对服务列表/详情/表单（输入框、文本域与页面其它表单同一套样式）与接入卡片（SnowLuma / NapCat 两张，动态取自平台）。
+**验收**：`test-control-center` **23/23**（新增服务注册表用例：内置四项、落盘、创建自定义服务、启停、日志、改名、删除内置 400、删除自定义、非法 ID/缺命令 400 全过）；`test-linux-support` 9/9（内置兜底表断言改为 `BUILTIN_BACKENDS` 形态，仍要求 SnowLuma 声明 Windows / Linux、NapCat 声明 macOS / Windows / Linux）；`test-console-static` 全部通过（控制中心引用的样式令牌齐全）；全量 `test-audit` **103/103、exit 0**。真机（3099）Playwright 走完「添加服务 → 启动 → 日志出现服务输出 → 停止 → 删除 → 列表归零」全流程，无 console 错误；截图核对服务列表/详情/表单（输入框、文本域与页面其它表单同一套样式）、接入卡片（SnowLuma / NapCat 两张，动态取自平台），以及服务页/接入实例页的左侧列表卡高度与添加按钮样式一致。
 
 **已知限制**：自定义服务只做进程级托管与端口/HTTP 健康检查，没有心跳协议；内置服务的启动命令仍以各自面板为准，服务页不提供修改；日志固定保留最近 800 行（前端渲染上限），不做下载。

@@ -341,7 +341,7 @@ export async function startControlCenter({ open = true, port: portOverride = nul
   }
   function sanitizeService(input, existing = null) {
     const id = String(input?.id ?? existing?.id ?? '').trim();
-    if (!SERVICE_ID_RE.test(id)) throw svcError('服务 ID 只能用小写字母、数字与连字符（最长 32 个字符），例如 soulkit');
+    if (!SERVICE_ID_RE.test(id)) throw svcError('服务 ID 只能用小写字母、数字与连字符（最长 32 个字符），例如 my-service');
     const name = String(input?.name ?? existing?.name ?? '').trim() || id;
     const command = String(input?.command ?? existing?.command ?? '').trim();
     if (!command) throw svcError('请填写启动命令（例如 node，或可执行文件的完整路径）');

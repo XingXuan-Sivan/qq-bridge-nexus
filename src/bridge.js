@@ -151,7 +151,7 @@ import { buildCommandsPayload } from './commands/payload.mjs';
 // 会话重置的清理序列（P7 第三步），deps 见 src/session/reset.mjs 的文件头。
 import { createSessionResetter } from './session/reset.mjs';
 // 会话准入：两态单源名单（白名单/黑名单），不再有 per-profile 三态或白名单投影。
-import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary } from './session/access.mjs';
+import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from './session/access.mjs';
 import { migrateAccessModel, summarizeAccessConfig } from './session/access-migrate.mjs';
 import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
 // 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
@@ -4701,6 +4701,11 @@ async function main() {
               log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
               continue;
             }
+            // 补投是第二条投递路径：排队期间主动权限可能已被收回，投递前按同一张原因表再判一次。
+            if (wakeAccessAxis(item.wakeReason) === 'proactive' && !proactiveAllowed(key)) {
+              log(`补投跳过未授权主动行为的会话 ${key}（${item.wakeReason}）`);
+              continue;
+            }
             const result = await deliverPrompt(key, item.promptText, { farewell: item.farewell, silent: item.silent, media: item.media ?? [], wakeReason: item.wakeReason });
             if (!result.ok) {
               log(`补投失败 ${key}: ${result.error || '未知错误'}`);
@@ -7448,6 +7453,8 @@ async function main() {
             const next = normalizeProfile(applyPatch(profile, patch), { key });
             state.profiles[key] = next;
             saveState();
+            // 名单变了要立刻生效：撤掉已排队的主动定时器 / 补排，别等定时器到点才被闸门拦。
+            if (accessChanged) rescheduleProactiveChecksAfterAccessChange();
             log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
             sendJson({ ok: true, key, profile: next });
             return;
@@ -14796,6 +14803,13 @@ async function main() {
       log(`[reserved2] 跳过唤醒 ${key}（${reason}）：会话已不在当前模式允许范围内`);
       return;
     }
+    // 准入是唯一闸门：被动轴由上面的 isSessionAllowedInCurrentMode（= passiveAllowed）统一拦，
+    // 主动轴必须在这里拦。否则 replyCheck / timeout / silenceEnded / memberJoin 这类不走
+    // scheduleWakeV2 的定时唤醒会绕过准入，把「关闭主动」的会话照样叫醒。
+    if (wakeAccessAxis(reason) === 'proactive' && !proactiveAllowed(key)) {
+      log(`[reserved2] 跳过唤醒 ${key}（${reason}）：会话未授权主动行为`);
+      return;
+    }
     // 「立即读卡」唤醒排队期间会话可能已经读到新卡（AI 自己调了 qq_get_prompt / 别的唤醒带上了），不用再叫
     if (reason === 'roleRefresh' && !roleRefresh.needsRefresh(key, sessions.get(key), currentRoleFingerprintV2(key))) {
       log(`[reserved2] ${key} 已读到当前角色卡，跳过读卡唤醒`);
@@ -14929,6 +14943,8 @@ async function main() {
   function scheduleReplyCheckV2(key) {
     if (cfg.socialV2?.enabled === false) return;
     if (socialV2.paused || effectiveMode(key) !== 'reserved2') return;
+    // 回复检查是「无人触发的唤醒」，属主动行为：没授权就别排定时器（投递闸门还会再拦一次）。
+    if (!proactiveAllowed(key)) return;
     const st = getSocialV2State(key);
     // 已有真实唤醒/有限睡眠/回复检查在排队时不再重复安排，避免 AI 被连环唤醒。
     if (st.pendingWakeTimer || st.sleepTimer || st.replyCheckTimer) return;
@@ -15038,6 +15054,10 @@ async function main() {
       log(`[reserved2] 跳过计划唤醒 ${key}（${reason}）：会话已不在当前模式允许范围内`);
       return;
     }
+    if (wakeAccessAxis(reason) === 'proactive' && !proactiveAllowed(key)) {
+      log(`[reserved2] 跳过计划唤醒 ${key}（${reason}）：会话未授权主动行为`);
+      return;
+    }
     {
       const manualSilent = theManualSilence();
       if (manualSilent) {
@@ -15139,6 +15159,8 @@ async function main() {
   function setupSleepTimerV2Impl(key) {
     if (cfg.socialV2?.enabled === false) return;
     if (!isSessionAllowedInCurrentMode(key)) return;
+    // 潜水到期唤醒同样是主动行为：没授权就不排定时器（投递闸门还会再拦一次）。
+    if (!proactiveAllowed(key)) return;
     const st = getSocialV2State(key);
     cancelReplyCheckV2(key); // 有限睡眠配置已接管，取消回复检查
     if (st.sleepTimer) {
@@ -15183,12 +15205,22 @@ async function main() {
     st.proactiveTimer = null;
   }
 
-  // 准入名单热更新：已被拒绝的会话立刻撤掉已排队的主动检查，新放开的会话补排一次。
-  // 定时器回调本身也会复查权限（双保险：这里是「立刻停」，那里是「真的到点时再确认」）。
+  // 准入名单热更新：被拒绝的会话立刻撤掉所有「无人触发的」定时器（主动机会、回复检查），
+  // 新放开的会话补排主动机会、并按需补回有限潜水定时器。
+  // 定时器回调本身与投递闸门也会复查权限（三重保险：这里是「立刻停」，回调是「到点再确认」，
+  // 闸门是「任何路径都过一遍」）。
   function rescheduleProactiveChecksAfterAccessChange() {
     for (const key of [...socialV2.conversations.keys()]) {
-      if (socialV2.paused || !proactiveAllowed(key) || effectiveMode(key) !== 'reserved2') cancelProactiveCheckV2(key);
-      else scheduleProactiveCheckV2(key);
+      if (socialV2.paused || !proactiveAllowed(key) || effectiveMode(key) !== 'reserved2') {
+        cancelProactiveCheckV2(key);
+        cancelReplyCheckV2(key);
+        continue;
+      }
+      scheduleProactiveCheckV2(key);
+      // 准入恢复：把因主动被拒而没排上的有限潜水定时器补回来（只补还没到期的，
+      // 已经过期的唤醒不在这里补发，避免「一放开就立刻集体弹起来」）。
+      const until = Date.parse(socialV2.conversations.get(key)?.wakeConfig?.sleepUntil ?? '');
+      if (Number.isFinite(until) && until > Date.now()) setupSleepTimerV2(key);
     }
   }
 
@@ -15832,13 +15864,14 @@ async function main() {
     }
 
     // DSH 重启容错：DSH 不可用时消息入队（不丢），恢复后自动补投
+    // 这批投递由入站消息触发（一代仿真的活跃回复），补投时按被动轴判：主动被关不影响回消息。
     if (!dshReady) {
       const items = queued.get(key) ?? [];
       if (items.length >= QUEUE_MAX) {
         items.shift();
         log(`队列满（${QUEUE_MAX}），丢弃最旧消息 (${key})`);
       }
-      items.push({ promptText, media: mediaList });
+      items.push({ promptText, media: mediaList, wakeReason: 'anyMessage' });
       queued.set(key, items);
       const now = Date.now();
       if ((queuedHintAt.get(key) ?? 0) + QUEUE_HINT_COOLDOWN_MS < now) {
@@ -15854,7 +15887,7 @@ async function main() {
       sessionId = await ensureSession(key);
     } catch (error) {
       if (String(error?.message ?? error).includes('会话创建期间已重置')) {
-        enqueueForRetry(key, promptText, { media: mediaList });
+        enqueueForRetry(key, promptText, { media: mediaList, wakeReason: 'anyMessage' });
         return;
       }
       throw error;

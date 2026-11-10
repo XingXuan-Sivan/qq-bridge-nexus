@@ -115,6 +115,55 @@ export function resolveAccessSummary(key, snapshot) {
   return out;
 }
 
+/**
+ * 唤醒原因 → 准入轴。投递闸门 `sendWakePromptV2Impl`（`src/bridge.js`）按这张表判定
+ * 一次唤醒要不要过主动轴；表是唯一分类处，新增唤醒原因必须登记（`test-session-proactive`
+ * 会扫描 `src/bridge.js` 里的原因字面量，漏登记直接失败）。
+ *
+ * - `passive`：由别人发来的消息/动作触发。被动轴在闸门里由 `isSessionAllowedInCurrentMode`
+ *   （= `passiveAllowed`）统一拦截，这里登记是为了让分类完整、便于阅读与测试。
+ * - `proactive`：没有新消息、由 bot 自己或定时器发起 —— 产品定义见控制台「主动行为」：
+ *   主动冒泡、潜水超时、回复检查等无人触发的唤醒。
+ * - `operator`：操作者/系统通道，不受会话准入约束。定时任务在调度器里已按目标会话的主动轴
+ *   判定（并会通知创建者），这里不重复拦；管理员中继、控制台手动唤醒、首次引导同理。
+ */
+export const WAKE_REASON_AXES = Object.freeze({
+  // 入站消息与它的触发条件
+  private: 'passive',
+  anyMessage: 'passive',
+  atMention: 'passive',
+  nameMention: 'passive',
+  keyword: 'passive',
+  question: 'passive',
+  speaker: 'passive',
+  probability: 'passive',
+  poke: 'passive',
+  // 静默结束后给「静默期间被直接找过」的会话补一次唤醒：触发源是被动消息。
+  silenceEnded: 'passive',
+  // bot 自己发起
+  timeout: 'proactive',
+  replyCheck: 'proactive',
+  proactiveCheck: 'proactive',
+  memberJoin: 'proactive',
+  memberLeave: 'proactive',
+  roleRefresh: 'proactive',
+  // 操作者/系统通道
+  bootstrap: 'operator',
+  admin: 'operator',
+  scheduled: 'operator',
+  ownerRelay: 'operator',
+});
+
+/**
+ * 一次唤醒该走哪根准入轴；未知原因按 `proactive` 处理（失败关闭：宁可拦住 bot 自发的唤醒，
+ * 也不让新加的定时路径悄悄绕过准入）。返回 `'passive' | 'proactive' | 'operator'`。
+ */
+export function wakeAccessAxis(reason) {
+  const base = String(reason ?? '').trim().split(':')[0];
+  if (!base) return 'proactive';
+  return Object.hasOwn(WAKE_REASON_AXES, base) ? WAKE_REASON_AXES[base] : 'proactive';
+}
+
 /** 名单模式的中文文案（控制台提示用）。 */
 export function defaultPolicyText(mode) {
   return mode === 'deny' ? '黑名单（名单外全部允许）' : '白名单（名单外全部拒绝）';

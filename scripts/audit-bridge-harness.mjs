@@ -70,7 +70,7 @@ import { createSessionResetter } from '../src/session/reset.mjs';
 import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
-import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary } from '../src/session/access.mjs';
+import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
 import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
@@ -323,6 +323,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     normalizeAccessEntries,
     resolveAccess,
     resolveAccessSummary,
+    wakeAccessAxis,
     migrateAccessModel,
     summarizeAccessConfig,
     migrateSessionProfiles,

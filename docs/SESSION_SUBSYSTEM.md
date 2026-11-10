@@ -177,6 +177,22 @@ resolve(axis, key):
 | AI 工具向其它会话发送（消息/表情/拍一拍/合并转发） | 目标会话 `proactive`；当前会话内、由入站触发的回复只走 `passive` |
 | 控制台「测试发送」 | 不受限，但写审计（人工操作） |
 
+**投递闸门（唯一）**：所有唤醒最终都过 `sendWakePromptV2Impl`，它先按 `passiveAllowed`（= `isSessionAllowedInCurrentMode`）
+拦被动轴，再按 `wakeAccessAxis(reason)` 拦主动轴。原因 → 轴的分类只在 `src/session/access.mjs` 的
+`WAKE_REASON_AXES` 维护，三分法是：
+
+| 类别 | 原因 | 说明 |
+| --- | --- | --- |
+| `passive` | private / anyMessage / atMention / nameMention / keyword / question / speaker / probability / poke / silenceEnded | 由别人发来的消息或动作触发；静默结束补唤醒的触发源也是被动消息 |
+| `proactive` | timeout / replyCheck / proactiveCheck / memberJoin / memberLeave / roleRefresh | 没有新消息、由 bot 自己或定时器发起（潜水到期、回复检查、主动机会、群事件反应、读新角色卡） |
+| `operator` | bootstrap / admin / scheduled / ownerRelay | 操作者或系统通道，不受会话准入约束（定时任务在调度器里按目标会话主动轴判定并通知创建者） |
+
+未登记的原因按 `proactive` 失败关闭；`test-session-proactive` 会扫描 `src/bridge.js` 与 `src/social/group-events.js`
+里的原因字面量，漏登记直接失败。排程侧同样判一次（`scheduleWakeV2`、`scheduleReplyCheckV2`、
+`setupSleepTimerV2Impl`），DSH 断线补投（`flushQueue`）投递前再判一次；准入名单变化（`/api/access` 与会话详情
+`PATCH .../profile`）会调 `rescheduleProactiveChecksAfterAccessChange()`，立刻撤掉主动机会与回复检查定时器、
+给放开的会话补回未到期的潜水定时器。
+
 定时任务/主动唤醒被拒绝时**不能静默**：至少写活动日志，并把原因回给创建者（owner/管理员）。
 
 ### 4.4 迁移映射（完全保持现状）
@@ -490,3 +506,4 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - 2026-11-08：P2b 主动检查点方案 A 落地（D17）：scheduler 跳过项标记「未授权主动行为」并生成通知（`src/scheduler/skip-notice.js`），引擎按任务+日期去重（`noteSkipNotice`），桥接写活动/审计并私聊创建者；v1 仿真改 `socialEnabledForKey(key)` 逐会话启用，循环与随机触发都先过 `proactiveAllowed(key)`，主动被拒即退出活跃；跨会话 agent token 返回明确拒绝文案「跨会话能力尚未实现」。`test-session-proactive` 3/3，static 全过、UI 28/28、audit 94/94；方案 B（AI 跨会话工具）留后续。
 - 2026-11-08：P3 多管理员落地（D18）：新增 `src/admin/admins.mjs`（名单归一化、capability、actor、maxLevel、私聊被动豁免）与 `test-admins` 6/6；`config.admins[]` 启动校验；管理员私聊接入管理通道（`/status`、`/approvals`、`/level L1|L2`），审批回复按 `approve` 放行、审计带 `actor`、通知 owner + `notify` 管理员；closed-agent 的 admin 私聊按 maxLevel 限级，L3 只 owner；访问页新增管理员表并通过 `/api/whitelist` 读写。控制台仍单 token owner。
 - 2026-11-08：准入收敛为两态单源（D19）：删除会话档案 `access`/`blocked` 与三态语义，只保留每轴 `{mode,entries}`；旧三态在迁移期以 `legacyAccess` 暂存，按旧默认翻译成白/黑名单后删除；`GET/PATCH /api/access` 成为唯一入口，模式翻转需 `confirmFlip`；`/api/status`、scheduler 目标、`reconcileGroupMembers`、语音发送与 MCP 群工具全部读同一份 `state/sessions/defaults.json`；`/api/whitelist` 只保留 owner/admins；删除 `src/session/mode-gate.mjs` 与其单测，旧白名单自查代码一并清理。控制台会话页改为统一表单的两列名单（无标签页），详情准入卡只显示成员关系与开关；`test-session-access` 5/5、`test-session-directory` 6/6、`test-session-profiles` 4/4、`test-audit-bridge` 16/16，全量 audit **96/96**、UI 28/28、static 全过；真机验证 `/api/access`、模式翻转 409、详情卡与两列布局。
+- 2026-11-11：主动准入收口到投递闸门（D20）：此前主动轴只在排程/入口零散检查，`sendWakePromptV2Impl` 不判准入，于是 `replyCheck`（回合结束 30s）、`timeout`（潜水到期）、`silenceEnded`（静默结束补唤醒）、`roleRefresh`（读新角色卡）、`memberJoin`/`memberLeave`（群事件）这些不走 `scheduleWakeV2` 的路径会把「关闭主动」的会话照样叫醒；会话详情 `PATCH .../profile` 改名单后也不重排定时器（只有 `/api/access` 会）。现在 `src/session/access.mjs` 新增 `WAKE_REASON_AXES` + `wakeAccessAxis()`（passive/proactive/operator 三分，未知原因失败关闭），闸门与排程侧（`scheduleWakeV2`、`scheduleReplyCheckV2`、`setupSleepTimerV2Impl`）、DSH 断线补投（`flushQueue`）统一按它判主动轴；`rescheduleProactiveChecksAfterAccessChange()` 扩为「撤主动机会 + 撤回复检查 + 补回未到期的潜水定时器」并接到会话详情 PATCH。`test-session-proactive` 扩到 6/6（含原因表全量扫描与三条投递路径的静态断言）。

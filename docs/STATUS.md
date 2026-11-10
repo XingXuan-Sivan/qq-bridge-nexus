@@ -421,3 +421,5 @@ npm run test:console-ui
 **验收**：`test-control-center` **23/23**（新增服务注册表用例：内置四项、落盘、创建自定义服务、启停、日志、改名、删除内置 400、删除自定义、非法 ID/缺命令 400 全过）；`test-linux-support` 9/9（内置兜底表断言改为 `BUILTIN_BACKENDS` 形态，仍要求 SnowLuma 声明 Windows / Linux、NapCat 声明 macOS / Windows / Linux）；`test-console-static` 全部通过（控制中心引用的样式令牌齐全）；全量 `test-audit` **103/103、exit 0**。真机（3099）Playwright 走完「添加服务 → 启动 → 日志出现服务输出 → 停止 → 删除 → 列表归零」全流程，无 console 错误；截图核对服务列表/详情/表单（输入框、文本域与页面其它表单同一套样式）、接入卡片（SnowLuma / NapCat 两张，动态取自平台），以及服务页/接入实例页的左侧列表卡高度与添加按钮样式一致。
 
 **已知限制**：自定义服务只做进程级托管与端口/HTTP 健康检查，没有心跳协议；内置服务的启动命令仍以各自面板为准，服务页不提供修改；日志固定保留最近 800 行（前端渲染上限），不做下载。
+
+**本机接入**：服务页额外登记了 soulkit（`kind:'process'`，`node bin/soulkit.mjs serve`，3110）作为自定义服务；SnowLuma 通过「选择目录」指向本机安装（5099）。这些条目只写 `state/control-center.json`（`.gitignore` 已忽略，不入库）；内置服务详情补上了 SnowLuma 的 WebUI 端口与桥接的项目目录。控制中心目前只在自身运行时托管这些进程，没有「开机自启/随控制中心启动」的开关。

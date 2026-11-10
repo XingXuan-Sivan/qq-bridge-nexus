@@ -383,9 +383,9 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     // 先铺运行时快照再铺服务描述：managed process 的 snapshot 里也有一个 name（进程名），
     // 不能用它覆盖服务显示名。
     const out = { ...(proc ? proc.snapshot() : { running: false }), ...service, lastSeq: proc?.lastSeq ?? 0, kindLabel: KIND_LABELS[service.kind] ?? KIND_LABELS.process };
-    if (service.kind === 'snowluma') out.dir = settings.snowlumaDir || '';
-    if (service.kind === 'napcat') out.dir = napcatDefaultHome(settings) || '';
-    if (service.kind === 'bridge') { const cfg = bridgeConfig(); out.port = cfg.valid ? consolePort(cfg.value) : 0; }
+    if (service.kind === 'snowluma') { out.dir = settings.snowlumaDir || ''; out.port = snowInfo?.ok ? snowInfo.webui?.port ?? 0 : 0; }
+    if (service.kind === 'napcat') { out.dir = napcatDefaultHome(settings) || ''; out.port = Number(settings.napcatWebuiPort) || 0; }
+    if (service.kind === 'bridge') { const cfg = bridgeConfig(); out.port = cfg.valid ? consolePort(cfg.value) : 0; out.dir = ROOT; }
     if (service.kind === 'platform') out.port = platformPort();
     if (Number(out.port) > 0) out.reachable = await portOpen(Number(out.port));
     if (service.healthUrl) {

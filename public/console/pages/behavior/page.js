@@ -5,6 +5,7 @@ import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
 import { behaviorFields, fillBehaviorForm, readBehaviorForm } from '../presets/behavior-form.js';
+import { BEHAVIOR_FIELDS } from './fields.js';
 
 let behaviorDoc = null;
 let busy = false;
@@ -78,6 +79,8 @@ async function saveDoc() {
 }
 
 export function init() {
+  const host = document.querySelector('[data-behavior-fields="main"]');
+  if (host) renderFields(host, BEHAVIOR_FIELDS.main.fields, { columns: 1, layout: 'inline' });
   document.getElementById('behaviorFormSelect')?.addEventListener('change', (event) => {
     if (event.target.value) void loadDoc(event.target.value);
   });

@@ -518,6 +518,7 @@ npm run test:console-ui
 3. **QQ 工具表每页 10 条**：`pages/config/tools-section.js` 的 `dataTableHtml` 增加 `pageSize: 10`（37 项分 4 页）。
 4. **访问令牌行对齐**：`pages/config/access-fields.js` 给令牌字段加 `className:'field-block--top'`（新变体：标签顶部对齐 + `padding-top`），说明文案改成字段 `hint` 由组件渲染；`components/form/form.css` 增加 `.field-block--top` 两条规则。
 5. **踩坑记录 1.86–1.88**：`pageSize: rows.length` 等于永远一页；行内布尔统一 `checkCellHtml`；控件高于一行时标签会垂直居中、要用 `field-block--top` + `hint`。
+6. **行为档案页字段规格化**：新增 `pages/behavior/fields.js`，把「选择档案（下拉 + 刷新）」与「名称」两行从 `page.html` 的手写 `.field-row` 搬进字段规格，`page.html` 只留 `<div class="form-stack" data-behavior-fields="main">`；`page.js` 在 `init()` 里 `renderFields(..., {columns:1, layout:'inline'})`。下拉仍是复合行（`custom` + `.control-row`），因为组件没有「select + 同行按钮」类型；旧 id 全部保留。
 
 **验收**：`node --check` 全过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；`test-scheduler` **7/7**；真机确认预设工具表 48 行只显示 10 行、QQ 工具表 37 项分 4 页、定时任务勾选与表格多选同款、令牌标签与输入框同一基线。
 

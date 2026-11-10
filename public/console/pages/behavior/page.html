@@ -2,21 +2,7 @@
   <section class="card span-all">
     <h2>行为档案</h2>
     <p class="meta">描述 QQ 里怎么说话、怎么等待；预设通过 behavior 引用，未绑定时用全局配置里的「默认行为档案」。保存写入 <code>config/behaviors</code>，重启桥接后生效。</p>
-    <div class="form-stack">
-      <div class="field-row">
-        <label class="field-label" for="behaviorFormSelect">选择档案</label>
-        <div class="control-row">
-          <select id="behaviorFormSelect" class="u-w-190"></select>
-          <button class="btn" type="button" id="behaviorFormRefresh">刷新</button>
-        </div>
-      </div>
-      <div class="field-row">
-        <label class="field-label" for="behaviorFormLabel">名称</label>
-        <div class="field-control">
-          <input id="behaviorFormLabel" type="text" maxlength="40" autocomplete="off">
-        </div>
-      </div>
-    </div>
+    <div class="form-stack" data-behavior-fields="main"></div>
     <div class="form-actions">
       <button class="btn primary" type="button" id="behaviorFormSave">保存</button>
       <span class="meta" id="behaviorFormMsg" role="status"></span>

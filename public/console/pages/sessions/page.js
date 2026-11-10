@@ -470,6 +470,8 @@ function detailDshLabel(health, sessionId) {
 
 // 详情弹窗的 DSH 模型目录：打开时取一次，供运行卡的提供方/模型/思考强度下拉使用。
 let detailCatalog = null;
+// 会话详情「人格」下拉的数据源：与全局配置同一份 /api/personas（本地卡 + 外部 provider 卡）。
+let detailPersonas = null;
 async function ensureDetailCatalog() {
   if (detailCatalog) return detailCatalog;
   try {
@@ -479,6 +481,53 @@ async function ensureDetailCatalog() {
     detailCatalog = [];
   }
   return detailCatalog;
+}
+
+async function ensurePersonaCatalog() {
+  if (detailPersonas) return detailPersonas;
+  try {
+    const r = await api('/api/personas');
+    detailPersonas = Array.isArray(r?.items) ? r.items : [];
+  } catch {
+    detailPersonas = [];
+  }
+  return detailPersonas;
+}
+
+/** 人格卡在会话里的存储值：本地卡写名字，外部卡写 `provider:id`。 */
+function personaUidOf(item) {
+  if (!item) return '';
+  if (item.uid) return String(item.uid);
+  if (item.source === 'local') return `local:${item.name}`;
+  return `${item.provider}:${item.id}`;
+}
+
+function personaSelectHtml(current, mode) {
+  const items = Array.isArray(detailPersonas) ? detailPersonas : [];
+  let currentUid = current
+    ? (String(current).includes(':') ? String(current) : `local:${current}`)
+    : '';
+  // 旧档案里可能只存了外部卡的名字（如「魅魔」）：按名字唯一匹配到 provider 卡，
+  // 显示时自动落到 `provider:id`，保存一次就把旧值迁成引用。
+  if (currentUid && !items.some((item) => personaUidOf(item) === currentUid)) {
+    const byName = items.filter((item) => item.source !== 'local' && item.name === current);
+    if (byName.length === 1) currentUid = personaUidOf(byName[0]);
+  }
+  const groups = new Map();
+  for (const item of items) {
+    const group = item.source === 'local' ? '本地人格' : `外部人格 · ${item.provider || 'provider'}`;
+    if (!groups.has(group)) groups.set(group, []);
+    const label = `${item.name || item.id}${item.stale ? '（缓存）' : ''}`;
+    groups.get(group).push([personaUidOf(item), label]);
+  }
+  if (currentUid && !items.some((item) => personaUidOf(item) === currentUid)) {
+    groups.set('当前值', [[currentUid, currentUid]]);
+  }
+  const options = [...groups].map(([group, list]) => `<optgroup label="${esc(group)}">`
+    + list.map(([value, label]) => `<option value="${esc(value)}"${value === currentUid ? ' selected' : ''}>${esc(label)}</option>`).join('')
+    + '</optgroup>').join('');
+  return `<select id="detailPersonaName"${mode === 'card' ? '' : ' disabled'}>`
+    + '<option value="">选择人格卡</option>' + options + '</select>';
 }
 
 function detailModelOptions(providerId) {
@@ -552,7 +601,7 @@ function renderDetail(data) {
         <h4>人格</h4>
         <div class="meta">继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。</div>
         ${detailRow('模式', detailSelect('detailPersonaMode', persona.mode || 'inherit', [['inherit', '继承全局'], ['card', '指定人格卡'], ['off', '不挂卡']]))}
-        ${detailRow('人格名', `<input id="detailPersonaName" type="text" value="${esc(persona.name || '')}" placeholder="例如：猫娘">`, persona.resolved?.name && persona.mode === 'inherit' ? `当前实际使用：${persona.resolved.name}` : '')}
+        ${detailRow('人格卡', personaSelectHtml(persona.name, persona.mode || 'inherit'), persona.resolved?.name && persona.mode === 'inherit' ? `当前实际使用：${persona.resolved.name}` : '')}
       </div>
 
       <div class="detail-card">
@@ -609,8 +658,16 @@ function renderDetail(data) {
     const modelEl = document.getElementById('detailModel');
     syncDetailModelSelects(modelEl?.value || '', '');
   });
-  const promptEl = document.getElementById('detailPrompt');
-  promptEl?.addEventListener('input', () => {
+  // 人格卡下拉只在「指定人格卡」模式下可用；其它模式置灰但保留可见，避免整行跳变。
+  const personaModeEl = document.getElementById('detailPersonaMode');
+  const personaNameEl = document.getElementById('detailPersonaName');
+  const syncPersonaSelect = () => {
+    if (!personaNameEl) return;
+    personaNameEl.disabled = personaModeEl?.value !== 'card';
+  };
+  personaModeEl?.addEventListener('change', syncPersonaSelect);
+  syncPersonaSelect();
+  const promptEl = document.getElementById('detailPrompt');  promptEl?.addEventListener('input', () => {
     const counter = document.getElementById('detailPromptCount');
     if (counter) counter.textContent = String(promptEl.value.length);
   });
@@ -670,6 +727,7 @@ async function openDetail(key) {
     const [data] = await Promise.all([
       api(`/api/sessions/${encodeURIComponent(key)}/profile`),
       ensureDetailCatalog(),
+      ensurePersonaCatalog(),
     ]);
     if (!data?.ok) throw new Error(data?.error || '读取失败');
     detailCache = data;
@@ -710,8 +768,10 @@ function buildDetailPatch() {
   if (JSON.stringify(model) !== JSON.stringify(cachedModel)) patch.model = model;
 
   const personaMode = document.getElementById('detailPersonaMode')?.value || 'inherit';
-  const personaName = String(document.getElementById('detailPersonaName')?.value ?? '').trim();
-  if (personaMode === 'card' && !personaName) throw new Error('指定人格卡时需要填写人格名');
+  const personaUid = String(document.getElementById('detailPersonaName')?.value ?? '').trim();
+  // 本地卡存名字，外部卡存 `provider:id`；后端两种情况都能解析。
+  const personaName = personaUid.startsWith('local:') ? personaUid.slice('local:'.length) : personaUid;
+  if (personaMode === 'card' && !personaName) throw new Error('指定人格卡时需要在「人格卡」里选一张');
   if (personaMode !== (data.persona?.mode || 'inherit') || personaName !== (data.persona?.name || '')) {
     // 服务端把「name 非空」视为切到 card；继承/关闭只发 mode，由服务端把 name 清空。
     patch.persona = personaMode === 'card'

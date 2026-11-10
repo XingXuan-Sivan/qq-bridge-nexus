@@ -7414,10 +7414,27 @@ async function main() {
                 if (mode !== 'card') patch.persona.name = null;
               }
               if (Object.hasOwn(body.persona, 'name')) {
-                const name = sanitizeRoleName(body.persona.name);
-                if (!name) { sendJson({ ok: false, error: '人格名不能为空' }, 400); return; }
-                patch.persona.mode = 'card';
-                patch.persona.name = name;
+                const rawName = String(body.persona.name ?? '').trim();
+                // 外部卡用 `provider:id` 存；本地卡仍走名字清洗（旧值兼容）。
+                const ref = rawName.includes(':') ? personaRef(rawName) : null;
+                if (ref) {
+                  try {
+                    await refreshPersonaCardCache(ref.providerId, ref.id);
+                  } catch (error) {
+                    // provider 暂时离线时允许沿用旧缓存；连缓存都没有就拒绝，别让会话指向一张取不到正文的卡。
+                    if (!readPersonaCardCache(ref.providerId, ref.id)?.text) {
+                      sendJson({ ok: false, error: `人格卡暂时不可用：${error.message}` }, 400);
+                      return;
+                    }
+                  }
+                  patch.persona.mode = 'card';
+                  patch.persona.name = `${ref.providerId}:${ref.id}`;
+                } else {
+                  const name = sanitizeRoleName(rawName);
+                  if (!name) { sendJson({ ok: false, error: '人格名不能为空' }, 400); return; }
+                  patch.persona.mode = 'card';
+                  patch.persona.name = name;
+                }
               }
             }
             if (body.prompt && typeof body.prompt === 'object' && Object.hasOwn(body.prompt, 'text')) {

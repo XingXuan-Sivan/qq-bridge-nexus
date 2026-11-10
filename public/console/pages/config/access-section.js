@@ -2,6 +2,7 @@ import { api } from '../../js/api.js';
 import { onPageRefresh } from '../../js/router.js';
 import { setMsg } from '../../components/message/message.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
 import { ACCESS_FIELDS } from './access-fields.js';
 
 const $ = (id) => document.getElementById(id);
@@ -17,6 +18,52 @@ function renderAccessFieldGroups() {
 // 白名单 / 黑名单现在按会话存在档案里，这里不再编辑；保存管理员时把现值原样带回。
 let adminsDraft = [];
 const ADMIN_CAPS = [['approve', '审批'], ['sessions', '会话'], ['scheduler', '定时任务'], ['memory', '记忆']];
+
+/** 权限格只放一行摘要：权限项以后还会增加，逐项摆复选会把整行撑高，所以编辑收进弹窗。 */
+function capsSummary(caps) {
+  const labels = ADMIN_CAPS.filter(([value]) => (caps ?? []).includes(value)).map(([, label]) => label);
+  return labels.length ? labels.join(' · ') : '未设置';
+}
+
+let capsEditor = null;
+let capsEditIndex = -1;
+
+function ensureCapsEditor() {
+  if (capsEditor) return capsEditor;
+  const host = document.createElement('div');
+  host.innerHTML = modalHtml({
+    id: 'adminCapsModal',
+    title: '编辑管理员权限',
+    body: '<div class="form-stack" id="adminCapsBody"></div>'
+      + '<div class="meta u-mt-8">权限决定该管理员在自己的私聊里能做什么；点「应用」后还要保存管理员才会写进 config.json。</div>',
+    footer: '<button class="btn" type="button" data-modal-close>取消</button>'
+      + '<button class="btn primary" type="button" id="adminCapsApply">应用</button>',
+  });
+  capsEditor = host.firstElementChild;
+  document.body.appendChild(capsEditor);
+  wireModal(capsEditor);
+  capsEditor.querySelector('#adminCapsApply')?.addEventListener('click', () => {
+    const admin = adminsDraft[capsEditIndex];
+    if (admin) {
+      admin.caps = [...capsEditor.querySelectorAll('#adminCapsBody input[type="checkbox"]:checked')].map((el) => el.value);
+      renderAdminRows();
+    }
+    closeModal(capsEditor);
+  });
+  return capsEditor;
+}
+
+function openCapsEditor(index) {
+  const admin = adminsDraft[index];
+  if (!admin) return;
+  capsEditIndex = index;
+  const overlay = ensureCapsEditor();
+  const chosen = new Set(Array.isArray(admin.caps) ? admin.caps : []);
+  const body = overlay.querySelector('#adminCapsBody');
+  body.innerHTML = ADMIN_CAPS.map(([value, label]) => `<label class="field-check-item">`
+    + `<input type="checkbox" value="${value}"${chosen.has(value) ? ' checked' : ''}> ${label}</label>`).join('');
+  openModal(overlay);
+}
 
 function adminCell(row, text) {
   const td = document.createElement('td');
@@ -53,19 +100,13 @@ function renderAdminRows() {
     name.dataset.adminIndex = String(index);
     adminCell(tr).appendChild(name);
     const caps = adminCell(tr);
-    for (const [value, label] of ADMIN_CAPS) {
-      const wrap = document.createElement('label');
-      wrap.className = 'field-check-item';
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.value = value;
-      box.checked = (admin.caps ?? []).includes(value);
-      box.dataset.adminField = 'caps';
-      box.dataset.adminIndex = String(index);
-      wrap.appendChild(box);
-      wrap.append(` ${label}`);
-      caps.appendChild(wrap);
-    }
+    const capsBtn = document.createElement('button');
+    capsBtn.type = 'button';
+    capsBtn.className = 'btn small';
+    capsBtn.textContent = capsSummary(admin.caps);
+    capsBtn.title = '编辑权限';
+    capsBtn.dataset.adminCaps = String(index);
+    caps.appendChild(capsBtn);
     const level = document.createElement('select');
     level.dataset.adminField = 'maxLevel';
     level.dataset.adminIndex = String(index);
@@ -100,12 +141,12 @@ function readAdminsFromDom() {
   return adminsDraft.map((admin, index) => {
     const rows = [...document.querySelectorAll('[data-admin-index]')];
     const valueOf = (field) => rows.find((el) => el.dataset.adminField === field && Number(el.dataset.adminIndex) === index);
-    const caps = rows.filter((el) => el.dataset.adminField === 'caps' && Number(el.dataset.adminIndex) === index && el.checked).map((el) => el.value);
     return {
       ...admin,
       qq: String(valueOf('qq')?.value ?? '').trim(),
       name: String(valueOf('name')?.value ?? '').trim(),
-      caps,
+      // 权限在弹窗里改，直接取草稿；不再从 DOM 里数复选。
+      caps: Array.isArray(admin.caps) ? [...admin.caps] : [],
       maxLevel: String(valueOf('maxLevel')?.value ?? 'L2'),
       notify: valueOf('notify')?.checked !== false,
       exemptPassive: valueOf('exemptPassive')?.checked !== false,
@@ -206,6 +247,12 @@ export function init() {
     renderAdminRows();
   });
   $('adminRows').addEventListener('click', (event) => {
+    const capsButton = event.target.closest('[data-admin-caps]');
+    if (capsButton) {
+      adminsDraft = readAdminsFromDom();
+      openCapsEditor(Number(capsButton.dataset.adminCaps));
+      return;
+    }
     const button = event.target.closest('[data-admin-remove]');
     if (!button) return;
     adminsDraft = readAdminsFromDom();

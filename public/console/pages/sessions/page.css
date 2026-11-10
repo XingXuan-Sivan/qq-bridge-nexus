@@ -75,6 +75,12 @@
 .detail-card .control-row + .control-row {
   margin-top: 10px;
 }
+/* 详情里的行标签统一宽度并右对齐：否则「模式」（2 字）与「人格卡」（3 字）宽度不同，
+   控件左边缘会参差，看起来像标签和控件没对齐。 */
+.detail-card .control-row > .control-label {
+  flex: 0 0 84px;
+  text-align: right;
+}
 .detail-card textarea {
   min-height: 120px;
 }

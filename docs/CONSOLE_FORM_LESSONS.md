@@ -463,6 +463,18 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 项目里没有 `.btn-icon` 的基础样式（`components.css` 只有 `:not(.btn-icon)` 的排除选择器），时段表格、概览页都是按页写 `width:36px;height:var(--control-h,40px);border:1px solid transparent;border-radius:8px`，hover 变 `--err` + `--danger` 底。黑话表沿用同一套（`.slang-list .row-actions .btn-icon`），**不要**给全局加一个 `.btn-icon` 然后指望各页自动对齐。
 
+### 1.80 会持续增加的「多选集合」不要逐项铺在单元格里，用摘要 + 弹窗
+
+管理员表的「权限」格原来把 4 个复选竖排塞进一个 `<td>`，行高 ~140px；用户明确说以后还会加权限，所以不能靠「横排」或「拆成 4 列」硬扛——前者加几项就会换行撑高，后者每加一项就要加一列表头。改成格内只放一个摘要按钮（`审批 · 会话`，空值「未设置」），点开弹窗勾选：行高恒为 67px，权限数组以后加多少项都只多一行复选。
+
+**规则**：表格里凡是「可增长的集合」列（权限、标签、目标群、能力位），列内只放摘要或计数，编辑收进 `modalHtml` 弹窗；弹窗里用 `.form-stack` + `.field-check-item`，不要再手写一套复选布局。
+
+### 1.81 详情弹窗里的行标签要给固定宽度，否则控件左边缘参差
+
+会话详情的行用 `.control-row{display:flex}`，`.control-label` 是 `flex:0 0 auto`——「模式」（2 字）、「人格卡」（3 字）、「DSH 预设」（5 字）宽度各不相同，后面的控件就一段一段错开，看起来像「标签和控件没对齐」。给 `.detail-card .control-row > .control-label{flex:0 0 84px;text-align:right}` 之后就落在同一条竖线上了。
+
+**规则**：同一张卡里成列的「标签 + 控件」行，标签列固定宽度并右对齐；宽度取该卡最长标签（含 padding）向上取整，不要用 `auto` 让它跟着字数变。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

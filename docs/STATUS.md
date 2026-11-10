@@ -462,3 +462,15 @@ npm run test:console-ui
 **验收**：`node --check` 对 `pages/slang/page.js`、`pages/mcp/{page,fields}.js`、`pages/persona/page.js` 全部通过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；全量 `test-audit` **103/103、exit 0**；真机（3111，Edge）截图核对：黑话表每行约 92px（原来 700+），四个操作按钮同排、删除为图标，工具栏「刷新 / 搜索 … 手动添加」；人格页空态占满整行、卡片按默认→内部→外部排序；MCP 弹窗底栏含日志、连接配置与凭据都挂编辑器且标签左对齐在上；无 console 错误。
 
 **已知限制**：MCP 弹窗内容变长后需要滚动（连接配置 320px + 凭据 160px）；语境证据在表格里只显示第一条，完整证据仍在编辑弹窗；provider 不支持 rename/remove 时按钮仍置灰，不做隐藏。
+
+### 6.31 第十三批：会话人格下拉与管理员权限列（2026-11-10）
+
+1. **会话人格下拉**：会话详情的「人格卡」从自由文本改成下拉，数据与全局配置同源（`GET /api/personas`），按「本地人格 / 外部人格 · provider」分组；只在「指定人格卡」模式下可编辑，其它模式置灰但保留可见，避免整行跳变。旧档案里只存了名字的外部卡（如「魅魔」）会按唯一同名匹配到 provider 卡并显示为引用，保存一次即迁移成 `provider:id`。
+2. **后端放宽引用**：`PATCH /api/sessions/:key/profile` 的 `body.persona.name` 接受 `provider:id`：先 `refreshPersonaCardCache()` 刷一次缓存，provider 离线时回退读旧缓存，连缓存都没有才返回 400「人格卡暂时不可用」；本地名字仍走 `sanitizeRoleName`。
+3. **详情标签对齐**：`.detail-card .control-row > .control-label` 固定 `flex:0 0 84px` + 右对齐；此前标签宽度随字数（模式 / 人格卡 / DSH 预设）变化，控件左边缘参差，看起来像「标签和控件没对齐」。
+4. **管理员权限列**：权限格改成一行摘要按钮（如「审批 · 会话」，空值显示「未设置」），点击打开「编辑管理员权限」弹窗勾选，应用后写回草稿、再点「保存管理员」落盘。行高从约 140px 回到 67px，以后新增权限项只加一行复选，不会把表格撑高。弹窗复用 `modalHtml` + `.field-check-item`，未新增自定义组件。
+
+**验收**：`node --check` 对 `src/bridge.js`、`pages/sessions/page.js`、`pages/config/access-section.js` 全部通过；`test-role-per-key` 通过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；全量 `test-audit` **103/103、exit 0**；真机（3111，Edge）：会话详情人格下拉 6 个选项、分 2 组，`模式` 与 `人格卡` 标签同宽且控件左对齐；管理员表行高 67px，权限摘要显示「审批 · 会话」，弹窗 4 个复选、应用后摘要更新；无 console 错误。
+
+**已知限制**：会话人格改动同样要等下一条消息才生效（与其它会话字段一致）；provider 离线且没有缓存时无法把会话指到该卡；权限弹窗与「保存管理员」是两段式，勾选后需再点一次保存才会写入 `config.json`。
+

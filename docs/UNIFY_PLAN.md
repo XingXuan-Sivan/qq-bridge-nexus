@@ -217,7 +217,7 @@
 | **P5** | 运行方案控制台：新页 `pages/runtime/`（摘要 + 切换 + 清单 + 弹窗编辑器 + 克隆 + 导入/导出 JSON，只复用 `renderFields`/`dataTableHtml`/`modalHtml`）、`POST/DELETE /api/runtime/plans`（内置只读、在用方案不许删）、导航重排（管理组：总览→会话→运行方案→全局配置→运维；预设移入聊天行为）、全局配置删「运行模式」卡与 `saveMode`/`#modeRow`/`#closedPreset`/`#adminPanic`/`#adminStatus` 一套、`overview/fields.js` 删 `MODE_HTML`/`ADMIN_ROW`/`mode` 组、会话详情「模式 + DSH 预设」合并为「运行方案」（`detailPlan`，保存发 `planId`）、`/api/status` 回 `planId/planLabel` 且总览指标显示方案名 | 无 | 是（前端 + 新接口） |
 | **P6** | 拆三处硬编码（已完成）：① `resolveEffectiveMode` 不再做 owner 排他 / `inactive` 投影，closed-agent 是全局引擎；② `effectiveMode` 按方案 `planMode()` 投影（行为 kind → reserved/reserved2，工具 → chat/closed-agent），会话固定 `planId` 时忽略旧 `mode`；③ `behaviorFor` 只看方案（`none` / `inherit` / id），删掉「按模式返回 null」与 kind 不匹配抛错；`modePreset` 方案能力优先；④ 受众由 `planAudienceBlocks()` 在 `passiveAllowed`/`proactiveAllowed` 里拦（`audience:'owner'` 只给管理员私聊），取代旧 closed-agent 排他；⑤ `legacyModeOfPlan` 改行为优先 | **有**（能力放开：Agent 工具 + 仿真行为 + 任意受众可组合） | 是 |
 | **P7** | 行为 kind 与能力授予：`src/behaviors/kinds/{v1,v2}.mjs`（字段表 + `defaults`，行为页与 `behavior-form` 共用）、`GET /api/behaviors/kinds`、行为页「档案清单」表（类型/被引用/编辑）、`src/runtime/capabilities.mjs`（`GATEABLE_TOOLS` 9 个写工具 + 沙箱 + `grants.disable`，配置落 `config.capabilities`）、`GET/PATCH /api/runtime/capabilities`、运行方案页「能力预设」卡 + 弹窗编辑器、`v2ToolEnabled(flag, key)` 按会话方案收紧写工具 | 无（只收紧，不放宽） | 是（新接口 + 前端） |
-| **P8** | 收尾：`GLOBAL_CONFIG.md` / `STATUS.md` / `SESSION_SUBSYSTEM.md` 更新；全量 audit；真机逐页截图；提交与报告 | 无 | — |
+| **P8** | 收尾：全量回归（audit 109/109、console UI 35/35、static 全过）、逐页截图核对、文档同步（`GLOBAL_CONFIG` 页面盘点、`STATUS` D21、模型稿 §3.1 对齐实现） | 无 | 否 |
 
 顺序理由：
 

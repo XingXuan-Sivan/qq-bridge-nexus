@@ -33,14 +33,15 @@
 
 ### 2.1 控制台页面
 
-当前 16 页：`overview`、`sessions`、`persona`、`plugins`、`skills`、`presets`、`mcp`、`behaviors`、`social-v2`、`social-v1`、`slang`、`scheduler`、`memory`、`usage`、`access`、`operations`。
+当前 16 页（全部片段页，按需注入）：`overview`、`config`、`runtime`、`sessions`、`persona`、`plugins`、`skills`、`presets`、`behavior`、`prompt-blocks`、`mcp`、`behaviors`、`slang`、`memory`、`scheduler`、`operations`。
 
-目标：
+导航分组（P5 后）：
 
-- 删除 `social-v1`、`social-v2`、`access` 三个页面及导航/路由/片段；
-- 新增 `config`（「全局配置」），放在「管理行为」之后、「定时任务」之前；
-- 新增 `prompt-blocks`（「注入块」）与 `runtime`（「运行方案」）两页：前者是提示词拼装的唯一入口（插件页不再有注入块卡）；后者是"能力预设 + 行为档案 + 受众"的唯一切换入口（全局配置页不再有「运行模式」卡）；
-- 保留 `presets`（预设层）、`sessions`（会话层）、`persona`（人格卡库）、`behaviors`（命令/工具参考）、`mcp`/`skills`/`plugins`（扩展注册）、`memory`/`scheduler`/`usage`/`operations`。
+- **管理**：运行总览 → 会话与审批 → 运行方案 → 全局配置 → 调试与运维；
+- **聊天行为**：注入块 → 行为档案 → 预设 → 人格与角色 → 记忆 → 黑话词库 → 定时任务；
+- **扩展**：插件 → 技能 → MCP 与工具 → 管理行为。
+
+入口分工：运行方案页是「引擎 / 能力 / 行为 / 受众」的唯一入口；注入块页是提示词拼装的唯一入口（插件页已无注入块卡）；全局配置页负责准入、安全与静默、行为默认值、DSH 模型、发言上限、工具目录。
 
 ### 2.2 当前文件与内容
 

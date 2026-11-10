@@ -9,8 +9,9 @@
   button.danger { background: transparent; border-color: var(--err); color: var(--err); }
   button.danger.solid { background: var(--danger-solid); border-color: var(--danger-solid); color: var(--on-solid); }
   button.ghost { background: transparent; }
-  input[type=text], input[type=search], input[type=password], select { font: inherit; color: var(--text); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 0; }
-  input:focus, select:focus, button:focus-visible, [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type=text], input[type=search], input[type=password], input[type=number], input[type=url], select, textarea { font: inherit; color: var(--text); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+  textarea { resize: vertical; }
+  input:focus, select:focus, textarea:focus, button:focus-visible, [role=tab]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; user-select: none; }
   code { font-family: var(--font-mono); font-size: 12.5px; }
 
@@ -101,10 +102,11 @@
   .ladder .dot { width: 8px; height: 8px; }
   .form { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; padding: 12px 14px; align-items: center; }
   .form label { color: var(--muted); font-size: 13px; }
+  .form > label:has(+ textarea) { align-self: start; padding-top: 6px; }
   .soon { color: var(--muted); font-style: italic; }
   .backends { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
   .bcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .bcard.on { border-color: color-mix(in srgb, var(--ok) 60%, var(--border)); box-shadow: inset 0 3px 0 var(--ok); }
+  .bcard.on { border-color: color-mix(in srgb, var(--ok) 60%, var(--border)); background: color-mix(in srgb, var(--ok) 5%, var(--surface)); }
   .bcard .bhead { display: flex; align-items: center; gap: 10px; }
   .bcard .bhead h3 { margin: 0; font-size: 16px; }
   .bcard dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }

@@ -102,7 +102,9 @@ function openBrowser(url) {
 // ── 设置与令牌 ────────────────────────────────────────────────────────────────
 
 function loadSettings() {
-  return { port: 3099, snowlumaDir: '', autoRestartBridge: true, autoRestartPlatform: true, platformDir: '', platformPort: 3120, napcatCommand: '', napcatQQApp: '', napcatHome: '', napcatWebuiPort: 0, napcatQuickLogin: '', ...(readJson(SETTINGS_FILE, {}) ?? {}) };
+  // services：服务注册表。内置四个固定项（bridge/platform/snowluma/napcat）在启动时自动补齐，
+  // 其余是用户在「服务」页添加的普通进程，只存描述，进程仍由 createManagedProcess 托管。
+  return { port: 3099, snowlumaDir: '', autoRestartBridge: true, autoRestartPlatform: true, platformDir: '', platformPort: 3120, napcatCommand: '', napcatQQApp: '', napcatHome: '', napcatWebuiPort: 0, napcatQuickLogin: '', services: [], ...(readJson(SETTINGS_FILE, {}) ?? {}) };
 }
 function saveSettings(s) { atomicWriteJsonFile(SETTINGS_FILE, s); }
 function loadOrCreateToken() {
@@ -295,6 +297,107 @@ export async function startControlCenter({ open = true, port: portOverride = nul
   });
   platform.setAutoRestart(settings.autoRestartPlatform !== false);
 
+  // ── 服务注册表 ──────────────────────────────────────────────────────────────
+  // 内置四项与自定义服务用同一套结构（id/name/kind/builtin/autoRestart + 运行时快照），
+  // 页面只认这个结构，所以「实例概览」「服务」两处都不再写死具体后端。
+  const BUILTIN_SERVICES = {
+    bridge: { name: '桥接', kind: 'bridge' },
+    platform: { name: '接口平台', kind: 'platform' },
+    snowluma: { name: 'SnowLuma', kind: 'snowluma' },
+    napcat: { name: 'NapCat', kind: 'napcat' },
+  };
+  const BUILTIN_PROCS = { bridge, platform, snowluma, napcat };
+  const SERVICE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+  const KIND_LABELS = { bridge: '桥接', platform: '接口平台', snowluma: 'SnowLuma', napcat: 'NapCat', process: '自定义服务' };
+  const customProcs = new Map();
+  const svcError = (message, status = 400) => Object.assign(new Error(message), { status });
+
+  function builtinService(id) {
+    const meta = BUILTIN_SERVICES[id];
+    const auto = id === 'bridge' ? settings.autoRestartBridge !== false : id === 'platform' ? settings.autoRestartPlatform !== false : false;
+    return { id, name: meta.name, kind: meta.kind, builtin: true, autoRestart: auto };
+  }
+  function seedServices() {
+    if (!Array.isArray(settings.services)) settings.services = [];
+    let dirty = false;
+    for (const id of Object.keys(BUILTIN_SERVICES)) {
+      const cur = settings.services.find((s) => s?.id === id);
+      if (!cur) { settings.services.push(builtinService(id)); dirty = true; }
+      else if (cur.name !== BUILTIN_SERVICES[id].name || cur.kind !== BUILTIN_SERVICES[id].kind || cur.builtin !== true) {
+        Object.assign(cur, { name: BUILTIN_SERVICES[id].name, kind: BUILTIN_SERVICES[id].kind, builtin: true });
+        dirty = true;
+      }
+    }
+    if (dirty) saveSettings(settings);
+  }
+  seedServices();
+
+  const findService = (id) => settings.services.find((s) => s?.id === id) ?? null;
+  function syncLegacyAutoRestart(service) {
+    if (!service.builtin) return;
+    if (service.kind === 'bridge') settings.autoRestartBridge = service.autoRestart !== false;
+    if (service.kind === 'platform') settings.autoRestartPlatform = service.autoRestart !== false;
+    BUILTIN_PROCS[service.id]?.setAutoRestart(service.autoRestart !== false);
+  }
+  function sanitizeService(input, existing = null) {
+    const id = String(input?.id ?? existing?.id ?? '').trim();
+    if (!SERVICE_ID_RE.test(id)) throw svcError('服务 ID 只能用小写字母、数字与连字符（最长 32 个字符），例如 soulkit');
+    const name = String(input?.name ?? existing?.name ?? '').trim() || id;
+    const command = String(input?.command ?? existing?.command ?? '').trim();
+    if (!command) throw svcError('请填写启动命令（例如 node，或可执行文件的完整路径）');
+    const args = Array.isArray(input?.args) ? input.args.map((a) => String(a)) : Array.isArray(existing?.args) ? existing.args : [];
+    const cwd = String(input?.cwd ?? existing?.cwd ?? '').trim() || '.';
+    const env = {};
+    const rawEnv = input?.env ?? existing?.env ?? {};
+    for (const [k, v] of Object.entries(rawEnv)) if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) env[k] = String(v);
+    const port = Number(input?.port ?? existing?.port ?? 0) || 0;
+    if (port && (port < 1 || port > 65535)) throw svcError('端口要在 1–65535 之间');
+    const healthUrl = String(input?.healthUrl ?? existing?.healthUrl ?? '').trim();
+    if (healthUrl && !/^https?:\/\//i.test(healthUrl)) throw svcError('健康检查地址要以 http:// 或 https:// 开头');
+    const autoRestart = input?.autoRestart === undefined ? existing?.autoRestart !== false : !!input.autoRestart;
+    return { id, name, kind: 'process', builtin: false, command, args, cwd, env, port, healthUrl, autoRestart };
+  }
+  function customProcess(service) {
+    let proc = customProcs.get(service.id);
+    if (proc) return proc;
+    proc = createManagedProcess({
+      name: `service-${service.id}`,
+      logDir: LOG_DIR,
+      redact,
+      resolveLaunch: () => {
+        const cwd = path.resolve(ROOT, service.cwd || '.');
+        if (!fs.existsSync(cwd)) return { error: `工作目录不存在：${cwd}` };
+        if (service.kind !== 'process') return { error: `未知的服务类型：${service.kind}` };
+        return { command: service.command, args: service.args ?? [], cwd, env: service.env ?? {}, display: [service.command, ...(service.args ?? [])].join(' ') };
+      },
+      shouldRestart: () => service.autoRestart !== false,
+    });
+    proc.setAutoRestart(service.autoRestart !== false);
+    customProcs.set(service.id, proc);
+    return proc;
+  }
+  const procOf = (service) => (service.builtin ? BUILTIN_PROCS[service.id] : customProcess(service));
+
+  async function serviceState(service) {
+    const proc = procOf(service);
+    // 先铺运行时快照再铺服务描述：managed process 的 snapshot 里也有一个 name（进程名），
+    // 不能用它覆盖服务显示名。
+    const out = { ...(proc ? proc.snapshot() : { running: false }), ...service, lastSeq: proc?.lastSeq ?? 0, kindLabel: KIND_LABELS[service.kind] ?? KIND_LABELS.process };
+    if (service.kind === 'snowluma') out.dir = settings.snowlumaDir || '';
+    if (service.kind === 'napcat') out.dir = napcatDefaultHome(settings) || '';
+    if (service.kind === 'bridge') { const cfg = bridgeConfig(); out.port = cfg.valid ? consolePort(cfg.value) : 0; }
+    if (service.kind === 'platform') out.port = platformPort();
+    if (Number(out.port) > 0) out.reachable = await portOpen(Number(out.port));
+    if (service.healthUrl) {
+      try { const r = await fetch(service.healthUrl, { signal: AbortSignal.timeout(1500) }); out.health = { ok: r.ok, status: r.status }; }
+      catch (e) { out.health = { ok: false, error: String(e?.message ?? e) }; }
+    }
+    return out;
+  }
+  async function platformProviders() {
+    try { const r = await platformApi('/v1/admin/providers'); return Array.isArray(r?.providers) ? r.providers : []; } catch { return []; }
+  }
+
   async function platformState() {
     const out = { ...platform.snapshot(), lastSeq: platform.lastSeq, port: platformPort(), dir: platformSettings.dir, installed: fs.existsSync(path.join(platformSettings.dir, 'src', 'index.mjs')) || !!platformEntry, link: bridgeLinkState() };
     out.reachable = await portOpen(out.port);
@@ -470,7 +573,8 @@ export async function startControlCenter({ open = true, port: portOverride = nul
       root: ROOT,
       bridge: { ...bridge.snapshot(), lastSeq: bridge.lastSeq },
       snowluma: { ...snowluma.snapshot(), lastSeq: snowluma.lastSeq, dir: settings.snowlumaDir || null, info: snowInfo, update: updateInfo, lastMigration, releasesPage: SNOWLUMA_RELEASES_PAGE },
-      platform: pl,
+      platform: { ...pl, providers: await platformProviders() },
+      services: await Promise.all(settings.services.map(serviceState)),
       napcat: {
         ...napcat.snapshot(), lastSeq: napcat.lastSeq, info: inspectNapCat(settings), external: !napcat.running && await portOpen(napcatWebuiPort()), home: napcatDefaultHome(settings),
         // 版本：运行中的以后端自报为准（经接口平台）；Windows 上不运行时也能从启动文件旁的 package.json 读到
@@ -789,8 +893,58 @@ export async function startControlCenter({ open = true, port: portOverride = nul
           return send(200, { ok: true, steps });
         }
       }
-      if (req.method === 'POST' && p === '/api/snowluma/check-update') {
-        if (!snowInfo.ok) return send(400, { ok: false, error: '请先选择 SnowLuma 目录' });
+      // ── 服务：内置四项 + 用户添加的自定义进程 ─────────────────────────────
+      if (req.method === 'GET' && p === '/api/services') {
+        return send(200, { ok: true, services: await Promise.all(settings.services.map(serviceState)) });
+      }
+      if (req.method === 'POST' && p === '/api/services') {
+        const svc = sanitizeService(body);
+        if (BUILTIN_SERVICES[svc.id]) throw svcError('内置服务的 ID 不能占用');
+        if (findService(svc.id)) throw svcError(`服务 ${svc.id} 已经存在`);
+        settings.services.push(svc);
+        saveSettings(settings);
+        customProcess(svc);
+        return send(200, { ok: true, services: await Promise.all(settings.services.map(serviceState)) });
+      }
+      {
+        const m = /^\/api\/services\/([a-z0-9][a-z0-9-]{0,31})(?:\/(save|delete|start|stop|restart|logs))?$/.exec(p);
+        if (m) {
+          const [, id, action = ''] = m;
+          const svc = findService(id);
+          if (!svc) throw svcError(`没有服务 ${id}`, 404);
+          if (action === 'logs' && req.method === 'GET') {
+            const proc = procOf(svc);
+            return send(200, { ok: true, lines: proc ? proc.linesSince(Number(url.searchParams.get('after')) || 0, 800) : [], lastSeq: proc?.lastSeq ?? 0 });
+          }
+          if (req.method !== 'POST') throw svcError('不支持的请求方法', 405);
+          if (action === 'save') {
+            if (svc.builtin) {
+              if (body?.name !== undefined) svc.name = String(body.name).trim() || svc.name;
+              if (body?.autoRestart !== undefined) { svc.autoRestart = !!body.autoRestart; syncLegacyAutoRestart(svc); }
+            } else {
+              Object.assign(svc, sanitizeService(body, svc));
+              customProcs.get(id)?.setAutoRestart(svc.autoRestart !== false);
+            }
+            saveSettings(settings);
+            return send(200, { ok: true, service: await serviceState(svc) });
+          }
+          if (action === 'delete') {
+            if (svc.builtin) throw svcError('内置服务不能删除（可以在各自的面板里停用）');
+            const proc = customProcs.get(id);
+            if (proc) { await proc.stop(); customProcs.delete(id); }
+            settings.services = settings.services.filter((s) => s.id !== id);
+            saveSettings(settings);
+            return send(200, { ok: true });
+          }
+          const proc = procOf(svc);
+          if (!proc) throw svcError(`服务 ${id} 不能启动`);
+          if (action === 'start') return send(200, proc.start());
+          if (action === 'stop') return send(200, await proc.stop());
+          if (action === 'restart') { await proc.stop(); return send(200, proc.start()); }
+          throw svcError(`未知操作：${action}`);
+        }
+      }
+      if (req.method === 'POST' && p === '/api/snowluma/check-update') {        if (!snowInfo.ok) return send(400, { ok: false, error: '请先选择 SnowLuma 目录' });
         try {
           updateInfo = { ...(await checkSnowLumaUpdate(snowInfo.version)), checkedAt: Date.now() };
           return send(200, { ok: true, update: updateInfo });
@@ -842,7 +996,7 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     if (shuttingDown) return;
     shuttingDown = true;
     log(`正在退出（${reason}）：先停止由控制中心启动的进程…`);
-    await Promise.allSettled([bridge.stop(), snowluma.stop(), napcat.stop(), platform.stop()]);
+    await Promise.allSettled([bridge, snowluma, napcat, platform, ...customProcs.values()].map((p) => p.stop()));
     try { const l = readJson(LOCK_FILE); if (l?.pid === process.pid) fs.unlinkSync(LOCK_FILE); } catch {}
     await new Promise((r) => server.close(r));
     if (exitOnShutdown) process.exit(0);

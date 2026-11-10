@@ -31,6 +31,9 @@
   <button class="bigtab" role="tab" id="tab-platform" aria-controls="panel-platform" aria-selected="false" tabindex="-1">
     <span class="dot" id="tabPlatformDot"></span>接口平台 <span class="st" id="tabPlatformSt">—</span><span class="alert" id="tabPlatformAlert" hidden></span>
   </button>
+  <button class="bigtab" role="tab" id="tab-services" aria-controls="panel-services" aria-selected="false" tabindex="-1">
+    <span class="dot" id="tabServicesDot"></span>服务 <span class="st" id="tabServicesSt">—</span>
+  </button>
 </nav>
 <div id="banners"></div>
 
@@ -335,6 +338,56 @@
         <dt>支持范围</dt><dd id="sSupport">—</dd>
       </dl>
       <p class="note note-block">兼容入口目标账号、恢复策略等平台配置在接口平台自己的 <code>interface-platform\state\platform.json</code>；控制中心不读写它。平台端口与目录是控制中心的设置（<code>state\control-center.json</code> 的 <code>platformPort</code> / <code>platformDir</code>），改后重启接口平台。令牌不会显示在页面上。</p>
+    </div>
+  </section>
+
+  <!-- ── 服务：内置四项 + 自定义进程 ───────────────────────── -->
+  <section class="tabpanel" id="panel-services" role="tabpanel" aria-labelledby="tab-services" hidden>
+    <div class="split">
+      <section class="card" aria-label="服务列表">
+        <div class="card-head"><h3>服务</h3><span class="grow"></span><button class="primary" id="svcAddBtn">添加服务</button></div>
+        <ul class="list" id="svcList"></ul>
+        <div class="note note-pad" id="svcNote">内置服务由控制中心托管；自定义服务按你填的命令启停，和内置服务共用一套状态、日志与自动重启。</div>
+      </section>
+      <section class="card" aria-label="服务详情">
+        <div class="panel-sub" id="svcFormPanel">
+          <h3 id="svcFormTitle">添加服务</h3>
+          <div class="form">
+            <label for="svcId">服务 ID</label><input type="text" id="svcId" placeholder="soulkit（小写字母、数字、连字符）" autocomplete="off">
+            <label for="svcName">显示名称</label><input type="text" id="svcName" placeholder="留空就用 ID" autocomplete="off">
+            <label for="svcCommand">启动命令</label><input type="text" id="svcCommand" placeholder="node，或可执行文件的完整路径" autocomplete="off">
+            <label for="svcArgs">命令参数</label><textarea id="svcArgs" rows="3" placeholder="每行一个参数，例如：&#10;bin/soulkit.mjs&#10;serve"></textarea>
+            <label for="svcCwd">工作目录</label><input type="text" id="svcCwd" placeholder="相对项目根目录，例如 ..\DSHBot\soulkit" autocomplete="off">
+            <label for="svcEnv">环境变量</label><textarea id="svcEnv" rows="3" placeholder="每行一个 KEY=VALUE（可选）"></textarea>
+            <label for="svcPort">端口</label><input type="number" id="svcPort" min="1" max="65535" placeholder="可选：用来看端口是否在线">
+            <label for="svcHealth">健康检查</label><input type="text" id="svcHealth" placeholder="可选：http://127.0.0.1:3110/health" autocomplete="off">
+            <label for="svcAuto">崩溃自动重启</label><label class="check"><input type="checkbox" id="svcAuto" checked> 异常退出后自动重启</label>
+          </div>
+          <div class="note note-pad" id="svcFormNote" hidden>内置服务的启动命令、工作目录由它自己的面板管理，这里只能改名称与自动重启。</div>
+          <div class="row end"><button class="ghost" id="svcFormCancel">取消</button><button class="primary" id="svcFormSave">保存</button></div>
+        </div>
+        <div id="svcEmpty" class="empty-state"><p>选择左侧的服务查看详情，或添加一个自定义服务。</p></div>
+        <div id="svcDetail" hidden>
+          <div class="card-head">
+            <span class="dot" id="svcDot"></span>
+            <h2 id="svcTitle">—</h2>
+            <span class="badge" id="svcKind">—</span>
+            <span class="grow"></span>
+            <button class="primary" id="svcStart">启动</button>
+            <button id="svcRestart">重启</button>
+            <button class="danger" id="svcStop">停止</button>
+            <button id="svcEdit">编辑</button>
+            <button class="danger" id="svcDelete">删除</button>
+          </div>
+          <dl class="info" id="svcInfo"></dl>
+          <div class="toolbar">
+            <span class="note" id="svcLogNote">最近日志</span>
+            <span class="grow"></span>
+            <button class="ghost" id="svcLogClear">清屏</button>
+          </div>
+          <div class="term" id="svcTerm" role="log" aria-live="polite"></div>
+        </div>
+      </section>
     </div>
   </section>
 </main>

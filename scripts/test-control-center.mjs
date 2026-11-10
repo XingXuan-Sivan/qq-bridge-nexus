@@ -429,3 +429,51 @@ test('页面：选择目录收到迁移提醒时，先建议「去迁移」（�
   assert.match(fn, /\{ dir, force: true \}/);
   assert.ok(fn.indexOf("'仍然切换'") < fn.indexOf('force: true'), '先确认再强制切换');
 });
+
+test('控制中心：服务注册表通用化（内置四项自动补齐、自定义服务可增删启停、日志与快照统一）', async () => {
+  await withCenter(async ({ d, port, T }) => {
+    const list = await req(port, 'GET', '/api/services', { headers: T });
+    assert.equal(list.status, 200);
+    assert.deepEqual(list.body.services.map((s) => s.id), ['bridge', 'platform', 'snowluma', 'napcat']);
+    assert.ok(list.body.services.every((s) => s.builtin === true && s.kind && s.kindLabel));
+    const saved = JSON.parse(fs.readFileSync(path.join(d, 'state', 'control-center.json'), 'utf8'));
+    assert.equal(saved.services.length, 4, '内置服务写回设置，之后按配置走');
+
+    const created = await req(port, 'POST', '/api/services', {
+      headers: T,
+      body: { id: 'zz-svc', name: '冒烟服务', command: process.execPath, args: ['-e', 'console.log("svc-hello"); setInterval(()=>{},1000)'], cwd: '.' },
+    });
+    assert.equal(created.status, 200, JSON.stringify(created.body));
+    assert.equal(created.body.services.length, 5);
+
+    const started = await req(port, 'POST', '/api/services/zz-svc/start', { headers: T, body: {} });
+    assert.equal(started.body.ok, true, JSON.stringify(started.body));
+    await sleep(700);
+    const st = await req(port, 'GET', '/api/state', { headers: T });
+    const svc = st.body.services.find((s) => s.id === 'zz-svc');
+    assert.equal(svc.running, true);
+    assert.ok(svc.pid > 0 && svc.kindLabel === '自定义服务');
+    const logs = await req(port, 'GET', '/api/services/zz-svc/logs', { headers: T });
+    assert.match(logs.body.lines.map((l) => l.text).join('\n'), /svc-hello/);
+
+    const stopped = await req(port, 'POST', '/api/services/zz-svc/stop', { headers: T, body: {} });
+    assert.equal(stopped.body.ok, true);
+    const renamed = await req(port, 'POST', '/api/services/zz-svc/save', { headers: T, body: { name: '改名后' } });
+    assert.equal(renamed.body.service.name, '改名后');
+    assert.equal(renamed.body.service.command, process.execPath, '没提交的字段保持原值');
+
+    const bad = await req(port, 'POST', '/api/services/snowluma/delete', { headers: T, body: {} });
+    assert.equal(bad.status, 400, '内置服务不能删除');
+    const del = await req(port, 'POST', '/api/services/zz-svc/delete', { headers: T, body: {} });
+    assert.equal(del.body.ok, true);
+    const after = await req(port, 'GET', '/api/services', { headers: T });
+    assert.equal(after.body.services.length, 4);
+
+    const dup = await req(port, 'POST', '/api/services', { headers: T, body: { id: 'bridge', command: 'x' } });
+    assert.equal(dup.status, 400, '内置 ID 不能占用');
+    const badId = await req(port, 'POST', '/api/services', { headers: T, body: { id: 'Bad ID', command: 'x' } });
+    assert.equal(badId.status, 400);
+    const noCmd = await req(port, 'POST', '/api/services', { headers: T, body: { id: 'zz-x' } });
+    assert.equal(noCmd.status, 400);
+  });
+});

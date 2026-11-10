@@ -155,7 +155,9 @@ test('控制中心页面：SnowLuma 在 Windows / Linux 上都可用（macOS 仍
   const html = fs.readFileSync(path.join(root, 'public', 'control-center', 'index.html'), 'utf8') + '\n' + fs.readFileSync(path.join(root, 'public', 'control-center', 'app.js'), 'utf8');
   assert.match(html, /const SNOW_OS = \['win32', 'linux'\];/);
   assert.ok(!html.includes("S?.os === 'win32' ? [LOCAL_SNOW]"), '本机 SnowLuma 占位项不再只看 Windows');
-  assert.match(html, /\{ id: 'snowluma', name: 'SnowLuma', os: 'Windows \/ Linux' \}/);
+  assert.match(html, /snowluma: \{ name: 'SnowLuma', os: 'Windows \/ Linux' \}/);
+  assert.match(html, /napcat: \{ name: 'NapCat', os: 'macOS \/ Windows \/ Linux' \}/);
+  assert.match(html, /function backendDefs\(\)/);
   assert.match(html, /需要 \$\{i\.nodeRequirement \?\? '22\.13\+'\}/);
   assert.match(html, /本机需要 \$\{i\.expectedTarget\} 版/);
   assert.match(html, /launcher\.sh/);

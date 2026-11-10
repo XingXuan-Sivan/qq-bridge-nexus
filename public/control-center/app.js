@@ -227,7 +227,11 @@
     $(panel).addEventListener('cc-hide', () => logs.forEach((l) => l.saveScroll()));
     $(panel).addEventListener('cc-show', () => requestAnimationFrame(() => logs.forEach((l) => l.restoreScroll())));
   }
-  mainTabs = makeTabs(['tab-bridge', 'tab-platform'], 'tab', (id) => { alerts[id === 'tab-bridge' ? 'bridge' : 'platform'] = 0; renderAlerts(); });
+  mainTabs = makeTabs(['tab-bridge', 'tab-platform', 'tab-services'], 'tab', (id) => {
+    const key = { 'tab-bridge': 'bridge', 'tab-platform': 'platform' }[id];
+    if (key) { alerts[key] = 0; renderAlerts(); }
+    if (id === 'tab-services') { void refreshServiceLogs(); }
+  });
   platformTabs = makeTabs(['ptab-overview', 'ptab-instances', 'ptab-accounts', 'ptab-logs', 'ptab-settings'], 'ptab', (id) => { if (id === 'ptab-logs') { plLogUnseen = 0; renderAlerts(); } });
 
   // ── 状态 ──
@@ -249,7 +253,9 @@
     renderSnow();
     renderNapcat();
     renderBackends();
+    renderServices();
     renderFooter();
+    if (tabVisible('panel-services')) void refreshServiceLogs();
   }
 
   function renderBridge() {
@@ -474,14 +480,38 @@
     $('napNote').textContent = !n.info.ok ? n.info.error : n.external ? 'NapCat（QQ）已在别处运行，控制中心不会接管它；要在这里启停，先完全退出那个 QQ。' : (n.info.quickLogin ? '已设置自动登录（NapCat 的 autoLoginAccount 或 napcatQuickLogin）：启动时用保存的登录态，不用扫码；登录态失效时仍会要求扫码，二维码在 NapCat 的 cache/qrcode.png。' : '首次启动或登录过期时需要扫码：二维码保存在 NapCat 的 cache/qrcode.png（网页日志里的字符二维码可能扫不出来）。要免扫码，在「NapCat 设置」里填快速登录 QQ 号，或在 NapCat 里开启自动登录。');
   }
 
-  // 接入后端开启卡：每个可用的提供方一张，互相独立
-  const BACKENDS = [
-    { id: 'snowluma', name: 'SnowLuma', os: 'Windows / Linux' },
-    { id: 'napcat', name: 'NapCat', os: 'macOS / Windows / Linux' },
-  ];
+  // 接入后端开启卡：平台报什么提供方就画什么卡；内置的 SnowLuma / NapCat 另有程序层信息
+  const BUILTIN_BACKENDS = {
+    snowluma: { name: 'SnowLuma', os: 'Windows / Linux' },
+    napcat: { name: 'NapCat', os: 'macOS / Windows / Linux' },
+  };
+  const OS_LABELS = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' };
+  function providerOs(p) {
+    const list = Array.isArray(p?.os) ? p.os : p?.os ? [p.os] : [];
+    const label = list.map((x) => OS_LABELS[x] ?? x).join(' / ');
+    return label || (p?.available === false ? '尚未提供' : '外部接入');
+  }
+  function backendDefs() {
+    const providers = Array.isArray(S?.platform?.providers) ? S.platform.providers : [];
+    const insts = S?.platform?.overview?.instances ?? [];
+    const list = providers
+      // 尚未提供的连接器不摆成可用卡片；但用户已经建了它的实例时要显示出来
+      .filter((p) => p?.id && (p.available !== false || insts.some((i) => i.provider === p.id)))
+      .map((p) => {
+        const builtin = BUILTIN_BACKENDS[p.id];
+        return { id: String(p.id), name: builtin?.name ?? p.name ?? String(p.id), os: builtin?.os ?? providerOs(p), note: p.note || '' };
+      });
+    // 实例存在、平台却还没登记这个 provider：也给一张通用卡，别让它从概览消失
+    for (const i of insts) {
+      if (i?.provider && !list.some((b) => b.id === i.provider)) list.push({ id: i.provider, name: i.provider, os: '外部接入', note: '' });
+    }
+    // 平台没报（没运行 / 旧版本）时仍给内置两个，保证页面不空
+    for (const [id, meta] of Object.entries(BUILTIN_BACKENDS)) if (!list.some((b) => b.id === id)) list.push({ id, ...meta });
+    return list;
+  }
   function renderBackends() {
     const pl = S.platform; const insts = pl.overview?.instances ?? []; const accs = pl.overview?.accounts ?? [];
-    const cards = BACKENDS.map((b) => {
+    const cards = backendDefs().map((b) => {
       const inst = insts.find((i) => i.provider === b.id);
       const links = inst?.links ?? [];
       const okLinks = links.filter((l) => l.state === 'open' && l.reason !== 'auth_failed').length;
@@ -493,13 +523,19 @@
         else if (sl.running) { prog = '运行中（控制中心启动）'; progKind = 'on'; }
         else if (S.health.snowlumaPort) { prog = '外部运行中'; progKind = 'warn'; }
         else prog = sl.info?.ok ? '未运行' : '未选择目录';
-      } else {
+      } else if (b.id === 'napcat') {
         const n = S.napcat;
         if (n.running) { prog = '运行中（控制中心启动）'; progKind = 'on'; }
         else if (n.external) { prog = '外部运行中'; progKind = 'warn'; }
         else prog = n.info.ok ? '未运行' : `不能启动：${n.info.error}`;
+      } else {
+        // 平台新接入的提供方：控制中心不知道它的程序细节，只显示平台侧连接状态
+        prog = inst ? `由接口平台连接（${inst.management ?? 'external'}）` : '由接口平台接入：先到「接入实例」添加并填地址';
+        progKind = inst?.connected ? 'on' : '';
+        unavailable = true;
       }
-      const on = !!inst?.connected || (b.id === 'napcat' ? S.napcat.running : S.snowluma.running);
+      const managed = b.id === 'snowluma' || b.id === 'napcat';
+      const on = managed ? (!!inst?.connected || (b.id === 'napcat' ? S.napcat.running : S.snowluma.running)) : !!inst?.connected;
       const card = el('div', { className: `bcard${on ? ' on' : ''}` });
       const d = el('span', { className: 'dot' }); setDot(d, ready.length ? 'on' : on ? 'warn' : '');
       card.append(el('div', { className: 'bhead' }, d, el('h3', { textContent: b.name }), el('span', { className: 'badge', textContent: b.os })));
@@ -510,6 +546,15 @@
       row('账号', ready.length ? ready.map((a) => `${a.account}${a.nickname ? `（${a.nickname}）` : ''}`).join('、') + ' 收发就绪' : (links.find((l) => l.account) ? `${links.filter((l) => l.account).map((l) => l.account).join('、')}：${rt(links[0].reason)}` : '—'));
       if (inst?.discoveryError) row('目录', `${inst.discoveryError} —— 已连上的账号不受影响；macOS 上多半是「访问其他 App 的数据」被拒：在 系统设置 › 隐私与安全性 › App 管理/其他 App 的数据 里允许启动控制中心的程序（终端）`);
       card.append(dl);
+      const rowEl = el('div', { className: 'row' });
+      if (!managed) {
+        // 未知提供方：控制中心不碰它的进程，只把人带到「接入实例」
+        const go = el('button', { className: 'bbtn primary', textContent: inst ? '查看接入实例 →' : '去接入实例添加 →' });
+        go.onclick = () => { mainTabs.select('tab-platform'); platformTabs.select('ptab-instances'); };
+        rowEl.append(go);
+        card.append(rowEl);
+        return card;
+      }
       const btn = el('button', { className: `bbtn ${on ? 'danger' : 'primary'}`, textContent: on ? `关闭 ${b.name}` : `开启 ${b.name}` });
       // 本机不能运行的后端不提供一键开启（默认端口会撞上本机其他后端）；要连别处的实例，到「接入实例」里添加并填地址
       if (unavailable && !on) { btn.disabled = true; btn.title = '要连接别处运行的 SnowLuma：在「接入实例」里添加实例并填写 WS 地址和令牌'; }
@@ -518,7 +563,7 @@
         const r = await act(() => api(`/api/backends/${b.id}/${on ? 'off' : 'on'}`, {}));
         if (r?.steps) toast(r.steps.join('；'), 'ok');
       };
-      const rowEl = el('div', { className: 'row' }, btn);
+      rowEl.append(btn);
       if (b.id === 'napcat') {
         // NapCat 等扫码时在卡片上直接提示；任何时候都能一键跳到 NapCat 程序区
         if (S.napcat.qr?.waiting) card.append(el('div', { className: 'qr-alert', textContent: '📱 NapCat 正在等你扫码登录' }));
@@ -531,6 +576,151 @@
     });
     $('backendCards').replaceChildren(...cards);
   }
+
+  // ─── 服务：内置四项（桥接 / 接口平台 / SnowLuma / NapCat）+ 自定义进程 ───
+  let svcSel = '';
+  let svcLogSeq = 0;
+  let svcFormMode = null; // 'add' | 'edit'
+  const svcById = (id) => (S?.services ?? []).find((s) => s.id === id) ?? null;
+
+  function renderServices() {
+    const list = S?.services ?? [];
+    const running = list.filter((s) => s.running).length;
+    setDot($('tabServicesDot'), running ? 'on' : '');
+    $('tabServicesSt').textContent = list.length ? `${running}/${list.length} 运行` : '—';
+
+    if (!list.some((s) => s.id === svcSel)) svcSel = list[0]?.id ?? '';
+    $('svcList').replaceChildren(...list.map((s) => {
+      const btn = el('button', { type: 'button' });
+      btn.setAttribute('aria-current', String(s.id === svcSel));
+      const d = el('span', { className: 'dot' });
+      setDot(d, s.health && s.health.ok === false ? 'warn' : s.running ? 'on' : '');
+      btn.append(d, el('span', { textContent: s.name }), el('span', { className: 'meta', textContent: s.id }));
+      btn.onclick = () => { svcSel = s.id; closeSvcForm(); svcLogSeq = 0; $('svcTerm').replaceChildren(); renderServices(); void refreshServiceLogs(); };
+      return el('li', {}, btn);
+    }));
+
+    const svc = svcById(svcSel);
+    $('svcEmpty').hidden = !!svc;
+    $('svcDetail').hidden = !svc;
+    if (svc) renderServiceDetail(svc);
+  }
+
+  function renderServiceDetail(s) {
+    setDot($('svcDot'), s.health && s.health.ok === false ? 'warn' : s.running ? 'on' : '');
+    $('svcTitle').textContent = s.name;
+    $('svcKind').textContent = `${s.kindLabel}${s.builtin ? ' · 内置' : ''}`;
+    $('svcStart').disabled = !!s.running;
+    $('svcStop').disabled = !s.running;
+    $('svcRestart').disabled = !s.running;
+    $('svcDelete').hidden = !!s.builtin;
+    $('svcLogNote').textContent = s.builtin ? '控制中心托管进程的日志（最近 800 行）' : '这个服务的标准输出与错误（最近 800 行）';
+    const rows = [['类型', s.kindLabel]];
+    if (!s.builtin) rows.push(['启动命令', [s.command, ...(s.args ?? [])].join(' ')]);
+    rows.push(
+      ['状态', s.running ? `运行中 · PID ${s.pid} · ${fmtDur(s.uptimeMs)}` : s.lastExit ? `已停止（退出码 ${s.lastExit.code ?? '—'}）` : '未启动'],
+      ['自动重启', s.autoRestart ? '开' : '关'],
+      ['端口', s.port ? `${s.port}${s.reachable === false ? '（没有监听）' : '（在线）'}` : '—'],
+      ['目录', s.dir || (s.cwd && s.cwd !== '.' ? s.cwd : s.builtin ? '—' : '项目根目录')],
+      ['健康检查', s.healthUrl ? `${s.healthUrl}${s.health ? (s.health.ok ? '（正常）' : `（失败：${s.health.error ?? `HTTP ${s.health.status}`}）`) : ''}` : '—'],
+      ['重启次数', String(s.restarts ?? 0)],
+    );
+    $('svcInfo').replaceChildren(...rows.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })]));
+  }
+
+  function renderServiceLogs(lines) {
+    const term = $('svcTerm');
+    for (const l of lines) {
+      const row = el('span', { className: 'l' });
+      row.append(el('span', { className: 't', textContent: new Date(l.time).toLocaleTimeString() }), el('span', { textContent: l.text }));
+      term.append(row);
+    }
+    while (term.childElementCount > 800) term.firstElementChild.remove();
+    term.scrollTop = term.scrollHeight;
+  }
+
+  async function refreshServiceLogs() {
+    const svc = svcById(svcSel);
+    if (!svc || !tabVisible('panel-services')) return;
+    const id = svc.id;
+    try {
+      const r = await api(`/api/services/${encodeURIComponent(id)}/logs?after=${svcLogSeq}`);
+      if (id !== svcSel) return; // 期间切了服务
+      const lines = r?.lines ?? [];
+      if (lines.length) renderServiceLogs(lines);
+      svcLogSeq = r?.lastSeq ?? svcLogSeq;
+    } catch { /* 服务刚被删、或控制中心正忙：下一轮再试 */ }
+  }
+
+  function openSvcForm(mode, s) {
+    svcFormMode = mode;
+    const builtin = !!s?.builtin;
+    $('svcFormTitle').textContent = mode === 'add' ? '添加服务' : `编辑「${s?.name ?? ''}」`;
+    $('svcId').value = s?.id ?? '';
+    $('svcId').disabled = mode === 'edit';
+    $('svcName').value = s?.name ?? '';
+    $('svcCommand').value = s?.command ?? '';
+    $('svcArgs').value = (s?.args ?? []).join('\n');
+    $('svcCwd').value = s?.cwd ?? '';
+    $('svcEnv').value = Object.entries(s?.env ?? {}).map(([k, v]) => `${k}=${v}`).join('\n');
+    $('svcPort').value = s?.port ? String(s.port) : '';
+    $('svcHealth').value = s?.healthUrl ?? '';
+    $('svcAuto').checked = s ? s.autoRestart !== false : true;
+    for (const id of ['svcCommand', 'svcArgs', 'svcCwd', 'svcEnv', 'svcPort', 'svcHealth']) $(id).disabled = builtin;
+    $('svcFormNote').hidden = !builtin;
+    $('svcFormPanel').classList.add('show');
+    $('svcId').focus();
+  }
+  function closeSvcForm() { svcFormMode = null; $('svcFormPanel').classList.remove('show'); }
+
+  function readSvcForm() {
+    const env = {};
+    for (const line of $('svcEnv').value.split(/\r?\n/)) {
+      const i = line.indexOf('=');
+      if (i > 0) env[line.slice(0, i).trim()] = line.slice(i + 1);
+    }
+    return {
+      id: $('svcId').value.trim(),
+      name: $('svcName').value.trim(),
+      command: $('svcCommand').value.trim(),
+      args: $('svcArgs').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
+      cwd: $('svcCwd').value.trim(),
+      env,
+      port: Number($('svcPort').value) || 0,
+      healthUrl: $('svcHealth').value.trim(),
+      autoRestart: $('svcAuto').checked,
+    };
+  }
+
+  async function saveSvcForm() {
+    const body = readSvcForm();
+    const path = svcFormMode === 'edit' ? `/api/services/${encodeURIComponent(svcSel)}/save` : '/api/services';
+    const r = await act(() => api(path, body), svcFormMode === 'edit' ? '服务已保存' : '服务已添加');
+    if (r) closeSvcForm();
+  }
+
+  $('svcAddBtn').onclick = () => openSvcForm('add', null);
+  $('svcEdit').onclick = () => { const s = svcById(svcSel); if (s) openSvcForm('edit', s); };
+  $('svcFormCancel').onclick = () => closeSvcForm();
+  $('svcFormSave').onclick = () => { void saveSvcForm(); };
+  $('svcStart').onclick = () => act(() => api(`/api/services/${encodeURIComponent(svcSel)}/start`, {}), '已启动');
+  $('svcStop').onclick = async () => {
+    const s = svcById(svcSel);
+    if (!s || !await confirmBox('停止服务', `停止「${s.name}」：控制中心不再托管它运行${s.autoRestart ? '（崩溃自动重启也会一并停止）' : ''}。其他服务不受影响。`, '停止')) return;
+    act(() => api(`/api/services/${encodeURIComponent(s.id)}/stop`, {}), '已停止');
+  };
+  $('svcRestart').onclick = async () => {
+    const s = svcById(svcSel);
+    if (!s || !await confirmBox('重启服务', `重启「${s.name}」会短暂中断它的运行。`, '重启')) return;
+    act(() => api(`/api/services/${encodeURIComponent(s.id)}/restart`, {}), '已重启');
+  };
+  $('svcDelete').onclick = async () => {
+    const s = svcById(svcSel);
+    if (!s || !await confirmBox('删除服务', `删除「${s.name}」：只从控制中心的列表里移除，不删除它的文件。`, '删除')) return;
+    const r = await act(() => api(`/api/services/${encodeURIComponent(s.id)}/delete`, {}), '已删除');
+    if (r) { svcSel = ''; $('svcTerm').replaceChildren(); svcLogSeq = 0; }
+  };
+  $('svcLogClear').onclick = () => { $('svcTerm').replaceChildren(); };
 
   function renderFooter() {
     const b = S.bridge; const h = S.health; const st = h.bridgeApi; const sl = S.snowluma; const pl = S.platform;

@@ -127,6 +127,9 @@ const tests = [
   'test-upstream-dsh-probe.mjs',
   'test-upstream-conn-update.mjs',
   'test-core-prompt-blocks.mjs',
+  // 注入块重构（P1）：唤醒提示词按 slot/priority 拼装后，逐字节等于重构前的 golden 夹具
+  // （4 种配置 × 14 个唤醒原因 + 收尾提醒），防止「谁来拼」的改动顺手改了「拼出什么」。
+  'test-prompt-golden.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
   'test-skills-index.mjs',
   // 外部技能存储（P3）：frontmatter 校验、写入/备份/启停/删除、ZIP 导入与路径边界。

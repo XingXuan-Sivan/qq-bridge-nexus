@@ -2106,40 +2106,159 @@ async function main() {
     readSkill: (id) => readSkillText(id),
   });
   // 注册/重注册抽成函数：控制台关掉或恢复某个内置块时，注册表按 'core' 整体重建。
+  //
+  // P1 起「醒来时说什么」只由这里的块决定，没有第二处硬编码拼接：
+  // - 块只产出自己那段正文，不带分隔符；先后关系由 slot（head → core → action → tail）
+  //   加 priority 决定，分隔符由注册表统一补 '\n\n'；
+  // - 块读 ctx 里的字段，不自己查状态：状态在 wakePromptCtx() 里统一取一次，
+  //   这样同一份 ctx 既用于真实投递，也能给控制台的预览复用；
+  // - 关闭一个块 = 它那段整段消失，不会留下空行（拼接前会跳过空块）。
   const registerCoreBlocks = () => {
     corePromptBlocks.unregisterPlugin('core');
-    // 开关与上限不再决定「注册与否」：块始终在表里，关闭只是不参与渲染（enabled=false），
-    // 控制台才能看到并重新打开它。覆盖值统一从 cfg.promptBlocks 读。
-    const registerCoreBlock = (id, label, priority, render) => {
-      corePromptBlocks.register({ id, label, owner: 'core', priority, render }, 'core');
+    const registerCoreBlock = (definition) => {
+      corePromptBlocks.register({ owner: 'core', ...definition }, 'core');
     };
-    registerCoreBlock('core-stickers', '表情包策略', 100, ({ stickerFull, blockPlan }) => {
-      if (!stickerFull) return '';
-      // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；blockPlan 为空（测试、旧调用方）时照旧完整给。
-      return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
+
+    // —— 前情提要（head）：这次唤醒之前发生、只该出现一次的事 ——
+    registerCoreBlock({
+      id: 'core-backfill-notice', label: '断线补收提示', slot: 'head', timing: 'on-event', priority: 10,
+      render: (ctx) => ctx.backfillNoticeText || ''
     });
-    // 记忆段（内置块 core-memory）：provider 由 memory.inject.provider 决定。
-    // 同步 provider 直接渲染；异步 provider 只读唤醒前的预热缓存——拿不到就空着，不阻塞。
-    registerCoreBlock('core-memory', '记忆', 200, ({ key, query } = {}) => {
-      const injected = memoryRegistry.injectionSync({ key, query });
-      return injected.text || '';
+    registerCoreBlock({
+      id: 'core-token-notice', label: '令牌抄错提醒', slot: 'head', timing: 'on-event', priority: 20,
+      render: (ctx) => ctx.tokenNoticeText || ''
     });
-    // 技能清单排在注入块之间：贴纸（100）之后、记忆摘要（200）之前都不合适，
-    // 取 150——它描述「能做什么」，跟着行为提示走比跟着记忆走更自然。
-    registerCoreBlock('core-skills', '技能清单', 150, ({ key, skillText } = {}) => {
-      if (typeof skillText === 'string') return skillText;
-      if (cfg.skills?.enabled === false) return '';
-      // 预设显式配了 skills.allow 时按白名单过滤；没配或空列表保持全量（内置 preset 没有 extensions.yml）。
-      let ids = null;
-      try {
-        const preset = modePreset(key, effectiveMode(key), cfg);
-        const allow = preset ? (presetPolicy.get(preset)?.skills?.allow ?? []) : [];
-        if (allow.length && !allow.includes('*')) ids = allow.slice();
-      } catch (error) {
-        log(`⚠️ 技能预设过滤失败，按全量处理：${error?.message ?? error}`);
+    registerCoreBlock({
+      id: 'core-persona-refresh', label: '人格卡已更新', slot: 'head', timing: 'on-event', priority: 30,
+      render: (ctx) => ctx.roleRefreshText || ''
+    });
+
+    // —— 身份与说话方式（core）——
+    registerCoreBlock({
+      id: 'core-role', label: '当前角色', slot: 'identity', priority: 100, profiles: ['wake', 'reminder'],
+      render: (ctx) => (ctx.roleName ? `【当前角色】${ctx.roleName}（完整角色卡请调用 qq_get_prompt 查看）` : '')
+    });
+    registerCoreBlock({
+      id: 'core-identity', label: '你的身份', slot: 'identity', priority: 110, profiles: ['wake', 'reminder'],
+      render: (ctx) => promptStripSeparator(ctx.identityText)
+    });
+    registerCoreBlock({
+      id: 'core-token', label: '会话令牌', slot: 'identity', priority: 120, profiles: ['wake', 'reminder'],
+      render: (ctx) => `【会话令牌】${ctx.agentToken}（调用二代状态工具时请在参数中带上此令牌）`
+    });
+    registerCoreBlock({
+      id: 'core-initial-prompt', label: '初始提示词', slot: 'identity', priority: 130,
+      render: (ctx) => ctx.initialPromptText || ''
+    });
+    registerCoreBlock({
+      id: 'core-anti-ai', label: '反AI味', slot: 'behavior', priority: 140,
+      render: () => '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。'
+    });
+    registerCoreBlock({
+      id: 'core-proactivity', label: '积极性', slot: 'behavior', priority: 150,
+      render: () => '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。'
+    });
+    // 技能清单：只给「名字 + 一句说明」，全文让 AI 自己读 SKILL.md。
+    // 行数由 skills.maxEntries 固定，关掉后整段消失——不会因为技能变多把提示词撑长。
+    registerCoreBlock({
+      id: 'core-skills', label: '技能清单', slot: 'resources', priority: 160,
+      render: ({ key, skillText } = {}) => {
+        if (typeof skillText === 'string') return skillText;
+        if (cfg.skills?.enabled === false) return '';
+        // 预设显式配了 skills.allow 时按白名单过滤；没配或空列表保持全量（内置 preset 没有 extensions.yml）。
+        let ids = null;
+        try {
+          const preset = modePreset(key, effectiveMode(key), cfg);
+          const allow = preset ? (presetPolicy.get(preset)?.skills?.allow ?? []) : [];
+          if (allow.length && !allow.includes('*')) ids = allow.slice();
+        } catch (error) {
+          log(`⚠️ 技能预设过滤失败，按全量处理：${error?.message ?? error}`);
+        }
+        return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200, ids });
       }
-      return skillIndex.render({ maxChars: cfg.skills?.maxChars ?? 1200, ids });
     });
+    registerCoreBlock({
+      id: 'core-stickers', label: '表情包策略', slot: 'resources', priority: 170,
+      render: ({ stickerFull, blockPlan } = {}) => {
+        if (!stickerFull) return '';
+        // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；blockPlan 为空（测试、旧调用方）时照旧完整给。
+        return blockPlan?.sticker && !blockPlan.sticker.full ? BLOCK_REFS.sticker : stickerFull;
+      }
+    });
+    registerCoreBlock({
+      id: 'core-reply-rhythm', label: '首回复节奏', slot: 'situation', priority: 180,
+      render: (ctx) => ctx.replyText || ''
+    });
+    registerCoreBlock({
+      id: 'core-state', label: '此刻状态', slot: 'situation', priority: 190,
+      render: (ctx) => ctx.statusText || ''
+    });
+    registerCoreBlock({
+      id: 'core-wake-info', label: '当前唤醒条件', slot: 'situation', priority: 200,
+      render: (ctx) => ctx.wakeText || ''
+    });
+    // 记忆段：provider 由 memory.inject.provider 决定。同步 provider 直接渲染；
+    // 异步 provider 只读唤醒前的预热缓存——拿不到就空着，不阻塞。
+    registerCoreBlock({
+      id: 'core-memory', label: '记忆', slot: 'situation', priority: 210,
+      render: ({ key, memoryQuery } = {}) => {
+        const injected = memoryRegistry.injectionSync({ key, query: memoryQuery });
+        return injected.text || '';
+      }
+    });
+    registerCoreBlock({
+      id: 'core-people', label: '在场人物', slot: 'situation', priority: 220,
+      render: (ctx) => ctx.peopleText || ''
+    });
+    registerCoreBlock({
+      id: 'core-participation', label: '参与度', slot: 'situation', priority: 230,
+      render: (ctx) => ctx.participationText || ''
+    });
+    registerCoreBlock({
+      id: 'core-pre-sleep', label: '沉睡前强制等待', slot: 'situation', priority: 240,
+      render: (ctx) => ctx.preSleepText || ''
+    });
+
+    // —— 这次为什么被叫醒、接下来做什么（action）——
+    registerCoreBlock({
+      id: 'core-wake-task', label: '本次唤醒任务', slot: 'action', priority: 100,
+      render: (ctx) => ctx.wakeTask?.branch || ''
+    });
+    registerCoreBlock({
+      id: 'core-action', label: '行动前与引用规则', slot: 'action', priority: 110,
+      render: (ctx) => ctx.wakeTask?.fallback || ''
+    });
+
+    // —— 操作者临时材料（tail）——
+    registerCoreBlock({
+      id: 'core-owner-relay', label: '管理员托付', slot: 'tail', timing: 'on-event', priority: 100,
+      render: (ctx) => (ctx.relays?.length ? ownerRelayPromptBlock(ctx.relays) : '')
+    });
+    registerCoreBlock({
+      id: 'core-scheduled', label: '定时任务说明', slot: 'tail', timing: 'on-event', priority: 110,
+      render: (ctx) => (ctx.notes?.length ? scheduledPromptBlock(ctx.notes) : '')
+    });
+    registerCoreBlock({
+      id: 'core-snapshot', label: '本次消息快照', slot: 'tail', timing: 'on-event', priority: 900,
+      render: (ctx) => (ctx.snapshot ? wakeSnapshotBlock(ctx.snapshot) : '')
+    });
+
+    // —— 前导段（context）：当前时间 + 黑话表，接在唤醒提示词最前面 ——
+    registerCoreBlock({
+      id: 'core-now', label: '当前时间', slot: 'head', priority: 100, profiles: ['context'],
+      render: (ctx) => ctx.nowText || ''
+    });
+    registerCoreBlock({
+      id: 'core-slang', label: '群聊黑话', slot: 'head', timing: 'on-change', priority: 110, profiles: ['context'],
+      render: (ctx) => ctx.slangText || ''
+    });
+
+    // —— 回合收尾提醒（reminder）：另一套短提示词，不参与唤醒拼装 ——
+    registerCoreBlock({
+      id: 'core-reminder', label: '收尾提醒', slot: 'action', priority: 100, profiles: ['reminder'],
+      render: (ctx) => `【提醒】你还没有完成回合收尾。请调用 qq_set_wake_config 设置下一次唤醒条件（例如继续潜水多久、@/名字/关键词/提问/概率/指定成员等），或者调用 qq_mark_read 表示你看过且决定不接。这是为了防止你忘记收尾后进入“永眠”。注意：设置潜水前先用 qq_wait_for_messages(timeoutMs=${ctx.preSleepMs}) 完成沉睡前观察；等待期间有人说话时查看 newMessages，判断不需要你参与即可收尾。`
+    });
+
     corePromptBlocks.setOverrides(cfg.promptBlocks);
   };
   registerCoreBlocks();
@@ -3324,16 +3443,19 @@ async function main() {
       .map(publicSlangEntry);
   }
 
+  // 唤醒前的两段前导：当前时间 + 黑话表。它们也是注入块（context 档案），
+  // 这样「提示词由哪些段组成」只有一张表，控制台能逐块关掉/限额。
   function withSlangContext(promptText, { slang } = {}) {
     const now = new Date();
-    const timeLine = `【当前时间】${now.toLocaleString('zh-CN', { hour12: false })}（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`;
-    const parts = [timeLine];
+    const nowText = `【当前时间】${now.toLocaleString('zh-CN', { hour12: false })}（${Intl.DateTimeFormat().resolvedOptions().timeZone}）`;
+    let slangText = '';
     if (cfg.slang?.enabled !== false) {
       const block = buildSlangContext(slangEntries, cfg.slang?.injectMax ?? 8);
       // 二代唤醒：黑话表和上次一样时只放一行（见 src/prompt-blocks.js）
-      if (block) parts.push(slang && !slang.full && !slang.empty ? BLOCK_REFS.slang : block);
+      if (block) slangText = slang && !slang.full && !slang.empty ? BLOCK_REFS.slang : block;
     }
-    return parts.join('\n\n') + '\n\n' + promptText;
+    const prefix = corePromptBlocks.renderProfileSync('context', { nowText, slangText }).text;
+    return prefix ? `${prefix}\n\n${promptText}` : promptText;
   }
 
   {
@@ -13413,7 +13535,9 @@ async function main() {
       scheduledNotes.take(key);
       wakeSnapshot = buildWakeSnapshotV2(key);
       if (wakeSnapshot) {
-        promptText += `\n\n【本次消息快照】\n${JSON.stringify(wakeSnapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
+        // 快照也是注入块（core-snapshot）：正文在块里，拼接仍走注册表。
+        const snapshotBlock = corePromptBlocks.renderBlockSync('core-snapshot', { snapshot: wakeSnapshot });
+        if (snapshotBlock.text) promptText += `\n\n${snapshotBlock.text}`;
       }
     }
     let modelText = withSlangContext(withHandover(key, promptText), { slang: blockPlan?.slang });
@@ -14617,24 +14741,10 @@ async function main() {
     return { woke, pending: keys.length - woke.length };
   }
 
+  // 唤醒提示词的唯一入口。文本由注入块注册表按 slot + priority 拼出来，
+  // 这里只负责把「此刻的状态」整理成上下文（见 wakePromptCtx）。
   function buildWakePromptV2(key, reason, blockPlan = null) {
-    const relays = ownerRelayStore.peek(key);
-    if (reason === 'ownerRelay' && !relays.length) reason = '管理员托付已过期，按平常判断即可';
-    // 定时任务的说明和托付一样：任何原因的唤醒都带上，最终投递时才取走（见 deliverPrompt 里的 scheduledNotes.take）
-    const notes = scheduledNotes.peek(key);
-    if (reason === 'scheduled' && !notes.length) reason = '定时任务的说明已过期，按平常判断即可';
-    let text = buildWakePromptV2Core(key, reason, blockPlan);
-    // 角色卡换了 / 改了、这个会话还没读到：把新卡全文放在最前面（引导唤醒会自己调用 qq_get_prompt，不重复给）
-    const roleBlock = roleRefreshBlockV2(key, reason);
-    if (roleBlock) text = `${roleBlock}\n\n${text}`;
-    // 令牌抄错过：把提醒放在最前面（送达后清掉，见 deliverPrompt）
-    const tokenNotice = tokenMiss.notice(key);
-    if (tokenNotice) text = `${tokenNoticeBlock(tokenNotice)}\n\n${text}`;
-    // 未读里有断线期间补收回来的消息：告诉 AI 它们不是刚发的（送达后清掉，见 deliverPrompt）
-    const bfNotice = backfillNotices.get(key);
-    if (bfNotice) text = `${backfillNoticeBlock(bfNotice)}\n\n${text}`;
-    if (relays.length) text = `${text}\n\n${ownerRelayPromptBlock(relays)}`;
-    return notes.length ? `${text}\n\n${scheduledPromptBlock(notes)}` : text;
+    return buildWakePromptV2Core(key, reason, blockPlan);
   }
 
   // r4：机器人自己的身份（昵称 + QQ 号）。**必须显式写进 prompt**（上游 issue #29）：
@@ -14660,46 +14770,120 @@ async function main() {
     return last ? String(last.text).slice(-300) : '';
   }
 
-  function buildWakePromptV2Core(key, reason, blockPlan = null) {
+  /** 块之间统一用 '\n\n' 连接；块自己的正文不带这个尾巴。 */
+  function promptStripSeparator(text) {
+    return typeof text === 'string' && text.endsWith('\n\n') ? text.slice(0, -2) : (text ?? '');
+  }
+
+  /**
+   * 本次消息快照：让 AI 知道「这些消息已经给过了」，别重复查询。
+   * 正文归 core-snapshot 块，这里只负责把快照对象序列化成那段话。
+   */
+  function wakeSnapshotBlock(snapshot) {
+    return `【本次消息快照】\n${JSON.stringify(snapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
+  }
+
+  /**
+   * 本次唤醒的「这次要做什么」：按原因给一段，没匹配到就给默认那段。
+   * 两段分开返回，是为了让它们各自成为可开关的块（core-wake-task / core-action），
+   * 又不会在拼装时同时出现。
+   */
+  function wakeTaskTextFor(key, reason, preSleepMs) {
+    if (reason === 'bootstrap') {
+      return {
+        branch: `【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'timeout') {
+      return {
+        branch: `【唤醒】${key}\n原因：你设置的有限潜水时间已到；在你规定的时间内没有任何一项条件被触发，只是因为时间到了所以你被唤醒。\n你可以查看消息，或继续设置新的唤醒条件。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'replyCheck') {
+      return {
+        branch: `【回复检查】${key}\n原因：你刚刚发送过消息，现在回来检查是否有人回复。\n已有回复时先看消息，需要短静默就用 qq_wait_for_messages(purpose="reply") 判断对方是否说完；如果没人回你，不用硬补一句，但也不要立刻潜水——先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成沉睡前观察：没人说话可收尾；有人说话则查看 newMessages，不需要你参与也可直接收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'proactiveCheck') {
+      return {
+        branch: `【主动机会】${key}\n原因：群里已经安静了一段时间，这是一次你可以主动冒泡的机会。\n优先主动开个话题、追问上次没聊完的事、分享一个刚想到的想法；如果一时想不到，可以用 mcp__web-search-safe__web_search 搜一下当前热点/时事/网络热梗，再结合记忆里的群友兴趣挑一个自然角度。只要内容自然，就大胆开口；如果实在没话想说，再安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
+    if (String(reason).startsWith('memberJoin')) {
+      const category = String(reason).split(':')[1] || '';
+      return {
+        branch: `【唤醒】${key}\n原因：有人加入了本群（见未读里的 [入群] 事件）。\n${joinWakeInstruction(category)}\n看完再决定：想打招呼就自然说一句；不想就安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'roleRefresh') {
+      return {
+        branch: `【唤醒】${key}\n原因：管理员更新了你的角色卡（见最上面的【角色卡已更新】）。这次唤醒主要是让你读到新卡。\n看一眼未读：有该回的就按新卡的语气自然地回；没有就直接安静收尾（qq_mark_read 或 qq_set_wake_config）。不要为了换卡专门发言，也不要提起换卡这件事。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'silenceEnded') {
+      return {
+        branch: `【唤醒】${key}\n原因：定时静默刚结束；静默期间有人直接找过你（@、叫名字、提问、拍一拍或私聊），消息都在未读里。\n先看未读，挑仍然值得回应的自然地回；已经过去很久、话题早就变了的不用硬接。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'scheduled') {
+      return {
+        branch: `【唤醒】${key}\n原因：管理员事先登记的定时任务到点了（见文末【定时任务】）。\n先看看会话里此刻的情况，再用发送工具自然地完成它；完成后照常收尾（qq_mark_read / qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'ownerRelay') {
+      return {
+        branch: `【唤醒】${key}\n原因：管理员在私聊里托付你在本群做一件事（见文末【管理员托付】）。\n先看看群里此刻在聊什么，再决定怎么开口最自然。`,
+        fallback: ''
+      };
+    }
+    if (reason === 'poke') {
+      return {
+        branch: `【唤醒】${key}\n原因：有人拍了一拍（可能拍了你，也可能拍了别人）。\n先看未读/最近消息里的 [拍一拍] 事件：如果是拍你，可以自然回应一句，也可以用 qq_send_poke 回一个拍一拍；如果是拍别人，觉得有趣也可以接梗。除了回应，偶尔也可以主动戳一下正在聊的人/熟人，像真人手贱/提醒/逗一下，但别频繁。不想接就安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
+    return {
+      branch: '',
+      fallback: `【唤醒】${key}\n原因：${reason}\n【行动前】先判断：群里在聊什么？热闹还是冷清？有没有人直接找你？对方说完了吗？你有没有真正想说的？\n如果群聊正热但没人叫你，可以插一句有趣的/相关的，插不上再看情况潜水；不要一上来就划走。\n【引用：只在必要时用】只有你这条消息指向的人或消息并非最新一条别人的消息，或者你连续的几句话中不同消息指代的是不同的消息或人时，才用 qq_reply 或 qq_send_message 的 replyToMessageId 指向具体那条；其他情况不要引用，别让对方猜。\n你可以调用工具查看未读消息、人设、状态，自行决定是否发言；决定潜水前必须按上面的【沉睡前强制等待】先等够观察窗口。`
+    };
+  }
+
+  /**
+   * 唤醒上下文：一次取齐「此刻的状态」，块只读不用自己查。
+   * 取数据与写文案分开，预览接口才能用同一份上下文渲染出真实会发出去的那段话。
+   */
+  function wakePromptCtx(key, reason, blockPlan = null) {
+    const relays = ownerRelayStore.peek(key);
+    // 托付过期了：按平常判断，别让提示词里出现「见文末」却什么都没有。
+    if (reason === 'ownerRelay' && !relays.length) reason = '管理员托付已过期，按平常判断即可';
+    // 定时任务的说明和托付一样：任何原因的唤醒都带上，最终投递时才取走（见 deliverPrompt 里的 scheduledNotes.take）
+    const notes = scheduledNotes.peek(key);
+    if (reason === 'scheduled' && !notes.length) reason = '定时任务的说明已过期，按平常判断即可';
+
     const roleName = currentRoleName(key);
-    const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
     const st = getSocialV2State(key);
-    const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
-    // 记忆段（内置块 core-memory）：块关掉时整段消失；上限由 memory.inject.maxChars 与
-    // provider 自己的 maxChars 取小值决定。query 取本轮最后一条别人说的话，供 provider 检索。
-    const memoryBlock = corePromptBlocks.renderBlockSync('core-memory', { key, reason, query: memoryQueryV2(st) });
-    const memoryLine = memoryBlock.text ? `${memoryBlock.text}\n\n` : '';
-    // v0.3.0 在场人物：只注入本轮未读/最近消息里出现的人，并在注入时按共享策略过滤可见范围。
-    const presentIds = [...(st.unread || []), ...(st.recentMessages || []).slice(-6)].filter((m) => m && !m.isSelf).map((m) => m.userId).filter(Boolean);
-    const peopleText = ext.peopleBlockFor(key, presentIds);
-    const peopleLine = peopleText ? `${peopleText}\n\n` : '';
-    // 注意：黑话表不在这里注入，deliverPromptNow 的 withSlangContext 会统一注入，
-    // 避免唤醒 prompt 出现两份黑话表。
-    const participationText = formatParticipationV2(st);
-    const participationLine = participationText ? `${participationText}\n\n` : '';
-    const antiAiLine = '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。\n\n';
-    const stickerCfg = cfg.socialV2?.sticker ?? {};
-    const stickerFull = stickerBlockTextV2();
-    // 表情块和上次一样时只放一行（见 src/prompt-blocks.js）；没有计划（测试、旧调用方）时照旧完整给
-    // 表情参考（内置块 core.stickers）：是否只给一行由 blockPlan 决定，块可单独关掉。
-    const stickerBlock = corePromptBlocks.renderBlockSync('core-stickers', { key, reason, stickerFull, blockPlan });
-    const stickerLine = stickerBlock.text ? `${stickerBlock.text}\n\n` : '';
-    // 技能清单（内置块 core-skills）：只给「名字 + 一句说明」，全文让 AI 自己读 SKILL.md。
-    // 行数由 skills.maxEntries 固定，关掉后整段消失——不会因为技能变多把提示词撑长。
-    const skillBlock = corePromptBlocks.renderBlockSync('core-skills', { key, reason });
-    const skillLine = skillBlock.text ? `${skillBlock.text}\n\n` : '';
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
-    const proactiveLine = '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。\n\n';
     const replyTiming = replyTimingV2(st);
-    const replyLine = `【首回复节奏】先处理已有消息，完整的问题及时回答。需要确认对方是否继续补充时，用 qq_wait_for_messages(purpose="reply", quietMs=${replyTiming.quietMs})；从最后来信计时，合批和读提示词的耗时也算，目前还差约 ${Math.ceil(replyTiming.remainingQuietMs / 1000)} 秒静默。已安静够久可直接回，工具也会立即返回并补上思考期间的新消息。只有明确没说完、你确实要等下文时，才用普通 messages 长等待。\n\n`;
-    const preSleepLine = `【沉睡前强制等待】这是决定潜水收尾时的步骤，不是首回复的前置条件。除非对方明确说“不聊了/晚安/下了/拜拜”等结束语，否则每次设置潜水/下一次唤醒前，必须先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成一次沉睡前观察；回复前 purpose="reply" 的短静默不能代替这次完整观察。若 ${Math.round(preSleepMs / 60000)} 分钟内没人说话，返回 preSleepWaitSatisfied=true，可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看返回的 newMessages——判断不需要你参与就可以直接沉睡，若你选择参与回复，则下次想睡时需要重新等待观察窗口。如果返回里带 preSleepWaitRemainingMs，就按剩余时间继续等待。\n\n`;
+
+    // v0.3.0 在场人物：只注入本轮未读/最近消息里出现的人，并在注入时按共享策略过滤可见范围。
+    const presentIds = [...(st.unread || []), ...(st.recentMessages || []).slice(-6)]
+      .filter((m) => m && !m.isSelf).map((m) => m.userId).filter(Boolean);
+
     const lastMsg = [...(Array.isArray(st.recentMessages) ? st.recentMessages : [])].reverse().find((m) => m && !m.isSelf);
     const lastAiMin = st.lastAiReplyAt ? Math.max(0, Math.round((Date.now() - Number(st.lastAiReplyAt)) / 60000)) : null;
     const statusBits = [`未读 ${(st.unread || []).length} 条`];
     if (lastMsg) statusBits.push(`最近一条来自 ${String(lastMsg.sender || '未知')}：${String(lastMsg.text || lastMsg.plain || '').slice(0, 30)}`);
     if (lastMsg && looksLikeUnfinished(String(lastMsg.tail || lastMsg.plain || lastMsg.text || ''))) statusBits.push('对方可能没说完');
     if (lastAiMin != null) statusBits.push(`你上次发言 ${lastAiMin} 分钟前`);
-    const statusLine = `【此刻状态】${statusBits.join('；')}\n\n`;
+
     const wc = st.wakeConfig || {};
     const wcTr = wc.triggers || {};
     const wcMode = wc.mode === 'active' ? '活跃' : '潜水';
@@ -14713,55 +14897,50 @@ async function main() {
     if (Array.isArray(wcTr.speakerIds) && wcTr.speakerIds.length) wcTriggers.push(`指定成员(${wcTr.speakerIds.length}:${wcTr.speakerIds.join(',')})`);
     if (wcTr.anyMessage) wcTriggers.push('任意消息');
     if (Number(wcTr.probability) > 0) wcTriggers.push(`概率${wcTr.probability}`);
-    const wakeLine = `【当前唤醒】${wcMode}，${wcTime}${wcTriggers.length ? `；触发：${wcTriggers.join('/')}` : ''}\n\n`;
-    // r4：操作者预写的「初始提示词」（圈子主题/群内氛围等）：**只在首次唤醒**注入，
-    // 放在角色/身份/令牌之后让它足够显眼；之后它已经在这条 DSH 会话的上下文里了。
-    const identityLine = selfIdentityTextV2();
-    const initialPromptText = reason === 'bootstrap' ? formatInitialPromptV2(key) : '';
-    const initialPromptLine = initialPromptText ? `${initialPromptText}\n\n` : '';
-    const base = roleLine + identityLine + tokenLine + initialPromptLine + antiAiLine + proactiveLine + skillLine + stickerLine + replyLine + statusLine + wakeLine + memoryLine + peopleLine + participationLine + preSleepLine;
-    if (reason === 'bootstrap') {
-      return `${base}【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`;
-    }
-    if (reason === 'timeout') {
-      return `${base}【唤醒】${key}\n原因：你设置的有限潜水时间已到；在你规定的时间内没有任何一项条件被触发，只是因为时间到了所以你被唤醒。\n你可以查看消息，或继续设置新的唤醒条件。`;
-    }
-    if (reason === 'replyCheck') {
-      return `${base}【回复检查】${key}\n原因：你刚刚发送过消息，现在回来检查是否有人回复。\n已有回复时先看消息，需要短静默就用 qq_wait_for_messages(purpose="reply") 判断对方是否说完；如果没人回你，不用硬补一句，但也不要立刻潜水——先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成沉睡前观察：没人说话可收尾；有人说话则查看 newMessages，不需要你参与也可直接收尾（qq_mark_read 或 qq_set_wake_config）。`;
-    }
-    if (reason === 'proactiveCheck') {
-      return `${base}【主动机会】${key}\n原因：群里已经安静了一段时间，这是一次你可以主动冒泡的机会。\n优先主动开个话题、追问上次没聊完的事、分享一个刚想到的想法；如果一时想不到，可以用 mcp__web-search-safe__web_search 搜一下当前热点/时事/网络热梗，再结合记忆里的群友兴趣挑一个自然角度。只要内容自然，就大胆开口；如果实在没话想说，再安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
-    }
-    if (String(reason).startsWith('memberJoin')) {
-      const category = String(reason).split(':')[1] || '';
-      return `${base}【唤醒】${key}\n原因：有人加入了本群（见未读里的 [入群] 事件）。\n${joinWakeInstruction(category)}\n看完再决定：想打招呼就自然说一句；不想就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
-    }
-    if (reason === 'roleRefresh') {
-      return `${base}【唤醒】${key}\n原因：管理员更新了你的角色卡（见最上面的【角色卡已更新】）。这次唤醒主要是让你读到新卡。\n看一眼未读：有该回的就按新卡的语气自然地回；没有就直接安静收尾（qq_mark_read 或 qq_set_wake_config）。不要为了换卡专门发言，也不要提起换卡这件事。`;
-    }
-    if (reason === 'silenceEnded') {
-      return `${base}【唤醒】${key}\n原因：定时静默刚结束；静默期间有人直接找过你（@、叫名字、提问、拍一拍或私聊），消息都在未读里。\n先看未读，挑仍然值得回应的自然地回；已经过去很久、话题早就变了的不用硬接。`;
-    }
-    if (reason === 'scheduled') {
-      return `${base}【唤醒】${key}\n原因：管理员事先登记的定时任务到点了（见文末【定时任务】）。\n先看看会话里此刻的情况，再用发送工具自然地完成它；完成后照常收尾（qq_mark_read / qq_set_wake_config）。`;
-    }
-    if (reason === 'ownerRelay') {
-      return `${base}【唤醒】${key}\n原因：管理员在私聊里托付你在本群做一件事（见文末【管理员托付】）。\n先看看群里此刻在聊什么，再决定怎么开口最自然。`;
-    }
-    if (reason === 'poke') {
-      return `${base}【唤醒】${key}\n原因：有人拍了一拍（可能拍了你，也可能拍了别人）。\n先看未读/最近消息里的 [拍一拍] 事件：如果是拍你，可以自然回应一句，也可以用 qq_send_poke 回一个拍一拍；如果是拍别人，觉得有趣也可以接梗。除了回应，偶尔也可以主动戳一下正在聊的人/熟人，像真人手贱/提醒/逗一下，但别频繁。不想接就安静收尾（qq_mark_read 或 qq_set_wake_config）。`;
-    }
-    return `${base}【唤醒】${key}\n原因：${reason}\n【行动前】先判断：群里在聊什么？热闹还是冷清？有没有人直接找你？对方说完了吗？你有没有真正想说的？\n如果群聊正热但没人叫你，可以插一句有趣的/相关的，插不上再看情况潜水；不要一上来就划走。\n【引用：只在必要时用】只有你这条消息指向的人或消息并非最新一条别人的消息，或者你连续的几句话中不同消息指代的是不同的消息或人时，才用 qq_reply 或 qq_send_message 的 replyToMessageId 指向具体那条；其他情况不要引用，别让对方猜。\n你可以调用工具查看未读消息、人设、状态，自行决定是否发言；决定潜水前必须按上面的【沉睡前强制等待】先等够观察窗口。`;
+
+    const tokenNotice = tokenMiss.notice(key);
+    const bfNotice = backfillNotices.get(key);
+
+    return {
+      key,
+      reason,
+      blockPlan,
+      preSleepMs,
+      roleName,
+      identityText: selfIdentityTextV2(),
+      agentToken: st.agentToken,
+      // 操作者预写的「初始提示词」只在首次唤醒给（之后它已经在这条会话上下文里了）。
+      initialPromptText: reason === 'bootstrap' ? formatInitialPromptV2(key) : '',
+      stickerFull: stickerBlockTextV2(),
+      memoryQuery: memoryQueryV2(st),
+      peopleText: ext.peopleBlockFor(key, presentIds),
+      participationText: formatParticipationV2(st),
+      replyText: `【首回复节奏】先处理已有消息，完整的问题及时回答。需要确认对方是否继续补充时，用 qq_wait_for_messages(purpose="reply", quietMs=${replyTiming.quietMs})；从最后来信计时，合批和读提示词的耗时也算，目前还差约 ${Math.ceil(replyTiming.remainingQuietMs / 1000)} 秒静默。已安静够久可直接回，工具也会立即返回并补上思考期间的新消息。只有明确没说完、你确实要等下文时，才用普通 messages 长等待。`,
+      statusText: `【此刻状态】${statusBits.join('；')}`,
+      wakeText: `【当前唤醒】${wcMode}，${wcTime}${wcTriggers.length ? `；触发：${wcTriggers.join('/')}` : ''}`,
+      preSleepText: `【沉睡前强制等待】这是决定潜水收尾时的步骤，不是首回复的前置条件。除非对方明确说“不聊了/晚安/下了/拜拜”等结束语，否则每次设置潜水/下一次唤醒前，必须先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成一次沉睡前观察；回复前 purpose="reply" 的短静默不能代替这次完整观察。若 ${Math.round(preSleepMs / 60000)} 分钟内没人说话，返回 preSleepWaitSatisfied=true，可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看返回的 newMessages——判断不需要你参与就可以直接沉睡，若你选择参与回复，则下次想睡时需要重新等待观察窗口。如果返回里带 preSleepWaitRemainingMs，就按剩余时间继续等待。`,
+      wakeTask: wakeTaskTextFor(key, reason, preSleepMs),
+      // 前情提要：角色卡换了 / 令牌抄错过 / 断线期间补收了消息。
+      roleRefreshText: roleRefreshBlockV2(key, reason),
+      tokenNoticeText: tokenNotice ? tokenNoticeBlock(tokenNotice) : '',
+      backfillNoticeText: bfNotice ? backfillNoticeBlock(bfNotice) : '',
+      relays,
+      notes,
+    };
+  }
+
+  function buildWakePromptV2Core(key, reason, blockPlan = null) {
+    return corePromptBlocks.renderProfileSync('wake', wakePromptCtx(key, reason, blockPlan)).text;
   }
 
   function buildWakeReminderPromptV2(key) {
-    const roleName = currentRoleName(key);
-    const roleLine = roleName ? `【当前角色】${roleName}（完整角色卡请调用 qq_get_prompt 查看）\n\n` : '';
-    const identityLine = selfIdentityTextV2();
     const st = getSocialV2State(key);
-    const tokenLine = `【会话令牌】${st.agentToken}（调用二代状态工具时请在参数中带上此令牌）\n\n`;
-    const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
-    return `${roleLine}${identityLine}${tokenLine}【提醒】你还没有完成回合收尾。请调用 qq_set_wake_config 设置下一次唤醒条件（例如继续潜水多久、@/名字/关键词/提问/概率/指定成员等），或者调用 qq_mark_read 表示你看过且决定不接。这是为了防止你忘记收尾后进入“永眠”。注意：设置潜水前先用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成沉睡前观察；等待期间有人说话时查看 newMessages，判断不需要你参与即可收尾。`;
+    return corePromptBlocks.renderProfileSync('reminder', {
+      roleName: currentRoleName(key),
+      identityText: selfIdentityTextV2(),
+      agentToken: st.agentToken,
+      preSleepMs: Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000),
+    }).text;
   }
 
   async function sendWakePromptV2(key, reason) {

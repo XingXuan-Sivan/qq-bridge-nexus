@@ -14,6 +14,28 @@
 
 export const PROMPT_BLOCK_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
+// 注入位：块按 slot 的固定顺序出现，同 slot 内再按 priority 升序。
+// 顺序即语义：
+//   head      = 这次唤醒的前情提要（角色卡换了 / 令牌抄错 / 断线补收）
+//   identity  = 你是谁（角色、身份、令牌、初始提示词）
+//   behavior  = 怎么说话（反AI味、积极性）
+//   resources = 有哪些手段（技能、表情）
+//   situation = 此刻的处境（首回复节奏、状态、唤醒条件、记忆、在场人物、参与度、沉睡前等待）
+//   action    = 这次为什么被叫醒、接下来做什么
+//   tail      = 操作者塞进来的临时材料（托付、定时任务、消息快照）
+export const PROMPT_BLOCK_SLOTS = ['head', 'identity', 'behavior', 'resources', 'situation', 'action', 'tail'];
+
+// 提示词档案：同一批块可以出现在不同用途的提示词里。
+//   wake     = 唤醒提示词（buildWakePromptV2）
+//   reminder = 回合收尾提醒（buildWakeReminderPromptV2）
+//   context  = 唤醒前的前导段（当前时间 + 黑话表，见 withSlangContext）
+export const PROMPT_BLOCK_PROFILES = ['wake', 'reminder', 'context'];
+
+// 出现时机：every-wake 每次都试；reason 只在指定原因时试（支持 `memberJoin` 前缀匹配
+// `memberJoin:member_start`）；on-event / on-change 由块自己按上下文决定是否为空
+// （例如「令牌抄错了」「黑话表变了」），注册表不做筛选。
+export const PROMPT_BLOCK_TIMINGS = ['every-wake', 'reason', 'on-event', 'on-change'];
+
 /** render 返回空串/非字符串视为「本轮不注入」，不算失败。 */
 function toText(value) {
   return typeof value === 'string' ? value : '';
@@ -33,7 +55,19 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     if (typeof definition.render !== 'function') return 'render 必须是函数';
     if (definition.priority !== undefined && !Number.isFinite(definition.priority)) return 'priority 必须是数字';
     if (definition.maxChars !== undefined && definition.maxChars !== null && (!Number.isInteger(definition.maxChars) || definition.maxChars < 1)) return 'maxChars 必须是正整数或 null';
+    if (definition.slot !== undefined && !PROMPT_BLOCK_SLOTS.includes(definition.slot)) return `slot 非法：${definition.slot}（只能是 ${PROMPT_BLOCK_SLOTS.join(' / ')}）`;
+    if (definition.timing !== undefined && !PROMPT_BLOCK_TIMINGS.includes(definition.timing)) return `timing 非法：${definition.timing}`;
+    if (definition.timing === 'reason' && !(Array.isArray(definition.reasons) && definition.reasons.length)) return 'timing=reason 的块必须写明 reasons';
+    if (definition.profiles !== undefined && (!Array.isArray(definition.profiles) || definition.profiles.some((p) => !PROMPT_BLOCK_PROFILES.includes(p)))) return 'profiles 只能是 wake / reminder / context 的子集';
+    if (definition.settings !== undefined && !Array.isArray(definition.settings)) return 'settings 必须是数组';
     return null;
+  }
+
+  /** 块声明的「出现时机」是否适用本轮原因。reason 支持前缀（memberJoin → memberJoin:member_start）。 */
+  function timingMatches(block, reason) {
+    if (block.timing !== 'reason') return true;
+    const value = String(reason ?? '');
+    return block.reasons.some((r) => value === r || value.startsWith(`${r}:`));
   }
 
   function normalizeOwner(definition, pluginId) {
@@ -66,6 +100,11 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
       owner: normalizeOwner(definition, pluginId),
       label: typeof definition.label === 'string' && definition.label.trim() ? definition.label.trim() : definition.id,
       priority: definition.priority ?? 100,
+      slot: definition.slot ?? 'core',
+      timing: definition.timing ?? 'every-wake',
+      reasons: Array.isArray(definition.reasons) ? [...definition.reasons] : [],
+      profiles: Array.isArray(definition.profiles) && definition.profiles.length ? [...definition.profiles] : ['wake'],
+      settings: Array.isArray(definition.settings) ? [...definition.settings] : [],
       enabledDefault: true,
       maxCharsDefault: definition.maxChars ?? null,
       render: definition.render,
@@ -217,6 +256,77 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
     };
   }
 
+  /**
+   * 按「档案」同步渲染一组块（P1 起唤醒提示词只走这一条路）。
+   *
+   * 与 render() 的区别：
+   * - 固定按 slot 顺序排列（head → core → action → tail），同 slot 内再按 priority；
+   * - 只渲染声明了该 profile 的块，并按 timing 过滤本轮不适用原因；
+   * - maxTotalChars 传 0 表示不限（唤醒提示词由各块自己的 maxChars 管，总预算在
+   *   config.limits.promptBlocks 落地前不设栅栏，避免重构前后行为变化）。
+   *
+   * 块之间用 '\n\n' 连接；块的 render 只返回自己的正文，分隔符由这里统一加。
+   */
+  function renderProfileSync(profile = 'wake', context = {}, { maxTotalChars = 0 } = {}) {
+    const slotIndex = (slot) => {
+      const index = PROMPT_BLOCK_SLOTS.indexOf(slot);
+      return index === -1 ? PROMPT_BLOCK_SLOTS.length : index;
+    };
+    const ordered = [...blocks.values()]
+      .filter((block) => block.profiles.includes(profile))
+      .sort((a, b) => (slotIndex(a.slot) - slotIndex(b.slot)) || (a.priority - b.priority) || a.id.localeCompare(b.id));
+    const parts = [];
+    const report = [];
+    let total = 0;
+    stats.renders += 1;
+
+    for (const block of ordered) {
+      const live = effective(block);
+      if (!live.enabled) {
+        report.push({ id: block.id, owner: block.owner, slot: block.slot, status: 'off', chars: 0 });
+        continue;
+      }
+      if (!timingMatches(block, context.reason)) {
+        report.push({ id: block.id, owner: block.owner, slot: block.slot, status: 'timing', chars: 0 });
+        continue;
+      }
+      begin(block);
+      let text = '';
+      try {
+        const value = block.render(context);
+        if (value && typeof value.then === 'function') throw new Error('同步渲染不接受 Promise 返回值');
+        text = toText(value);
+      } catch (error) {
+        block.failures += 1;
+        block.lastError = String(error?.message ?? error).slice(0, 300);
+        finish(block, 'error', 0);
+        report.push({ id: block.id, owner: block.owner, slot: block.slot, status: 'error', chars: 0 });
+        continue;
+      }
+      if (!text.trim()) {
+        finish(block, 'empty', 0);
+        report.push({ id: block.id, owner: block.owner, slot: block.slot, status: 'empty', chars: 0 });
+        continue;
+      }
+      const limit = live.maxChars;
+      const clipped = limit !== null && text.length > limit ? text.slice(0, limit) : text;
+      if (maxTotalChars > 0 && total + clipped.length > maxTotalChars) {
+        stats.skipped += 1;
+        finish(block, 'budget', 0);
+        report.push({ id: block.id, owner: block.owner, slot: block.slot, status: 'budget', chars: 0 });
+        continue;
+      }
+      parts.push(clipped);
+      total += clipped.length;
+      stats.injected += 1;
+      const status = clipped.length < text.length ? 'truncated' : 'injected';
+      finish(block, status, clipped.length);
+      report.push({ id: block.id, owner: block.owner, slot: block.slot, status, chars: clipped.length });
+    }
+
+    return { profile, text: parts.join('\n\n'), blocks: report, chars: total };
+  }
+
   function status() {
     const items = list();
     return {
@@ -225,11 +335,11 @@ export function createPromptBlockRegistry({ log = () => {}, maxTotalChars = 4000
       renders: stats.renders,
       injected: stats.injected,
       skipped: stats.skipped,
-      blocks: items.map(({ id, pluginId, owner, label, priority, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated }) => ({
-        id, pluginId, owner, label, priority, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated,
+      blocks: items.map(({ id, pluginId, owner, label, priority, slot, timing, reasons, profiles, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated }) => ({
+        id, pluginId, owner, label, priority, slot, timing, reasons, profiles, enabled, maxChars, calls, failures, lastError, lastRunAt, lastChars, lastStatus, truncated,
       })),
     };
   }
 
-  return { register, unregisterPlugin, setOverrides, list, render, renderBlockSync, status };
+  return { register, unregisterPlugin, setOverrides, list, render, renderBlockSync, renderProfileSync, status };
 }

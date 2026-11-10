@@ -28,7 +28,7 @@
 | 6 | 会话覆盖存哪 | 注入稿 §3.8 写 `sessions.json > sessionOverrides` | **已目录化**：`state/sessions/qq/<group\|private>/<id>.json`（`src/session/directory.mjs`，`SESSION_DIR_VERSION = 2`）。`byKey` 已在 P7 迁进 `profile.persona`（`src/bridge.js:856-863`），`state/current-role.json` 只剩回退作用。 |
 | 7 | 全局人格的源 | 注入稿 §5.2 把 `current-role.json > role` 当全局源 | **`config.role.default` 才是唯一事实源**（`src/bridge.js:861`）；`current-role.json.role` 只做旧版本回退。迁移时只取 `config.role.default`。 |
 | 8 | 页面/导航没合并 | 注入稿要加「注入块」页；运行稿 §8.1 的导航里没有注入块 | 合并成第 4 节那一张表：新增 2 页（注入块、运行方案），改名 2 项（能力预设、命令与工具），移动 1 项（运行方案位置）。 |
-| 9 | 块清单不全 | 注入稿 §2.3 列 19 块，只说"其余 5 处没归一" | 按代码反推，实际是 **27 块 + 2 种提示词**（第 6 节；`wake` 26 块 + `reminder` 1 块）。原因尾巴（10 个分支）、一次性通知（读卡/令牌/补写/中继/定时）、快照提示、收尾提醒都不在原清单里。 |
+| 9 | 块清单不全 | 注入稿 §2.3 列 19 块，只说"其余 5 处没归一" | 按代码反推，实际是 **26 块 + 3 种提示词档案**（第 6 节；`wake` 23 块 + `context` 2 块 + `reminder` 1 块）。原因尾巴（10 个分支）、一次性通知（读卡/令牌/补写/中继/定时）、快照提示、收尾提醒都不在原清单里。 |
 | 10 | 块作用域 `runtime` | 注入稿 §2.2 允许 `scopes: ['global','runtime','session']` | v1 **只做 `global`**；字段保留解析但非 global 一律按 global 处理并在页面标注"按方案覆盖尚未开放"。理由：方案只有三个字段，塞块覆盖会破坏模型；而人格/行为已经能表达差异。 |
 | 11 | 行为 kind 的 `render()` 与块重叠 | 运行稿 §3.2 让 kind 输出"提示词片段：参与度/唤醒/等待节奏"；注入稿把这些做成块 | **文本归块，值归 kind**。kind 只提供 `view(ctx)`（现值来自 `behaviorConfigFor` / `behaviorV2View`）与字段规格；若将来某种行为要独有文案，由它**注册自己的块**（owner = `behavior:<id>`），而不是加第二个文本出口。 |
 | 12 | 注入预算数值 | 注入稿用 "总 200k"；注册表默认 `maxTotalChars = 4000`；`plugins.json` 是 4000 | 统一成 `config.limits.promptBlocks = { total, perBlockDefault }`，单位字符。默认值不拍脑袋：P1 的 golden 用例量出真实分布后取 p95 + 20%，页面上显示"已用 / 总预算"并允许改。 |
@@ -160,55 +160,55 @@
 
 ---
 
-## 6. 注入块完整清单（27 个，从代码反推）
+## 6. 注入块完整清单（26 个，已按此实现）
 
-装配器有**两种提示词**：`wake`（唤醒）与 `reminder`（收尾提醒）。块用 `profiles` 声明出现在哪些。
+装配器有三种提示词档案：`wake`（唤醒）、`reminder`（收尾提醒）、`context`（唤醒前的前导段：当前时间 + 黑话表）。
+块用 `profiles` 声明自己出现在哪些档案；`slot` 决定先后，`priority` 决定同一 slot 内的先后。
 
-| id | slot | timing | 内容 / 现状位置 | 可配 |
-| --- | --- | --- | --- | --- |
-| `core-now` | head/0 | every-wake | 【当前时间】（现在在 `withSlangContext` 前置，`src/bridge.js:3327`） | 时区/格式 |
-| `core-persona-refresh` | head/1 | reason:roleRefresh | 【角色卡已更新】（`:14628`） | 否（locked） |
-| `core-token-notice` | head/2 | on-event | 令牌抄错提醒（`:14631`） | 否（locked） |
-| `core-backfill-notice` | head/3 | on-event | 断线补收说明（`:14634`） | 否（locked） |
-| `core-role` | head/10 | every-wake | 【当前角色】一行（`:14665`） | 否（有开关） |
-| `core-identity` | head/11 | every-wake | 【你的身份】昵称+QQ（`:14652`） | 否（locked） |
-| `core-token` | head/12 | every-wake | 【会话令牌】（`:14667`） | 否（locked） |
-| `core-initial-prompt` | head/13 | reason:bootstrap | 初始提示词（`:14720`） | 上限 |
-| `core-anti-ai` | behavior/20 | every-wake | 【反AI味】 | 开关/措辞 |
-| `core-proactivity` | behavior/21 | every-wake | 【积极性】 | 开关/档位 |
-| `core-reply-rhythm` | behavior/22 | every-wake | 【首回复节奏】（`:14694`） | quietMs/开关 |
-| `core-skills` | resources/100 | on-change | 技能清单 | 条数/截断 |
-| `core-stickers` | resources/110 | on-change | 表情包策略 | 条数/策略 |
-| `core-slang` | resources/120 | on-change | 黑话表（`withSlangContext`） | 条数/候选 |
-| `core-people` | resources/130 | every-wake | 在场人物（`:14674`） | 人数/字段 |
-| `core-memory` | resources/140 | every-wake | 记忆（`:14670`） | provider/上限 |
-| `core-state` | situation/200 | every-wake | 【此刻状态】（`:14702`） | 统计窗口 |
-| `core-wake-info` | situation/210 | every-wake | 【当前唤醒】（`:14716`） | 显示项 |
-| `core-participation` | situation/220 | every-wake | 【参与度】（`:14678`） | 窗口 |
-| `core-pre-sleep` | situation/230 | every-wake | 【沉睡前强制等待】（`:14695`） | 窗口/强制 |
-| `core-wake-task` | action/300 | reason:* | **原因尾巴 10 个分支**（`:14723-14753`），模板化 | 每个原因一段 |
-| `core-action` | action/310 | every-wake | 【行动前】检查项（`:14754`） | 可编辑列表 |
-| `core-quote-rule` | action/320 | every-wake | 【引用规则】（`:14754`） | 开关/文案 |
-| `core-owner-relay` | tail/900 | on-event | 管理员托付（`:14636`） | 否（locked） |
-| `core-scheduled` | tail/910 | reason:scheduled | 定时任务说明（`:14637`） | 否（locked） |
-| `core-snapshot` | tail/920 | every-wake | 【本次消息快照】+ 读取提示（`:13416`；快照本体在 `deliverPromptNow` 手拼） | 条数/格式 |
-| `core-reminder` | — | profile:reminder | 收尾提醒（`:14757`） | 文案模板 |
+| slot | id | priority | profiles | timing | 内容 |
+| --- | --- | --- | --- | --- | --- |
+| head | `core-backfill-notice` | 10 | wake | on-event | 断线补收说明（":13434" 一带） |
+| head | `core-token-notice` | 20 | wake | on-event | 令牌抄错提醒 |
+| head | `core-persona-refresh` | 30 | wake | on-event | 角色卡已更新（新卡全文） |
+| head | `core-now` | 100 | context | every-wake | 【当前时间】 |
+| head | `core-slang` | 110 | context | on-change | 黑话表（变了给全文，没变只给一行引用） |
+| identity | `core-role` | 100 | wake, reminder | every-wake | 【当前角色】一行 |
+| identity | `core-identity` | 110 | wake, reminder | every-wake | 【你的身份】昵称 + QQ |
+| identity | `core-token` | 120 | wake, reminder | every-wake | 【会话令牌】 |
+| identity | `core-initial-prompt` | 130 | wake | reason:bootstrap | 初始提示词（只在首次唤醒） |
+| behavior | `core-anti-ai` | 140 | wake | every-wake | 【反AI味】 |
+| behavior | `core-proactivity` | 150 | wake | every-wake | 【积极性】 |
+| resources | `core-skills` | 160 | wake | on-change | 技能清单（名字 + 一句说明） |
+| resources | `core-stickers` | 170 | wake | on-change | 表情包策略（没变只给一行） |
+| situation | `core-reply-rhythm` | 180 | wake | every-wake | 【首回复节奏】 |
+| situation | `core-state` | 190 | wake | every-wake | 【此刻状态】 |
+| situation | `core-wake-info` | 200 | wake | every-wake | 【当前唤醒】条件与触发 |
+| situation | `core-memory` | 210 | wake | every-wake | 记忆（provider 决定内容） |
+| situation | `core-people` | 220 | wake | every-wake | 在场人物 |
+| situation | `core-participation` | 230 | wake | every-wake | 【参与度】 |
+| situation | `core-pre-sleep` | 240 | wake | every-wake | 【沉睡前强制等待】 |
+| action | `core-wake-task` | 100 | wake | every-wake | 原因尾巴 10 个分支（bootstrap/timeout/replyCheck/proactiveCheck/memberJoin/roleRefresh/silenceEnded/scheduled/ownerRelay/poke） |
+| action | `core-action` | 110 | wake | every-wake | 默认尾巴：【行动前】+【引用：只在必要时用】 |
+| action | `core-reminder` | 100 | reminder | every-wake | 【提醒】回合收尾 |
+| tail | `core-owner-relay` | 100 | wake | on-event | 管理员托付 |
+| tail | `core-scheduled` | 110 | wake | on-event | 定时任务说明 |
+| tail | `core-snapshot` | 900 | wake | on-event | 【本次消息快照】+ 读取/收尾提示 |
 
-约定：
+约定（实现见 `src/plugins/prompt-blocks.mjs` 与 `src/bridge.js` 的 `registerCoreBlocks` / `wakePromptCtx`）：
 
-- `timing: reason:<name>` 的 `<name>` 必须存在于 `WAKE_REASON_AXES`（`src/session/access.mjs`）或 `bootstrap`/`roleRefresh`/`ownerRelay`/`scheduled` 这几个已登记项；启动时校验，未登记直接拒绝注册并记日志。
-- `on-event` 块是动态内容，`render(ctx)` 返回空串表示本次不出现；它们不参与"指纹未变发一行"。
-- `on-change` 块复用 `src/prompt-blocks.js` 的 tracker，但刷新策略改成每块可配（`settings.refreshEveryWakes` / `refreshEveryMs`，默认 30 / 12h）。
-- 预览接口 `POST /api/prompt-preview { key, reason, profile }` 返回逐块文本、字数、phase、跳过原因；不写 state、不调模型。
-
----
+- **块只产出自己的正文，不带分隔符**；注册表用 `'\n\n'` 连接。这是逐字节等价的硬约束：原文里凡是用单换行连成一段的（例如【行动前】与【引用规则】），就不拆成两个块——拆了会被分隔符改成双换行，所以原来规划里的 `core-quote-rule` 并入 `core-action`。
+- `timing: reason:<name>` 支持前缀（`memberJoin` 命中 `memberJoin:member_start`）。`on-event` / `on-change` 是「块自己决定这次有没有内容」，注册表不筛选：返回空串即本轮不出现。
+- `wake` 档案的装配不设总字数闸门（`renderProfileSync(..., { maxTotalChars: 0 })`）：重构前这些段落本来就没有总预算，先保证等价；总预算与逐块上限的配置化在 P2 落到 `config.limits.promptBlocks`。
+- `wakePromptCtx()` 一次取齐状态（角色、令牌、未读、唤醒条件、托付、定时说明、快照之外的动态内容），块只读 ctx，不自己查状态。预览接口会复用同一份 ctx。
+- 快照本体仍在 `deliverPromptNow` 里生成（它依赖投递时的实时状态），但**那段话归 `core-snapshot` 块**，投递处只做「渲染 + 追加」。
+- `core-persona` 的注入上限（`config.role.maxInjectChars`）在 P2 迁移为 `promptBlocks['core-persona'].maxChars`；本阶段仍走原路径，行为不变。
 
 ## 7. 执行顺序
 
 | 阶段 | 内容 | 行为变化 | 重启 |
 | --- | --- | --- | --- |
 | **P0** | 本文 + 两份旧稿加"以本文为准"的头注；不再动代码 | 无 | 否 |
-| **P1** | 注入块内核：注册表 v2（slot/timing/profiles/settings/priority/refresh）、单一装配器（wake+reminder）、27 块迁移、`withSlangContext`/`promptAdditions` 退场、快照进块、`/api/prompt-preview` | 无（golden 逐块等价） | 是（验证真实投递） |
+| **P1** | 注入块内核：注册表 v2（slot/timing/profiles/settings/priority/refresh）、单一装配器（wake+reminder）、26 块迁移、`buildWakePromptV2Core` 退化为「建 ctx + renderProfileSync」、`withSlangContext` 改走 context 档案、快照进块、golden 逐字节夹具 | 无（golden 等价） | 是（验证真实投递） |
 | **P2** | 注入块页 + 插件页移除注入块卡；预算与人格上限迁到 `config.limits.promptBlocks` / `core-persona`；`prompt-blocks.json` 改名 | 无 | 否（前端） |
 | **P3** | 配置归一（非运行部分）：`plugins.json` → `config.plugins`、`scheduler.settings` → `config.scheduler`、静默 → `config.silence`、`current-role.json` 的 `silent` → `config.silence.manual` | 无（等价迁移，备份） | 是（读配置） |
 | **P4** | 运行方案数据层：`plans.mjs` / `capabilities.mjs` / `resolvePlan` / `legacyMode` 投影 / `state/runtime.json` / plan-control（确认、审计、TOTP、闲置回落、重启不继承）/ 切换 API / 迁移脚本（干跑+备份+幂等） | 无（等价映射） | 是 |

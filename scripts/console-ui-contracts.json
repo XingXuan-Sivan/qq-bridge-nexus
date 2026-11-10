@@ -31,6 +31,14 @@
   },
   {
     "method": "POST",
+    "path": "/api/preset/sim-prompt",
+    "body": {
+      "preset": "demo-agent",
+      "content": "空白预设的新提示词"
+    }
+  },
+  {
+    "method": "POST",
     "path": "/api/config/behavior-default",
     "body": {
       "value": "social-v1"

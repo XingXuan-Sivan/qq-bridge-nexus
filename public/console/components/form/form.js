@@ -396,7 +396,12 @@ export function renderFields(host, spec, options = {}) {
       // 分组必须落在栅格外面：若前面已有字段，先关掉 .form-cols，
       // 否则 fieldset 会被塞进栅格当列，整套 section 变成一列窄条。
       closeGrid();
-      if (item.card === true) {
+      if (item.card === true && item.collapsed === true) {
+        // 默认收起的卡片：复用全局的 .card.is-group + details.settings-group（social-v2 / 插件页同一套），
+        // 不在这里另写折叠样式；.span-all 让它和其它 section 一样占满整行栅格。
+        out.push(`<section class="card is-group span-all"><details class="settings-group" data-default-open="closed"><summary>${esc(item.label ?? '')}</summary><div class="settings-content">${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
+        sectionClose = '</div></details></section>';
+      } else if (item.card === true) {
         out.push(`<section class="form-section form-section--card"><div class="form-section-head"><h3>${esc(item.label ?? '')}</h3></div>${item.hint ? `<p class="form-section-hint">${esc(item.hint)}</p>` : ''}`);
         sectionClose = '</section>';
       } else {

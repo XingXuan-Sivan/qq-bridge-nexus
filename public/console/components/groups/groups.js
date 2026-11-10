@@ -55,7 +55,9 @@ export function initGroups(root, { pageId } = {}) {
     const key = details.dataset.group || `g${index}`;
     details.dataset.groupKey = key;
     // 首次访问：只展开第一组；之后完全按记忆（没记过的组默认收起）。
-    details.open = isFirstVisit ? index === 0 : saved[key] === true;
+    // data-default-open="closed" 的组即使排在第一位也保持收起（预设页的「高级配置」就是这种）。
+    const firstVisitOpen = index === 0 && details.dataset.defaultOpen !== 'closed';
+    details.open = isFirstVisit ? firstVisitOpen : saved[key] === true;
     state[key] = details.open;
     details.addEventListener('toggle', () => {
       if (restoring) return;

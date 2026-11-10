@@ -383,4 +383,15 @@ npm run test:console-ui
 
 **已知限制**：MCP 工具表仍一次渲染全部工具（当前 48 行，卡片较高），分页/搜索框可按需再加；工具说明较长时行高偏大。
 
+### 6.25 第七批：高级配置折叠卡与「所有预设都能改提示词」（2026-11-10）
+
+1. **插件配置改名「高级配置」并默认折叠**：`form.js` 的 `type:'section'` 新增 `collapsed:true`，复用全局 `.card.is-group > details.settings-group`（social-v2 / 插件页同款），不新增折叠样式；`groups.js` 支持 `data-default-open="closed"`，让这张唯一的折叠组在首次访问时也保持收起（否则「首访展开第一组」的规则会把它默认打开）。编辑器内容仍是 `agent.cordis.yml` 全文。
+2. **提示词卡对所有预设有内容**：`page.js` 删掉 `PROMPT_PRESETS`（原只认 qq-chat / qq-chat-v2），提示词卡不再按预设隐藏；后端 `knownPresetName()` 换成 `editablePresetName()`，只要 `dsh/agent-presets/<id>/agent.cordis.yml` 存在就允许读写（名字仍限 `[a-z0-9-]` 且校验路径前缀，挡住路径穿越），`presetStatus().label` 对非仿真预设显示「预设提示词」。
+3. **prefix 缺省也能打开与保存**：`readPresetPromptText()` 在 `extractPresetPrefix()` 为 null 时不再抛错（返回空串）；`locatePresetPromptBlock()` 从「只认块标量」扩成四种形态——block（`>-`/`|`）、inline（`prefix: ""`/`prefix:` 整行替换）、insert-under-config（persona 有 `config:` 但没 prefix）、insert-config（连 `config:` 都没有，补一层）。`renderPresetPromptYaml()` 按 mode 替换或插入，写回后仍做「重新解析必须逐字一致」的校验。
+4. **非仿真预设不做仿真不变量校验**：`presetPromptMarkers/Blockers` 增加 `generic` 分支（只拦空内容），`bridge.js` 用 `presetKind()` 决定 v1/v2/generic；否则 qq-agent-* 与自建预设会被「缺少『你没有本地工具』」硬拒保存。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **32/32、49 次写**（新增用例：`demo-agent` 空提示词也能打开并保存；契约重录只多一条 `POST /api/preset/sim-prompt`）；`test-preset-prompt` **16/16**（新增「缺 prefix 自动补 config」「行内空值替换」「generic 不校验」三条）；真机重启后 `GET /api/preset/sim-prompt?preset=qq-agent-full` 返回 652 字符、label「预设提示词」，临时预设删掉 prefix 后读为 0 字符、写入自动补出 `config:` + `prefix: |-` 且回读一致，`prefix: ""` 行内值同样能替换。
+
+**已知限制**：`prefix` 写在 flow mapping 里（`config: { prefix: '' }`）不属于上述四种形态，会落到 insert 模式并在 `config` 下补一个 `prefix` 键（YAML 视为重复键，可能解析失败）；本仓库五个预设都不用这种写法。
+
 

@@ -12,6 +12,7 @@ import {
   locatePresetPromptBlock,
   presetBlockingSubstrings,
   presetPromptBlockers,
+  presetPromptMarkers,
   presetPromptWarnings,
   renderPresetPromptYaml,
 } from '../src/preset-prompt.js';
@@ -187,4 +188,44 @@ test('提示词软校验按代次取清单：一代不该被要求二代段落',
   assert.deepEqual(presetPromptWarnings(v1, 'v1'), [], '一代内容按一代校验不应报缺段');
   assert.deepEqual(presetPromptWarnings(v2, 'v2'), [], '二代内容按二代校验不应报缺段');
   assert.equal(presetPromptWarnings(v1, 'v2').length, 2, '一代内容按二代校验应报两段缺失');
+});
+
+// 回归：qq-agent-* 与自建预设的 persona.prefix 可能缺省或为空。
+// 以前这两种文件会直接抛「无法定位 prefix 块」，控制台里整块提示词打不开也存不了。
+const NO_PREFIX_YAML = [
+  '- id: persona',
+  "  name: '@deepseek-ai/dsh-persona'",
+  '- id: qq-tool-restrict',
+  "  name: './qq-tool-restrict.mjs'",
+  '',
+].join('\n');
+
+test('persona 没有 prefix 时能补出 config: 与 prefix 块', () => {
+  assert.ok(locatePresetPromptBlock(NO_PREFIX_YAML), '缺 prefix 也要能定位到 persona 条目');
+  const next = renderPresetPromptYaml(NO_PREFIX_YAML, '补出来的提示词', 'generic');
+  assert.equal(extractPresetPrefix(next), '补出来的提示词');
+  const rows = parseYaml(next);
+  assert.deepEqual(rows[0], { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '补出来的提示词' } });
+  assert.deepEqual(rows[1], { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs' });
+});
+
+test('prefix: "" 这种行内空值能替换成块标量', () => {
+  const inline = [
+    '- id: persona',
+    "  name: '@deepseek-ai/dsh-persona'",
+    '  config:',
+    '    prefix: ""',
+    '- id: qq-tool-restrict',
+    "  name: './qq-tool-restrict.mjs'",
+    '',
+  ].join('\n');
+  const next = renderPresetPromptYaml(inline, '行内空值也能写', 'generic');
+  assert.equal(extractPresetPrefix(next), '行内空值也能写');
+});
+
+test('非仿真预设（generic）不做工具面不变量校验', () => {
+  assert.deepEqual(presetBlockingSubstrings('generic'), []);
+  assert.deepEqual(presetPromptMarkers('generic'), []);
+  assert.deepEqual(presetPromptBlockers('随便一段提示词', 'generic'), []);
+  assert.equal(presetPromptBlockers('   ', 'generic').length, 1, '空内容仍要拦住');
 });

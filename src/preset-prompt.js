@@ -18,9 +18,11 @@ export const PRESET_PROMPT_MAX_BYTES = 128 * 1024;
 export const PRESET_REQUIRED_MARKERS = ['【二代仿真模式 —— 安全规则', '【二代仿真模式 —— 工具协议'];
 export const PRESET_REQUIRED_MARKERS_V1 = ['【QQ 群聊模式 —— 安全规则', '【发送与汇报禁令'];
 
-/** 取某个预设对应的软校验标记（未知代次按二代处理）。 */
+/** 取某个预设对应的软校验标记（未知代次 / 非仿真预设不检查）。 */
 export function presetPromptMarkers(preset = 'v2') {
-  return preset === 'v1' ? PRESET_REQUIRED_MARKERS_V1 : PRESET_REQUIRED_MARKERS;
+  if (preset === 'v1') return PRESET_REQUIRED_MARKERS_V1;
+  if (preset === 'generic') return [];
+  return PRESET_REQUIRED_MARKERS;
 }
 
 // 硬性不变量：这些串是本项目自己的测试与安全边界所依赖的（test-qq-preset-contract.mjs / verify-persona-config.mjs），
@@ -47,19 +49,22 @@ export const PRESET_BLOCKING_SUBSTRINGS_V1 = [
 ];
 export const PRESET_MIN_BODY_CHARS = 500;
 
-/** 取某个预设对应的硬性不变量清单（未知预设按更严的二代替处理）。 */
+/** 取某个预设对应的硬性不变量清单（非仿真预设不做工具面校验）。 */
 export function presetBlockingSubstrings(preset = 'v2') {
-  return preset === 'v1' ? PRESET_BLOCKING_SUBSTRINGS_V1 : PRESET_BLOCKING_SUBSTRINGS;
+  if (preset === 'v1') return PRESET_BLOCKING_SUBSTRINGS_V1;
+  if (preset === 'generic') return [];
+  return PRESET_BLOCKING_SUBSTRINGS;
 }
 
-/** 硬性校验：返回阻止保存的原因列表（空数组=可保存）。preset 取 'v1' / 'v2'。 */
+/** 硬性校验：返回阻止保存的原因列表（空数组=可保存）。preset 取 'v1' / 'v2' / 'generic'。 */
 export function presetPromptBlockers(content, preset = 'v2') {
   const text = String(content ?? '');
   const blockers = [];
   if (!text.trim()) {
-    blockers.push('仿真提示词不能为空');
+    blockers.push(preset === 'generic' ? '提示词不能为空' : '仿真提示词不能为空');
     return blockers;
   }
+  if (preset === 'generic') return blockers;
   for (const needle of presetBlockingSubstrings(preset)) {
     if (!text.includes(needle)) {
       blockers.push(`缺少安全不变量「${needle}」：删除它会让 AI 的权限边界失效，并使 npm run test:audit 失败`);
@@ -72,8 +77,14 @@ export function presetPromptBlockers(content, preset = 'v2') {
 }
 
 /**
- * 定位 persona 条目的 prefix 块标量（支持 >- / | 等块语法）。
- * @returns {{lines: string[], entryStart: number, entryEnd: number, keyLine: number, keyIndent: number, blockEnd: number}|null}
+ * 定位 persona 条目的 prefix（支持 >- / | 等块语法，也支持行内空值或缺省键）。
+ *
+ * 三种形态：
+ *   block              已有块标量，替换 [keyLine, blockEnd)
+ *   inline             `prefix: ''` / `prefix:` 这类行内值，整行替换
+ *   insert-under-config / insert-config  没有 prefix 键，分别插到 config: 下或补一层 config:
+ * @returns {{mode:string, lines:string[], entryStart:number, entryEnd:number, keyLine:number,
+ *            keyIndent:number, blockEnd?:number, insertAt?:number}|null}
  */
 export function locatePresetPromptBlock(text) {
   const lines = String(text ?? '').split('\n');
@@ -83,21 +94,51 @@ export function locatePresetPromptBlock(text) {
   for (let i = entryStart + 1; i < lines.length; i += 1) {
     if (/^- /.test(lines[i])) { entryEnd = i; break; }
   }
-  let keyLine = -1;
+  // 1) 块标量：prefix: | / >- …
   for (let i = entryStart; i < entryEnd; i += 1) {
-    if (/^\s*prefix:\s*[>|][-+]?\s*$/.test(lines[i])) { keyLine = i; break; }
+    if (/^\s*prefix:\s*[>|][-+]?\s*$/.test(lines[i])) {
+      const keyIndent = lines[i].match(/^\s*/)[0].length;
+      // 只有真正的内容行才推进块尾：块内的空行（段落分隔）会被后面的内容行重新纳入，
+      // 而块尾的空行留给后续行，避免把 persona 与下一条注释之间的空行吞掉。
+      let blockEnd = i + 1;
+      for (let j = i + 1; j < entryEnd; j += 1) {
+        if (lines[j].trim() === '') continue;
+        if (lines[j].match(/^\s*/)[0].length <= keyIndent) break;
+        blockEnd = j + 1;
+      }
+      return { mode: 'block', lines, entryStart, entryEnd, keyLine: i, keyIndent, blockEnd };
+    }
   }
-  if (keyLine < 0) return null;
-  const keyIndent = lines[keyLine].match(/^\s*/)[0].length;
-  // 只有真正的内容行才推进块尾：块内的空行（段落分隔）会被后面的内容行重新纳入，
-  // 而块尾的空行留给后续行，避免把 persona 与下一条注释之间的空行吞掉。
-  let blockEnd = keyLine + 1;
-  for (let i = keyLine + 1; i < entryEnd; i += 1) {
-    if (lines[i].trim() === '') continue;
-    if (lines[i].match(/^\s*/)[0].length <= keyIndent) break;
-    blockEnd = i + 1;
+  // 2) 行内值（prefix: '' / prefix: null / prefix: 某个短串）：整行替换成块标量。
+  for (let i = entryStart; i < entryEnd; i += 1) {
+    if (/^\s*prefix:/.test(lines[i])) {
+      return {
+        mode: 'inline',
+        lines,
+        entryStart,
+        entryEnd,
+        keyLine: i,
+        keyIndent: lines[i].match(/^\s*/)[0].length,
+        blockEnd: i + 1,
+      };
+    }
   }
-  return { lines, entryStart, entryEnd, keyLine, keyIndent, blockEnd };
+  // 3) 完全没有 prefix：插到 config: 下面；连 config 都没有，就在条目末尾补一层。
+  for (let i = entryStart; i < entryEnd; i += 1) {
+    if (/^\s*config:\s*$/.test(lines[i])) {
+      const indent = lines[i].match(/^\s*/)[0].length;
+      return {
+        mode: 'insert-under-config',
+        lines,
+        entryStart,
+        entryEnd,
+        keyLine: -1,
+        keyIndent: indent + 2,
+        insertAt: i + 1,
+      };
+    }
+  }
+  return { mode: 'insert-config', lines, entryStart, entryEnd, keyLine: -1, keyIndent: 4, insertAt: entryEnd };
 }
 
 /** 取出 persona.prefix 的真实字符串值（已由 YAML 解析，折叠标量已展开）。 */
@@ -152,10 +193,19 @@ export function renderPresetPromptYaml(text, content, preset = 'v2') {
   // 只有「真正的空行」才写成空行；只含空格/Tab 的行必须保留原样（写成 pad + 原内容），
   // 否则它会被 YAML 当成空行读回，导致下面的一致性校验失败、提示词无法保存。
   const body = normalized.split('\n').map((line) => (line === '' ? '' : pad + line));
-  // 外层用 '\n' 连接各行：CRLF 文件的行自带 '\r'，因此块的最后一行也要补一个 '\r'，
+  // 外层用 eol 连接各行：CRLF 文件的行自带 '\r'，因此块的最后一行也要补一个 '\r'，
   // 否则它与下一行之间会变成 LF-only，把文件行尾弄得更混杂。
   const block = [`${' '.repeat(loc.keyIndent)}prefix: |-`, ...body].join(eol) + (eol === '\r\n' ? '\r' : '');
-  const next = [...loc.lines.slice(0, loc.keyLine), block, ...loc.lines.slice(loc.blockEnd)].join('\n');
+  let next;
+  if (loc.mode === 'block' || loc.mode === 'inline') {
+    next = [...loc.lines.slice(0, loc.keyLine), block, ...loc.lines.slice(loc.blockEnd)].join('\n');
+  } else if (loc.mode === 'insert-under-config') {
+    next = [...loc.lines.slice(0, loc.insertAt), block, ...loc.lines.slice(loc.insertAt)].join('\n');
+  } else {
+    // persona 连 config: 都没有：在条目末尾补一层，保持 2 空格缩进。
+    const cfgIndent = ' '.repeat(Math.max(0, loc.keyIndent - 2));
+    next = [...loc.lines.slice(0, loc.insertAt), `${cfgIndent}config:`, block, ...loc.lines.slice(loc.insertAt)].join('\n');
+  }
   const reparsed = extractPresetPrefix(next);
   if (reparsed === null) throw new Error('写入后 YAML 解析失败或找不到 persona.prefix');
   if (reparsed !== normalized) {

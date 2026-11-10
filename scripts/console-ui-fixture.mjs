@@ -22,7 +22,9 @@ const timestamp = '2026-09-20T08:30:00.000Z';
 function presetStatusFixture(preset) {
   return {
     preset,
-    label: preset === 'qq-chat' ? '一代仿真（reserved）' : '二代仿真（reserved2）',
+    label: preset === 'qq-chat'
+      ? '一代仿真（reserved）'
+      : preset === 'qq-chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
     sourceFile: `dsh/agent-presets/${preset}/agent.cordis.yml`,
     installed: true,
     requiresRestart: true,
@@ -373,11 +375,14 @@ export function makeFixtureState() {
     simPrompts: {
       'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
       'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+      // 自建预设：persona.prefix 为空，用来验证「提示词卡不该被隐藏、空内容也能编辑」。
+      'demo-agent': '',
     },
     // 「初始版本」：与 simPrompts 起始值一致，用来测「已修改 / 还原」。
     simDefaults: {
       'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
       'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+      'demo-agent': '',
     },
     roleInjectMax: 6000,
     dshEffort: 'max',
@@ -791,6 +796,17 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 hasExtensions: true,
                 extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
               },
+              {
+                id: 'demo-agent',
+                name: '演示预设',
+                description: '离线预览用的自建预设，persona 提示词为空。',
+                order: 3,
+                editable: true,
+                builtin: false,
+                error: null,
+                hasExtensions: false,
+                extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: [] } },
+              },
             ],
           });
           case '/api/extensions/presets/qq-chat': return json({
@@ -824,6 +840,22 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               ],
               agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
               validation: { ok: true, rows: 3 },
+              backups: [],
+            },
+          });
+          case '/api/extensions/presets/demo-agent': return json({
+            ok: true,
+            preset: {
+              id: 'demo-agent',
+              meta: { name: '演示预设', description: '离线预览用的自建预设，persona 提示词为空。', order: 3 },
+              extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: [] } },
+              extensionsExists: false,
+              agent: [
+                { id: 'persona', name: '@deepseek-ai/dsh-persona' },
+                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: {} },
+              ],
+              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n  config: {}\n',
+              validation: { ok: true, rows: 2 },
               backups: [],
             },
           });
@@ -932,23 +964,25 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             });
           }
           case '/api/preset/sim-prompt': {
-            const preset = url.searchParams.get('preset') === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            const preset = String(url.searchParams.get('preset') || 'qq-chat-v2');
+            const content = state.simPrompts[preset] ?? '';
+            const initial = state.simDefaults[preset];
             return json({
               ok: true,
-              content: state.simPrompts[preset],
-              chars: state.simPrompts[preset].length,
-              bytes: Buffer.byteLength(state.simPrompts[preset], 'utf8'),
+              content,
+              chars: content.length,
+              bytes: Buffer.byteLength(content, 'utf8'),
               warnings: [],
               status: presetStatusFixture(preset),
               presets: [presetStatusFixture('qq-chat'), presetStatusFixture('qq-chat-v2')],
-              hasDefault: true,
-              modified: state.simPrompts[preset] !== state.simDefaults[preset],
-              defaultContent: state.simDefaults[preset],
-              defaultChars: state.simDefaults[preset].length,
+              hasDefault: initial !== undefined,
+              modified: content !== (initial ?? ''),
+              defaultContent: initial ?? '',
+              defaultChars: (initial ?? '').length,
             });
           }
           case '/api/preset/sim-prompt/backups': {
-            const preset = url.searchParams.get('preset') === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            const preset = String(url.searchParams.get('preset') || 'qq-chat-v2');
             return json({ ok: true, backups: [{ file: `${preset}.agent.cordis.yml.fixture`, mtime: Date.parse(timestamp) }] });
           }
           case '/api/dsh/model': {
@@ -1166,19 +1200,19 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           }
           case '/api/roles/limit': state.roleInjectMax = Number(body.maxInjectChars) || state.roleInjectMax; return json({ ok: true, maxInjectChars: state.roleInjectMax, limits: { injectMaxChars: state.roleInjectMax } });
           case '/api/preset/sim-prompt': {
-            const preset = body.preset === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            const preset = String(body.preset || 'qq-chat-v2');
             const content = String(body.content ?? '');
             const unchanged = content === state.simPrompts[preset];
             if (!unchanged) state.simPrompts[preset] = content;
             return json({ ok: true, unchanged, chars: content.length, warnings: [], synced: true, requiresRestart: !unchanged, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/reset': {
-            const preset = body.preset === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            const preset = String(body.preset || 'qq-chat-v2');
             state.simPrompts[preset] = state.simDefaults[preset];
             return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], synced: true, requiresRestart: true, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/restore': {
-            const preset = body.preset === 'qq-chat' ? 'qq-chat' : 'qq-chat-v2';
+            const preset = String(body.preset || 'qq-chat-v2');
             return json({ ok: true, restoredFrom: `${preset}.agent.cordis.yml.fixture`, requiresRestart: true });
           }
           case '/api/dsh/effort': state.dshEffort = body.reasoningEffort; return json({ ok: true, reasoningEffort: body.reasoningEffort });

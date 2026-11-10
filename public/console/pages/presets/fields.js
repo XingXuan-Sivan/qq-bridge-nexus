@@ -73,9 +73,10 @@ export const PRESETS_FIELDS = {
 
       {
         type: 'section',
-        label: '插件配置',
-        hint: 'agent.cordis.yml 全文：直接在编辑器里改，保存时后端会校验语法与必填插件行；保存后仍要「应用并安装」才会进入 DSH。',
+        label: '高级配置',
+        hint: 'agent.cordis.yml 全文（含 persona 提示词，那段也可以在上面的「仿真提示词」卡里改）。平时收起；保存时后端会校验语法与必填插件行，保存后仍要「应用并安装」才会进入 DSH。',
         card: true,
+        collapsed: true,
       },
       {
         name: 'presetAgentYamlHead',

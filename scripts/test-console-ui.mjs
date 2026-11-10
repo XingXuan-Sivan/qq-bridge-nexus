@@ -265,11 +265,23 @@ try {
     await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
     await page.waitForFunction(() => !document.getElementById('presetEditor').hidden);
     assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
-    // 插件配置不再是逐项表单：整份 agent.cordis.yml 进代码编辑器，保存走 PUT …/yaml。
+    // 插件配置不再是逐项表单：整份 agent.cordis.yml 进代码编辑器（「高级配置」是默认折叠的卡），保存走 PUT …/yaml。
+    const advancedOpen = await page.evaluate(() => {
+      const sec = [...document.querySelectorAll('.preset-edit-fields section.card')]
+        .find((s) => s.textContent.includes('高级配置'));
+      return sec?.querySelector('details')?.open;
+    });
+    assert.equal(advancedOpen, false, '「高级配置」应默认折叠');
     await page.waitForSelector('#presetAgentYamlText', { state: 'attached' });
     const yamlText = await page.evaluate(() => document.getElementById('presetAgentYamlText').value);
     assert.match(yamlText, /tool-web/, '插件配置编辑器应载入 agent.cordis.yml');
-    assert.match(await page.locator('#presetAgentYamlStatus').innerText(), /插件行/);
+    const yamlStatus = await page.evaluate(() => document.getElementById('presetAgentYamlStatus')?.textContent ?? '');
+    assert.match(yamlStatus, /插件行/);
+    await page.evaluate(() => {
+      const sec = [...document.querySelectorAll('.preset-edit-fields section.card')]
+        .find((s) => s.textContent.includes('高级配置'));
+      sec.querySelector('details').open = true;
+    });
     await page.click('#agentYamlEdit');
     await page.evaluate(() => {
       const area = document.getElementById('presetAgentYamlText');
@@ -280,11 +292,38 @@ try {
     // 新建预设：工具栏按钮打开弹窗，复制 qq-chat-v2。
     await page.click('#presetNewOpen');
     await page.waitForSelector('#presetCreateModal.open');
-    assert.equal(await page.locator('#presetList [data-preset-act="delete"]').count(), 0, '系统自带预设不应有删除按钮');
+    assert.equal(
+      await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="delete"]').count(),
+      0,
+      '系统自带预设不应有删除按钮',
+    );
+    assert.equal(
+      await page.locator('#presetList tbody tr', { hasText: 'demo-agent' }).locator('[data-preset-act="delete"]').count(),
+      1,
+      '自建预设应有删除按钮',
+    );
     await page.fill('#presetNewId', 'ui-copy');
     await page.selectOption('#presetNewFrom', 'qq-chat-v2');
     const created = await clickWrite('#presetNewCreate', '/api/extensions/presets/create');
     assert.equal(created.id, 'ui-copy');
+  });
+
+  await test('Preset prompt editor opens for presets with an empty persona prompt', async () => {
+    // qq-agent-* 与自建预设的 persona.prefix 可能为空：提示词卡不能被隐藏，编辑器要能载入与保存。
+    await page.locator('#presetList tbody tr', { hasText: 'demo-agent' }).locator('[data-preset-act="edit"]').click();
+    await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
+    await page.waitForFunction(() => document.getElementById('presetPrompt').dataset.preset === 'demo-agent');
+    const status = await page.locator('#presetPromptStatus').innerText();
+    assert.match(status, /0 字符/);
+    assert.match(status, /预设提示词/);
+    await page.click('#simPromptEdit');
+    await page.evaluate(() => {
+      const area = document.getElementById('simPromptText');
+      area._codeEditorHandle.setValue('空白预设的新提示词');
+    });
+    const saved = await clickWrite('#simPromptSave', '/api/preset/sim-prompt', 'POST');
+    assert.equal(saved.content, '空白预设的新提示词');
+    await page.click('#presetCancelEdit');
   });
 
   await test('Global config renders field rows with aligned labels', async () => {

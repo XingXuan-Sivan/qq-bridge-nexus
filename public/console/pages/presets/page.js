@@ -330,7 +330,7 @@ function setField(name, value) {
 
 // ── 仿真提示词（预设内置 persona.prefix；保存后需重启 DSH）────────────────
 // 从人格页搬过来：它属于预设而不是人格，放在 YAML 高级编辑上方，改的是同一份源文件。
-const PROMPT_PRESETS = new Set(['qq-chat', 'qq-chat-v2']);
+// 所有预设都能编辑（qq-agent-* 与自建预设的 persona.prefix 可能很短甚至是空的）。
 let promptEditor = null;
 let promptPreset = '';
 let promptOriginal = '';
@@ -360,20 +360,21 @@ function mountPromptEditor() {
 async function refreshPresetPrompt(id) {
   const card = promptEl('presetPrompt');
   if (!card) return;
-  const supported = PROMPT_PRESETS.has(id);
-  card.hidden = !supported;
-  if (!supported) { promptPreset = ''; delete card.dataset.preset; return; }
+  if (!id) { card.hidden = true; promptPreset = ''; delete card.dataset.preset; return; }
+  card.hidden = false;
   promptPreset = id;
   setPromptMsg('读取中…');
   try {
     const r = await api('/api/preset/sim-prompt?preset=' + encodeURIComponent(id));
+    // 连续点不同预设时，慢的响应不能覆盖后选中的那个。
+    if (promptPreset !== id) return;
     if (!r.ok) { setPromptMsg(r.error || '读取失败', 'err'); return; }
     promptOriginal = r.content ?? '';
     promptEditor?.setValue(promptOriginal);
     setPromptEditing(false);
     setPromptMsg('');
     promptEl('presetPromptStatus').textContent =
-      `${r.chars} 字符 · ${r.status?.installed ? '已同步到 DSH' : '尚未同步到 DSH'}`
+      `${r.status?.label ?? '预设'} · ${r.chars} 字符 · ${r.status?.installed ? '已同步到 DSH' : '尚未同步到 DSH'}`
       + (r.hasDefault && !r.modified ? ' · 初始版本' : '');
     promptEl('simPromptWarnings').textContent = (r.warnings ?? []).length
       ? '⚠️ ' + r.warnings.join('；') : '';

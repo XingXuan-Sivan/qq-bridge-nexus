@@ -11,7 +11,7 @@ import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { extractPresetPrefix, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
+import { extractPresetPrefix, locatePresetPromptBlock, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
 import { defaultPromptState, readDefaultPrompt } from './preset-defaults.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
@@ -621,18 +621,30 @@ const PRESET_BACKUP_DIR = path.join(STATE_DIR, 'preset-backups');
 const PRESET_BACKUP_KEEP = 10;
 
 /**
- * 控制台的 preset 参数校验：只接受本项目这两个预置名（缺省 = 二代）。
+ * 控制台的 preset 参数校验：接受任一**确实存在的**预设目录（缺省 = 二代）。
  *
- * 为什么必须在拼路径**之前**校验：main() 里的 resolvePresetName() 在「DSH preset 清单为空」
- * （DSH 还没连上 / 正在启动）时会把调用方给的字符串**原样返回**。那四个 preset 控制台路由
- * 都拿它去 path.join(ROOT, 'dsh', 'agent-presets', name, 'agent.cordis.yml')，
- * 于是 `preset=..\..\..\x` 会读写/备份 <x>/agent.cordis.yml，越出仓库。
+ * 早先只允许 qq-chat / qq-chat-v2，导致 qq-agent-* 与自建预设的提示词卡被前端直接隐藏。
+ * 现在改为「目录里真的有 agent.cordis.yml」才算数，既支持所有预设，又挡住了路径穿越：
+ * 名字必须是 [a-z0-9-] 且解析后的文件必须落在 dsh/agent-presets 下。
  * 返回 null 由调用方回 400。
  */
-function knownPresetName(raw) {
+const PRESET_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+function editablePresetName(raw) {
   const name = String(raw ?? '').trim();
   if (!name) return PRESET_NAMES.v2;
-  return Object.values(PRESET_NAMES).includes(name) ? name : null;
+  if (!PRESET_ID_RE.test(name)) return null;
+  const dir = path.resolve(ROOT, 'dsh', 'agent-presets');
+  const file = path.resolve(dir, name, 'agent.cordis.yml');
+  if (!file.startsWith(dir + path.sep)) return null;
+  return fs.existsSync(file) ? name : null;
+}
+
+/** 预设代次：两个内置仿真预设之外的一律按「generic」处理（不做仿真不变量校验）。 */
+function presetKind(name) {
+  if (name === PRESET_NAMES.v1) return 'v1';
+  if (name === PRESET_NAMES.v2) return 'v2';
+  return 'generic';
 }
 
 function presetSourceYaml(name) {
@@ -658,9 +670,11 @@ function readPresetPromptText(name) {
   const file = presetSourceYaml(name);
   if (!fs.existsSync(file)) throw new Error(`找不到预设文件 ${path.relative(ROOT, file)}`);
   const text = fs.readFileSync(file, 'utf8');
+  // prefix 缺省（或写成 prefix: ''）的预设也要能打开编辑器：当成空提示词，保存时
+  // renderPresetPromptYaml 会按 locator 的 insert 模式把 prefix: |- 补进 persona 条目。
+  if (!locatePresetPromptBlock(text)) throw new Error('预设里找不到 persona 插件行（结构可能已变化）');
   const prefix = extractPresetPrefix(text);
-  if (prefix === null) throw new Error('预设里找不到 persona.prefix（结构可能已变化）');
-  return { text, prefix };
+  return { text, prefix: prefix ?? '' };
 }
 
 // 备份文件名带上预设名：两个预设的主文件名都叫 agent.cordis.yml，
@@ -699,9 +713,10 @@ function listPresetBackups(name) {
 function presetStatus(name) {
   // 只回传控制台需要的信息：不回传 DSH_HOME / 安装副本的绝对路径，减少无谓的信息暴露
   // （路径已经写在服务端日志里，排查时看日志即可）。
+  const kind = presetKind(name);
   return {
     preset: name,
-    label: name === PRESET_NAMES.v1 ? '一代仿真（reserved）' : '二代仿真（reserved2）',
+    label: kind === 'v1' ? '一代仿真（reserved）' : kind === 'v2' ? '二代仿真（reserved2）' : '预设提示词',
     sourceFile: path.relative(ROOT, presetSourceYaml(name)),
     installed: fs.existsSync(installedPresetYaml(name)),
     requiresRestart: true,
@@ -6468,8 +6483,8 @@ async function main() {
 
         // ── 仿真提示词（一代 / 二代各自的预设内置提示词）──────────────────────
         if (req.method === 'GET' && url.pathname === '/api/preset/sim-prompt') {
-          const preset = knownPresetName(url.searchParams.get('preset'));
-          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const preset = editablePresetName(url.searchParams.get('preset'));
+          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
           try {
             const { prefix } = readPresetPromptText(preset);
             const initial = defaultPromptState(preset, prefix);
@@ -6478,7 +6493,7 @@ async function main() {
               content: prefix,
               chars: prefix.length,
               bytes: Buffer.byteLength(prefix, 'utf8'),
-              warnings: presetPromptWarnings(prefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2'),
+              warnings: presetPromptWarnings(prefix, presetKind(preset)),
               status: presetStatus(preset),
               presets: Object.values(PRESET_NAMES).map((n) => presetStatus(n)),
               // 初始版本：控制台用它做「已还原 / 已修改」判断与一键还原。
@@ -6494,8 +6509,8 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt') {
           const body = await readBody();
-          const preset = knownPresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const preset = editablePresetName(body.preset);
+          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
           let nextText;
           try {
             const { text, prefix } = readPresetPromptText(preset);
@@ -6503,15 +6518,15 @@ async function main() {
             // 让一次"打开又保存"把整个提示词块变成全删全加的 diff，失去可复审性。
             const normalized = String(body.content ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
             if (normalized === prefix) {
-              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2'), synced: fs.existsSync(installedPresetYaml(preset)), requiresRestart: false, status: presetStatus(preset) });
+              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix, presetKind(preset)), synced: fs.existsSync(installedPresetYaml(preset)), requiresRestart: false, status: presetStatus(preset) });
               return;
             }
-            nextText = renderPresetPromptYaml(text, body.content, preset === PRESET_NAMES.v1 ? 'v1' : 'v2');
+            nextText = renderPresetPromptYaml(text, body.content, presetKind(preset));
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '校验失败' }, 400);
             return;
           }
-          const warnings = presetPromptWarnings(body.content, preset === PRESET_NAMES.v1 ? 'v1' : 'v2');
+          const warnings = presetPromptWarnings(body.content, presetKind(preset));
           let sourceBackup = null;
           try {
             sourceBackup = backupPresetFile(preset);
@@ -6544,11 +6559,11 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt/reset') {
           const body = await readBody();
-          const preset = knownPresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const preset = editablePresetName(body.preset);
+          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
           const initial = readDefaultPrompt(preset);
           if (initial === null) { sendJson({ ok: false, error: '这个预设没有内置的初始版本' }, 404); return; }
-          const side = preset === PRESET_NAMES.v1 ? 'v1' : 'v2';
+          const side = presetKind(preset);
           let nextText;
           let warnings;
           try {
@@ -6585,8 +6600,8 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/preset/sim-prompt/backups') {
-          const preset = knownPresetName(url.searchParams.get('preset'));
-          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const preset = editablePresetName(url.searchParams.get('preset'));
+          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
           try {
             sendJson({ ok: true, backups: listPresetBackups(preset) });
           } catch (error) {
@@ -6596,8 +6611,8 @@ async function main() {
         }
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt/restore') {
           const body = await readBody();
-          const preset = knownPresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（只支持 ${Object.values(PRESET_NAMES).join(' / ')}）` }, 400); return; }
+          const preset = editablePresetName(body.preset);
+          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
           try {
             const requested = String(body.file ?? '').trim();
             const candidates = listPresetBackups(preset).map((b) => b.file);
@@ -6611,7 +6626,7 @@ async function main() {
             // 还原路径必须与保存路径同样严格：旧备份可能来自安全基线加入之前，
             // 直接还原会把弱化版提示词（缺「你没有本地工具」等不变量）写回去。
             // 不变量清单**按预设取**：一代本来就没有「你没有本地工具」这类工具面表述。
-            const blockers = presetPromptBlockers(restoredPrefix, preset === PRESET_NAMES.v1 ? 'v1' : 'v2');
+            const blockers = presetPromptBlockers(restoredPrefix, presetKind(preset));
             if (blockers.length) {
               sendJson({ ok: false, error: `该备份不满足当前的安全不变量，拒绝还原：${blockers.join('；')}` }, 400);
               return;

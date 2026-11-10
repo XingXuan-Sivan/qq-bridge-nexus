@@ -69,15 +69,6 @@ export const SCHED_FIELDS = {
       },
     ],
   },
-  listActions: {
-    fields: [
-      {
-        type: 'action',
-        items: [{ id: 'schedNew', label: '＋ 新建任务', variant: 'primary', small: true }],
-        status: 'schedCount',
-      },
-    ],
-  },
   taskList: {
     fields: [{ name: 'schedListSlot', type: 'custom', span: 2, html: '<div id="schedList" class="data-slot"></div>' }],
   },

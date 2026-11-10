@@ -114,25 +114,7 @@
 .mcp-tools {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
-}
-.mcp-tools-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.mcp-tools-head h4 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-.mcp-tools-head .search-input {
-  flex: 0 1 260px;
-  max-width: 260px;
 }
 .mcp-tool-list {
   display: flex;

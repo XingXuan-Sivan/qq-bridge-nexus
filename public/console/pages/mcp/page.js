@@ -7,7 +7,7 @@ import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../componen
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { dataTableHtml, initDataTables, tableToolbarHtml } from '../../components/table/table.js';
 import { MCP_FIELDS } from './fields.js';
 import { renderTerminalLines, terminalHtml, textToLines } from '../../components/terminal/terminal.js';
 
@@ -89,36 +89,51 @@ function toolbarMarkup(servers, summary) {
   const toolCount = Number(summary.tools) || servers.reduce((sum, server) => sum + (Number(server.toolCount) || (server.tools ?? []).length), 0);
   const errors = Number(summary.errors) || servers.filter((server) => server.status === 'error').length;
   const warning = errors ? `<span class="pill r" title="部分 server 连接失败；打开详情可查看原因">${errors} 个读取失败</span>` : '';
-  return `<div class="table-toolbar">
-    <div class="table-toolbar-main">
-      <input id="mcpServerSearch" class="search-input" type="search" placeholder="搜索服务器、工具、说明…" aria-label="搜索 MCP 服务器">
-      <select id="mcpFilterSource" class="u-w-190" aria-label="按来源筛选">
-        <option value="all">全部来源</option><option value="builtin">内置</option><option value="external">外部</option>
-      </select>
-      <select id="mcpFilterStatus" class="u-w-190" aria-label="按状态筛选">
-        <option value="all">全部状态</option><option value="running">在线</option><option value="error">读取失败</option><option value="stopped">已停止</option>
-      </select>
-    </div>
-    <div class="table-toolbar-side">
-      <span class="meta" id="mcpSummary">${servers.length} 个 server · ${toolCount} 个工具 · ${MCP_STATE.skills} 个技能</span>
-      ${warning}
-      <button class="btn small" type="button" data-mcp-refresh>刷新</button>
-      <button class="btn primary" type="button" data-mcp-new>新增 MCP</button>
-    </div>
-  </div>`;
+  return tableToolbarHtml({
+    refresh: true,
+    filters: [
+      {
+        id: 'mcpFilterSource',
+        domId: 'mcpFilterSource',
+        label: '按来源筛选',
+        value: MCP_STATE.source,
+        options: [
+          { value: 'all', label: '全部来源' },
+          { value: 'builtin', label: '内置' },
+          { value: 'external', label: '外部' },
+        ],
+      },
+      {
+        id: 'mcpFilterStatus',
+        domId: 'mcpFilterStatus',
+        label: '按状态筛选',
+        value: MCP_STATE.status,
+        options: [
+          { value: 'all', label: '全部状态' },
+          { value: 'running', label: '在线' },
+          { value: 'error', label: '读取失败' },
+          { value: 'stopped', label: '已停止' },
+        ],
+      },
+    ],
+    search: { id: 'mcpServerSearch', placeholder: '搜索服务器、工具、说明…', value: MCP_STATE.query },
+    meta: `${servers.length} 个 server · ${toolCount} 个工具 · ${MCP_STATE.skills} 个技能`,
+    metaId: 'mcpSummary',
+    actions: `${warning}<button class="btn primary" type="button" data-mcp-new>新增 MCP</button>`,
+  });
 }
 
 function detailMarkup(server) {
   if (!server) return '<div class="split-empty">从左侧选一个 server 查看工具清单</div>';
   const tools = Array.isArray(server.tools) ? server.tools : [];
   const external = server.source === 'external';
-  const description = server.status === 'error' ? (server.error || '读取失败') : (server.note || server.description || '');
+  const description = server.status === 'error' ? (server.error || '读取失败') : (server.description || '');
   const actions = external
     ? `<button class="btn small" type="button" data-mcp-act="edit" data-id="${esc(server.id)}">编辑</button>
        <button class="btn small" type="button" data-mcp-act="test" data-id="${esc(server.id)}">测试</button>
        <button class="btn small" type="button" data-mcp-act="logs" data-id="${esc(server.id)}">日志</button>
        <button class="btn small danger" type="button" data-mcp-act="delete" data-id="${esc(server.id)}">删除</button>`
-    : '<span class="meta">内置 server 由桥接仓库提供，不能在这里修改。</span>';
+    : '';
   const toolRows = tools.map((tool) => ({
     cells: [
       `<code>${esc(toolName(tool))}</code>`,
@@ -492,7 +507,7 @@ export function init() {
       openEditor('').catch(() => {});
       return;
     }
-    if (target.closest('[data-mcp-refresh]')) {
+    if (target.closest('[data-mcp-refresh]') || target.closest('[data-table-refresh]')) {
       refreshMcp(true).catch(() => {});
       return;
     }

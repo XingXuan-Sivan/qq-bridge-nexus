@@ -130,7 +130,7 @@ test('③ 控制台：人格页把「恢复初始」并入列表行操作', () =
   // P3：不再有独立的「恢复默认人格」分组，改为每张人格卡上的「恢复初始」。
   assert.doesNotMatch(html, /roleDefaultsList/);
   assert.doesNotMatch(html, /<summary>恢复默认人格<\/summary>/);
-  assert.match(html, /data-persona-fields="toolbar"/);
+  assert.match(html, /id="roleToolbar"/);
   assert.match(html, /data-act="restore"/);
   assert.match(html, /\/api\/roles\/restore-default/);
 });

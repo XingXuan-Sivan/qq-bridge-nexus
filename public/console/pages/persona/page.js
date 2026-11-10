@@ -1,12 +1,11 @@
 // 人格与角色页：内部卡（roles/*.md）与外部 provider 卡合成一面卡片墙；
-// 编辑走弹窗（人格名 + 提示词编辑器），配置项放在「人格提示词配置」卡里。
-import { renderFields } from '../../components/form/form.js';
+// 编辑走弹窗（人格名 + 提示词编辑器），注入上限与生效方式在「全局配置 › 人格与行为」。
+import { tableToolbarHtml } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
-import { PERSONA_FIELDS } from './fields.js';
 
 const model = { items: [], providers: [], providerErrors: {}, default: null, limits: null };
 let roleFilter = 'all';
@@ -48,12 +47,15 @@ function badgesHtml(item) {
 function actionsHtml(item) {
   const caps = item.capabilities ?? {};
   const canDelete = item.source === 'local' ? Boolean(item.deletable) : Boolean(caps.remove);
+  const deleteTitle = canDelete ? '删除这张人格卡'
+    : (item.source === 'local' ? '内置人格不能删除，可点「重置」恢复出厂' : `${item.provider ?? '外部服务'} 还没有实现删除`);
   return `
     <div class="tile-actions">
-      ${item.default ? '' : `<button class="btn small" type="button" data-act="default" data-uid="${esc(item.uid)}">设为默认</button>`}
+      <button class="btn small" type="button" data-act="edit" data-uid="${esc(item.uid)}">编辑</button>
+      <button class="btn small" type="button" data-act="default" data-uid="${esc(item.uid)}"${item.default ? ' disabled title="当前就是默认人格"' : ''}>设为默认</button>
       ${item.source === 'provider' ? `<button class="btn small" type="button" data-act="save-as" data-uid="${esc(item.uid)}">另存为内部</button>` : ''}
       ${item.resettable ? `<button class="btn small" type="button" data-act="restore" data-uid="${esc(item.uid)}">重置</button>` : ''}
-      ${canDelete ? `<button class="btn small danger" type="button" data-act="delete" data-uid="${esc(item.uid)}">删除</button>` : ''}
+      <button class="btn small danger" type="button" data-act="delete" data-uid="${esc(item.uid)}"${canDelete ? '' : ' disabled'} title="${esc(deleteTitle)}">删除</button>
     </div>`;
 }
 
@@ -62,8 +64,8 @@ function cardHtml(item) {
     ? `${item.chars ?? 0} 字符`
     : `${item.chars ?? '—'} 字符 · ${esc(item.description || '外部人格卡')}`;
   return `
-    <div class="tile${item.default ? ' active' : ''}" data-uid="${esc(item.uid)}">
-      <button class="tile-body" type="button" data-act="edit" data-uid="${esc(item.uid)}">
+    <div class="tile" data-uid="${esc(item.uid)}">
+      <button class="tile-body" type="button" data-open="1" data-uid="${esc(item.uid)}">
         <div class="tile-head"><strong>${esc(item.name)}</strong>${badgesHtml(item)}</div>
         <small>${sub}</small>
       </button>
@@ -331,9 +333,40 @@ async function deleteCard(uid) {
   }
 }
 
+/** 工具栏统一由表格组件生成（与预设/定时任务页同一套控件与顺序）。 */
+function renderToolbar() {
+  const host = document.getElementById('roleToolbar');
+  if (!host) return;
+  host.innerHTML = tableToolbarHtml({
+    refresh: true,
+    filters: [{
+      id: 'roleFilter',
+      domId: 'roleFilter',
+      label: '按来源筛选',
+      value: roleFilter,
+      options: [
+        { value: 'all', label: '全部人格' },
+        { value: 'local', label: '内部人格' },
+        { value: 'provider', label: '外部人格' },
+        { value: 'cached', label: '仅缓存' },
+      ],
+    }],
+    search: { id: 'roleSearch', placeholder: '搜索人格名或说明…', value: roleQuery },
+    meta: '共 0 张',
+    metaId: 'roleListHint',
+    actions: '<button class="btn primary" id="roleNew" type="button">新建人格</button>',
+  });
+}
+
 function bind() {
   const root = document.getElementById('roleList');
   root?.addEventListener('click', (e) => {
+    const body = e.target.closest('[data-open]');
+    if (body) {
+      const item = model.items.find((entry) => entry.uid === body.dataset.uid) ?? null;
+      void openEditor(item);
+      return;
+    }
     const button = e.target.closest('[data-act]');
     if (!button) return;
     const uid = button.dataset.uid;
@@ -349,21 +382,25 @@ function bind() {
       default: break;
     }
   });
-  document.getElementById('roleSearch')?.addEventListener('input', (e) => {
+  const toolbar = document.getElementById('roleToolbar');
+  toolbar?.addEventListener('input', (e) => {
+    if (!e.target.closest('#roleSearch')) return;
     roleQuery = e.target.value;
     renderRoleList();
   });
-  document.getElementById('roleFilter')?.addEventListener('change', (e) => {
+  toolbar?.addEventListener('change', (e) => {
+    if (!e.target.closest('#roleFilter')) return;
     roleFilter = e.target.value;
     renderRoleList();
   });
-  document.getElementById('roleRefresh')?.addEventListener('click', () => { void refresh(); });
-  document.getElementById('roleNew')?.addEventListener('click', () => { void openEditor(null); });
+  toolbar?.addEventListener('click', (e) => {
+    if (e.target.closest('#roleNew')) { void openEditor(null); return; }
+    if (e.target.closest('[data-table-refresh]')) void refresh();
+  });
 }
 
 export function init() {
-  const toolbar = document.querySelector('[data-persona-fields="toolbar"]');
-  if (toolbar) renderFields(toolbar, PERSONA_FIELDS.toolbar.fields, { layout: 'inline' });
+  renderToolbar();
   bind();
   void refresh();
   onPageRefresh('persona', () => { void refresh(); });

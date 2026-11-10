@@ -438,3 +438,16 @@ npm run test:console-ui
 **验收**：`node --check` 对 `src/bridge.js`、`src/plugins/{persona,kernel}.mjs`、`plugins/soulkit-persona/index.mjs`、人格/配置/MCP 页全部通过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**（契约只改 2 条：人格创建不再自带 `apply`、设默认从 `/api/config/role-default` 改为 `/api/personas/default`）；真机（3111）核对：人格列表 5 张（本地 3 + `soulkit:saren` / `soulkit:succubus`），默认「星苒」，外部卡的 `pill` 与插件卡一致；全局配置「人格提示词」两项同卡保存；MCP 弹窗底栏顺序、代码编辑器、无「工具 N」小节均符合预期；无 console 错误。
 
 **已知限制**：soulkit 按约定不实现删除与重命名，对应按钮在能力位里标 `false`（前端隐藏）；外部卡只有在被默认或会话引用过之后才有缓存，从未用过的卡在服务离线时不会出现在列表里；缓存目前不自动回收（引用改回本地后旧缓存仍留在 `state/persona-cache/`，可手动清理）；`soulkit` 仓库的改动单独提交，其工作树本来就有其它未提交内容。
+
+### 6.29 第十一批：工具栏与同类控件统一（2026-11-10）
+
+1. **工具栏组件化**：`components/table/table.js` 新增导出 `tableToolbarHtml({refresh,filters,search,meta,metaId,actions})`，`dataTableHtml` 改为调用它；布局固定为「左侧刷新 / 筛选 / 搜索，右侧统计与主操作」。筛选的 DOM id 只认 `filter.domId`，避免 sessions / memory 两页的 `platform`、`kind` 撞车。
+2. **人格页**：删掉 `pages/persona/fields.js`，工具栏改由 `tableToolbarHtml` 生成（刷新 / 全部人格 / 搜索 … 统计 / 新建人格），与预设页同序；卡片操作统一为「编辑 / 设为默认 / 另存为内部 / 重置 / 删除」，默认卡只保留 `默认` 标签、不再加高亮底色；能力位不支持的动作渲染成 `disabled` + `title`，不再隐藏。
+3. **MCP 页**：顶层工具栏改用 `tableToolbarHtml`；工具列表改用 `dataTableHtml` 自带的搜索/统计工具栏，删掉页面自拼的「筛选工具名 + 共 N 个」那条；内置 server 不再显示「由桥接仓库提供」说明，描述不再回退到 `note`（去掉「SnowLuma 网关状态，只读」）。
+4. **定时任务页**：新建按钮从卡片头移进表格工具栏的 `actions`，空表也渲染表格（空状态走 `empty` 文案），卡片外不再有游离按钮。
+5. **全局配置**：默认行为档案、默认人格、人格提示词三张卡合并为「人格与行为」，删掉与字段 hint 重复的说明段落；「默认人格」下拉改读 `GET /api/personas`，本地卡与外部卡都可直接选（外部写 `provider:id`），当前值不在列表时补一个同名选项，避免显示成「不挂人格卡」。
+6. **踩坑记录**：`docs/CONSOLE_FORM_LESSONS.md` 追加 1.70–1.73（工具栏必须复用表格组件、同类控件位置同序、未实现按钮置灰而非隐藏、合并卡片不重复说明）。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**；真机（3111，Edge）逐页截图核对：人格页工具栏与预设页同序、卡片按钮排齐且默认卡无特殊底色，定时任务页工具栏为「刷新 · 1 / 20 · ＋ 新建任务」且 `#schedNew` 在 `.table-toolbar` 内，全局配置只剩「人格与行为」一张卡且默认人格正确显示「星苒-内部」，MCP 页无只读说明、工具表使用自带工具栏；无 console 错误。
+
+**已知限制**：MCP 页首次进入需要等 `/api/extensions/mcp` 与工具清单返回，数据量大时会有几秒「加载中…」；外部人格的「编辑」目前只能改提示词正文，重命名仍受 provider 能力位限制。

@@ -55,9 +55,9 @@ console.log('## JS 语法');
 }
 
 console.log('## 人格列表：工具栏 + 行内操作（P3）');
-ok(/data-persona-fields="toolbar"/.test(html), '列表卡顶部挂了工具栏槽位');
-ok(/id="roleSearch"/.test(html) && /id="roleFilter"/.test(html) && /id="roleNew"/.test(html), '工具栏含搜索 / 筛选 / 新建');
-ok(/data-act="default"/.test(html) && /data-act="restore"/.test(html), '行内操作：设为默认 / 重置');
+ok(/id="roleToolbar"/.test(html), '列表卡顶部挂了工具栏宿主');
+ok(/tableToolbarHtml\(/.test(html) && /id: 'roleSearch'/.test(html) && /id: 'roleFilter'/.test(html) && /id="roleNew"/.test(html), '工具栏由表格组件生成（搜索 / 筛选 / 新建）');
+ok(/data-act="default"/.test(html) && /data-act="restore"/.test(html) && /data-act="delete"/.test(html), '行内操作：设为默认 / 重置 / 删除');
 ok(/function renderRoleList\(\)/.test(html), 'renderRoleList 已定义');
 ok(/roleFilter === 'local'/.test(html) && /roleFilter === 'provider'/.test(html) && /roleFilter === 'cached'/.test(html), '筛选区分内部 / 外部 / 缓存');
 ok(/roleQuery = e\.target\.value/.test(html), '搜索输入实时过滤');

@@ -122,6 +122,41 @@ function pagerHtml(page, pages) {
 }
 
 /**
+ * 表格工具栏：刷新 / 筛选 / 搜索在左，统计与动作在右。
+ * 单独导出是给「不是表格、但要有同款工具栏」的页面用（人格卡片墙等），
+ * 避免各页手写 input/select 导致顺序、控件样式各写一套。
+ *
+ * @param {object} [options]
+ * @param {boolean} [options.refresh] 渲染「刷新」按钮（点击回调由页面接 `[data-table-refresh]`）
+ * @param {Array<{id?:string,label:string,options:Array<{value:string,label:string}>,value?:string}>} [options.filters]
+ * @param {{placeholder?:string,id?:string,value?:string}} [options.search]
+ * @param {string} [options.meta] 右侧统计文案
+ * @param {string} [options.metaId] 统计文案的 id（需要动态改文案时用）
+ * @param {string} [options.actions] 右侧动作按钮 HTML
+ */
+export function tableToolbarHtml({ refresh = false, filters = [], search = null, meta = '', metaId = '', actions = '' } = {}) {
+  const hasToolbar = Boolean(search || refresh || filters.length || meta || actions);
+  if (!hasToolbar) return '';
+  const filterHtml = filters.map((filter) => `<select class="table-filter"${filter.domId ? ` id="${esc(filter.domId)}"` : ''} data-filter="${esc(filter.id || filter.label)}" aria-label="${esc(filter.label)}">`
+    + filter.options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === String(filter.value ?? '') ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
+    + '</select>').join('');
+  const searchHtml = search
+    ? `<input type="search" class="search-box search-box--w240"${search.id ? ` id="${esc(search.id)}"` : ''} data-table-search${search.value ? ` value="${esc(search.value)}"` : ''} placeholder="${esc(search.placeholder || '搜索…')}" aria-label="${esc(search.placeholder || '搜索')}">`
+    : '';
+  return `<div class="table-toolbar">
+    <div class="table-toolbar-main">
+      ${refresh ? '<button type="button" class="btn" data-table-refresh>刷新</button>' : ''}
+      ${filterHtml}
+      ${searchHtml}
+    </div>
+    <div class="table-toolbar-side">
+      ${meta ? `<span class="table-toolbar-meta"${metaId ? ` id="${esc(metaId)}"` : ''} data-table-meta data-table-meta-fixed>${esc(meta)}</span>` : ''}
+      ${actions}
+    </div>
+  </div>`;
+}
+
+/**
  * 完整表格骨架：工具栏（刷新 / 筛选 / 搜索 / 统计）+ 表体 + 分页。
  * 传 `pager: false` 时不渲染分页（短表、或只需要表体）。
  *
@@ -155,23 +190,7 @@ export function dataTableHtml({
   pager = true,
   select = null,
 }) {
-  const hasToolbar = Boolean(search || refresh || filters.length || meta || actions);
-  const filterHtml = filters.map((filter) => `<select class="table-filter" data-filter="${esc(filter.id)}" aria-label="${esc(filter.label)}">`
-    + filter.options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === String(filter.value ?? '') ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
-    + '</select>').join('');
-  const toolbar = hasToolbar
-    ? `<div class="table-toolbar">
-    <div class="table-toolbar-main">
-      ${refresh ? '<button type="button" class="btn" data-table-refresh>刷新</button>' : ''}
-      ${filterHtml}
-      ${search ? `<input type="search" class="search-box search-box--w240" data-table-search placeholder="${esc(search.placeholder || '搜索…')}" aria-label="${esc(search.placeholder || '搜索')}">` : ''}
-    </div>
-    <div class="table-toolbar-side">
-      ${meta ? `<span class="table-toolbar-meta" data-table-meta data-table-meta-fixed>${esc(meta)}</span>` : ''}
-      ${actions}
-    </div>
-  </div>`
-    : '';
+  const toolbar = tableToolbarHtml({ refresh, filters, search, meta, actions });
   const footer = pager
     ? `<div class="table-footer" data-table-footer>
     <span class="table-footer-summary" data-table-summary></span>

@@ -1,4 +1,4 @@
-<!-- 人格与角色页：卡片骨架与说明文字留在这里，所有控件由 fields.js 生成后渲染进 [data-persona-fields]。 -->
+<!-- 人格与角色页：工具栏由表格组件在 page.js 里生成，卡片墙渲染进 #roleList。 -->
 <div class="card span-all">
   <h2>人格与角色</h2>
   <div class="meta">当前人格：<b id="roleText">-</b> <span class="status-badge is-pill" id="roleModeText">读取中…</span></div>
@@ -13,11 +13,7 @@
 </div>
 
 <div class="card span-all">
-  <div class="card-head">
-    <h3>人格列表</h3>
-    <span class="meta" id="roleListHint"></span>
-  </div>
-  <div data-persona-fields="toolbar"></div>
+  <h3>人格列表</h3>
+  <div id="roleToolbar"></div>
   <div id="roleList" class="tile-list">加载中…</div>
 </div>
-

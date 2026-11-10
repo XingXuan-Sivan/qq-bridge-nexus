@@ -72,7 +72,6 @@ function renderScheduler() {
   setSwitch(schedEl('schedQuietEnabled'), st.limits.quietEnabled);
   schedEl('schedQuietStart').value = st.limits.quietStart;
   schedEl('schedQuietEnd').value = st.limits.quietEnd;
-  schedEl('schedCount').textContent = `${r.tasks.length} / ${st.limits.maxTasks}`;
   renderSchedPluginKinds();
   const targetLabel = (k) => (r.targets.find((t) => t.key === k)?.label) || k;
   const taskRows = r.tasks.map((t) => {
@@ -89,16 +88,16 @@ function renderScheduler() {
       `<div class="row-actions"><button type="button" class="btn small" data-sched-run="${t.id}" title="立即执行一次（计入今天的限额）">试发</button><button type="button" class="btn small" data-sched-edit="${t.id}">编辑</button><button type="button" class="btn small danger" data-sched-del="${t.id}">删</button></div>`,
     ];
   });
-  schedEl('schedList').innerHTML = taskRows.length
-    ? dataTableHtml({
-      columns: [{ label: '启用', width: 64 }, { label: '任务' }, { label: '时间', width: 220 }, { label: '发给', width: 160 }, { label: '上次', width: 160 }, { label: '操作', width: 190 }],
-      rows: taskRows,
-      search: { placeholder: '搜索任务名或内容…' },
-      refresh: true,
-      empty: '没有匹配的任务。',
-    })
-    : '<div class="meta">还没有定时任务。点「＋ 新建任务」，或者在管理员私聊里发 /remind 看用法。</div>';
-  if (taskRows.length) initDataTables(schedEl('schedList'), { onRefresh: () => refreshScheduler() });
+  schedEl('schedList').innerHTML = dataTableHtml({
+    columns: [{ label: '启用', width: 64 }, { label: '任务' }, { label: '时间', width: 220 }, { label: '发给', width: 160 }, { label: '上次', width: 160 }, { label: '操作', width: 190 }],
+    rows: taskRows,
+    search: { placeholder: '搜索任务名或内容…' },
+    refresh: true,
+    meta: `${r.tasks.length} / ${st.limits.maxTasks}`,
+    actions: '<button class="btn primary small" type="button" id="schedNew">＋ 新建任务</button>',
+    empty: '还没有定时任务。点「＋ 新建任务」，或者在管理员私聊里发 /remind 看用法。',
+  });
+  initDataTables(schedEl('schedList'), { onRefresh: () => refreshScheduler() });
   const historyRows = r.history.map((h) => {
     const [label, cls] = SCHED_STATUS[h.status] || [h.status, 'pill'];
     const when = new Date(h.at).toLocaleString('zh-CN', { hour12: false, timeZone: st.timezone });
@@ -334,7 +333,10 @@ schedEl('schedEditor').addEventListener('change', (e) => {
   if (e.target.id === 'schedPluginKind') schedSyncKindUi();
   if (e.target.id !== 'schedContent' && e.target.id !== 'schedName') schedPreview();
 });
-schedEl('schedNew').addEventListener('click', () => openSchedEditor(null));
+// 「＋ 新建任务」在表格工具栏里，随每次渲染重建，所以用委托。
+schedEl('schedList').addEventListener('click', (event) => {
+  if (event.target instanceof Element && event.target.closest('#schedNew')) openSchedEditor(null);
+});
 schedEl('schedCancel').addEventListener('click', () => { closeModal(schedEditorOverlay()); schedEditingId = null; });
 schedEl('schedSave').addEventListener('click', async () => {
   const payload = schedPayload();

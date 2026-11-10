@@ -417,7 +417,7 @@ try {
     // 清除默认人格走全局配置页的下拉（空选项 = 不挂人格卡）。
     await navigate('config');
     const roleOptions = await page.$$eval('#roleDefaultSelect option', (els) => els.map((el) => el.textContent));
-    assert.ok(roleOptions.some((text) => text.includes('（外部）')), '默认人格下拉应列出外部人格');
+    assert.ok(roleOptions.some((text) => text.includes('（外部')), '默认人格下拉应列出外部人格');
     await page.selectOption('#roleDefaultSelect', '');
     assert.deepEqual(await saveBarWrite('/api/config/role-default'), { value: '' });
     // 手动静默按钮在总览页；这里只校验表单契约与按钮可用，实际写请求由后端测试覆盖。

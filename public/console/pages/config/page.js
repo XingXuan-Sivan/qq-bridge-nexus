@@ -438,18 +438,34 @@ async function loadPersonaSettings() {
 async function loadRoleDefault() {
   const select = $('roleDefaultSelect');
   if (!select) return;
-  const r = await api('/api/config/role-default');
-  const current = r?.value ?? '';
-  const options = Array.isArray(r?.options) ? r.options : [];
-  const external = Array.isArray(r?.external) ? r.external : [];
+  const [cfg, catalog] = await Promise.all([
+    api('/api/config/role-default'),
+    api('/api/personas').catch(() => null),
+  ]);
+  const current = cfg?.value ?? '';
+  const items = Array.isArray(catalog?.items) ? catalog.items : [];
+  // 统一目录里本地卡的 uid 是 local:<名字>，写回 role.default 只写名字；
+  // 外部卡写 provider:id，注入时读缓存。这样默认人格可以直接选外部卡。
+  const valueOf = (item) => (item.source === 'local' ? item.id : item.uid);
+  const locals = items.filter((item) => item.source === 'local');
+  const providers = items.filter((item) => item.source !== 'local');
+  const options = locals.length
+    ? locals.map((item) => ({ value: valueOf(item), label: item.name }))
+    : (cfg?.options ?? []).map((name) => ({ value: name, label: name }));
+  const externals = providers.length
+    ? providers.map((item) => ({ value: valueOf(item), label: `${item.name}（外部 · ${item.provider}）` }))
+    : (cfg?.external ?? []).map((name) => ({ value: name, label: `${name}（外部）` }));
   select.innerHTML = '<option value="">不挂人格卡</option>'
-    + options.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join('')
-    + (external.length
-      ? '<optgroup label="外部人格（选中后另存为内部人格）">'
-        + external.map((name) => `<option value="${esc(name)}">${esc(name)}（外部）</option>`).join('')
+    + options.map((item) => `<option value="${esc(item.value)}">${esc(item.label)}</option>`).join('')
+    + (externals.length
+      ? '<optgroup label="外部人格">'
+        + externals.map((item) => `<option value="${esc(item.value)}">${esc(item.label)}</option>`).join('')
         + '</optgroup>'
       : '');
-  select.value = options.includes(current) || external.includes(current) ? current : '';
+  if (current && ![...options, ...externals].some((item) => item.value === current)) {
+    select.insertAdjacentHTML('beforeend', `<option value="${esc(current)}">${esc(current)}</option>`);
+  }
+  select.value = current;
 }
 
 const roleDefaultSection = {
@@ -457,7 +473,11 @@ const roleDefaultSection = {
   label: '默认人格',
   read: () => ({ value: $('roleDefaultSelect')?.value ?? '' }),
   save: async (value) => {
-    const r = await api('/api/config/role-default', 'POST', { value: value?.value ?? '' });
+    const next = String(value?.value ?? '').trim();
+    // 外部卡走统一目录接口（带 provider:id），本地卡仍走原来的 role-default。
+    const r = next.includes(':')
+      ? await api('/api/personas/default', 'POST', { uid: next })
+      : await api('/api/config/role-default', 'POST', { value: next });
     if (!r?.ok) return { ok: false, message: r?.error || '保存失败' };
     await loadRoleDefault();
     return { ok: true, message: r.message || '已保存，下一条消息生效' };

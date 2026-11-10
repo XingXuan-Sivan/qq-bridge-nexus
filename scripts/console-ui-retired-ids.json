@@ -153,5 +153,9 @@
     "secSave",
     "roleInput",
     "roleSet",
-    "roleClear"
+    "roleClear",
+    "newRoleName",
+    "newRoleContent",
+    "roleCreate",
+    "roleCreateMsg"
 ]

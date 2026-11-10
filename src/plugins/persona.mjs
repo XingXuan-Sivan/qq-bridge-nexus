@@ -67,6 +67,11 @@ function validateProvider(provider) {
   for (const field of ['perSession', 'conditional', 'listable']) {
     if (typeof caps[field] !== 'boolean') return `provider.capabilities.${field} 必须是布尔值`;
   }
+  // 目录能力（catalog/create/update/rename/remove）是可选的：
+  // 老 provider 不声明就按「只读、不提供 CRUD」处理，不能被判为非法。
+  for (const field of ['catalog', 'create', 'update', 'rename', 'remove']) {
+    if (caps[field] !== undefined && typeof caps[field] !== 'boolean') return `provider.capabilities.${field} 必须是布尔值`;
+  }
   if (typeof provider.get !== 'function') return 'provider.get 必须是函数';
   return null;
 }
@@ -99,6 +104,8 @@ export function createPersonaRegistry({
   const limit = clampNumber(maxEntries, DEFAULT_MAX_ENTRIES, 1, 2000);
 
   let active = null;
+  /** 并列的目录 provider：注入只认 active，列表/读写按 id 分派。 */
+  const catalog = new Map();
   let loaded = false;
   /** @type {Map<string, {state: 'card'|'none', name?: string, text?: string, fingerprint?: string, etag?: string|null, fetchedAt: number, failures: number}>} */
   const entries = new Map();
@@ -241,15 +248,26 @@ export function createPersonaRegistry({
     if (problem) throw new Error(problem);
     if (active) log(`⚠️ 人格 provider "${active.provider.id}" 将被 "${provider.id}" 覆盖（插件 ${pluginId}）`);
     active = { provider, plugin: pluginId };
+    // 目录可以并列多个 provider；注入（get/warm）只认 active。
+    catalog.set(provider.id, { provider, plugin: pluginId });
     loaded = false;
     load();
     log(`[plugins] 人格 provider 已注册：${provider.id}（插件 ${pluginId}）`);
   }
 
   function unregister(pluginId) {
-    if (!active || active.plugin !== pluginId) return;
-    log(`[plugins] 人格 provider 已注销：${active.provider.id}`);
-    active = null;
+    for (const [id, entry] of catalog) {
+      if (entry.plugin === pluginId) {
+        catalog.delete(id);
+        if (active?.plugin === pluginId && active.provider.id === id) active = null;
+      }
+    }
+    if (active?.plugin === pluginId) {
+      const fallback = [...catalog.values()].find((entry) => typeof entry.provider.get === 'function');
+      active = fallback ? { provider: fallback.provider, plugin: fallback.plugin } : null;
+    }
+    if (!active) log('[plugins] 人格 provider 已注销');
+    else log(`[plugins] 人格 provider 已注销，改用 ${active.provider.id}`);
   }
 
   function describe() {
@@ -265,6 +283,21 @@ export function createPersonaRegistry({
   /** 当前 provider 的只读引用：桥接的「外部人格」接口用它做列表 / 读写代理。 */
   function provider() {
     return active?.provider ?? null;
+  }
+
+  /** 全部并列的目录 provider（带 plugin / capabilities）。 */
+  function providers() {
+    return [...catalog.values()].map(({ provider: item, plugin }) => ({
+      id: item.id,
+      plugin,
+      contract: item.contract,
+      capabilities: { ...item.capabilities },
+      provider: item,
+    }));
+  }
+
+  function providerById(id) {
+    return catalog.get(String(id))?.provider ?? null;
   }
 
   function status() {
@@ -292,5 +325,5 @@ export function createPersonaRegistry({
     };
   }
 
-  return { register, unregister, resolve, warm, describe, status, provider };
+  return { register, unregister, resolve, warm, describe, status, provider, providers, providerById };
 }

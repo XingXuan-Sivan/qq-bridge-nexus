@@ -32,12 +32,23 @@ test('注册：契约、能力与无钩子', async () => {
   const provider = registered[0];
   assert.equal(provider.id, 'soulkit');
   assert.equal(provider.contract, 'persona-provider/1');
-  assert.deepEqual(provider.capabilities, { perSession: true, conditional: true, listable: true });
+  assert.deepEqual(provider.capabilities, {
+    perSession: true,
+    conditional: true,
+    listable: true,
+    catalog: true,
+    create: true,
+    update: true,
+    rename: false,
+    remove: false,
+  });
   assert.equal(typeof provider.get, 'function');
-  // P5：可选的列表/编辑方法用于控制台「外部人格」区。
-  for (const method of ['list', 'getByName', 'save', 'create', 'rename', 'card']) {
+  // 目录能力：soul 列表 / 读一张卡 / 改提示词 / 新建；不实现删除与重命名。
+  for (const method of ['list', 'read', 'update', 'create', 'card']) {
     assert.equal(typeof provider[method], 'function', `提供 ${method}`);
   }
+  assert.equal(provider.rename, undefined, '不实现重命名');
+  assert.equal(provider.remove, undefined, '不实现删除');
   // 刷新时机由内核决定，插件不再自己挂在 onInbound 上。
   assert.deepEqual(result, {});
 });

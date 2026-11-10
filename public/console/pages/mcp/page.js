@@ -4,6 +4,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
@@ -127,15 +128,13 @@ function detailMarkup(server) {
   return `<div class="mcp-detail" data-mcp-detail="${esc(server.id)}">
     <header class="mcp-detail-head">
       <div class="mcp-detail-title">
-        <h3>${esc(server.name || server.id)}</h3>
+        <h3>${esc(server.name || server.id)}<span class="mcp-title-tags">${sourceTag(server)}${statusTag(server)}</span></h3>
         <div class="mcp-detail-sub"><code>${esc(server.id)}</code><span class="meta">${esc(server.file || TRANSPORT_LABEL[server.transport] || '')}</span></div>
       </div>
-      <div class="mcp-status-cell">${sourceTag(server)}${statusTag(server)}</div>
+      <div class="mcp-detail-actions">${actions}</div>
     </header>
     ${description ? `<p class="meta mcp-detail-note">${esc(description)}</p>` : ''}
-    <div class="mcp-detail-actions">${actions}</div>
     <section class="mcp-tools">
-      <h4>工具 <span class="meta">${tools.length}</span></h4>
       ${dataTableHtml({
         columns: [{ label: '工具', width: 260 }, { label: '说明' }],
         rows: toolRows,
@@ -161,7 +160,7 @@ function paintList() {
     const badges = `${sourceTag(server)}${statusTag(server)}`;
     const count = Number(server.toolCount) || (server.tools ?? []).length;
     const meta = [server.file || TRANSPORT_LABEL[server.transport] || '', `${count} 个工具`].filter(Boolean).join(' · ');
-    return splitItemHtml({
+    const item = splitItemHtml({
       key: server.id,
       title: server.name || server.id,
       badges,
@@ -169,6 +168,9 @@ function paintList() {
       active: server.id === MCP_STATE.selected,
       attrs: !online ? 'data-offline="1"' : '',
     });
+    // 内置 server 改不了，也不该给删除入口；外部 server 悬停时在行尾露出一个删除按钮。
+    if (server.source !== 'external') return item;
+    return `<div class="mcp-split-row">${item}<button class="mcp-split-del" type="button" data-mcp-del="${esc(server.id)}" title="删除这个 server" aria-label="删除 ${esc(server.name || server.id)}">×</button></div>`;
   }).join('');
 }
 
@@ -286,7 +288,10 @@ function fillEditor(config = null) {
   field('mcpEditSecrets').value = '';
   const configText = JSON.stringify(connectionConfig(config), null, 2);
   transportDrafts.set(transport, configText);
-  field('mcpEditConfig').value = configText;
+  const configField = field('mcpEditConfig');
+  configField.value = configText;
+  // 编辑器是把 textarea 遮住的 CodeMirror；重新打开弹窗时要把新内容同步过去。
+  configField._codeEditorHandle?.setValue(configText);
   field('mcpEditMsg').textContent = '';
   syncTransportFields();
 }
@@ -328,9 +333,9 @@ function overlay() {
     wide: true,
     body: '<div data-mcp-fields="edit"></div>',
     footer: '<span class="modal-status" id="mcpEditMsg"></span>'
-      + '<button class="btn" type="button" id="mcpEditLogs">查看连接日志</button>'
-      + '<button class="btn" type="button" data-modal-close>取消</button>'
+      + '<button class="btn" type="button" id="mcpEditLogs">日志</button>'
       + '<button class="btn" type="button" id="mcpEditTest">测试连接</button>'
+      + '<button class="btn" type="button" data-modal-close>取消</button>'
       + '<button class="btn primary" type="button" id="mcpEditSave">保存</button>',
   });
   const host = document.createElement('div');
@@ -355,6 +360,12 @@ async function openEditor(id = '') {
   fillEditor(config);
   openModal(layer);
   bindSwitches(layer);
+  // 连接配置用项目自带编辑器；textarea 本身仍保存内容，提交时照旧读它。
+  const configField = field('mcpEditConfig');
+  if (configField) {
+    const handle = attachTextareaEditor(configField, { language: 'json', height: '320px' });
+    handle?.setValue?.(configField.value);
+  }
   syncTransportFields();
 }
 
@@ -421,6 +432,7 @@ function bindEditor() {
     transportDrafts.set(editorTransport, textarea.value);
     const next = select.value;
     textarea.value = transportDrafts.get(next) ?? templateFor(next);
+    textarea._codeEditorHandle?.setValue(textarea.value);
     editorTransport = next;
     syncTransportFields();
   });
@@ -485,7 +497,12 @@ export function init() {
       return;
     }
     const hit = target.closest('[data-mcp-act]');
-    if (!hit) return;
+    if (!hit) {
+      // 左栏行尾的删除按钮：和详情里的「删除」走同一条确认 + 删除流程。
+      const del = target.closest('[data-mcp-del]');
+      if (del) handleAction('delete', del.dataset.mcpDel).catch(() => {});
+      return;
+    }
     if (hit.dataset.mcpAct === 'logs') { openLogs(hit.dataset.id); return; }
     handleAction(hit.dataset.mcpAct, hit.dataset.id).catch(() => {});
   });

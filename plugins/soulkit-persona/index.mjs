@@ -1,8 +1,10 @@
 // soulkit 人格 provider（docs/PERSONA_PROVIDER.md）。
 //
-// 只做一件事：把 soulkit 的 `GET /api/persona/card` 翻译成 persona-provider/1 的三态返回。
-// 缓存 TTL、单飞、旧卡降级、失败节流全部在内核的注册表里——这里再写一套就会有两份 TTL、
-// 两份告警、行为不一致。
+// 两件事：
+//   1) 注入：把 soulkit 的 `GET /api/persona/card` 翻译成 persona-provider/1 的三态返回。
+//      缓存 TTL、单飞、旧卡降级、失败节流全部在内核的注册表里。
+//   2) 目录：把 soulkit 的 `GET/POST /api/souls*` 映射成控制台可用的「人格卡」增删改查。
+//      soul 的正文是 prompt.md；soulkit 不提供删除与改名，这里也不假装提供。
 const DEFAULT_BASE_URL = 'http://127.0.0.1:3110';
 const DEFAULT_TIMEOUT_MS = 1200;
 // soulkit 的卡片正文以「【人格卡：星苒｜257399a91c】」开头；桥接自己会注入【当前角色】，
@@ -45,6 +47,18 @@ function cardUrl(baseUrl, key) {
   return url.href;
 }
 
+function soulView(soul) {
+  const id = String(soul?.id ?? '').trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(soul?.name ?? id).trim() || id,
+    description: String(soul?.description ?? ''),
+    chars: Number.isFinite(soul?.chars) ? soul.chars : String(soul?.text ?? '').length,
+    updatedAt: Number.isFinite(soul?.updatedAt) ? soul.updatedAt : null,
+  };
+}
+
 export async function activate(ctx) {
   const baseUrl = normalizeBaseUrl(ctx.config.baseUrl);
   const timeoutMs = clampTimeout(ctx.config.timeoutMs);
@@ -64,10 +78,32 @@ export async function activate(ctx) {
     return response.json ?? {};
   }
 
+  async function readSoul(id) {
+    const data = await call(`/api/soul?id=${encodeURIComponent(String(id))}`);
+    const soul = data.soul ?? {};
+    return {
+      id: String(soul.id ?? id),
+      name: String(soul.name ?? id),
+      description: String(soul.description ?? ''),
+      text: String(soul.text ?? ''),
+      chars: Number.isFinite(soul.chars) ? soul.chars : String(soul.text ?? '').length,
+      updatedAt: Number.isFinite(soul.updatedAt) ? soul.updatedAt : null,
+    };
+  }
+
   ctx.persona.register({
     id: 'soulkit',
     contract: 'persona-provider/1',
-    capabilities: { perSession: true, conditional: true, listable: true },
+    capabilities: {
+      perSession: true,
+      conditional: true,
+      listable: true,
+      catalog: true,
+      create: true,
+      update: true,
+      rename: false,
+      remove: false,
+    },
     async get(key, options = {}) {
       if (!key) return { status: 'none', reason: 'no-key' };
       const etag = typeof options.etag === 'string' && options.etag ? options.etag : null;
@@ -95,30 +131,43 @@ export async function activate(ctx) {
       return { status: 'card', card: { name, text }, etag: response.etag ?? null };
     },
 
-    // ── 可选扩展：供控制台列出 / 编辑灵魂侧的角色卡（不参与会话注入的缓存） ──
+    // ── 目录扩展：人格卡列表与正文读写（不参与会话注入的缓存） ──
     async list() {
-      const data = await call('/api/characters');
-      return Array.isArray(data.characters) ? data.characters : [];
+      const data = await call('/api/souls');
+      return (Array.isArray(data.souls) ? data.souls : []).map(soulView).filter(Boolean);
     },
-    async getByName(name) {
-      const data = await call(`/api/character?slug=${encodeURIComponent(String(name))}`);
-      return data.character ?? null;
+    async read(id) {
+      return readSoul(id);
     },
-    async save(patch) {
-      const data = await call('/api/characters/save', { method: 'POST', body: patch });
-      return data.character ?? null;
+    async update(id, { text } = {}) {
+      const data = await call('/api/souls/prompt', { method: 'POST', body: { id: String(id), text: String(text ?? '') } });
+      const soul = data.soul ?? {};
+      return {
+        id: String(soul.id ?? id),
+        name: String(soul.name ?? id),
+        text: String(soul.text ?? ''),
+        chars: Number.isFinite(soul.chars) ? soul.chars : String(soul.text ?? '').length,
+        updatedAt: Number.isFinite(soul.updatedAt) ? soul.updatedAt : null,
+      };
     },
-    async create({ name, from = '' } = {}) {
-      const data = await call('/api/characters/create', { method: 'POST', body: { name, from } });
-      return data.character ?? null;
+    async create({ id, name, text = '', description = '' } = {}) {
+      const data = await call('/api/souls/create', {
+        method: 'POST',
+        body: { id: String(id ?? ''), name: String(name ?? ''), text: String(text), description: String(description) },
+      });
+      const soul = data.soul ?? {};
+      return {
+        id: String(soul.id ?? id),
+        name: String(soul.name ?? name),
+        description: String(soul.description ?? description),
+        chars: Number.isFinite(soul.chars) ? soul.chars : 0,
+        updatedAt: Number.isFinite(soul.updatedAt) ? soul.updatedAt : null,
+      };
     },
-    async rename({ name, nextName } = {}) {
-      const data = await call('/api/characters/rename', { method: 'POST', body: { slug: name, name: nextName } });
-      return data.character ?? null;
-    },
-    async card(name) {
-      const data = await call('/api/characters/card', { method: 'POST', body: { slug: String(name) } });
-      return data.card ?? null;
+    // 兼容旧调用：按 id 取正文，供「另存为内部人格」使用。
+    async card(id) {
+      const soul = await readSoul(id);
+      return { name: soul.name, text: soul.text };
     },
   });
 

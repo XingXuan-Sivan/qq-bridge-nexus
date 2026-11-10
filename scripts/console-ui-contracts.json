@@ -132,15 +132,14 @@
     "path": "/api/roles/create",
     "body": {
       "name": "契约测试角色",
-      "content": "温柔、有耐心，回答简洁。",
-      "apply": "nextWake"
+      "content": "温柔、有耐心，回答简洁。"
     }
   },
   {
     "method": "POST",
-    "path": "/api/config/role-default",
+    "path": "/api/personas/default",
     "body": {
-      "value": "契约测试角色"
+      "uid": "local:契约测试角色"
     }
   },
   {

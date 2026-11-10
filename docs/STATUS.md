@@ -423,3 +423,18 @@ npm run test:console-ui
 **已知限制**：自定义服务只做进程级托管与端口/HTTP 健康检查，没有心跳协议；内置服务的启动命令仍以各自面板为准，服务页不提供修改；日志固定保留最近 800 行（前端渲染上限），不做下载。
 
 **本机接入**：服务页额外登记了 soulkit（`kind:'process'`，`node bin/soulkit.mjs serve`，3110）作为自定义服务；SnowLuma 通过「选择目录」指向本机安装（5099）。这些条目只写 `state/control-center.json`（`.gitignore` 已忽略，不入库）；内置服务详情补上了 SnowLuma 的 WebUI 端口与桥接的项目目录。控制中心目前只在自身运行时托管这些进程，没有「开机自启/随控制中心启动」的开关。
+
+### 6.28 第十批：统一人格目录、人格提示词搬家与 MCP 页整理（2026-11-10）
+
+1. **统一人格目录**：新增 `GET /api/personas`，把本地 `roles/*.md` 与各 provider 的目录合并成一份列表（`uid` = `local:<名字>` 或 `<provider>:<id>`），返回 `items / providers / providersErrors / default`；每项带 `source / capabilities / chars / default / deletable / resettable / cached / stale`。provider 离线时只回放「用过的缓存卡」（`stale:true`），不会临时编造没缓存过的卡。
+2. **人格引用与离线缓存**：`config.role.default` 与按会话指定都接受 `provider:id`（旧的纯名字仍按本地卡解析，不用迁移）；默认或会话引用外部卡时写 `state/persona-cache/<provider>/<id>.json`，注入时读缓存，所以外部服务掉线不影响正在用的人格。缓存不等于「另存为内部」：另存仍然显式写 `roles/<名字>.md`。
+3. **provider 契约扩展**：`persona-provider/1` 增加可选能力位 `catalog / create / update / rename / remove`；注册表支持多 provider（按 id 分派目录，注入仍只认激活的那个），内核 `plugins.json` 的白名单支持字符串或数组。前端按能力位决定按钮是否可用，不再假设所有外部卡都能改。
+4. **soulkit 只加接口**：新增 `GET /api/souls`、`GET /api/soul?id=`、`POST /api/souls/prompt`、`POST /api/souls/create`，复用 `src/domain/souls.mjs`，只读写 `prompt.md` 与新建 soul 目录，没有改核心逻辑和既有数据；`soulkit-persona` 插件的 `list/read/update/create` 改走 soul 接口，注入仍走 `/api/persona/card`。
+5. **人格页重写**：保留卡片墙，操作按钮统一固定在卡片底部；编辑改成与定时任务同风格的弹窗（人格名 + 代码编辑器写提示词，标签在控件上方、整行）；内外卡操作统一为「设为默认 / 另存为内部 / 重置 / 删除」，能力位不支持的按钮置灰或隐藏；标签改用插件卡同款 `pill`（默认 / 内部 / 外部 / 缓存），不再单独定义一套徽标样式。
+6. **「人格提示词」搬到全局配置**：`全局配置 › 运行与模型` 新增 `#section-personasettings`（注入上限 1000–20000 字符 + 生效方式），两项由同一个保存按钮一起提交；`/api/roles/limit` 改为 `GET` 读两项、`POST` 写两项（`config.role.injectMaxChars` / `config.role.saveApply`）；保存人格卡的 5 个写接口默认取这份全局生效方式。
+7. **MCP 页整理**：弹窗底栏改为「日志 / 测试连接 / 取消 / 保存」；「连接配置」换成项目自带代码编辑器、整行显示（标签在上，「允许任意命令」在其上方）；左侧列表悬停露出删除按钮（只对外部 server）；「编辑 / 测试 / 日志」移到详情右上、徽标移到名称旁；删掉详情里重复的「工具 N」小节。
+8. **插件卡按钮统一**：插件卡片按钮行改用共享 `.tile-actions`，与人格卡一样贴在卡片底部对齐。
+
+**验收**：`node --check` 对 `src/bridge.js`、`src/plugins/{persona,kernel}.mjs`、`plugins/soulkit-persona/index.mjs`、人格/配置/MCP 页全部通过；`test-console-static` 全部通过；`test-console-ui` **33/33、45 次 mock 写**（契约只改 2 条：人格创建不再自带 `apply`、设默认从 `/api/config/role-default` 改为 `/api/personas/default`）；真机（3111）核对：人格列表 5 张（本地 3 + `soulkit:saren` / `soulkit:succubus`），默认「星苒」，外部卡的 `pill` 与插件卡一致；全局配置「人格提示词」两项同卡保存；MCP 弹窗底栏顺序、代码编辑器、无「工具 N」小节均符合预期；无 console 错误。
+
+**已知限制**：soulkit 按约定不实现删除与重命名，对应按钮在能力位里标 `false`（前端隐藏）；外部卡只有在被默认或会话引用过之后才有缓存，从未用过的卡在服务离线时不会出现在列表里；缓存目前不自动回收（引用改回本地后旧缓存仍留在 `state/persona-cache/`，可手动清理）；`soulkit` 仓库的改动单独提交，其工作树本来就有其它未提交内容。

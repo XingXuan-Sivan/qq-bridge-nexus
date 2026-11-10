@@ -140,6 +140,30 @@ export const OVERVIEW_FIELDS = {
       { name: 'sendLimitStatus', type: 'custom', span: 2, html: '<div class="meta" id="sendLimitMsg" role="status"></div>' },
     ],
   },
+  personaSettings: {
+    fields: [
+      {
+        name: 'personaInjectMax',
+        type: 'number',
+        label: '注入上限',
+        min: 1000,
+        max: 20000,
+        step: 100,
+        unit: '字符',
+        hint: '按模式筛完小节后再截断，约 4~6k token 的成本护栏；范围 1000~20000，改完下一条消息生效。',
+      },
+      {
+        name: 'personaSaveApply',
+        type: 'radio',
+        label: '生效方式',
+        options: [
+          { value: 'nextWake', label: '下次唤醒时重新读卡' },
+          { value: 'immediate', label: '立即生效（现在就唤醒各会话说新卡）' },
+        ],
+        hint: '保存人格卡（新建 / 编辑 / 重置 / 按会话指定）后默认怎么生效；只作用于正在启用的会话。',
+      },
+    ],
+  },
   silence: {
     fields: [
       { name: 'overviewSilenceHead', type: 'custom', span: 2, html: SILENCE_HEAD },

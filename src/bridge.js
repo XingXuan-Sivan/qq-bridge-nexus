@@ -422,6 +422,9 @@ const ROLE_CONTENT_MAX_BYTES = 64 * 1024;
 // role.maxInjectChars 调整（1000~20000）；启动时由 applyRoleInjectLimit() 写入。
 const ROLE_INJECT_MAX_CHARS_DEFAULT = 8000;
 let roleInjectMaxChars = ROLE_INJECT_MAX_CHARS_DEFAULT;
+// 保存人格卡后怎么生效：null/nextWake = 下次唤醒读卡；immediate = 立即唤醒读卡。
+// 这是全局默认值（config.json role.saveApply），编辑人格时不再逐次选择。
+let roleSaveApplyDefault = 'nextWake';
 function applyRoleInjectLimit(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return ROLE_INJECT_MAX_CHARS_DEFAULT;
@@ -863,6 +866,11 @@ function readRoleState() {
 function configDefaultRoleName() {
   const raw = bridgeCfg?.role?.default;
   if (typeof raw !== 'string' || !raw.trim()) return null;
+  // 外部卡是 `provider:id`：冒号会被本地卡清洗规则吃掉，必须先按引用解析。
+  if (raw.includes(':')) {
+    const ref = personaRef(raw);
+    return ref ? `${ref.providerId}:${ref.id}` : null;
+  }
   const name = sanitizeRoleName(raw);
   if (!name) return null;
   const file = resolveRoleFile(ROLES_DIR, name);
@@ -877,6 +885,79 @@ function setConfigDefaultRole(name) {
   file.role = role;
   atomicWriteJson(configFile, file);
   if (bridgeCfg) bridgeCfg.role = { ...(bridgeCfg.role ?? {}), default: name ?? undefined };
+}
+
+// ── 外部人格引用与缓存 ──────────────────────────────────────────────────────
+// 引用写法是 `provider:id`（例如 soulkit:saren）。人格合成本身是同步的（每条消息都要拼），
+// 而 provider 是异步 HTTP：所以「默认/会话选中的外部卡」缓存到
+// state/persona-cache/<provider>/<id>.json —— 在线时刷新、离线时读缓存，
+// 缓存只是注入用的副本，不等于「另存为内部人格」。
+const PERSONA_CACHE_DIR = path.join(ROOT, 'state', 'persona-cache');
+const PERSONA_REF_RE = /^([a-z0-9][a-z0-9-]{0,31}):(.+)$/;
+
+/** 把 `provider:id` 解析成 provider 引用；provider 未注册或格式不对返回 null。 */
+function personaRef(raw) {
+  const match = PERSONA_REF_RE.exec(String(raw ?? '').trim());
+  if (!match) return null;
+  const provider = plugins?.personaProviderById?.(match[1]) ?? null;
+  const id = match[2].trim();
+  if (!provider || !id) return null;
+  return { providerId: match[1], id, provider };
+}
+
+function personaCacheFile(providerId, id) {
+  return path.join(PERSONA_CACHE_DIR, String(providerId), `${encodeURIComponent(String(id))}.json`);
+}
+
+function readPersonaCardCache(providerId, id) {
+  try {
+    const data = readJsonSafe(personaCacheFile(providerId, id), null);
+    return data && typeof data.text === 'string' ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersonaCardCache(providerId, id, card) {
+  try {
+    const file = personaCacheFile(providerId, id);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    atomicWriteJson(file, {
+      provider: providerId,
+      id: String(id),
+      name: String(card?.name ?? id),
+      description: String(card?.description ?? ''),
+      text: String(card?.text ?? ''),
+      chars: String(card?.text ?? '').length,
+      updatedAt: card?.updatedAt ?? null,
+      cachedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    log(`⚠️ 写人格卡缓存失败（${providerId}:${id}）：${error?.message ?? error}`);
+  }
+}
+
+function listPersonaCardCaches(providerId) {
+  const dir = path.join(PERSONA_CACHE_DIR, String(providerId));
+  let files = [];
+  try { files = fs.readdirSync(dir).filter((item) => item.endsWith('.json')); } catch { return []; }
+  return files.map((file) => {
+    try { return readJsonSafe(path.join(dir, file), null); } catch { return null; }
+  }).filter((item) => item && typeof item.text === 'string');
+}
+
+/** 读一张外部卡的正文（list/get 两种 provider 都兼容），并顺手刷新缓存。 */
+async function refreshPersonaCardCache(providerId, id, provider = null) {
+  const target = provider ?? plugins?.personaProviderById?.(providerId) ?? null;
+  if (!target) throw new Error(`人格 provider「${providerId}」未注册`);
+  let card;
+  if (typeof target.read === 'function') card = await target.read(id);
+  else if (typeof target.card === 'function') card = await target.card(id);
+  else throw new Error('当前 provider 不支持读取人格卡');
+  const text = String(card?.text ?? '').trim();
+  if (!text) throw new Error('provider 返回了空卡片');
+  writePersonaCardCache(providerId, id, { ...card, text });
+  return { ...card, text };
 }
 
 /** 全局默认行为档案：预设没绑定 behavior 时兜底（预设在 preset.yml 里绑定时仍以预设为准）。 */
@@ -1385,6 +1466,7 @@ function loadConfig() {
   // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
   cfg.role = { maxInjectChars: ROLE_INJECT_MAX_CHARS_DEFAULT, ...(file.role ?? {}) };
   roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
+  roleSaveApplyDefault = cfg.role.saveApply === 'immediate' ? 'immediate' : 'nextWake';
   if (roleInjectMaxChars !== cfg.role.maxInjectChars) {
     log(`人格注入上限已按范围校正为 ${roleInjectMaxChars} 字符（配置值 ${cfg.role.maxInjectChars}，允许 1000~20000）`);
   }
@@ -5720,6 +5802,194 @@ async function main() {
           sendJson({ ok: true, provider: plugins?.status()?.persona?.id ?? null, rows });
           return;
         }
+        // ── 统一人格目录 ──────────────────────────────────────────────────────
+        // 内部卡（roles/*.md）与各插件 provider 的目录卡合成一份列表；uid 里带来源：
+        // `local:<名字>` / `<provider>:<id>` —— 后者和 config.json 的 role.default 引用同形。
+        if (req.method === 'GET' && url.pathname === '/api/personas') {
+          const roleState = readRoleState();
+          const def = roleState.role ?? null;
+          const builtin = new Set(defaultRoleStatus({ rolesDir: ROLES_DIR }).map((item) => item.name));
+          const entries = (plugins?.personaProviders?.() ?? []).map((entry) => ({
+            id: entry.id,
+            plugin: entry.plugin,
+            capabilities: { ...entry.capabilities },
+          }));
+          const items = listRoles().map((name) => {
+            let chars = 0;
+            let updatedAt = null;
+            try {
+              const file = roleFilePath(name);
+              chars = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim().length;
+              updatedAt = fs.statSync(file).mtimeMs;
+            } catch {}
+            return {
+              uid: `local:${name}`, source: 'local', provider: null, id: name, name,
+              chars, updatedAt, default: def === name,
+              builtin: builtin.has(name), deletable: !builtin.has(name), resettable: builtin.has(name),
+            };
+          });
+          const providerErrors = {};
+          for (const entry of entries) {
+            const provider = plugins?.personaProviderById?.(entry.id) ?? null;
+            let listed = false;
+            try {
+              if (typeof provider?.list !== 'function') throw new Error('该插件不支持列出人格卡');
+              const cards = await provider.list();
+              listed = true;
+              for (const card of cards ?? []) {
+                const id = String(card?.id ?? card?.name ?? '').trim();
+                if (!id) continue;
+                const uid = `${entry.id}:${id}`;
+                items.push({
+                  uid, source: 'provider', provider: entry.id, id,
+                  name: String(card?.name ?? id),
+                  description: String(card?.description ?? ''),
+                  chars: Number.isFinite(card?.chars) ? card.chars : null,
+                  updatedAt: Number.isFinite(card?.updatedAt) ? card.updatedAt : null,
+                  default: def === uid,
+                  cached: Boolean(readPersonaCardCache(entry.id, id)),
+                  stale: false,
+                  capabilities: entry.capabilities,
+                });
+              }
+            } catch (error) {
+              providerErrors[entry.id] = String(error?.message ?? error);
+            }
+            // 服务离线：把「用过的缓存卡」显示出来（只读，可另存为内部），列表不会突然空掉。
+            if (!listed) {
+              for (const cached of listPersonaCardCaches(entry.id)) {
+                const uid = `${entry.id}:${cached.id}`;
+                items.push({
+                  uid, source: 'provider', provider: entry.id, id: String(cached.id),
+                  name: String(cached.name ?? cached.id),
+                  description: String(cached.description ?? ''),
+                  chars: String(cached.text).length,
+                  updatedAt: cached.updatedAt ?? null,
+                  default: def === uid, cached: true, stale: true,
+                  capabilities: entry.capabilities,
+                });
+              }
+            }
+          }
+          items.sort((a, b) => Number(b.default) - Number(a.default) || a.name.localeCompare(b.name, 'zh-CN'));
+          sendJson({ ok: true, default: def, items, providers: entries, providerErrors });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/personas/default') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const uid = String(body?.uid ?? '').trim();
+          if (uid.startsWith('local:')) {
+            const name = uid.slice('local:'.length);
+            try { validateRoleName(name); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            if (!fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」不存在` }, 404); return; }
+            setConfigDefaultRole(name);
+            sendJson({ ok: true, default: name, message: `已设为默认人格「${name}」` });
+            return;
+          }
+          const ref = personaRef(uid);
+          if (!ref) { sendJson({ ok: false, error: `未知的人格：${uid}` }, 400); return; }
+          setConfigDefaultRole(`${ref.providerId}:${ref.id}`);
+          // 设为默认即「被使用」：立刻刷一次缓存，断线时也能继续注入。
+          refreshPersonaCardCache(ref.providerId, ref.id, ref.provider)
+            .catch((error) => log(`⚠️ 刷新外部人格缓存失败（${uid}）：${error?.message ?? error}`));
+          sendJson({ ok: true, default: `${ref.providerId}:${ref.id}`, message: '已设为默认人格（外部卡）' });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/personas/update') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const uid = String(body?.uid ?? '').trim();
+          const text = String(body?.text ?? '');
+          if (uid.startsWith('local:')) {
+            const name = uid.slice('local:'.length);
+            let content;
+            try { validateRoleName(name); content = validateRoleContent(text); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            if (!fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」不存在` }, 404); return; }
+            writeRoleContent(name, content);
+            sendJson({ ok: true, uid, chars: content.length, message: `已保存「${name}」` });
+            return;
+          }
+          const ref = personaRef(uid);
+          if (!ref) { sendJson({ ok: false, error: `未知的人格：${uid}` }, 400); return; }
+          try {
+            if (typeof ref.provider.update !== 'function') throw Object.assign(new Error('该插件不支持编辑人格卡'), { status: 501 });
+            const card = await ref.provider.update(ref.id, { text });
+            writePersonaCardCache(ref.providerId, ref.id, { ...(card ?? {}), text });
+            sendJson({ ok: true, uid, chars: text.trim().length, message: '已写入外部人格' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status ?? 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/personas/create') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const source = String(body?.source ?? 'local');
+          const text = String(body?.text ?? '');
+          if (source === 'local') {
+            let name;
+            let content;
+            try { name = validateRoleName(body?.name); content = validateRoleContent(text); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            if (fs.existsSync(roleFilePath(name))) { sendJson({ ok: false, error: `人格「${name}」已存在` }, 409); return; }
+            writeRoleContent(name, content);
+            sendJson({ ok: true, uid: `local:${name}`, name, message: `已新建内部人格「${name}」` });
+            return;
+          }
+          const providerId = String(body?.provider ?? '').trim();
+          const provider = plugins?.personaProviderById?.(providerId ?? '') ?? null;
+          if (!provider) { sendJson({ ok: false, error: `未知的人格 provider：${providerId}` }, 400); return; }
+          try {
+            if (typeof provider.create !== 'function') throw Object.assign(new Error('该插件不支持新建人格卡'), { status: 501 });
+            const card = await provider.create({ id: String(body?.id ?? '').trim() || undefined, name: String(body?.name ?? '').trim(), text });
+            sendJson({ ok: true, uid: `${providerId}:${card?.id ?? body?.id ?? body?.name}`, card, message: '已新建外部人格' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status ?? 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/personas/delete') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const uid = String(body?.uid ?? '').trim();
+          if (uid.startsWith('local:')) {
+            const name = uid.slice('local:'.length);
+            let clean;
+            try { clean = validateRoleName(name); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+            const builtin = defaultRoleStatus({ rolesDir: ROLES_DIR }).some((item) => item.name === clean);
+            if (builtin) { sendJson({ ok: false, error: `「${clean}」是内置人格，不能删除（可重置）` }, 400); return; }
+            if (!fs.existsSync(roleFilePath(clean))) { sendJson({ ok: false, error: `人格「${clean}」不存在` }, 404); return; }
+            if (configDefaultRoleName() === clean) setConfigDefaultRole(null);
+            fs.unlinkSync(roleFilePath(clean));
+            sendJson({ ok: true, message: `已删除「${clean}」` });
+            return;
+          }
+          const ref = personaRef(uid);
+          if (!ref) { sendJson({ ok: false, error: `未知的人格：${uid}` }, 400); return; }
+          try {
+            if (!ref.provider.capabilities?.remove || typeof ref.provider.remove !== 'function') {
+              throw Object.assign(new Error('该插件不支持删除人格卡'), { status: 501 });
+            }
+            await ref.provider.remove(ref.id);
+            sendJson({ ok: true, message: '已删除外部人格' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, error?.status ?? 502);
+          }
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/personas/refresh') {
+          let body = {};
+          try { body = await readBody(); } catch (error) { sendJson({ ok: false, error: error?.message ?? String(error) }, 400); return; }
+          const ref = personaRef(body?.uid);
+          if (!ref) { sendJson({ ok: false, error: '只能刷新外部人格的缓存' }, 400); return; }
+          try {
+            const card = await refreshPersonaCardCache(ref.providerId, ref.id, ref.provider);
+            sendJson({ ok: true, card: { id: ref.id, name: card.name, chars: card.text.length }, message: '已刷新缓存' });
+          } catch (error) {
+            sendJson({ ok: false, error: String(error?.message ?? error) }, 502);
+          }
+          return;
+        }
         // 外部（provider 侧）人格卡：列表、正文、编辑、新建、改名、另存为内部人格。
         if (req.method === 'GET' && url.pathname === '/api/persona/external') {
           const data = await listExternalPersonas();
@@ -6242,11 +6512,11 @@ async function main() {
             // 全局默认人格存在 config.json（state/current-role.json 只留 mode/byKey）。
             setConfigDefaultRole(name);
             log(`控制台：默认人格已设置为 ${name}（config.json role.default）`);
-            sendJson({ ok: true, role: name, refresh: applyRoleChange(body.apply) });
+            sendJson({ ok: true, role: name, refresh: applyRoleChange(body.apply ?? roleSaveApplyDefault) });
           } else {
             setConfigDefaultRole(null);
             log('控制台：默认人格已清除（config.json role.default）');
-            sendJson({ ok: true, role: null, refresh: applyRoleChange(body.apply) });
+            sendJson({ ok: true, role: null, refresh: applyRoleChange(body.apply ?? roleSaveApplyDefault) });
           }
           return;
         }
@@ -6342,7 +6612,7 @@ async function main() {
           writeRoleStateFull(next);
           log(`控制台：${key} ${use === 'default' ? '回到全局默认人格' : use === 'off' ? '不挂角色卡' : `单独使用人格 ${name}`}`);
           // 只有这个会话的卡变了；按会话算指纹，「立即」也只会唤醒它
-          sendJson({ ok: true, key, use, role: roleNameFor(next, key), source: roleSourceFor(next, key), refresh: applyRoleChange(body.apply, [key]) });
+          sendJson({ ok: true, key, use, role: roleNameFor(next, key), source: roleSourceFor(next, key), refresh: applyRoleChange(body.apply ?? roleSaveApplyDefault, [key]) });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/role-mode') {
@@ -6405,17 +6675,23 @@ async function main() {
           });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/roles/limit') {
+        if (url.pathname === '/api/roles/limit' && (req.method === 'GET' || req.method === 'POST')) {
+          if (req.method === 'GET') {
+            sendJson({ ok: true, limits: { injectMaxChars: roleInjectMaxChars }, persona: { saveApply: roleSaveApplyDefault } });
+            return;
+          }
           const body = await readBody();
           const next = applyRoleInjectLimit(body.maxInjectChars);
+          const saveApply = normalizeApplyMode(body.saveApply ?? roleSaveApplyDefault);
           const configFile = path.join(ROOT, 'config.json');
           const file = readConfigObject(configFile);
-          file.role = { ...(file.role ?? {}), maxInjectChars: next };
+          file.role = { ...(file.role ?? {}), maxInjectChars: next, saveApply };
           atomicWriteJson(configFile, file);
-          cfg.role = { ...(cfg.role ?? {}), maxInjectChars: next };
+          cfg.role = { ...(cfg.role ?? {}), maxInjectChars: next, saveApply };
           roleInjectMaxChars = next;
-          log(`控制台：人格注入上限已设为 ${next} 字符（下一条消息生效）`);
-          sendJson({ ok: true, maxInjectChars: next, limits: { injectMaxChars: next } });
+          roleSaveApplyDefault = saveApply;
+          log(`控制台：人格注入上限已设为 ${next} 字符，保存后的生效方式为「${saveApply === 'immediate' ? '立即生效' : '下次唤醒'}」`);
+          sendJson({ ok: true, maxInjectChars: next, saveApply, limits: { injectMaxChars: next }, persona: { saveApply } });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/roles/create') {
@@ -6440,7 +6716,7 @@ async function main() {
           // 改的是有会话在用的人格（全局默认或某个会话单独指定）：按选的生效方式处理（默认下次唤醒；立即 = 现在就唤醒还没读到新卡的会话）。
           // 指纹按会话算，只有用这张卡的会话会被判为过期。没人用就不涉及。
           const isActive = roleUsedAnywhere(name);
-          sendJson({ ok: true, role: name, chars: content.length, warnings: roleWarnings(content), refresh: isActive ? applyRoleChange(body.apply) : { apply: normalizeApplyMode(body.apply), notActive: true } });
+          sendJson({ ok: true, role: name, chars: content.length, warnings: roleWarnings(content), refresh: isActive ? applyRoleChange(body.apply ?? roleSaveApplyDefault) : { apply: normalizeApplyMode(body.apply ?? roleSaveApplyDefault), notActive: true } });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/roles/rename') {
@@ -6490,7 +6766,7 @@ async function main() {
           log(`控制台：恢复默认人格「${r.name}」${r.created ? '（原来被删了，已重新放回）' : `（改过的那份已备份到 state/role-backups/${r.backup}）`}`);
           // 恢复的是有会话在用的人格：和保存修改一样，按选的生效方式让用它的会话读到原版
           const isActive = roleUsedAnywhere(r.name);
-          sendJson({ ok: true, ...r, refresh: isActive ? applyRoleChange(body.apply) : { apply: normalizeApplyMode(body.apply), notActive: true } });
+          sendJson({ ok: true, ...r, refresh: isActive ? applyRoleChange(body.apply ?? roleSaveApplyDefault) : { apply: normalizeApplyMode(body.apply ?? roleSaveApplyDefault), notActive: true } });
           return;
         }
 
@@ -13477,8 +13753,21 @@ async function main() {
     return roleRawByName(roleNameForKey(key));
   }
 
-  // 给 persona-resolve 用的本地卡：正文要过二代的过滤与示例改写，指纹与注入内容一一对应。
+  // 给 persona-resolve 用的卡：本地卡要过二代的过滤与示例改写；
+  // `provider:id` 读磁盘缓存（合成是同步的，在线刷新放在后台/列表时做）。
   function roleCardFor(name) {
+    const ref = personaRef(name);
+    if (ref) {
+      const cached = readPersonaCardCache(ref.providerId, ref.id);
+      if (!cached?.text) return null;
+      const text = String(cached.text);
+      return {
+        text,
+        fingerprint: roleFingerprint(cached.name || ref.id, text),
+        name: cached.name || ref.id,
+        stale: Boolean(cached.stale),
+      };
+    }
     const raw = roleRawByName(name);
     if (!raw) return null;
     const text = sanitizeRoleTextV2(raw);

@@ -26,7 +26,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadBehaviorDefault(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadBehaviorDefault(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -69,6 +69,21 @@ const sendLimitSection = {
     if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
     requestStatusRefresh();
     return { ok: true, message: '已保存，立即生效' };
+  },
+};
+
+const personaSettingsSection = {
+  id: 'personaSettings',
+  label: '人格提示词',
+  read: () => ({
+    maxInjectChars: Math.round(Number($('personaInjectMax').value) || 6000),
+    saveApply: document.querySelector('input[name="personaSaveApply"]:checked')?.value || 'nextWake',
+  }),
+  save: async (value) => {
+    const r = await api('/api/roles/limit', 'POST', value);
+    if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
+    const applyText = r.saveApply === 'immediate' ? '立即生效' : '下次唤醒时生效';
+    return { ok: true, message: `已保存：上限 ${r.maxInjectChars} 字符，人格卡保存后${applyText}` };
   },
 };
 
@@ -408,6 +423,17 @@ async function loadSendLimit() {
   }
 }
 
+// ── 人格提示词：注入上限 + 保存人格卡后的生效方式（两项一起保存）──────────────
+async function loadPersonaSettings() {
+  const r = await api('/api/roles/limit');
+  const max = $('personaInjectMax');
+  if (max && document.activeElement !== max) max.value = r?.limits?.injectMaxChars ?? 6000;
+  const apply = r?.persona?.saveApply === 'immediate' ? 'immediate' : 'nextWake';
+  document.querySelectorAll('input[name="personaSaveApply"]').forEach((el) => {
+    el.checked = el.value === apply;
+  });
+}
+
 // ── 默认人格（config.json 的 role.default）────────────────────────────────────
 async function loadRoleDefault() {
   const select = $('roleDefaultSelect');
@@ -490,7 +516,7 @@ export function init() {
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, dshModelSection, sendLimitSection, tokenSection],
+    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, dshModelSection, sendLimitSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',

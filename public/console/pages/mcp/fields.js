@@ -31,17 +31,18 @@ export const MCP_FIELDS = {
         ],
       },
       { name: 'mcpEditTimeout', type: 'number', label: '调用超时 ms', min: 1000, max: 300000, step: 1000 },
+      { name: 'mcpEditAllowArbitrary', type: 'switch', label: '允许任意命令', default: false, onLabel: '是', offLabel: '否' },
+      { name: 'mcpEditAllowPrivate', type: 'switch', label: '允许私网 HTTP', default: false, onLabel: '是', offLabel: '否' },
       {
         name: 'mcpEditConfig',
         type: 'textarea',
         label: '连接配置',
-        rows: 8,
+        rows: 10,
         mono: true,
         span: 2,
+        className: 'field-block--stacked',
         hint: 'stdio 填 command / args / env；HTTP 与 SSE 填 url / headers。env 与 headers 的值用 secret:name 引用凭据。',
       },
-      { name: 'mcpEditAllowArbitrary', type: 'switch', label: '允许任意命令', default: false, onLabel: '是', offLabel: '否' },
-      { name: 'mcpEditAllowPrivate', type: 'switch', label: '允许私网 HTTP', default: false, onLabel: '是', offLabel: '否' },
 
       { type: 'section', card: true, label: '凭据', hint: '秘密只写入 state/extensions/secrets.json，不写进 server.json。编辑时留空表示保持已有凭据不变。' },
       {

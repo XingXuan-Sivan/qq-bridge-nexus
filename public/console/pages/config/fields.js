@@ -6,6 +6,7 @@ export const CONFIG_FIELDS = {
   mode: OVERVIEW_FIELDS.mode,
   behaviorDefault: OVERVIEW_FIELDS.behaviorDefault,
   roleDefault: OVERVIEW_FIELDS.roleDefault,
+  personaSettings: OVERVIEW_FIELDS.personaSettings,
   sendLimit: OVERVIEW_FIELDS.sendLimit,
   silence: OVERVIEW_FIELDS.silence,
   dsh: OVERVIEW_FIELDS.dsh,

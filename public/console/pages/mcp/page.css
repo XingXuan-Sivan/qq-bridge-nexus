@@ -72,6 +72,45 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+/* 徽标贴着 server 名字，不再单占右侧一列。 */
+.mcp-title-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+/* 左栏行尾的删除按钮：平时不占视线，悬停或键盘聚焦时才露出来。 */
+.mcp-split-row {
+  position: relative;
+}
+.mcp-split-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+}
+.mcp-split-row:hover .mcp-split-del,
+.mcp-split-del:focus-visible {
+  opacity: 1;
+}
+.mcp-split-del:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
 .mcp-tools {
   display: flex;
   flex-direction: column;

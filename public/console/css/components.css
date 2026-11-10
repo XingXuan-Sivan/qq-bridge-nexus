@@ -1135,17 +1135,14 @@ tr:last-child td {
   color:var(--muted-soft);
   overflow-wrap:anywhere
 }
-.persona-badge {
-  font-size:10px;
-  line-height:1.6;
-  padding:0 7px;
-  border-radius:20px;
-  background:var(--pill-green-bg);
-  color:var(--pill-green-fg)
-}
-.persona-badge.warn {
-  background:var(--warn-bg);
-  color:var(--warn-fg)
+/* 卡片底部操作区：同一行卡片高度不一时，按钮也压在同一条基线上。 */
+.tile-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  width:100%;
+  margin-top:auto;
+  padding-top:10px
 }
 .layer-heading {
   display:flex;

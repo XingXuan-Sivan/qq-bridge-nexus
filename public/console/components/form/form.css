@@ -402,6 +402,22 @@
   align-items: start;
 }
 
+/* 标签在上：整行编辑器这类控件，把标签挪到控件上方，控件独占一行。 */
+.field-block--stacked > .field-row {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 6px;
+}
+
+.field-block--stacked > .field-row > .field-label {
+  align-self: start;
+  padding-top: 0;
+  text-align: left;
+}
+
+.field-block--stacked > .field-notes {
+  margin-left: 0;
+}
+
 .field-block--textarea > .field-row > .field-label {
   /* 标签自己写了 align-self:center，这里必须显式改回 start，否则整块 100px 高时标签仍居中。 */
   align-self: start;

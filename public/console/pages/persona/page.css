@@ -1,8 +1,13 @@
-/* 人格与角色页：只放本页私有的列表行样式；控件与字段布局一律走 components/。 */
+/* 人格与角色页：只补卡片墙需要的行为（整卡可点、标题与徽标换行）。
+   卡片内的按钮条直接用 components.css 的 .tile-actions，不在这里重复定义。 */
 
-/* 人格卡片：整卡是一个 div，主体是铺满的按钮，行内操作单独一行靠右。 */
-.tile-body {
+#roleList .tile {
+  display: flex;
+  flex-direction: column;
+}
+#roleList .tile-body {
   display: block;
+  flex: 1;
   width: 100%;
   padding: 0;
   border: 0;
@@ -12,53 +17,23 @@
   text-align: left;
   cursor: pointer;
 }
-.tile-body:focus-visible {
+#roleList .tile-body:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: 6px;
 }
-.tile-actions {
+#roleList .tile-head {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  width: 100%;
-  margin-top: 2px;
-}
-.tile-actions .btn.small {
-  padding: 3px 10px;
-  font-size: 12px;
-}
-.tile-actions .btn:disabled {
-  opacity: 0.45;
-  cursor: default;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-/* 外部人格（soulkit provider）：列表卡片沿用 .tile，只加分区标题与小标。 */
-.external-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin: 22px 0 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-subtle);
-}
-.external-head h3 {
-  margin: 0;
-  font-size: 15px;
-}
-.external-head .meta {
-  margin: 0;
-}
-.tile-external .tile-head strong {
-  font-weight: 600;
-}
-
+/* 工具条宽度：与 MCP 页同一标尺（搜索框 320px、筛选按内容收窄）。 */
 #roleSearch {
   flex: 0 1 320px;
   max-width: 320px;
 }
 #roleFilter {
-  flex: 0 0 140px;
+  flex: 0 0 160px;
 }
-
-

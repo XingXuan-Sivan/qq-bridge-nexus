@@ -131,6 +131,6 @@ test('③ 控制台：人格页把「恢复初始」并入列表行操作', () =
   assert.doesNotMatch(html, /roleDefaultsList/);
   assert.doesNotMatch(html, /<summary>恢复默认人格<\/summary>/);
   assert.match(html, /data-persona-fields="toolbar"/);
-  assert.match(html, /data-role-restore/);
+  assert.match(html, /data-act="restore"/);
   assert.match(html, /\/api\/roles\/restore-default/);
 });

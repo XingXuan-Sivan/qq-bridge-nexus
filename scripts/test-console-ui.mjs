@@ -393,11 +393,27 @@ try {
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {
-    await fill('newRoleName', '契约测试角色');
-    await fill('newRoleContent', '温柔、有耐心，回答简洁。');
-    assert.deepEqual(await clickWrite('#roleCreate', '/api/roles/create'), { name: '契约测试角色', content: '温柔、有耐心，回答简洁。', apply: 'nextWake' });
-    // 默认人格已归一到全局配置：列表行的「设为默认」写 config.json 的 role.default。
-    assert.deepEqual(await clickWrite('[data-role="契约测试角色"] [data-role-default]', '/api/config/role-default'), { value: '契约测试角色' });
+    await navigate('persona');
+    // 新建人格走弹窗：人格名 + 提示词编辑器（弹窗关闭后列表里出现新卡）。
+    await page.locator('#roleNew').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.locator('#personaName').fill('契约测试角色');
+    await page.locator('#personaEditor .cm-content').first().click();
+    await page.keyboard.type('温柔、有耐心，回答简洁。');
+    const [createRequest, createResponse] = await Promise.all([
+      page.waitForRequest(r => new URL(r.url()).pathname === '/api/roles/create' && r.method() === 'POST'),
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/roles/create' && r.request().method() === 'POST'),
+      page.locator('#personaSave').click(),
+    ]);
+    assert.equal(createResponse.status(), 200);
+    // 生效方式已搬到「全局配置 › 人格提示词」：保存人格卡不再自带 apply，由后端取全局默认。
+    assert.deepEqual(JSON.parse(createRequest.postData() || '{}'), { name: '契约测试角色', content: '温柔、有耐心，回答简洁。' });
+    // 设为默认：卡片墙的「设为默认」写统一目录的 /api/personas/default（本地卡 = local:<名字>）。
+    const [defaultRequest] = await Promise.all([
+      page.waitForRequest(r => new URL(r.url()).pathname === '/api/personas/default' && r.method() === 'POST'),
+      page.locator('#roleList .tile').filter({ hasText: '契约测试角色' }).locator('[data-act="default"]').click(),
+    ]);
+    assert.deepEqual(JSON.parse(defaultRequest.postData() || '{}'), { uid: 'local:契约测试角色' });
     // 清除默认人格走全局配置页的下拉（空选项 = 不挂人格卡）。
     await navigate('config');
     const roleOptions = await page.$$eval('#roleDefaultSelect option', (els) => els.map((el) => el.textContent));
@@ -787,81 +803,95 @@ try {
     await calm.close();
   });
 
-  if (!original) await test('外部人格：读取角色卡 → 编辑覆盖并保存 → 另存为内部人格 → 改名', async () => {
+  if (!original) await test('外部人格：读取提示词 → 编辑保存 → 另存为内部人格', async () => {
     await navigate('persona');
-    await page.waitForFunction(() => document.querySelectorAll('#externalRoles .tile').length >= 2, null, { timeout: 8000 });
-    assert.equal(await page.locator('#externalRoles .tile').count(), 2);
-    assert.match(await page.textContent('#externalHint'), /soulkit/);
-    await page.locator('#externalRoles [data-ext-open]').first().click();
-    await page.waitForSelector('#externalEditor.open', { timeout: 5000 });
-    assert.equal(await page.locator('#extName').inputValue(), '星苒');
-    assert.equal(await page.locator('#extOverlay').inputValue(), '雨夜的北京，窗没关。');
-    await page.locator('#extOverlay').fill('雨停了，天台上风很大。');
-    const [saveRes] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/save' && r.request().method() === 'POST'),
-      page.locator('#extSave').click(),
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('#roleList .tile')].some((el) => el.textContent.includes('星苒')),
+      null,
+      { timeout: 8000 },
+    );
+    const card = page.locator('#roleList .tile').filter({ hasText: '星苒' }).first();
+    assert.match(await card.textContent(), /外部 · soulkit/);
+    await card.locator('[data-act="edit"]').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.waitForFunction(() => (document.getElementById('personaText')?.value || '').length > 0);
+    // 外部卡的人名归插件管理：只读，只能改提示词。
+    assert.equal(await page.locator('#personaName').evaluate((el) => el.readOnly), true);
+    await page.locator('#personaSaveAsBlock').waitFor({ state: 'visible' });
+    await page.locator('#personaEditor .cm-content').first().click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('雨停了，天台上风很大。');
+    const [updateRequest, updateResponse] = await Promise.all([
+      page.waitForRequest(r => new URL(r.url()).pathname === '/api/personas/update' && r.method() === 'POST'),
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/personas/update' && r.request().method() === 'POST'),
+      page.locator('#personaSave').click(),
     ]);
-    assert.equal(saveRes.status(), 200);
-    assert.match(await page.textContent('#extMsg'), /已保存/);
-    // 另存为内部人格：名字来自表单字段（默认「星苒-内部」）。
-    await page.locator('#extSaveAsName').fill('星苒内部');
-    const [asRes] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/save-as-role' && r.request().method() === 'POST'),
-      page.locator('#extSaveAs').click(),
+    assert.equal(updateResponse.status(), 200);
+    const updateBody = JSON.parse(updateRequest.postData() || '{}');
+    assert.equal(updateBody.uid, 'soulkit:星苒');
+    assert.match(updateBody.text, /雨停了/);
+    // 另存为内部：名字来自弹窗字段（默认「星苒-内部」）。
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('#roleList .tile')].some((el) => el.textContent.includes('星苒')),
+      null,
+      { timeout: 8000 },
+    );
+    await page.locator('#roleList .tile').filter({ hasText: '星苒' }).first().locator('[data-act="edit"]').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.locator('#personaSaveAsName').fill('星苒内部');
+    const [saveAsRequest, saveAsResponse] = await Promise.all([
+      page.waitForRequest(r => new URL(r.url()).pathname === '/api/persona/external/save-as-role'),
+      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/save-as-role'),
+      page.locator('#personaSaveAs').click(),
     ]);
-    assert.equal(asRes.status(), 200);
-    await page.waitForFunction(() => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === '星苒内部'), null, { timeout: 8000 });
-    await page.locator('#extNewName').fill('星苒二号');
-    const [renameRes] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/persona/external/rename' && r.request().method() === 'POST'),
-      page.locator('#extRename').click(),
-    ]);
-    assert.equal(renameRes.status(), 200);
-    assert.match(await page.textContent('#extMsg'), /已改名/);
-    await page.locator('#extClose').click();
-    await page.waitForFunction(() => !document.getElementById('externalEditor'), null, { timeout: 5000 });
+    assert.equal(saveAsResponse.status(), 200);
+    assert.equal(JSON.parse(saveAsRequest.postData() || '{}').as, '星苒内部');
+    await page.waitForFunction(
+      () => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === '星苒内部'),
+      null,
+      { timeout: 8000 },
+    );
   });
 
-  if (!original) await test('人格管理：新建 → 载入编辑 → 保存修改 → 重命名 → 删除', async () => {
+  if (!original) await test('人格管理：新建 → 载入编辑 → 保存修改 → 删除', async () => {
     await navigate('persona');
     const created = '回归人格A';
-    const renamed = '回归人格B';
     const namesInList = () => page.locator('#roleList .tile strong').allTextContents();
-    await page.locator('#newRoleName').fill(created);
-    await page.locator('#newRoleContent').fill('# 回归人格A\n\n- 性格：用于回归测试');
+    await page.locator('#roleNew').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.locator('#personaName').fill(created);
+    await page.locator('#personaEditor .cm-content').first().click();
+    await page.keyboard.type('回归人格A 用于回归测试');
     const [createRes] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === '/api/roles/create' && r.request().method() === 'POST'),
-      page.locator('#roleCreate').click(),
+      page.locator('#personaSave').click(),
     ]);
     assert.equal(createRes.status(), 200);
     await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
-    // 点列表载入编辑：内容回填 + 按钮切到「保存修改」
-    await page.locator('#roleList .tile .tile-body').filter({ hasText: created }).first().click();
-    await page.waitForFunction((n) => document.getElementById('newRoleName').value === n, created);
-    assert.match(await page.locator('#newRoleContent').inputValue(), /用于回归测试/);
-    assert.equal((await page.locator('#roleCreate').textContent()).trim(), '保存修改');
-    // 保存修改
-    await page.locator('#newRoleContent').fill('# 回归人格A\n\n- 性格：已修改');
+    // 点卡片打开编辑：人格名回填、提示词载入。
+    await page.locator('#roleList .tile').filter({ hasText: created }).locator('[data-act="edit"]').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.waitForFunction(() => (document.getElementById('personaText')?.value || '').includes('用于回归测试'));
+    assert.equal(await page.locator('#personaName').inputValue(), created);
+    await page.locator('#personaEditor .cm-content').first().click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type('回归人格A 已修改');
     const [updateRes] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === '/api/roles/update' && r.request().method() === 'POST'),
-      page.locator('#roleCreate').click(),
+      page.locator('#personaSave').click(),
     ]);
     assert.equal(updateRes.status(), 200);
-    // 重命名（编辑模式改名后再保存 = 先 rename 再 update），等列表真正刷新
-    await page.locator('#newRoleName').fill(renamed);
-    await page.locator('#roleCreate').click();
-    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), renamed);
-    assert.match(await page.locator('#roleCreateMsg').textContent(), new RegExp(`已保存「${renamed}」`));
-    assert.ok((await namesInList()).includes(renamed), '重命名后列表应出现新名字');
-    assert.ok(!(await namesInList()).includes(created), '重命名后旧名字应消失');
-    // 删除（会弹确认框，测试环境自动接受）
+    // 删除（确认框由全局 dialog handler 接受）。
+    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
+    await page.locator('#roleList .tile').filter({ hasText: created }).locator('[data-act="edit"]').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
     const [deleteRes] = await Promise.all([
       page.waitForResponse(r => new URL(r.url()).pathname === '/api/roles/delete' && r.request().method() === 'POST'),
-      page.locator('#roleDelete').click(),
+      page.locator('#personaDelete').click(),
     ]);
     assert.equal(deleteRes.status(), 200);
-    await page.waitForFunction((n) => ![...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), renamed);
-    assert.match(await page.locator('#roleCreateMsg').textContent(), /已删除/);
+    await page.waitForFunction((n) => ![...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
+    assert.ok((await namesInList()).length >= 1);
   });
 
   if (!original) await test('仿真提示词：预设页只读展示、解锁后可编辑、保存提示重启 DSH、可还原初始版本', async () => {
@@ -904,23 +934,22 @@ try {
     assert.notEqual(v1, v2, '两代预设的提示词应各自独立');
   });
 
-  if (!original) await test('人格注入上限可调，且随模式筛选后统计', async () => {
-    await navigate('persona');
-    await page.waitForFunction(() => document.querySelectorAll('#roleList .tile').length > 0);
-    const before = await page.locator('#roleInjectMax').inputValue();
-    assert.equal(Number(before), 6000, '默认上限应为 6000');
-    await page.locator('#roleInjectMax').fill('8000');
-    const [saved] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/roles/limit' && r.request().method() === 'POST'),
-      page.locator('#roleInjectMaxSave').click(),
-    ]);
-    assert.equal(saved.status(), 200);
-    assert.equal((await saved.json()).maxInjectChars, 8000);
-    assert.match(await page.locator('#roleInjectMaxMsg').textContent(), /8000/);
+  if (!original) await test('人格提示词：注入上限与生效方式在全局配置里一起保存', async () => {
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    const max = page.locator('#personaInjectMax');
+    await max.waitFor();
+    assert.equal(Number(await max.inputValue()), 6000, '默认上限应为 6000');
+    await max.fill('8000');
+    await page.locator('input[name="personaSaveApply"][value="immediate"]').check();
+    const body = await saveBarWrite('/api/roles/limit');
+    assert.equal(body.maxInjectChars, 8000);
+    assert.equal(body.saveApply, 'immediate');
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('actionDockResults')?.textContent || ''));
     // 改回默认
-    await page.locator('#roleInjectMax').fill('6000');
-    await page.locator('#roleInjectMaxSave').click();
-    await page.waitForFunction(() => document.getElementById('roleInjectMaxMsg').textContent.includes('6000'));
+    await max.fill('6000');
+    await page.locator('input[name="personaSaveApply"][value="nextWake"]').check();
+    await saveBarWrite('/api/roles/limit');
   });
 
   if (!original) await test('DSH 模型：提供方 / 模型 / 思考强度联动、来自目录、明示全局副作用与第三方隐私', async () => {

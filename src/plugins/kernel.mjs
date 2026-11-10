@@ -211,7 +211,12 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
   /** 把 persona 注册真正落到注册表（manifest 声明的 provider 白名单也在这里判）。 */
   function commitPersona(provider, pluginId) {
     const wanted = config.persona.provider;
-    if (wanted && wanted !== provider?.id) {
+    // 白名单可以是单个 id，也可以是数组：数组表示「这些 provider 都可以列目录」，
+    // 注入仍然只认最后注册（或第一个）那个，由注册表自己决定。
+    const allowed = Array.isArray(wanted)
+      ? wanted.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim())
+      : (typeof wanted === 'string' && wanted.trim() ? [wanted.trim()] : []);
+    if (allowed.length && !allowed.includes(String(provider?.id))) {
       logLine(`[plugins] ${pluginId} 的人格 provider "${provider?.id}" 未在 plugins.json 的 persona.provider 中启用，已忽略`);
       return;
     }
@@ -701,6 +706,15 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     return persona.provider();
   }
 
+  /** 并列的目录 provider（控制台统一人格列表用）。 */
+  function personaProviders() {
+    return persona.providers();
+  }
+
+  function personaProviderById(id) {
+    return persona.providerById(id);
+  }
+
   /**
    * 渲染插件注册的具名注入块（P4）。与 promptAdditions 的区别：这里是「内容」，
    * 按 priority 排序、按块限额、按总预算跳块；返回的 blocks 报告给控制台看占比。
@@ -939,6 +953,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, deps = {} }) 
     filterInbound,
     personaResolve,
     personaProvider,
+    personaProviders,
+    personaProviderById,
     personaWarm,
     taskTypes,
     hasTaskType,

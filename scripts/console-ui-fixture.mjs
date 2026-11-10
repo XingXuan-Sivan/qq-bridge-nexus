@@ -747,6 +747,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
       if (method === 'GET') {
         switch (path) {
+          case '/api/roles/limit':
+            return json({
+              ok: true,
+              limits: { injectMaxChars: state.roleInjectMax },
+              persona: { saveApply: state.roleSaveApply ?? 'nextWake' },
+            });
           case '/api/status': {
             const allowed = state.access.passive.entries;
             const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
@@ -911,6 +917,56 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               stale: false,
             })),
           });
+          case '/api/personas': {
+            const builtin = new Set(['小鲸鱼', '傲娇助手']);
+            const items = state.roles.map((name) => ({
+              uid: `local:${name}`,
+              source: 'local',
+              id: name,
+              name,
+              description: '',
+              chars: (state.roleContents[name] ?? '').length,
+              updatedAt: Date.parse(timestamp),
+              default: state.role === name,
+              builtin: builtin.has(name),
+              deletable: !builtin.has(name),
+              resettable: builtin.has(name),
+              capabilities: { create: true, update: true, rename: true, remove: true },
+              cached: true,
+              stale: false,
+            }));
+            for (const [name, card] of Object.entries(state.externalPersonas)) {
+              const text = card.text ?? `# ${name}\n\n${card.overlay || ''}\n${card.systemAppend || ''}`.trim();
+              items.push({
+                uid: `soulkit:${card.slug ?? name}`,
+                source: 'provider',
+                provider: 'soulkit',
+                id: card.slug ?? name,
+                name,
+                description: card.description,
+                chars: text.length,
+                updatedAt: Date.parse(timestamp),
+                default: state.role === name,
+                builtin: false,
+                deletable: false,
+                resettable: false,
+                capabilities: { create: true, update: true, rename: false, remove: false },
+                cached: true,
+                stale: Boolean(card.stale),
+              });
+            }
+            return json({
+              ok: true,
+              default: items.find((item) => item.default)?.uid ?? null,
+              items,
+              providers: [{
+                id: 'soulkit',
+                online: true,
+                capabilities: { catalog: true, create: true, update: true, rename: false, remove: false },
+              }],
+              providerErrors: {},
+            });
+          }
           case '/api/config/role-default': return json({
             ok: true,
             value: state.role ?? null,
@@ -1166,6 +1222,46 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             state.roleContents[as] = text;
             return json({ ok: true, name: as, chars: text.length, message: `已另存为「${as}」` });
           }
+          case '/api/personas/default': {
+            const uid = String(body.uid ?? '');
+            if (uid.startsWith('local:')) state.role = uid.slice('local:'.length);
+            return json({ ok: true, value: state.role });
+          }
+          case '/api/personas/update': {
+            const uid = String(body.uid ?? '');
+            const text = String(body.text ?? '');
+            if (uid.startsWith('local:')) state.roleContents[uid.slice('local:'.length)] = text;
+            else if (uid.startsWith('soulkit:')) {
+              const id = uid.slice('soulkit:'.length);
+              for (const [name, card] of Object.entries(state.externalPersonas)) {
+                if ((card.slug ?? name) === id) card.text = text;
+              }
+            }
+            return json({ ok: true });
+          }
+          case '/api/personas/delete': {
+            const uid = String(body.uid ?? '');
+            if (uid.startsWith('local:')) {
+              const name = uid.slice('local:'.length);
+              const at = state.roles.indexOf(name);
+              if (at >= 0) state.roles.splice(at, 1);
+              delete state.roleContents[name];
+              if (state.role === name) state.role = null;
+            } else if (uid.startsWith('soulkit:')) {
+              const id = uid.slice('soulkit:'.length);
+              for (const [name, card] of Object.entries(state.externalPersonas)) {
+                if ((card.slug ?? name) === id) delete state.externalPersonas[name];
+              }
+            }
+            return json({ ok: true });
+          }
+          case '/api/personas/create': {
+            const name = String(body.name ?? '').trim();
+            if (!name) return json({ ok: false, error: '缺少人格名' }, 400);
+            if (!state.roles.includes(name)) state.roles.push(name);
+            state.roleContents[name] = String(body.text ?? '');
+            return json({ ok: true, uid: `local:${name}`, name });
+          }
           case '/api/config/role-default': {
             const value = typeof body.value === 'string' ? body.value.trim() : '';
             if (value && !state.roles.includes(value)) {
@@ -1198,7 +1294,22 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (cleared) state.role = null;
             return json({ ok: true, deleted: body.name, clearedCurrent: cleared });
           }
-          case '/api/roles/limit': state.roleInjectMax = Number(body.maxInjectChars) || state.roleInjectMax; return json({ ok: true, maxInjectChars: state.roleInjectMax, limits: { injectMaxChars: state.roleInjectMax } });
+          case '/api/roles/limit':
+            if (method === 'GET') {
+              return json({
+                ok: true,
+                limits: { injectMaxChars: state.roleInjectMax },
+                persona: { saveApply: state.roleSaveApply ?? 'nextWake' },
+              });
+            }
+            state.roleInjectMax = Number(body.maxInjectChars) || state.roleInjectMax;
+            state.roleSaveApply = body.saveApply === 'immediate' ? 'immediate' : 'nextWake';
+            return json({
+              ok: true,
+              maxInjectChars: state.roleInjectMax,
+              saveApply: state.roleSaveApply,
+              limits: { injectMaxChars: state.roleInjectMax },
+            });
           case '/api/preset/sim-prompt': {
             const preset = String(body.preset || 'qq-chat-v2');
             const content = String(body.content ?? '');

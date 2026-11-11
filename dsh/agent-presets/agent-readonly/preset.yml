@@ -1,0 +1,4 @@
+# 本文件由 scripts/build-capability-artifacts.mjs 从 capability.yml 生成，请勿手工编辑。
+name: Agent · 只读
+description: 只读文件与检索，不改任何东西
+order: 20

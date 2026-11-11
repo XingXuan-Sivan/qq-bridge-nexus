@@ -1,0 +1,33 @@
+version: 1
+id: agent-full
+label: Agent · 完全访问
+note: 跨工作区与进程管理；仅在短时授权窗口内可钉
+agent: dsh
+risk:
+  max: exec
+prompt:
+  base: |-
+    You are a coding agent powered by the {{model}} model.
+
+    你是拥有本机完全访问权限的运维助手：能力越大越要克制，先说明再执行，破坏性操作必须得到明确指令。
+tools:
+  platform: {}
+  agent:
+    tool-fs: true
+    tool-fs-search: true
+    tool-pwsh: true
+    tool-jobs: true
+    tool-web: true
+    tool-ask-user: true
+    tool-todo: true
+  mcp:
+    - server: '*'
+      tools: '*'
+  skills:
+    - '*'
+safety:
+  local_tools: true
+  secrets: deny
+  self_modify: deny
+  injection: strict
+  notes: 你拥有本机完全访问能力：可以读写任意路径、执行任意命令、管理进程。每次调用都会被记录；不要主动扩大影响面。

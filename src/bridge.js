@@ -90,6 +90,15 @@ import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyL
 import { createRuntimeState } from './runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from './capabilities/store.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
+import {
+  PERMISSION_LABEL,
+  PERMISSION_LEVELS,
+  SESSION_PERMISSIONS,
+  normalizePermissionConfig,
+  normalizeSessionPermission,
+  presetForLevel,
+  resolvePermission,
+} from './session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
@@ -1529,6 +1538,7 @@ function loadConfig() {
   // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
   // 存储键已迁到 `limits.personaInjectChars`；`role.maxInjectChars` 只读兼容。
   // 先展开旧 `role` 再写 maxInjectChars，保证新键优先于旧键。
+  cfg.permission = normalizePermissionConfig(file.permission);
   cfg.role = { ...(file.role ?? {}), maxInjectChars: normalizePersonaInjectChars(file) };
   roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
   roleSaveApplyDefault = cfg.role.saveApply === 'immediate' ? 'immediate' : 'nextWake';
@@ -4060,6 +4070,86 @@ async function main() {
   }
 
   /** 受众为 owner 的方案只允许管理员私聊使用（取代旧 closed-agent 全局排他）。 */
+  // ---- 会话权限级别（P11）----
+  const fullGrants = new Map(); // key -> { expiresAt, timer }
+
+  function fullGrantActive(key) {
+    const grant = fullGrants.get(key);
+    if (!grant) return false;
+    if (grant.expiresAt <= Date.now()) {
+      clearFullGrant(key, { revert: true, reason: 'expired' });
+      return false;
+    }
+    return true;
+  }
+
+  function permissionLevelOf(rawKey) {
+    const key = apiKey(rawKey);
+    const profile = state.profiles?.[key];
+    const chat = !sessionPlanOf(key)?.capability;
+    return resolvePermission({ profile, global: cfg.permission, chat });
+  }
+
+  function fullAllowedForKey(key) {
+    return cfg.permission?.allowFull === true && fullGrantActive(key);
+  }
+
+  function grantFull(key, minutes) {
+    const ttl = Number(minutes) > 0 ? Number(minutes) : cfg.permission.fullTtlMin;
+    clearFullGrant(key, { revert: false, reason: 'replaced' });
+    const expiresAt = Date.now() + ttl * 60_000;
+    const timer = setTimeout(() => clearFullGrant(key, { revert: true, reason: 'expired' }), ttl * 60_000);
+    timer.unref?.();
+    fullGrants.set(key, { expiresAt, timer });
+    ext.audit.append('permission.full_grant', { key, ttlMin: ttl });
+    return { expiresAt, ttlMin: ttl };
+  }
+
+  function clearFullGrant(key, { revert = true, reason = 'manual' } = {}) {
+    const grant = fullGrants.get(key);
+    if (!grant) return false;
+    clearTimeout(grant.timer);
+    fullGrants.delete(key);
+    ext.audit.append('permission.full_revoked', { key, reason });
+    if (revert) void pinSessionPermission(key, { reason: `full-${reason}` }).catch(() => {});
+    return true;
+  }
+
+  async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false } = {}) {
+    const key = apiKey(rawKey);
+    const sessionId = sessions.get(key)?.sessionId;
+    if (!sessionId || !api.commands?.execute) return { ok: true, skipped: true };
+    const level = permissionLevelOf(key);
+    const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key) });
+    try {
+      const r = unwrap(await api.commands.execute(sessionId, `/permission ${plan.preset}`), 'commands.execute');
+      const ok = permissionCommandSucceeded(r, plan.preset);
+      ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason });
+      if (!ok && throwOnError) throw new Error(`权限预设 ${plan.preset} 结果不符合预期`);
+      return { ok, level: plan.level, preset: plan.preset };
+    } catch (error) {
+      ext.audit.append('permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason, error: String(error?.message ?? error) });
+      if (throwOnError) throw error;
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  }
+
+  function permissionPayload(rawKey) {
+    const key = apiKey(rawKey);
+    const value = normalizeSessionPermission(state.profiles?.[key]?.permission);
+    return {
+      value,
+      effective: permissionLevelOf(key),
+      options: SESSION_PERMISSIONS,
+      labels: PERMISSION_LABEL,
+      fullAllowed: cfg.permission?.allowFull === true,
+      grantActive: fullGrantActive(key),
+      grantExpiresAt: fullGrants.get(key)?.expiresAt ?? null,
+      ttlMin: cfg.permission.fullTtlMin,
+      canPinFull: fullAllowedForKey(key),
+    };
+  }
+
   function planAudienceBlocks(key) {
     const plan = planOf(key);
     if (!plan || plan.audience !== 'owner') return false;
@@ -12775,28 +12865,16 @@ async function main() {
       }
       // 新版 DSH 事件流需要显式 follow 该会话，否则收不到 turn 事件。
       api.events.follow(sessionId);
-      // v0.3.0：closed-agent 会话按级别钉住 DSH 权限预设（rc.2 只能用 commands/execute 的 /permission）。
-      // 钉不上就丢弃会话 —— 宁可建不出会话，也不让它带着 DSH 默认权限运行。
-      if (agentPlan?.ok) {
-        let pinned = false;
-        let pinError = '';
-        try {
-          const r = unwrap(await api.commands.execute(sessionId, `/permission ${agentPlan.permissionPreset}`), 'commands.execute');
-          pinned = permissionCommandSucceeded(r, agentPlan.permissionPreset);
-          if (!pinned) pinError = String(r?.result?.text ?? '未知结果').slice(0, 200);
-        } catch (error) {
-          pinError = String(error?.message ?? error);
-        }
-        if (!pinned) {
-          log(`⛔ 无法为 ${key} 设置权限预设 ${agentPlan.permissionPreset}：${pinError}；丢弃该会话`);
-          ext.audit.append('permission.pin_failed', { key, preset: agentPlan.permissionPreset, error: pinError });
+      // P11：按会话权限级别钉 DSH 权限预设。chat 会话恒只读（钉不上不影响聊天）；
+      // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着 DSH 默认权限运行。
+      {
+        const chatSession = !sessionPlanOf(key)?.capability;
+        const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false });
+        if (!pinned.ok && !chatSession) {
+          log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);
           try { await api.workspace.archiveSession({ sessionId }); } catch {}
-          throw new Error(`权限预设 ${agentPlan.permissionPreset} 设置失败（${pinError}），已拒绝建会话`);
+          throw new Error(`权限预设设置失败（${pinned.error}），已拒绝建会话`);
         }
-        ext.audit.append('permission.pinned', { key, sessionId, level: currentLevel, preset: agentPlan.permissionPreset, agentPreset: agentPlan.agentPreset || '(DSH 默认)' });
-      } else if (strictPreset && cfg.admin?.pinChatReadOnly !== false && api.commands?.execute) {
-        // 群友会话本来就没有本地工具；再钉一个 read-only 是纵深防御，失败不影响聊天。
-        try { await api.commands.execute(sessionId, '/permission read-only'); } catch {}
       }
       // reset/清空工作区期间创建完成：丢弃，防止旧会话复活
       if (epoch !== sessionEpoch || policy !== sessionPolicy(key) || !isSessionAllowedInCurrentMode(key)) {

@@ -74,6 +74,7 @@ import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, reso
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from '../src/capabilities/store.mjs';
+import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
 
@@ -339,6 +340,13 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     findPlan,
     RUNTIME_PLATFORM,
     createRuntimeState,
+  normalizePermissionConfig,
+  normalizeSessionPermission,
+  presetForLevel,
+  resolvePermission,
+  PERMISSION_LABEL,
+  PERMISSION_LEVELS,
+  SESSION_PERMISSIONS,
     createCapabilityStore,
     capabilityAllowsFlag,
     visiblePlatformFlags,

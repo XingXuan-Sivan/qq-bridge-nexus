@@ -1,4 +1,4 @@
-// 管理行为页：桥接命令注册表（含迁移状态）+ 只读的 DSH 会话命令与 Agent 工具。
+// 命令与工具页：桥接命令注册表（含迁移状态）+ 只读的 DSH 会话命令与 Agent 工具。
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';

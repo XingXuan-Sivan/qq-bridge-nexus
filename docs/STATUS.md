@@ -564,3 +564,10 @@ npm run test:console-ui
 - 平台提示词迁到 `config/platform/qq.yml`，经注入块 `core-platform-prompt` 注入（仅能力方案）；能力里不再写 QQ 话术。
 - 行为与能力页：行为档案 + 能力预设两个标签，能力编辑器内联（平台工具 / Agent 模块 / MCP 服务器与工具 / 技能四张表）；删除 `pages/presets` 与「Agent 预设」导航；运行方案改引用 `capability`。
 - 红线守卫 `scripts/test-capability-unify.mjs`（12 条），全量 audit 见当次运行结果。
+
+### 2026-11-11（D24）P10.9 计划与生成物审计
+
+- 新增 SPEC §14：提示词三层（平台话术 / 引擎语义 / 能力安全与身份底稿）、页面三标签、P10.9.1–P10.9.8、G17–G21。
+- 新增 SPEC §14.7：生成物与源的边界审计——5 类不符合项（结构行缺失、`order` 无来源、行参数硬编码、安全段文字模板化、`risk.max` 空转）+ 冗余判定（运行时产物不算冗余；安装副本与旧 `qq-*` 是）+ G22–G24。
+- 备份与迁移清单：`docs/archive/prompts/2026-11-11/`（46 文件 + SHA256SUMS + manifest）、`docs/PROMPT_MIGRATION.md`。
+- 待拍板默认值：A 安全段改源文件显式文本；B 安装目录用链接（回落 hash 校验）。

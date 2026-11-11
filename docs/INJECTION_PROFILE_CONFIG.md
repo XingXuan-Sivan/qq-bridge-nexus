@@ -92,7 +92,8 @@
 | `core-pre-sleep` | situation / 230 | every-wake | 观察窗口时长（默认 300000）、是否强制 |
 | `core-action` | action / 300 | every-wake | 行动前检查项（可编辑列表） |
 | `core-quote-rule` | action / 310 | every-wake | 开关 |
-| `core-platform-prompt`（平台提示词，仅当会话方案带 `capability` 时注入）
+| `core-behavior-prompt`（引擎行为提示词，P10.9 计划：读 `config/behaviors/<id>.yml > prompt`，全量注入；摘要模式默认关）
+| `core-platform-prompt`（平台提示词，仅当会话方案带 `capability` 时注入；P10.9 起读 `config/platform/<platform>.yml`）
 - `core-snapshot` | tail / 900 | every-wake | 最多条数、是否带 recent、格式（JSON/文本） |
 | `core-unread-hint` | tail / 910 | every-wake | 是否提示 `readThroughSeq` 用法 |
 

@@ -833,7 +833,13 @@ Start-Process node -ArgumentList 'src/bridge.js' -WorkingDirectory (Get-Location
 ### 14.5 分步（每步单独提交）
 - **P10.9.1** 数据层：`behaviors` 增 `prompt` 读写与克隆/删除；新增 `src/platform/prompt.mjs`（读 `config/platform/*.yml`、渲染占位符、还原出厂）；单测。
 - **P10.9.2** 注入：新增 `core-behavior-prompt`，重写 `core-platform-prompt` 读平台话术；golden 夹具扩一个带 capability 的变体。
-- **P10.9.3** 生成器收口：`agent.cordis.yml` 只由 safety + `prompt.base` 生成；确认旧预设不再被新能力引用。
+- **P10.9.3** 生成器收口（按 §14.7 审计结论逐项修）：
+  - (a) `capability.yml` 增 `order`；`preset.yml.order` 只读该字段（不再由调用方传参、默认 100）。
+  - (b) 结构行 `compaction` / `command-compact` / `tool-result-pruner` 进默认模板文件，任何能力都带（当前生成物缺失，属功能回归）。
+  - (c) 行参数从代码常量搬进源或模板文件：`tool-web {fetch,searchTimeoutMs}`、`tool-todo {allowParallelInProgress}`、`tool-fs-search {sampleOverCapGlobResults}`、`qq-approval-gate {level}`、`qq-tool-restrict {profile}`。
+  - (d) 安全段改为源文件写文本（`safety.rules` 显式列表），开关只做校验；默认文本放模板文件。
+  - (e) `risk.max` 要么参与校验（能力声明上限），要么从 schema 删除——不允许空转。
+  - 完成后 `--check` 必须逐字节通过，并新增守卫测试「产物中每个属性都能在 capability.yml 或模板文件中找到来源」。
 - **P10.9.4** 前端三标签骨架 + 行为提示词卡 + 拼装预览（代码编辑器组件）。
 - **P10.9.5** 能力页骨架恢复：清单/编辑/底稿三卡、新建/克隆/删除、技能表空态。
 - **P10.9.6** 平台话术标签（编辑、还原出厂）。
@@ -846,3 +852,31 @@ Start-Process node -ArgumentList 'src/bridge.js' -WorkingDirectory (Get-Location
 - G19 页面三标签结构与原预设页一致（清单/编辑/提示词都是并列卡片），全部使用 `renderFields` / `dataTableHtml` / `attachTextareaEditor`，无手写控件。
 - G20 技能表在数据为空时显示空态说明，不得整块消失。
 - G21 能力新建/克隆/删除可用，内置只读可克隆；被方案引用的删除返回 409。
+- G22 生成物可追溯：`agent.cordis.yml` / `preset.yml` / `extensions.yml` 里的每一项（含行参数、顺序、安全段文字）都能在 `capability.yml` 或模板文件中找到来源；`--check` 无漂移。
+- G23 新能力产物必须含上下文压缩相关结构行（`compaction` / `command-compact` / `tool-result-pruner`）。
+- G24 安装副本不产生第二份真源：安装目录与仓库目录一致（链接或 hash 校验二选一），漂移时启动日志与页面都要提示。
+
+### 14.7 生成物与源的边界（2026-11-11 审计结论）
+
+> 用户要求：`agent.cordis.yml` 即便保留，其内容也必须完全由源文件派生，不得包含源里没有的配置项或属性。
+
+**链路**：`capability.yml`（唯一源）→ `scripts/build-capability-artifacts.mjs` → `preset.yml` / `agent.cordis.yml` / `extensions.yml`（带「勿手改」头，`--check` 防漂移）。`agent.cordis.yml` 是 DSH 真正加载的文件，不能删；`extensions.yml` 由桥接 Hub 读。
+
+| # | 现状（实测） | 为什么不符合 | 修法 |
+|---|---|---|---|
+| 1 | 生成的 `agent-chat/agent.cordis.yml` 只有 `persona, tool-web, tool-ask-user, tool-todo, qq-tool-restrict`，缺 `compaction` / `command-compact` / `tool-result-pruner`（旧 `qq-chat-v2` 有） | 产物少了源里应存在的结构行 → 新能力没有上下文压缩 | 结构行进默认模板，build 无条件带上 |
+| 2 | `preset.yml` 的 `order`（10/20/30/40）由调用方传参、默认 100 | 源文件无法表达顺序 | `capability.yml` 增 `order`，生成器只读 |
+| 3 | `AGENT_ROW_TEMPLATES` 在 `src/capabilities/build.mjs` 硬编码行参数（`tool-web{fetch,searchTimeoutMs}`、`tool-todo{allowParallelInProgress}`、`tool-fs-search{sampleOverCapGlobResults}`、`qq-approval-gate{level}`、守卫行 `{profile:'simulation'}`） | 生成物含源里没有的属性，改不了也查不到 | 参数搬进源或模板文件，代码只做组装 |
+| 4 | 安全段文字由 `renderSafetyPrompt()` 按布尔开关拼句子 | 措辞不在源里，无法编辑/追溯 | `safety.rules` 显式文本进源；开关只做校验 |
+| 5 | `capability.yml` 的 `risk.max` 在生成链路未被消费 | 源里有、产物不用，方向相反 | 用于校验（声明的最大风险不得超过允许上限），或删除字段 |
+
+**冗余判定**
+
+- `agent.cordis.yml` / `preset.yml` / `extensions.yml`：**不是冗余**，是运行时产物；问题是产物内容越界（见上表），不是文件本身多余。
+- `~/.dsh/.agent-presets` 安装副本：**真冗余**。修法二选一——目录链接指向仓库，或安装时写 `state/capability-install.json`（id → 三产物 hash）并在启动/页面提示漂移。
+- 旧 `qq-*` 五个预设：**迁移完成后应删除**（与 `agent-*` 同层同义，是双份知识）；原件已备份在 `docs/archive/prompts/2026-11-11/`。
+
+**待拍板（默认值如下，未反对即按此执行）**
+
+- A. 安全段：**改成源文件写文本**（`safety.rules`），开关只校验。
+- B. 安装副本：**用目录链接**指向仓库；链接不可用时回落 hash 校验并提示。

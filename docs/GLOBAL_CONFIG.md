@@ -33,13 +33,17 @@
 
 ### 2.1 控制台页面
 
-当前 16 页（全部片段页，按需注入）：`overview`、`config`、`runtime`、`sessions`、`persona`、`plugins`、`skills`、`presets`、`behavior`、`prompt-blocks`、`mcp`、`behaviors`、`slang`、`memory`、`scheduler`、`operations`。
+当前 15 页（全部片段页，按需注入）：`overview`、`config`、`runtime`、`sessions`、`persona`、`plugins`、`skills`、`behavior`、`prompt-blocks`、`mcp`、`behaviors`、`slang`、`memory`、`scheduler`、`operations`。
+
+P10.6 起「Agent 预设」整页删除：能力编辑在「行为档案 › 能力预设」标签内完成（`capability.yml` 唯一源，保存即重建三份产物）。
 
 导航分组（P5 后）：
 
 - **管理**：运行总览 → 会话与审批 → 运行方案 → 全局配置 → 调试与运维；
-- **聊天行为**：注入块 → 行为档案 → 预设 → 人格与角色 → 记忆 → 黑话词库 → 定时任务；
-- **扩展**：插件 → 技能 → MCP 与工具 → 管理行为。
+- **聊天行为**：注入块 → 行为档案（含能力预设标签）→ 人格与角色 → 记忆 → 黑话词库 → 定时任务；
+- **扩展**：插件 → 技能 → MCP → 命令与工具。
+
+计划（P10.9）：行为档案页改为三标签——行为档案（清单 / 参数 / **提示词** / 拼装预览）· 能力预设（清单 / 编辑 / **能力底稿**，恢复新建·克隆·删除）· 平台话术（编辑 `config/platform/<platform>.yml`、还原出厂）。提示词一律用代码编辑器组件 `attachTextareaEditor`。
 
 入口分工：运行方案页是「引擎 / 能力 / 行为 / 受众」的唯一入口；注入块页是提示词拼装的唯一入口（插件页已无注入块卡）；全局配置页负责准入、安全与静默、行为默认值、DSH 模型、发言上限、工具目录。
 

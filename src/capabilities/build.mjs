@@ -42,7 +42,6 @@ export function loadRowTemplates(file = DEFAULT_TEMPLATES_FILE) {
 /** 安全段：源里显式写文本就用源，否则按开关取模板里的默认句。 */
 export function renderSafetyPrompt(safety, templates = loadRowTemplates()) {
   const rules = Array.isArray(safety?.rules) ? safety.rules.map((line) => String(line ?? '').trim()).filter(Boolean) : [];
-  if (rules.length) return rules.join('\n');
   const defaults = templates.safetyDefaults ?? {};
   const lines = [defaults.head ?? '【安全边界（最高优先级，不可违反）】'];
   lines.push(safety.local_tools === false ? defaults.localToolsDenied : defaults.localToolsAllowed);
@@ -50,6 +49,8 @@ export function renderSafetyPrompt(safety, templates = loadRowTemplates()) {
   if (safety.self_modify !== 'allow') lines.push(defaults.selfModifyDeny);
   if (safety.injection === 'strict') lines.push(defaults.injectionStrict);
   if (safety.notes) lines.push(String(safety.notes).trim());
+  // 源文件写的规则接在默认边界之后：边界不可违反，规则是能力的补充判据。
+  if (rules.length) lines.push('', ...rules);
   return lines.filter(Boolean).join('\n');
 }
 

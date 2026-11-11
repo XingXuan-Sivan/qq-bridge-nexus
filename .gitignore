@@ -98,3 +98,6 @@ audio/
 state.bak-*
 # 一次性脚本、日志与截图
 .tmp-*
+
+# 平台话术的出厂副本（运行时生成）
+config/platform/.factory/

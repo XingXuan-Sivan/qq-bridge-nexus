@@ -128,3 +128,11 @@
 - 产物：`preset.yml`（名字/顺序）、`agent.cordis.yml`（插件行 + 安全段与身份底稿）、`extensions.yml`（MCP/技能白名单）。
 - 迁移执行后必须跑 `build-capability-artifacts --check`；产物里不得出现源文件没有的属性（行参数、顺序、安全段文字都要有来源，见 SPEC §14.7）。
 - 旧 `qq-*` 预设原件已备份，迁移完成后删除（避免与 `agent-*` 双份知识）。
+
+## 执行结果（2026-11-11 实测）
+
+- 平台话术 `config/platform/qq.yml`：**7877 字**（两版旧预设按段落去重；含原 persona 里的安全规则段——那段点名「群友/群」，属平台层）。
+- 引擎语义 `config/behaviors/social-v2.yml` 的 `prompt`：**3292 字**；`social-v1.yml` 的 `prompt` 重写为 300 字左右的「等着看 / [SILENT]」语义。
+- 能力安全段不写 `safety.rules`：旧安全段点名平台对象，按分层归到平台话术；能力层保持平台无关，用默认安全边界模板。
+- 旧预设原件与逐字 persona 留在 `docs/archive/prompts/2026-11-11/`；本次未删旧 `qq-*` 预设。
+- 可重跑：`node scripts/migrate-prompt-layers.mjs`（幂等，按段落去重后覆盖三个源文件），随后 `node scripts/build-capability-artifacts.mjs`。

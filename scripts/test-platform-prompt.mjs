@@ -10,11 +10,13 @@ test('platform prompt file carries the QQ section and nothing else', () => {
   assert.equal(raw.version, 1);
   assert.equal(raw.platform, 'qq');
   const text = String(raw.prompt ?? '');
-  assert.ok(text.length > 5000, `prompt too short: ${text.length}`);
+  // P10.9.7 起身份底稿归能力层，平台层只剩平台话术，体量约 5k。
+  assert.ok(text.length > 4000, `prompt too short: ${text.length}`);
   for (const heading of ['【二代仿真模式 —— 工具协议', '【等、回与沉睡前观察】', '【发送与汇报禁令']) {
     assert.ok(text.includes(heading), `missing heading: ${heading}`);
   }
   assert.ok(!text.includes('id: persona'), 'persona 键不应出现在平台提示词里');
   assert.ok(!text.includes('{{model}}'), '模型变量不应出现在平台提示词里');
+  assert.ok(!/^\s*You are a coding agent/m.test(text), '身份底稿不应出现在平台提示词里');
   assert.ok(!text.trimEnd().endsWith('config:'), '文件尾部不应混入后续 YAML 键');
 });

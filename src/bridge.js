@@ -4119,10 +4119,17 @@ async function main() {
     return true;
   }
 
+  /** closed-agent 期间 level 仍是权限的来源（旧语义），其余模式走全局默认 + 会话覆盖。 */
+  const LEGACY_LEVEL_PERMISSION = { L1: 'read-only', L2: 'workspace-write', L3: 'full-ask' };
   function permissionLevelOf(rawKey) {
     const key = apiKey(rawKey);
     const profile = state.profiles?.[key];
     const chat = !sessionPlanOf(key)?.capability;
+    const explicit = profile?.permission && profile.permission !== 'inherit' ? profile.permission : null;
+    if (!explicit && !chat && effectiveMode(key) === 'closed-agent') {
+      const legacy = LEGACY_LEVEL_PERMISSION[String(currentLevel || '').toUpperCase()];
+      if (legacy) return legacy;
+    }
     return resolvePermission({ profile, global: cfg.permission, chat });
   }
 
@@ -4151,15 +4158,18 @@ async function main() {
     return true;
   }
 
-  async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false } = {}) {
+  async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false, sessionId: explicitSessionId = null } = {}) {
     const key = apiKey(rawKey);
-    const sessionId = sessions.get(key)?.sessionId;
+    // 建会话时还没 bindSession，必须把刚拿到的 sessionId 显式传进来。
+    const sessionId = explicitSessionId || sessions.get(key)?.sessionId;
     if (!sessionId || !api.commands?.execute) return { ok: true, skipped: true };
     const level = permissionLevelOf(key);
     const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key) });
     try {
       const r = unwrap(await api.commands.execute(sessionId, `/permission ${plan.preset}`), 'commands.execute');
       const ok = permissionCommandSucceeded(r, plan.preset);
+      if (ok) pinnedPermissions.set(key, plan.preset);
+      else pinnedPermissions.delete(key);
       ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason });
       if (!ok && throwOnError) throw new Error(`权限预设 ${plan.preset} 结果不符合预期`);
       return { ok, level: plan.level, preset: plan.preset };
@@ -4169,6 +4179,8 @@ async function main() {
       return { ok: false, error: String(error?.message ?? error) };
     }
   }
+
+  const pinnedPermissions = new Map();
 
   function permissionPayload(rawKey) {
     const key = apiKey(rawKey);
@@ -12930,6 +12942,19 @@ async function main() {
           retireSession(key);
         } else {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
+          {
+            const chatSession = !sessionPlanOf(key)?.capability;
+            const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key) }).preset;
+            if (pinnedPermissions.get(key) !== wanted) {
+              const repinned = await pinSessionPermission(key, { reason: 'mode-change', throwOnError: false, sessionId: existing });
+              if (!repinned.ok && !chatSession && !cfg.permission.allowFull) {
+                log(`⛔ 无法为 ${key} 更新权限预设：${repinned.error}；丢弃该会话`);
+                try { await api.workspace.archiveSession({ sessionId: existing }); } catch {}
+                retireSession(key);
+                throw new Error(`权限预设设置失败（${repinned.error}），已拒绝继续使用该会话`);
+              }
+            }
+          }
           markDshHealth(key, existing, 'online');
           return existing;
         }
@@ -13029,7 +13054,7 @@ async function main() {
       // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着 DSH 默认权限运行。
       {
         const chatSession = !sessionPlanOf(key)?.capability;
-        const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false });
+        const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
         if (!pinned.ok && !chatSession) {
           log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);
           try { await api.workspace.archiveSession({ sessionId }); } catch {}

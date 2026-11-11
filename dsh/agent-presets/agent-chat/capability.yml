@@ -1,3 +1,5 @@
+# 能力预设源文件：工具面 + 安全段 + 身份底稿。
+# 生成物（preset.yml / agent.cordis.yml / extensions.yml）由 scripts/build-capability-artifacts.mjs 产出，勿手改。
 version: 1
 id: agent-chat
 label: 聊天 Agent
@@ -18,10 +20,10 @@ tools:
     tool-ask-user: true
     tool-todo: true
   mcp:
-    - server: '*'
-      tools: '*'
+    - server: "*"
+      tools: "*"
   skills:
-    - '*'
+    - "*"
 safety:
   local_tools: false
   secrets: deny

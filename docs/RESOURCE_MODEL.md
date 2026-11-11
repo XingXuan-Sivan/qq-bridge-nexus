@@ -1,6 +1,6 @@
 # 资源模型：两端适配、能力、行为与权限（需求与方案稿 v2）
 
-> 状态：**P9.1–P9.4 已实施**（P9.1 工具目录归一：`src/tools/catalog.mjs` + 能力 `tools.visible`；P9.2 平台提示词组装：`src/runtime/prompt-compose.mjs`，安装期拼进 persona.prefix，空值时产物逐字节不变）。其余分期见 §10。
+> 状态：**P9.1–P9.4 已实施；P10.1–P10.6 已实施（能力归一，见 `CAPABILITY_UNIFY_SPEC.md`）**（P9.1 工具目录归一：`src/tools/catalog.mjs` + 能力 `tools.visible`；P9.2 平台提示词组装：`src/runtime/prompt-compose.mjs`，安装期拼进 persona.prefix，空值时产物逐字节不变）。其余分期见 §10。
 > 上游：`docs/UNIFY_PLAN.md`（三线归一执行契约）、`docs/RUNTIME_PROFILE_MODEL.md`（运行方案）。
 > v1 → v2 的变化：D1 取「安装期组装」；补齐**两端适配器**（用户端平台 / Agent 端运行时）、**工具目录归一**与**权限级别矩阵**；内置资源改为只读模板。
 

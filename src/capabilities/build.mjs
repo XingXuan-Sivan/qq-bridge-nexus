@@ -1,7 +1,7 @@
 // 由 capability.yml 生成三份产物：preset.yml / agent.cordis.yml / extensions.yml。
 //
 // 为什么必须生成而不是手写：一份能力的「工具面」原本散在三处（cordis 插件行、
-// extensions.yml 的 MCP/技能白名单、config.capabilities 的可见集），三处各改一半就会
+// extensions.yml 的 MCP/技能白名单、capability.yml 的可见集），三处各改一半就会
 // 出现「界面说禁了、实际还能调」。这里让 capability.yml 成为唯一输入，产物带
 // 「请勿手工编辑」头，`--check` 保证不漂移。
 import fs from 'node:fs';

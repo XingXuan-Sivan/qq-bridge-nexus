@@ -1,7 +1,7 @@
 // 工具目录：平台工具与 Agent 工具的唯一定义处。
 //
 // 之前有三份清单：config.tools 的 37 个注册开关（控制台手写）、能力预设里的
-// 插件行与 qq-tool-restrict 白名单、以及 config.capabilities[id].grants.disable。
+// 插件行与 qq-tool-restrict 白名单、以及 capability.yml 的 tools 可见集。
 // 这里把它们收敛成一份目录 + 一份风险分级：
 //   · 目录条目描述「这个工具是什么、来自哪一端、风险等级」；
 //   · 能力预设只存 tools.visible（平台工具白名单）；

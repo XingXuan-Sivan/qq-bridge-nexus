@@ -1,13 +1,13 @@
 # 全局配置：三层模型与配置归一化方案
 
-> 状态：**G1–G4 已提交；G5 已完成**（2026-11-09）。
+> 状态：**G1–G4 已提交；G5 已完成**（2026-11-09）。P10 能力归一已实施（`CAPABILITY_UNIFY_SPEC.md`）：旧「预设」页已删除，能力与行为合并到「行为与能力」页两个标签，模型以该 SPEC 为准；本文的「预设层」表述保留作历史对照。
 > G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页 `aa2176a`、G4 动态 picker / CM6 / 统一 `yaml` `169da58`。G5 完成文档收尾、控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）与 `js-yaml` 迁移；表格可选能力（D23）留待有使用点再补。
 > 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.16。
 
 ## 0. 结论
 
 1. 控制台新增**一个**「全局配置」页，只放**系统层**配置；不再有 `social-v1` / `social-v2` 两个按仿真模式拆分的页面，也不再有独立的「访问与安全」页。
-2. 「预设」页负责**预设层**：预设元数据、`agent.cordis.yml`、扩展授权、行为档案绑定。预设是“一个 Agent 的完整配置包”，不是运行模式。
+2. 「行为与能力」页负责**资源层**：第一标签是行为档案（QQ 交互参数），第二标签是能力预设（`dsh/agent-presets/<id>/capability.yml`：平台工具、Agent 模块、MCP/技能、安全边界）。能力是“这个 Agent 能做什么”，不含平台话术；平台提示词在 `config/platform/qq.yml`，由注入块注入。
 3. 「会话与审批」页负责**会话层**：某个群的预设、模型、人格、初始提示词、准入成员、清空/重建；行为参数默认继承预设，不在会话页重复。
 4. QQ 交互行为参数（唤醒、发送、等待、主动、表情、上下文、反馈）从 `config.json` 的 `social` / `socialV2` 移到**行为档案** `config/behaviors/*.yml`；预设通过 `behavior:` 引用，不再按 `reserved` / `reserved2` 写死在页面里。
 5. 旧的 `social-v1` / `social-v2` / `access` 页面、旧配置键、旧兼容读取**直接删除**，不保留别名、不双写；迁移前先提交/打基线，出错用 git 回溯（用户已选方案 2）。
@@ -18,13 +18,13 @@
 | 层 | 回答的问题 | 存放位置 | 编辑入口 | 典型内容 |
 | --- | --- | --- | --- | --- |
 | 系统层 | 这台桥接怎么运行 | `config.json`、`state/mode.json`、`plugins.json`、`state/sessions/defaults.json`、`state/extensions/` | 全局配置 / 插件 / MCP / 技能 | DSH 地址与模型、默认预设、默认运行模式、控制台端口与令牌、owner/管理员、准入默认名单、发送总上限、静默、记忆/搜索/定价 |
-| 预设层 | 这个 Agent 是谁、会什么 | `dsh/agent-presets/<id>/`、`config/behaviors/<id>.yml` | 预设 / 全局配置的「行为档案」 | 人设与提示词、工具限制 guard、扩展授权、唤醒/发送/主动/表情等行为 |
+| 资源层 | 这个 Agent 能做什么、在 QQ 里怎么说话 | `dsh/agent-presets/<id>/capability.yml`、`config/behaviors/<id>.yml`、`config/platform/qq.yml` | 行为与能力 | 平台工具/Agent 模块/MCP/技能、安全边界、唤醒/发送/主动/表情等行为、平台话术 |
 | 会话层 | 这个群/私聊怎么跑 | `state/sessions/<platform>/<kind>/<id>.json` | 会话与审批 | 该会话的 preset、模型、人格卡、初始提示词、准入成员、DSH 绑定、清空/重建 |
 
 ### 1.1 三个容易混淆的概念
 
 - **运行模式（mode）**：`chat` / `reserved` / `reserved2` / `closed-agent`，决定消息走哪条处理链、用哪个引擎；是系统层的“路由”，不是预设。
-- **预设（preset）**：`dsh/agent-presets/<id>/` 的完整 Agent 包；决定提示词、guard、扩展授权、行为档案。`reserved` 默认用 `qq-chat`，`reserved2` 默认用 `qq-chat-v2`，但会话可以单独指定 preset。
+- **能力预设（capability）**：`dsh/agent-presets/<id>/capability.yml` 是唯一源，生成 `preset.yml` / `agent.cordis.yml` / `extensions.yml`；决定工具面、安全边界与平台无关的提示词底稿。运行方案通过 `capability` 字段引用它。
 - **行为档案（behavior）**：一组 QQ 交互参数（唤醒、发送、等待、主动、表情、上下文、反馈）。它不绑定“一代/二代”页面，只带一个 `kind` 用于校验使用它的引擎；可以被多个预设共享。
 
 当前 `social-v1` / `social-v2` 页面把“行为参数”按运行模式拆开，所以看起来像“某个预设的独立页面”；归一化后页面只按“层”划分，不再按 mode 划分。

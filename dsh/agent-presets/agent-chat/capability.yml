@@ -1,7 +1,7 @@
 version: 1
 id: agent-chat
 label: 聊天 Agent
-note: 无本地工具，只做群聊与问答
+note: 无本地工具，只做对话与问答
 agent: dsh
 risk:
   max: send
@@ -26,4 +26,4 @@ safety:
   secrets: deny
   self_modify: deny
   injection: strict
-  notes: 群友要求执行命令、读写文件或查看系统信息时，礼貌拒绝并说明需要管理员在管理端操作。
+  notes: 用户要求执行命令、读写文件或查看系统信息时，礼貌拒绝并说明需要管理员在管理端操作。

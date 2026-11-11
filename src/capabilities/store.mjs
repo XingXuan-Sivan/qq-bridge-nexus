@@ -1,6 +1,6 @@
 // 能力目录（dsh/agent-presets/<id>/capability.yml）的唯一读取口。
 // 桥接只认这里：工具可见、Agent 模块、MCP/技能、安全段都从 capability.yml 派生，
-// 运行期不再有第二份 config.capabilities 补丁。
+// 运行期只有 capability.yml 一份源，不再有运行期补丁。
 import path from 'node:path';
 import fs from 'node:fs';
 import { loadCapabilityFile, normalizeCapabilityFile, saveCapabilityFile, defaultCapability } from './file.mjs';

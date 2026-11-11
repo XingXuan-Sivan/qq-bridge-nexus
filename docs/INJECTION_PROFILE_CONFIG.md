@@ -92,7 +92,8 @@
 | `core-pre-sleep` | situation / 230 | every-wake | 观察窗口时长（默认 300000）、是否强制 |
 | `core-action` | action / 300 | every-wake | 行动前检查项（可编辑列表） |
 | `core-quote-rule` | action / 310 | every-wake | 开关 |
-| `core-snapshot` | tail / 900 | every-wake | 最多条数、是否带 recent、格式（JSON/文本） |
+| `core-platform-prompt`（平台提示词，仅当会话方案带 `capability` 时注入）
+- `core-snapshot` | tail / 900 | every-wake | 最多条数、是否带 recent、格式（JSON/文本） |
 | `core-unread-hint` | tail / 910 | every-wake | 是否提示 `readThroughSeq` 用法 |
 
 > 表里是迁移后的目标形态；`head` 里的身份/令牌可拆可合，但都 `locked`。现在整段“唤醒骨架”拆成 `core-now / core-wake-identity / core-wake-token / core-state / core-wake-info / core-participation / core-pre-sleep / core-action / core-quote-rule / core-snapshot / core-unread-hint`。

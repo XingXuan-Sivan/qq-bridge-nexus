@@ -556,3 +556,11 @@ npm run test:console-ui
 
 
 
+
+### 2026-11-11（D23）能力归一 P10.1–P10.6
+
+- 工具目录 45 条（37 平台 + 8 Agent）/ 四级权限矩阵 / 能力默认集：`src/tools/catalog.mjs`。
+- `capability.yml` 单一源 + 生成三产物：`src/capabilities/{file,build,store}.mjs`、`scripts/build-capability-artifacts.mjs`；内置四能力 `agent-chat/agent-readonly/agent-workspace/agent-full`。
+- 平台提示词迁到 `config/platform/qq.yml`，经注入块 `core-platform-prompt` 注入（仅能力方案）；能力里不再写 QQ 话术。
+- 行为与能力页：行为档案 + 能力预设两个标签，能力编辑器内联（平台工具 / Agent 模块 / MCP 服务器与工具 / 技能四张表）；删除 `pages/presets` 与「Agent 预设」导航；运行方案改引用 `capability`。
+- 红线守卫 `scripts/test-capability-unify.mjs`（12 条），全量 audit 见当次运行结果。

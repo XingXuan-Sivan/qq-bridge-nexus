@@ -30,11 +30,11 @@ export const CAPABILITIES = [
   {
     id: 'agent-chat',
     label: '聊天 Agent',
-    note: '无本地工具，只做群聊与问答',
+    note: '无本地工具，只做对话与问答',
     order: 10,
     agent: ['tool-web', 'tool-ask-user', 'tool-todo'],
     local_tools: false,
-    notes: '群友要求执行命令、读写文件或查看系统信息时，礼貌拒绝并说明需要管理员在管理端操作。',
+    notes: '用户要求执行命令、读写文件或查看系统信息时，礼貌拒绝并说明需要管理员在管理端操作。',
     base: `${COMMON_BASE}\n\n你是一个在聊天平台里与人对话的助手：先理解对方在说什么，再决定回不回、怎么回；不确定就说不确定。`,
   },
   {

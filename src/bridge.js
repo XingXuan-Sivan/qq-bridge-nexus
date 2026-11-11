@@ -14088,9 +14088,9 @@ async function main() {
     if (entry.items.length > 60) entry.items.shift();
   }
 
-  /** 消息里只认 role：owner=主人、admin=管理员、member=群友（存量记录只有 isOwner 时按主人算）。 */
+  /** 消息里只认 botRole：owner=主人、admin=管理员、member=群友（存量记录只有 isOwner 时按主人算）。 */
   function roleTagOf(message) {
-    const role = message?.role || (message?.isOwner ? 'owner' : '');
+    const role = message?.botRole || (message?.isOwner ? 'owner' : '');
     if (role === 'owner') return '【主人】';
     if (role === 'admin') return '【管理员】';
     return '';
@@ -15211,7 +15211,9 @@ async function main() {
       sender,
       senderId: userId != null ? String(userId) : null,
       userId: userId != null ? String(userId) : null,
-      role: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }),
+      botRole: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }),
+      // 群身份只对群消息有意义；私聊不写这个字段（模型视图会把空值剥掉）。
+      groupRole: extra.groupRole ?? null,
       text: truncateText(String(textContent), 200),
       plain: truncateText(String(plainContent ?? textContent), 200),
       tail: truncateTextTail(String(plainContent ?? textContent), 200),
@@ -15627,7 +15629,7 @@ async function main() {
    * 正文归 core-snapshot 块，这里只负责把快照对象序列化成那段话。
    */
   function wakeSnapshotBlock(snapshot) {
-    return `【本次消息快照】\n${JSON.stringify(snapshot)}\n消息里的 role 是说话人身份：owner 是主人、admin 是管理员、member 是群友；判断该听谁的、怎么称呼、要不要客气，都看 role。\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
+    return `【本次消息快照】\n${JSON.stringify(snapshot)}\n消息里的 botRole 是桥接身份、groupRole 是群身份，两者独立；字段缺失表示没有或不适用。\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
   }
 
   /**
@@ -16753,7 +16755,7 @@ async function main() {
         } else {
           if (effectiveMode(key) === 'reserved2' && silence.config().options.recordMessages) {
             const sender = displaySenderName(kind, event);
-            appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
+            appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), kind === 'group' && event.sender?.role ? { groupRole: event.sender.role } : {});
             if (directed) getSocialV2State(key).silenceMissedDirect = true;
           }
           appendActivity(`${key}（${silenceReason(sw)}）${isOwner ? '管理员' : '群友 ' + event.user_id}：${textContent.slice(0, 80)}`);
@@ -16770,7 +16772,7 @@ async function main() {
           || (Array.isArray(event.message) && event.message.some((s) => s?.type === 'at' && event.self_id != null && String(s.data?.qq) === String(event.self_id)));
         if (effectiveMode(key) === 'reserved2' && roleState.silent.recordMessages !== false) {
           const sender = displaySenderName(kind, event);
-          appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
+          appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), kind === 'group' && event.sender?.role ? { groupRole: event.sender.role } : {});
         }
         if (directed) getSocialV2State(key).manualSilenceMissedDirect = true;
         appendActivity(`${key}（手动静默）${isOwner ? '管理员' : '群友 ' + event.user_id}：${textContent.slice(0, 80)}`);
@@ -16822,7 +16824,7 @@ async function main() {
     // 二代仿真模式（reserved2）：唤醒调度
     if (effectiveMode(key) === 'reserved2') {
       const sender = displaySenderName(kind, event);
-      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), backfill ? { time: backfill.timeMs, backfill: true } : {});
+      appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), { ...(backfill ? { time: backfill.timeMs, backfill: true } : {}), ...(kind === 'group' && event.sender?.role ? { groupRole: event.sender.role } : {}) });
       if (backfill?.tooOld) {
         appendActivity(`${key} [reserved2] 补收（太旧，只记下不唤醒）：${textContent.slice(0, 80)}`);
         return;

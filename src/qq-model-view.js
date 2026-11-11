@@ -5,7 +5,7 @@ const DEFAULT_FALSE_FIELDS = new Set([
 ]);
 const OPTIONAL_FIELDS = new Set([
   'seq', 'messageId', 'sender', 'userId', 'text', 'plain', 'tail', 'kind',
-  'role', 'media', 'forwardIds', 'nestedForwardIds'
+  'botRole', 'groupRole', 'media', 'forwardIds', 'nestedForwardIds'
 ]);
 
 function isRecord(value) {
@@ -45,7 +45,7 @@ export function compactModelMessage(message) {
   const result = { ...message };
   // 身份只有一个字段：role（owner/admin/member）。isOwner/isAdmin/ownerLabel 是旧字段，
   // 存量消息若只有 isOwner，这里映射一次 role，之后模型只按 role 判断。
-  if (!result.role && message.isOwner === true) result.role = 'owner';
+  if (!result.botRole && message.isOwner === true) result.botRole = 'owner';
   delete result.isOwner;
   delete result.isAdmin;
   delete result.ownerLabel;

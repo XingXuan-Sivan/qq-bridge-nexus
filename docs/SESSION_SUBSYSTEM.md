@@ -523,4 +523,5 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 - **准入写盘校验**：控制台保存会话准入（会话档案 PATCH）或全局准入（`/api/access` PATCH）后，`saveState()` 之后调 `verifyAccessPersisted(expected)` 回读 `state/sessions/defaults.json` 并逐轴比对；不一致直接 500「准入名单写入未生效（defaults.json 回读不一致），请看桥接日志」，并在日志里打出期望/实际两份 JSON。过去「关了却不生效」会静默失败，现在会当场报错。
 - **`probability` 归主动轴**：按概率随机唤醒没有人在找它，是 bot 自己冒泡；此前登记为 `passive`，导致「关掉主动」后仍可能自己开口。现为 `proactive`，`WAKE_REASON_AXES` 与 `test-session-proactive` 用例 ④ 同步。
 - **发送者归因**：私聊不再写死 `sender:'私聊'`，统一走 `displaySenderName(kind, event)`（群名片 → 昵称 → QQ 号）；落库消息新增 `senderId`、`role`（owner/admin/member）与 `isAdmin`，模型能分清「谁说的」。AI 自己的消息仍是 `sender:'我'` + `isSelf:true`。
+- **身份字段（D23b）**：落库消息的身份拆成两个正交字段——`botRole`（桥接侧身份：owner/admin/member）与 `groupRole`（QQ 群身份：owner/admin/member）。`groupRole` 只对群消息有意义，私聊不写；两者为空时由 `compactModelMessage` 按既有空值剥离机制删掉，模型只在字段存在时看到。`role`/`isAdmin`/`ownerLabel`/`isOwner` 不再写入新消息（存量 `isOwner:true` 在模型视图里映射一次 `botRole:'owner'`）。`roleTagOf()` 按 `botRole` 给上下文行加【主人】/【管理员】前缀。
 

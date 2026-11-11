@@ -84,9 +84,13 @@ test('self/owner flags, poke context and unknown extensions survive; only known 
   };
   const compact = compactModelMessage(message);
   assert.deepEqual(compact, {
-    text: '我来啦', isSelf: true, role: 'owner', kind: 'poke',
+    text: '我来啦', isSelf: true, botRole: 'owner', kind: 'poke',
     poke: message.poke, extension: message.extension, futureFlag: false
   });
+  // 私聊/无群身份：groupRole 为空时整个字段消失（沿用空值剥离机制）
+  assert.equal('groupRole' in compactModelMessage({ text: 'hi', groupRole: null }), false);
+  assert.equal('groupRole' in compactModelMessage({ text: 'hi', groupRole: '' }), false);
+  assert.deepEqual(compactModelMessage({ text: 'hi', botRole: 'member', groupRole: 'admin' }), { text: 'hi', botRole: 'member', groupRole: 'admin' });
   for (const item of [null, undefined, 'string', 1, false, []]) {
     assert.equal(compactModelMessage(item), item);
   }

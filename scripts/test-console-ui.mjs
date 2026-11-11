@@ -401,17 +401,25 @@ try {
     });
   });
 
-  await test('Runtime capability grants contracts', async () => {
+  await test('Runtime capability tool-visible contracts', async () => {
     await navigate('runtime');
     await reveal('#runtimeCaps [data-cap-edit]');
     await page.click('#runtimeCaps [data-cap-edit]');
     await page.waitForSelector('#runtimeCapEditor .modal', { timeout: 5000 });
-    await page.check('[name="runtimeCapGrants"][value="sendPoke"]');
-    assert.deepEqual(await clickWrite('#runtimeCapSave', '/api/runtime/capabilities/qq-chat', 'PATCH'), {
-      sandbox: 'workspace-write',
-      grants: { disable: ['sendPoke'] },
-      note: '',
-    });
+    await page.uncheck('[name="runtimeCapVisible"][value="sendPoke"]');
+    await page.fill('#runtimeCapPersona', '你是 QQ 上的助手。');
+    await page.selectOption('#runtimeCapPermission', 'read-only');
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/qq-chat' && r.request().method() === 'PATCH'),
+      page.click('#runtimeCapSave'),
+    ]);
+    assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/qq-chat should succeed');
+    const body = fixture.requests.at(-1)?.body ?? {};
+    assert.equal(body.tools?.visible?.includes('sendPoke'), false, '取消勾选的工具不能出现在可见集里');
+    assert.equal(body.tools?.visible?.includes('sendMessage'), true, '其余工具仍应保留');
+    assert.equal(body.prompt?.personaPrefix, '你是 QQ 上的助手。');
+    assert.equal(body.suggestedPermission, 'read-only');
+    assert.equal(body.sandbox, undefined, '沙箱不再由能力预设承载');
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {

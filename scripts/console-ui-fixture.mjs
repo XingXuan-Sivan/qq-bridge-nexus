@@ -14,6 +14,7 @@ import { createScheduler } from '../src/scheduler/engine.js';
 import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
 import { listKinds } from '../src/behaviors/kinds/index.mjs';
+import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -764,20 +765,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/behaviors/kinds': return json({ ok: true, kinds: listKinds() });
           case '/api/runtime/capabilities': return json({
             ok: true,
-            gateable: [
-              { flag: 'sendMessage', label: '发送消息' },
-              { flag: 'sendBurst', label: '分多条发送' },
-              { flag: 'sendPoke', label: '拍一拍' },
-              { flag: 'sendSticker', label: '发表情' },
-              { flag: 'sendVoice', label: '发语音' },
-              { flag: 'collectSticker', label: '收藏表情' },
-              { flag: 'schedule', label: '定时任务' },
-              { flag: 'markRead', label: '标记已读' },
-              { flag: 'setWakeConfig', label: '调唤醒配置' },
-            ],
+            catalog: toolCatalogSnapshot(),
             capabilities: [
-              { id: 'qq-chat', sandbox: 'workspace-write', grants: { disable: [] }, usedBy: ['chat'] },
-              { id: 'qq-chat-v2', sandbox: 'workspace-write', grants: { disable: [] }, usedBy: ['social-v2'] },
+              { id: 'qq-chat', label: '聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['chat'] },
+              { id: 'qq-chat-v2', label: '二代聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['social-v2'] },
             ],
           });
           case '/api/config/behaviors': return json({

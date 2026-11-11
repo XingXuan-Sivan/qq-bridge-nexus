@@ -109,12 +109,35 @@
     "method": "PATCH",
     "path": "/api/runtime/capabilities/qq-chat",
     "body": {
-      "sandbox": "workspace-write",
-      "grants": {
-        "disable": [
-          "sendPoke"
+      "tools": {
+        "visible": [
+          "memory",
+          "slangSubmit",
+          "markRead",
+          "setWakeConfig",
+          "stickerNote",
+          "setStickerRemark",
+          "collectSticker",
+          "sendGroup",
+          "sendPrivate",
+          "reply",
+          "sendBurst",
+          "sendMessage",
+          "sendSticker",
+          "sendVoice",
+          "webImage",
+          "feedback",
+          "requestMode",
+          "crossGroup",
+          "ownerGroupAccess",
+          "ownerRelay",
+          "schedule"
         ]
       },
+      "prompt": {
+        "personaPrefix": "你是 QQ 上的助手。"
+      },
+      "suggestedPermission": "read-only",
       "note": ""
     }
   },

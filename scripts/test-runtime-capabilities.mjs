@@ -1,77 +1,88 @@
-// 行为 kind 注册表与能力授予（grants）的单元测试。
+#!/usr/bin/env node
+// 能力预设补丁：工具可见集的归一、迁移与注册表行为。
 import assert from 'node:assert/strict';
-import { listKinds, getKind } from '../src/behaviors/kinds/index.mjs';
-import { normalizeGrants, normalizeCapability, createCapabilityRegistry, GATEABLE_TOOLS } from '../src/runtime/capabilities.mjs';
+import test from 'node:test';
+import {
+  createCapabilityRegistry,
+  normalizeCapability,
+  normalizeVisible,
+  visibleAllows,
+} from '../src/runtime/capabilities.mjs';
+import {
+  AGENT_MODULES,
+  LEVEL_ALLOWS,
+  PLATFORM_TOOLS,
+  capabilityCovers,
+  platformToolFlags,
+  platformToolRisk,
+  toolCatalogSnapshot,
+} from '../src/tools/catalog.mjs';
 
-let pass = 0;
-let fail = 0;
-function test(name, fn) {
-  try {
-    fn();
-    pass += 1;
-    console.log(`ok ${pass + fail} - ${name}`);
-  } catch (error) {
-    fail += 1;
-    console.error(`not ok ${pass + fail} - ${name}`);
-    console.error(error?.stack || error);
+const ALL = platformToolFlags();
+const GATED = PLATFORM_TOOLS.filter((tool) => capabilityCovers(tool.flag)).map((tool) => tool.flag);
+
+test('工具目录：平台工具与 Agent 模块都有风险等级', () => {
+  assert.ok(PLATFORM_TOOLS.length >= 30);
+  assert.equal(new Set(ALL).size, ALL.length, 'flag 不能重复');
+  for (const tool of PLATFORM_TOOLS) {
+    assert.ok(tool.label, `${tool.flag} 缺 label`);
+    assert.ok(tool.names.length >= 1, `${tool.flag} 缺宿主工具名`);
+    assert.ok(['read', 'send', 'state', 'admin'].includes(tool.risk), `${tool.flag} 风险等级不合法`);
   }
-}
-
-test('kind 注册表提供 v1/v2 的字段与嵌套默认值', () => {
-  const kinds = listKinds();
-  assert.deepEqual(kinds.map((k) => k.kind).sort(), ['v1', 'v2']);
-  const v2 = getKind('v2');
-  assert.ok(v2.fields.length > 20);
-  assert.ok(v2.fields.some((field) => field.name === 'wake_defaultMode'));
-  const entry = kinds.find((k) => k.kind === 'v2');
-  assert.equal(entry.defaults.wake.defaultMode, '');
-  assert.equal(entry.defaults.sticker?.enabled, false);
-  assert.deepEqual(Object.keys(entry.defaults).sort().slice(0, 3), ['autoReplyCheckMs', 'context', 'feedback']);
-  assert.equal(getKind('nope'), null);
+  assert.deepEqual(platformToolRisk('nope'), 'admin', '未知工具按 admin 处理');
+  for (const module of AGENT_MODULES) assert.ok(module.risk);
+  assert.ok(GATED.includes('sendMessage'));
+  assert.ok(!GATED.includes('getUnread'), '读类不进能力收紧范围');
 });
 
-test('grants 只保留可收紧工具里的名字', () => {
-  const grants = normalizeGrants({ disable: ['sendMessage', 'nope', 'sendMessage', '  sendPoke  '] });
-  assert.deepEqual(grants.disable, ['sendMessage', 'sendPoke']);
-  assert.deepEqual(normalizeGrants(null), { disable: [] });
+test('权限级别的准入矩阵与文档一致', () => {
+  assert.deepEqual([...LEVEL_ALLOWS['read-only']].sort(), ['read', 'send', 'state']);
+  assert.ok(LEVEL_ALLOWS['workspace-write'].includes('write'));
+  assert.ok(LEVEL_ALLOWS['full'].includes('exec'));
+  assert.ok(LEVEL_ALLOWS['full'].includes('admin'));
+  assert.ok(!LEVEL_ALLOWS['full-ask'].includes('read') === false);
 });
 
-test('能力补丁归一化：未知沙箱回落到工作区读写', () => {
-  assert.deepEqual(normalizeCapability({ id: 'qq-chat', sandbox: 'root', grants: { disable: ['sendVoice'] } }), {
-    id: 'qq-chat',
-    sandbox: 'workspace-write',
-    grants: { disable: ['sendVoice'] },
-    note: '',
-  });
-  assert.equal(normalizeCapability({}, ''), null);
+test('visible 归一：null/全部、过滤未知、去重', () => {
+  assert.equal(normalizeVisible(null), null);
+  assert.equal(normalizeVisible('all'), null);
+  assert.deepEqual(normalizeVisible(['sendMessage', 'sendMessage', 'nope']), ['sendMessage']);
+  assert.equal(visibleAllows(null, 'sendMessage'), true);
+  assert.equal(visibleAllows(['sendPoke'], 'sendMessage'), false);
 });
 
-test('注册表：列表合并目录、保存触发回调、grantsOf 反映禁用项', () => {
-  let saved = null;
+test('capability 归一：旧 grants.disable 迁移成 visible，沙箱字段被丢掉', () => {
+  const migrated = normalizeCapability({ sandbox: 'danger-full-access', grants: { disable: ['sendPoke', 'schedule'] }, note: '旧数据' }, 'qq-chat');
+  assert.equal(migrated.sandbox, undefined);
+  assert.ok(migrated.tools.visible.includes('sendMessage'));
+  assert.ok(!migrated.tools.visible.includes('sendPoke'));
+  assert.ok(!migrated.tools.visible.includes('schedule'));
+  assert.equal(migrated.note, '旧数据');
+  const blank = normalizeCapability({}, 'qq-chat-v2');
+  assert.equal(blank.tools.visible, null);
+  assert.equal(blank.suggestedPermission, '');
+  assert.equal(normalizeCapability({}, 'Bad Id'), null);
+});
+
+test('注册表：合并目录、保存触发 onChange、allows 只收紧副作用工具', () => {
+  const changes = [];
   const registry = createCapabilityRegistry({
-    catalog: [{ id: 'qq-chat', label: '聊天' }, { id: 'qq-chat-v2', label: '二代' }],
-    config: { 'qq-chat-v2': { sandbox: 'read-only', grants: { disable: ['schedule'] } } },
-    onChange: (next) => { saved = next; },
+    catalog: [{ id: 'qq-chat', label: '聊天', builtin: true }],
+    config: { 'qq-chat': { tools: { visible: ['sendMessage'] }, suggestedPermission: 'read-only' } },
+    onChange: (next) => changes.push(next),
   });
-  const list = registry.list();
-  assert.equal(list.length, 2);
-  assert.equal(list.find((item) => item.id === 'qq-chat').label, '聊天');
-  assert.equal(list.find((item) => item.id === 'qq-chat').sandbox, 'workspace-write');
-  assert.equal(registry.grantsOf('qq-chat-v2', 'schedule'), false);
-  assert.equal(registry.grantsOf('qq-chat-v2', 'sendMessage'), true);
-  assert.equal(registry.grantsOf('qq-chat', 'schedule'), true);
-  registry.save('qq-chat', { grants: { disable: ['sendVoice'] } });
-  assert.deepEqual(saved['qq-chat'].grants.disable, ['sendVoice']);
-  assert.throws(() => registry.save('missing', {}), /没有这个能力预设/);
+  const chat = registry.get('qq-chat');
+  assert.equal(chat.builtin, true);
+  assert.equal(chat.tools.visible.length, 1);
+  assert.equal(chat.suggestedPermission, 'read-only');
+  assert.equal(registry.allows('qq-chat', 'sendMessage'), true);
+  assert.equal(registry.allows('qq-chat', 'sendPoke'), false);
+  assert.equal(registry.allows('qq-chat', 'getUnread'), true, '读类不受可见集影响');
+  const saved = registry.save('qq-chat', { tools: { visible: GATED }, prompt: { personaPrefix: '你是 QQ 上的 {displayName}。' } });
+  assert.equal(saved.tools.visible.length, GATED.length);
+  assert.equal(saved.prompt.personaPrefix, '你是 QQ 上的 {displayName}。');
+  assert.equal(changes.length, 1);
+  assert.ok(changes[0]['qq-chat'].tools.visible.length === GATED.length);
+  assert.throws(() => registry.save('nope', {}), /没有这个能力预设/);
+  assert.deepEqual(Object.keys(toolCatalogSnapshot()).sort(), ['agent', 'gatedRisks', 'levelAllows', 'levelAsks', 'levels', 'platform', 'risks']);
 });
-
-test('可收紧工具都在 v2ToolEnabled 的读写面上（没有重复）', () => {
-  const flags = GATEABLE_TOOLS.map((tool) => tool.flag);
-  assert.equal(new Set(flags).size, flags.length);
-  assert.ok(flags.includes('sendMessage'));
-  assert.ok(flags.includes('schedule'));
-});
-
-console.log(`# pass ${pass}`);
-console.log(`# fail ${fail}`);
-if (fail) process.exitCode = 1;

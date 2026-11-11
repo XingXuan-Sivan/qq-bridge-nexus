@@ -17,7 +17,7 @@ let payload = null;
 let presets = [];
 let behaviors = [];
 let capabilities = [];
-let gateable = [];
+let catalog = null;
 
 function el(id) {
   return document.getElementById(id);
@@ -105,22 +105,33 @@ function capabilityById(id) {
   return capabilities.find((item) => item.id === id) ?? null;
 }
 
+function gatedTools() {
+  return (catalog?.platform ?? []).filter((tool) => tool.gated);
+}
+
+/** 可见集（null = 全部）→ 「允许 N / 共 M」+ 被禁工具的 pill。 */
+function visibleSummary(cap) {
+  const tools = gatedTools();
+  const blocked = tools.filter((tool) => cap.tools?.visible?.includes(tool.flag) === false);
+  const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined ? tools.length : tools.length - blocked.length;
+  const pills = blocked.slice(0, 4).map((tool) => `<span class="pill r">${esc(tool.label)}</span>`).join(' ');
+  return `<span class="meta">允许 ${allowed} / ${tools.length}</span>${pills ? ` ${pills}` : ''}`;
+}
+
 function capsMarkup() {
   if (!capabilities.length) return '<div class="meta">还没有可用的能力预设。</div>';
   const rows = capabilities.map((cap) => [
     `<code>${esc(cap.id)}</code>`,
-    `<span class="pill${cap.sandbox === 'danger-full-access' ? ' r' : ''}">${esc(cap.sandbox)}</span>`,
-    cap.grants?.disable?.length
-      ? cap.grants.disable.map((flag) => `<span class="pill">${esc(gateable.find((t) => t.flag === flag)?.label || flag)}</span>`).join(' ')
-      : '<span class="meta">全部允许</span>',
+    visibleSummary(cap),
+    cap.suggestedPermission ? `<span class="pill">${esc(cap.suggestedPermission)}</span>` : '<span class="meta">跟随级别</span>',
     cap.usedBy?.length ? cap.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ') : '<span class="meta">未被方案引用</span>',
     `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
   ]);
   return dataTableHtml({
     columns: [
       { label: '能力预设', width: '200' },
-      { label: '沙箱', width: '180' },
-      { label: '禁用工具' },
+      { label: '可用工具' },
+      { label: '权限建议', width: '140' },
       { label: '被方案引用', width: '200' },
       { label: '操作', width: '90' },
     ],
@@ -147,26 +158,32 @@ function capabilityModalHtml(cap) {
   });
 }
 
-/** 弹窗里的字段也走 renderFields：沙箱、禁用工具、备注三块。 */
+/** 弹窗里的字段也走 renderFields：工具授予、权限建议、平台提示词、备注。 */
 function renderCapabilityFields(cap) {
   const host = el('runtimeCapFields');
   if (!host) return;
-  const disabled = new Set(cap.grants?.disable ?? []);
-  const grantsHtml = checkListField({
-    id: 'runtimeCapGrants',
-    label: '禁用工具',
-    options: gateable.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
-    value: [...disabled],
+  const tools = gatedTools();
+  const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
+    ? tools.map((tool) => tool.flag)
+    : cap.tools.visible.filter((flag) => tools.some((tool) => tool.flag === flag));
+  const toolsHtml = checkListField({
+    id: 'runtimeCapVisible',
+    label: '允许调用的工具',
+    options: tools.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
+    value: allowed,
     columns: 2,
-    hint: '勾上 = 禁用；只对固定使用这个能力预设的方案生效。',
+    hint: '勾上 = 允许；只对固定使用这个能力预设的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
   });
   renderFields(host, [
-    { name: 'runtimeCapSandbox', type: 'select', label: '沙箱', options: [
+    { name: 'runtimeCapVisibleBlock', type: 'custom', span: 1, html: toolsHtml },
+    { name: 'runtimeCapPermission', type: 'select', label: '权限建议', options: [
+      { value: '', label: '跟随级别（不提示）' },
       { value: 'read-only', label: '只读' },
       { value: 'workspace-write', label: '工作区读写' },
-      { value: 'danger-full-access', label: '完全访问（危险）' },
-    ], value: cap.sandbox, hint: '这里只记录口径；真正的沙箱由 DSH 权限预设执行。' },
-    { name: 'runtimeCapGrantsBlock', type: 'custom', span: 1, html: grantsHtml },
+      { value: 'full-ask', label: '完全访问 · 每次确认' },
+      { value: 'full', label: '完全访问 · 短时授权' },
+    ], value: cap.suggestedPermission || '', hint: '只作提示：新建或改会话时建议选这个级别，不会自动套用。' },
+    { name: 'runtimeCapPersona', type: 'textarea', label: '平台提示词', value: cap.prompt?.personaPrefix || '', hint: '拼进 Agent 的平台补充（可用 {platform} {displayName} 等占位符，P9.2 接上渲染）。' },
     { name: 'runtimeCapNote', type: 'text', label: '备注', value: cap.note || '' },
   ], { columns: 1 });
 }
@@ -178,14 +195,12 @@ function openCapabilityEditor(id) {
   const overlay = el('runtimeCapEditor');
   openModal(overlay);
   renderCapabilityFields(cap);
-  const sandbox = overlay.querySelector('#runtimeCapSandbox');
   wireModal(overlay);
   overlay.querySelector('#runtimeCapSave')?.addEventListener('click', async () => {
     const next = {
-      sandbox: sandbox?.value ?? cap.sandbox,
-      grants: {
-        disable: [...overlay.querySelectorAll('[name="runtimeCapGrants"]:checked')].map((box) => box.value),
-      },
+      tools: { visible: [...overlay.querySelectorAll('[name="runtimeCapVisible"]:checked')].map((box) => box.value) },
+      prompt: { personaPrefix: overlay.querySelector('#runtimeCapPersona')?.value ?? '' },
+      suggestedPermission: overlay.querySelector('#runtimeCapPermission')?.value ?? '',
       note: overlay.querySelector('#runtimeCapNote')?.value ?? '',
     };
     try {
@@ -218,7 +233,7 @@ async function load() {
     presets = presetList.status === 'fulfilled' ? (presetList.value?.presets ?? []) : [];
     behaviors = behaviorList.status === 'fulfilled' ? (behaviorList.value?.behaviors ?? []) : [];
     capabilities = caps.status === 'fulfilled' ? (caps.value?.capabilities ?? []) : [];
-    gateable = caps.status === 'fulfilled' ? (caps.value?.gateable ?? []) : [];
+    catalog = caps.status === 'fulfilled' ? (caps.value?.catalog ?? null) : null;
     renderSummary();
     renderCaps();
     fillPlanOptions();

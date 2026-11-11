@@ -73,7 +73,8 @@ import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDir
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
-import { createCapabilityRegistry, GATEABLE_TOOLS } from '../src/runtime/capabilities.mjs';
+import { createCapabilityRegistry } from '../src/runtime/capabilities.mjs';
+import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 
 import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
@@ -338,7 +339,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     RUNTIME_PLATFORM,
     createRuntimeState,
     createCapabilityRegistry,
-    GATEABLE_TOOLS,
+    capabilityCovers,
+    toolCatalogSnapshot,
     migrateAccessModel,
     summarizeAccessConfig,
     migrateSessionProfiles,

@@ -246,7 +246,14 @@ provideRecommendations: true
 
 ### 3.2.1 能力预设的桥接侧补丁（`capabilities`）
 
-`config.json > capabilities` 只放桥接自己那半份信息：`{ "<presetId>": { sandbox, grants: { disable: [...] }, note } }`。权威能力仍在 `dsh/agent-presets/<id>/`；`sandbox` 是口径记录（真正执行在 DSH 侧），`grants.disable` 列出被收紧的写工具（`sendMessage/sendBurst/sendPoke/sendSticker/sendVoice/collectSticker/schedule/markRead/setWakeConfig`），由 `v2ToolEnabled(flag, key)` 按会话固定方案在执行前拦掉。
+`config.json > capabilities` 只放桥接自己那半份信息：`{ "<presetId>": { agent, tools: { visible }, prompt: { personaPrefix }, suggestedPermission, note } }`。
+
+- 权威能力仍在 `dsh/agent-presets/<id>/`；这里不存沙箱，也不存审批（都归 DSH 的权限预设）。
+- `tools.visible`：允许这套能力的会话调用哪些平台工具；`null` = 全部。目录见 `src/tools/catalog.mjs`（37 个平台工具，按 `read/send/state/admin` 分级）。只有 `send/state/admin` 类会被它收紧（`CAPABILITY_GATED_RISKS`），读类仍由「全局配置 › 拓展功能」的注册开关控制。
+- `prompt.personaPrefix`：拼进 Agent 的平台补充（占位符在 P9.2 接上渲染）。
+- `suggestedPermission`：只作提示（`read-only/workspace-write/full-ask/full`），不会被自动套用。
+- 执行侧：`v2ToolEnabled(flag, key)` → `capabilityAllows(key, flag)`，按会话固定方案的 `tools` 查 `visible`，不在集合里就 403。
+- 迁移：P7 的 `grants.disable` 在读取时自动折算成 `visible`（全集减去禁用项），下次保存后旧字段消失。
 
 ### 3.3 `config.json` 目标结构
 

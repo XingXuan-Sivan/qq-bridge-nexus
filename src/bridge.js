@@ -87,7 +87,8 @@ import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
-import { createCapabilityRegistry, GATEABLE_TOOLS } from './runtime/capabilities.mjs';
+import { createCapabilityRegistry } from './runtime/capabilities.mjs';
+import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
 import {
@@ -3971,7 +3972,7 @@ async function main() {
   let capabilityRegistry = null;
   let capabilitySource = null;
 
-  /** 能力预设的桥接侧补丁（沙箱 + 工具授予）；catalog 就是 DSH 预设目录 + 方案用到的预设。 */
+  /** 能力预设的桥接侧补丁（工具可见集 + 平台提示词）；catalog 就是 DSH 预设目录 + 方案用到的预设。 */
   function ensureCapabilities() {
     const catalog = [...new Set([...PRESET_IDS, ...normalizePlans(bridgeCfg.runtime?.plans).map((plan) => plan.tools)])]
       .filter(Boolean)
@@ -3988,12 +3989,12 @@ async function main() {
     return capabilityRegistry;
   }
 
-  /** 这套方案允许调用该工具吗？只覆盖 GATEABLE_TOOLS 里的写工具，读工具仍看全局开关。 */
+  /** 这套方案允许调用该工具吗？只覆盖有副作用的平台工具（读类仍看全局注册开关）。 */
   function capabilityAllows(key, flag) {
-    if (!GATEABLE_TOOLS.some((tool) => tool.flag === flag)) return true;
+    if (!capabilityCovers(flag)) return true;
     const plan = sessionPlanOf(key);
     if (!plan?.tools) return true;
-    return ensureCapabilities().grantsOf(plan.tools, flag);
+    return ensureCapabilities().allows(plan.tools, flag);
   }
 
   function activePlan() {
@@ -5453,7 +5454,7 @@ async function main() {
   // ── 本地控制台（独立 Web 面板，不依赖 DSH WebUI） ───────────────────────────
   // 模式/角色/静默状态都存 state/*.json，桥接即时感知；此服务只读写这些文件。
   function v2ToolEnabled(flag, key = '') {
-    // 会话固定了方案时，方案的能力授予可以再收紧一层（只影响 GATEABLE_TOOLS 里的写工具）。
+    // 会话固定了方案时，方案的能力可见集可以再收紧一层（只影响有副作用的平台工具）。
     if (key && !capabilityAllows(key, flag)) return false;
     // 记忆工具已收编到记忆页（S5）：memory.providers['local-digest'].tools.enabled 优先，
     // 未显式配置时才回落到旧的 socialV2.tools.memory（兼容旧配置，不丢开关）。
@@ -6925,23 +6926,28 @@ async function main() {
           });
           return;
         }
-        // 能力预设的桥接侧补丁（沙箱 / 工具授予）：只读列表 + 单条保存。
+        // 能力预设的桥接侧补丁（工具可见集 / 平台提示词）：只读列表 + 单条保存。
         if (req.method === 'GET' && url.pathname === '/api/runtime/capabilities') {
           const plans = normalizePlans(bridgeCfg.runtime?.plans);
           const capabilities = ensureCapabilities().list().map((entry) => ({
             ...entry,
             usedBy: plans.filter((plan) => plan.tools === entry.id).map((plan) => plan.id),
           }));
-          sendJson({ ok: true, gateable: GATEABLE_TOOLS, capabilities });
+          sendJson({ ok: true, catalog: toolCatalogSnapshot(), capabilities });
           return;
         }
         if (req.method === 'PATCH' && url.pathname.startsWith('/api/runtime/capabilities/')) {
           const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
           const body = await readBody();
           try {
-            const saved = ensureCapabilities().save(capabilityId, { sandbox: body?.sandbox, grants: body?.grants, note: body?.note });
+            const saved = ensureCapabilities().save(capabilityId, {
+              tools: body?.tools,
+              prompt: body?.prompt,
+              suggestedPermission: body?.suggestedPermission,
+              note: body?.note,
+            });
             capabilityRegistry = null;
-            ext.audit.append('runtime.capability.write', { id: capabilityId, sandbox: saved.sandbox, grants: saved.grants });
+            ext.audit.append('runtime.capability.write', { id: capabilityId, visible: saved.tools.visible });
             sendJson({ ok: true, capability: saved, capabilities: ensureCapabilities().list() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '保存失败' }, 400);

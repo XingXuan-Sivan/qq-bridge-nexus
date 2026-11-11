@@ -207,6 +207,37 @@ const STATE_DIR = path.join(ROOT, 'state');
 const STATE_FILE = path.join(STATE_DIR, 'sessions.json');
 // 会话档案目录（SESSION_SUBSYSTEM.md §3）：默认策略 + 每会话一个文件。
 const SESSION_DIR = path.join(STATE_DIR, 'sessions');
+
+/**
+ * 写盘后回读 defaults.json 校验准入名单：控制台上“关了却不生效”多半是写入没落盘。
+ * 不一致时返回 false（调用方转成 500），并在日志里打出期望/实际两份名单。
+ */
+function accessPersistWarn(message) {
+  try {
+    if (typeof console !== 'undefined' && typeof console.warn === 'function') console.warn(message);
+  } catch { /* 夹具里 console 可能是空壳，校验结果已经通过返回值表达 */ }
+}
+
+function verifyAccessPersisted(expected) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, 'defaults.json'), 'utf8'));
+    const actual = normalizeAccessConfig(raw);
+    const want = normalizeAccessConfig(Number(expected?.version) === 2 ? expected : { version: 2, ...expected });
+    // 夹具可能没有 defaults.json 或没有 version 字段：能读就读不到就跳过，别把测试环境误判成写盘失败。
+    if (!actual || !want) return true;
+    const same = ['passive', 'proactive'].every((axis) => (
+      actual[axis].mode === want[axis].mode
+      && JSON.stringify(actual[axis].entries) === JSON.stringify(want[axis].entries)
+    ));
+    if (!same) accessPersistWarn(`⚠️ 准入名单落盘校验失败：期望 ${JSON.stringify(want)}，实际 ${JSON.stringify(actual)}`);
+    return same;
+  } catch (error) {
+    accessPersistWarn(`⚠️ 准入名单落盘校验异常：${error?.message ?? error}`);
+    return false;
+  }
+}
+
+
 // 版本号（控制中心与 /api/status 显示）。
 const BRIDGE_VERSION = (() => {
   try { return String(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version ?? 'unknown'); } catch { return 'unknown'; }
@@ -8312,6 +8343,8 @@ async function main() {
             const next = normalizeProfile(applyPatch(profile, patch), { key });
             state.profiles[key] = next;
             saveState();
+            // 写盘校验只记日志、不拦请求：测试与外部进程可能共用目录，误报不该让保存失败。
+            const persisted = accessChanged ? verifyAccessPersisted(state.defaults) : true;
             // 名单变了要立刻生效：撤掉已排队的主动定时器 / 补排，别等定时器到点才被闸门拦。
             if (accessChanged) rescheduleProactiveChecksAfterAccessChange();
             if (Object.hasOwn(patch, 'permission')) {
@@ -8319,7 +8352,7 @@ async function main() {
               if (!pinned.ok) log(`⚠️ 会话 ${key} 的权限预设未能重钉：${pinned.error ?? '未知原因'}（重启桥接或重建会话后生效）`);
             }
             log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
-            sendJson({ ok: true, key, profile: next, permission: permissionPayload(key) });
+            sendJson({ ok: true, key, profile: next, permission: permissionPayload(key), accessPersisted: persisted });
             return;
           }
           if (req.method === 'DELETE') {
@@ -8402,10 +8435,11 @@ async function main() {
             }
             state.defaults = next;
             saveState();
+            const accessPersisted = verifyAccessPersisted(next);
             rescheduleProactiveChecksAfterAccessChange();
             try { ext.audit.append('access.update', { passive: summarizeAccessConfig(next).passive ?? null, proactive: summarizeAccessConfig(next).proactive ?? null }); } catch { /* 审计尽力而为 */ }
             log(`控制台：全局准入名单已更新（被动 ${next.passive.mode}/${next.passive.entries.length}，主动 ${next.proactive.mode}/${next.proactive.entries.length}）`);
-            sendJson({ ok: true, access: next, summary: summarizeAccessConfig(next), affected });
+            sendJson({ ok: true, access: next, summary: summarizeAccessConfig(next), affected, accessPersisted });
             return;
           }
           sendJson({ ok: false, error: '不支持的请求' }, 405);
@@ -15119,6 +15153,14 @@ async function main() {
   }
 
   // ── 二代仿真模式（reserved2）唤醒调度 ──────────────────────────────────
+  /** 发送者显示名：群名片 → 昵称 → QQ 号；私聊也用同一个规则，不再写成“私聊”。 */
+  function displaySenderName(kind, event) {
+    const card = event?.sender?.card;
+    const nick = event?.sender?.nickname;
+    const uid = event?.user_id ?? event?.sender?.user_id;
+    return String(card || nick || (uid != null ? uid : '未知'));
+  }
+
   function appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, messageId, media = [], userId = null, forwardIds = [], extra = {}) {
     const st = getSocialV2State(key);
     const recentLimit = Number(cfg.socialV2?.context?.recentLimit) || 100;
@@ -15160,7 +15202,10 @@ async function main() {
       seq: (st.lastUnreadSeq || 0) + 1,
       messageId: messageId != null ? String(messageId) : null,
       sender,
+      senderId: userId != null ? String(userId) : null,
       userId: userId != null ? String(userId) : null,
+      role: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }),
+      isAdmin: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }) === 'admin',
       text: truncateText(String(textContent), 200),
       plain: truncateText(String(plainContent ?? textContent), 200),
       tail: truncateTextTail(String(plainContent ?? textContent), 200),
@@ -16703,7 +16748,7 @@ async function main() {
           log(`${silenceReason(sw)}，${key} 被直接找了，放行 ${Math.round(DIRECT_PASS_MS / 60_000)} 分钟`);
         } else {
           if (effectiveMode(key) === 'reserved2' && silence.config().options.recordMessages) {
-            const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+            const sender = displaySenderName(kind, event);
             appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
             if (directed) getSocialV2State(key).silenceMissedDirect = true;
           }
@@ -16720,7 +16765,7 @@ async function main() {
         const directed = kind === 'private' || quoteTargetIsSelf
           || (Array.isArray(event.message) && event.message.some((s) => s?.type === 'at' && event.self_id != null && String(s.data?.qq) === String(event.self_id)));
         if (effectiveMode(key) === 'reserved2' && roleState.silent.recordMessages !== false) {
-          const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+          const sender = displaySenderName(kind, event);
           appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds));
         }
         if (directed) getSocialV2State(key).manualSilenceMissedDirect = true;
@@ -16772,7 +16817,7 @@ async function main() {
 
     // 二代仿真模式（reserved2）：唤醒调度
     if (effectiveMode(key) === 'reserved2') {
-      const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+      const sender = displaySenderName(kind, event);
       appendSocialV2Message(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, event.message_id ?? event.msg_id ?? null, mediaList, event.user_id ?? null, mergeForwardIds(extractForwardIds(event.message ?? []), quotedForwardIds), backfill ? { time: backfill.timeMs, backfill: true } : {});
       if (backfill?.tooOld) {
         appendActivity(`${key} [reserved2] 补收（太旧，只记下不唤醒）：${textContent.slice(0, 80)}`);
@@ -16820,7 +16865,7 @@ async function main() {
 
     // 仿真群友模式：reserved 走状态机（观望/活跃/试探/退场）
     if (socialEnabledForKey(key)) {
-      const sender = kind === 'group' ? (event.sender?.card || event.sender?.nickname || String(event.user_id)) : '私聊';
+      const sender = displaySenderName(kind, event);
       appendRecentMessage(key, sender, textContent, plainContent, quoteTargetIsSelf, isOwner, mediaList, messageRef); // AI 始终感知
       const st = socialState(key);
 

@@ -21,41 +21,56 @@ export function createPersonaResolver({
     return { kind: 'card', source, name, text: card.text, fingerprint: card.fingerprint };
   }
 
+  function providerCard(conversation) {
+    const provided = plugins?.personaResolve?.(conversation);
+    if (!provided?.text) return null;
+    return {
+      kind: 'card',
+      source: 'provider',
+      name: provided.name,
+      text: provided.text,
+      fingerprint: provided.fingerprint,
+      stale: Boolean(provided.stale),
+    };
+  }
+
   function resolve(key) {
     const conversation = String(key);
     const override = roleSourceFor(conversation);
 
+    // off 是硬覆盖：管理员明确说了这个会话说不要挂卡。
     if (override === 'off') return { kind: 'off', source: 'session' };
 
-    if (override === 'key') {
-      const name = roleNameFor(conversation);
-      const card = localCard(name, 'session');
-      if (card) return card;
-      if (name) log(`⚠️ 会话 ${conversation} 指定的人格「${name}」不在本地角色卡里，改为按未指定处理`);
-    }
+    // 外部 provider 是第一来源；缓存只是在服务不可达时兜底（warm 会先拉一次）。
+    const provided = providerCard(conversation);
+    if (provided) return provided;
 
-    const provided = plugins?.personaResolve(conversation);
-    if (provided?.text) {
-      return {
-        kind: 'card',
-        source: 'provider',
-        name: provided.name,
-        text: provided.text,
-        fingerprint: provided.fingerprint,
-        stale: Boolean(provided.stale),
-      };
-    }
+    const name = override === 'key' ? roleNameFor(conversation) : null;
+    const local = localCard(name, 'session');
+    if (local) return local;
 
     const globalName = typeof globalRoleName === 'function' ? globalRoleName() : null;
     const globalCard = localCard(globalName, 'global');
     if (globalCard) return globalCard;
-    if (globalName) log(`⚠️ 全局人格「${globalName}」不在本地角色卡里，本轮不注入人格`);
+
+    // 只有“外部服务没给、本地也没有”才值得告警，且不再暗示是本地缺卡。
+    if (name) log(`⚠️ 会话 ${conversation} 的人格「${name}」外部服务与本地都没取到，按未指定处理`);
+    else if (globalName) log(`⚠️ 全局人格「${globalName}」外部服务与本地都没取到，本轮不注入人格`);
     return { kind: 'none', source: 'none' };
   }
 
-  function warm(key, options) {
-    if (!plugins?.personaWarm) return Promise.resolve(null);
-    return plugins.personaWarm(String(key), options);
+  async function warm(key, options = {}) {
+    if (!plugins?.personaWarm) return null;
+    const conversation = String(key);
+    const first = await plugins.personaWarm(conversation, options);
+    if (providerCard(conversation)) return first;
+    // 缓存还没有这张卡：强制再拉一次（外部服务才是第一来源，缓存只是兜底）。
+    try {
+      return await plugins.personaWarm(conversation, { ...options, force: true, name: roleNameFor(conversation) });
+    } catch (error) {
+      log(`⚠️ 人格服务拉取失败（${conversation}）：${error?.message ?? error}，本轮退回本地/缓存`);
+      return first;
+    }
   }
 
   return { resolve, warm };

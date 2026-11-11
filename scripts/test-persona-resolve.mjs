@@ -1,7 +1,7 @@
 // 人格三层解析回归（docs/PERSONA_PROVIDER.md §4）。
 //
-// 钉住的是「优先级」而不是具体 provider：会话覆盖 → provider → 全局本地卡，
-// 以及两个容易写错的分支：off 必须硬覆盖 provider；会话指定的本地卡缺失时要继续往下落。
+// 钉住的是「优先级」而不是具体 provider：provider（外部，第一来源）→ 会话本地卡 → 全局本地卡，
+// 以及两个容易写错的分支：off 必须硬覆盖 provider；provider 没卡时才回落本地。
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -21,9 +21,18 @@ function makeResolver({ source = 'global', sessionName = null, globalName = '星
   return { resolver, logs, warmed };
 }
 
-test('L1 会话卡优先于 provider 与全局', () => {
+test('provider 是外部第一来源：有卡时压过会话卡', () => {
   const { resolver } = makeResolver({ source: 'key', sessionName: '魅魔', cards: { 魅魔: '魅魔卡' }, provider: () => ({ name: '星苒', text: 'provider 卡' }) });
+  const hit = resolver.resolve('group:1');
+  assert.equal(hit.source, 'provider');
+  assert.equal(hit.text, 'provider 卡');
+  assert.equal(hit.stale, false);
+});
+
+test('provider 没卡时回落会话卡（本地是兜底，不告警）', () => {
+  const { resolver, logs } = makeResolver({ source: 'key', sessionName: '魅魔', cards: { 魅魔: '魅魔卡' }, provider: () => null });
   assert.deepEqual(resolver.resolve('group:1'), { kind: 'card', source: 'session', name: '魅魔', text: '魅魔卡', fingerprint: 'fp-魅魔' });
+  assert.equal(logs.some((line) => line.includes('魅魔')), false);
 });
 
 test('off 是硬覆盖：provider 与全局都不生效', () => {
@@ -31,12 +40,10 @@ test('off 是硬覆盖：provider 与全局都不生效', () => {
   assert.deepEqual(resolver.resolve('group:1'), { kind: 'off', source: 'session' });
 });
 
-test('会话指定的本地卡不存在：告警并落到 provider', () => {
-  const { resolver, logs } = makeResolver({ source: 'key', sessionName: '不存在的卡', provider: () => ({ name: '星苒', text: 'provider 卡' }) });
-  const result = resolver.resolve('group:1');
-  assert.equal(result.source, 'provider');
-  assert.equal(result.text, 'provider 卡');
-  assert.ok(logs.some((line) => line.includes('不存在的卡')));
+test('会话指定的本地卡不存在、provider 也没卡：告警并落到 none/全局', () => {
+  const { resolver, logs } = makeResolver({ source: 'key', sessionName: '不存在的卡', globalName: null, provider: () => null });
+  assert.deepEqual(resolver.resolve('group:1'), { kind: 'none', source: 'none' });
+  assert.ok(logs.some((line) => line.includes('外部服务与本地都没取到')));
 });
 
 test('没有 provider 命中时回落到全局本地卡', () => {
@@ -61,7 +68,10 @@ test('provider 卡带 stale 标记时原样透传（供控制台显示）', () =
 test('warm 委托给内核；没有内核时是安全的空操作', async () => {
   const { resolver, warmed } = makeResolver({ provider: () => null });
   assert.equal(await resolver.warm('group:1'), 'warmed');
-  assert.deepEqual(warmed, [{ key: 'group:1', opts: undefined }]);
+  // 新一轮语义：先普通预热，若仍没有 provider 卡（测试里 provider 恒为 null）再强制拉一次。
+  assert.equal(warmed.length, 2);
+  assert.equal(warmed[0].key, 'group:1');
+  assert.equal(warmed[1].opts?.force, true);
 
   const bare = createPersonaResolver({ roleSourceFor: () => 'global', roleNameFor: () => null, roleCardFor: () => null, globalRoleName: () => null });
   assert.equal(await bare.warm('group:1'), null);

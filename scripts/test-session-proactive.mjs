@@ -81,11 +81,12 @@ const sliceBetween = (from, to) => {
 
 test('④ 唤醒原因 → 准入轴：被动/主动/操作者三分，未知原因失败关闭', () => {
   // 入站消息与它的触发条件 → 被动轴（闸门里由 isSessionAllowedInCurrentMode 拦）
-  for (const reason of ['private', 'anyMessage', 'atMention', 'nameMention', 'keyword:小鲸鱼', 'question', 'speaker:某人', 'probability', 'poke']) {
+  // probability 不是「有人在找它」，而是 bot 按概率自己冒泡 → 主动轴
+  for (const reason of ['private', 'anyMessage', 'atMention', 'nameMention', 'keyword:小鲸鱼', 'question', 'speaker:某人', 'poke']) {
     assert.equal(wakeAccessAxis(reason), 'passive', reason);
   }
   // 没有新消息、由 bot 自己或定时器发起 → 主动轴
-  for (const reason of ['timeout', 'replyCheck', 'proactiveCheck', 'memberJoin', 'memberJoin:member_start', 'memberLeave', 'roleRefresh']) {
+  for (const reason of ['timeout', 'replyCheck', 'proactiveCheck', 'memberJoin', 'memberJoin:member_start', 'memberLeave', 'roleRefresh', 'probability']) {
     assert.equal(wakeAccessAxis(reason), 'proactive', reason);
   }
   // 操作者/系统通道 → 不受会话准入约束

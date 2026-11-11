@@ -136,8 +136,9 @@ export const WAKE_REASON_AXES = Object.freeze({
   keyword: 'passive',
   question: 'passive',
   speaker: 'passive',
-  probability: 'passive',
   poke: 'passive',
+  // 按概率随机唤醒没有人在找它，是 bot 自己冒泡 —— 归主动轴。
+  probability: 'proactive',
   // 静默结束后给「静默期间被直接找过」的会话补一次唤醒：触发源是被动消息。
   silenceEnded: 'passive',
   // bot 自己发起

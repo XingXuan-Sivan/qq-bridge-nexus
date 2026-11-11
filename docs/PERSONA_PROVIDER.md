@@ -146,3 +146,8 @@ card(name)                              // → { name, text, chars }，合成完
 - 卡正文缓存到 `state/persona-external.json`；provider 不可达时列表标 `stale`、仍可另存为内部人格。
 - 不提供删除：外部服务的角色可能被记忆/绑定引用，删除留给 provider 自己的管理面。
 
+### 2026-11-11（D5）外部服务是第一来源
+
+- `resolve` 的优先级改为：`off`（会话指定不挂卡，硬覆盖）→ **provider（外部服务）** → 会话本地卡 → 全局本地卡。
+- 外部服务取到卡就使用它（其 `stale` 标记原样透传供控制台显示）；外部没卡才回落本地卡；两边都没有才记「外部服务与本地都没取到」告警。
+- `warm` 改为 async：先普通预热；若仍没有 provider 卡，再用 `{force:true, name: roleNameFor(conversation)}` 强拉一次。失败只记「人格服务拉取失败…本轮退回本地/缓存」，不阻塞唤醒。

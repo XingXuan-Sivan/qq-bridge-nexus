@@ -41,6 +41,7 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
   /** 可见集（null = 全部）→ 「允许 N / 共 M」+ 被禁工具的 pill。 */
   function visibleSummary(cap) {
     const tools = gatedTools();
+    if (!catalog) return '<span class="meta">后端未返回工具目录：重启桥接后生效</span>';
     const blocked = tools.filter((tool) => cap.tools?.visible?.includes(tool.flag) === false);
     const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
       ? tools.length
@@ -97,14 +98,15 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
     const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
       ? tools.map((tool) => tool.flag)
       : cap.tools.visible.filter((flag) => tools.some((tool) => tool.flag === flag));
-    const toolsHtml = checkListField({
+    const toolsHtml = tools.length ? checkListField({
       id: 'capabilityVisible',
       label: '允许调用的工具',
       options: tools.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
       value: allowed,
       columns: 2,
       hint: '勾上 = 允许；只对固定使用这个能力预设的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
-    });
+    })
+      : '<div class="meta">后端还没有返回工具目录（桥接进程启动早于本次更新）。重启桥接后，这里会列出可收紧的工具。</div>';
     renderFields(host, [
       { name: 'capabilityVisibleBlock', type: 'custom', span: 1, html: toolsHtml },
       { name: 'capabilityPermission', type: 'select', label: '权限建议', options: PERMISSION_OPTIONS, value: cap.suggestedPermission || '', hint: '只作提示：新建或改会话时建议选这个级别，不会自动套用。' },

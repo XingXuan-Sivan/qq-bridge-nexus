@@ -760,3 +760,89 @@ Start-Process node -ArgumentList 'src/bridge.js' -WorkingDirectory (Get-Location
 - 不重写 MCP Hub 的扩展分发；只改它读的 `extensions.yml` 的来源（生成物）。
 - 不做权限的「按工具粒度逐项授权」——工具可见集已在能力层，权限只管审批档位。
 
+
+---
+
+## 14. 提示词三层拆分与页面骨架（P10.9）
+
+> 背景：P10.5/P10.6 把平台话术抽到 `config/platform/qq.yml`、能力只留 `prompt.base`，但行为档案没有 `prompt` 段、旧预设的提示词仍整段躺在 `agent.cordis.yml`，页面上也丢了「提示词卡 / 技能表 / 新建 / 克隆」。本节把提示词按「平台 / 引擎 / 能力」三层定稿，并恢复原预设页骨架。
+
+### 14.1 三层各管一段（不再按预设复制）
+
+| 层 | 文件与字段 | 回答什么 | 谁读 |
+| --- | --- | --- | --- |
+| 平台层 | `config/platform/<platform>.yml` 的 `prompt` | 在这个平台上怎么说话：发送工具协议、群聊不是客服队列、反 AI 味、引用/表情/分条节奏、漏看迟到、记忆卫生、认人、发送禁令、运维场景 | 注入块 `core-platform-prompt`（占位符 `{platform}/{displayName}/{owner}` 渲染） |
+| 行为层 | `config/behaviors/<id>.yml` 新增 `prompt` | 这个引擎怎么工作：v1 文本自动转发 + `[SILENT]`；v2 文本只是思考、必须调发送工具、令牌/已读水位/唤醒与潜水/等回参数 | 注入块 `core-behavior-prompt`（按方案的 behavior 与它的 kind 取） |
+| 能力层 | `dsh/agent-presets/<id>/capability.yml` 的 `safety.*` + `prompt.base` | 能做什么、边界在哪：无本地工具、拒绝越权、保密；身份底稿写“你是谁、对谁负责” | 生成器写进 `agent.cordis.yml` 的 persona，DSH 建会话时加载 |
+
+- **不进 `agent.cordis.yml` 的两层**：平台话术与行为提示词由注入块每轮给，改完重启桥接即生效，不需要「应用并安装」到 `~/.dsh/.agent-presets`；`agent.cordis.yml` 保持短而稳（安全边界 + 身份底稿），只有工具面/边界变化才重装。
+- **默认每轮全量注入**；`core-behavior-prompt` 给一个「摘要模式」开关（复用黑话表的指纹机制，未变时只发一行摘要），默认关。理由：这两段是操作语义，摘要化会让模型丢掉“必须调发送工具”这类硬约束。
+- 人格卡（角色扮演）不进任何提示词模板，仍走「人格与角色」。
+
+### 14.2 旧预设提示词逐段清单（去向即执行项）
+
+| 来源段（字符数） | 去向 |
+| --- | --- |
+| qq-chat【QQ 群聊模式 —— 安全规则】444 | `agent-chat` 的 `safety.rules`（与 v2 安全段取并集） |
+| qq-chat【QQ 场景规则】1158 | `config/platform/qq.yml`（与 v2 同名段去重） |
+| qq-chat【发送与汇报禁令】666 | `config/platform/qq.yml` |
+| qq-chat-v2【二代仿真模式 —— 安全规则】289 | `agent-chat` 的 `safety.rules` |
+| qq-chat-v2【二代仿真模式 —— 工具协议】3215 | `social-v2.prompt`（v2 引擎语义） |
+| qq-chat-v2【等、回与沉睡前观察】1264 | 拆：`qq_wait_for_messages` 用法与静默参数 → `social-v2.prompt`；社交判断（何时不硬接）→ `platform/qq.yml` |
+| qq-chat-v2 其余 15 段共 5947 | `platform/qq.yml` |
+| `qq-agent-readonly/workspace/full`【QQ 运维 Agent·L1/L2/L3】97–99 | 各自 `capability.yml > prompt.base`（保留权限表述） |
+| 同上【权限边界（硬性执行）】359–391 | 各自 `capability.yml > safety`（与工具面一致） |
+| 同上【QQ 场景】193–205 | `platform/qq.yml` 的「运维场景」小节 |
+| 新版 `agent-*` 现有【安全边界】 | 保留在各自 `safety`；平台/引擎两段由注入块补 |
+
+- **必须补的一段**：`social-v1.prompt` 新增 300–500 字，写清「文本会自动转发、`[SILENT]` 表示不说、无需调发送工具」。qq-chat 与 qq-chat-v2 合并成 `agent-chat` 后，这段是 v1 引擎唯一的语义来源，丢了就会让一代会话按 v2 规则执行。
+- 去重后预判：`platform/qq.yml` 8854 → 约 6000–6500 字；`social-v2.prompt` 约 3800–4200 字；`social-v1.prompt` 300–500 字。
+
+### 14.3 页面：「聊天行为」三标签
+
+页面标题从「行为档案」改为「聊天行为」，三个标签：
+
+**标签 1｜行为档案**
+- 卡片 A「档案清单」：`dataTableHtml`，列 = 档案（id + 名称，内置带 pill）/ 类型 / 提示词字数 / 被方案引用 / 操作（编辑、克隆、删除）。内置只读可克隆。
+- 卡片 B「行为参数」：现有 v1/v2 分组表单（`renderFields` + `behavior-groups`，字段由 `kinds/*.mjs` 提供）。
+- 卡片 C「行为提示词」：**代码编辑器**（`attachTextareaEditor(textarea, { language: 'text', height: '420px', readOnly: true })` + 编辑/保存/取消按钮，写法与原预设页的 `#presetPrompt` 卡一致，不用 textarea 裸框）。只编辑当前档案的 `prompt`；下方说明「只写引擎语义；QQ 话术在『平台话术』标签」。
+- 卡片 D「拼装预览」：只读顺序条（安全边界 → 身份底稿 → 行为提示词 → 平台话术）+「生成预览」按钮，调 `POST /api/prompt-preview`（profile=persona）看最终片段。
+
+**标签 2｜能力预设**（恢复原预设页骨架，不再大卡包编辑器）
+- 卡片 A「能力清单」：列 = 能力 / 风险 / 工具面摘要 / 被方案引用 / 操作（编辑、克隆、删除）；新建入口支持「空白 / 从模板（4 个内置）/ 从现有复制」，内置只读可克隆。
+- 卡片 B「能力编辑」：与清单同页并列的独立卡片（`#capabilityEditor` 移出清单卡），字段 = 名称、说明、平台工具表、Agent 模块表、MCP 服务器 / 工具表、技能表（接 `/api/extensions.skills`，空数据给空态文案）。
+- 卡片 C「能力底稿」：`prompt.base` + `safety.notes` 的**代码编辑器**卡（从原预设页的人格提示词卡搬来，改名为「能力底稿」）。
+
+**标签 3｜平台话术**
+- 顶部平台下拉（当前只有 `qq`）+ 只读来源路径 `config/platform/qq.yml` + 占位符提示 `{platform} {displayName} {owner}`。
+- 卡片：**代码编辑器**（`language: 'text'`，高度 460px）+ 保存 / 还原出厂；内置语义按「可编辑、可还原」处理。
+- 卡片：只读说明「对 QQ 上所有会话生效，含运维场景；不要写具体角色或模型」。
+
+**通用**：注入块页保留 `core-platform-prompt` / `core-behavior-prompt` 两行只读摘要（来源 + 字数 + 开关），正文编辑只在上面三个标签里做。
+
+### 14.4 接口
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET/PUT | `/api/behaviors/<id>` | 读写行为档案参数 + `prompt` |
+| POST | `/api/behaviors/<id>/clone` | 克隆（内置可克） |
+| DELETE | `/api/behaviors/<id>` | 删除（被方案引用 409） |
+| GET/PUT | `/api/platform/<id>` | 读写平台话术 `prompt`，PUT 带 `reset:true` 还原出厂 |
+| POST | `/api/capabilities/<id>/clone` | 克隆能力（内核已有 save/upsert，补 clone 语义） |
+| POST | `/api/prompt-preview` | 现有接口，profile 增 `persona`（拼装预览） |
+
+### 14.5 分步（每步单独提交）
+- **P10.9.1** 数据层：`behaviors` 增 `prompt` 读写与克隆/删除；新增 `src/platform/prompt.mjs`（读 `config/platform/*.yml`、渲染占位符、还原出厂）；单测。
+- **P10.9.2** 注入：新增 `core-behavior-prompt`，重写 `core-platform-prompt` 读平台话术；golden 夹具扩一个带 capability 的变体。
+- **P10.9.3** 生成器收口：`agent.cordis.yml` 只由 safety + `prompt.base` 生成；确认旧预设不再被新能力引用。
+- **P10.9.4** 前端三标签骨架 + 行为提示词卡 + 拼装预览（代码编辑器组件）。
+- **P10.9.5** 能力页骨架恢复：清单/编辑/底稿三卡、新建/克隆/删除、技能表空态。
+- **P10.9.6** 平台话术标签（编辑、还原出厂）。
+- **P10.9.7** 提示词逐段迁移执行（§14.2 清单）+ 去重 + 字数核对。
+- **P10.9.8** 回归：static / UI 契约 / 全量 audit / 截图目视，提交 `fix(capability): 提示词三层拆分与预设页骨架恢复（P10.9）`，打 `phase/10.9`。
+
+### 14.6 验收
+- G17 三层各只有一份文件，`grep` 不得在 `agent.cordis.yml` 里出现平台话术或引擎语义（安全段与身份底稿除外）。
+- G18 行为提示词改动后重启桥接，下一轮唤醒即生效（不需要「应用并安装」）。
+- G19 页面三标签结构与原预设页一致（清单/编辑/提示词都是并列卡片），全部使用 `renderFields` / `dataTableHtml` / `attachTextareaEditor`，无手写控件。
+- G20 技能表在数据为空时显示空态说明，不得整块消失。
+- G21 能力新建/克隆/删除可用，内置只读可克隆；被方案引用的删除返回 409。

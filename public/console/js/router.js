@@ -25,7 +25,6 @@ export const consolePages = {
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
   skills: ['技能', '让 AI 知道，自己会什么。', '查看 DSH、仓库与外部技能；外部技能可新增、导入、编辑、启停与删除。'],
-  presets: ['Agent 预设', '把工具与能力，装进一套配置。', '编辑 DSH 预设的元数据、扩展授权与 YAML；保存源文件后点「应用」才会 build 并安装。'],
   behavior: ['行为档案', '让 AI 的说话节奏，有据可循。', '按 v1 / v2 的表单编辑行为档案；预设通过 behavior 引用，保存后重启桥接生效。'],
   'prompt-blocks': ['注入块', '提示词由哪些块拼成，一处看清。', '按槽位查看每次唤醒的拼装顺序，改开关与字数上限；可按会话预览真实提示词。'],
   mcp: ['MCP 与工具', '把外部能力，接成标准接口。', '查看桥接内置 MCP 的真实工具清单，并在本页管理外部 MCP；工具参考已并入本页。'],
@@ -41,7 +40,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'presets', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory', 'runtime']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory', 'runtime']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

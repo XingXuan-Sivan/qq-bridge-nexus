@@ -1,180 +1,329 @@
-// 能力面板：编辑 capability.yml（平台工具、Agent 模块、安全补充）。平台说话方式在行为档案里。
-// 行为页第二标签与运行方案页共用同一份实现，避免两处各写一套。
-// 约定：表格只用 table 组件，字段只用 renderFields，弹窗字段也走 renderFields。
+// 能力预设：列表 + 内联编辑（平台工具 / Agent 模块 / MCP 服务器与工具 / 技能）。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { renderFields, checkListField } from '../../components/form/form.js';
-import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
+import { renderFields } from '../form/form.js';
+import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../table/table.js';
 
-/**
- * @param {{ tableHost: HTMLElement, editorHost?: HTMLElement, onSaved?: Function }} options
- */
-export function createCapabilityPanel({ tableHost, onSaved = null }) {
-  let capabilities = [];
-  let presets = [];
+const PLATFORM_RISK_TEXT = { read: '读取', send: '发送', state: '会话状态', admin: '管理' };
+
+function riskPill(risk) {
+  const text = PLATFORM_RISK_TEXT[risk] ?? risk ?? '—';
+  const tone = risk === 'admin' ? 'r' : risk === 'send' ? 'b' : 'g';
+  return `<span class="pill ${tone}">${esc(text)}</span>`;
+}
+
+export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   let catalog = null;
+  let capabilities = [];
+  let extensions = null; // /api/extensions：MCP 服务器与技能目录
+  let draft = null;
 
-  const el = (id) => document.getElementById(id);
-  const gatedTools = () => (catalog?.platform ?? []).filter((tool) => tool.gated);
   const byId = (id) => capabilities.find((item) => item.id === id) ?? null;
-  const presetById = (id) => presets.find((item) => item.id === id) ?? null;
+  const platformTools = () => (catalog?.entries ?? []).filter((entry) => entry.side === 'platform');
+  const agentModules = () => (catalog?.entries ?? []).filter((entry) => entry.side === 'agent');
 
-  /** 预设里 MCP / 技能的放行数量（DSH 侧），没有就写「未配置」。 */
-  function extensionSummary(id) {
-    const preset = presetById(id);
-    if (!preset) return '<span class="meta">—</span>';
-    const mcp = preset.extensions?.mcpServers?.allow?.length ?? 0;
-    const tools = preset.extensions?.mcpServers?.tools?.allow?.length ?? 0;
-    const skills = preset.extensions?.skills?.allow?.length ?? 0;
-    return `<span class="meta">MCP ${mcp} · 工具 ${tools} · 技能 ${skills}</span>`;
+  function presetExtensions(id) {
+    const preset = extensions?.presets?.find?.((item) => item.id === id);
+    return preset?.extensions ?? null;
   }
 
-  /** 平台工具可见集 → 「允许 N / 共 M」+ 被禁工具的 pill。 */
+  function extensionSummary(cap) {
+    const mcp = cap.tools?.mcp?.allow ?? [];
+    const tools = cap.tools?.mcp?.tools?.allow ?? [];
+    const skills = cap.tools?.skills ?? [];
+    const count = (list) => (list.includes('*') ? '全部' : String(list.length));
+    return `<span class="meta">MCP ${count(mcp)} · 工具 ${count(tools)} · 技能 ${count(skills)}</span>`;
+  }
+
   function visibleSummary(cap) {
-    const tools = gatedTools();
-    if (!catalog) return '<span class="meta">后端未返回工具目录：重启桥接后生效</span>';
-    const visible = Array.isArray(cap.platformVisible) ? cap.platformVisible : tools.map((tool) => tool.flag);
-    const blocked = tools.filter((tool) => !visible.includes(tool.flag));
-    const pills = blocked.slice(0, 3).map((tool) => `<span class="pill r">${esc(tool.label)}</span>`).join(' ');
-    return `<span class="meta">允许 ${tools.length - blocked.length} / ${tools.length}</span>${pills ? ` ${pills}` : ''}`;
+    const allowed = (cap.platformVisible ?? []).length;
+    const total = platformTools().length || 0;
+    return `<span class="meta">允许 ${allowed} / ${total}</span>`;
   }
 
-  function tableMarkup() {
-    if (!capabilities.length) return '<div class="meta">还没有可用的能力预设。</div>';
-    const rows = capabilities.map((cap) => [
-      `<code>${esc(cap.id)}</code>`,
-      visibleSummary(cap),
-      (cap.agentModules ?? []).length
-        ? `<span class="meta">${esc((cap.agentModules ?? []).join(' / '))}</span>`
-        : '<span class="meta">无本地模块</span>',
-      extensionSummary(cap.id),
-      `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button> <button class="btn small" type="button" data-cap-advanced="${esc(cap.id)}">高级</button>`,
-    ]);
-    return dataTableHtml({
-      columns: [
-        { label: '能力预设', width: '180' },
-        { label: '平台工具' },
-        { label: 'Agent 模块', width: '220' },
-        { label: 'MCP / 技能', width: '170' },
-        { label: '操作', width: '150' },
+  function listMarkup() {
+    const rows = capabilities.map((cap) => ({
+      cells: [
+        `<code>${esc(cap.id)}</code><div class="meta">${esc(cap.label || '')}</div>`,
+        visibleSummary(cap),
+        (cap.agentModules ?? []).length ? (cap.agentModules).map((m) => `<code>${esc(m)}</code>`).join(' ') : '<span class="meta">—</span>',
+        extensionSummary(cap),
+        `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
       ],
+    }));
+    return dataTableHtml({
+      columns: [{ label: '能力预设' }, { label: '平台工具', width: '200px' }, { label: 'Agent 模块', width: '260px' }, { label: 'MCP · 技能', width: '160px' }, { label: '操作', width: '80px' }],
+      rows,
+      pageSize: 20,
+      meta: `${capabilities.length} 个能力`,
+    });
+  }
+
+  function renderList() {
+    if (!listHost) return;
+    listHost.innerHTML = listMarkup();
+    initDataTables(listHost);
+  }
+
+  // ---- 编辑区 ----
+
+  function loadDraft(cap) {
+    const mcp = cap.tools?.mcp ?? {};
+    const toolAllow = mcp.tools?.allow ?? [];
+    const toolDeny = mcp.tools?.deny ?? [];
+    draft = {
+      id: cap.id,
+      label: cap.label || '',
+      note: cap.note || '',
+      notes: cap.safety?.notes || '',
+      platform: new Set(cap.platformVisible ?? []),
+      agent: new Set(cap.agentModules ?? []),
+      servers: new Set(mcp.allow ?? []),
+      toolAllow: new Set(toolAllow),
+      toolDeny: new Set(toolDeny),
+      skills: new Set(cap.tools?.skills ?? []),
+    };
+  }
+
+  function platformTable() {
+    const rows = platformTools().map((entry) => ({
+      cells: [
+        selectCellHtml({ value: entry.flag, checked: draft.platform.has(entry.flag), label: `允许 ${entry.label}`, attrs: { 'data-cap-platform': entry.flag } }),
+        `${esc(entry.label)}<div class="meta"><code>${esc(entry.flag)}</code></div>`,
+        riskPill(entry.risk),
+      ],
+    }));
+    return dataTableHtml({
+      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'platform' } }, { label: '工具' }, { label: '风险', width: '90px' }],
+      rows,
+      pageSize: 40,
+      meta: `${rows.length} 个平台工具`,
+    });
+  }
+
+  function agentTable() {
+    const rows = agentModules().map((entry) => ({
+      cells: [
+        selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id } }),
+        esc(entry.label),
+        `<code>${esc(entry.id)}</code>`,
+        riskPill(entry.risk),
+      ],
+    }));
+    return rows.length
+      ? dataTableHtml({
+        columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'agent' } }, { label: '模块' }, { label: 'id', width: '220px' }, { label: '风险', width: '90px' }],
+        rows,
+        pageSize: 10,
+        meta: `${rows.length} 个 Agent 模块`,
+      })
+      : '<p class="meta">后端没有返回 Agent 模块目录。</p>';
+  }
+
+  function allowedServers() {
+    const servers = extensions?.mcp ?? [];
+    return servers.filter((server) => draft.servers.has(server.id));
+  }
+
+  function serverTable() {
+    const servers = extensions?.mcp ?? [];
+    if (!servers.length) return '<p class="meta">还没有 MCP 服务器目录（重启桥接后刷新）。</p>';
+    const rows = servers.map((server) => ({
+      cells: [
+        selectCellHtml({ value: server.id, checked: draft.servers.has(server.id), label: `允许 ${server.id}`, attrs: { 'data-cap-server': server.id } }),
+        `<code>${esc(server.id)}</code>`,
+        server.source === 'external' ? '外部' : '内置',
+        server.status === 'online' ? '在线' : '不可用',
+        String((server.tools ?? []).length || server.toolCount || 0),
+      ],
+    }));
+    return dataTableHtml({
+      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'servers' } }, { label: '服务器' }, { label: '来源', width: '80px' }, { label: '状态', width: '90px' }, { label: '工具数', width: '80px' }],
       rows,
       pageSize: 10,
-      meta: `共 ${capabilities.length} 项`,
-      empty: '没有匹配的能力预设。',
+      meta: `${servers.length} 个服务器`,
     });
   }
 
-  function render() {
-    if (!tableHost) return;
-    tableHost.innerHTML = tableMarkup();
-    initDataTables(tableHost);
-  }
-
-  function editorMarkup(cap) {
-    return modalHtml({
-      id: 'capabilityEditor',
-      title: `能力预设 · ${cap.id}`,
-      body: '<div class="form-stack" id="capabilityFields"></div>',
-      footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="capabilitySave">保存</button>',
+  function toolTable() {
+    const servers = allowedServers();
+    const rows = [];
+    for (const server of servers) {
+      for (const tool of server.tools ?? []) {
+        const id = `${server.id}__${tool.name}`;
+        rows.push({
+          cells: [
+            checkCellHtml({ value: id, checked: draft.toolAllow.has(id), attrs: { 'data-cap-tool-allow': id }, label: `允许 ${id}` }),
+            checkCellHtml({ value: id, checked: draft.toolDeny.has(id), attrs: { 'data-cap-tool-deny': id }, label: `拒绝 ${id}` }),
+            `<code>${esc(server.id)}</code>`,
+            `<code>${esc(tool.name)}</code>`,
+            `<span class="preset-tool-desc">${esc(tool.description || '—')}</span>`,
+          ],
+        });
+      }
+    }
+    if (!rows.length) return '<p class="meta">先允许 MCP 服务器，再逐个勾选它的工具。</p>';
+    return dataTableHtml({
+      columns: [{ label: '允许', width: '60px' }, { label: '拒绝', width: '60px' }, { label: '服务器', width: '180px' }, { label: '工具', width: '220px' }, { label: '说明' }],
+      rows,
+      pageSize: 20,
+      meta: `${rows.length} 个工具（拒绝优先于允许）`,
     });
   }
 
-  function renderEditorFields(cap) {
-    const host = el('capabilityFields');
-    if (!host) return;
-    const tools = gatedTools();
-    const visible = Array.isArray(cap.platformVisible) ? cap.platformVisible : tools.map((tool) => tool.flag);
-    const modules = (catalog?.agent ?? []).map((module) => ({ value: module.id, label: module.label }));
-    const toolsHtml = tools.length ? checkListField({
-      id: 'capabilityPlatform',
-      label: '平台工具',
-      options: tools.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
-      value: visible.filter((flag) => tools.some((tool) => tool.flag === flag)),
-      columns: 2,
-      hint: '勾上 = 允许；只对使用这套能力的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
-    })
-      : '<div class="meta">后端还没有返回工具目录（桥接进程启动早于本次更新）。重启桥接后，这里会列出可收紧的工具。</div>';
-    const modulesHtml = checkListField({
-      id: 'capabilityAgent',
-      label: 'Agent 模块',
-      options: modules,
-      value: cap.agentModules ?? [],
-      columns: 2,
-      hint: '本地执行能力（文件 / 命令 / 任务）。聊天类能力应保持全关，由守卫行兜底。',
+  function skillTable() {
+    const skills = extensions?.skills ?? [];
+    if (!skills.length) return '<p class="meta">还没有技能目录。</p>';
+    const rows = skills.map((skill) => ({
+      cells: [
+        selectCellHtml({ value: skill.id, checked: draft.skills.has(skill.id), label: `允许 ${skill.id}`, attrs: { 'data-cap-skill': skill.id } }),
+        `<code>${esc(skill.id)}</code>`,
+        `<span class="preset-tool-desc">${esc(skill.description || '—')}</span>`,
+      ],
+    }));
+    return dataTableHtml({
+      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'skills' } }, { label: '技能', width: '220px' }, { label: '说明' }],
+      rows,
+      pageSize: 10,
+      meta: `${skills.length} 个技能`,
     });
-    renderFields(host, [
-      { name: 'capabilityLabel', type: 'text', label: '名称', value: cap.label || '', span: 1 },
-      { name: 'capabilityVisibleBlock', type: 'custom', span: 2, html: toolsHtml },
-      { name: 'capabilityAgentBlock', type: 'custom', span: 2, html: modulesHtml },
-      { name: 'capabilitySafetyNotes', type: 'textarea', label: '安全补充', value: cap.safety?.notes || '', hint: '拼在 persona 安全段末尾；只写这套能力特有的约束。' },
-      { name: 'capabilityNote', type: 'text', label: '备注', value: cap.note || '', hint: '给选方案的人看的说明，不进提示词。' },
+  }
+
+  function renderEditor() {
+    if (!editorHost) return;
+    if (!draft) {
+      editorHost.hidden = true;
+      editorHost.innerHTML = '';
+      return;
+    }
+    editorHost.hidden = false;
+    editorHost.innerHTML = `
+      <div class="card span-all">
+        <div class="card-head">
+          <h2>编辑能力 · <code>${esc(draft.id)}</code></h2>
+          <div class="meta" id="capabilitySaveMsg" role="status"></div>
+        </div>
+        <div class="meta">保存后重写 <code>capability.yml</code> 并重建 preset / agent / extensions 三份产物。</div>
+        <div id="capabilityEditorFields"></div>
+        <h3>平台工具</h3>
+        <div id="capEditorPlatform"></div>
+        <h3>Agent 模块</h3>
+        <div id="capEditorAgent"></div>
+        <h3>MCP 服务器</h3>
+        <div id="capEditorServers"></div>
+        <h3>MCP 工具</h3>
+        <div id="capEditorTools"></div>
+        <h3>技能</h3>
+        <div id="capEditorSkills"></div>
+        <div class="form-actions">
+          <button class="btn" type="button" id="capabilitySave">保存</button>
+          <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
+        </div>
+      </div>`;
+    renderFields(editorHost.querySelector('#capabilityEditorFields'), [
+      { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },
+      { name: 'capabilitySafetyNotes', type: 'textarea', label: '安全补充', value: draft.notes, hint: '拼在 persona 安全段末尾；只写这套能力特有的约束。' },
+      { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选方案的人看的说明，不进提示词。' },
     ], { columns: 1 });
+    editorHost.querySelector('#capEditorPlatform').innerHTML = platformTable();
+    editorHost.querySelector('#capEditorAgent').innerHTML = agentTable();
+    editorHost.querySelector('#capEditorServers').innerHTML = serverTable();
+    editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
+    editorHost.querySelector('#capEditorSkills').innerHTML = skillTable();
+    for (const host of editorHost.querySelectorAll('#capEditorPlatform, #capEditorAgent, #capEditorServers, #capEditorTools, #capEditorSkills')) {
+      initDataTables(host);
+    }
   }
 
-  function open(id) {
-    const cap = byId(id);
-    if (!cap) return;
-    document.body.insertAdjacentHTML('beforeend', editorMarkup(cap));
-    const overlay = el('capabilityEditor');
-    if (!overlay) return;
-    openModal(overlay);
-    renderEditorFields(cap);
-    wireModal(overlay);
-    overlay.querySelector('#capabilitySave')?.addEventListener('click', async () => {
-      const platform = {};
-      for (const tool of gatedTools()) {
-        platform[tool.flag] = overlay.querySelector(`[name="capabilityPlatform"][value="${tool.flag}"]`)?.checked === true;
-      }
-      const agent = {};
-      for (const box of overlay.querySelectorAll('[name="capabilityAgent"]')) {
-        if (box.checked) agent[box.value] = true;
-      }
-      const next = {
-        label: overlay.querySelector('#capabilityLabel')?.value ?? '',
-        tools: { platform, agent },
-        safety: { notes: overlay.querySelector('#capabilitySafetyNotes')?.value ?? '' },
-        note: overlay.querySelector('#capabilityNote')?.value ?? '',
-      };
-      try {
-        const r = await api(`/api/runtime/capabilities/${encodeURIComponent(id)}`, 'PATCH', next);
-        if (!r?.ok) throw new Error(r?.error || '保存失败');
-        showConsoleToast('能力预设已保存');
-        overlay.remove();
-        await load();
-        onSaved?.();
-      } catch (error) {
-        showConsoleToast(`保存失败：${error?.message ?? error}`, 'err');
-      }
-    });
+  function syncFromEvents(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
+    const { capPlatform, capAgent, capServer, capSkill, capToolAllow, capToolDeny } = target.dataset;
+    if (capPlatform) { target.checked ? draft.platform.add(capPlatform) : draft.platform.delete(capPlatform); return; }
+    if (capAgent) { target.checked ? draft.agent.add(capAgent) : draft.agent.delete(capAgent); return; }
+    if (capServer) {
+      target.checked ? draft.servers.add(capServer) : draft.servers.delete(capServer);
+      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
+      initDataTables(editorHost.querySelector('#capEditorTools'));
+      return;
+    }
+    if (capSkill) { target.checked ? draft.skills.add(capSkill) : draft.skills.delete(capSkill); return; }
+    if (capToolAllow) {
+      if (target.checked) { draft.toolAllow.add(capToolAllow); draft.toolDeny.delete(capToolAllow); }
+      else draft.toolAllow.delete(capToolAllow);
+      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
+      initDataTables(editorHost.querySelector('#capEditorTools'));
+      return;
+    }
+    if (capToolDeny) {
+      if (target.checked) { draft.toolDeny.add(capToolDeny); draft.toolAllow.delete(capToolDeny); }
+      else draft.toolDeny.delete(capToolDeny);
+      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
+      initDataTables(editorHost.querySelector('#capEditorTools'));
+    }
+  }
+
+  async function save() {
+    if (!draft) return;
+    const platform = {};
+    for (const entry of platformTools()) platform[entry.flag] = draft.platform.has(entry.flag);
+    const agent = {};
+    for (const entry of agentModules()) agent[entry.id] = draft.agent.has(entry.id);
+    const payload = {
+      label: editorHost.querySelector('#capabilityLabel')?.value?.trim() ?? '',
+      note: editorHost.querySelector('#capabilityNote')?.value?.trim() ?? '',
+      safety: { notes: editorHost.querySelector('#capabilitySafetyNotes')?.value?.trim() ?? '' },
+      tools: {
+        platform,
+        agent,
+        mcp: { allow: [...draft.servers], tools: { allow: [...draft.toolAllow], deny: [...draft.toolDeny] } },
+        skills: [...draft.skills],
+      },
+    };
+    try {
+      const result = await api(`/api/runtime/capabilities/${encodeURIComponent(draft.id)}`, 'PATCH', payload);
+      if (!result?.ok) throw new Error(result?.error || '保存失败');
+      showConsoleToast('能力预设已保存');
+      draft = null;
+      await load();
+      onSaved?.();
+    } catch (error) {
+      const msg = editorHost.querySelector('#capabilitySaveMsg');
+      if (msg) msg.textContent = `保存失败：${error?.message ?? error}`;
+    }
   }
 
   async function load() {
     try {
-      const [caps, list] = await Promise.all([
+      const [caps, ext] = await Promise.all([
         api('/api/runtime/capabilities'),
-        api('/api/presets').catch(() => null),
+        api('/api/extensions').catch(() => null),
       ]);
       catalog = caps?.catalog ?? null;
       capabilities = caps?.capabilities ?? [];
-      presets = list?.presets ?? [];
-      render();
+      extensions = ext ?? null;
+      renderList();
+      renderEditor();
     } catch (error) {
-      if (tableHost) tableHost.innerHTML = `<div class="meta">读取能力预设失败：${esc(error?.message ?? error)}</div>`;
+      if (listHost) listHost.innerHTML = `<div class="meta">读取能力预设失败：${esc(error?.message ?? error)}</div>`;
     }
   }
 
-  tableHost?.addEventListener('click', (event) => {
+  listHost?.addEventListener('click', (event) => {
     const trigger = event.target.closest('[data-cap-edit]');
-    if (trigger) {
-      open(trigger.dataset.capEdit);
-      return;
-    }
-    // 「高级」去能力预设页：MCP / 技能 / YAML 在那儿改，这里只做桥接侧补丁。
-    const advanced = event.target.closest('[data-cap-advanced]');
-    if (advanced) window.location.hash = '#presets';
+    if (!trigger) return;
+    const cap = byId(trigger.dataset.capEdit);
+    if (!cap) return;
+    loadDraft(cap);
+    renderEditor();
+    editorHost?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   });
 
-  return { load, render };
+  editorHost?.addEventListener('change', syncFromEvents);
+  editorHost?.addEventListener('click', (event) => {
+    if (event.target.closest('#capabilitySave')) { void save(); return; }
+    if (event.target.closest('#capabilityCancel')) { draft = null; renderEditor(); }
+  });
+
+  return { load, render: renderList };
 }

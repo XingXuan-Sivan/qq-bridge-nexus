@@ -5,7 +5,7 @@ import { esc } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { behaviorFields, fillBehaviorForm, readBehaviorForm } from '../presets/behavior-form.js';
+import { behaviorFields, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
 import { BEHAVIOR_FIELDS } from './fields.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
 
@@ -147,7 +147,8 @@ export function init() {
 
   // 第二标签：能力预设（桥接侧补丁）。标签首次打开时才拉数据，避免进页就发两个请求。
   const capabilityHost = document.getElementById('capabilityTable');
-  if (capabilityHost) capabilityPanel = createCapabilityPanel({ tableHost: capabilityHost });
+  const capabilityEditorHost = document.getElementById('capabilityEditor');
+  if (capabilityHost) capabilityPanel = createCapabilityPanel({ listHost: capabilityHost, editorHost: capabilityEditorHost });
   const tabs = [...document.querySelectorAll('[data-behavior-tab]')];
   const panels = [...document.querySelectorAll('[data-behavior-panel]')];
   function showTab(name) {

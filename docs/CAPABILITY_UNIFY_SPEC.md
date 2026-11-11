@@ -470,11 +470,11 @@ session.planId → plan → capability(安装预设 id) + behavior(id)
 - 新注入块 `core-platform-prompt`（slot behavior / priority 145，紧跟 `core-proactivity` 之前），`wakePromptCtx` 增 `platformPrompt`。
 - 验收：`test-platform-prompt.mjs`（结构/关键段落/无 persona 残留）、`test-prompt-golden` 仍 1/1（夹具无 capability，块为空、逐字不变）、`test-prompt-registry` 通过。
 
-**P10.6 前端合并**
-- 行为页两标签，能力预设编辑器整体迁入（复用现有 `presets/page.js` 的表单与 YAML 查看器，改造为 capability 表单）。
-- 删除 `capability-panel/`、导航项、`pages/presets` 页面与路由（或保留为内部重定向，P10.8 决定）。
-- 静态基线、`pilotIds`、legacy/retired id、契约重录。
-- 验收：`test-console-static`、`test-console-ui`（新增能力工具勾选用例）。
+**P10.6 前端合并（✅ 已实施）**
+- 行为页第二标签「能力预设」用**内联编辑器**（非弹窗，按用户 18:40 裁决）：平台工具 37 行、Agent 模块 8 行、MCP 服务器/工具、技能各一张表，全部用 `selectCellHtml` 勾选；保存组装整个 `capability.yml` 的工具面。
+- 删除 `pages/presets` 页面、`#presets` 路由与「Agent 预设」导航；`behavior-form.js` 移入 `pages/behavior/`；运行方案页的能力下拉改读 `/api/runtime/capabilities`，方案保存字段由 `tools` 换成 `capability`。
+- 静态基线、`pilotIds`、legacy/retired、UI 契约已重录；`test-console-static` 全过、`test-console-ui` 31/31。
+- 遗留：`GLOBAL_CONFIG.md` 的页面表仍写旧「预设」页，P10.8 统一改写。
 
 **P10.7 清理与红线核查**
 - 按 §10 清单逐项删除/断言；`grep` 清单进 `test-capability-unify.mjs`（例如「代码里不得出现 `config.capabilities`」）。
@@ -714,7 +714,7 @@ function effectiveLevel({ profile, global, chat, grantActive }) {
 | U3 | P10.3 迁移脚本 + 4 内置能力 | U2 | G3/G4 | 高 |
 | U4 | P10.4 服务端读源切换（删 `config.capabilities`） | U3 | G5/G7/G8 | 高 |
 | U5 | P10.5 平台提示词注入块 `core-platform-prompt` | U4 | G9 | 高 |
-| U6 | P10.6 前端合并（行为页两标签、删 presets 页） | U4 | G10 | 高 |
+| U6 | P10.6 前端合并（行为页两标签、删 presets 页） | U4 | G10 | ✅ |
 | U7 | P10.7 红线清理 + `test-capability-unify.mjs` | U5,U6 | 该测试通过 + 全量 audit | 中 |
 | U8 | P10.8 文档转正 + presets API 降级决定 | U7 | 文档无冲突、audit 绿 | 中 |
 | U9 | P11 权限等级 + full 授权（§12） | U4（建议 U8 后） | G12–G16 | 高 |

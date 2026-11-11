@@ -46,7 +46,7 @@ function summaryHtml() {
   const legacy = payload.legacy ?? {};
   return `
     <span class="pill g">${esc(plan.label)}</span>
-    <span class="pill">能力预设 ${esc(plan.tools)}</span>
+    <span class="pill">能力预设 ${esc(plan.capability || plan.tools)}</span>
     <span class="pill">${esc(behaviorLabel(plan.behavior))}</span>
     <span class="pill">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>
     <span class="pill">旧模式 ${esc(MODE_LABEL[legacy.mode] ?? legacy.mode ?? '—')}${legacy.level && legacy.level !== 'L0' ? ` / ${esc(legacy.level)}` : ''}</span>
@@ -69,7 +69,7 @@ function fillPlanOptions() {
 function rowHtml(plan) {
   return [
     `<code>${esc(plan.id)}</code><div class="meta">${esc(plan.label)}</div>`,
-    `<span class="meta">${esc(plan.tools)}</span>`,
+    `<span class="meta">${esc(plan.capability || plan.tools)}</span>`,
     `<span class="meta">${esc(behaviorLabel(plan.behavior))}</span>`,
     `<span class="meta">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>`,
     `<span class="pill">${plan.builtin ? '内置' : '自定义'}</span>`,
@@ -118,13 +118,13 @@ async function load() {
   try {
     const [plans, presetList, behaviorList, caps] = await Promise.allSettled([
       api('/api/runtime/plans'),
-      api('/api/presets'),
+      api('/api/runtime/capabilities'),
       api('/api/config/behaviors'),
       api('/api/runtime/capabilities'),
     ]);
     if (plans.status !== 'fulfilled') throw plans.reason;
     payload = plans.value;
-    presets = presetList.status === 'fulfilled' ? (presetList.value?.presets ?? []) : [];
+    presets = presetList.status === 'fulfilled' ? (presetList.value?.capabilities ?? []) : [];
     behaviors = behaviorList.status === 'fulfilled' ? (behaviorList.value?.behaviors ?? []) : [];
     capsPayload = caps.status === 'fulfilled' ? (caps.value ?? null) : null;
     renderSummary();
@@ -173,8 +173,8 @@ function editorFields(plan) {
     },
     { name: 'runtimeEditLabel', type: 'text', label: '名称', value: plan?.label || '', maxlength: 40 },
     {
-      name: 'runtimeEditTools', type: 'select', label: '能力预设', value: plan?.tools || '',
-      options: presets.map((item) => ({ value: item.id, label: `${item.id}${item.trust === 'user' ? '（用户）' : ''}` })),
+      name: 'runtimeEditTools', type: 'select', label: '能力预设', value: plan?.capability || plan?.tools || '',
+      options: presets.map((item) => ({ value: item.id, label: `${item.id} · ${item.label || item.id}` })),
       hint: '能力预设决定工具授权与沙箱；在「能力预设」页维护。',
     },
     {
@@ -224,7 +224,7 @@ async function savePlan() {
   const body = {
     id: el('runtimeEditId')?.value.trim() ?? '',
     label: el('runtimeEditLabel')?.value.trim() ?? '',
-    tools: el('runtimeEditTools')?.value ?? '',
+    capability: el('runtimeEditTools')?.value ?? '',
     behavior: el('runtimeEditBehavior')?.value ?? 'none',
     audience: el('runtimeEditAudience')?.value ?? 'access',
     note: el('runtimeEditNote')?.value ?? '',
@@ -233,7 +233,7 @@ async function savePlan() {
     setEditorMsg('方案 id 只能用小写字母、数字与连字符，且以字母开头（2–40 字符）');
     return;
   }
-  if (!body.tools) {
+  if (!body.capability) {
     setEditorMsg('先选一套能力预设');
     return;
   }
@@ -280,7 +280,7 @@ function jsonModal({ id, title, value, readonly, confirmLabel, onConfirm }) {
 
 function exportPlans() {
   const plans = (payload?.plans ?? []).map((plan) => ({
-    id: plan.id, label: plan.label, note: plan.note, tools: plan.tools, behavior: plan.behavior, audience: plan.audience,
+    id: plan.id, label: plan.label, note: plan.note, capability: plan.capability || plan.tools, behavior: plan.behavior, audience: plan.audience,
   }));
   jsonModal({
     id: 'runtimeExportModal',

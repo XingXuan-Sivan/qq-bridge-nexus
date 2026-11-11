@@ -15,29 +15,6 @@
     }
   },
   {
-    "method": "PUT",
-    "path": "/api/extensions/presets/qq-chat-v2/yaml",
-    "body": {
-      "yaml": "- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: true\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n"
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/api/extensions/presets/create",
-    "body": {
-      "id": "ui-copy",
-      "from": "qq-chat-v2"
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/api/preset/sim-prompt",
-    "body": {
-      "preset": "demo-agent",
-      "content": "空白预设的新提示词"
-    }
-  },
-  {
     "method": "POST",
     "path": "/api/config/behavior-default",
     "body": {
@@ -99,7 +76,7 @@
     "body": {
       "id": "my-agent",
       "label": "我的 Agent",
-      "tools": "qq-chat",
+      "capability": "agent-chat",
       "behavior": "social-v2",
       "audience": "owner",
       "note": "带人格进群"
@@ -110,9 +87,28 @@
     "path": "/api/runtime/capabilities/agent-chat",
     "body": {
       "label": "聊天（改）",
+      "note": "",
+      "safety": {
+        "notes": "不主动私聊。"
+      },
       "tools": {
         "platform": {
+          "getPrompt": false,
+          "getUnread": false,
+          "getRecent": false,
+          "getMyRecent": false,
+          "getMessageDetail": false,
+          "getImages": false,
+          "getForwardMsg": false,
+          "getActiveMembers": false,
+          "waitMessages": false,
+          "socialState": false,
+          "listStickers": false,
+          "getStickerImage": false,
+          "getSelfImage": false,
+          "personProfile": false,
           "memory": false,
+          "slangQuery": false,
           "slangSubmit": false,
           "markRead": true,
           "setWakeConfig": true,
@@ -136,15 +132,26 @@
           "schedule": false
         },
         "agent": {
+          "tool-fs": false,
+          "tool-fs-search": false,
+          "tool-pwsh": false,
+          "tool-jobs": false,
           "tool-web": true,
           "tool-ask-user": true,
-          "tool-todo": true
-        }
-      },
-      "safety": {
-        "notes": "不主动私聊。"
-      },
-      "note": ""
+          "tool-todo": true,
+          "qq-approval-gate": false
+        },
+        "mcp": {
+          "allow": [],
+          "tools": {
+            "allow": [],
+            "deny": []
+          }
+        },
+        "skills": [
+          "*"
+        ]
+      }
     }
   },
   {

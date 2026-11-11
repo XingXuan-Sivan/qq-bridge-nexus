@@ -18,7 +18,7 @@ const original = args.includes('--original');
 const acceptContracts = args.includes('--accept-contracts');
 const record = args.includes('--record-baseline') || acceptContracts;
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
-const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'presets', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'operations'];
+const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'operations'];
 const retiredIds = new Set(existsSync(join(here, 'console-ui-retired-ids.json'))
   ? JSON.parse((await readFile(join(here, 'console-ui-retired-ids.json'), 'utf8')).replace(/^\uFEFF/, ''))
   : []);
@@ -93,7 +93,6 @@ try {
     if (original) return;
     if (await page.locator(`[data-page="${view}"]:visible`).count()) {
       await hydrate(view);
-      await showPresetsTab(view);
       return;
     }
     const nav = page.locator(`[data-view="${view}"]`).first();
@@ -107,13 +106,6 @@ try {
     const leaveDialog = page.locator('#unsavedLeaveModal [data-leave="discard"]');
     if (await leaveDialog.count()) await leaveDialog.click();
     await hydrate(view);
-    await showPresetsTab(view);
-  }
-  // 预设页默认停在「行为档案」标签；其它用例都在「预设」标签里操作。
-  async function showPresetsTab(view) {
-    if (view !== 'presets') return;
-    const tab = page.locator('[data-presets-tab="presets"]');
-    if (await tab.count()) await tab.click();
   }
   async function reveal(selector) {
     // 片段化之后元素只存在于自己那一页里：先按 id 快照切页，再定位。
@@ -257,74 +249,7 @@ try {
     await page.click('#pluginDetailClose');
   });
 
-  await test('Preset page lists presets and edits agent YAML as a code editor', async () => {
-    await navigate('presets');
-    await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
-    const text = await page.locator('#presetList').innerText();
-    assert.match(text, /qq-chat-v2/);
-    await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
-    await page.waitForFunction(() => !document.getElementById('presetEditor').hidden);
-    assert.equal(await page.locator('#presetEditName').inputValue(), 'QQ 群聊（二代）');
-    // 插件配置不再是逐项表单：整份 agent.cordis.yml 进代码编辑器（「高级配置」是默认折叠的卡），保存走 PUT …/yaml。
-    const advancedOpen = await page.evaluate(() => {
-      const sec = [...document.querySelectorAll('.preset-edit-fields section.card')]
-        .find((s) => s.textContent.includes('高级配置'));
-      return sec?.querySelector('details')?.open;
-    });
-    assert.equal(advancedOpen, false, '「高级配置」应默认折叠');
-    await page.waitForSelector('#presetAgentYamlText', { state: 'attached' });
-    const yamlText = await page.evaluate(() => document.getElementById('presetAgentYamlText').value);
-    assert.match(yamlText, /tool-web/, '插件配置编辑器应载入 agent.cordis.yml');
-    const yamlStatus = await page.evaluate(() => document.getElementById('presetAgentYamlStatus')?.textContent ?? '');
-    assert.match(yamlStatus, /插件行/);
-    await page.evaluate(() => {
-      const sec = [...document.querySelectorAll('.preset-edit-fields section.card')]
-        .find((s) => s.textContent.includes('高级配置'));
-      sec.querySelector('details').open = true;
-    });
-    await page.click('#agentYamlEdit');
-    await page.evaluate(() => {
-      const area = document.getElementById('presetAgentYamlText');
-      area._codeEditorHandle.setValue(area.value.replace('search: false', 'search: true'));
-    });
-    const saved = await clickWrite('#agentYamlSave', '/api/extensions/presets/qq-chat-v2/yaml', 'PUT');
-    assert.match(saved.yaml, /search: true/, '保存的 yaml 应包含编辑器里的改动');
-    // 新建预设：工具栏按钮打开弹窗，复制 qq-chat-v2。
-    await page.click('#presetNewOpen');
-    await page.waitForSelector('#presetCreateModal.open');
-    assert.equal(
-      await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="delete"]').count(),
-      0,
-      '系统自带预设不应有删除按钮',
-    );
-    assert.equal(
-      await page.locator('#presetList tbody tr', { hasText: 'demo-agent' }).locator('[data-preset-act="delete"]').count(),
-      1,
-      '自建预设应有删除按钮',
-    );
-    await page.fill('#presetNewId', 'ui-copy');
-    await page.selectOption('#presetNewFrom', 'qq-chat-v2');
-    const created = await clickWrite('#presetNewCreate', '/api/extensions/presets/create');
-    assert.equal(created.id, 'ui-copy');
-  });
 
-  await test('Preset prompt editor opens for presets with an empty persona prompt', async () => {
-    // qq-agent-* 与自建预设的 persona.prefix 可能为空：提示词卡不能被隐藏，编辑器要能载入与保存。
-    await page.locator('#presetList tbody tr', { hasText: 'demo-agent' }).locator('[data-preset-act="edit"]').click();
-    await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
-    await page.waitForFunction(() => document.getElementById('presetPrompt').dataset.preset === 'demo-agent');
-    const status = await page.locator('#presetPromptStatus').innerText();
-    assert.match(status, /0 字符/);
-    assert.match(status, /预设提示词/);
-    await page.click('#simPromptEdit');
-    await page.evaluate(() => {
-      const area = document.getElementById('simPromptText');
-      area._codeEditorHandle.setValue('空白预设的新提示词');
-    });
-    const saved = await clickWrite('#simPromptSave', '/api/preset/sim-prompt', 'POST');
-    assert.equal(saved.content, '空白预设的新提示词');
-    await page.click('#presetCancelEdit');
-  });
 
   await test('Global config renders field rows with aligned labels', async () => {
     await hydrate('config');
@@ -392,12 +317,12 @@ try {
     await page.waitForSelector('#runtimePlanEditor .modal', { timeout: 5000 });
     await page.fill('#runtimeEditId', 'my-agent');
     await page.fill('#runtimeEditLabel', '我的 Agent');
-    await page.selectOption('#runtimeEditTools', 'qq-chat');
+    await page.selectOption('#runtimeEditTools', 'agent-chat');
     await page.selectOption('#runtimeEditBehavior', 'social-v2');
     await page.selectOption('#runtimeEditAudience', 'owner');
     await page.fill('#runtimeEditNote', '带人格进群');
     assert.deepEqual(await clickWrite('#runtimeEditSave', '/api/runtime/plans'), {
-      id: 'my-agent', label: '我的 Agent', tools: 'qq-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+      id: 'my-agent', label: '我的 Agent', capability: 'agent-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
     });
   });
 
@@ -406,9 +331,9 @@ try {
     await page.click('[data-behavior-tab="capabilities"]');
     await reveal('#capabilityTable [data-cap-edit]');
     await page.click('#capabilityTable [data-cap-edit]');
-    await page.waitForSelector('#capabilityEditor .modal', { timeout: 5000 });
+    await page.waitForSelector('#capabilityEditor [data-cap-platform="sendPoke"]', { state: 'attached' });
     await page.fill('#capabilityLabel', '聊天（改）');
-    await page.uncheck('[name="capabilityPlatform"][value="sendPoke"]');
+    await page.click('[data-cap-platform="sendPoke"]');
     await page.fill('#capabilitySafetyNotes', '不主动私聊。');
     const [response] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/agent-chat' && r.request().method() === 'PATCH'),
@@ -927,45 +852,6 @@ try {
     assert.ok((await namesInList()).length >= 1);
   });
 
-  if (!original) await test('仿真提示词：预设页只读展示、解锁后可编辑、保存提示重启 DSH、可还原初始版本', async () => {
-    await navigate('presets');
-    await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
-    await page.locator('#presetList tbody tr', { hasText: 'qq-chat-v2' }).locator('[data-preset-act="edit"]').click();
-    await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
-    await page.waitForFunction(() => (document.querySelector('#presetPrompt .cm-content')?.textContent || '').length > 0);
-    assert.match(await page.locator('#presetPromptStatus').textContent(), /字符/, '状态行应显示字符数');
-    assert.equal(await page.locator('#simPromptSave').isDisabled(), true, '只读时不应能保存');
-    assert.equal(await page.locator('#presetPrompt .cm-content').getAttribute('contenteditable'), 'false', '默认应为只读');
-    await page.locator('#simPromptEdit').click();
-    assert.equal(await page.locator('#presetPrompt .cm-content').getAttribute('contenteditable'), 'true', '解锁后应可编辑');
-    assert.equal(await page.locator('#simPromptSave').isDisabled(), false);
-    await page.locator('#presetPrompt .cm-content').click();
-    await page.keyboard.press('Control+End');
-    await page.keyboard.type('\n\n【回归追加】一句测试规则。');
-    await page.locator('#simPromptSave').click();
-    await page.waitForFunction(() => /重启 DSH/.test(document.getElementById('simPromptMsg')?.textContent || ''), null, { timeout: 8000 });
-    // 改过之后「还原初始提示词」才可点；确认框由全局 dialog handler 接受。
-    await page.locator('#simPromptReset').click();
-    await page.waitForFunction(() => /已还原/.test(document.getElementById('simPromptMsg')?.textContent || ''), null, { timeout: 8000 });
-  });
-
-  if (!original) await test('仿真提示词按预设独立：一代与二代内容不同', async () => {
-    const readPrompt = async (presetId) => {
-      await navigate('presets');
-      await page.waitForFunction(() => document.querySelectorAll('#presetList tbody tr').length >= 2);
-      await page.locator('#presetList tbody tr', { hasText: presetId }).first().locator('[data-preset-act="edit"]').click();
-      await page.waitForFunction(() => !document.getElementById('presetPrompt').hidden);
-      // 卡片内容是异步回填的：等它明确标成本次预设，避免读到上一个预设的旧内容。
-      await page.waitForFunction((id) => document.getElementById('presetPrompt').dataset.preset === id, presetId);
-      await page.waitForFunction(() => (document.querySelector('#presetPrompt .cm-content')?.textContent || '').length > 0);
-      return page.locator('#simPromptText').inputValue();
-    };
-    const v2 = await readPrompt('qq-chat-v2');
-    assert.match(await page.locator('#presetEditName').inputValue(), /二代/);
-    const v1 = await readPrompt('qq-chat');
-    assert.match(await page.locator('#presetEditName').inputValue(), /一代/);
-    assert.notEqual(v1, v2, '两代预设的提示词应各自独立');
-  });
 
   if (!original) await test('人格提示词：注入上限与生效方式在全局配置里一起保存', async () => {
     await navigate('config');

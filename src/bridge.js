@@ -7189,6 +7189,45 @@ async function main() {
           sendJson({ ok: true, catalog: toolCatalogSnapshot(), adapters: adapterRegistry.snapshot(), capabilities });
           return;
         }
+        if (req.method === 'POST' && (url.pathname === '/api/capabilities' || url.pathname === '/api/runtime/capabilities')) {
+          const body = await readBody();
+          const id = String(body?.id ?? '').trim();
+          const label = String(body?.label ?? '').trim() || id;
+          const from = String(body?.from ?? body?.cloneFrom ?? '').trim();
+          try {
+            if (!id) throw new Error('请填能力 id');
+            if (capabilityStore.get(id)) throw new Error('这个能力 id 已存在');
+            const base = from ? capabilityStore.get(from) : null;
+            if (from && !base) throw new Error('模板能力不存在');
+            const created = capabilityStore.save(id, {
+              label,
+              note: body?.note ?? base?.note ?? '',
+              order: Number(body?.order) || 100,
+              risk: base?.risk ?? { max: 'send' },
+              prompt: base?.prompt ?? { base: '' },
+              safety: base?.safety ?? {},
+              tools: base?.tools ?? { platform: {}, agent: {}, mcp: [], skills: [] },
+            });
+            ext.audit.append('capability.create', { id, from: from || null });
+            sendJson({ ok: true, capability: created, capabilities: capabilityStore.list() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '创建失败' }, 400);
+          }
+          return;
+        }
+        if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/capabilities/')) {
+          const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
+          try {
+            const usedBy = normalizePlans(bridgeCfg.runtime?.plans).filter((plan) => plan.capability === capabilityId).map((plan) => plan.id);
+            if (usedBy.length) throw new Error(`这套能力正被方案引用（${usedBy.join('、')}），先换掉再删`);
+            const removed = capabilityStore.remove(capabilityId);
+            ext.audit.append('capability.remove', { id: capabilityId });
+            sendJson({ ok: true, removed, capabilities: capabilityStore.list() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '删除失败' }, 400);
+          }
+          return;
+        }
         if (req.method === 'GET' && url.pathname === '/api/runtime/adapters') {
           sendJson({ ok: true, ...adapterRegistry.snapshot() });
           return;

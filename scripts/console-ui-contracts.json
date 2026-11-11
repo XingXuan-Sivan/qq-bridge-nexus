@@ -58,7 +58,8 @@
           "longGapMaxMs": 0,
           "skipProbability": 0,
           "surrenderProbability": 0
-        }
+        },
+        "prompt": ""
       }
     }
   },

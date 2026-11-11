@@ -310,6 +310,19 @@ try {
     assert.deepEqual(await clickWrite('#runtimeSwitch', '/api/runtime/switch'), { planId: 'social-v2', totp: '' });
   });
 
+  await test('Prompt layer tabs contracts', async () => {
+    await navigate('behavior');
+    await reveal('[data-behavior-tab="platform"]');
+    await page.click('[data-behavior-tab="platform"]');
+    await page.waitForSelector('#platformSave', { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelector('#platformMsg')?.textContent?.includes('字'), null, { timeout: 5000 });
+    await reveal('#behaviorPromptSave');
+    assert.ok(await page.locator('#behaviorPromptSave').count(), '行为提示词保存按钮');
+    await page.click('[data-behavior-tab="capabilities"]');
+    await page.waitForSelector('#capabilityCreate', { timeout: 5000 });
+    await page.click('[data-behavior-tab="behaviors"]');
+  });
+
   await test('Runtime plan editor contracts', async () => {
     await navigate('runtime');
     await reveal('#runtimeNew');

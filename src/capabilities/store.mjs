@@ -101,7 +101,18 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     return decorate(normalized.capability);
   }
 
-  return { list, get, save, root };
+  /** 删除自定义能力；内置四条不允许删（只能克隆改）。 */
+  function remove(id) {
+    const name = String(id ?? '').trim();
+    const current = get(name);
+    if (!current) throw new Error('没有这个能力预设');
+    if (current.builtin) throw new Error('内置能力预设只读：请先克隆一份再改');
+    fs.rmSync(path.join(root, name), { recursive: true, force: true });
+    cache.delete(name);
+    return { id: name };
+  }
+
+  return { list, get, save, remove, root };
 }
 
 function pick(source, keys) {

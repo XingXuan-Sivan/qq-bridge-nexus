@@ -13,6 +13,8 @@ import { join as joinPath } from 'node:path';
 import { createScheduler } from '../src/scheduler/engine.js';
 import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
+const PLATFORM_PROMPT_SAMPLE = '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。';
+
 import { listKinds } from '../src/behaviors/kinds/index.mjs';
 import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -823,7 +825,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             profiles: ['wake', 'reminder', 'context'],
             slots: ['head', 'identity', 'behavior', 'resources', 'situation', 'action', 'tail'],
-            limits: { total: 0, perBlockDefault: 0, personaInjectChars: 6000, roleInjectMaxChars: 6000 },
+            platformPrompt: '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。',
+  limits: { total: 0, perBlockDefault: 0, personaInjectChars: 6000, roleInjectMaxChars: 6000 },
             stats: { total: 26, maxTotalChars: 0, renders: 12, injected: 40, skipped: 1 },
             blocks: [
               { id: 'core-role', pluginId: 'core', owner: 'core', label: '当前角色', priority: 100, slot: 'identity', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 220, lastStatus: 'injected' },
@@ -947,7 +950,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               { id: 'demo-external', name: 'demo-external', description: '离线预览用的外部技能。', path: 'C:/fixture/extensions/skills/demo-external', source: 'user', editable: true, active: true },
             ],
           });
-          case '/api/extensions': return json({
+          case '/api/platform/prompts': return json({ ok: true, prompts: [{ id: 'qq', platform: 'QQ', chars: PLATFORM_PROMPT_SAMPLE.length }] });
+        case '/api/platform/prompts/qq': return json({ ok: true, id: 'qq', platform: 'QQ', text: PLATFORM_PROMPT_SAMPLE, chars: PLATFORM_PROMPT_SAMPLE.length, isFactory: true });
+        case '/api/capabilities': return json({ ok: true, capability: { id: body?.id ?? 'new-cap' }, capabilities: [] });
+        case '/api/extensions': return json({
             ok: true,
             version: 2,
             generatedAt: Date.parse(timestamp),

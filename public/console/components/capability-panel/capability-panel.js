@@ -2,6 +2,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { renderFields } from '../form/form.js';
+import { modalHtml, openModal, closeModal } from '../modal/modal.js';
 import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../table/table.js';
 
 const PLATFORM_RISK_TEXT = { read: '读取', send: '发送', state: '会话状态', admin: '管理' };
@@ -48,14 +49,19 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
         visibleSummary(cap),
         (cap.agentModules ?? []).length ? (cap.agentModules).map((m) => `<code>${esc(m)}</code>`).join(' ') : '<span class="meta">—</span>',
         extensionSummary(cap),
-        `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
+        [
+          `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
+          `<button class="btn small" type="button" data-cap-clone="${esc(cap.id)}">克隆</button>`,
+          cap.builtin ? '' : `<button class="btn small danger" type="button" data-cap-delete="${esc(cap.id)}">删除</button>`,
+        ].filter(Boolean).join(' '),
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '能力预设' }, { label: '平台工具', width: '200px' }, { label: 'Agent 模块', width: '260px' }, { label: 'MCP · 技能', width: '160px' }, { label: '操作', width: '80px' }],
+      columns: [{ label: '能力预设' }, { label: '平台工具', width: '200px' }, { label: 'Agent 模块', width: '260px' }, { label: 'MCP · 技能', width: '160px' }, { label: '操作', width: '190px' }],
       rows,
       pageSize: 20,
       meta: `${capabilities.length} 个能力`,
+      actions: '<button class="btn" type="button" id="capabilityCreate">新建</button><span class="meta" id="capabilityListMsg" role="status"></span>',
     });
   }
 
@@ -310,6 +316,11 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   }
 
   listHost?.addEventListener('click', (event) => {
+    if (event.target.closest('#capabilityCreate')) { void createCapability(null); return; }
+    const cloneTrigger = event.target.closest('[data-cap-clone]');
+    if (cloneTrigger) { void createCapability(byId(cloneTrigger.dataset.capClone)); return; }
+    const deleteTrigger = event.target.closest('[data-cap-delete]');
+    if (deleteTrigger) { void deleteCapability(deleteTrigger.dataset.capDelete); return; }
     const trigger = event.target.closest('[data-cap-edit]');
     if (!trigger) return;
     const cap = byId(trigger.dataset.capEdit);
@@ -324,6 +335,51 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     if (event.target.closest('#capabilitySave')) { void save(); return; }
     if (event.target.closest('#capabilityCancel')) { draft = null; renderEditor(); }
   });
+
+  /** 新建 / 克隆：id + 名称两个字段，克隆时带模板。 */
+  async function createCapability(source) {
+    const overlayId = 'capabilityCreateModal';
+    document.getElementById(overlayId)?.remove();
+    const title = source ? `克隆能力预设 · ${source.id}` : '新建能力预设';
+    document.body.insertAdjacentHTML('beforeend', modalHtml({
+      id: overlayId,
+      title,
+      body: '<div class="form-stack" id="capabilityCreateFields"></div>',
+      footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="capabilityCreateSave">保存</button>',
+    }));
+    const overlay = document.getElementById(overlayId);
+    renderFields(overlay.querySelector('#capabilityCreateFields'), [
+      { name: 'capabilityNewId', type: 'text', label: '能力 id', placeholder: '小写字母、数字、连字符', value: source ? `${source.id}-copy` : '', hint: '创建后不可改名' },
+      { name: 'capabilityNewLabel', type: 'text', label: '名称', value: source ? `${source.label || source.id}（副本）` : '' },
+    ], { columns: 1, layout: 'inline' });
+    openModal(overlay);
+    overlay.querySelectorAll('[data-modal-close]').forEach((btn) => btn.addEventListener('click', () => closeModal(overlay)));
+    overlay.querySelector('#capabilityCreateSave')?.addEventListener('click', async () => {
+      const id = String(overlay.querySelector('[name="capabilityNewId"]')?.value ?? '').trim();
+      const label = String(overlay.querySelector('[name="capabilityNewLabel"]')?.value ?? '').trim();
+      try {
+        const r = await api('/api/capabilities', 'POST', { id, label, from: source?.id ?? '' });
+        if (!r?.ok) throw new Error(r?.error || '创建失败');
+        closeModal(overlay);
+        showConsoleToast(source ? '已克隆能力预设' : '已新建能力预设');
+        await load();
+      } catch (error) {
+        if (listHost) listHost.querySelector('#capabilityListMsg')?.replaceChildren(String(error?.message ?? error));
+      }
+    });
+  }
+
+  async function deleteCapability(id) {
+    if (!window.confirm(`删除能力预设 ${id}？目录会被移除，产物一并删除。`)) return;
+    try {
+      const r = await api(`/api/capabilities/${encodeURIComponent(id)}`, 'DELETE');
+      if (!r?.ok) throw new Error(r?.error || '删除失败');
+      showConsoleToast('已删除能力预设');
+      await load();
+    } catch (error) {
+      if (listHost) listHost.querySelector('#capabilityListMsg')?.replaceChildren(String(error?.message ?? error));
+    }
+  }
 
   return { load, render: renderList };
 }

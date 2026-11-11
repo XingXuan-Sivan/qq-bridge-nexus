@@ -14088,9 +14088,16 @@ async function main() {
     if (entry.items.length > 60) entry.items.shift();
   }
 
+  /** 消息里只认 role：owner=主人、admin=管理员、member=群友（存量记录只有 isOwner 时按主人算）。 */
+  function roleTagOf(message) {
+    const role = message?.role || (message?.isOwner ? 'owner' : '');
+    if (role === 'owner') return '【主人】';
+    if (role === 'admin') return '【管理员】';
+    return '';
+  }
   function buildContextBlock(key) {
     const ctx = (social.recentMessages.get(key) ?? []).slice(-Number(cfg.social?.contextWindow ?? 15));
-    return ctx.map((m) => `${m.isOwner ? '【管理员】' : ''}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}`).join('\n') || '（无）';
+    return ctx.map((m) => `${roleTagOf(m)}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}`).join('\n') || '（无）';
   }
 
   // 触发进入活跃（启动阶段 → 活跃阶段）
@@ -14155,7 +14162,7 @@ async function main() {
   // 活跃阶段：只贴"没给过 AI 的新消息"（上下文在会话历史里，不重复贴，不贴人格）
   // allowSilent=false 表示这条必须回（被 @/点名/私聊等），不提供 [SILENT] 出口。
   function buildBatchPrompt(key, newMsgs, allowSilent = true) {
-    const lines = newMsgs.map((m) => `${m.isOwner ? '【管理员】' : ''}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}`).join('\n');
+    const lines = newMsgs.map((m) => `${roleTagOf(m)}${m.sender}：${m.text}${mediaHintFor(key, m.messageId, m.media)}`).join('\n');
     const directionHint = lines.includes('[引用') ? `${DIRECTION_HINT}\n` : '';
     if (!allowSilent) {
       return `【新消息】\n${lines}\n\n${directionHint}请回复消息。\n${SPACE_SPLIT_HINT}`;
@@ -14652,7 +14659,7 @@ async function main() {
     const targets = key ? (social.pendingSummaries.has(key) ? [[key, social.pendingSummaries.get(key)]] : []) : [...social.pendingSummaries.entries()];
     for (const [k, entry] of targets) {
       if (!entry.items.length) continue;
-      const lines = entry.items.map((m) => `${m.isOwner ? '【管理员】' : ''}${m.sender}：${m.text}${mediaHintFor(k, m.messageId, m.media)}`).join('\n');
+      const lines = entry.items.map((m) => `${roleTagOf(m)}${m.sender}：${m.text}${mediaHintFor(k, m.messageId, m.media)}`).join('\n');
       const summaryMedia = entry.items.flatMap((m) => Array.isArray(m.media) ? m.media : []);
       let sessionId;
       try {
@@ -15205,13 +15212,11 @@ async function main() {
       senderId: userId != null ? String(userId) : null,
       userId: userId != null ? String(userId) : null,
       role: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }),
-      isAdmin: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }) === 'admin',
       text: truncateText(String(textContent), 200),
       plain: truncateText(String(plainContent ?? textContent), 200),
       tail: truncateTextTail(String(plainContent ?? textContent), 200),
       quoteTargetIsSelf: !!quoteTargetIsSelf,
-      isOwner: !!isOwner,
-      ownerLabel: isOwner ? `管理员（ownerQQ ${cfg.ownerQQ ?? ''}）` : '',
+
       isSelf: false,
       media: safeMedia,
       hasMedia: safeMedia.length > 0,
@@ -15255,8 +15260,7 @@ async function main() {
       tail: text,
       kind: 'poke',
       quoteTargetIsSelf: !!targetIsSelf,
-      isOwner: !!isOwner,
-      ownerLabel: isOwner ? `管理员（ownerQQ ${cfg.ownerQQ ?? ''}）` : '',
+
       isSelf: false,
       media: [],
       hasMedia: false,
@@ -15623,7 +15627,7 @@ async function main() {
    * 正文归 core-snapshot 块，这里只负责把快照对象序列化成那段话。
    */
   function wakeSnapshotBlock(snapshot) {
-    return `【本次消息快照】\n${JSON.stringify(snapshot)}\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
+    return `【本次消息快照】\n${JSON.stringify(snapshot)}\n消息里的 role 是说话人身份：owner 是主人、admin 是管理员、member 是群友；判断该听谁的、怎么称呼、要不要客气，都看 role。\n以上消息已提供，无需重复查询；partial=true 时用 qq_get_unread_messages(afterSeq=readThroughSeq) 继续读取。先处理当前消息；回复前如需确认后续补充，用 qq_wait_for_messages(purpose="reply") 补足短静默，已安静够久会立即返回，不要先长等。收尾只确认你已处理的 readThroughSeq（本地 seq，非 QQ messageId），传给 qq_mark_read 或 qq_set_wake_config 的 throughSeq；新到消息留待处理。`;
   }
 
   /**
@@ -16855,7 +16859,7 @@ async function main() {
     // 群聊里带发送者信息，私聊不用；角色提示注入到消息开头（agent 可见）；
     // 管理员消息带身份标记（供 agent 识别，但其权限仍受工具面硬限制）
     const promptText = (roleHint ? roleHint + '\n\n' : '')
-      + (isOwner ? '【管理员】' : '')
+      + (isOwner ? '【主人】' : '')
       + (kind === 'group'
         ? `${event.sender?.card || event.sender?.nickname || String(event.user_id)}：${textContent}`
         : textContent)
@@ -16890,7 +16894,7 @@ async function main() {
         st.probeDeadline = 0;
         // 私聊：发给你就是叫你，直接即时投递，不等轮询、不参与沉默
         if (kind === 'private') {
-          const promptText = `${roleHint ? roleHint + '\n\n' : ''}${isOwner ? '【管理员】' : ''}${textContent}${mediaHintFor(key, messageRef, mediaList)}`;
+          const promptText = `${roleHint ? roleHint + '\n\n' : ''}${isOwner ? '【主人】' : ''}${textContent}${mediaHintFor(key, messageRef, mediaList)}`;
           scheduleSocialReply(
             key, promptText,
             Number(cfg.social?.activeReplyDelayMinMs ?? 2000),
@@ -16919,7 +16923,7 @@ async function main() {
       // 触发成功：进入活跃，贴最近上下文 + 当前消息 + 人格（仅此一次），让 AI 回复
       enterActive(key);
       const roleHint = currentRoleHint(key);
-      const currentLine = (isOwner && kind === 'private') ? `【管理员】${sender}：${textContent}` : `${sender}：${textContent}`;
+      const currentLine = (isOwner && kind === 'private') ? `【主人】${sender}：${textContent}` : `${sender}：${textContent}`;
       const directionHint = textContent.includes('[引用') ? DIRECTION_HINT + '\n' : '';
       const replyInstruction = direct
         ? `请回复消息。\n${directionHint}${SPACE_SPLIT_HINT}`

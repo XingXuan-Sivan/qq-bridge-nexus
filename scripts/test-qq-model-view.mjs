@@ -84,7 +84,7 @@ test('self/owner flags, poke context and unknown extensions survive; only known 
   };
   const compact = compactModelMessage(message);
   assert.deepEqual(compact, {
-    text: '我来啦', isSelf: true, isOwner: true, ownerLabel: '我', kind: 'poke',
+    text: '我来啦', isSelf: true, role: 'owner', kind: 'poke',
     poke: message.poke, extension: message.extension, futureFlag: false
   });
   for (const item of [null, undefined, 'string', 1, false, []]) {

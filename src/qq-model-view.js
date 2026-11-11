@@ -1,11 +1,11 @@
 // Only the model-facing view is compacted. Stored messages and console/API data
 // retain the original fields for display, media retrieval and troubleshooting.
 const DEFAULT_FALSE_FIELDS = new Set([
-  'quoteTargetIsSelf', 'isOwner', 'isSelf', 'hasMedia', 'hasForward'
+  'quoteTargetIsSelf', 'isSelf', 'hasMedia', 'hasForward'
 ]);
 const OPTIONAL_FIELDS = new Set([
   'seq', 'messageId', 'sender', 'userId', 'text', 'plain', 'tail', 'kind',
-  'ownerLabel', 'media', 'forwardIds', 'nestedForwardIds'
+  'role', 'media', 'forwardIds', 'nestedForwardIds'
 ]);
 
 function isRecord(value) {
@@ -43,6 +43,12 @@ function compactMedia(media, canResolveByMessage) {
 export function compactModelMessage(message) {
   if (!isRecord(message)) return message;
   const result = { ...message };
+  // 身份只有一个字段：role（owner/admin/member）。isOwner/isAdmin/ownerLabel 是旧字段，
+  // 存量消息若只有 isOwner，这里映射一次 role，之后模型只按 role 判断。
+  if (!result.role && message.isOwner === true) result.role = 'owner';
+  delete result.isOwner;
+  delete result.isAdmin;
+  delete result.ownerLabel;
   // No trimming or truncation: differing plain text can contain resolved quote
   // context, and tail can carry the end of a long message absent from text.
   const seenText = new Set();

@@ -23,6 +23,7 @@ const base = {
   version: 1,
   id: 'agent-chat',
   label: '聊天 Agent',
+  order: 12,
   tools: {
     platform: { sendMessage: true, schedule: false },
     agent: { 'fs.read': true, web: true, todo: true },
@@ -92,7 +93,7 @@ test('生成：extensions 只写 MCP/技能，没有就返回 null；preset.yml 
   const ext = buildExtensions(chat);
   assert.deepEqual(ext.mcp.allow, ['snowluma']);
   assert.equal(ext.mcp.tools.allow, '*');
-  const meta = buildPresetMeta(chat, { order: 12 });
+  const meta = buildPresetMeta(chat);
   assert.deepEqual(meta, { name: '聊天 Agent', description: '', order: 12 });
   const none = normalizeCapabilityFile({ ...base, tools: { ...base.tools, mcp: [], skills: [] } }).capability;
   assert.equal(buildExtensions(none), null);
@@ -100,18 +101,18 @@ test('生成：extensions 只写 MCP/技能，没有就返回 null；preset.yml 
 
 test('确定性：同一份能力两次渲染逐字一致；--check 能发现漂移', () => {
   const cap = normalizeCapabilityFile(base, { id: 'agent-chat' }).capability;
-  const first = renderArtifacts(cap, { order: 10 });
-  const second = renderArtifacts(cap, { order: 10 });
+  const first = renderArtifacts(cap);
+  const second = renderArtifacts(cap);
   assert.deepEqual(first, second);
   assert.match(first['agent.cordis.yml'], /由 scripts\/build-capability-artifacts\.mjs/);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-build-'));
-  const ok = writeArtifacts(dir, cap, { order: 10 });
+  const ok = writeArtifacts(dir, cap);
   assert.ok(ok.every((item) => item.changed));
-  const again = writeArtifacts(dir, cap, { order: 10, check: true });
+  const again = writeArtifacts(dir, cap, { check: true });
   assert.ok(again.every((item) => !item.changed), '第二次 --check 不应报告漂移');
   fs.writeFileSync(path.join(dir, 'preset.yml'), '# 手改\n', 'utf8');
-  const drift = writeArtifacts(dir, cap, { order: 10, check: true });
+  const drift = writeArtifacts(dir, cap, { check: true });
   assert.equal(drift.find((item) => item.file.endsWith('preset.yml')).changed, true);
 });
 

@@ -20,6 +20,8 @@ import {
 
 export const CAPABILITY_VERSION = 1;
 export const CAPABILITY_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
+export const SAFETY_RULES_MAX = 40;
+export const SAFETY_RULE_MAX_CHARS = 2000;
 export const SAFETY_ENUMS = Object.freeze({
   secrets: ['deny', 'allow'],
   self_modify: ['deny', 'allow'],
@@ -60,6 +62,17 @@ export function agentModuleId(key) {
 export function agentModuleKey(moduleId) {
   const found = Object.entries(AGENT_ALIASES).find(([, id]) => id === moduleId);
   return found ? found[0] : moduleId;
+}
+
+function normalizeSafetyRules(raw) {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) fail('safety.rules 必须是字符串数组');
+  if (raw.length > SAFETY_RULES_MAX) fail(`safety.rules 最多 ${SAFETY_RULES_MAX} 条`);
+  return raw.map((line, index) => {
+    const value = text(line, SAFETY_RULE_MAX_CHARS);
+    if (!value) fail(`safety.rules 第 ${index + 1} 条为空`);
+    return value;
+  });
 }
 
 function normalizeMcpList(raw) {
@@ -117,6 +130,8 @@ export function normalizeCapabilityFile(raw, { id } = {}) {
     self_modify: SAFETY_ENUMS.self_modify.includes(safetyRaw.self_modify) ? safetyRaw.self_modify : 'deny',
     injection: SAFETY_ENUMS.injection.includes(safetyRaw.injection) ? safetyRaw.injection : 'strict',
     notes: text(safetyRaw.notes, 2000),
+    // 安全段的显式文本：写了就用源里的句子，没写才由行模板的 safetyDefaults 生成。
+    rules: normalizeSafetyRules(safetyRaw.rules),
   };
   if (safety.local_tools === false) {
     for (const [moduleId, enabled] of Object.entries(agent)) {
@@ -128,10 +143,16 @@ export function normalizeCapabilityFile(raw, { id } = {}) {
   const riskMax = TOOL_RISKS.includes(riskMaxRaw) ? riskMaxRaw : '';
   if (riskMaxRaw && !riskMax) fail(`risk.max 不合法：${riskMaxRaw}`);
 
+  const orderRaw = value.order;
+  const order = orderRaw === undefined ? 100 : Number(orderRaw);
+  if (!Number.isInteger(order) || order < 0 || order > 9999) fail(`order 必须是 0~9999 的整数：${orderRaw}`);
+
   const capability = {
     version: CAPABILITY_VERSION,
     id: dirId,
     label: text(value.label, 60) || dirId,
+    // 目录展示顺序属于能力本身（源文件可表达），不再由生成器传参。
+    order,
     note: text(value.note, 400),
     agent: text(value.agent, 20) || 'dsh',
     risk: { max: riskMax },
@@ -155,6 +176,7 @@ export function defaultCapability(id, { label = '', from = '' } = {}) {
     id,
     label: label || id,
     note: '',
+    order: 100,
     agent: 'dsh',
     risk: { max: '' },
     prompt: { base: '' },
@@ -170,6 +192,7 @@ export function defaultCapability(id, { label = '', from = '' } = {}) {
       self_modify: 'deny',
       injection: 'strict',
       notes: '',
+      rules: [],
     },
   };
 }

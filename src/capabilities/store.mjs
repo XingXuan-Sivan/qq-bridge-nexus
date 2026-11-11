@@ -83,7 +83,7 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     const current = loadCapabilityFile(dir, { id })?.capability ?? defaultCapability(id);
     const next = {
       ...current,
-      ...pick(patch, ['label', 'note', 'risk']),
+      ...pick(patch, ['label', 'note', 'order', 'risk']),
       prompt: { ...current.prompt, ...(patch.prompt ?? {}) },
       safety: { ...current.safety, ...(patch.safety ?? {}) },
       tools: {
@@ -95,7 +95,7 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     };
     const normalized = normalizeCapabilityFile(next, { id });
     saveCapabilityFile(dir, normalized.capability);
-    writeArtifacts(dir, normalized.capability, { order: Number(patch.order) || 100 });
+    writeArtifacts(dir, normalized.capability);
     cache.delete(id);
     log(`[capabilities] 已保存 ${id}${normalized.warnings.length ? `（${normalized.warnings.length} 条告警）` : ''}`);
     return decorate(normalized.capability);

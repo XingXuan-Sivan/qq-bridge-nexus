@@ -1,6 +1,7 @@
 version: 1
 id: agent-readonly
 label: Agent · 只读
+order: 20
 note: 只读文件与检索，不改任何东西
 agent: dsh
 risk:

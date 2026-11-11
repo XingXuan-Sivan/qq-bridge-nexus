@@ -831,9 +831,9 @@ Start-Process node -ArgumentList 'src/bridge.js' -WorkingDirectory (Get-Location
 | POST | `/api/prompt-preview` | 现有接口，profile 增 `persona`（拼装预览） |
 
 ### 14.5 分步（每步单独提交）
-- **P10.9.1** 数据层：`behaviors` 增 `prompt` 读写与克隆/删除；新增 `src/platform/prompt.mjs`（读 `config/platform/*.yml`、渲染占位符、还原出厂）；单测。
-- **P10.9.2** 注入：新增 `core-behavior-prompt`，重写 `core-platform-prompt` 读平台话术；golden 夹具扩一个带 capability 的变体。
-- **P10.9.3** 生成器收口（按 §14.7 审计结论逐项修）：
+- **P10.9.1 ✅** 数据层：`behaviors` 增 `prompt`（≤20000 字）读写与克隆/删除（`duplicateBehavior`/`removeBehaviorFile`，删除前备份 `state/behavior-backups/`）；新增 `src/platform/prompt.mjs`（`readPlatformPrompt`/`writePlatformPrompt`/`restorePlatformPrompt`/`renderPlatformText`、`.factory` 出厂副本、写入备份、占位符渲染）；`scripts/test-prompt-layers.mjs` 5/5。
+- **P10.9.2 ✅** 注入：`core-behavior-prompt`（slot behavior、priority 148）接在平台块之后；`behaviorPromptFor()` 按 `config.behaviorPrompt.injection` 支持 full/summary(600 字)/off；`core-platform-prompt` 改读 `config/platform/<id>.yml` 并经适配器 vars 渲染；golden 1/1（暂无内容时块为空，拼装不变）。
+- **P10.9.3 ✅（生成器部分）** 生成器收口（按 §14.7 审计结论逐项修）：
   - (a) `capability.yml` 增 `order`；`preset.yml.order` 只读该字段（不再由调用方传参、默认 100）。
   - (b) 结构行 `compaction` / `command-compact` / `tool-result-pruner` 进默认模板文件，任何能力都带（当前生成物缺失，属功能回归）。
   - (c) 行参数从代码常量搬进源或模板文件：`tool-web {fetch,searchTimeoutMs}`、`tool-todo {allowParallelInProgress}`、`tool-fs-search {sampleOverCapGlobResults}`、`qq-approval-gate {level}`、`qq-tool-restrict {profile}`。

@@ -8,7 +8,8 @@ import path from 'node:path';
 import YAML from 'yaml';
 
 export const BEHAVIOR_KINDS = ['v1', 'v2'];
-const TOP_KEYS = new Set(['version', 'kind', 'label', 'description', 'v1', 'v2']);
+const TOP_KEYS = new Set(['version', 'kind', 'label', 'description', 'prompt', 'v1', 'v2']);
+const PROMPT_MAX = 20000;
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 function isPlainObject(value) {
@@ -61,7 +62,9 @@ export function normalizeBehavior(id, raw) {
   const otherKey = kind === 'v1' ? 'v2' : 'v1';
   if (source[otherKey] !== undefined) throw new Error(`${value} 是 ${kind} 档案，不能同时包含 ${otherKey}`);
   walkNumbers(config, `${value}.${bodyKey}`);
-  return { id: value, version, kind, label, description, config, [bodyKey]: config };
+  const prompt = String(source.prompt ?? '').trim();
+  if (prompt.length > PROMPT_MAX) throw new Error(`${value}.prompt 超过 ${PROMPT_MAX} 字`);
+  return { id: value, version, kind, label, description, prompt, config, [bodyKey]: config };
 }
 
 /** 读取 config/behaviors 下所有 .yml 档案；任何损坏都让启动失败。 */
@@ -176,6 +179,7 @@ function behaviorDocumentText(header, data) {
     kind: data.kind,
     label: data.label,
     description: data.description ?? '',
+    ...(data.prompt ? { prompt: data.prompt } : {}),
     [data.kind]: data.config,
   }, { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true }).replace(/\n+$/, '');
   const head = String(header ?? '').replace(/\s+$/, '');
@@ -194,7 +198,8 @@ export function readBehaviorDocument({ root, id } = {}) {
     kind: behavior.kind,
     label: behavior.label,
     description: behavior.description,
-    data: { version: behavior.version, kind: behavior.kind, label: behavior.label, description: behavior.description, config: behavior.config },
+    prompt: behavior.prompt ?? '',
+    data: { version: behavior.version, kind: behavior.kind, label: behavior.label, description: behavior.description, prompt: behavior.prompt ?? '', config: behavior.config },
   };
 }
 
@@ -208,6 +213,7 @@ export function writeBehaviorData({ root, id, data } = {}) {
     kind: data?.kind,
     label: data?.label,
     description: data?.description ?? '',
+    prompt: data?.prompt ?? '',
     [String(data?.kind)]: data?.config,
   });
   const text = behaviorDocumentText(header, {
@@ -215,6 +221,7 @@ export function writeBehaviorData({ root, id, data } = {}) {
     kind: normalized.kind,
     label: normalized.label,
     description: normalized.description,
+    prompt: normalized.prompt,
     config: normalized.config,
   });
   fs.mkdirSync(root, { recursive: true });
@@ -262,4 +269,39 @@ export function writeBehaviorFile({ root, id, text } = {}) {
 export function behaviorSummary(behavior) {
   if (!behavior) return '';
   return `${behavior.label}（${behavior.kind}）`;
+}
+
+
+/** 克隆一份行为档案：目标 id 必须不存在；label 可覆盖。 */
+export function duplicateBehavior({ root, fromId, toId, label } = {}) {
+  const source = readBehaviorDocument({ root, id: fromId });
+  const target = String(toId ?? '').trim();
+  if (!ID_RE.test(target)) throw new Error(`行为档案 id 不合法：${target || '(空)'}`);
+  const file = behaviorFile(root, target);
+  if (fs.existsSync(file)) throw new Error(`${target} 已存在`);
+  const result = writeBehaviorData({
+    root,
+    id: target,
+    data: {
+      version: source.data.version,
+      kind: source.data.kind,
+      label: String(label ?? '').trim() || `${source.label}（副本）`,
+      description: source.data.description,
+      prompt: source.data.prompt,
+      config: source.data.config,
+    },
+  });
+  return result;
+}
+
+/** 删除一份行为档案；调用方负责确认没有方案在引用。 */
+export function removeBehaviorFile({ root, id } = {}) {
+  const file = behaviorFile(root, id);
+  if (!fs.existsSync(file)) throw new Error('没有这个行为档案');
+  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  fs.mkdirSync(backupRoot, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  fs.copyFileSync(file, path.join(backupRoot, `${stamp}.yml`));
+  fs.rmSync(file);
+  return { id: String(id) };
 }

@@ -1,6 +1,7 @@
 version: 1
 id: agent-full
 label: Agent · 完全访问
+order: 40
 note: 跨工作区与进程管理；仅在短时授权窗口内可钉
 agent: dsh
 risk:

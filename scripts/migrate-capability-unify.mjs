@@ -77,6 +77,7 @@ function capabilityOf(spec) {
     id: spec.id,
     label: spec.label,
     note: spec.note,
+    order: spec.order,
     agent: 'dsh',
     risk: { max: spec.local_tools ? 'exec' : 'send' },
     prompt: { base: spec.base },
@@ -110,7 +111,7 @@ export function migrate({ check = false, force = false, log = () => {} } = {}) {
       saveCapabilityFile(dir, capabilityOf(spec));
       log(`${exists ? '✓ 已覆盖' : '✓ 已创建'} ${path.relative(REPO_ROOT, file)}`);
     }
-    const files = writeArtifacts(dir, capabilityOf(spec), { check, order: spec.order });
+    const files = writeArtifacts(dir, capabilityOf(spec), { check });
     const changed = files.some((item) => item.changed);
     for (const item of files) {
       if (item.skipped) continue;

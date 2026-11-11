@@ -28,6 +28,9 @@ import {
   listBehaviorFiles,
   readBehaviorDocument,
   writeBehaviorData,
+  duplicateBehavior,
+  removeBehaviorFile,
+  BEHAVIOR_KINDS,
   loadBehaviorProfiles,
   loadPresetBehaviorBindings,
   readBehaviorFile,
@@ -1095,6 +1098,16 @@ function normalizePromptBlocks(raw) {
  * 单块默认上限只对「没有单独配置 maxChars 的块」生效——单独配过的块以自己的值为准，
  * 这样升级不会悄悄改掉用户已经调好的块。
  */
+/** 行为提示词的注入模式：full / summary / off（默认 full）。 */
+function normalizeBehaviorPrompt(raw) {
+  const mode = String(raw?.injection ?? '').trim();
+  const summaryChars = Math.round(Number(raw?.summaryChars) || 0);
+  return {
+    injection: ['full', 'summary', 'off'].includes(mode) ? mode : 'full',
+    summaryChars: summaryChars >= 80 && summaryChars <= 20000 ? summaryChars : 600,
+  };
+}
+
 function normalizePromptBlockLimits(raw) {
   const out = { total: 0, perBlockDefault: 0 };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
@@ -1539,6 +1552,7 @@ function loadConfig() {
   // 存储键已迁到 `limits.personaInjectChars`；`role.maxInjectChars` 只读兼容。
   // 先展开旧 `role` 再写 maxInjectChars，保证新键优先于旧键。
   cfg.permission = normalizePermissionConfig(file.permission);
+  cfg.behaviorPrompt = normalizeBehaviorPrompt(file.behaviorPrompt);
   cfg.role = { ...(file.role ?? {}), maxInjectChars: normalizePersonaInjectChars(file) };
   roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
   roleSaveApplyDefault = cfg.role.saveApply === 'immediate' ? 'immediate' : 'nextWake';
@@ -2248,6 +2262,13 @@ async function main() {
       slot: 'behavior',
       priority: 145,
       render: (ctx) => promptStripSeparator(ctx.platformPrompt ?? ''),
+    });
+    registerCoreBlock({
+      id: 'core-behavior-prompt',
+      label: '行为提示词',
+      slot: 'behavior',
+      priority: 148,
+      render: (ctx) => promptStripSeparator(ctx.behaviorPrompt ?? ''),
     });
     registerCoreBlock({
       id: 'core-proactivity', label: '积极性', slot: 'behavior', priority: 150,
@@ -4015,25 +4036,40 @@ async function main() {
    * 平台提示词：QQ 里怎么用工具、怎么说话、怎么等。
    * 只有新能力体系的会话才注入 —— 旧 `qq-*` 预设的 persona 里自带同段文字，重复注入会打架。
    */
-  const PLATFORM_PROMPT_FILE = path.join(ROOT, 'config', 'platform', 'qq.yml');
-  let platformPromptCache = null;
+  const PLATFORM_PROMPT_ROOT = path.join(ROOT, 'config', 'platform');
+  function platformIdOf(key) {
+    const platform = String(key ?? '').split(':')[0];
+    return /^[a-z][a-z0-9-]{0,39}$/.test(platform) ? platform : 'qq';
+  }
   function platformPromptFor(key) {
     if (!capabilityOf(key)) return '';
+    const id = platformIdOf(key);
     try {
-      const stat = fs.statSync(PLATFORM_PROMPT_FILE);
-      if (!platformPromptCache || platformPromptCache.mtimeMs !== stat.mtimeMs) {
-        const raw = YAML.parse(fs.readFileSync(PLATFORM_PROMPT_FILE, 'utf8')) ?? {};
-        platformPromptCache = { mtimeMs: stat.mtimeMs, text: String(raw.prompt ?? '').trim() };
-      }
-      const vars = adapterRegistry.get('platform', 'qq')?.vars ?? {};
-      return platformPromptCache.text
-        .replace(/\{platform\}/g, vars.platform ?? 'QQ')
-        .replace(/\{displayName\}/g, vars.displayName ?? 'QQ')
-        .replace(/\{owner\}/g, vars.owner ?? '管理员');
+      const prompt = readPlatformPrompt({ root: PLATFORM_PROMPT_ROOT, id });
+      const vars = adapterRegistry.get('platform', id)?.vars ?? {};
+      return renderPlatformText(prompt.text, vars).trim();
     } catch (error) {
-      log(`⚠️ 读取平台提示词失败：${error?.message ?? error}`);
+      log(`⚠️ 读取平台话术失败（${id}）：${error?.message ?? error}`);
       return '';
     }
+  }
+
+  /** 引擎行为提示词：读行为档案的 prompt 段；注入模式 full / summary / off。 */
+  function behaviorPromptFor(key) {
+    const behavior = behaviorFor(key);
+    if (!behavior?.prompt) return '';
+    const mode = behaviorPromptInjection();
+    if (mode === 'off') return '';
+    if (mode === 'summary') {
+      const limit = Math.max(80, Number(cfg.behaviorPrompt?.summaryChars) || 600);
+      if (behavior.prompt.length <= limit) return behavior.prompt;
+      return `${behavior.prompt.slice(0, limit).trimEnd()}\n（完整内容见「行为档案 › 提示词」）`;
+    }
+    return behavior.prompt;
+  }
+  function behaviorPromptInjection() {
+    const mode = String(cfg.behaviorPrompt?.injection ?? '').trim();
+    return ['full', 'summary', 'off'].includes(mode) ? mode : 'full';
   }
 
   /** 这套方案允许调用该工具吗？只覆盖有副作用的平台工具（读类仍看全局注册开关）。 */
@@ -6783,7 +6819,57 @@ async function main() {
               sendJson({ ok: true, behaviors });
               return;
             }
+            if (!id && req.method === 'POST') {
+              // 新建：带 cloneFrom 就克隆，否则按 kind 建一份最小可用的空档案。
+              const body = await readBody();
+              const target = String(body?.id ?? '').trim();
+              if (!target) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
+              try {
+                const result = body?.cloneFrom
+                  ? duplicateBehavior({ root: behaviorsRoot, fromId: String(body.cloneFrom), toId: target, label: body?.label })
+                  : writeBehaviorData({
+                    root: behaviorsRoot,
+                    id: target,
+                    data: {
+                      version: 1,
+                      kind: BEHAVIOR_KINDS.includes(body?.kind) ? body.kind : 'v2',
+                      label: String(body?.label ?? '').trim() || target,
+                      description: String(body?.description ?? ''),
+                      prompt: '',
+                      config: {},
+                    },
+                  });
+                ext.audit.append('config.behavior.created', { id: target, from: body?.cloneFrom ? String(body.cloneFrom) : null });
+                sendJson({ ok: true, ...result, requiresRestart: true });
+              } catch (error) {
+                sendJson({ ok: false, error: error?.message ?? '新建行为档案失败' }, 400);
+              }
+              return;
+            }
             if (!id) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
+            if (req.method === 'POST' && action === 'clone') {
+              const body = await readBody();
+              try {
+                const result = duplicateBehavior({ root: behaviorsRoot, fromId: id, toId: body?.toId, label: body?.label });
+                ext.audit.append('config.behavior.cloned', { from: id, to: result.id });
+                sendJson({ ok: true, ...result, requiresRestart: true });
+              } catch (error) {
+                sendJson({ ok: false, error: error?.message ?? '克隆行为档案失败' }, 400);
+              }
+              return;
+            }
+            if (req.method === 'DELETE' && !action) {
+              const plans = normalizePlans(bridgeCfg.runtime?.plans);
+              const usedBy = plans.filter((plan) => plan.behavior === id).map((plan) => plan.id);
+              if (usedBy.length) {
+                sendJson({ ok: false, error: `这套行为正被方案引用（${usedBy.join('、')}），先换掉再删` }, 409);
+                return;
+              }
+              removeBehaviorFile({ root: behaviorsRoot, id });
+              ext.audit.append('config.behavior.removed', { id });
+              sendJson({ ok: true, id, requiresRestart: true });
+              return;
+            }
             if (req.method === 'GET') {
               // 表单需要结构化 data；文本仍原样返回，供备份/排查使用。
               sendJson({ ok: true, ...readBehaviorDocument({ root: behaviorsRoot, id }) });
@@ -6806,6 +6892,41 @@ async function main() {
             sendJson({ ok: false, error: '不支持的方法' }, 405);
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '行为档案操作失败' }, 400);
+          }
+          return;
+        }
+        // 平台话术（P10.9）：每个平台一份 config/platform/<id>.yml，只读写正文。
+        const platformRoute = url.pathname.match(/^\/api\/platform\/prompts(?:\/([a-z][a-z0-9-]{0,39}))?(?:\/(restore))?$/);
+        if (platformRoute) {
+          const platformRoot = path.join(ROOT, 'config', 'platform');
+          const id = platformRoute[1];
+          const action = platformRoute[2];
+          try {
+            if (!id && req.method === 'GET') {
+              sendJson({ ok: true, prompts: listPlatformPrompts({ root: platformRoot }) });
+              return;
+            }
+            if (!id) { sendJson({ ok: false, error: '缺少平台 id' }, 400); return; }
+            if (req.method === 'GET') {
+              sendJson({ ok: true, prompt: readPlatformPrompt({ root: platformRoot, id }) });
+              return;
+            }
+            if (req.method === 'PUT') {
+              const body = await readBody();
+              const prompt = writePlatformPrompt({ root: platformRoot, id, text: body?.text, platform: body?.platform });
+              ext.audit.append('config.platform_prompt.write', { platform: id, chars: prompt.chars });
+              sendJson({ ok: true, prompt, requiresRestart: true });
+              return;
+            }
+            if (req.method === 'POST' && action === 'restore') {
+              const prompt = restorePlatformPrompt({ root: platformRoot, id });
+              ext.audit.append('config.platform_prompt.restore', { platform: id });
+              sendJson({ ok: true, prompt, requiresRestart: true });
+              return;
+            }
+            sendJson({ ok: false, error: '不支持的方法' }, 405);
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '平台话术操作失败' }, 400);
           }
           return;
         }
@@ -15451,6 +15572,7 @@ async function main() {
       blockPlan,
       preSleepMs,
       platformPrompt: platformPromptFor(key),
+      behaviorPrompt: behaviorPromptFor(key),
       roleName,
       identityText: selfIdentityTextV2(),
       agentToken: st.agentToken,

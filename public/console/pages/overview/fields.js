@@ -96,6 +96,39 @@ export const OVERVIEW_FIELDS = {
       },
     ],
   },
+  permission: {
+    fields: [
+      {
+        name: 'permissionDefault',
+        type: 'select',
+        label: '默认级别',
+        options: [
+          { value: 'read-only', label: '只读（read-only）' },
+          { value: 'workspace-write', label: '工作区读写（workspace-write）' },
+          { value: 'full-ask', label: '完全访问 · 每次确认（qq-full-ask）' },
+        ],
+        hint: '没单独设置权限的会话用这个级别；会话详情里可逐条覆盖。',
+      },
+      {
+        name: 'permissionAllowFull',
+        type: 'switch',
+        label: '允许 full 档',
+        hint: '打开后才能在会话里用一次性授权换取 danger-full-access；关闭时所有 full 授权立刻收回并回落 qq-full-ask。',
+      },
+      {
+        name: 'permissionTtl',
+        type: 'select',
+        label: '授权时长',
+        options: [
+          { value: '10', label: '10 分钟' },
+          { value: '30', label: '30 分钟' },
+          { value: '60', label: '60 分钟' },
+        ],
+        hint: 'full 授权到期自动回落 qq-full-ask；重启桥接也会收回。',
+      },
+      { name: 'permissionMsg', type: 'custom', span: 2, html: '<div class="meta" id="permissionMsg" role="status"></div>' },
+    ],
+  },
   sendLimit: {
     fields: [
       { name: 'overviewSendLimit', type: 'custom', span: 2, html: SEND_LIMIT_HTML },

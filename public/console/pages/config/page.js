@@ -57,6 +57,24 @@ const dshModelSection = {
   },
 };
 
+async function loadPermission() {
+  try {
+    const r = await api('/api/config/permission');
+    if (r.ok === false) throw new Error(r.error || '读取失败');
+    const p = r.permission ?? {};
+    const def = document.getElementById('permissionDefault');
+    if (def) def.value = p.default || 'read-only';
+    const ttl = document.getElementById('permissionTtl');
+    if (ttl) ttl.value = String(p.fullTtlMin || 30);
+    const allow = document.getElementById('permissionAllowFull');
+    if (allow) setSwitch(allow, p.allowFull === true);
+    setMsg('permissionMsg', '');
+    if (saveBar) saveBar.adoptIfPristine();
+  } catch (error) {
+    setMsg('permissionMsg', `读取权限配置失败：${error?.message ?? error}`, 'err');
+  }
+}
+
 const sendLimitSection = {
   id: 'sendLimit',
   label: '发言上限',
@@ -66,6 +84,22 @@ const sendLimitSection = {
   }),
   save: async (value) => {
     const r = await api('/api/config/send-limit', 'POST', value);
+    if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
+    requestStatusRefresh();
+    return { ok: true, message: '已保存，立即生效' };
+  },
+};
+
+const permissionSection = {
+  id: 'permission',
+  label: '权限级别',
+  read: () => ({
+    default: document.getElementById('permissionDefault')?.value || 'read-only',
+    allowFull: getSwitch(document.getElementById('permissionAllowFull')) === true,
+    fullTtlMin: Math.round(Number(document.getElementById('permissionTtl')?.value) || 30),
+  }),
+  save: async (value) => {
+    const r = await api('/api/config/permission', 'POST', value);
     if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
     requestStatusRefresh();
     return { ok: true, message: '已保存，立即生效' };
@@ -475,7 +509,7 @@ export function init() {
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, dshModelSection, sendLimitSection, tokenSection],
+    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',

@@ -248,6 +248,20 @@ provideRecommendations: true
 
 > 注：字段名以当前 `src/bridge.js` 的归一化对象为准；上表是目标结构，迁移时逐字段对照，不凭页面 label 猜。
 
+### 3.2.2 权限级别（`config.permission`）
+
+```json
+{
+  "permission": { "default": "read-only", "allowFull": false, "fullTtlMin": 30 }
+}
+```
+
+- `default`：新会话默认级别，只读 / 工作区读写 / 完全访问（每次确认）；不允许设为 `full`。
+- `allowFull`：是否允许 `full`（完全访问 · 短时授权）。关掉时立刻收回所有进行中的 full 授权并回落 `qq-full-ask`。
+- `fullTtlMin`：full 授权有效期，只接受 10 / 30 / 60 分钟。
+- 级别 → DSH 权限预设的唯一映射在 `src/session/permission.mjs`：`read-only` / `workspace-write` / `qq-full-ask` / `danger-full-access`（仅 `full`）。
+- 群聊会话恒为只读（`chat`），不接受更高档位。
+
 ### 3.2.1 能力（`dsh/agent-presets/<id>/capability.yml`）
 
 - 能力只有**一份源**：`dsh/agent-presets/<id>/capability.yml`，形状 `{ id, label, agent:'dsh', tools:{ platform, agent, mcp, skills }, safety, prompt:{ base }, note }`。`preset.yml` / `agent.cordis.yml` / `extensions.yml` 由 `scripts/build-capability-artifacts.mjs` 生成，文件头带「勿手改」，`--check` 可逐字节比对。

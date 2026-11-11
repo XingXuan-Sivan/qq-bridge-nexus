@@ -21,11 +21,28 @@
  *     exists: (name:string) => boolean,
  *     setGlobalMode: (mode:'silent'|'active') => void,
  *   },
+ *   permission?: {
+ *     describe: (key:string) => Promise<string>|string,
+ *     set: (key:string, level:string) => Promise<{ok:boolean, text?:string, error?:string}>,
+ *   },
  *   log?: (msg:string) => void,
  * }} deps
  */
+async function commandPermission(ctx) {
+  const { send, permission } = depsRef;
+  if (!permission) { await send(ctx.key, '权限命令不可用：桥接没有注入权限模块'); return; }
+  const arg = String(ctx.arg || '').trim();
+  if (!arg || arg === 'show') { await send(ctx.key, await permission.describe(ctx.key)); return; }
+  const result = await permission.set(ctx.key, arg);
+  await send(ctx.key, result.ok ? result.text : `切换失败：${result.error ?? '未知原因'}`);
+}
+
+let depsRef = null;
+
 export function createBuiltinCommands(deps) {
-  const { send, session, acl, role } = deps;
+  depsRef = deps;
+  const { send, session, acl, role, permission } = deps;
+  depsRef = deps;
   const log = deps.log ?? (() => {});
 
   async function commandReset(ctx) {
@@ -111,6 +128,10 @@ export function createBuiltinCommands(deps) {
     {
       id: 'active', name: '/active', aliases: ['/speak'], scope: 'all', permission: 'owner',
       group: '会话', help: '退出静默模式', handler: commandActive,
+    },
+    {
+      id: 'perm', name: '/perm', scope: 'all', permission: 'owner',
+      group: '会话', help: '查看/切换本会话的 DSH 权限级别（read-only|workspace-write|full-ask|full）', handler: commandPermission,
     },
   ];
 }

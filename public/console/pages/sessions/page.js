@@ -4,6 +4,7 @@
 // 数据来源只有两个接口：/api/sessions（会话清单，已含平台/模式/人格/未读/最近唤醒）与 /api/pending。
 // 会话 key 形如 `qq:group:123`、`qq:private:456`：平台前缀用于筛选，页面不假设只有一个平台。
 import { api } from '../../js/api.js';
+import { setMsg } from '../../components/message/message.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
@@ -627,6 +628,31 @@ function renderDetail(data) {
       hint: '方案决定能力预设、行为档案与受众；模型与人格在下面单独设置。',
     },
     {
+      name: 'detailPermission', type: 'select', label: '权限级别',
+      value: data.permission?.value || 'inherit',
+      options: [
+        { value: 'inherit', label: `跟随全局（当前：${data.permission?.labels?.[data.permission?.effective] || data.permission?.effective || '—'}）` },
+        ...(Array.isArray(data.permission?.options) ? data.permission.options : []).map((level) => ({
+          value: level,
+          label: data.permission?.labels?.[level] || level,
+          disabled: level === 'full' && data.permission?.fullAllowed !== true,
+        })),
+      ],
+      hint: data.permission?.grantActive
+        ? `full 授权已生效，到期后自动回落 qq-full-ask；当前实际：${data.permission?.labels?.[data.permission?.effective] || data.permission?.effective}`
+        : '只读 / 工作区读写 / 完全访问（每次确认）。full 档需总开关打开并单独授权。',
+    },
+    {
+      name: 'detailFullActions', type: 'custom', span: 2,
+      html: '<div class="form-actions">'
+        + (data.permission?.grantActive
+          ? '<button class="btn btn-ghost" id="detailFullRevoke" type="button">收回 full 授权</button>'
+          : (data.permission?.fullAllowed
+            ? '<button class="btn" id="detailFullGrant" type="button">授权 full（限时）</button>'
+            : '<span class="meta">full 档未开放：先在「全局配置 › 权限级别」打开总开关。</span>'))
+        + '<span class="form-actions-status" id="detailFullMsg" role="status"></span></div>',
+    },
+    {
       name: 'detailModelProvider', type: 'select', label: '模型', value: data.model?.provider || '',
       options: [{ value: '', label: '跟随全局' }, ...(detailCatalog || []).map((p) => ({ value: p.id, label: p.name || p.id }))],
       hint: `当前生效：${data.effectiveModel?.provider || '—'} / ${data.effectiveModel?.model || '—'}`,
@@ -772,6 +798,9 @@ function buildDetailPatch() {
 
   const planId = document.getElementById('detailPlan')?.value || '';
   if (planId !== (data.planId || '')) patch.planId = planId;
+
+  const permission = document.getElementById('detailPermission')?.value || 'inherit';
+  if (permission !== (data.permission?.value || 'inherit')) patch.permission = permission;
 
   const provider = document.getElementById('detailModelProvider')?.value || '';
   const model = provider
@@ -970,6 +999,25 @@ export function init() {
   document.getElementById('sessionDetailBody')?.addEventListener('input', () => { if (!detailRendering) detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('change', () => { if (!detailRendering) detailDirty = true; });
   document.getElementById('sessionDetailSave')?.addEventListener('click', () => { void saveDetailAll(); });
+
+  // full 短时授权：POST/DELETE 都走控制台接口，成功后重读详情让下拉与按钮状态同步。
+  document.getElementById('sessionDetailBody')?.addEventListener('click', async (event) => {
+    const grant = event.target.closest('#detailFullGrant');
+    const revoke = event.target.closest('#detailFullRevoke');
+    if ((!grant && !revoke) || !detailKey) return;
+    event.preventDefault();
+    const key = detailKey;
+    try {
+      if (grant) await api(`/api/sessions/${encodeURIComponent(key)}/permission/full`, 'POST', { ttlMin: 0 });
+      else await api(`/api/sessions/${encodeURIComponent(key)}/permission/full`, 'DELETE');
+      setMsg('detailFullMsg', grant ? '已授权：到期自动收回' : '已收回授权', 'ok');
+      const fresh = await api(`/api/sessions/${encodeURIComponent(key)}/profile`);
+      if (fresh?.ok !== false) { detailCache = fresh; renderDetail(fresh); }
+      window.dispatchEvent(new CustomEvent('console:refresh-status'));
+    } catch (error) {
+      setMsg('detailFullMsg', `操作失败：${error?.message ?? error}`, 'err');
+    }
+  });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
     if (event.target.closest('[data-open-global-access]')) {
       if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;

@@ -142,6 +142,7 @@ const tests = [
   'test-capability-file.mjs',
   'test-capability-artifacts.mjs',
   'test-capability-unify.mjs',
+  'test-permission.mjs',
   'test-prompt-layers.mjs',
   'test-prompt-compose.mjs',
   'test-platform-prompt.mjs',

@@ -362,6 +362,19 @@ function adaptersSnapshot() {
   };
 }
 
+const PERMISSION_LABELS = { 'read-only': '只读', 'workspace-write': '工作区读写', 'full-ask': '完全访问 · 每次确认', full: '完全访问 · 短时授权' };
+
+function fixturePermissionState(state) {
+  return {
+    value: 'inherit',
+    effective: 'read-only',
+    options: ['read-only', 'workspace-write', 'full-ask', 'full'],
+    labels: PERMISSION_LABELS,
+    fullAllowed: state.permission.allowFull === true,
+    grantActive: state.fullActive === true,
+  };
+}
+
 export function makeFixtureState() {
   return {
     mode: 'reserved2', role: '小鲸鱼', roleMode: 'active', closedAgentPreset: '', paused: false,
@@ -755,6 +768,27 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (method === 'GET') return json({ ok: true, send: state.limits.send });
         state.limits.send = { maxSendPerMinute: Number(body?.maxSendPerMinute) || 0, maxSendPerHour: Number(body?.maxSendPerHour) || 0 };
         return json({ ok: true, send: state.limits.send });
+      }
+      if (path === '/api/config/permission') {
+        if (method === 'GET') {
+          return json({ ok: true, permission: state.permission, levels: ['read-only', 'workspace-write', 'full-ask', 'full'], labels: PERMISSION_LABELS, ttlOptions: [10, 30, 60] });
+        }
+        state.permission = {
+          default: ['read-only', 'workspace-write', 'full-ask'].includes(body?.default) ? body.default : 'read-only',
+          allowFull: body?.allowFull === true,
+          fullTtlMin: [10, 30, 60].includes(Number(body?.fullTtlMin)) ? Number(body.fullTtlMin) : 30,
+        };
+        return json({ ok: true, permission: state.permission });
+      }
+      if (/^\/api\/sessions\/[^/]+\/permission\/full$/.test(path)) {
+        if (method === 'POST') {
+          if (state.permission.allowFull !== true) return json({ ok: false, error: '总开关没开，先到全局配置 › 权限级别打开「允许 full」' }, 409);
+          state.fullActive = true;
+          state.fullCalls.push({ path, body });
+          return json({ ok: true, permission: fixturePermissionState(state) });
+        }
+        state.fullActive = false;
+        return json({ ok: true, permission: fixturePermissionState(state) });
       }
       if (path === '/api/config/tools') {
         if (method === 'GET') return json({ ok: true, tools: state.tools });

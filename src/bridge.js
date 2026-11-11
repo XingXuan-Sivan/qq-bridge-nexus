@@ -4128,7 +4128,8 @@ async function main() {
     const profile = state.profiles?.[key];
     const chat = !sessionPlanOf(key)?.capability;
     const explicit = profile?.permission && profile.permission !== 'inherit' ? profile.permission : null;
-    if (!explicit && !chat && effectiveMode(key) === 'closed-agent') {
+    // closed-agent 期间权限由管理通道的级别决定（旧语义保留）；其余模式走全局默认 + 会话覆盖。
+    if (!explicit && currentMode === 'closed-agent') {
       const legacy = LEGACY_LEVEL_PERMISSION[String(currentLevel || '').toUpperCase()];
       if (legacy) return legacy;
     }
@@ -8187,6 +8188,7 @@ async function main() {
               planId: profile?.planId ?? null,
               plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, tools: p.tools, audience: p.audience, builtin: p.builtin })),
               activePlan: activePlan()?.id ?? null,
+              permission: permissionPayload(key),
               presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
               model: profile?.model ?? null,
@@ -8294,6 +8296,11 @@ async function main() {
                 }
               }
             }
+            if (Object.hasOwn(body, 'permission')) {
+              const raw = String(body.permission ?? 'inherit').trim();
+              if (!SESSION_PERMISSIONS.includes(raw)) { sendJson({ ok: false, error: `权限级别无效：${raw}` }, 400); return; }
+              patch.permission = raw;
+            }
             if (body.prompt && typeof body.prompt === 'object' && Object.hasOwn(body.prompt, 'text')) {
               const max = Number(cfg.socialV2?.initialPromptMaxChars) || 2000;
               const text = String(body.prompt.text ?? '');
@@ -8307,8 +8314,12 @@ async function main() {
             saveState();
             // 名单变了要立刻生效：撤掉已排队的主动定时器 / 补排，别等定时器到点才被闸门拦。
             if (accessChanged) rescheduleProactiveChecksAfterAccessChange();
+            if (Object.hasOwn(patch, 'permission')) {
+              const pinned = await pinSessionPermission(key, { reason: 'profile', throwOnError: false });
+              if (!pinned.ok) log(`⚠️ 会话 ${key} 的权限预设未能重钉：${pinned.error ?? '未知原因'}（重启桥接或重建会话后生效）`);
+            }
             log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
-            sendJson({ ok: true, key, profile: next });
+            sendJson({ ok: true, key, profile: next, permission: permissionPayload(key) });
             return;
           }
           if (req.method === 'DELETE') {
@@ -8894,6 +8905,61 @@ async function main() {
           };
           log(`控制台：发言上限已更新（每分钟 ${send.maxSendPerMinute} / 每小时 ${send.maxSendPerHour}）`);
           sendJson({ ok: true, send });
+          return;
+        }
+        // ── 全局配置：权限级别（config.permission；默认值 + full 短时授权开关） ──
+        if (req.method === 'GET' && url.pathname === '/api/config/permission') {
+          sendJson({ ok: true, permission: cfg.permission ?? normalizePermissionConfig({}), levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL, ttlOptions: [10, 30, 60] });
+          return;
+        }
+        if (req.method === 'POST' && url.pathname === '/api/config/permission') {
+          const body = await readBody();
+          let next;
+          try {
+            next = normalizePermissionConfig({
+              ...(cfg.permission ?? {}),
+              ...body,
+              // normalizePermissionConfig 只认这三个字段；其它键由它自己丢弃。
+            });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '权限配置无效' }, 400);
+            return;
+          }
+          saveConfigSection('permission', next);
+          cfg.permission = next;
+          // 关掉 allowFull 立刻收回所有 full 授权，避免窗口里的会话继续用旧级别。
+          if (!next.allowFull) {
+            for (const key of [...fullGrants.keys()]) clearFullGrant(key, { revert: true, reason: 'allow-full-off' });
+          }
+          ext.audit.append('config.permission.write', { ...next });
+          sendJson({ ok: true, permission: next, levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL, ttlOptions: [10, 30, 60] });
+          return;
+        }
+        // ── 会话：full 短时授权（一次性码由控制台 TOTP 换出 + TTL） ────────
+        const fullGrantMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/permission\/full$/);
+        if (fullGrantMatch) {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          let key;
+          try { key = apiKey(decodeURIComponent(fullGrantMatch[1])); }
+          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
+          if (req.method === 'POST') {
+            if (cfg.permission?.allowFull !== true) { sendJson({ ok: false, error: '总开关没开：先在「全局配置 › 权限级别」里允许 full 档' }, 409); return; }
+            const body = await readBody();
+            grantFull(key, Number(body?.ttlMin) || 0);
+            const grant = fullGrants.get(key);
+            ext.audit.append('permission.full_grant', { key, expiresAt: grant?.expiresAt ?? null, ttlMin: cfg.permission.fullTtlMin, by: 'console' });
+            const pinned = await pinSessionPermission(key, { reason: 'grant-full', throwOnError: false });
+            sendJson({ ok: true, permission: permissionPayload(key), pinned });
+            return;
+          }
+          if (req.method === 'DELETE') {
+            clearFullGrant(key, { revert: true, reason: 'console' });
+            ext.audit.append('permission.full_revoke', { key, by: 'console' });
+            const pinned = await pinSessionPermission(key, { reason: 'revoke-full', throwOnError: false });
+            sendJson({ ok: true, permission: permissionPayload(key), pinned });
+            return;
+          }
+          sendJson({ ok: false, error: '不支持的请求' }, 405);
           return;
         }
         // ── 全局配置：QQ 工具开关（系统层 tools） ─────────────────────────
@@ -13055,7 +13121,8 @@ async function main() {
       // P11：按会话权限级别钉 DSH 权限预设。chat 会话恒只读（钉不上不影响聊天）；
       // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着 DSH 默认权限运行。
       {
-        const chatSession = !sessionPlanOf(key)?.capability;
+        // closed-agent 下定权限是硬要求：钉不上就丢弃会话；普通聊天会话钉不上不影响聊天。
+        const chatSession = currentMode !== 'closed-agent' && !sessionPlanOf(key)?.capability;
         const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
         if (!pinned.ok && !chatSession) {
           log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);
@@ -16416,6 +16483,39 @@ async function main() {
           return;
         }
         writeRoleState(readRoleState().role, mode);
+      },
+    },
+    permission: {
+      describe: (key) => {
+        const payload = permissionPayload(key);
+        const labels = payload?.labels ?? {};
+        const lines = [
+          `本会话权限：${labels[payload?.effective] || payload?.effective || '—'}（${payload?.value === 'inherit' ? '跟随全局' : '单独设置'}）`,
+          `可选：${(payload?.options ?? []).map((level) => `${level}=${labels[level] || level}`).join(' / ')}`,
+          payload?.grantActive ? 'full 短时授权进行中，到期自动回落 qq-full-ask。' : '',
+          '用法：/perm <级别>；/perm show 只看状态。',
+        ].filter(Boolean);
+        return lines.join('\n');
+      },
+      set: async (key, level) => {
+        const raw = String(level || '').trim();
+        if (!SESSION_PERMISSIONS.includes(raw)) return { ok: false, error: `级别无效：${raw}` };
+        try {
+          const stored = ensureSessionProfile(key);
+          stored.permission = raw;
+          state.profiles[apiKey(key)] = stored;
+          saveState();
+          const pinned = await pinSessionPermission(key, { reason: 'command' });
+          ext.audit.append('permission.change', { key, level: raw, by: 'command' });
+          const payload = permissionPayload(key);
+          const label = payload?.labels?.[payload?.effective] || payload?.effective;
+          return {
+            ok: true,
+            text: pinned.ok ? `已切到${label}（DSH 预设 ${pinned.preset}）` : `已记录为${label}，但钉权限失败：${pinned.error ?? '未知原因'}（重建会话或重启桥接后生效）`,
+          };
+        } catch (error) {
+          return { ok: false, error: error?.message ?? String(error) };
+        }
       },
     },
     log,

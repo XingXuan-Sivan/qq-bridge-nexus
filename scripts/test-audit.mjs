@@ -139,6 +139,7 @@ const tests = [
   'test-runtime-combo.mjs',
   'test-runtime-capabilities.mjs',
   'test-tool-catalog.mjs',
+  'test-capability-file.mjs',
   'test-prompt-compose.mjs',
   'test-runtime-adapters.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。

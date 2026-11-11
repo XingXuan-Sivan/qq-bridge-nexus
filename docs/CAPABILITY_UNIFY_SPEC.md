@@ -139,7 +139,7 @@ dsh-bundles/qq-agent-presets/presets/
 
 ## 3. 数据契约
 
-### 3.1 `capability.yml`（唯一源）
+### 3.1 `capability.yml`（唯一源，已实现 `src/capabilities/file.mjs`）
 
 ```yaml
 version: 1
@@ -180,7 +180,13 @@ tools:
   # 技能：按技能 id 列表；空数组表示不给任何技能
   skills: []
 
-# 三、安全约束（平台无关，写进 persona.prefix 的安全段）
+# 三、能力自己的系统提示（平台无关；平台的说话方式在行为档案的 prompt 段）
+prompt:
+  base: |
+    You are a coding agent powered by the {{model}} model.
+    （该能力的身份、边界与通用要求；平台话术不写在这里）
+
+# 四、安全约束（平台无关，写进 persona.prefix 的安全段）
 safety:
   local_tools: false             # 关则强制清空 agent.fs/pwsh/jobs
   secrets: deny                  # deny | allow
@@ -199,9 +205,20 @@ safety:
 - `tools.skills` 每项匹配技能 id 规则；未知技能只告警不拒绝（技能来自 DSH 侧，可能后装）。
 - `safety` 四键枚举校验，`notes` ≤ 2000 字。
 
-### 3.2 生成物与生成规则（`scripts/build-agent-preset-patches.mjs` 扩展）
+### 3.2 生成物与生成规则（`scripts/build-capability-artifacts.mjs` + `build-agent-preset-patches.mjs`，均已实现）
 
-输入：`capability.yml` + 通用底座常量。输出四个文件，全部带 `# 生成物，请勿手工编辑` 头。
+链路（每级只读上一级，避免循环）：
+
+```
+capability.yml  --build-capability-artifacts-->  preset.yml / agent.cordis.yml / extensions.yml
+                                                  --build-agent-preset-patches-->  dsh-bundles/qq-agent-presets/presets/<id>.patch.yml
+                                                                                    --setup-dsh-->  ~/.dsh profile
+```
+
+- **能力自己的系统提示**存在 `capability.yml` 的 `prompt.base`（平台无关：身份、能力边界、该能力的通用行为要求），生成时放在 `persona.prefix` 里安全段之后；**平台的说话方式**在行为档案的 `prompt` 段。两者互不引用。
+- 生成器不需要任何外部输入（不读 base 预设、不读 config），因此产物是能力的纯函数，`--check` 能逐字节比对。
+
+输出四个文件，全部带 `# 生成物，请勿手工编辑` 头。
 
 1. `preset.yml`
    ```yaml
@@ -211,7 +228,7 @@ safety:
    ```
    **不再写 `behavior:`**。
 2. `agent.cordis.yml`
-   - `persona.prefix` = `renderSafety(safety)` + `\n\n` + `BASE_PROMPT`（现有通用底座，抽常量）。
+   - `persona.prefix` = `renderSafety(safety)` + `\n\n` + `prompt.base`。
    - 插件行按 `tools.agent` 生成：`fs.read/fs.search` → `tool-fs`/`tool-fs-search` 行；`pwsh` → `tool-pwsh` + 工作区参数；`web` → `tool-web`；`jobs` → `tool-jobs`；`ask_user_question`/`todo` → 对应行。
    - `local_tools: false` 时**不生成**任何 `tool-fs/tool-pwsh/tool-jobs` 行，只保留 `tool-web`/`tool-ask-user`/`tool-todo`。
    - `qq-tool-restrict` 行：**仅当 `safety.local_tools === false`** 时挂载（它是「仿真会话不得有本地执行能力」的注册期铁律；Agent 能力必须不挂）。插件改为读取行配置 `allow`（生成的平台工具/MCP 工具名集合），未提供 allow 时沿用现有硬编码兜底，行为不变——**这是对 bundle 内唯一实现的参数化，不新增插件**。
@@ -226,7 +243,7 @@ safety:
      allow: ['*']
    ```
    缺文件/空文件 = 全部拒绝（Hub 语义），所以生成器必须显式写 `allow`。
-4. bundle patch：`composeRows(...)` 逻辑不变，只把输入换成生成后的行列表。
+4. bundle patch：`composeRows(...)` 逻辑不变，只把输入换成生成后的行列表（`build-agent-preset-patches.mjs` 仍只读 `preset.yml` + `agent.cordis.yml`，不直接读 `capability.yml`——生成与打包各自单向）。
 
 **`--check` 语义**：逐字节比对四个产物与源；不一致 exit 1。迁移完成后，5 个旧预设 → 4 个新能力的产物必须与手工迁移前的 `agent.cordis.yml`（去掉 QQ 段与 `behavior:`）逐字一致，作为验收（§8 G3）。
 

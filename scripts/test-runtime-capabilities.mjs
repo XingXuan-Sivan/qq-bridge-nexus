@@ -84,5 +84,5 @@ test('注册表：合并目录、保存触发 onChange、allows 只收紧副作�
   assert.equal(changes.length, 1);
   assert.ok(changes[0]['qq-chat'].tools.visible.length === GATED.length);
   assert.throws(() => registry.save('nope', {}), /没有这个能力预设/);
-  assert.deepEqual(Object.keys(toolCatalogSnapshot()).sort(), ['agent', 'gatedRisks', 'levelAllows', 'levelAsks', 'levels', 'platform', 'risks']);
+  assert.deepEqual(Object.keys(toolCatalogSnapshot()).sort(), ['agent', 'defaultAgents', 'entries', 'gatedRisks', 'levelAllows', 'levelAsks', 'levels', 'platform', 'risks']);
 });

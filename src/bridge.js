@@ -92,6 +92,8 @@ import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from './capabilities/store.mjs';
+// P10.9：平台话术 = config/platform/<id>.yml，读写只经这一层（注入块 core-platform-prompt 用同一份）。
+import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './platform/prompt.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
   PERMISSION_LABEL,

@@ -457,16 +457,18 @@ session.planId → plan → capability(安装预设 id) + behavior(id)
 - 手工确认 4 个 `capability.yml` 的 tools/safety 与旧预设等价；跑 `--check`（新产物 vs 旧产物，放行 `behavior:` 行与 persona 平台段的差异，逐项 diff 记录在 `docs/migration-report.md`）。
 - 验收：§8 G3/G4。
 
-**P10.4 服务端切换读取源** — ✅ 已实施（本轮提交，tag `phase/10.4`）
+**P10.4 服务端切换读取源** — ✅ 已实施（提交 `08ecb41`，tag `phase/10.4`）
 - 新增 `src/capabilities/store.mjs`（唯一读源）：`createCapabilityStore({root})` → `list/get/save`，`visiblePlatformFlags`/`agentModulesOf`/`capabilityAllowsFlag`；保存时经 `normalizeCapabilityFile` 写回 `capability.yml` 并重建三产物。
 - `src/bridge.js` 删除 `ensureCapabilities`/`capabilityRegistry`/`config.capabilities` 读路径，改模块级 `capabilityStore` + `capabilityOf(key)`；`/api/runtime/capabilities` 返回 `{catalog, adapters, capabilities}`，`PATCH` 收 `{label,note,tools,safety,prompt}` 审计 `capability.write`。
 - `plan.tools` 迁移为 `plan.capability`：`LEGACY_PRESET_TO_CAPABILITY` 把 `qq-chat/qq-chat-v2/qq-agent-*` 折成 `agent-*`，`normalizePlan` 以 `capability` 优先、`tools` 兜底。
 - 删 `src/runtime/capabilities.mjs`；`v2ToolEnabled` 经 `capabilityAllows` → `capabilityAllowsFlag`。
 - 验收：`test-runtime-capabilities` 4/4、`test-runtime-plans` 6/6、`test-runtime-combo` 4/4、static 全过、UI 35/35。
 
-**P10.5 平台提示词注入块**
-- 行为档案加 `prompt`；迁移脚本抽取 QQ 段；新增 `core-platform-prompt` 块 + `wakePromptCtx` 取值；golden 夹具更新（新增 1 块，其余逐字不变）。
-- 验收：`test-prompt-golden.mjs`（更新基线并说明差异）、`test-prompt-compose`。
+**P10.5 平台提示词注入块** — ✅ 已实施（tag `phase/10.5`）
+- 平台提示词落 `config/platform/qq.yml`（`version/platform/prompt`），从旧 `qq-chat-v2` persona 抽取「工具协议 + QQ 场景规则」共 8854 字；能力 `prompt.base` 只留平台无关的身份与边界。
+- 桥接新增 `platformPromptFor(key)`：按文件 mtime 缓存、用 QQ 适配器 `vars` 替换 `{platform}/{displayName}/{owner}`；**只在会话方案带 `capability` 时返回值**（旧 `qq-*` 预设 persona 自带同段文字，避免重复注入）。
+- 新注入块 `core-platform-prompt`（slot behavior / priority 145，紧跟 `core-proactivity` 之前），`wakePromptCtx` 增 `platformPrompt`。
+- 验收：`test-platform-prompt.mjs`（结构/关键段落/无 persona 残留）、`test-prompt-golden` 仍 1/1（夹具无 capability，块为空、逐字不变）、`test-prompt-registry` 通过。
 
 **P10.6 前端合并**
 - 行为页两标签，能力预设编辑器整体迁入（复用现有 `presets/page.js` 的表单与 YAML 查看器，改造为 capability 表单）。

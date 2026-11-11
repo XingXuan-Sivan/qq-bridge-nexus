@@ -21,6 +21,7 @@ import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-p
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import YAML from 'yaml';
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
 import {
   assertPresetBehaviorBindings,
@@ -2232,6 +2233,13 @@ async function main() {
       render: () => '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。'
     });
     registerCoreBlock({
+      id: 'core-platform-prompt',
+      label: '平台提示词',
+      slot: 'behavior',
+      priority: 145,
+      render: (ctx) => promptStripSeparator(ctx.platformPrompt ?? ''),
+    });
+    registerCoreBlock({
       id: 'core-proactivity', label: '积极性', slot: 'behavior', priority: 150,
       render: () => '【积极性】不要习惯性潜水：群里有你能接的话题就主动参与，偶尔插一句别人的话题也很正常；只有确实没话可说、对方已明确结束、或长时间没人说话时才潜水。'
     });
@@ -3991,6 +3999,31 @@ async function main() {
   function capabilityOf(key) {
     const id = sessionPlanOf(key)?.capability;
     return id ? capabilityStore.get(id) : null;
+  }
+
+  /**
+   * 平台提示词：QQ 里怎么用工具、怎么说话、怎么等。
+   * 只有新能力体系的会话才注入 —— 旧 `qq-*` 预设的 persona 里自带同段文字，重复注入会打架。
+   */
+  const PLATFORM_PROMPT_FILE = path.join(ROOT, 'config', 'platform', 'qq.yml');
+  let platformPromptCache = null;
+  function platformPromptFor(key) {
+    if (!capabilityOf(key)) return '';
+    try {
+      const stat = fs.statSync(PLATFORM_PROMPT_FILE);
+      if (!platformPromptCache || platformPromptCache.mtimeMs !== stat.mtimeMs) {
+        const raw = YAML.parse(fs.readFileSync(PLATFORM_PROMPT_FILE, 'utf8')) ?? {};
+        platformPromptCache = { mtimeMs: stat.mtimeMs, text: String(raw.prompt ?? '').trim() };
+      }
+      const vars = adapterRegistry.get('platform', 'qq')?.vars ?? {};
+      return platformPromptCache.text
+        .replace(/\{platform\}/g, vars.platform ?? 'QQ')
+        .replace(/\{displayName\}/g, vars.displayName ?? 'QQ')
+        .replace(/\{owner\}/g, vars.owner ?? '管理员');
+    } catch (error) {
+      log(`⚠️ 读取平台提示词失败：${error?.message ?? error}`);
+      return '';
+    }
   }
 
   /** 这套方案允许调用该工具吗？只覆盖有副作用的平台工具（读类仍看全局注册开关）。 */
@@ -15339,6 +15372,7 @@ async function main() {
       reason,
       blockPlan,
       preSleepMs,
+      platformPrompt: platformPromptFor(key),
       roleName,
       identityText: selfIdentityTextV2(),
       agentToken: st.agentToken,

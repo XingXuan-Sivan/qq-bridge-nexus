@@ -90,6 +90,112 @@ export const LEVEL_ASKS = Object.freeze({
 /** 可被能力预设按会话收紧的平台工具（副作用类；读类只受 config.tools 注册控制）。 */
 export const CAPABILITY_GATED_RISKS = Object.freeze(['send', 'state', 'admin']);
 
+/** 工具来源两侧（平台 = QQ 桥接；Agent = DSH 运行时）。 */
+export const TOOL_SIDES = Object.freeze(['platform', 'agent']);
+
+/**
+ * 统一目录条目。平台工具以 flag 为 id，Agent 模块以 module id 为 id。
+ * `gated` = 能力预设可以收紧；读类恒 false（只受 config.tools 注册开关控制）。
+ * `alwaysAllowed` 是这句话的正面表述，供生成器与 UI 直接读。
+ */
+export const CATALOG_ENTRIES = Object.freeze([
+  ...PLATFORM_TOOLS.map((tool) => Object.freeze({
+    id: tool.flag,
+    flag: tool.flag,
+    label: tool.label,
+    names: tool.names,
+    side: 'platform',
+    provider: 'qq',
+    source: 'builtin',
+    risk: tool.risk,
+    gated: CAPABILITY_GATED_RISKS.includes(tool.risk),
+    alwaysAllowed: !CAPABILITY_GATED_RISKS.includes(tool.risk),
+  })),
+  ...AGENT_MODULES.map((module) => Object.freeze({
+    id: module.id,
+    label: module.label,
+    side: 'agent',
+    provider: 'dsh',
+    source: 'builtin',
+    risk: module.risk,
+    gated: true,
+    alwaysAllowed: false,
+  })),
+]);
+
+/** 内置能力的默认工具集：平台全开；Agent 按能力递增（见 SPEC §3.4）。 */
+export const CAPABILITY_DEFAULTS = Object.freeze({
+  'agent-chat': Object.freeze({
+    platform: true,
+    agent: Object.freeze(['tool-web', 'tool-ask-user', 'tool-todo']),
+    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
+    skills: Object.freeze(['*']),
+  }),
+  'agent-readonly': Object.freeze({
+    platform: true,
+    agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-web', 'tool-ask-user', 'tool-todo']),
+    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
+    skills: Object.freeze(['*']),
+  }),
+  'agent-workspace': Object.freeze({
+    platform: true,
+    agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-pwsh', 'tool-jobs', 'tool-web', 'tool-ask-user', 'tool-todo']),
+    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
+    skills: Object.freeze(['*']),
+  }),
+  'agent-full': Object.freeze({
+    platform: true,
+    agent: Object.freeze(AGENT_MODULES.map((module) => module.id)),
+    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
+    skills: Object.freeze(['*']),
+  }),
+});
+
+/** 内置能力的默认工具集；未知 id 返回 null（调用方决定回落）。 */
+export function capabilityDefaults(id) {
+  return CAPABILITY_DEFAULTS[String(id ?? '')] ?? null;
+}
+
+/** 目录条目（id → 条目）。 */
+export function catalogEntry(id) {
+  const value = String(id ?? '');
+  return CATALOG_ENTRIES.find((entry) => entry.id === value
+    || entry.flag === value
+    || (entry.names ?? []).includes(value)) ?? null;
+}
+
+/**
+ * 由两端适配器声明的工具合并出目录条目（适配器只声明 id/label/risk）。
+ * 内置条目优先；重复 id 时以适配器声明覆盖 label/risk，但保留 source。
+ */
+export function catalogFromAdapters({ platform = [], agent = [] } = {}) {
+  const merged = new Map(CATALOG_ENTRIES.map((entry) => [entry.id, entry]));
+  const add = (side, provider, items) => {
+    for (const item of Array.isArray(items) ? items : []) {
+      const id = String(item?.id ?? '').trim();
+      if (!id) continue;
+      const risk = TOOL_RISKS.includes(item?.risk) ? item.risk : 'admin';
+      const existing = merged.get(id);
+      merged.set(id, Object.freeze({
+        ...(existing ?? {}),
+        id,
+        flag: existing?.flag ?? null,
+        label: String(item?.label ?? existing?.label ?? id),
+        names: existing?.names ?? [],
+        side,
+        provider,
+        source: existing?.source ?? 'builtin',
+        risk,
+        gated: existing ? existing.gated : CAPABILITY_GATED_RISKS.includes(risk),
+        alwaysAllowed: existing ? existing.alwaysAllowed : !CAPABILITY_GATED_RISKS.includes(risk),
+      }));
+    }
+  };
+  add('platform', 'qq', platform);
+  add('agent', 'dsh', agent);
+  return [...merged.values()];
+}
+
 /** 平台工具 flag 列表（按目录顺序）。 */
 export function platformToolFlags() {
   return PLATFORM_TOOLS.map((tool) => tool.flag);
@@ -127,5 +233,7 @@ export function toolCatalogSnapshot() {
     gatedRisks: CAPABILITY_GATED_RISKS,
     platform: PLATFORM_TOOLS.map((tool) => ({ ...tool, gated: capabilityCovers(tool.flag) })),
     agent: AGENT_MODULES.map((module) => ({ ...module })),
+    entries: CATALOG_ENTRIES,
+    defaultAgents: Object.fromEntries(Object.entries(CAPABILITY_DEFAULTS).map(([id, value]) => [id, value.agent])),
   };
 }

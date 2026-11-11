@@ -255,7 +255,11 @@ provideRecommendations: true
 - 执行侧：`v2ToolEnabled(flag, key)` → `capabilityAllows(key, flag)`，按会话固定方案的 `tools` 查 `visible`，不在集合里就 403。
 - 迁移：P7 的 `grants.disable` 在读取时自动折算成 `visible`（全集减去禁用项），下次保存后旧字段消失。
 
-### 3.3 `config.json` 目标结构
+#> 平台提示词（`prompt.personaPrefix`）在安装期由 `scripts/build-agent-preset-patches.mjs` 拼进
+> `agent.cordis.yml` 的 `persona.prefix`（`{platform}`/`{displayName}`/`{owner}` 占位符按平台适配器渲染）；
+> 为空时生成物逐字节不变，内置预设不受影响。
+
+## 3.3 `config.json` 目标结构
 
 迁移完成后 `config.json` 只保留系统层。目标形状如下（省略号表示沿用当前子字段）：
 

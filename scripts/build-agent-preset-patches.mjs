@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { composeRows, readPlatformPromptFromConfig } from '../src/runtime/prompt-compose.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..');
@@ -55,6 +56,16 @@ export function patchFileFor(name) {
 }
 function sourceDirFor(name) {
   return path.join(REPO_ROOT, 'dsh', 'agent-presets', name);
+}
+
+/** 能力预设里的平台提示词（config.json > capabilities[id].prompt.personaPrefix）。 */
+function capabilityPlatformPrompt(name) {
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config.json'), 'utf8'));
+    return readPlatformPromptFromConfig(config, name);
+  } catch {
+    return '';
+  }
 }
 
 function readYaml(file) {
@@ -119,7 +130,7 @@ export function renderPatch(name) {
   for (const field of ['name', 'description', 'order']) {
     if (meta[field] === undefined) throw new Error(`${name}: preset.yml 缺少 ${field}`);
   }
-  const plugins = normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name);
+  const plugins = composeRows(normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name), { platformText: capabilityPlatformPrompt(name) });
   const row = {
     id: presetRowId(name),
     name: '@deepseek-ai/dsh-agent-preset',

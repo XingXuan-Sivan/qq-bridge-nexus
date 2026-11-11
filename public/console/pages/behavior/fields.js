@@ -1,18 +1,10 @@
-// 行为档案页的静态字段：清单动作、选择档案（下拉 + 刷新）、两处提示词编辑区。
+// 行为档案页的静态字段：清单表体、选择档案（下拉 + 刷新）、两处提示词编辑区。
 // 动态的 v1/v2 表单由 behavior/behavior-form.js 按 schema 生成，不在这里。
+// 清单的 新建/刷新/筛选 由表格工具栏提供，克隆/删除在行内操作列，不在这里定义动作行。
 export const BEHAVIOR_FIELDS = {
   list: {
     fields: [
       { name: 'behaviorTable', type: 'custom', span: 2, html: '<div id="behaviorTable"></div>' },
-      {
-        name: 'behaviorListActions',
-        type: 'action',
-        items: [
-          { id: 'behaviorCreate', label: '新建' },
-          { id: 'behaviorClone', label: '克隆' },
-          { id: 'behaviorDelete', label: '删除', variant: 'danger' },
-        ],
-      },
     ],
   },
   main: {

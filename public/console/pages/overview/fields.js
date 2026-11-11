@@ -1,5 +1,6 @@
 // 运行总览的字段规格：静态块全部搬进来，页面只留卡片与宿主 div。
 // 动态部分（静默时段行、活动日志、模型目录）仍由 page.js 渲染。
+import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
   <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
@@ -45,12 +46,9 @@ const MANUAL_SILENCE_STAGES = [
 
 const SILENCE_RANGES = `<div class="silence-block">
   <div id="silenceRanges"></div>
-  <div class="control-row">
-    <button id="silenceAdd" class="btn small">＋ 添加时间段</button>
-    <button id="silencePeak" class="btn small">一键填入 DeepSeek 高峰时段</button>
-    <span class="control-note" id="silencePeakNote">高峰：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</span>
-  </div>
   <div class="meta" id="silenceUpcoming">—</div>
+  <div class="meta" id="silencePeakNote">高峰时段：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</div>
+  <div class="meta" id="silenceMsg" role="status"></div>
 </div>`;
 
 
@@ -67,32 +65,24 @@ export const OVERVIEW_FIELDS = {
   behaviorDefault: {
     fields: [
       {
-        name: 'behaviorDefaultPanel',
-        type: 'custom',
-        span: 2,
-        html: `<div class="field-row">
-  <span class="field-label">默认行为档案</span>
-  <div class="field-control"><div class="role-default-control">
-    <select id="behaviorDefaultSelect" class="u-w-190"><option value="">（未设置，预设必须自带 behavior）</option></select>
-    <div class="field-hint">预设在 <code>preset.yml</code> 里绑定 <code>behavior</code> 时以预设为准；这里只在预设未绑定时兜底。档案 kind 必须与运行模式一致。</div>
-  </div></div>
-</div>`,
+        name: 'behaviorDefaultSelect',
+        type: 'select',
+        label: '默认行为档案',
+        placeholder: '（未设置，预设必须自带 behavior）',
+        options: [],
+        hint: '预设在 preset.yml 里绑定 behavior 时以预设为准；这里只在预设未绑定时兜底。档案 kind 必须与运行模式一致。',
       },
     ],
   },
   roleDefault: {
     fields: [
       {
-        name: 'roleDefaultPanel',
-        type: 'custom',
-        span: 2,
-        html: `<div class="field-row">
-  <span class="field-label">默认人格</span>
-  <div class="field-control"><div class="role-default-control">
-    <select id="roleDefaultSelect" class="u-w-190"><option value="">不挂人格卡</option></select>
-    <div class="field-hint">没有单独指定人格的会话都用这张卡；按会话的设置在「人格与角色」页。改完下一条消息生效。</div>
-  </div></div>
-</div>`,
+        name: 'roleDefaultSelect',
+        type: 'select',
+        label: '默认人格',
+        placeholder: '不挂人格卡',
+        options: [],
+        hint: '没有单独指定人格的会话都用这张卡；按会话的设置在「人格与角色」页。改完下一条消息生效。',
       },
     ],
   },
@@ -102,11 +92,8 @@ export const OVERVIEW_FIELDS = {
         name: 'permissionDefault',
         type: 'select',
         label: '默认级别',
-        options: [
-          { value: 'read-only', label: '只读（read-only）' },
-          { value: 'workspace-write', label: '工作区读写（workspace-write）' },
-          { value: 'full-ask', label: '完全访问 · 每次确认（qq-full-ask）' },
-        ],
+        // 档位措辞与「会话详情 › 权限级别」共用一份，避免两处文案漂移。
+        options: permissionLevelOptions(false),
         hint: '没单独设置权限的会话用这个级别；会话详情里可逐条覆盖。',
       },
       {
@@ -138,16 +125,6 @@ export const OVERVIEW_FIELDS = {
   personaSettings: {
     fields: [
       {
-        name: 'personaInjectMax',
-        type: 'number',
-        label: '注入上限',
-        min: 1000,
-        max: 20000,
-        step: 100,
-        unit: '字符',
-        hint: '按模式筛完小节后再截断，约 4~6k token 的成本护栏；范围 1000~20000，改完下一条消息生效。',
-      },
-      {
         name: 'personaSaveApply',
         type: 'radio',
         label: '生效方式',
@@ -155,7 +132,7 @@ export const OVERVIEW_FIELDS = {
           { value: 'nextWake', label: '下次唤醒时重新读卡' },
           { value: 'immediate', label: '立即生效（现在就唤醒各会话说新卡）' },
         ],
-        hint: '保存人格卡（新建 / 编辑 / 重置 / 按会话指定）后默认怎么生效；只作用于正在启用的会话。',
+        hint: '保存人格卡（新建 / 编辑 / 重置 / 按会话指定）后默认怎么生效；只作用于正在启用的会话。人格卡的注入上限在「注入块」页统一配置。',
       },
     ],
   },
@@ -206,12 +183,6 @@ export const OVERVIEW_FIELDS = {
         html: `<select id="silenceTz" aria-label="定时静默的时区"></select>`,
       },
       { name: 'overviewSilenceRanges', type: 'custom', span: 2, html: SILENCE_RANGES },
-      {
-        type: 'action',
-        id: 'silenceActions',
-        items: [{ id: 'silenceSave', label: '保存定时静默', variant: 'primary' }],
-        status: 'silenceMsg',
-      },
     ],
   },
   dsh: {

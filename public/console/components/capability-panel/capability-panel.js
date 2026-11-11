@@ -1,11 +1,14 @@
 // 能力预设：列表 + 内联编辑（平台工具 / Agent 模块 / MCP 服务器与工具 / 技能）。
+// 结构约定：每个分组是一张独立卡片（编辑器容器用 display:contents 落到页面栅格），
+// 表格一律用 dataTableHtml/initDataTables（工具栏、分页、多选列都由组件提供，不手写）。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { renderFields } from '../form/form.js';
 import { modalHtml, openModal, closeModal } from '../modal/modal.js';
 import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../table/table.js';
 
-const PLATFORM_RISK_TEXT = { read: '读取', send: '发送', state: '会话状态', admin: '管理' };
+const PLATFORM_RISK_TEXT = { read: '读取', send: '发送', state: '会话状态', write: '写入', exec: '执行', admin: '管理' };
+const EDITOR_TABLES = ['capEditorPlatform', 'capEditorServers', 'capEditorTools', 'capEditorSkills'];
 
 function riskPill(risk) {
   const text = PLATFORM_RISK_TEXT[risk] ?? risk ?? '—';
@@ -23,23 +26,23 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   const platformTools = () => (catalog?.entries ?? []).filter((entry) => entry.side === 'platform');
   const agentModules = () => (catalog?.entries ?? []).filter((entry) => entry.side === 'agent');
 
-  function presetExtensions(id) {
-    const preset = extensions?.presets?.find?.((item) => item.id === id);
-    return preset?.extensions ?? null;
-  }
-
   function extensionSummary(cap) {
-    const mcp = cap.tools?.mcp?.allow ?? [];
-    const tools = cap.tools?.mcp?.tools?.allow ?? [];
+    const mcp = Array.isArray(cap.tools?.mcp) ? cap.tools.mcp : [];
+    const servers = mcp.some((item) => item.server === '*') ? '全部' : String(mcp.length);
+    const tools = mcp.length && mcp.every((item) => item.tools === '*')
+      ? '全部'
+      : String(new Set(mcp.flatMap((item) => (Array.isArray(item.tools) ? item.tools : []))).size);
     const skills = cap.tools?.skills ?? [];
     const count = (list) => (list.includes('*') ? '全部' : String(list.length));
-    return `<span class="meta">MCP ${count(mcp)} · 工具 ${count(tools)} · 技能 ${count(skills)}</span>`;
+    return `<span class="meta">MCP ${servers} · 工具 ${tools} · 技能 ${count(skills)}</span>`;
   }
 
   function visibleSummary(cap) {
     const allowed = (cap.platformVisible ?? []).length;
     const total = platformTools().length || 0;
-    return `<span class="meta">允许 ${allowed} / ${total}</span>`;
+    const modules = (cap.agentModules ?? []).length;
+    const moduleTotal = agentModules().length || 0;
+    return `<span class="meta">允许 ${allowed}/${total} · 模块 ${modules}/${moduleTotal}</span>`;
   }
 
   function listMarkup() {
@@ -47,36 +50,55 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       cells: [
         `<code>${esc(cap.id)}</code><div class="meta">${esc(cap.label || '')}</div>`,
         visibleSummary(cap),
-        (cap.agentModules ?? []).length ? (cap.agentModules).map((m) => `<code>${esc(m)}</code>`).join(' ') : '<span class="meta">—</span>',
         extensionSummary(cap),
-        [
-          `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
-          `<button class="btn small" type="button" data-cap-clone="${esc(cap.id)}">克隆</button>`,
-          cap.builtin ? '' : `<button class="btn small danger" type="button" data-cap-delete="${esc(cap.id)}">删除</button>`,
-        ].filter(Boolean).join(' '),
+        `<div class="row-actions">
+          <button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>
+          <button class="btn small" type="button" data-cap-clone="${esc(cap.id)}">克隆</button>
+          ${cap.builtin ? '' : `<button class="btn small danger" type="button" data-cap-delete="${esc(cap.id)}">删除</button>`}
+        </div>`,
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '能力预设' }, { label: '平台工具', width: '200px' }, { label: 'Agent 模块', width: '260px' }, { label: 'MCP · 技能', width: '160px' }, { label: '操作', width: '190px' }],
+      columns: [{ label: '能力预设' }, { label: '工具' }, { label: 'MCP · 技能', width: '220px' }, { label: '操作', width: '160px' }],
       rows,
       pageSize: 20,
+      search: { placeholder: '搜索能力预设 / id' },
+      refresh: true,
       meta: `${capabilities.length} 个能力`,
-      actions: '<button class="btn" type="button" id="capabilityCreate">新建</button><span class="meta" id="capabilityListMsg" role="status"></span>',
+      actions: '<button class="btn small primary" type="button" id="capabilityCreate">新建</button><span class="meta" id="capabilityListMsg" role="status"></span>',
     });
   }
 
   function renderList() {
     if (!listHost) return;
     listHost.innerHTML = listMarkup();
-    initDataTables(listHost);
+    initDataTables(listHost, { onRefresh: () => void load() });
   }
 
   // ---- 编辑区 ----
 
   function loadDraft(cap) {
-    const mcp = cap.tools?.mcp ?? {};
-    const toolAllow = mcp.tools?.allow ?? [];
-    const toolDeny = mcp.tools?.deny ?? [];
+    const mcp = Array.isArray(cap.tools?.mcp) ? cap.tools.mcp : [];
+    const known = new Set((extensions?.mcp ?? []).map((server) => server.id));
+    const servers = new Set();
+    const serverTools = new Map(); // server id → '*' | Set(工具名)
+    // 通配服务器（`- server: "*"`）表示「以后新增的服务器也允许」；没改动就原样写回，
+    // 不能因为界面上只认识当前这几台服务器就把它悄悄收窄成显式清单。
+    const mcpAll = mcp.some((item) => item.server === '*');
+    for (const item of mcp) {
+      if (item.server === '*') {
+        // 目录为空时保留 *；有目录时展开成已知服务器供勾选。
+        if (!known.size) { servers.add('*'); serverTools.set('*', '*'); continue; }
+        for (const id of known) {
+          servers.add(id);
+          serverTools.set(id, item.tools === '*' ? '*' : new Set(Array.isArray(item.tools) ? item.tools : []));
+        }
+        continue;
+      }
+      servers.add(item.server);
+      serverTools.set(item.server, item.tools === '*' ? '*' : new Set(Array.isArray(item.tools) ? item.tools : []));
+    }
+    const skills = Array.isArray(cap.tools?.skills) ? cap.tools.skills : [];
     draft = {
       id: cap.id,
       label: cap.label || '',
@@ -84,46 +106,51 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       notes: cap.safety?.notes || '',
       platform: new Set(cap.platformVisible ?? []),
       agent: new Set(cap.agentModules ?? []),
-      servers: new Set(mcp.allow ?? []),
-      toolAllow: new Set(toolAllow),
-      toolDeny: new Set(toolDeny),
-      skills: new Set(cap.tools?.skills ?? []),
+      servers,
+      serverTools,
+      mcpAll,
+      skills: new Set(skills.filter((name) => name !== '*')),
+      skillsAll: skills.includes('*'),
     };
   }
 
+  // 平台工具与 Agent 模块合在一张表：两者的「允许」都指向同一套能力预设，
+  // 拆成两张表只会让人以为它们是两种开关。类型列用标签区分来源与风险。
   function platformTable() {
-    const rows = platformTools().map((entry) => ({
-      cells: [
-        selectCellHtml({ value: entry.flag, checked: draft.platform.has(entry.flag), label: `允许 ${entry.label}`, attrs: { 'data-cap-platform': entry.flag } }),
-        `${esc(entry.label)}<div class="meta"><code>${esc(entry.flag)}</code></div>`,
-        riskPill(entry.risk),
-      ],
-    }));
+    const rows = [];
+    for (const entry of platformTools()) {
+      rows.push({
+        attrs: { 'data-filter-kind': 'platform' },
+        cells: [
+          selectCellHtml({ value: entry.flag, checked: draft.platform.has(entry.flag), label: `允许 ${entry.label}`, attrs: { 'data-cap-platform': entry.flag, 'data-select-group': 'tools' } }),
+          `${esc(entry.label)}<div class="meta"><code>${esc(entry.flag)}</code></div>`,
+          (entry.names ?? []).length
+            ? `<span class="cap-tool-names">${entry.names.map((name) => `<code>${esc(name)}</code>`).join('')}</span>`
+            : '<span class="meta">—</span>',
+          `<span class="cap-pill-row"><span class="pill">平台</span>${riskPill(entry.risk)}</span>`,
+        ],
+      });
+    }
+    for (const entry of agentModules()) {
+      rows.push({
+        attrs: { 'data-filter-kind': 'agent' },
+        cells: [
+          selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id, 'data-select-group': 'tools' } }),
+          `${esc(entry.label)}<div class="meta"><code>${esc(entry.id)}</code></div>`,
+          esc(entry.desc || 'Agent 运行时模块'),
+          `<span class="cap-pill-row"><span class="pill">Agent</span>${riskPill(entry.risk)}</span>`,
+        ],
+      });
+    }
     return dataTableHtml({
-      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'platform' } }, { label: '工具' }, { label: '风险', width: '90px' }],
+      columns: [{ label: '允许', select: true, selectAttrs: { 'data-select-group': 'tools' } }, { label: '工具', width: '220px' }, { label: '说明' }, { label: '类型', width: '150px' }],
       rows,
-      pageSize: 40,
-      meta: `${rows.length} 个平台工具`,
+      pageSize: 20,
+      search: { placeholder: '搜索工具 / 模块 / 宿主工具名' },
+      refresh: true,
+      filters: [{ id: 'kind', label: '类型', value: '', options: [{ value: '', label: '全部类型' }, { value: 'platform', label: '平台工具' }, { value: 'agent', label: 'Agent 模块' }] }],
+      meta: `${platformTools().length} 个平台工具 · ${agentModules().length} 个 Agent 模块`,
     });
-  }
-
-  function agentTable() {
-    const rows = agentModules().map((entry) => ({
-      cells: [
-        selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id } }),
-        esc(entry.label),
-        `<code>${esc(entry.id)}</code>`,
-        riskPill(entry.risk),
-      ],
-    }));
-    return rows.length
-      ? dataTableHtml({
-        columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'agent' } }, { label: '模块' }, { label: 'id', width: '220px' }, { label: '风险', width: '90px' }],
-        rows,
-        pageSize: 10,
-        meta: `${rows.length} 个 Agent 模块`,
-      })
-      : '<p class="meta">后端没有返回 Agent 模块目录。</p>';
   }
 
   function allowedServers() {
@@ -132,35 +159,57 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   }
 
   function serverTable() {
-    const servers = extensions?.mcp ?? [];
-    if (!servers.length) return '<p class="meta">还没有 MCP 服务器目录（重启桥接后刷新）。</p>';
+    const known = extensions?.mcp ?? [];
+    const knownIds = new Set(known.map((server) => server.id));
+    // 目录里已经没有、但 capability.yml 仍写着的服务器也要显示出来，否则无从取消。
+    const missing = [...draft.servers]
+      .filter((id) => id !== '*' && !knownIds.has(id))
+      .map((id) => ({ id, source: 'external', status: 'offline', tools: [], missing: true }));
+    const servers = [...known, ...missing];
+    if (!servers.length) {
+      return draft.servers.has('*')
+        ? '<p class="meta">当前为「全部服务器」；扩展目录为空，保存时保留通配。</p>'
+        : '<p class="meta">还没有 MCP 服务器目录（重启桥接后刷新）。</p>';
+    }
     const rows = servers.map((server) => ({
+      attrs: { 'data-filter-status': server.status === 'online' ? 'online' : 'offline' },
       cells: [
         selectCellHtml({ value: server.id, checked: draft.servers.has(server.id), label: `允许 ${server.id}`, attrs: { 'data-cap-server': server.id } }),
         `<code>${esc(server.id)}</code>`,
-        server.source === 'external' ? '外部' : '内置',
-        server.status === 'online' ? '在线' : '不可用',
+        server.missing ? '<span class="meta">已不在目录</span>' : server.source === 'external' ? '外部' : '内置',
+        server.missing ? '不可用' : server.status === 'online' ? '在线' : '不可用',
         String((server.tools ?? []).length || server.toolCount || 0),
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'servers' } }, { label: '服务器' }, { label: '来源', width: '80px' }, { label: '状态', width: '90px' }, { label: '工具数', width: '80px' }],
+      columns: [{ label: '允许', select: true, selectAttrs: { 'data-select-group': 'servers' } }, { label: '服务器' }, { label: '来源', width: '80px' }, { label: '状态', width: '90px' }, { label: '工具数', width: '80px' }],
       rows,
       pageSize: 10,
+      search: { placeholder: '搜索服务器' },
+      refresh: true,
+      filters: [{ id: 'status', label: '状态', value: '', options: [{ value: '', label: '全部状态' }, { value: 'online', label: '在线' }, { value: 'offline', label: '不可用' }] }],
       meta: `${servers.length} 个服务器`,
     });
   }
 
+  function toolNamesOf(serverId) {
+    const server = (extensions?.mcp ?? []).find((item) => item.id === serverId);
+    return (server?.tools ?? []).map((tool) => tool.name);
+  }
+
   function toolTable() {
-    const servers = allowedServers();
+    const servers = allowedServers().filter((server) => server.id !== '*');
+    if (!servers.length) return '<p class="meta">先允许 MCP 服务器，再逐个勾选它的工具。</p>';
     const rows = [];
     for (const server of servers) {
+      const selection = draft.serverTools.get(server.id);
       for (const tool of server.tools ?? []) {
-        const id = `${server.id}__${tool.name}`;
+        const id = `${server.id}::${tool.name}`;
+        const checked = selection === '*' || (selection instanceof Set && selection.has(tool.name));
         rows.push({
+          attrs: { 'data-filter-server': server.id },
           cells: [
-            checkCellHtml({ value: id, checked: draft.toolAllow.has(id), attrs: { 'data-cap-tool-allow': id }, label: `允许 ${id}` }),
-            checkCellHtml({ value: id, checked: draft.toolDeny.has(id), attrs: { 'data-cap-tool-deny': id }, label: `拒绝 ${id}` }),
+            checkCellHtml({ value: id, checked, attrs: { 'data-cap-tool': id }, label: `允许 ${id}` }),
             `<code>${esc(server.id)}</code>`,
             `<code>${esc(tool.name)}</code>`,
             `<span class="preset-tool-desc">${esc(tool.description || '—')}</span>`,
@@ -168,12 +217,15 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
         });
       }
     }
-    if (!rows.length) return '<p class="meta">先允许 MCP 服务器，再逐个勾选它的工具。</p>';
+    if (!rows.length) return '<p class="meta">这些服务器没有上报工具。</p>';
     return dataTableHtml({
-      columns: [{ label: '允许', width: '60px' }, { label: '拒绝', width: '60px' }, { label: '服务器', width: '180px' }, { label: '工具', width: '220px' }, { label: '说明' }],
+      columns: [{ label: '允许', width: '60px' }, { label: '服务器', width: '180px' }, { label: '工具', width: '220px' }, { label: '说明' }],
       rows,
-      pageSize: 20,
-      meta: `${rows.length} 个工具（拒绝优先于允许）`,
+      pageSize: 10,
+      search: { placeholder: '搜索工具' },
+      refresh: true,
+      filters: [{ id: 'server', label: '服务器', value: '', options: [{ value: '', label: '全部服务器' }, ...servers.map((server) => ({ value: server.id, label: server.id }))] }],
+      meta: `${rows.length} 个工具`,
     });
   }
 
@@ -182,17 +234,37 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     if (!skills.length) return '<p class="meta">还没有技能目录。</p>';
     const rows = skills.map((skill) => ({
       cells: [
-        selectCellHtml({ value: skill.id, checked: draft.skills.has(skill.id), label: `允许 ${skill.id}`, attrs: { 'data-cap-skill': skill.id } }),
+        selectCellHtml({ value: skill.id, checked: draft.skillsAll || draft.skills.has(skill.id), label: `允许 ${skill.id}`, attrs: { 'data-cap-skill': skill.id } }),
         `<code>${esc(skill.id)}</code>`,
         `<span class="preset-tool-desc">${esc(skill.description || '—')}</span>`,
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '允许', width: '64px', select: true, selectAttrs: { 'data-select-group': 'skills' } }, { label: '技能', width: '220px' }, { label: '说明' }],
+      columns: [{ label: '允许', select: true, selectAttrs: { 'data-select-group': 'skills' } }, { label: '技能', width: '220px' }, { label: '说明' }],
       rows,
       pageSize: 10,
+      search: { placeholder: '搜索技能' },
+      refresh: true,
       meta: `${skills.length} 个技能`,
     });
+  }
+
+  const TABLE_RENDERERS = {
+    capEditorPlatform: platformTable,
+    capEditorServers: serverTable,
+    capEditorTools: toolTable,
+    capEditorSkills: skillTable,
+  };
+
+  function mountTable(hostId) {
+    const host = editorHost?.querySelector(`#${hostId}`);
+    if (!host) return;
+    host.innerHTML = TABLE_RENDERERS[hostId]();
+    initDataTables(host, { onRefresh: () => mountTable(hostId) });
+  }
+
+  function renderEditorTables() {
+    for (const hostId of EDITOR_TABLES) mountTable(hostId);
   }
 
   function renderEditor() {
@@ -204,77 +276,87 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     }
     editorHost.hidden = false;
     editorHost.innerHTML = `
-      <div class="card span-all">
+      <section class="card span-all">
         <div class="card-head">
-          <h2>编辑能力 · <code>${esc(draft.id)}</code></h2>
-          <div class="meta" id="capabilitySaveMsg" role="status"></div>
+          <div>
+            <h2>编辑能力 · <code>${esc(draft.id)}</code></h2>
+            <div class="meta">保存后重写 <code>capability.yml</code> 并重建 preset / agent / extensions 三份产物。</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn primary" type="button" id="capabilitySave">保存</button>
+            <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
+            <span class="meta" id="capabilitySaveMsg" role="status"></span>
+          </div>
         </div>
-        <div class="meta">保存后重写 <code>capability.yml</code> 并重建 preset / agent / extensions 三份产物。</div>
         <div id="capabilityEditorFields"></div>
-        <h3>平台工具</h3>
-        <div id="capEditorPlatform"></div>
-        <h3>Agent 模块</h3>
-        <div id="capEditorAgent"></div>
-        <h3>MCP 服务器</h3>
-        <div id="capEditorServers"></div>
-        <h3>MCP 工具</h3>
-        <div id="capEditorTools"></div>
-        <h3>技能</h3>
-        <div id="capEditorSkills"></div>
-        <div class="form-actions">
-          <button class="btn" type="button" id="capabilitySave">保存</button>
-          <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
-        </div>
-      </div>`;
+      </section>
+      <section class="card span-all"><h2>平台工具</h2><p class="meta">「平台」是 QQ 桥接提供的工具，「Agent」是装进 DSH 预设的运行时模块；两边共用这张允许表。</p><div id="capEditorPlatform"></div></section>
+      <section class="card span-all"><h2>MCP 服务器</h2><p class="meta">勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。</p><div id="capEditorServers"></div></section>
+      <section class="card span-all"><h2>MCP 工具</h2><p class="meta">只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。</p><div id="capEditorTools"></div></section>
+      <section class="card span-all"><h2>技能</h2><div id="capEditorSkills"></div></section>`;
     renderFields(editorHost.querySelector('#capabilityEditorFields'), [
       { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },
       { name: 'capabilitySafetyNotes', type: 'textarea', label: '安全补充', value: draft.notes, hint: '拼在 persona 安全段末尾；只写这套能力特有的约束。' },
       { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选方案的人看的说明，不进提示词。' },
     ], { columns: 1 });
-    editorHost.querySelector('#capEditorPlatform').innerHTML = platformTable();
-    editorHost.querySelector('#capEditorAgent').innerHTML = agentTable();
-    editorHost.querySelector('#capEditorServers').innerHTML = serverTable();
-    editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
-    editorHost.querySelector('#capEditorSkills').innerHTML = skillTable();
-    for (const host of editorHost.querySelectorAll('#capEditorPlatform, #capEditorAgent, #capEditorServers, #capEditorTools, #capEditorSkills')) {
-      initDataTables(host);
-    }
+    renderEditorTables();
   }
 
   function syncFromEvents(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement) || target.type !== 'checkbox') return;
-    const { capPlatform, capAgent, capServer, capSkill, capToolAllow, capToolDeny } = target.dataset;
+    const { capPlatform, capAgent, capServer, capSkill, capTool } = target.dataset;
     if (capPlatform) { target.checked ? draft.platform.add(capPlatform) : draft.platform.delete(capPlatform); return; }
     if (capAgent) { target.checked ? draft.agent.add(capAgent) : draft.agent.delete(capAgent); return; }
     if (capServer) {
-      target.checked ? draft.servers.add(capServer) : draft.servers.delete(capServer);
-      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
-      initDataTables(editorHost.querySelector('#capEditorTools'));
+      draft.mcpAll = false; // 手动增删服务器即放弃通配
+      if (target.checked) {
+        draft.servers.add(capServer);
+        if (!draft.serverTools.has(capServer)) draft.serverTools.set(capServer, '*');
+      } else {
+        draft.servers.delete(capServer);
+        draft.serverTools.delete(capServer);
+      }
+      mountTable('capEditorTools');
       return;
     }
-    if (capSkill) { target.checked ? draft.skills.add(capSkill) : draft.skills.delete(capSkill); return; }
-    if (capToolAllow) {
-      if (target.checked) { draft.toolAllow.add(capToolAllow); draft.toolDeny.delete(capToolAllow); }
-      else draft.toolAllow.delete(capToolAllow);
-      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
-      initDataTables(editorHost.querySelector('#capEditorTools'));
+    if (capSkill) {
+      // 通配状态下第一次改动要把 '*' 展开成目录里所有技能，再按本次勾选增减。
+      if (draft.skillsAll) {
+        draft.skills = new Set((extensions?.skills ?? []).map((skill) => skill.id));
+        draft.skillsAll = false;
+      }
+      target.checked ? draft.skills.add(capSkill) : draft.skills.delete(capSkill);
       return;
     }
-    if (capToolDeny) {
-      if (target.checked) { draft.toolDeny.add(capToolDeny); draft.toolAllow.delete(capToolDeny); }
-      else draft.toolDeny.delete(capToolDeny);
-      editorHost.querySelector('#capEditorTools').innerHTML = toolTable();
-      initDataTables(editorHost.querySelector('#capEditorTools'));
+    if (capTool) {
+      draft.mcpAll = false; // 收窄到具体工具后就不能再写通配
+      const [serverId, toolName] = capTool.split('::');
+      let selection = draft.serverTools.get(serverId);
+      // '*' 表示该服务器下全部工具：先展开成显式集合，再按本次勾选增减。
+      if (selection === '*' || selection === undefined) selection = new Set(toolNamesOf(serverId));
+      else selection = new Set(selection);
+      if (target.checked) selection.add(toolName); else selection.delete(toolName);
+      draft.serverTools.set(serverId, selection);
     }
   }
 
   async function save() {
     if (!draft) return;
+    const msg = editorHost.querySelector('#capabilitySaveMsg');
+    if (msg) msg.textContent = '保存中…';
     const platform = {};
     for (const entry of platformTools()) platform[entry.flag] = draft.platform.has(entry.flag);
     const agent = {};
     for (const entry of agentModules()) agent[entry.id] = draft.agent.has(entry.id);
+    // capability.yml 的 tools.mcp 是 [{server, tools: '*' | [名称]}] 列表，按这个形状写回。
+    // 没改过的通配配置保持 `- server: "*"`，避免把「以后新增的服务器也允许」悄悄收窄。
+    const mcp = draft.mcpAll
+      ? [{ server: '*', tools: '*' }]
+      : [...draft.servers].map((server) => {
+        const selection = draft.serverTools.get(server);
+        return { server, tools: selection === '*' || selection === undefined ? '*' : [...selection] };
+      });
     const payload = {
       label: editorHost.querySelector('#capabilityLabel')?.value?.trim() ?? '',
       note: editorHost.querySelector('#capabilityNote')?.value?.trim() ?? '',
@@ -282,19 +364,21 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       tools: {
         platform,
         agent,
-        mcp: { allow: [...draft.servers], tools: { allow: [...draft.toolAllow], deny: [...draft.toolDeny] } },
-        skills: [...draft.skills],
+        mcp,
+        skills: draft.skillsAll ? ['*'] : [...draft.skills],
       },
     };
     try {
       const result = await api(`/api/runtime/capabilities/${encodeURIComponent(draft.id)}`, 'PATCH', payload);
       if (!result?.ok) throw new Error(result?.error || '保存失败');
+      draft.label = payload.label;
+      draft.note = payload.note;
+      draft.notes = payload.safety.notes;
       showConsoleToast('能力预设已保存');
-      draft = null;
+      if (msg) msg.textContent = '✅ 已保存；生成物已重建';
       await load();
       onSaved?.();
     } catch (error) {
-      const msg = editorHost.querySelector('#capabilitySaveMsg');
       if (msg) msg.textContent = `保存失败：${error?.message ?? error}`;
     }
   }

@@ -1,11 +1,10 @@
 // 工具目录：平台工具与 Agent 工具的唯一定义处。
 //
-// 之前有三份清单：config.tools 的 37 个注册开关（控制台手写）、能力预设里的
-// 插件行与 qq-tool-restrict 白名单、以及 capability.yml 的 tools 可见集。
-// 这里把它们收敛成一份目录 + 一份风险分级：
-//   · 目录条目描述「这个工具是什么、来自哪一端、风险等级」；
-//   · 能力预设只存 tools.visible（平台工具白名单）；
-//   · 权限级别按风险等级决定「这个会话能用哪一类」。
+// 平台工具曾经另有一份 config.tools 的 37 个注册开关（控制台手写），和能力预设的
+// capability.yml 重复；现在收敛成这一份目录 + 能力预设里的 tools.platform：
+//   · 目录条目描述「这个工具是什么、来自哪一端、风险等级、默认是否注册」；
+//   · 能力预设只存 tools.platform（平台工具白名单，缺省按目录默认值）；
+//   · 注册开关由各能力预设的白名单求并集推导，config.json 不再保存工具开关。
 //
 // 目录本身是只读投影，不存配置。宿主工具名（qq_get_unread_messages 等）保留在
 // names 里，便于报错文案与旧配置迁移。
@@ -13,7 +12,7 @@
 /** 风险等级（越往后越危险）。 */
 export const TOOL_RISKS = Object.freeze(['read', 'send', 'state', 'write', 'exec', 'admin']);
 
-/** 平台侧（QQ 桥接提供的工具）。flag 即 config.tools 的键，也是能力预设里 tools.visible 的元素。 */
+/** 平台侧（QQ 桥接提供的工具）。flag 即能力预设 tools.platform 的键，也是推导注册开关时的键。 */
 export const PLATFORM_TOOLS = Object.freeze([
   { flag: 'getPrompt', label: '读取提示词', names: ['qq_get_prompt'], risk: 'read' },
   { flag: 'getUnread', label: '读取未读消息', names: ['qq_get_unread_messages'], risk: 'read' },
@@ -35,7 +34,7 @@ export const PLATFORM_TOOLS = Object.freeze([
   { flag: 'markRead', label: '标记已读', names: ['qq_mark_read'], risk: 'state' },
   { flag: 'setWakeConfig', label: '调整唤醒配置', names: ['qq_set_wake_config'], risk: 'state' },
   { flag: 'stickerNote', label: '记录表情含义', names: ['qq_sticker_note'], risk: 'state' },
-  { flag: 'setStickerRemark', label: '设置表情备注', names: ['qq_set_sticker_remark'], risk: 'state' },
+  { flag: 'setStickerRemark', label: '设置表情备注', names: ['qq_set_sticker_remark'], risk: 'state', defaultOff: true },
   { flag: 'collectSticker', label: '收藏表情', names: ['qq_collect_sticker'], risk: 'state' },
   { flag: 'sendGroup', label: '发送群消息', names: ['qq_send_group_message'], risk: 'send' },
   { flag: 'sendPrivate', label: '发送私聊消息', names: ['qq_send_private_message'], risk: 'send' },
@@ -44,26 +43,26 @@ export const PLATFORM_TOOLS = Object.freeze([
   { flag: 'sendMessage', label: '统一发送', names: ['qq_send_message'], risk: 'send' },
   { flag: 'sendPoke', label: '拍一拍', names: ['qq_send_poke'], risk: 'send' },
   { flag: 'sendSticker', label: '发表情', names: ['qq_send_sticker'], risk: 'send' },
-  { flag: 'sendVoice', label: '发语音', names: ['qq_send_voice', 'qq_list_voices'], risk: 'send' },
-  { flag: 'webImage', label: '搜索/发送网图', names: ['qq_search_images', 'qq_preview_image', 'qq_send_web_image'], risk: 'send' },
+  { flag: 'sendVoice', label: '发语音', names: ['qq_send_voice', 'qq_list_voices'], risk: 'send', defaultOff: true },
+  { flag: 'webImage', label: '搜索/发送网图', names: ['qq_search_images', 'qq_preview_image', 'qq_send_web_image'], risk: 'send', defaultOff: true },
   { flag: 'feedback', label: '向管理端反馈', names: ['qq_report_feedback'], risk: 'admin' },
   { flag: 'requestMode', label: '申请切换模式', names: ['qq_request_mode_change'], risk: 'admin' },
   { flag: 'crossGroup', label: '跨群查询', names: ['qq_cross_group_query'], risk: 'admin' },
-  { flag: 'ownerGroupAccess', label: 'owner 群权限管理', names: ['qq_owner_peek_group', 'qq_owner_group_rule'], risk: 'admin' },
-  { flag: 'ownerRelay', label: '让群会话代为转达', names: ['qq_ask_group_session'], risk: 'admin' },
+  { flag: 'ownerGroupAccess', label: 'owner 群权限管理', names: ['qq_owner_peek_group', 'qq_owner_group_rule'], risk: 'admin', defaultOff: true },
+  { flag: 'ownerRelay', label: '让群会话代为转达', names: ['qq_ask_group_session'], risk: 'admin', defaultOff: true },
   { flag: 'schedule', label: '定时任务', names: ['qq_schedule_create', 'qq_schedule_list', 'qq_schedule_update', 'qq_schedule_delete'], risk: 'admin' },
 ]);
 
 /** Agent 侧工具模块（装进 DSH 预设的插件行）。只用于展示与预设生成，不在桥接里逐调用拦截。 */
 export const AGENT_MODULES = Object.freeze([
-  { id: 'tool-fs', label: '文件读写', risk: 'write' },
-  { id: 'tool-fs-search', label: '文件检索', risk: 'read' },
-  { id: 'tool-pwsh', label: '执行命令', risk: 'exec' },
-  { id: 'tool-jobs', label: '后台任务', risk: 'exec' },
-  { id: 'tool-web', label: '联网搜索/抓取', risk: 'read' },
-  { id: 'tool-ask-user', label: '向用户提问', risk: 'read' },
-  { id: 'tool-todo', label: '任务列表', risk: 'read' },
-  { id: 'qq-approval-gate', label: '审批闸门', risk: 'admin' },
+  { id: 'tool-fs', label: '文件读写', risk: 'write', desc: '读写工作区里的文件' },
+  { id: 'tool-fs-search', label: '文件检索', risk: 'read', desc: '按名字或内容在工作区里查找文件' },
+  { id: 'tool-pwsh', label: '执行命令', risk: 'exec', desc: '执行 PowerShell 命令' },
+  { id: 'tool-jobs', label: '后台任务', risk: 'exec', desc: '启动、查看和结束后台任务' },
+  { id: 'tool-web', label: '联网搜索/抓取', risk: 'read', desc: '搜索网页并抓取正文' },
+  { id: 'tool-ask-user', label: '向用户提问', risk: 'read', desc: '需要确认时向用户发问并等待回答' },
+  { id: 'tool-todo', label: '任务列表', risk: 'read', desc: '维护多步骤任务的进度清单' },
+  { id: 'qq-approval-gate', label: '审批闸门', risk: 'admin', desc: '高风险操作的确认与放行' },
 ]);
 
 /**
@@ -87,7 +86,7 @@ export const LEVEL_ASKS = Object.freeze({
   full: Object.freeze([]),
 });
 
-/** 可被能力预设按会话收紧的平台工具（副作用类；读类只受 config.tools 注册控制）。 */
+/** 可被能力预设按会话收紧的平台工具（副作用类；读类只受平台工具表的注册结果控制）。 */
 export const CAPABILITY_GATED_RISKS = Object.freeze(['send', 'state', 'admin']);
 
 /** 工具来源两侧（平台 = QQ 桥接；Agent = DSH 运行时）。 */
@@ -95,7 +94,7 @@ export const TOOL_SIDES = Object.freeze(['platform', 'agent']);
 
 /**
  * 统一目录条目。平台工具以 flag 为 id，Agent 模块以 module id 为 id。
- * `gated` = 能力预设可以收紧；读类恒 false（只受 config.tools 注册开关控制）。
+ * `gated` = 能力预设可以收紧；读类恒 false（只受平台工具表的注册结果控制）。
  * `alwaysAllowed` 是这句话的正面表述，供生成器与 UI 直接读。
  */
 export const CATALOG_ENTRIES = Object.freeze([
@@ -118,10 +117,14 @@ export const CATALOG_ENTRIES = Object.freeze([
     provider: 'dsh',
     source: 'builtin',
     risk: module.risk,
+    desc: module.desc ?? '',
     gated: true,
     alwaysAllowed: false,
   })),
 ]);
+
+/** 内置能力：只读，可克隆但不可删除；自定义能力可以删。 */
+export const BUILTIN_CAPABILITY_IDS = Object.freeze(['agent-chat', 'agent-readonly', 'agent-workspace', 'agent-full']);
 
 /** 内置能力的默认工具集：平台全开；Agent 按能力递增（见 SPEC §3.4）。 */
 export const CAPABILITY_DEFAULTS = Object.freeze({

@@ -28,7 +28,7 @@
 - **能力预设 = DSH agent preset 目录**（`dsh/agent-presets/<id>/`）：`agent.cordis.yml`（`persona` 插件行里塞着 QQ 平台规则 + 能力安全文案、工具模块行、`qq-tool-restrict`、`qq-approval-gate`、`compaction`）、`preset.yml`（名称/order/`behavior: social-v1|v2`）、`qq-tool-restrict.mjs`（re-export 壳）。
 - 内置 5 个：`qq-chat`、`qq-chat-v2`（各 4 个工具）、`qq-agent-readonly`（+fs/fs-search）、`qq-agent-workspace`（+pwsh/jobs/approval-gate）、`qq-agent-full`（同 workspace）。
 - **行为档案**（`config/behaviors/*.yml`）只有节奏参数，**没有一句提示词**；`src/behaviors/kinds/{v1,v2}.mjs` 已有字段表与 `platform:'qq'`。
-- **工具授权三层**：① `config.tools` 44 布尔（MCP 是否注册，重启生效）② 能力预设插件行 + `qq-tool-restrict`（可见性，安装生效）③ `config.capabilities[id].grants.disable`（9 个写工具，桥接 403，即时）。
+- **工具授权三层**：① 能力预设的平台工具表（`capability.yml` 的 `tools.platform`，所有预设求并集 = MCP 注册面，重启生效）② 能力预设插件行 + `qq-tool-restrict`（单方案可见性，安装生效）③ 桥接的风险门槛（send/state/admin 可按会话收紧，read 恒可用，即时）。
 - **权限**：DSH 权限预设 = 沙箱（read-only/workspace-write/danger-full-access）+ 审批（ask/never）；`session.create` 无权限参数，建完用 `commands/execute(sessionId, '/permission <名>')` 钉住，**运行中可再执行改，即时生效**（`src/bridge.js:12726-12748`）。桥接现在按旧 level 映射：L1→read-only、L2→workspace-write、L3→qq-full-ask；群聊会话额外钉 read-only。
 - **`config.capabilities[id].sandbox` 是死字段**（只有保存/审计读它）。
 - **命令注册表**已存在（`/reset /status /role /silent /active`，支持 `permission: all|admin|owner`、`scope`），加 `/perm` 是小活。
@@ -123,13 +123,13 @@
 
 - **`risk`** 是权限级别的唯一判据：`read` / `send` / `write` / `exec` / `admin`。
 - **`side`** 区分「平台给的工具」与「agent 自带的工具」；页面按 side 分组展示。
-- 目录是**只读投影**：`config.tools`（注册开关）与 DSH 预设（安装）都是它的下游，不再各自维护一份清单。
+- 目录是**只读投影**：能力预设 `tools.platform` 的并集（注册面）与 DSH 预设（安装）都是它的下游，不再各自维护一份清单；`config.json` 不再有 `tools` 键。
 
 ### 5.2 三层 → 两层
 
 | 原层 | 处置 |
 |---|---|
-| ① `config.tools` 注册开关 | 保留，但降级为「平台工具目录的部署开关」，只在全局配置里，标注需重启 |
+| ① `config.tools` 注册开关 | **删除**：注册面改由能力预设 `tools.platform` 的并集推导（`platformFlags()`），没有单独的全局开关卡 |
 | ② DSH 预设可见性 | 由**能力预设的 `tools.visible`** 生成，不再手写 |
 | ③ `grants.disable` | **删除**；可执行性由「可见 ∩ 权限级别」推导，桥接按可见集在调用前拦截 |
 

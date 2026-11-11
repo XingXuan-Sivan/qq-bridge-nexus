@@ -22,6 +22,7 @@ import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
 import { formatKey } from './session/key.mjs';
 import { accessState, normalizeAccessConfig } from './session/access.mjs';
+import { platformFlags } from './capabilities/store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -37,6 +38,12 @@ function loadConfig() {
 }
 
 const cfg = loadConfig();
+// 平台工具的注册开关只认能力预设（capability.yml 的平台工具表并集），config.json 不再保存这份开关。
+// 注册发生在模块加载期，因此改能力预设后要重启 DSH 才会刷新工具清单。
+cfg.tools = platformFlags({
+  root: path.join(ROOT, 'dsh', 'agent-presets'),
+  log: (message) => console.error(message),
+});
 
 function getConfig() {
   return loadConfig();

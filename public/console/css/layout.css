@@ -84,6 +84,15 @@
   line-height:1;
   font-weight:400
 }
+/* ⌗ 笔画细、可见面积小，略放大；♥ 是实心字形，略收一点，保持同一视觉重量。 */
+.nav-icon-behavior {
+  width:20px;
+  font-size:19px
+}
+.nav-icon-persona {
+  width:18px;
+  font-size:21px
+}
 .nav-count,.nav-note {
   margin-left:auto;
   font-size:10px;

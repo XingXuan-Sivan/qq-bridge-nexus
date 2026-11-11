@@ -2,7 +2,6 @@
   <div class="page-tabs" role="tablist">
     <button class="page-tab active" type="button" role="tab" aria-selected="true" data-behavior-tab="behaviors">行为档案</button>
     <button class="page-tab" type="button" role="tab" aria-selected="false" data-behavior-tab="capabilities">能力预设</button>
-    <button class="page-tab" type="button" role="tab" aria-selected="false" data-behavior-tab="platform">平台话术</button>
   </div>
 
   <div class="page-stack" data-behavior-panel="behaviors">
@@ -30,8 +29,14 @@
 
     <section class="card span-all">
       <h2>行为提示词</h2>
-      <p class="meta">这一层只写「怎么当这个引擎」：等待、分条、主动、边界。平台话术（怎么说 QQ、群聊礼仪）在「平台话术」，身份底稿在「能力预设」。保存后下一轮唤醒注入。</p>
+      <p class="meta">这一层只写「怎么当这个引擎」：等待、分条、主动、边界。平台话术（怎么说 QQ、群聊礼仪）在同一标签页下方，身份底稿在「能力预设」。保存后下一轮唤醒注入。</p>
       <div data-behavior-fields="prompt"></div>
+    </section>
+
+    <section class="card span-all">
+      <h2>平台话术</h2>
+      <p class="meta">这一层只写「在这个平台怎么当人」：群聊礼仪、引用与分条、该说不该说、发送禁令。占位符 <code>{platform}</code>、<code>{displayName}</code>、<code>{owner}</code> 由平台适配器渲染。</p>
+      <div data-behavior-fields="platform"></div>
     </section>
   </div>
 
@@ -44,15 +49,7 @@
         </div>
       </div>
       <div id="capabilityTable"></div>
-      <div id="capabilityEditor" hidden></div>
     </section>
-  </div>
-
-  <div class="page-stack" data-behavior-panel="platform" hidden>
-    <section class="card span-all">
-      <h2>平台话术</h2>
-      <p class="meta">这一层只写「在这个平台怎么当人」：群聊礼仪、引用与分条、该说不该说、发送禁令。占位符 <code>{platform}</code>、<code>{displayName}</code>、<code>{owner}</code> 由平台适配器渲染。</p>
-      <div data-behavior-fields="platform"></div>
-    </section>
+    <div id="capabilityEditor" class="behavior-groups" hidden></div>
   </div>
 </section>

@@ -169,18 +169,20 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
   });
 });
 
-test('⑤ 控制台：全局配置的「运行与模型」有上下文压缩卡片', () => {
+test('⑤ 控制台：全局配置的「行为与模型」有上下文压缩卡片', () => {
   const html = readConsoleSource();
   // 卡片宿主在 config/page.html，控件由 pages/config/compact.js 生成。
   assert.match(html, /id="section-compact-config"/);
   assert.match(html, /data-config-compact/);
+  assert.match(html, /行为与模型/);
   // 控件已改成字段规格（compact.js 的 FIELDS），源文件里不再有拼好的 input HTML；
-  // 这里按规格字段断言：两个压缩方式、阈值范围、保存按钮。
+  // 这里按规格字段断言：两个压缩方式、阈值范围。
   assert.match(html, /name: 'compactMode'/);
   for (const v of ['early', 'dsh']) assert.match(html, new RegExp(`value: '${v}'`), v);
   assert.match(html, /name: 'compactWan'[\s\S]*?min: 5[\s\S]*?max: 80/);
-  // 按钮 id 写在 compact.js 的模板里，按 id 名匹配即可。
-  assert.match(html, /compactSave/);
+  // 保存统一走页面保存栏：压缩卡导出 compactSection，不再有自己的保存按钮。
+  assert.match(html, /export const compactSection/);
+  assert.ok(!/compactSave/.test(html), '压缩卡不应再有自己的保存按钮');
   // 运行总览不再保留压缩卡（整块已搬到全局配置）。
   assert.ok(!/id="section-compact"/.test(html), '总览不应再有上下文压缩卡');
 });

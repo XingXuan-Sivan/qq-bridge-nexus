@@ -2,6 +2,24 @@
 .behavior-page .behavior-groups {
   display: contents;
 }
+/* 能力列表里的模块/技能 id 排成可换行的代码片，避免挤成一串。 */
+.behavior-page .cap-code-list,
+.behavior-page .cap-tool-names {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 合并后的工具表：说明列里列宿主工具名，类型列放「平台/Agent + 风险」标签。 */
+.behavior-page .cap-tool-names code { font-size: 11px; }
+.behavior-page .cap-pill-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* display:contents 会盖掉 UA 的 [hidden]{display:none}，编辑区收起时补一条。 */
+.behavior-page #capabilityEditor[hidden] {
+  display: none;
+}
 .behavior-page .behavior-groups .form-section--card {
   grid-column: 1 / -1;
   margin: 0;

@@ -142,13 +142,12 @@
           "tool-todo": true,
           "qq-approval-gate": false
         },
-        "mcp": {
-          "allow": [],
-          "tools": {
-            "allow": [],
-            "deny": []
+        "mcp": [
+          {
+            "server": "*",
+            "tools": "*"
           }
-        },
+        ],
         "skills": [
           "*"
         ]
@@ -217,6 +216,35 @@
     "path": "/api/security",
     "body": {
       "interceptNotify": false
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/access",
+    "body": {
+      "passive": {
+        "mode": "allow",
+        "entries": [
+          "qq:group:123456789",
+          "qq:group:200002"
+        ]
+      },
+      "proactive": {
+        "mode": "allow",
+        "entries": [
+          "qq:group:123456789",
+          "qq:group:100003"
+        ]
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/config/permission",
+    "body": {
+      "default": "read-only",
+      "allowFull": true,
+      "fullTtlMin": 30
     }
   },
   {

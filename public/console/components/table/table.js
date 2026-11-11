@@ -36,11 +36,23 @@ export function selectCellHtml({ value, checked = false, disabled = false, label
 }
 
 /**
+ * 列宽用 `<colgroup><col width="…">` 表达：width 是 HTML 表现属性，不受 CSP 对 style 的拦截；
+ * 没写宽度的列由 table-layout:fixed 均分剩余宽度。多选列缺省 44（只容纳一个复选框）。
+ */
+function colgroupHtml(columns) {
+  const cells = columns.map((column) => {
+    const width = column.width ?? (column.select ? 60 : '');
+    return `<col${width === '' ? '' : ` width="${String(width).replace('px', '')}"`}>`;
+  }).join('');
+  return cells ? `<colgroup>${cells}</colgroup>` : '';
+}
+
+/**
  * @param {Array<{label:string, width?:number|string, select?:boolean, selectAttrs?:object}>} columns
  * @param {Array<Array<string>>} rows 单元格已是 HTML 片段，调用方自己 esc
  */
 export function tableHtml(columns, rows) {
-  const head = `<thead><tr>${columns.map((column) => `<th${column.width ? ` data-w="${String(column.width).replace('px', '')}"` : ''}${column.select ? ' class="table-select"' : ''}>${column.select ? selectHeadCell(column) : esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr>${columns.map((column) => `<th${column.select ? ' class="table-select"' : ''}>${column.select ? selectHeadCell(column) : esc(column.label)}</th>`).join('')}</tr></thead>`;
   // 行可以只给单元格数组，也可以给 `{ cells, attrs }`：attrs 落到 <tr> 上，
   // 供工具栏的筛选器按 data-filter-<id> 读取（例如会话页按平台 / 类型筛）。
   const body = rows.map((row) => {
@@ -49,7 +61,7 @@ export function tableHtml(columns, rows) {
       .map(([name, value]) => ` ${esc(name)}="${esc(String(value))}"`).join('');
     return `<tr${attrs}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
   }).join('');
-  return `<table${columns.some((column) => column.select) ? ' data-select' : ''}>${head}<tbody>${body}</tbody></table>`;
+  return `<table${columns.some((column) => column.select) ? ' data-select' : ''}>${colgroupHtml(columns)}${head}<tbody>${body}</tbody></table>`;
 }
 
 /**
@@ -58,8 +70,7 @@ export function tableHtml(columns, rows) {
  * @param {{columns: Array<{label:string, width?:number|string}>, groups: Array<{label:string, key?:string, rows: Array<Array<string>>}>, openIndex?: number}} options
  */
 export function groupedTableHtml({ columns = [], groups = [], openIndex = 0 } = {}) {
-  const width = (column) => (column.width ? ` data-w="${String(column.width).replace('px', '')}"` : '');
-  const head = `<thead><tr>${columns.map((column) => `<th${width(column)}>${esc(column.label)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr>${columns.map((column) => `<th>${esc(column.label)}</th>`).join('')}</tr></thead>`;
   const body = groups.map((group, index) => {
     const key = group.key ?? group.label ?? String(index);
     const open = index === openIndex;
@@ -70,7 +81,7 @@ export function groupedTableHtml({ columns = [], groups = [], openIndex = 0 } = 
       + cells.map((cell) => `<td>${cell}</td>`).join('') + '</tr>').join('');
     return groupRow + childRows;
   }).join('');
-  return `<div class="table-wrap"><table class="table-grouped">${head}<tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="table-grouped">${colgroupHtml(columns)}${head}<tbody>${body}</tbody></table></div>`;
 }
 
 /**
@@ -191,7 +202,7 @@ export function tableToolbarHtml({ refresh = false, filters = [], search = null,
  * @param {string} [options.empty] 无数据/无匹配时的提示
  * @param {boolean} [options.pager=true]
  * @param {{label?:string, width?:number|string, attrs?:object}} [options.select] 给了就在最前面加一列多选（表头即全选）
- *   多选列默认 44px（只容纳一个复选框）。表体是 table-layout:fixed，若所有列都写了 width，
+ *   多选列默认 60px（复选框 + 「允许」这类两字表头不折行）。表体是 table-layout:fixed，若所有列都写了 width，
  *   剩余宽度会按比例摊到每一列，把多选列也撑宽——所以用了 select 的表要留一列不写 width 来吸收剩余宽度。
  */
 export function dataTableHtml({
@@ -220,7 +231,7 @@ export function dataTableHtml({
   </div>`
     : '';
   const allColumns = select
-    ? [{ label: select.label || '全选', width: select.width || '44px', select: true, selectAttrs: select.attrs || {} }, ...columns]
+    ? [{ label: select.label || '全选', width: select.width || '60px', select: true, selectAttrs: select.attrs || {} }, ...columns]
     : columns;
   return `<div class="data-table" data-table data-page-size="${esc(String(pageSize))}" data-empty="${esc(empty)}">
   ${toolbar}

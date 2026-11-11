@@ -66,6 +66,7 @@
 ```
 
 - 覆盖：`config.promptBlocks[id] = { enabled, maxChars, priority, scope, settings }`。
+- `core-persona` 是「不进注册表」的虚拟块：人格卡始终注入，覆盖只接受 `maxChars`（1000~20000，缺省 8000）；控制台注入块页把它显示成「常开」，只留上限输入。`config.role.maxInjectChars` 与 `limits.personaInjectChars` 已在启动迁移时删除。
 - 总预算：`config.limits.promptAppendChars`（从 `plugins.json` 迁入）。
 - 投递记账：`state/prompt-blocks.json` 只记录“这次投递了哪些块、各多少字、指纹”，不存配置。
 - 插件 manifest 只能声明 `owner/slot/timing/scopes/settings`，内核校验（非法 slot/scope 拒绝注册并记日志）。

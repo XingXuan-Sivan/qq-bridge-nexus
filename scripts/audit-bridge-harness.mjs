@@ -73,7 +73,7 @@ import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDir
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from '../src/capabilities/store.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from '../src/capabilities/store.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -107,7 +107,7 @@ import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {} } = {}) {
+export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {} } = {}) {
   // 取 realpath：macOS 默认的 /var/folders 是 /private/var/folders 的软链接，而语音库解析会返回 realpath（挡 symlink 逃逸），
   // 不先归一的话「库内路径」断言在真实 Mac 上会因为前缀不同而失败。
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qq-audit-bridge-')));
@@ -140,10 +140,17 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     source[kind] = mergeBehavior(source[kind] || {}, behavior[kind] || {});
     fs.writeFileSync(path.join(temp, 'config/behaviors', `${id}.yml`), stringifyYaml(source));
   }
-  for (const id of PRESET_IDS) {
-    const dir = path.join(temp, 'dsh/agent-presets', id);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.copyFileSync(path.join(root, 'dsh/agent-presets', id, 'preset.yml'), path.join(dir, 'preset.yml'));
+  // 能力预设目录整份复制：注册面由各预设的 capability.yml 求并集推导（platformFlags），
+  // 只复制 preset.yml 会让临时根目录缺少 capability.yml、注册面变成全关。
+  const presetsSrc = path.join(root, 'dsh/agent-presets');
+  if (fs.existsSync(presetsSrc)) fs.cpSync(presetsSrc, path.join(temp, 'dsh/agent-presets'), { recursive: true });
+  for (const id of PRESET_IDS) fs.mkdirSync(path.join(temp, 'dsh/agent-presets', id), { recursive: true });
+  // 注册面由能力预设的平台工具表推导，测试要开某个工具就改预设，而不是往 config.tools 塞键。
+  if (Object.keys(platformTools).length) {
+    const file = path.join(temp, 'dsh/agent-presets', 'agent-chat', 'capability.yml');
+    const doc = parseYaml(fs.readFileSync(file, 'utf8'));
+    doc.tools = { ...(doc.tools ?? {}), platform: { ...(doc.tools?.platform ?? {}), ...platformTools } };
+    fs.writeFileSync(file, stringifyYaml(doc));
   }
   // r4：额外状态文件（用于测试"启动时读到损坏/旧版文件"这类路径）。
   for (const [rel, content] of Object.entries(files)) {
@@ -350,6 +357,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createCapabilityStore,
     capabilityAllowsFlag,
     visiblePlatformFlags,
+    platformFlags,
     capabilityCovers,
     createAdapterRegistry,
     builtinAdapters,

@@ -76,7 +76,8 @@ function call(port, pathname, { method = 'GET', headers = {}, body } = {}) {
 async function withHarness(run, { webImage = true, vision = 'yes', fetch: fakeGatewayFetch } = {}) {
   const fetched = { pages: [], images: [] };
   const h = await bridgeHarness({
-    config: { dsh: { authToken: 'fixture-only', vision }, tools: { webImage } },
+    config: { dsh: { authToken: 'fixture-only', vision } },
+    platformTools: { webImage },
     globals: {
       safeFetch: async (url) => { fetched.pages.push(url); return { url, statusCode: 200, truncated: false, body: PAGE }; },
       safeFetchBuffer: async (url) => { fetched.images.push(url); return { url, statusCode: 200, buffer: PNG }; },

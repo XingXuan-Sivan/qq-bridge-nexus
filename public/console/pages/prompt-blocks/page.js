@@ -80,37 +80,70 @@ function rowHtml(block) {
     : (TIMING_LABEL[block.timing] || block.timing || '每次唤醒');
   const profiles = (block.profiles ?? ['wake']).map((profile) => `<span class="pill">${esc(PROFILE_LABEL[profile] || profile)}</span>`).join('');
   const title = detail ? ` title="${esc(detail)}"` : '';
-  return [
-    `<button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button>`,
-    `<code>${esc(block.id)}</code><div class="meta">${esc(block.label || '')}</div>`,
-    `<span class="pill">${esc(slotLabel(block.slot))}</span>`,
-    `<div class="meta"${title}>${esc(timing)}</div><div class="row">${profiles}</div>`,
-    `<span class="meta">${esc(owner)}</span>`,
-    `<input type="number" data-block-max="${esc(block.id)}" min="0" max="200000" step="100" value="${block.maxChars ?? ''}" placeholder="跟随默认" aria-label="${esc(block.id)} 上限（留空跟随默认）">`,
-    `<span class="meta">${esc(chars)}</span>`,
-    `<span class="${cls}"${title}>${esc(label)}</span>`,
-    `<span class="meta">${esc(when)}</span>`,
-  ];
+  // 人格卡这类「不经过注册表」的虚拟块没有真正的开关键：人格卡始终注入，只让它配上限。
+  const enabledCell = block.synthetic
+    ? '<span class="pill">常开</span>'
+    : `<button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button>`;
+  return {
+    // 行属性给工具栏的两个筛选器用：槽位 + 来源（核心 / 插件 / 人格卡虚拟块）。
+    attrs: {
+      'data-filter-slot': block.slot || 'core',
+      'data-filter-source': block.synthetic ? 'persona' : (block.pluginId === 'core' ? 'core' : 'plugin'),
+    },
+    cells: [
+      enabledCell,
+      `<code>${esc(block.id)}</code><div class="meta">${esc(block.label || '')}</div>`,
+      `<span class="pill">${esc(slotLabel(block.slot))}</span>`,
+      `<div class="meta"${title}>${esc(timing)}</div><div class="row">${profiles}</div>`,
+      `<span class="meta">${esc(owner)}</span>`,
+      `<input type="number" data-block-max="${esc(block.id)}" min="0" max="200000" step="100" value="${block.maxChars ?? ''}" placeholder="跟随默认" aria-label="${esc(block.id)} 上限（留空跟随默认）">`,
+      `<span class="meta">${esc(chars)}</span>`,
+      `<span class="${cls}"${title}>${esc(label)}</span>`,
+      `<span class="meta">${esc(when)}</span>`,
+    ],
+  };
 }
+
+const SLOT_ORDER = ['head', 'identity', 'behavior', 'resources', 'situation', 'action', 'tail', 'core'];
+function slotFilterOptions(blocks) {
+  const present = new Set(blocks.map((block) => block.slot || 'core'));
+  return [{ value: '', label: '全部槽位' }].concat(
+    SLOT_ORDER.filter((slot) => present.has(slot)).map((slot) => ({ value: slot, label: slotLabel(slot) })),
+  );
+}
+
 function tableMarkup() {
   const blocks = Array.isArray(payload?.blocks) ? payload.blocks : [];
   if (!blocks.length) return '<div class="meta">还没有注册任何注入块。</div>';
   return dataTableHtml({
     columns: [
-      { label: '启用', width: '88' },
-      { label: '块', width: '250' },
-      { label: '槽位', width: '104' },
-      { label: '时机', width: '220' },
-      { label: '来源', width: '96' },
-      { label: '上限', width: '250' },
-      { label: '最近字数', width: '96' },
+      { label: '启用', width: '76' },
+      { label: '块', width: '220' },
+      { label: '槽位', width: '92' },
+      { label: '时机', width: '180' },
+      { label: '来源', width: '78' },
+      { label: '上限', width: '170' },
+      { label: '最近字数', width: '90' },
       { label: '状态' },
-      { label: '最近', width: '110' },
+      { label: '最近', width: '96' },
     ],
     rows: blocks.map(rowHtml),
     pageSize: 20,
     search: { placeholder: '搜索块名 / id' },
     refresh: { label: '重新读取' },
+    filters: [
+      { id: 'slot', label: '槽位', options: slotFilterOptions(blocks) },
+      {
+        id: 'source',
+        label: '来源',
+        options: [
+          { value: '', label: '全部来源' },
+          { value: 'core', label: '核心' },
+          { value: 'plugin', label: '插件' },
+          { value: 'persona', label: '人格卡' },
+        ],
+      },
+    ],
     meta: `共 ${blocks.length} 块`,
     actions: '<button class="btn primary" type="button" id="pbSave">保存修改</button>',
     empty: '没有匹配的注入块。',
@@ -167,11 +200,11 @@ async function load() {
 
 function collectOverrides() {
   const overrides = {};
-  document.querySelectorAll('[data-block-enabled]').forEach((switchEl) => {
-    const id = switchEl.dataset.blockEnabled;
-    const maxInput = document.querySelector(`[data-block-max="${CSS.escape(id)}"]`);
-    const raw = maxInput?.value?.trim() ?? '';
-    overrides[id] = { enabled: getSwitch(switchEl), maxChars: raw === '' ? null : Number(raw) };
+  document.querySelectorAll('[data-block-max]').forEach((maxInput) => {
+    const id = maxInput.dataset.blockMax;
+    const switchEl = document.querySelector(`[data-block-enabled="${CSS.escape(id)}"]`);
+    const raw = maxInput.value.trim();
+    overrides[id] = { enabled: switchEl ? getSwitch(switchEl) : true, maxChars: raw === '' ? null : Number(raw) };
   });
   return overrides;
 }
@@ -191,11 +224,12 @@ async function save() {
       promptBlocks: overrides,
       limits: { total, perBlockDefault },
     });
-    payload = { ...payload, ...result, blocks: result?.coreBlocks?.blocks ?? payload?.blocks, limits: { ...(payload?.limits ?? {}), ...(result?.limits ?? {}) } };
     if (msg) msg.textContent = '已保存，下一轮唤醒生效';
     showConsoleToast('注入块设置已保存');
-    renderSummary();
-    renderTable();
+    // 重新读取：PATCH 只回 coreBlocks.status()，不含插件块和人格卡的虚拟块，
+    // 直接拿它覆盖会把整张表换成一小部分。
+    if (result?.ok === false) throw new Error(result?.error || '保存失败');
+    await load();
   } catch (error) {
     if (msg) msg.textContent = `保存失败：${error?.message || '未知错误'}`;
   }

@@ -91,7 +91,7 @@ import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from './capabilities/store.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from './capabilities/store.mjs';
 // P10.9：平台话术 = config/platform/<id>.yml，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './platform/prompt.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
@@ -470,9 +470,10 @@ const roleHintCache = new Map();
 const ROLE_NAME_MAX = 40;
 const ROLE_CONTENT_MAX_BYTES = 64 * 1024;
 // 注入上限：**按模式筛完小节之后**再截断，避免另一模式的专属内容白白占掉预算。
-// 默认 6000（沿用历史值，是每条约 4~6k token 的成本护栏），可用 config.json 的
-// role.maxInjectChars 调整（1000~20000）；启动时由 applyRoleInjectLimit() 写入。
+// 唯一配置来源是注入块 `core-persona` 的 maxChars（控制台「注入块」页可改）；
+// 旧键 limits.personaInjectChars / role.maxInjectChars 只在启动时迁移一次，迁完即删。
 const ROLE_INJECT_MAX_CHARS_DEFAULT = 8000;
+const PERSONA_BLOCK_ID = 'core-persona';
 let roleInjectMaxChars = ROLE_INJECT_MAX_CHARS_DEFAULT;
 // 保存人格卡后怎么生效：null/nextWake = 下次唤醒读卡；immediate = 立即唤醒读卡。
 // 这是全局默认值（config.json role.saveApply），编辑人格时不再逐次选择。
@@ -481,6 +482,11 @@ function applyRoleInjectLimit(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return ROLE_INJECT_MAX_CHARS_DEFAULT;
   return Math.min(20000, Math.max(1000, Math.round(n)));
+}
+/** 人格卡上限：只认 `promptBlocks['core-persona'].maxChars`，未配置时用默认 8000。 */
+function personaInjectCharsFromBlocks(promptBlocks) {
+  const value = Number(promptBlocks?.[PERSONA_BLOCK_ID]?.maxChars);
+  return Number.isInteger(value) && value > 0 ? applyRoleInjectLimit(value) : ROLE_INJECT_MAX_CHARS_DEFAULT;
 }
 // off / clear / default 是 /role 命令的关键字（本会话不挂卡 / 回到全局默认），不能当人格名
 const ROLE_RESERVED_NAMES = new Set(['README', 'off', 'clear', 'default']);
@@ -510,7 +516,7 @@ function roleWarnings(content, mode = 'v2') {
   const stats = roleCharStats(text);
   const injected = mode === 'v1' ? stats.v1 : stats.v2;
   if (injected > roleInjectMaxChars) {
-    warnings.push(`超出注入上限：当前模式实际注入 ${injected} 字符，只有前 ${roleInjectMaxChars} 字符会进入提示词（可在配置里调 role.maxInjectChars）`);
+    warnings.push(`超出注入上限：当前模式实际注入 ${injected} 字符，只有前 ${roleInjectMaxChars} 字符会进入提示词（可在「注入块」页调人格卡上限）`);
   }
   // 只在「没有用模式标记分开」的小节上提示兜底过滤，避免对已正确标记的卡片误报。
   const untagged = parseRoleSections(text)
@@ -1151,17 +1157,6 @@ function normalizePromptBlockLimits(raw) {
   return out;
 }
 
-/**
- * 人格卡注入上限（字符）：新键 `limits.personaInjectChars`，旧键 `role.maxInjectChars` 只读兼容。
- */
-function normalizePersonaInjectChars(raw) {
-  const fromLimits = Number(raw?.limits?.personaInjectChars);
-  if (Number.isInteger(fromLimits) && fromLimits > 0) return fromLimits;
-  const legacy = Number(raw?.role?.maxInjectChars);
-  if (Number.isInteger(legacy) && legacy > 0) return legacy;
-  return ROLE_INJECT_MAX_CHARS_DEFAULT;
-}
-
 /** 运行方案 id：只接受与注册表同形的短横线小写 id，非法值一律视为「没配」。 */
 function normalizeRuntimePlanId(value) {
   if (typeof value !== 'string') return '';
@@ -1581,16 +1576,55 @@ function loadConfig() {
   // 看图能力：auto = 按已知表（未知的模型按不能看图，图片降级成文字）；yes / no = 管理员手动指定。
   cfg.dsh.vision = normalizeVisionSetting(cfg.dsh.vision);
 
-  // 人格卡注入上限（字符）。历史硬编码 6000，现在可配：每条约 4~6k token 的成本护栏。
-  // 存储键已迁到 `limits.personaInjectChars`；`role.maxInjectChars` 只读兼容。
-  // 先展开旧 `role` 再写 maxInjectChars，保证新键优先于旧键。
+  // 权限配置归一化；随后统一写回 config.json（见下个块）。
   cfg.permission = normalizePermissionConfig(file.permission);
+  // 归一化结果写回 config.json：旧版本只在内存里补默认值，文件里没有 permission 段，
+  // 于是「控制台看到的」和「改文件的人看到的」是两套。缺段或值非法时自愈一次，合法值不动。
+  {
+    const configFile = path.join(ROOT, 'config.json');
+    const stored = readConfigObject(configFile).permission;
+    const sameAsStored = stored && typeof stored === 'object'
+      && stored.default === cfg.permission.default
+      && stored.allowFull === cfg.permission.allowFull
+      && stored.fullTtlMin === cfg.permission.fullTtlMin;
+    if (!sameAsStored) {
+      try {
+        atomicWriteJson(configFile, { ...readConfigObject(configFile), permission: cfg.permission });
+        log(`权限配置已归一化到 config.json：${cfg.permission.default} / 完全访问 ${cfg.permission.allowFull ? '开' : '关'} / 临时授权 ${cfg.permission.fullTtlMin} 分钟`);
+      } catch (error) {
+        log(`⚠️ 权限配置写回 config.json 失败：${error?.message ?? error}`);
+      }
+    }
+  }
   cfg.behaviorPrompt = normalizeBehaviorPrompt(file.behaviorPrompt);
-  cfg.role = { ...(file.role ?? {}), maxInjectChars: normalizePersonaInjectChars(file) };
-  roleInjectMaxChars = applyRoleInjectLimit(cfg.role.maxInjectChars);
-  roleSaveApplyDefault = cfg.role.saveApply === 'immediate' ? 'immediate' : 'nextWake';
-  if (roleInjectMaxChars !== cfg.role.maxInjectChars) {
-    log(`人格注入上限已按范围校正为 ${roleInjectMaxChars} 字符（配置值 ${cfg.role.maxInjectChars}，允许 1000~20000）`);
+  // 人格卡注入上限：注入块 `core-persona` 是唯一来源；旧键只做一次性迁移。
+  // 迁移后 config.json 里不再保留 `limits.personaInjectChars` / `role.maxInjectChars`。
+  {
+    const legacy = Number(file.limits?.personaInjectChars) || Number(file.role?.maxInjectChars) || 0;
+    const current = Number(cfg.promptBlocks[PERSONA_BLOCK_ID]?.maxChars);
+    if (!(Number.isInteger(current) && current > 0) && legacy > 0) {
+      cfg.promptBlocks = {
+        ...cfg.promptBlocks,
+        [PERSONA_BLOCK_ID]: { ...(cfg.promptBlocks[PERSONA_BLOCK_ID] ?? {}), maxChars: applyRoleInjectLimit(legacy) },
+      };
+    }
+    const hasLegacyKeys = Boolean(file.limits && 'personaInjectChars' in file.limits)
+      || Boolean(file.role && 'maxInjectChars' in file.role);
+    if (hasLegacyKeys) {
+      try {
+        const configFile = path.join(ROOT, 'config.json');
+        const fresh = readConfigObject(configFile);
+        if (fresh.limits && 'personaInjectChars' in fresh.limits) delete fresh.limits.personaInjectChars;
+        if (fresh.role && 'maxInjectChars' in fresh.role) delete fresh.role.maxInjectChars;
+        atomicWriteJson(configFile, { ...fresh, promptBlocks: cfg.promptBlocks });
+        log('人格卡注入上限已迁到注入块 core-persona.maxChars，旧键已从 config.json 删除');
+      } catch (error) {
+        log(`⚠️ 人格卡注入上限迁移写盘失败：${error?.message ?? error}`);
+      }
+    }
+    roleInjectMaxChars = personaInjectCharsFromBlocks(cfg.promptBlocks);
+    cfg.role = { ...(file.role ?? {}), saveApply: file.role?.saveApply === 'immediate' ? 'immediate' : 'nextWake' };
+    roleSaveApplyDefault = cfg.role.saveApply;
   }
 
   // ── v0.3.0 新配置段（字段说明见 docs/guides/CONFIGURATION.md）──────────────────
@@ -1638,7 +1672,15 @@ function loadConfig() {
   cfg.crossGroup = { enabled: false, links: [], ...(file.crossGroup ?? {}) };
 
   // 系统级 v2 配置：从旧 socialV2 拆出，迁移后只保留 config.* 这些新键。
-  cfg.tools = { ...cfg.socialV2.tools, ...(file.tools ?? {}) };
+  // 平台工具的注册开关不再单独配置：由各能力预设「平台工具」表的并集推导，
+  // 唯一源是 dsh/agent-presets/<id>/capability.yml；单会话仍由 capabilityAllows 收紧副作用工具。
+  cfg.tools = platformFlags({
+    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    log: (message) => log(`⚠️ ${message}`),
+  });
+  // 旧的读点（webImage / ownerRelay / ownerGroupAccess / sendVoice / setStickerRemark）
+  // 仍看 socialV2.tools；把它对齐到推导后的注册开关，避免两套开关各说各话。
+  cfg.socialV2.tools = { ...cfg.socialV2.tools, ...cfg.tools };
   cfg.compact = normalizeCompactConfig(file.compact ?? cfg.socialV2.compact);
   cfg.voice = { ...cfg.socialV2.voice, ...(file.voice ?? {}) };
   cfg.media = { ...cfg.socialV2.media, ...(file.media ?? {}) };
@@ -1648,7 +1690,6 @@ function loadConfig() {
       maxSendPerHour: Number(file.limits?.send?.maxSendPerHour ?? cfg.socialV2.send?.maxSendPerHour) || 0,
     },
     initialPromptMaxChars: Number(file.limits?.initialPromptMaxChars ?? cfg.socialV2.initialPromptMaxChars) || 2000,
-    personaInjectChars: cfg.role.maxInjectChars,
     promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
 
@@ -6255,16 +6296,36 @@ async function main() {
         // 注入块：读配置与运行状态、预览渲染（写配置仍走 /api/config/promptBlocks）。
         if (req.method === 'GET' && url.pathname === '/api/prompt-blocks') {
           const status = corePromptBlocks.status();
+          // 人格卡不经过注册表（它由唤醒流程直接拼进提示词），但它的上限和块级配置同源，
+          // 所以在这里补一行「虚拟块」，让控制台用同一张表管它。
+          const personaLimit = Number(cfg.promptBlocks[PERSONA_BLOCK_ID]?.maxChars);
+          const personaLimitValue = Number.isInteger(personaLimit) && personaLimit > 0 ? personaLimit : null;
           sendJson({
             ok: true,
             profiles: PROMPT_BLOCK_PROFILES,
             slots: PROMPT_BLOCK_SLOTS,
             limits: {
               ...cfg.limits.promptBlocks,
-              personaInjectChars: cfg.limits.personaInjectChars,
               roleInjectMaxChars: roleInjectMaxChars,
             },
-            blocks: status.blocks,
+            blocks: [
+              ...status.blocks,
+              {
+                id: PERSONA_BLOCK_ID,
+                label: '人格卡（人格提示词正文）',
+                owner: 'core',
+                pluginId: 'core',
+                slot: 'head',
+                timing: 'every-wake',
+                profiles: ['wake', 'reminder'],
+                enabled: true,
+                maxChars: personaLimitValue,
+                lastChars: 0,
+                calls: 0,
+                reasons: ['persona'],
+                synthetic: true,
+              },
+            ],
             stats: { total: status.total, maxTotalChars: status.maxTotalChars, renders: status.renders, injected: status.injected, skipped: status.skipped },
           });
           return;
@@ -6301,10 +6362,16 @@ async function main() {
               merged[id] = next;
             }
             const normalized = normalizePromptBlocks(merged);
+            // 人格卡上限也在这份配置里：夹到 1000~20000，并在写盘后立刻作用到截断点。
+            const personaMax = Number(normalized[PERSONA_BLOCK_ID]?.maxChars);
+            if (Number.isInteger(personaMax) && personaMax > 0) {
+              normalized[PERSONA_BLOCK_ID] = { ...normalized[PERSONA_BLOCK_ID], maxChars: applyRoleInjectLimit(personaMax) };
+            }
             const limits = body?.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
               ? normalizePromptBlockLimits({ ...(raw.limits?.promptBlocks ?? {}), ...body.limits })
               : normalizePromptBlockLimits(raw.limits?.promptBlocks);
             cfg.promptBlocks = normalized;
+            roleInjectMaxChars = personaInjectCharsFromBlocks(normalized);
             cfg.limits.promptBlocks = limits;
             registerCoreBlocks();
             atomicWriteJson(file, { ...raw, promptBlocks: normalized, limits: { ...(raw.limits ?? {}), promptBlocks: limits } });
@@ -7552,25 +7619,24 @@ async function main() {
         }
         if (url.pathname === '/api/roles/limit' && (req.method === 'GET' || req.method === 'POST')) {
           if (req.method === 'GET') {
-            sendJson({ ok: true, limits: { injectMaxChars: roleInjectMaxChars }, persona: { saveApply: roleSaveApplyDefault } });
+            // 注入上限只读：唯一来源是注入块 core-persona，改它请走「注入块」页。
+            sendJson({
+              ok: true,
+              limits: { injectMaxChars: roleInjectMaxChars, source: `promptBlocks.${PERSONA_BLOCK_ID}.maxChars` },
+              persona: { saveApply: roleSaveApplyDefault },
+            });
             return;
           }
           const body = await readBody();
-          const next = applyRoleInjectLimit(body.maxInjectChars);
           const saveApply = normalizeApplyMode(body.saveApply ?? roleSaveApplyDefault);
           const configFile = path.join(ROOT, 'config.json');
           const file = readConfigObject(configFile);
-          // 上限存在 `limits.personaInjectChars`；顺手删掉旧键 role.maxInjectChars，避免两处各说各话。
-          file.limits = { ...(file.limits ?? {}), personaInjectChars: next };
-          if (file.role && typeof file.role === 'object') delete file.role.maxInjectChars;
           file.role = { ...(file.role ?? {}), saveApply };
           atomicWriteJson(configFile, file);
-          cfg.limits = { ...(cfg.limits ?? {}), personaInjectChars: next };
-          cfg.role = { ...(cfg.role ?? {}), maxInjectChars: next, saveApply };
-          roleInjectMaxChars = next;
+          cfg.role = { ...(cfg.role ?? {}), saveApply };
           roleSaveApplyDefault = saveApply;
-          log(`控制台：人格注入上限已设为 ${next} 字符，保存后的生效方式为「${saveApply === 'immediate' ? '立即生效' : '下次唤醒'}」`);
-          sendJson({ ok: true, maxInjectChars: next, saveApply, limits: { injectMaxChars: next }, persona: { saveApply } });
+          log(`控制台：人格卡保存后的生效方式为「${saveApply === 'immediate' ? '立即生效' : '下次唤醒'}」`);
+          sendJson({ ok: true, saveApply, persona: { saveApply }, limits: { injectMaxChars: roleInjectMaxChars } });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/roles/create') {
@@ -8996,33 +9062,7 @@ async function main() {
           sendJson({ ok: false, error: '不支持的请求' }, 405);
           return;
         }
-        // ── 全局配置：QQ 工具开关（系统层 tools） ─────────────────────────
-        if (req.method === 'GET' && url.pathname === '/api/config/tools') {
-          sendJson({ ok: true, tools: cfg.tools ?? {} });
-          return;
-        }
-        if (req.method === 'POST' && url.pathname === '/api/config/tools') {
-          const body = await readBody();
-          if (!body.tools || typeof body.tools !== 'object' || Array.isArray(body.tools)) {
-            sendJson({ ok: false, error: 'tools 必须是对象' }, 400);
-            return;
-          }
-          const next = { ...(cfg.tools ?? {}) };
-          for (const [key, value] of Object.entries(body.tools)) {
-            if (!(key in next)) { sendJson({ ok: false, error: `未知工具：${key}` }, 400); return; }
-            if (typeof value !== 'boolean') { sendJson({ ok: false, error: `工具 ${key} 必须是布尔值` }, 400); return; }
-            next[key] = value;
-          }
-          const configFile = path.join(ROOT, 'config.json');
-          const file = readConfigObject(configFile);
-          file.tools = { ...(file.tools ?? {}), ...next };
-          atomicWriteJson(configFile, file);
-          cfg.tools = next;
-          try { ext.audit.append('config.tools.write', { keys: Object.keys(body.tools) }); } catch {}
-          log(`控制台：工具开关已更新（${Object.keys(body.tools).length} 项）`);
-          sendJson({ ok: true, tools: next });
-          return;
-        }
+        // 平台工具的注册开关已并入能力预设的「平台工具」表，不再有独立的全局开关接口。
         if (req.method === 'GET' && url.pathname === '/api/socialV2/activity') {
           sendJson({ ok: true, paused: socialV2.paused });
           return;

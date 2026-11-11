@@ -1,8 +1,10 @@
 import { api } from '../../js/api.js';
 import { onPageRefresh } from '../../js/router.js';
+import { esc } from '../../js/ui.js';
 import { setMsg } from '../../components/message/message.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { ACCESS_FIELDS } from './access-fields.js';
 
 const $ = (id) => document.getElementById(id);
@@ -65,76 +67,47 @@ function openCapsEditor(index) {
   openModal(overlay);
 }
 
-function adminCell(row, text) {
-  const td = document.createElement('td');
-  if (text != null) td.textContent = text;
-  row.appendChild(td);
-  return td;
+// 行返回单元格数组：table 组件的 rows 只吃「每格 HTML」或 { cells, attrs }，
+// 直接返回 '<tr>' 字符串会让 tableHtml 在 row.cells.map 处抛错（空表时不报，一加人就崩）。
+function adminRowCells(admin, index) {
+  const level = ['L1', 'L2', 'L3']
+    .map((value) => `<option value="${value}"${(admin.maxLevel ?? 'L2') === value ? ' selected' : ''}>${value}</option>`)
+    .join('');
+  return [
+    `<input type="text" data-admin-field="qq" data-admin-index="${index}" value="${esc(admin.qq ?? '')}" placeholder="QQ 号" aria-label="管理员 QQ">`,
+    `<input type="text" data-admin-field="name" data-admin-index="${index}" value="${esc(admin.name ?? '')}" placeholder="可留空" aria-label="称呼">`,
+    `<button type="button" class="btn small" data-admin-caps="${index}" title="编辑权限">${esc(capsSummary(admin.caps))}</button>`,
+    `<select data-admin-field="maxLevel" data-admin-index="${index}" aria-label="最高级别">${level}</select>`,
+    `<span class="admin-check"><input type="checkbox" data-admin-field="notify" data-admin-index="${index}"${admin.notify !== false ? ' checked' : ''} aria-label="通知"></span>`,
+    `<span class="admin-check"><input type="checkbox" data-admin-field="exemptPassive" data-admin-index="${index}"${admin.exemptPassive !== false ? ' checked' : ''} aria-label="私聊被动豁免"></span>`,
+    `<button type="button" class="btn small danger" data-admin-remove="${index}">移除</button>`,
+  ];
 }
 
+// 管理员表走统一的 data-table：工具栏（添加 / 保存）、搜索、分页、表头样式都与其他页一致。
+// 行内控件用 data-admin-* 标记，取值仍由 readAdminsFromDom() 读 DOM，增删改后整表重绘。
 function renderAdminRows() {
-  const tbody = $('adminRows');
-  if (!tbody) return;
-  tbody.textContent = '';
-  if (!adminsDraft.length) {
-    const tr = document.createElement('tr');
-    const td = adminCell(tr, '还没有管理员。点「添加管理员」新增。');
-    td.colSpan = 7;
-    tbody.appendChild(tr);
-    return;
-  }
-  adminsDraft.forEach((admin, index) => {
-    const tr = document.createElement('tr');
-    const qq = document.createElement('input');
-    qq.type = 'text';
-    qq.value = admin.qq ?? '';
-    qq.placeholder = 'QQ 号';
-    qq.dataset.adminField = 'qq';
-    qq.dataset.adminIndex = String(index);
-    adminCell(tr).appendChild(qq);
-    const name = document.createElement('input');
-    name.type = 'text';
-    name.value = admin.name ?? '';
-    name.placeholder = '可留空';
-    name.dataset.adminField = 'name';
-    name.dataset.adminIndex = String(index);
-    adminCell(tr).appendChild(name);
-    const caps = adminCell(tr);
-    const capsBtn = document.createElement('button');
-    capsBtn.type = 'button';
-    capsBtn.className = 'btn small';
-    capsBtn.textContent = capsSummary(admin.caps);
-    capsBtn.title = '编辑权限';
-    capsBtn.dataset.adminCaps = String(index);
-    caps.appendChild(capsBtn);
-    const level = document.createElement('select');
-    level.dataset.adminField = 'maxLevel';
-    level.dataset.adminIndex = String(index);
-    for (const value of ['L1', 'L2', 'L3']) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = value;
-      option.selected = (admin.maxLevel ?? 'L2') === value;
-      level.appendChild(option);
-    }
-    adminCell(tr).appendChild(level);
-    for (const field of ['notify', 'exemptPassive']) {
-      const cell = adminCell(tr);
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.checked = admin[field] !== false;
-      box.dataset.adminField = field;
-      box.dataset.adminIndex = String(index);
-      cell.appendChild(box);
-    }
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'btn small danger';
-    remove.textContent = '移除';
-    remove.dataset.adminRemove = String(index);
-    adminCell(tr).appendChild(remove);
-    tbody.appendChild(tr);
+  const host = $('adminTableHost');
+  if (!host) return;
+  host.innerHTML = dataTableHtml({
+    columns: [
+      { label: 'QQ', width: '160' },
+      { label: '称呼', width: '140' },
+      { label: '权限', width: '150' },
+      { label: '最高级别', width: '100' },
+      { label: '通知', width: '72' },
+      { label: '私聊被动豁免', width: '124' },
+      { label: '操作', width: '88' },
+    ],
+    rows: adminsDraft.map(adminRowCells),
+    pageSize: 10,
+    search: { placeholder: '搜索 QQ / 称呼' },
+    meta: `共 ${adminsDraft.length} 位管理员`,
+    actions: '<button type="button" id="adminAdd" class="btn small">+ 添加管理员</button>'
+      + '<button type="button" id="wlSave" class="btn small primary">保存管理员</button>',
+    empty: '还没有管理员。点「+ 添加管理员」新增。',
   });
+  initDataTables(host);
 }
 
 function readAdminsFromDom() {
@@ -233,20 +206,24 @@ export function init() {
   // 先渲染字段规格，下面所有 $('…') 才取得到节点；开关的点击委托也要在这个范围内显式绑。
   renderAccessFieldGroups();
   bindSwitches(document.getElementById('section-config'));
-  $('wlSave').addEventListener('click', async () => {
-    const r = await api('/api/whitelist', 'POST', {
-      ownerQQ: $('ownerQQ').value.trim(),
-      admins: readAdminsFromDom(),
-    });
-    if (r.ok) { refreshWhitelist(); alert('管理员已保存并生效'); }
-    else alert(r.error || '保存失败');
-  });
-  $('adminAdd').addEventListener('click', () => {
-    adminsDraft = readAdminsFromDom();
-    adminsDraft.push({ qq: '', name: '', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true });
-    renderAdminRows();
-  });
-  $('adminRows').addEventListener('click', (event) => {
+  // 表格每次增删都会整块重绘，所以按钮与行操作都委托在宿主上，不随重绘丢失。
+  const adminHost = $('adminTableHost');
+  adminHost?.addEventListener('click', async (event) => {
+    if (event.target.closest('#adminAdd')) {
+      adminsDraft = readAdminsFromDom();
+      adminsDraft.push({ qq: '', name: '', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true });
+      renderAdminRows();
+      return;
+    }
+    if (event.target.closest('#wlSave')) {
+      const r = await api('/api/whitelist', 'POST', {
+        ownerQQ: $('ownerQQ').value.trim(),
+        admins: readAdminsFromDom(),
+      });
+      if (r.ok) { refreshWhitelist(); alert('管理员已保存并生效'); }
+      else alert(r.error || '保存失败');
+      return;
+    }
     const capsButton = event.target.closest('[data-admin-caps]');
     if (capsButton) {
       adminsDraft = readAdminsFromDom();

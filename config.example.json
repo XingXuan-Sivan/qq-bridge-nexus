@@ -10,9 +10,12 @@
     "allowRemote": false
   },
   "role": {
-    "maxInjectChars": 8000
+    "saveApply": "nextWake"
   },
   "promptBlocks": {
+    "core-persona": {
+      "maxChars": 8000
+    },
     "core-stickers": {
       "enabled": true
     },

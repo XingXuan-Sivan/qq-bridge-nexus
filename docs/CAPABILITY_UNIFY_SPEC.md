@@ -318,7 +318,7 @@ prompt:
 | `config.capabilities` | **删除**（能力信息全部回到 capability.yml） |
 | `config.runtime.plans[].tools` | 改名为 `capability`（迁移见 §5；旧键读一次） |
 | `config.platforms.qq.prompt` | 不新增；平台提示词在行为档案 |
-| `config.tools` | 保留，语义=`部署开关`，文案改「平台工具注册（需重启）」 |
+| `config.tools` | **删除**：注册面改由能力预设 `tools.platform` 的并集推导（`platformFlags()`），控制台不再有 37 个工具开关 |
 | `config.behavior.default` | 保留（默认行为档案） |
 | `state/runtime.json` | 不变 |
 | `state/sessions/**` | `presetId` 继续存在，值改为能力预设 id |

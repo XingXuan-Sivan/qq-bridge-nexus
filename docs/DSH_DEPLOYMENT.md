@@ -255,7 +255,7 @@ open -e config.json
 
 | 字段 | 填什么 | 来源 |
 | --- | --- | --- |
-| `ownerQQ` | 管理员（用户本人）的 QQ 号，**数字**，例如 `12345678` | 问用户 |
+| `ownerQQ` | **所有者**的 QQ 号，**数字**，例如 `12345678`。所有者是全局唯一最高权限（管理命令 / 审批 / closed-agent），与 `admins[]` 里的管理员不是一回事 | 问用户 |
 | `allow.groups` | 允许机器人参与的群号数组，例如 `["10001","20002"]` | 问用户 |
 | `allow.private` | 允许私聊的 QQ 号数组；**建议把 ownerQQ 也放进去**（否则 owner 只能用管理命令，不能和 AI 私聊） | 问用户 |
 | `dsh.provider` | API Key 方式 `deepseek-official`（默认）；账号登录方式 `deepseek-account` | 第 3.5 节 |

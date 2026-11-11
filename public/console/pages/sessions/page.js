@@ -10,6 +10,7 @@ import { closeModal, openModal, wireModal } from '../../components/modal/modal.j
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { bindCounters, bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { permissionLevelLabel, permissionLevelOptions } from '../../js/permission-levels.js';
 import { SESSIONS_FIELDS } from './fields.js';
 
 const MODE_LABEL = {
@@ -232,11 +233,15 @@ export const globalAccessSection = {
   save: (value) => pushGlobalAccess(value || accessBody()),
 };
 
-export async function saveGlobalAccess() {
-  const msg = document.getElementById('accessMsg');
-  const done = (text) => { if (msg) msg.textContent = text; showConsoleToast(text); };
+export async function saveGlobalAccess(msgId = 'accessMsg') {
+  const msg = msgId ? document.getElementById(msgId) : null;
+  const done = (text) => {
+    if (msg) msg.textContent = text;
+    showConsoleToast(text);
+  };
   const result = await pushGlobalAccess(accessBody());
   if (result.message) done(result.message);
+  return result;
 }
 
 function renderSessions() {
@@ -630,17 +635,14 @@ function renderDetail(data) {
     {
       name: 'detailPermission', type: 'select', label: '权限级别',
       value: data.permission?.value || 'inherit',
+      // 档位与措辞跟全局配置页共用一份；full 只在总开关打开时出现。
       options: [
-        { value: 'inherit', label: `跟随全局（当前：${data.permission?.labels?.[data.permission?.effective] || data.permission?.effective || '—'}）` },
-        ...(Array.isArray(data.permission?.options) ? data.permission.options : []).map((level) => ({
-          value: level,
-          label: data.permission?.labels?.[level] || level,
-          disabled: level === 'full' && data.permission?.fullAllowed !== true,
-        })),
+        { value: 'inherit', label: `跟随全局（当前：${permissionLevelLabel(data.permission?.effective)}）` },
+        ...permissionLevelOptions(data.permission?.fullAllowed === true),
       ],
       hint: data.permission?.grantActive
-        ? `full 授权已生效，到期后自动回落 qq-full-ask；当前实际：${data.permission?.labels?.[data.permission?.effective] || data.permission?.effective}`
-        : '只读 / 工作区读写 / 完全访问（每次确认）。full 档需总开关打开并单独授权。',
+        ? `full 授权已生效，到期后自动回落 qq-full-ask；当前实际：${permissionLevelLabel(data.permission?.effective)}`
+        : '只读 / 工作区读写 / 完全访问 · 每次确认；full 档需总开关打开并单独授权。',
     },
     {
       name: 'detailFullActions', type: 'custom', span: 2,

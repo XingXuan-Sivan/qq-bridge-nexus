@@ -5,7 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { loadCapabilityFile, normalizeCapabilityFile, saveCapabilityFile, defaultCapability } from './file.mjs';
 import { writeArtifacts } from './build.mjs';
-import { capabilityCovers, capabilityDefaults, PLATFORM_TOOLS, AGENT_MODULES } from '../tools/catalog.mjs';
+import { capabilityCovers, capabilityDefaults, PLATFORM_TOOLS, AGENT_MODULES, BUILTIN_CAPABILITY_IDS } from '../tools/catalog.mjs';
 
 /** 目录名即能力 id；只认带 capability.yml 的子目录。 */
 function capabilityDirs(root) {
@@ -16,7 +16,7 @@ function capabilityDirs(root) {
     .filter((name) => fs.existsSync(path.join(root, name, 'capability.yml')));
 }
 
-/** 平台工具可见集：显式写了就按显式，没写按能力的默认模板。 */
+/** 平台工具可见集：显式写了就按显式，没写按能力的默认模板（目录里 defaultOff 的工具默认不进）。 */
 export function visiblePlatformFlags(capability) {
   const preset = capabilityDefaults(capability.id) ?? capabilityDefaults('agent-chat');
   const allVisible = preset?.platform === true;
@@ -25,7 +25,8 @@ export function visiblePlatformFlags(capability) {
   const visible = [];
   for (const tool of PLATFORM_TOOLS) {
     const value = explicit[tool.flag];
-    if (value === true || (value === undefined && (allVisible || defaults.has(tool.flag)))) visible.push(tool.flag);
+    const byDefault = defaults.has(tool.flag) || (allVisible && tool.defaultOff !== true);
+    if (value === true || (value === undefined && byDefault)) visible.push(tool.flag);
   }
   return visible;
 }
@@ -54,7 +55,7 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
   function decorate(capability) {
     return {
       ...capability,
-      builtin: true,
+      builtin: BUILTIN_CAPABILITY_IDS.includes(capability.id),
       platformVisible: visiblePlatformFlags(capability),
       agentModules: agentModulesOf(capability),
     };
@@ -119,4 +120,31 @@ function pick(source, keys) {
   const out = {};
   for (const key of keys) if (source[key] !== undefined) out[key] = source[key];
   return out;
+}
+
+/**
+ * 平台工具注册开关：所有能力预设 `platformVisible` 的并集。
+ *
+ * 这是「平台注册哪些 QQ 工具」的唯一来源——控制台不再有第二份开关表，MCP 脚本启动时
+ * 也用这个函数，避免桥接与 MCP 各自读一份配置产生分歧。`defaultOff` 的工具只有被
+ * 某个能力显式写 `true` 时才会注册。
+ */
+export function platformFlags({ root, log = () => {} } = {}) {
+  const flags = Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, false]));
+  try {
+    const capabilities = createCapabilityStore({ root, log }).list();
+    if (!capabilities.length) {
+      // 目录里一个能力预设都没有（新克隆、最小部署、隔离夹具）：按目录默认值注册，
+      // 否则「没配置」会被解释成「所有工具都关闭」，模型连读消息都做不到。
+      for (const tool of PLATFORM_TOOLS) flags[tool.flag] = tool.defaultOff !== true;
+      log('[capabilities] 没有能力预设，平台工具按目录默认值注册');
+      return flags;
+    }
+    for (const capability of capabilities) {
+      for (const flag of capability.platformVisible ?? []) flags[flag] = true;
+    }
+  } catch (error) {
+    log(`[capabilities] 平台工具开关推导失败，按全部关闭处理：${error?.message ?? error}`);
+  }
+  return flags;
 }

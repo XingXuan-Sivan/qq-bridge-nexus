@@ -162,6 +162,13 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     await fs.mkdir(path.join(fixture, 'src', 'session'));
     await Promise.all(['key.mjs', 'access.mjs'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', 'session', name), path.join(fixture, 'src', 'session', name))));
+    // 工具注册面从能力预设推导（capabilities/store.mjs → file/build + tools/catalog），
+    // 子进程只有 fixture/src，依赖模块也要一起带上。
+    await fs.mkdir(path.join(fixture, 'src', 'capabilities'));
+    await fs.mkdir(path.join(fixture, 'src', 'tools'));
+    await Promise.all(['store.mjs', 'file.mjs', 'build.mjs'].map((name) =>
+      fs.copyFile(path.join(ROOT, 'src', 'capabilities', name), path.join(fixture, 'src', 'capabilities', name))));
+    await fs.copyFile(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), path.join(fixture, 'src', 'tools', 'catalog.mjs'));
     await Promise.all(['mcp-snowluma-safe.js', 'qq-model-view.js', 'sensitive.js'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', name), path.join(fixture, 'src', name))));
     await fs.writeFile(path.join(fixture, 'config.json'), JSON.stringify({ consolePort: api.address().port }));

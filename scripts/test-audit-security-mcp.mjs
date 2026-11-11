@@ -113,6 +113,8 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     fs: fixtureFs,
     SENSITIVE_RE: { test: () => false },
     serializeModelData: (value) => JSON.stringify(value),
+    // 真实模块从能力预设推导注册面；vm 里剥掉了 import，用夹具的工具表代替。
+    platformFlags: () => (fixtureConfig?.tools ?? {}),
   });
   return async (name, arguments_ = {}) => {
     const tool = tools.get(name);

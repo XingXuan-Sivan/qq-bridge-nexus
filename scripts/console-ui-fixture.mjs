@@ -421,6 +421,7 @@ export function makeFixtureState() {
       passive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003', 'qq:private:100001'] },
       proactive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003'] },
     },
+    permission: { default: 'read-only', allowFull: false, fullTtlMin: 30 },
     sessions: [
       { key: 'group:123456789', sessionId: 'demo-community-20260920', owner: false },
       { key: 'group:100003', sessionId: 'demo-development-20260920', owner: false },
@@ -790,12 +791,26 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         state.fullActive = false;
         return json({ ok: true, permission: fixturePermissionState(state) });
       }
-      if (path === '/api/config/tools') {
-        if (method === 'GET') return json({ ok: true, tools: state.tools });
-        state.tools = { ...state.tools, ...(body?.tools || {}) };
-        return json({ ok: true, tools: state.tools });
-      }
       if (method === 'GET') {
+        const profileMatch = path.match(/^\/api\/sessions\/([^/]+)\/profile$/);
+        if (profileMatch) {
+          const key = decodeURIComponent(profileMatch[1]);
+          return json({
+            ok: true,
+            key,
+            displayName: '',
+            sessionId: `demo-${key.replace(/[^a-z0-9]+/gi, '-')}`,
+            dsh: { label: 'DSH 已连接' },
+            access: { passiveMode: state.access.passive.mode, proactiveMode: state.access.proactive.mode },
+            plans: [], planId: '', activePlan: { id: 'chat', label: '聊天' },
+            persona: { mode: 'inherit' },
+            prompt: { maxChars: 2000, text: '' },
+            wake: { triggers: { atMention: true } },
+            permission: fixturePermissionState(state),
+            model: {},
+            effectiveModel: { provider: state.dshProvider, model: state.dshModel },
+          });
+        }
         switch (path) {
           case '/api/roles/limit':
             return json({
@@ -860,7 +875,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             profiles: ['wake', 'reminder', 'context'],
             slots: ['head', 'identity', 'behavior', 'resources', 'situation', 'action', 'tail'],
             platformPrompt: '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。',
-  limits: { total: 0, perBlockDefault: 0, personaInjectChars: 6000, roleInjectMaxChars: 6000 },
+  limits: { total: 0, perBlockDefault: 0, roleInjectMaxChars: 6000 },
             stats: { total: 26, maxTotalChars: 0, renders: 12, injected: 40, skipped: 1 },
             blocks: [
               { id: 'core-role', pluginId: 'core', owner: 'core', label: '当前角色', priority: 100, slot: 'identity', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 220, lastStatus: 'injected' },
@@ -868,6 +883,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               { id: 'core-stickers', pluginId: 'core', owner: 'core', label: '表情包策略', priority: 170, slot: 'resources', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: false, maxChars: 1200, calls: 8, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 0, lastStatus: 'off' },
               { id: 'core-wake-task', pluginId: 'core', owner: 'core', label: '这次要做什么', priority: 100, slot: 'action', timing: 'reason', reasons: ['bootstrap', 'timeout', 'replyCheck'], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 640, lastStatus: 'injected' },
               { id: 'core-slang', pluginId: 'core', owner: 'core', label: '群聊黑话表', priority: 110, slot: 'tail', timing: 'on-change', reasons: [], profiles: ['context'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 96, lastStatus: 'injected' },
+              // 人格卡不经过注册表，由 /api/prompt-blocks 追加成虚拟块：只用来配上限，没有开关。
+              { id: 'core-persona', pluginId: 'core', owner: 'core', label: '人格卡（人格提示词正文）', priority: 0, slot: 'head', timing: 'every-wake', reasons: ['persona'], profiles: ['wake', 'reminder'], enabled: true, maxChars: 6000, calls: 0, lastChars: 0, lastError: null, lastRunAt: null, lastStatus: 'injected', synthetic: true },
             ],
           });
           case '/api/prompt-preview': return json({
@@ -1245,6 +1262,14 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         }
       }
       if (method === 'PATCH' || method === 'DELETE') {
+        if (method === 'PATCH' && path === '/api/access') {
+          const axis = (raw) => ({
+            mode: raw?.mode === 'deny' ? 'deny' : 'allow',
+            entries: Array.isArray(raw?.entries) ? raw.entries.map(String) : [],
+          });
+          state.access = { passive: axis(body?.passive), proactive: axis(body?.proactive) };
+          return json({ ok: true, access: state.access });
+        }
         if (method === 'PATCH' && path.startsWith('/api/runtime/capabilities/')) {
           const id = decodeURIComponent(path.slice('/api/runtime/capabilities/'.length));
           state.capabilityPatches = state.capabilityPatches ?? {};
@@ -1282,6 +1307,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (body.extra?.motivation != null) item.motivation = body.extra.motivation;
           }
           return json({ ok: true, item });
+        }
+        if (method === 'PATCH' && path === '/api/config/promptBlocks') {
+          state.promptBlockPatches = body;
+          const personaMax = Number(body.promptBlocks?.['core-persona']?.maxChars);
+          if (personaMax >= 1000) state.roleInjectMax = personaMax;
+          return json({ ok: true, promptBlocks: body.promptBlocks ?? {}, limits: { total: body.limits?.total ?? 0, perBlockDefault: body.limits?.perBlockDefault ?? 0, roleInjectMaxChars: state.roleInjectMax }, coreBlocks: { total: 0, maxTotalChars: 0 } });
         }
         return json({ ok: false, error: 'not found' }, 404);
       }
@@ -1434,13 +1465,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 persona: { saveApply: state.roleSaveApply ?? 'nextWake' },
               });
             }
-            state.roleInjectMax = Number(body.maxInjectChars) || state.roleInjectMax;
             state.roleSaveApply = body.saveApply === 'immediate' ? 'immediate' : 'nextWake';
             return json({
               ok: true,
-              maxInjectChars: state.roleInjectMax,
               saveApply: state.roleSaveApply,
-              limits: { injectMaxChars: state.roleInjectMax },
+              limits: { injectMaxChars: state.roleInjectMax, source: 'promptBlocks.core-persona.maxChars' },
             });
           case '/api/preset/sim-prompt': {
             const preset = String(body.preset || 'qq-chat-v2');

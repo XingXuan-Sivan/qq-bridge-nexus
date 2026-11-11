@@ -377,7 +377,7 @@ G3 删除 `access`/`social-v1`/`social-v2` 后，`test-console-ui` 连续报旧 
 
 行为档案迁移后，`cfg.socialV2` 只代表当前会话的 v2 行为视图；`tools`/`voice`/`media`/`limits` 等系统键在 `cfg.*`。旧测试 fixture 仍传 `config.socialV2.tools`/`.sticker`，会在 `cfg.socialV2` 视图中读不到并报 `Cannot read properties of undefined`。
 
-**规则**：系统级开关走 `config.tools`/`config.voice`/`config.media`/`config.limits`；行为参数走 `behavior.v2`。测试夹层要显式分两处传，不能再用一个 `socialV2` 对象兜所有。
+**规则**：系统级开关走 `config.voice`/`config.media`/`config.limits`（工具注册面已不在 `config` 里，由能力预设 `tools.platform` 的并集推导）；行为参数走 `behavior.v2`。测试夹层要显式分两处传，不能再用一个 `socialV2` 对象兜所有。
 
 ### 1.65 行为视图的返回形状必须同时带 `.config` 与 `.v1/.v2`
 

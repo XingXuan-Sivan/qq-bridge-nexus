@@ -9,13 +9,14 @@ import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initTimeFields } from '../../components/time/time.js';
+import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
 import { DOCK_ICONS } from '../../components/action-dock/action-dock.js';
 import { CONFIG_FIELDS } from './fields.js';
 import { init as initAccessPage, loadSecurity, securitySection, tokenSection } from './access-section.js';
-import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess } from '../sessions/page.js';
-import { initToolsSection } from './tools-section.js';
-import { mountCompact } from './compact.js';
+import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobalAccess } from '../sessions/page.js';
+import { initVoiceSection } from './voice-section.js';
+import { mountCompact, compactSection } from './compact.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
@@ -26,7 +27,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadBehaviorDefault(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadBehaviorDefault(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -109,15 +110,15 @@ const permissionSection = {
 const personaSettingsSection = {
   id: 'personaSettings',
   label: '人格提示词',
+  // 注入上限已经归「注入块」页管（core-persona 块），这里只剩「保存人格卡后怎么生效」。
   read: () => ({
-    maxInjectChars: Math.round(Number($('personaInjectMax').value) || 6000),
     saveApply: document.querySelector('input[name="personaSaveApply"]:checked')?.value || 'nextWake',
   }),
   save: async (value) => {
     const r = await api('/api/roles/limit', 'POST', value);
     if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
     const applyText = r.saveApply === 'immediate' ? '立即生效' : '下次唤醒时生效';
-    return { ok: true, message: `已保存：上限 ${r.maxInjectChars} 字符，人格卡保存后${applyText}` };
+    return { ok: true, message: `已保存：人格卡保存后${applyText}` };
   },
 };
 
@@ -280,38 +281,50 @@ function readSilenceRows() {
   });
 }
 
+function silenceRowHtml(r, index) {
+  return {
+    attrs: { 'data-sil-row': r.id || '', 'data-sil-index': String(index), class: r.enabled ? '' : 'off' },
+    cells: [
+      silenceSwitch('silEnabled', 'enabled', !!r.enabled, '开', '关'),
+      `<input type="text" data-sil="name" value="${esc(r.name || '')}" placeholder="上午高峰" aria-label="时段名称">`,
+      silenceTime(`silStart_${r.id || index}`, 'start', r.start, '开始时间'),
+      silenceTime(`silEnd_${r.id || index}`, 'end', r.end, '结束时间'),
+      `<div class="silence-days">
+        <select data-sil="days" aria-label="哪些天">${[['every', '每天'], ['workdays', '工作日'], ['weekend', '周末'], ['custom', '自选']].map(([v, l]) => `<option value="${v}" ${r.days === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <span data-sil-custom ${r.days === 'custom' ? '' : 'hidden'}>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip ${(r.weekdays || []).includes(d) ? 'on' : ''} tight"><input type="checkbox" data-sil-wd="${d}" ${(r.weekdays || []).includes(d) ? 'checked' : ''}> ${SILENCE_W[d]}</label>`).join('')}</span>
+      </div>`,
+      silenceSwitch('silSkipHolidays', 'skipHolidays', !!r.skipHolidays, '跳过节假日', '不跳过'),
+      `<button type="button" class="btn-icon" data-sil-del aria-label="删除这个时间段" title="删除这个时间段">${SILENCE_TRASH}</button>`,
+    ],
+  };
+}
+
 function renderSilenceRanges() {
   const box = $('silenceRanges');
-  if (!silenceDraft.length) { box.innerHTML = '<div class="meta">还没有时间段。点「＋ 添加时间段」，或者「一键填入 DeepSeek 高峰时段」。</div>'; return; }
-  // 用表格而不是 grid：窄屏时各列不会互相挤成三行，列宽也随表头固定下来（2026-11-07 用户反馈）。
-  const head = '<thead><tr><th>启用</th><th>名称</th><th>开始</th><th>结束</th><th>哪些天</th><th>跳过节假日</th><th>操作</th></tr></thead>';
-  const body = silenceDraft.map((r) => `
-      <tr class="${r.enabled ? '' : 'off'}" data-sil-row="${esc(r.id || '')}">
-        <td>${silenceSwitch('silEnabled', 'enabled', !!r.enabled, '开', '关')}</td>
-        <td><input type="text" data-sil="name" value="${esc(r.name || '')}" placeholder="上午高峰" aria-label="时段名称"></td>
-        <td>${silenceTime(`silStart_${r.id}`, 'start', r.start, '开始时间')}</td>
-        <td>${silenceTime(`silEnd_${r.id}`, 'end', r.end, '结束时间')}</td>
-        <td>
-          <div class="silence-days">
-            <select data-sil="days" aria-label="哪些天">${[['every', '每天'], ['workdays', '工作日'], ['weekend', '周末'], ['custom', '自选']].map(([v, l]) => `<option value="${v}" ${r.days === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-            <span data-sil-custom ${r.days === 'custom' ? '' : 'hidden'}>${[1, 2, 3, 4, 5, 6, 7].map((d) => `<label class="sched-chip ${(r.weekdays || []).includes(d) ? 'on' : ''} tight"><input type="checkbox" data-sil-wd="${d}" ${(r.weekdays || []).includes(d) ? 'checked' : ''}> ${SILENCE_W[d]}</label>`).join('')}</span>
-          </div>
-        </td>
-        <td>${silenceSwitch('silSkipHolidays', 'skipHolidays', !!r.skipHolidays, '跳过节假日', '不跳过')}</td>
-        <td><button type="button" class="btn-icon" data-sil-del aria-label="删除这个时间段" title="删除这个时间段">${SILENCE_TRASH}</button></td>
-      </tr>`).join('');
-  box.innerHTML = `<div class="table-wrap"><table class="silence-table">
-      <colgroup><col class="c-enable"><col class="c-name"><col class="c-time"><col class="c-time"><col class="c-days"><col class="c-skip"><col class="c-act"></colgroup>
-      ${head}<tbody>${body}</tbody></table></div>`;
-  initTimeFields(box);
-  box.querySelectorAll('[data-sil-row]').forEach((row) => {
-    row.querySelector('[data-sil="days"]').addEventListener('change', (e) => { row.querySelector('[data-sil-custom]').hidden = e.target.value !== 'custom'; });
-    // 开关的 aria-checked 由 bindSwitches 切换；这里只在点击瞬间读旧值，决定整行要不要变灰。
-    const enabled = row.querySelector('[data-sil="enabled"]');
-    enabled.addEventListener('click', () => row.classList.toggle('off', getSwitch(enabled)));
-    row.querySelectorAll('[data-sil-wd]').forEach((c) => c.addEventListener('change', () => c.parentElement.classList.toggle('on', c.checked)));
-    row.querySelector('[data-sil-del]').addEventListener('click', () => { silenceDraft = readSilenceRows().filter((x) => x.id !== row.dataset.silRow); renderSilenceRanges(); });
+  if (!box) return;
+  // 与其他页一致：统一 data-table（工具栏、搜索、分页、表头样式）。
+  // 行内是时间/开关/下拉等活控件，重绘后重新 initDataTables 与时间组件。
+  box.innerHTML = dataTableHtml({
+    columns: [
+      { label: '启用', width: '84' },
+      { label: '名称', width: '150' },
+      { label: '开始', width: '132' },
+      { label: '结束', width: '132' },
+      { label: '哪些天' },
+      { label: '跳过节假日', width: '124' },
+      { label: '操作', width: '64' },
+    ],
+    rows: silenceDraft.map(silenceRowHtml),
+    pageSize: 10,
+    search: { placeholder: '搜索时段名称' },
+    meta: `共 ${silenceDraft.length} 个时段`,
+    actions: '<button type="button" class="btn small" id="silenceAdd">＋ 添加时间段</button>'
+      + '<button type="button" class="btn small" id="silencePeak">一键填入高峰时段</button>'
+      + '<button type="button" class="btn small primary" id="silenceSave">保存定时静默</button>',
+    empty: '还没有时间段。点「＋ 添加时间段」，或者「一键填入高峰时段」。',
   });
+  initDataTables(box);
+  initTimeFields(box);
 }
 
 function renderSilence() {
@@ -396,11 +409,9 @@ async function loadSendLimit() {
   }
 }
 
-// ── 人格提示词：注入上限 + 保存人格卡后的生效方式（两项一起保存）──────────────
+// ── 人格卡保存后的生效方式（注入上限已移到「注入块」页的 core-persona 块）──────
 async function loadPersonaSettings() {
   const r = await api('/api/roles/limit');
-  const max = $('personaInjectMax');
-  if (max && document.activeElement !== max) max.value = r?.limits?.injectMaxChars ?? 6000;
   const apply = r?.persona?.saveApply === 'immediate' ? 'immediate' : 'nextWake';
   document.querySelectorAll('input[name="personaSaveApply"]').forEach((el) => {
     el.checked = el.value === apply;
@@ -481,7 +492,18 @@ const behaviorDefaultSection = {
   },
 };
 
-function showConfigSection(name) {
+const CONFIG_TABS = ['runtime', 'access', 'security', 'voice'];
+const CONFIG_TAB_KEY = 'qq-console:tab:config';
+
+function readConfigTab() {
+  try {
+    const saved = localStorage.getItem(CONFIG_TAB_KEY);
+    return CONFIG_TABS.includes(saved) ? saved : 'runtime';
+  } catch { return 'runtime'; }
+}
+
+function showConfigSection(name, { persist = true } = {}) {
+  if (!CONFIG_TABS.includes(name)) name = 'runtime';
   document.querySelectorAll('[data-config-section]').forEach((button) => {
     const active = button.dataset.configSection === name;
     button.classList.toggle('active', active);
@@ -492,6 +514,9 @@ function showConfigSection(name) {
     panel.classList.toggle('active', active);
     panel.hidden = !active;
   });
+  if (persist) { try { localStorage.setItem(CONFIG_TAB_KEY, name); } catch { /* 隐私模式下不可用 */ } }
+  // 权限卡的数据原本没人读：切到「安全」时补一次，避免卡片一会儿空一会儿有值。
+  if (name === 'security') void loadPermission();
 }
 
 // ── 初始化 ──────────────────────────────────────────────────────────────────
@@ -506,10 +531,25 @@ export function init() {
   initAccessPage();
   // 准入：复用会话页的全局名单组件；必须先挂载，保存条才能读到它的控件。
   mountGlobalAccess(document.querySelector('[data-sessions-access]'));
+  // 卡片自己的保存入口：改完名单不用去页脚浮层找保存，这里直接落盘。
+  document.getElementById('globalAccessSave')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    const msg = document.getElementById('globalAccessSaveMsg');
+    if (msg) msg.textContent = '保存中…';
+    button.disabled = true;
+    try {
+      const result = await saveGlobalAccess('globalAccessSaveMsg');
+      if (result?.ok) saveBar?.reset('access');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  // 刷新后回到上次停留的标签页（默认「行为与模型」）；写入只在用户点击时发生。
+  showConfigSection(readConfigTab(), { persist: false });
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
+    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',
@@ -534,8 +574,8 @@ export function init() {
     });
     return false;
   });
-  // 准入：复用会话页的全局名单组件（上面已挂载）；工具与语音：系统层工具开关 + 语音库调试
-  initToolsSection();
+  // 准入：复用会话页的全局名单组件（上面已挂载）；拓展功能：语音库调试
+  initVoiceSection();
   // 上下文压缩：从运行总览搬来，跟运行与模型放同一分区。
   compactPanel = mountCompact(document.querySelector('[data-config-compact]'));
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
@@ -577,29 +617,55 @@ export function init() {
     if (r.ok) { await refreshSilence(); requestStatusRefresh(); }
   });
 
-  // 定时静默排期
-  $('silenceAdd').addEventListener('click', () => {
-    silenceDraft = readSilenceRows();
-    silenceDraft.push({ id: '', name: '', enabled: true, start: '12:00', end: '14:00', days: 'every', weekdays: [], skipHolidays: false });
-    renderSilenceRanges();
+  // 定时静默排期：表格每次增删都整块重绘，按钮与行内控件一律委托到宿主上。
+  const silenceHost = $('silenceRanges');
+  silenceHost?.addEventListener('click', async (event) => {
+    if (event.target.closest('#silenceAdd')) {
+      silenceDraft = readSilenceRows();
+      silenceDraft.push({ id: '', name: '', enabled: true, start: '12:00', end: '14:00', days: 'every', weekdays: [], skipHolidays: false });
+      renderSilenceRanges();
+      return;
+    }
+    if (event.target.closest('#silencePeak')) {
+      const preset = silenceState?.peakPreset || [];
+      // 已经有同一时间、同样「哪些天」的时间段就不再重复添加（保存后 id 会变，不能只按 id 判断）
+      const keep = readSilenceRows();
+      const same = (a, b) => a.start === b.start && a.end === b.end && a.days === b.days;
+      const added = preset.filter((p) => !keep.some((x) => same(x, p)));
+      silenceDraft = [...keep, ...added.map((p) => ({ ...p }))];
+      if ($('silenceTz').value !== 'Asia/Shanghai') tzSet($('silenceTz'), 'Asia/Shanghai');
+      renderSilenceRanges();
+      $('silenceMsg').textContent = added.length ? `已填入 ${added.length} 个高峰时段（北京时间），确认后点「保存定时静默」` : '高峰时段已经都在列表里了';
+      $('silenceMsg').className = 'meta';
+      return;
+    }
+    if (event.target.closest('#silenceSave')) {
+      const r = await api('/api/silence', 'POST', { enabled: getSwitch($('silenceEnabled')), timezone: $('silenceTz').value, ranges: readSilenceRows() });
+      $('silenceMsg').textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
+      $('silenceMsg').className = r.ok ? 'meta ok' : 'meta err';
+      if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }
+      return;
+    }
+    const remove = event.target.closest('[data-sil-del]');
+    if (remove) {
+      const row = remove.closest('[data-sil-row]');
+      const index = Number(row?.dataset.silIndex);
+      silenceDraft = readSilenceRows().filter((_, i) => i !== index);
+      renderSilenceRanges();
+      return;
+    }
+    // 开关的 aria-checked 由 bindSwitches 在父容器上切换；等它切完再按新值决定整行是否变灰。
+    const toggle = event.target.closest('[data-sil="enabled"]');
+    if (toggle) {
+      const row = toggle.closest('tr');
+      requestAnimationFrame(() => row?.classList.toggle('off', !getSwitch(toggle)));
+    }
   });
-  $('silencePeak').addEventListener('click', () => {
-    const preset = silenceState?.peakPreset || [];
-    // 已经有同一时间、同样「哪些天」的时间段就不再重复添加（保存后 id 会变，不能只按 id 判断）
-    const keep = readSilenceRows();
-    const same = (a, b) => a.start === b.start && a.end === b.end && a.days === b.days;
-    const added = preset.filter((p) => !keep.some((x) => same(x, p)));
-    silenceDraft = [...keep, ...added.map((p) => ({ ...p }))];
-    if ($('silenceTz').value !== 'Asia/Shanghai') tzSet($('silenceTz'), 'Asia/Shanghai');
-    renderSilenceRanges();
-    $('silenceMsg').textContent = added.length ? `已填入 ${added.length} 个高峰时段（北京时间），确认后点「保存定时静默」` : '高峰时段已经都在列表里了';
-    $('silenceMsg').className = 'meta';
-  });
-  $('silenceSave').addEventListener('click', async () => {
-    const r = await api('/api/silence', 'POST', { enabled: getSwitch($('silenceEnabled')), timezone: $('silenceTz').value, ranges: readSilenceRows() });
-    $('silenceMsg').textContent = r.ok ? '✅ 已保存' : '❌ ' + (r.error || '保存失败');
-    $('silenceMsg').className = r.ok ? 'meta ok' : 'meta err';
-    if (r.ok) { silenceState = r; silenceDraft = r.config.ranges.map((x) => ({ ...x })); renderSilence(); }
+  silenceHost?.addEventListener('change', (event) => {
+    const days = event.target.closest('[data-sil="days"]');
+    if (days) { days.closest('tr').querySelector('[data-sil-custom]').hidden = days.value !== 'custom'; return; }
+    const weekday = event.target.closest('[data-sil-wd]');
+    if (weekday) weekday.parentElement.classList.toggle('on', weekday.checked);
   });
 
   // 发言上限：保存入口在页面级保存条（见 init 里的 saveBar）；这里只留数据读取。

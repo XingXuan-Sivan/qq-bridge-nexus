@@ -105,7 +105,7 @@ export function render(ctx) {}       // 提示词片段：参与度 / 唤醒 / �
 
 - 全局默认：`config.defaults.persona`（现 `config.role.default`）。
 - 会话覆盖：会话档案里的 `persona`（已有）。
-- 注入上限 `maxInjectChars` 暂留原处，待注入块重构时并入块级设置。
+- 注入上限：`config.promptBlocks['core-persona'].maxChars`（1000~20000，默认 8000），在「注入块」页的「人格卡」行配置；`config.role.maxInjectChars` 与 `limits.personaInjectChars` 已在启动迁移时删除。
 
 ### 3.4 模型（model）
 
@@ -131,18 +131,18 @@ export function render(ctx) {}       // 提示词片段：参与度 / 唤醒 / �
 
 ### 3.7 工具目录（tool catalog）
 
-现有的「全局配置 → 拓展功能 → QQ 工具」是 44 个全局布尔（`public/console/pages/config/tools-section.js`），决定 `src/mcp-snowluma-safe.js` **注册哪些工具**（模块加载时 `if (cfg.tools?.X !== false) register(...)`，所以改动要重启 DSH 才刷新工具清单）。它同时被别的子系统当开关用：`voice.enabled`、`socialV2.sticker.enabled`、`crossGroup.enabled`。
+工具注册不再有全局开关表：`config.json` 的 `tools` 已删除，控制台「全局配置 → 拓展功能」里的 37 个 QQ 工具开关也随之移除（该分区只剩「语音」卡）。注册面由所有能力预设的 `tools.platform` 求并集推导——`src/capabilities/store.mjs` 的 `platformFlags()`，`src/bridge.js` 与 `src/mcp-snowluma-safe.js` 启动时调用——决定 `src/mcp-snowluma-safe.js` **注册哪些工具**（模块加载时 `if (cfg.tools?.X !== false) register(...)`，所以改完能力预设要重启 DSH 才刷新工具清单）。`voice.enabled`、`socialV2.sticker.enabled`、`crossGroup.enabled` 仍是各自子系统的依赖开关，与注册面分开。
 
-它和"方案能用哪些工具"是**两个层**，现在却被混在一起：全局布尔管"存在不存在"，DSH 预设的 `extensions.yml` 管"这个预设允许哪些"。本轮把它显式拆成两层，一处解析：
+它和"方案能用哪些工具"是**两个层**，现在显式拆开、一处解析：
 
 | 层 | 位置 | 决定 | 生效时机 |
 | --- | --- | --- | --- |
-| **工具目录** | `config.tools`（保留这张卡，改名「工具目录」） | 平台实现了哪些工具、哪些随依赖关闭（语音/表情/跨群） | 重启 DSH |
-| **能力授权** | 能力预设的 `grants.disable` / `grants.allow` | 这个方案在目录之上还能用哪些 | 即时（桥接调用时拦截） |
+| **工具注册面** | 能力预设 `capability.yml` 的 `tools.platform`（`platformFlags()` 的并集） | 平台注册哪些工具；`defaultOff` 的五个（表情备注 / 发语音 / ownerRelay / ownerGroupAccess / webImage）默认不开，显式勾选可开 | 重启 DSH |
+| **能力授权** | 单条能力预设的 `tools.platform` + 风险门槛（send/state/admin 可按会话收紧，read 恒可用） | 这个方案在注册面之上还能用哪些 | 即时（桥接调用时拦截） |
 
-- 桥接在工具调用入口统一校验 `plan → capability → grants`，deny 直接拒绝并回一条简短说明；不改 DSH 工具清单即可按会话收窄。
-- DSH 预设的 `extensions.yml` 继续负责"模型看到哪些工具"（提示词层面的收敛），但不再是唯一真相；控制台在能力预设页同时展示"目录 ∩ 授权"的最终清单。
-- 工具目录卡加依赖提示：`crossGroup` 需 `crossGroup.enabled`、`sendVoice` 需 `voice.enabled`、表情类需 `socialV2.sticker.enabled`，并在卡上写明"改动影响所有方案，需重启 DSH"。
+- 桥接在工具调用入口统一校验 `plan → capability → 风险门槛`，拒绝时回一条简短说明；不改 DSH 工具清单即可按会话收窄。
+- DSH 预设的 `extensions.yml` 继续负责"模型看到哪些工具"（提示词层面的收敛），但不再是唯一真相；控制台在能力预设页同时展示"注册面 ∩ 授权"的最终清单。
+- 平台工具表里勾选/取消就是改注册面：这张表按能力保存，改动影响所有引用该能力的方案，保存后需重启 DSH。
 - 这层不进方案的三个字段：方案引用能力预设，能力预设引用工具目录的键；目录是部署事实，不是策略。
 
 ---
@@ -271,7 +271,7 @@ UI 上不再让用户选"模式"；方案卡显示这一行推导结果（"当�
 | 会话 `mode` + `presetId` | `session.planId` |
 | 会话人格 / 模型 / 唤醒 | 保留为覆盖项 |
 | 准入 | 不动，`audience: access` 复用它 |
-| `config.tools` 44 个布尔 | 保留为「工具目录」（平台层，§3.7）；方案级收窄进能力预设的 `grants` |
+| `config.tools` 44 个布尔 | **已删除**：注册面改由能力预设 `tools.platform` 的并集推导（`platformFlags()`，平台层，§3.7）；方案级收窄仍走能力预设 |
 | DSH 预设 `extensions.yml` 的工具授权 | 保留管"模型看到哪些"；能力预设的 `grants` 管"实际能不能用" |
 
 ---
@@ -291,7 +291,7 @@ UI 上不再让用户选"模式"；方案卡显示这一行推导结果（"当�
 | 运行总览 | 模式徽标 → 当前方案名 + 解析摘要 |
 | 会话与审批 | "模式 + DSH 预设"两个下拉 → 一个"运行方案"；人格/模型/唤醒保留为覆盖项 |
 | **运行方案**（新） | 列表 + 编辑器 + 启用 + 克隆/导入导出；放"会话与审批"后 |
-| 全局配置 | 删"运行模式"卡；保留"人格与行为"卡（默认行为 + 默认人格 + 注入上限）；「拓展功能 → QQ 工具」改名「工具目录」并加依赖提示（§3.7） |
+| 全局配置 | 删"运行模式"卡；"人格与行为"卡只留默认行为 + 默认人格 + 生效方式（注入上限归「注入块」页的 `core-persona`）；「扩展功能」分区只剩语音库（工具注册面由能力预设推导，§3.7） |
 | 行为档案 | 加表格 + 编辑区；新建/复制/删除 |
 | 能力预设（原"DSH 预设"） | 改名；加沙箱列；放"行为档案"后 |
 | 命令与工具（原"管理行为"） | 只改名 |
@@ -407,7 +407,7 @@ UI 上不再让用户选"模式"；方案卡显示这一行推导结果（"当�
 | `src/behaviors/`（改） | kind 注册表 + `kinds/v1.mjs`、`kinds/v2.mjs`；`render(ctx)` 承接提示词片段 |
 | `src/bridge.js` | `effectiveMode()` 保留投影（55 处调用点先不动）；`modePreset`/`behaviorFor` 读方案；拆三处硬编码 |
 | `src/mcp-snowluma-safe.js` | 工具调用入口加 `plan → capability → grants` 统一校验（deny 即时拒绝，不改工具清单） |
-| `public/console/pages/config/tools-section.js` | 改名「工具目录」、加依赖提示与"影响所有方案"说明 |
+| `public/console/pages/config/voice-section.js` | QQ 工具开关卡已删除；只留「语音库」，注册面改由能力预设的平台工具表决定 |
 | `src/platform/*`（新） | 适配器接口 + QQ 适配器（包住现有 SnowLuma 调用） |
 | API | `GET/POST /api/runtime/plan(s)`、导出/导入；`/api/runtime/capabilities`；`/api/config/behaviors` 返回 kind 元信息 |
 | 控制台 | 运行方案页；行为档案表格；能力预设页（沙箱 + 收窄）；config 删模式卡、工具目录改名；sessions 合并；导航调整 |

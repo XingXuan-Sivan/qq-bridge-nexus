@@ -259,6 +259,7 @@ provideRecommendations: true
 - `default`：新会话默认级别，只读 / 工作区读写 / 完全访问（每次确认）；不允许设为 `full`。
 - `allowFull`：是否允许 `full`（完全访问 · 短时授权）。关掉时立刻收回所有进行中的 full 授权并回落 `qq-full-ask`。
 - `fullTtlMin`：full 授权有效期，只接受 10 / 30 / 60 分钟。
+- 启动时 `normalizePermissionConfig()` 会把归一化结果与 `config.json` 里的 `permission` 比对，不一致就写回（文件里原本没有该键也会补上），日志记一行「权限配置已归一化到 config.json」。因此控制台看到的默认级别与实际生效值始终同源，不再只存在于内存。
 - 级别 → DSH 权限预设的唯一映射在 `src/session/permission.mjs`：`read-only` / `workspace-write` / `qq-full-ask` / `danger-full-access`（仅 `full`）。
 - 群聊会话恒为只读（`chat`），不接受更高档位。
 
@@ -266,7 +267,7 @@ provideRecommendations: true
 
 - 能力只有**一份源**：`dsh/agent-presets/<id>/capability.yml`，形状 `{ id, label, agent:'dsh', tools:{ platform, agent, mcp, skills }, safety, prompt:{ base }, note }`。`preset.yml` / `agent.cordis.yml` / `extensions.yml` 由 `scripts/build-capability-artifacts.mjs` 生成，文件头带「勿手改」，`--check` 可逐字节比对。
 - `config.json > capabilities` 已删除（P10.4）：工具可见集、Agent 模块、MCP/技能全部从 `capability.yml` 读，旧补丁不再生效；迁移脚本把它们折算进能力文件。
-- 平台工具可见性由 `visiblePlatformFlags(capability)` 推导：显式 `tools.platform[flag] = true|false` 优先，没写的按内置模板默认。只有 `send/state/admin` 类会被收紧（`CAPABILITY_GATED_RISKS`），读类仍由「全局配置 › 拓展功能」的注册开关控制。
+- 平台工具可见性由 `visiblePlatformFlags(capability)` 推导：显式 `tools.platform[flag] = true|false` 优先，没写的按内置模板默认。只有 `send/state/admin` 类会被收紧（`CAPABILITY_GATED_RISKS`），读类始终允许。宿主工具的注册面由所有能力预设的平台表求并集（`platformFlags()`）得到，不再有 `config.tools` 或控制台开关；控制台「扩展功能」只剩语音库。
 - 执行侧：`v2ToolEnabled(flag, key)` → `capabilityAllows(key, flag)` → `capabilityAllowsFlag(capabilityOf(key), flag)`，按会话固定方案的 `capability` 判定，不允许就 403。
 - `safety.local_tools = false` 时生成器清空 fs/pwsh/jobs 并追加 `qq-tool-restrict` 守卫行；`safety.notes` 与 1–4 条安全段拼在 `persona.prefix` 最前面。
 - `prompt.base` 只写平台无关的身份与边界；**平台话术归行为档案**（P10.5 由注入块 `core-platform-prompt` 注入），不再写进 persona。
@@ -337,7 +338,7 @@ provideRecommendations: true
 | `socialV2.wake/send 行为部分/wait/proactive/sticker/context/feedback/autoReplyCheckMs/provideRecommendations` | `config/behaviors/social-v2.yml` |
 | `socialV2.agentPreset` | 删除，统一用 `config.agentPreset` |
 | `socialV2.enabled` | 删除，由 mode 决定；不再有“选了 reserved2 但 v2 关着”的第二开关 |
-| `socialV2.tools` | `config.tools`（全局工具面） |
+| `socialV2.tools` | 删除：工具注册面由能力预设 `tools.platform` 的并集推导（`platformFlags()`），不再有全局工具开关 |
 | `socialV2.compact` | `config.compact`（上下文压缩） |
 | `socialV2.send.maxSendPerMinute/maxSendPerHour` | `config.limits.send`（全局防刷屏上限；与行为档案里的 burst 分开） |
 | `socialV2.initialPromptMaxChars` | `config.limits.initialPromptMaxChars` |

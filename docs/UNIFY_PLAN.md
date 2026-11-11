@@ -46,7 +46,7 @@
   人格 persona        = 角色卡（本地 md / provider: 引用）
   模型 model          = DSH provider / model / effort
   平台适配器 platform = 发送 / 成员 / 历史 / 显示名
-  工具目录 catalog    = config.tools（44 个部署事实，重启 DSH 生效）
+  工具目录 catalog    = 能力预设 tools.platform 的并集（注册面，重启 DSH 生效）
   准入 access         = 两轴名单（被动 / 主动），独立系统，不进方案
 
 方案（plan）

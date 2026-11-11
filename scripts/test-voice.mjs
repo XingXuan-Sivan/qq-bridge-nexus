@@ -213,8 +213,8 @@ console.log('## 控制台契约');
 {
   const html = readConsoleSource();
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
-  ok(html.includes("'sendVoice'") || html.includes('"sendVoice"'), '控制台有 sendVoice 工具开关');
-  ok(/['\"]sendVoice['\"]/.test(bridgeSrc), 'config API 的 toolFlags 含 sendVoice');
+  ok(html.includes('initVoiceSection'), '控制台只剩语音库卡，不再有全局 sendVoice 开关');
+  ok(bridgeSrc.includes('platformFlags('), '工具注册面由能力预设的平台工具表推导（platformFlags）');
   const uniq = (a) => [...new Set(a)].sort();
   const views = uniq([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]));
   const pages = uniq([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]));

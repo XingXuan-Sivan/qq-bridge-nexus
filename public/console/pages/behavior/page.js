@@ -1,4 +1,4 @@
-// 行为档案页：三标签 —— 行为档案（参数 + 提示词）、能力预设、平台话术。
+// 行为档案页：两标签 —— 行为档案（清单 + 参数 + 两层提示词）、能力预设。
 // 权威存储：config/behaviors/<id>.yml、dsh/agent-presets/<id>/capability.yml、config/platform/<id>.yml。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
@@ -12,6 +12,7 @@ import { BEHAVIOR_FIELDS } from './fields.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
 
 let behaviorDoc = null;
+let behaviorItems = [];
 let busy = false;
 let kindSpecs = new Map();
 let kindsPromise = null;
@@ -60,23 +61,32 @@ function renderBehaviorTable(items) {
   const host = document.getElementById('behaviorTable');
   if (!host) return;
   const rows = items.map((item) => ({
+    attrs: { 'data-filter-kind': item.kind || '' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
       `<span class="pill">${esc(item.kind || '?')}</span>`,
       Array.isArray(item.usedBy) && item.usedBy.length
         ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
         : '<span class="meta">未被方案引用</span>',
-      `<button class="btn" type="button" data-behavior-edit="${esc(item.id)}">编辑</button>`,
+      `<div class="row-actions">
+        <button class="btn small" type="button" data-behavior-edit="${esc(item.id)}">编辑</button>
+        <button class="btn small" type="button" data-behavior-clone="${esc(item.id)}">克隆</button>
+        <button class="btn small danger" type="button" data-behavior-delete="${esc(item.id)}">删除</button>
+      </div>`,
     ],
   }));
+  const kindOptions = [...kindSpecs.keys()].map((kind) => ({ value: kind, label: kind }));
   host.innerHTML = dataTableHtml({
-    columns: [{ label: '档案', width: '38%' }, { label: '类型', width: '120px' }, { label: '被引用', width: '26%' }, { label: '操作', width: '110px' }],
+    columns: [{ label: '档案' }, { label: '类型', width: '90px' }, { label: '被引用' }, { label: '操作', width: '190px' }],
     rows,
     pageSize: 10,
     search: { placeholder: '搜索档案 / id' },
+    refresh: true,
+    filters: [{ id: 'kind', label: '类型', value: '', options: [{ value: '', label: '全部类型' }, ...kindOptions] }],
+    actions: '<button class="btn small primary" type="button" id="behaviorCreate">新建</button>',
     empty: '还没有行为档案。',
   });
-  initDataTables(host);
+  initDataTables(host, { onRefresh: () => void refreshList() });
 }
 
 async function refreshList(preferred) {
@@ -85,6 +95,7 @@ async function refreshList(preferred) {
   await ensureKinds();
   const list = await api('/api/config/behaviors');
   const items = Array.isArray(list?.behaviors) ? list.behaviors : [];
+  behaviorItems = items;
   renderBehaviorTable(items);
   select.innerHTML = items.length
     ? items.map((item) => `<option value="${esc(item.id)}">${esc(item.label || item.id)}（${esc(item.kind || '?')}）</option>`).join('')
@@ -294,11 +305,22 @@ export function init() {
   });
   document.getElementById('behaviorFormRefresh')?.addEventListener('click', () => void refreshList());
   document.querySelector('[data-behavior-fields="list"]')?.addEventListener('click', (event) => {
-    const id = event.target.closest('[data-behavior-edit]')?.dataset.behaviorEdit;
-    if (!id) return;
-    const select = document.getElementById('behaviorFormSelect');
-    if (select) select.value = id;
-    void loadDoc(id);
+    const edit = event.target.closest('[data-behavior-edit]');
+    if (edit) {
+      const id = edit.dataset.behaviorEdit;
+      const select = document.getElementById('behaviorFormSelect');
+      if (select) select.value = id;
+      void loadDoc(id);
+      return;
+    }
+    const clone = event.target.closest('[data-behavior-clone]');
+    if (clone) {
+      const item = behaviorItems.find((entry) => entry.id === clone.dataset.behaviorClone);
+      openArchiveModal({ mode: 'clone', source: { id: clone.dataset.behaviorClone, label: item?.label ?? clone.dataset.behaviorClone } });
+      return;
+    }
+    const remove = event.target.closest('[data-behavior-delete]');
+    if (remove) openArchiveModal({ mode: 'delete', source: { id: remove.dataset.behaviorDelete } });
   });
   document.getElementById('behaviorFormSave')?.addEventListener('click', () => void saveDoc());
   // 动作按钮由 renderFields 生成、重建后失效，统一在 document 上委托。
@@ -306,16 +328,6 @@ export function init() {
     const id = event.target.closest('[id]')?.id;
     if (id === 'behaviorPromptSave') { void savePrompt(); return; }
     if (id === 'behaviorCreate') { openArchiveModal({ mode: 'create' }); return; }
-    if (id === 'behaviorClone') {
-      const current = document.getElementById('behaviorFormSelect')?.value;
-      if (current) openArchiveModal({ mode: 'clone', source: { id: current, label: behaviorDoc?.data?.label ?? current } });
-      return;
-    }
-    if (id === 'behaviorDelete') {
-      const current = document.getElementById('behaviorFormSelect')?.value;
-      if (current) openArchiveModal({ mode: 'delete', source: { id: current } });
-      return;
-    }
     if (id === 'platformSave') { void savePlatform(); return; }
     if (id === 'platformRestore') { void restorePlatform(); }
   });
@@ -326,21 +338,37 @@ export function init() {
 
   const tabs = [...document.querySelectorAll('[data-behavior-tab]')];
   const panels = [...document.querySelectorAll('[data-behavior-panel]')];
-  function showTab(name) {
+  // 记住停留的标签页：刷新/切走再回来都回到同一页，而不是永远弹回第一个。
+  const TAB_KEY = 'qq-console:tab:behavior';
+  const TAB_NAMES = ['behaviors', 'capabilities'];
+  function readTab() {
+    try {
+      const saved = localStorage.getItem(TAB_KEY);
+      return TAB_NAMES.includes(saved) ? saved : 'behaviors';
+    } catch {
+      return 'behaviors';
+    }
+  }
+  function showTab(name, { persist = true } = {}) {
+    const next = TAB_NAMES.includes(name) ? name : 'behaviors';
     for (const tab of tabs) {
-      const active = tab.dataset.behaviorTab === name;
+      const active = tab.dataset.behaviorTab === next;
       tab.classList.toggle('active', active);
       tab.setAttribute('aria-selected', String(active));
     }
-    for (const panel of panels) panel.hidden = panel.dataset.behaviorPanel !== name;
-    if (name === 'capabilities') void capabilityPanel?.load();
-    if (name === 'platform') void loadPlatform();
+    for (const panel of panels) panel.hidden = panel.dataset.behaviorPanel !== next;
+    if (persist) {
+      try { localStorage.setItem(TAB_KEY, next); } catch { /* 隐身模式忽略 */ }
+    }
+    if (next === 'capabilities') void capabilityPanel?.load();
   }
   for (const tab of tabs) tab.addEventListener('click', () => showTab(tab.dataset.behaviorTab));
 
+  void loadPlatform();
   onPageRefresh('behavior', () => {
     setTimeout(() => void refreshList(), 0);
-    showTab('behaviors');
+    showTab(readTab(), { persist: false });
   });
+  showTab(readTab(), { persist: false });
   void refreshList();
 }

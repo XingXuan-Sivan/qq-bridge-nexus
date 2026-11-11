@@ -571,3 +571,39 @@ npm run test:console-ui
 - 新增 SPEC §14.7：生成物与源的边界审计——5 类不符合项（结构行缺失、`order` 无来源、行参数硬编码、安全段文字模板化、`risk.max` 空转）+ 冗余判定（运行时产物不算冗余；安装副本与旧 `qq-*` 是）+ G22–G24。
 - 备份与迁移清单：`docs/archive/prompts/2026-11-11/`（46 文件 + SHA256SUMS + manifest）、`docs/PROMPT_MIGRATION.md`。
 - 待拍板默认值：A 安全段改源文件显式文本；B 安装目录用链接（回落 hash 校验）。
+
+### 2026-11-12（D25）能力预设界面收口、工具注册面只剩能力预设
+
+1. **行为档案页两标签**：去掉独立的「平台话术」标签，平台话术卡并入行为档案面板（提示词卡之后）；档案清单一律行内操作（编辑/克隆/删除），新建放表头工具区，配搜索/刷新/类型筛选。
+2. **能力预设编辑区拆卡**：列表卡（搜索/刷新/蓝色新建、行内编辑/克隆/删除）+ 六张独立卡（基本信息、平台工具、Agent 模块、MCP 服务器、MCP 工具、技能）；每张表有搜索/分页，保存按钮在基本信息卡头部，保存成功不收起编辑区。
+3. **能力面板正确性**：`tools.mcp` 按 `[{server, tools:'*'|[]}]` 列表保存（旧 UI 的 `{allow,deny}` 形状会被 `normalizeMcpList` 丢空）；删除不存在的 deny 列；`skills: ['*']` 与 `mcp: [{server:'*'}]` 在编辑时展开为显式集合，未改动时保存仍写回 `*`，避免把「以后新增的也允许」悄悄收窄；`builtin` 只认四条内置 id，克隆出来的能力可删除。
+4. **表格列宽**：`table.js` 用 `<colgroup><col width>` 输出列宽并删除 `th[data-w]` 白名单（白名单外的 64/95/38% 之前被静默忽略，剩余宽度全摊给选择列）；多选列缺省 60px。
+5. **工具注册面**：删除 `config.json` 的 `tools`（37 键）与控制台「QQ 工具」开关卡，控制台该分区只剩语音库；注册面改为所有能力预设 `tools.platform` 的并集（`platformFlags()`），`src/bridge.js` 与 `src/mcp-snowluma-safe.js` 启动时调用；`defaultOff` 的五个工具（表情备注/发语音/ownerRelay/ownerGroupAccess/webImage）默认不进并集，显式勾选才注册；`GET/POST /api/config/tools` 已删除。
+6. **测试夹具**：`audit-bridge-harness` 整份复制 `dsh/agent-presets`（原来只复制 preset.yml，缺 capability.yml 会让注册面全关）；新增 `platformTools` 选项用于开单个工具；无能力预设时 `platformFlags()` 按目录默认值注册，避免「没配置 = 全关」。
+
+**验收**：`test-audit` **118/118**；`test-console-ui` **32/32、38 次 mock 写**；`test-console-static` 全部通过；`test-voice` **83/0**、`test-voice-system` **50/0**；`test-mcp-servers-stdio` 通过（snowluma 45 / snowluma-host 1 / web-search-safe 2）；`platformFlags()` 实测 32 开 5 关；离线截图确认六张卡、行内操作、列宽与分页。
+
+**已知限制**：工具注册发生在 MCP 模块加载期，改能力预设后必须重启 DSH 才刷新工具清单；本文 §6.14、§6.35 提到的 `/api/config/tools` 与 `pages/config/tools-section.js` 已被本次改动取代（历史记录不改写）。
+
+### 2026-11-12（D26）全局配置页整改与「人格卡上限」归注入块
+
+1. **权限卡空白**：`config/fields.js` 的映射漏了 `permission`，权限级别卡从未渲染控件；补上后 `reloadConfigSections()` 每次刷到它，切「安全」时再读一次 `/api/config/permission`。
+2. **权限落盘**：`loadConfig` 归一化 `permission` 后与 `config.json` 比对，不一致即写回（缺键时补上），不再只留内存。
+3. **人格卡注入上限迁移**：`config.role.maxInjectChars` / `limits.personaInjectChars` 删除，改为 `promptBlocks['core-persona'].maxChars`（1000~20000，默认 8000）；启动迁移旧值、`PATCH /api/config/promptBlocks` 夹紧范围；`/api/roles/limit` 只写 `role.saveApply`；`GET /api/prompt-blocks` 追加 `synthetic:true` 的「人格卡」行供控制台调上限（显示「常开」）。
+4. **卡片与保存**：「权限级别」移到「安全」管理员之后，「静默与发言限制」移到「准入」全局准入之后；上下文压缩去掉自带保存按钮并进页面保存栏；管理员表与静默时段表改用 `dataTableHtml`（搜索/分页/工具栏动作），删除各自的手搓表。
+5. **表单与布局**：默认行为/默认人格改标准 `select` 字段（消除手写行造成的标签偏移）；全局准入改自适应双列并重写说明；标签页记忆（`qq-console:tab:config` / `qq-console:tab:behavior`，刷新保持当前标签）。
+6. **能力面板两表合并**：平台工具与 Agent 模块合成一张「平台工具」表（允许/工具/说明/类型，类型列显示「平台|Agent」+ 风险标签）；列表合并为「允许 x/y · 模块 a/b」；侧栏行为档案图标放大到与其他图标同一视觉重量。
+7. **注入块保存修复**：PATCH 响应只含 core 块的 `status()`，旧前端拿它覆盖整表会冲掉插件块与人格卡行；改为保存后重新 `load()`。
+
+**验收**：`test-console-ui` **32/32、40 次 mock 写**；权限卡控件数 0→2；标签记忆刷新后停在「安全」；能力编辑表 45 行（37 平台 + 8 Agent）；注入块工具栏保存按钮在 1440 宽度内可见；静默表 3 行 7 列。
+
+**已知限制**：改注入上限后需重启 DSH 才刷新工具清单；`config.json` 的旧键清理发生在桥接启动时，未启动前文件里可能仍留着旧键。
+
+### 2026-11-12（D27）管理员表增行、所有者字段正名、注入块筛选
+
+1. **管理员列表加不了人**：`renderAdminRows()` 把整行 `<tr>` 字符串塞进 `dataTableHtml({ rows })`，而组件的 `rows` 只接受「每格 HTML」或 `{cells, attrs}`；空表时 `map` 不执行所以不报错，一点「添加管理员」就抛 `Cannot read properties of undefined (reading 'map')`，表格保持 0 行。改为 `adminRowCells()` 返回单元格数组。
+2. **所有者 ≠ 管理员**：`ownerQQ` 字段标签由「管理员 QQ」改为「所有者 QQ」，说明写清它是全局唯一最高权限（管理命令 / 审批 / closed-agent），与 `admins[]` 按人配置的权限是两套。
+3. **注入块筛选**：块清单表补「槽位」「来源（核心 / 插件 / 人格卡）」两个筛选；行上带 `data-filter-slot` / `data-filter-source`，筛选选项按实际出现的槽位生成。
+4. **侧栏图标**：行为档案 `◆`→`⌗`、人格与角色 `◉`→`♥`，各自调字号保持与其他菜单同一视觉重量。
+
+**验收**：`test-console-ui` **32/32**（新增「添加一行 → 移除 → 回空表」与「来源=人格卡只剩一行」断言）；`node --check` 通过；截图确认管理员行可编辑、两个筛选可用、图标大小一致。

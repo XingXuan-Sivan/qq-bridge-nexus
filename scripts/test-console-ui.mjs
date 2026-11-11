@@ -312,9 +312,8 @@ try {
 
   await test('Prompt layer tabs contracts', async () => {
     await navigate('behavior');
-    await reveal('[data-behavior-tab="platform"]');
-    await page.click('[data-behavior-tab="platform"]');
-    await page.waitForSelector('#platformSave', { timeout: 5000 });
+    // 平台话术不再是独立标签：它和行为提示词一起放在「行为档案」标签页里。
+    await reveal('#platformSave');
     await page.waitForFunction(() => document.querySelector('#platformMsg')?.textContent?.includes('字'), null, { timeout: 5000 });
     await reveal('#behaviorPromptSave');
     assert.ok(await page.locator('#behaviorPromptSave').count(), '行为提示词保存按钮');
@@ -344,6 +343,8 @@ try {
     await page.click('[data-behavior-tab="capabilities"]');
     await reveal('#capabilityTable [data-cap-edit]');
     await page.click('#capabilityTable [data-cap-edit]');
+    // 平台工具表分页展示，先用搜索把 sendPoke 筛出来再勾选。
+    await page.fill('#capEditorPlatform [data-table-search]', 'sendPoke');
     await page.waitForSelector('#capabilityEditor [data-cap-platform="sendPoke"]', { state: 'attached' });
     await page.fill('#capabilityLabel', '聊天（改）');
     await page.click('[data-cap-platform="sendPoke"]');
@@ -426,10 +427,64 @@ try {
   await test('Admin list save contract', async () => {
     await navigate('config');
     await page.locator('[data-config-section="security"]').click();
+    // 字段语义：这是全局唯一的所有者（ownerQQ），不是管理员列表里的管理员。
+    assert.equal((await page.locator('[data-field-wrap="ownerQQ"] .field-label').innerText()).trim(), '所有者 QQ');
+    // 点「添加管理员」必须真的出现一行：表格 rows 只吃单元格数组，直接塞 <tr> 字符串会在有行时抛错。
+    await page.locator('#adminAdd').click();
+    await page.waitForTimeout(150);
+    assert.equal(await page.locator('#adminTableHost tbody tr').count(), 1, '点「添加管理员」应出现一行');
+    assert.equal(await page.locator('[data-admin-field="qq"]').count(), 1, '新行应带 QQ 输入框');
+    await page.locator('[data-admin-remove]').click();
+    await page.waitForTimeout(150);
+    assert.equal(await page.locator('#adminTableHost tbody tr').count(), 0, '移除后应回到空表');
     await fill('ownerQQ', '100001');
     assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { ownerQQ: '100001', admins: [] });
     await check('secInterceptNotify', false);
     assert.deepEqual(await saveBarWrite('/api/security'), { interceptNotify: false });
+  });
+
+  // 全局准入不能只靠右下角浮层保存：卡片自己有保存按钮，改完当场落盘。
+  await test('Global access card saves from its own button', async () => {
+    await navigate('config');
+    await page.locator('[data-config-section="access"]').click();
+    await page.waitForFunction(() => document.getElementById('accessPassiveEntries')?.value.includes('123456789'));
+    await page.locator('#accessPassiveEntries').fill('qq:group:123456789\nqq:group:200002');
+    const body = await clickWrite('#globalAccessSave', '/api/access', 'PATCH');
+    assert.equal(body.passive.mode, 'allow');
+    assert.deepEqual(body.passive.entries, ['qq:group:123456789', 'qq:group:200002']);
+    await page.waitForFunction(() => /已保存/.test(document.getElementById('globalAccessSaveMsg')?.textContent || ''));
+  });
+
+  // 会话弹窗的权限档位必须与全局配置页同一套措辞；full 档只在总开关打开时出现。
+  await test('Session permission levels mirror global wording and hide full until enabled', async () => {
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key]');
+    await page.locator('#sessionList [data-manage-key]').first().click();
+    await page.waitForSelector('#detailPermission');
+    const readOptions = () => page.locator('#detailPermission option').evaluateAll((nodes) => nodes.map((node) => ({
+      value: node.value,
+      label: node.textContent.trim(),
+    })));
+    let options = await readOptions();
+    assert.deepEqual(options.map((o) => o.value), ['inherit', 'read-only', 'workspace-write', 'full-ask'], '总开关关闭时不应出现 full 档');
+    assert.ok(options.every((o) => o.label !== 'inherit'), '不应出现裸 inherit 选项');
+    assert.match(options[0].label, /跟随全局（当前：只读（read-only））/);
+    assert.match(options[3].label, /完全访问 · 每次确认（qq-full-ask）/);
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+
+    await navigate('config');
+    await page.locator('[data-config-section="security"]').click();
+    await check('permissionAllowFull', true);
+    assert.deepEqual(await saveBarWrite('/api/config/permission'), { default: 'read-only', allowFull: true, fullTtlMin: 30 });
+
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key]');
+    await page.locator('#sessionList [data-manage-key]').first().click();
+    await page.waitForSelector('#detailPermission');
+    options = await readOptions();
+    assert.equal(options.at(-1).value, 'full', '总开关打开后应出现 full 档');
+    assert.match(options.at(-1).label, /完全访问 · 短时授权（danger-full-access）/);
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
   });
 
   // state/ 的 ACL 收紧需要管理员权限，未提权时桥接会明确报告 hardened:false。
@@ -866,22 +921,54 @@ try {
   });
 
 
-  if (!original) await test('人格提示词：注入上限与生效方式在全局配置里一起保存', async () => {
+  if (!original) await test('人格提示词：上限在注入块页管理，全局配置只留生效方式', async () => {
     await navigate('config');
     await page.locator('[data-config-section="runtime"]').click();
-    const max = page.locator('#personaInjectMax');
-    await max.waitFor();
-    assert.equal(Number(await max.inputValue()), 6000, '默认上限应为 6000');
-    await max.fill('8000');
+    assert.equal(await page.locator('#personaInjectMax').count(), 0, '注入上限已移到注入块页，全局配置不应再有输入框');
+    const hint = await page.locator('[data-field-wrap="personaSaveApply"]').textContent();
+    assert.match(hint, /注入块/, '全局配置要说明上限改去哪管');
     await page.locator('input[name="personaSaveApply"][value="immediate"]').check();
     const body = await saveBarWrite('/api/roles/limit');
-    assert.equal(body.maxInjectChars, 8000);
     assert.equal(body.saveApply, 'immediate');
+    assert.equal(body.maxInjectChars, undefined, '全局配置不再提交上限');
     await page.waitForFunction(() => /已保存/.test(document.getElementById('actionDockResults')?.textContent || ''));
-    // 改回默认
-    await max.fill('6000');
     await page.locator('input[name="personaSaveApply"][value="nextWake"]').check();
     await saveBarWrite('/api/roles/limit');
+
+    // 注入块页：人格卡作为虚拟块「常开」，只暴露上限。
+    await navigate('prompt-blocks');
+    await page.waitForFunction(() => !!document.querySelector('[data-block-max="core-persona"]'), null, { timeout: 8000 });
+    assert.equal(await page.locator('[data-block-enabled="core-persona"]').count(), 0, '人格卡不提供开关');
+    // 注入块表要能按槽位 / 来源筛选；人格卡虚拟块单独成一类。
+    assert.equal(await page.locator('#pbTable [data-filter="slot"]').count(), 1, '应有槽位筛选');
+    assert.equal(await page.locator('#pbTable [data-filter="source"]').count(), 1, '应有来源筛选');
+    await page.selectOption('#pbTable [data-filter="source"]', 'persona');
+    await page.waitForTimeout(150);
+    assert.equal(await page.locator('#pbTable tbody tr:not([hidden])').count(), 1, '来源=人格卡应只剩一行');
+    assert.equal(await page.locator('[data-block-max="core-persona"]').count(), 1);
+    await page.selectOption('#pbTable [data-filter="source"]', '');
+    await page.waitForTimeout(150);
+    assert.match(await page.locator('#pbSummaryRow').textContent(), /人格卡注入上限/);
+    const input = page.locator('[data-block-max="core-persona"]');
+    const previous = await input.inputValue();
+    // 表格可能正在重绘：直接写 DOM 再触发 change，避免 Playwright 的可见性等待。
+    await input.evaluate((el, next) => {
+      el.value = next;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, '9000');
+    const [req] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes('/api/config/promptBlocks') && r.method() !== 'GET'),
+      page.evaluate(() => document.getElementById('pbSave').click()),
+    ]);
+    const saved = req.postDataJSON();
+    assert.equal(saved.promptBlocks['core-persona'].maxChars, 9000, '上限应写进 core-persona 块');
+    await input.evaluate((el, next) => {
+      el.value = next;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }, previous);
+    await page.evaluate(() => document.getElementById('pbSave').click());
   });
 
   if (!original) await test('DSH 模型：提供方 / 模型 / 思考强度联动、来自目录、明示全局副作用与第三方隐私', async () => {

@@ -27,28 +27,16 @@ export const ACCESS_FIELDS = {
       {
         name: 'ownerQQ',
         type: 'text',
-        label: '管理员 QQ',
-        placeholder: '123456789',
-        hint: 'ownerQQ，最高权限：唯一可执行管理命令 / 审批 / closed-agent 的 QQ；可留空清除（清除后无管理员，fail-closed）。',
+        label: '所有者 QQ',
+        placeholder: '留空 = 不设所有者',
+        hint: '所有者（ownerQQ）与下面的管理员是两个概念：所有者全局唯一、拥有最高权限，可执行管理命令 / 审批 / 进入 closed-agent；管理员列表按人配权限，只在各自私聊生效。留空表示没有所有者（fail-closed）。',
         span: 2,
       },
       {
         name: 'adminsBlock',
         type: 'custom',
         span: 2,
-        html: `<div class="table-toolbar">
-  <div class="table-toolbar-main">
-    <button type="button" id="adminAdd" class="btn small">+ 添加管理员</button>
-    <span class="meta" id="adminMsg"></span>
-  </div>
-  <div class="table-toolbar-side">
-    <button type="button" id="wlSave" class="btn small primary">保存管理员</button>
-  </div>
-</div>
-<table class="table admin-table">
-  <thead><tr><th>QQ</th><th>称呼</th><th>权限</th><th>最高级别</th><th>通知</th><th>私聊被动豁免</th><th></th></tr></thead>
-  <tbody id="adminRows"></tbody>
-</table>`,
+        html: '<div id="adminTableHost"></div>',
       },
       { name: 'wlNote', type: 'custom', span: 2, html: '<div class="meta">保存后立即生效并写入 config.json。会话准入请看 <a href="#sessions">会话与审批</a>。</div>' },
     ],

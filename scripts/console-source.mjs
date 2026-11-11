@@ -63,7 +63,7 @@ export function consolePageDirs(root = ROOT) {
     .map((id) => {
       const dir = path.join(pagesDir, id);
       const pick = (name) => (fs.existsSync(path.join(dir, name)) ? path.join(dir, name) : null);
-      // 一个页面可以拆成多个模块（例如 config/tools-section.js、config/access-section.js）；
+      // 一个页面可以拆成多个模块（例如 config/voice-section.js、config/access-section.js）；
       // 静态断言按整个页面源码匹配，必须把它们一并纳入，否则新模块对测试不可见。
       let scripts = [];
       try {

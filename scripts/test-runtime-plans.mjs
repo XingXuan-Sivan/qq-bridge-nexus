@@ -81,11 +81,11 @@ test('激活指针：首次迁移只写一次，之后 set/get 持久化', () =>
 
 test('自定义方案：新增/更新落盘字段、内置 id 拒绝、删除保护', () => {
   const created = upsertCustomPlan([], {
-    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', capability: 'agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
   });
   assert.equal(created.plans.length, 1);
   assert.deepEqual(created.plans[0], {
-    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', capability: 'agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
   });
   const updated = upsertCustomPlan(created.plans, { ...created.plans[0], label: '改名后', builtin: true });
   assert.equal(updated.plans.length, 1);

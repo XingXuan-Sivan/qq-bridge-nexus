@@ -12,12 +12,29 @@ export const PLAN_BEHAVIORS = ['none', 'inherit'];
 export const PLAN_AUDIENCES = ['owner', 'access'];
 
 /** 内置方案：数据而不是枚举，控制台里只读，可克隆成自定义方案。 */
+/** 旧预设 id → 新能力 id（P10 迁移用）。控制台不再让用户看到 qq-*。 */
+export const LEGACY_PRESET_TO_CAPABILITY = Object.freeze({
+  'qq-chat': 'agent-chat',
+  'qq-chat-v2': 'agent-chat',
+  'qq-agent-readonly': 'agent-readonly',
+  'qq-agent-workspace': 'agent-workspace',
+  'qq-agent-full': 'agent-full',
+});
+
+/** 兼容旧配置：只给了预设 id 的方案，按对照表补出能力 id。 */
+export function capabilityForTools(tools) {
+  const id = normalizeString(tools, 80);
+  if (!id) return '';
+  return LEGACY_PRESET_TO_CAPABILITY[id] ?? (id.startsWith('agent-') ? id : '');
+}
+
 export const BUILTIN_PLANS = [
   {
     id: 'chat',
     label: '聊天模式',
     note: '白名单内，随时对话。',
     tools: 'qq-chat',
+    capability: 'agent-chat',
     behavior: 'none',
     audience: 'access',
     builtin: true,
@@ -27,6 +44,7 @@ export const BUILTIN_PLANS = [
     label: '一代仿真',
     note: '按策略自然参与群聊（v1 行为）。',
     tools: 'qq-chat',
+    capability: 'agent-chat',
     behavior: 'social-v1',
     audience: 'access',
     builtin: true,
@@ -36,6 +54,7 @@ export const BUILTIN_PLANS = [
     label: '二代仿真',
     note: '自主阅读、发言与潜水（v2 行为）。',
     tools: 'qq-chat-v2',
+    capability: 'agent-chat',
     behavior: 'social-v2',
     audience: 'access',
     builtin: true,
@@ -45,6 +64,7 @@ export const BUILTIN_PLANS = [
     label: 'Agent · 只读',
     note: '仅管理员私聊；只能读，不能改。',
     tools: 'qq-agent-readonly',
+    capability: 'agent-readonly',
     behavior: 'none',
     audience: 'owner',
     builtin: true,
@@ -54,6 +74,7 @@ export const BUILTIN_PLANS = [
     label: 'Agent · 工作区',
     note: '仅管理员私聊；可读写工作区。',
     tools: 'qq-agent-workspace',
+    capability: 'agent-workspace',
     behavior: 'none',
     audience: 'owner',
     builtin: true,
@@ -63,6 +84,7 @@ export const BUILTIN_PLANS = [
     label: 'Agent · 高权限',
     note: '仅管理员私聊；完全访问，每次切换需要确认码与 TOTP。',
     tools: 'qq-agent-full',
+    capability: 'agent-full',
     behavior: 'none',
     audience: 'owner',
     builtin: true,
@@ -89,8 +111,10 @@ export function normalizePlan(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const id = normalizeString(raw.id, 40);
   if (!PLAN_ID_RE.test(id)) return null;
-  const tools = normalizeString(raw.tools, 80);
-  if (!tools) return null;
+  const capability = normalizeString(raw.capability, 40) || capabilityForTools(raw.tools);
+  // P10.4 起以 capability 为准；tools 只作 P10.5 之前的安装目标，两者至少有一个。
+  const tools = normalizeString(raw.tools, 80) || capability;
+  if (!tools && !capability) return null;
   const behaviorRaw = normalizeString(raw.behavior, 80) || 'none';
   const behavior = PLAN_BEHAVIORS.includes(behaviorRaw) || PLAN_ID_RE.test(behaviorRaw) ? behaviorRaw : 'none';
   const audience = PLAN_AUDIENCES.includes(raw.audience) ? raw.audience : 'access';
@@ -99,6 +123,7 @@ export function normalizePlan(raw) {
     label: normalizeString(raw.label, 40) || id,
     note: normalizeString(raw.note, 200),
     tools,
+    capability,
     behavior,
     audience,
     builtin: raw.builtin === true,
@@ -119,7 +144,8 @@ export function normalizePlans(raw) {
       ...builtin,
       label: override?.label || builtin.label,
       note: override?.note || builtin.note,
-      tools: builtin.tools, // 内置方案的「用哪套能力」不允许在控制台改，改就克隆
+      tools: builtin.tools, // 安装目标（P10.5 起与 capability 同名）
+      capability: builtin.capability, // 内置方案的能力不允许在控制台改，改就克隆
       behavior: builtin.behavior,
       audience: builtin.audience,
     });

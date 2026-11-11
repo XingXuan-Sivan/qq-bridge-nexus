@@ -244,20 +244,15 @@ provideRecommendations: true
 
 > 注：字段名以当前 `src/bridge.js` 的归一化对象为准；上表是目标结构，迁移时逐字段对照，不凭页面 label 猜。
 
-### 3.2.1 能力预设的桥接侧补丁（`capabilities`）
+### 3.2.1 能力（`dsh/agent-presets/<id>/capability.yml`）
 
-`config.json > capabilities` 只放桥接自己那半份信息：`{ "<presetId>": { agent, tools: { visible }, prompt: { personaPrefix }, suggestedPermission, note } }`。
-
-- 权威能力仍在 `dsh/agent-presets/<id>/`；这里不存沙箱，也不存审批（都归 DSH 的权限预设）。
-- `tools.visible`：允许这套能力的会话调用哪些平台工具；`null` = 全部。目录见 `src/tools/catalog.mjs`（37 个平台工具，按 `read/send/state/admin` 分级）。只有 `send/state/admin` 类会被它收紧（`CAPABILITY_GATED_RISKS`），读类仍由「全局配置 › 拓展功能」的注册开关控制。
-- `prompt.personaPrefix`：拼进 Agent 的平台补充（占位符在 P9.2 接上渲染）。
-- `suggestedPermission`：只作提示（`read-only/workspace-write/full-ask/full`），不会被自动套用。
-- 执行侧：`v2ToolEnabled(flag, key)` → `capabilityAllows(key, flag)`，按会话固定方案的 `tools` 查 `visible`，不在集合里就 403。
-- 迁移：P7 的 `grants.disable` 在读取时自动折算成 `visible`（全集减去禁用项），下次保存后旧字段消失。
-
-#> 平台提示词（`prompt.personaPrefix`）在安装期由 `scripts/build-agent-preset-patches.mjs` 拼进
-> `agent.cordis.yml` 的 `persona.prefix`（`{platform}`/`{displayName}`/`{owner}` 占位符按平台适配器渲染）；
-> 为空时生成物逐字节不变，内置预设不受影响。
+- 能力只有**一份源**：`dsh/agent-presets/<id>/capability.yml`，形状 `{ id, label, agent:'dsh', tools:{ platform, agent, mcp, skills }, safety, prompt:{ base }, note }`。`preset.yml` / `agent.cordis.yml` / `extensions.yml` 由 `scripts/build-capability-artifacts.mjs` 生成，文件头带「勿手改」，`--check` 可逐字节比对。
+- `config.json > capabilities` 已删除（P10.4）：工具可见集、Agent 模块、MCP/技能全部从 `capability.yml` 读，旧补丁不再生效；迁移脚本把它们折算进能力文件。
+- 平台工具可见性由 `visiblePlatformFlags(capability)` 推导：显式 `tools.platform[flag] = true|false` 优先，没写的按内置模板默认。只有 `send/state/admin` 类会被收紧（`CAPABILITY_GATED_RISKS`），读类仍由「全局配置 › 拓展功能」的注册开关控制。
+- 执行侧：`v2ToolEnabled(flag, key)` → `capabilityAllows(key, flag)` → `capabilityAllowsFlag(capabilityOf(key), flag)`，按会话固定方案的 `capability` 判定，不允许就 403。
+- `safety.local_tools = false` 时生成器清空 fs/pwsh/jobs 并追加 `qq-tool-restrict` 守卫行；`safety.notes` 与 1–4 条安全段拼在 `persona.prefix` 最前面。
+- `prompt.base` 只写平台无关的身份与边界；**平台话术归行为档案**（P10.5 由注入块 `core-platform-prompt` 注入），不再写进 persona。
+- 内置能力 `builtin: true` 服务端拒改拒删，页面只给「克隆」。
 
 ## 3.3 `config.json` 目标结构
 

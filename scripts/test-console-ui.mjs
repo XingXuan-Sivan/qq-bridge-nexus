@@ -401,25 +401,27 @@ try {
     });
   });
 
-  await test('Runtime capability tool-visible contracts', async () => {
+  await test('Capability file contracts', async () => {
     await navigate('behavior');
     await page.click('[data-behavior-tab="capabilities"]');
     await reveal('#capabilityTable [data-cap-edit]');
     await page.click('#capabilityTable [data-cap-edit]');
     await page.waitForSelector('#capabilityEditor .modal', { timeout: 5000 });
-    await page.uncheck('[name="capabilityVisible"][value="sendPoke"]');
-    await page.fill('#capabilityPersona', '你是 QQ 上的助手。');
-    await page.selectOption('#capabilityPermission', 'read-only');
+    await page.fill('#capabilityLabel', '聊天（改）');
+    await page.uncheck('[name="capabilityPlatform"][value="sendPoke"]');
+    await page.fill('#capabilitySafetyNotes', '不主动私聊。');
     const [response] = await Promise.all([
-      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/qq-chat' && r.request().method() === 'PATCH'),
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/agent-chat' && r.request().method() === 'PATCH'),
       page.click('#capabilitySave'),
     ]);
-    assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/qq-chat should succeed');
+    assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/agent-chat should succeed');
     const body = fixture.requests.at(-1)?.body ?? {};
-    assert.equal(body.tools?.visible?.includes('sendPoke'), false, '取消勾选的工具不能出现在可见集里');
-    assert.equal(body.tools?.visible?.includes('sendMessage'), true, '其余工具仍应保留');
-    assert.equal(body.prompt?.personaPrefix, '你是 QQ 上的助手。');
-    assert.equal(body.suggestedPermission, 'read-only');
+    assert.equal(body.label, '聊天（改）');
+    assert.equal(body.tools?.platform?.sendPoke, false, '取消勾选的平台工具要写成 false');
+    assert.equal(body.tools?.platform?.sendMessage, true, '其余平台工具保持 true');
+    assert.equal(body.tools?.agent?.['tool-web'], true, 'Agent 模块按勾选写成 true');
+    assert.equal(body.safety?.notes, '不主动私聊。');
+    assert.equal(body.tools?.visible, undefined, '可见集不再直接提交，由能力文件推导');
     assert.equal(body.sandbox, undefined, '沙箱不再由能力预设承载');
   });
 

@@ -457,10 +457,12 @@ session.planId → plan → capability(安装预设 id) + behavior(id)
 - 手工确认 4 个 `capability.yml` 的 tools/safety 与旧预设等价；跑 `--check`（新产物 vs 旧产物，放行 `behavior:` 行与 persona 平台段的差异，逐项 diff 记录在 `docs/migration-report.md`）。
 - 验收：§8 G3/G4。
 
-**P10.4 服务端切换读取源**
-- `src/bridge.js`：能力/工具/行为/安装全部改读 `capability.yml`；删 `config.capabilities` 读路径；`/api/capabilities/*` 落地；`plan.tools` 迁移为 `plan.capability`（旧键读一次并写回）。
-- 删 `capabilityAllows` 旧实现，`v2ToolEnabled` 改走新解析。
-- 验收：`test-runtime-capabilities.mjs` 重写通过、存量会话建链回归（`test-runtime-combo`）。
+**P10.4 服务端切换读取源** — ✅ 已实施（本轮提交，tag `phase/10.4`）
+- 新增 `src/capabilities/store.mjs`（唯一读源）：`createCapabilityStore({root})` → `list/get/save`，`visiblePlatformFlags`/`agentModulesOf`/`capabilityAllowsFlag`；保存时经 `normalizeCapabilityFile` 写回 `capability.yml` 并重建三产物。
+- `src/bridge.js` 删除 `ensureCapabilities`/`capabilityRegistry`/`config.capabilities` 读路径，改模块级 `capabilityStore` + `capabilityOf(key)`；`/api/runtime/capabilities` 返回 `{catalog, adapters, capabilities}`，`PATCH` 收 `{label,note,tools,safety,prompt}` 审计 `capability.write`。
+- `plan.tools` 迁移为 `plan.capability`：`LEGACY_PRESET_TO_CAPABILITY` 把 `qq-chat/qq-chat-v2/qq-agent-*` 折成 `agent-*`，`normalizePlan` 以 `capability` 优先、`tools` 兜底。
+- 删 `src/runtime/capabilities.mjs`；`v2ToolEnabled` 经 `capabilityAllows` → `capabilityAllowsFlag`。
+- 验收：`test-runtime-capabilities` 4/4、`test-runtime-plans` 6/6、`test-runtime-combo` 4/4、static 全过、UI 35/35。
 
 **P10.5 平台提示词注入块**
 - 行为档案加 `prompt`；迁移脚本抽取 QQ 段；新增 `core-platform-prompt` 块 + `wakePromptCtx` 取值；golden 夹具更新（新增 1 块，其余逐字不变）。

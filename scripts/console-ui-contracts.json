@@ -107,37 +107,43 @@
   },
   {
     "method": "PATCH",
-    "path": "/api/runtime/capabilities/qq-chat",
+    "path": "/api/runtime/capabilities/agent-chat",
     "body": {
+      "label": "聊天（改）",
       "tools": {
-        "visible": [
-          "memory",
-          "slangSubmit",
-          "markRead",
-          "setWakeConfig",
-          "stickerNote",
-          "setStickerRemark",
-          "collectSticker",
-          "sendGroup",
-          "sendPrivate",
-          "reply",
-          "sendBurst",
-          "sendMessage",
-          "sendSticker",
-          "sendVoice",
-          "webImage",
-          "feedback",
-          "requestMode",
-          "crossGroup",
-          "ownerGroupAccess",
-          "ownerRelay",
-          "schedule"
-        ]
+        "platform": {
+          "memory": false,
+          "slangSubmit": false,
+          "markRead": true,
+          "setWakeConfig": true,
+          "stickerNote": false,
+          "setStickerRemark": false,
+          "collectSticker": false,
+          "sendGroup": false,
+          "sendPrivate": false,
+          "reply": false,
+          "sendBurst": true,
+          "sendMessage": true,
+          "sendPoke": false,
+          "sendSticker": false,
+          "sendVoice": false,
+          "webImage": false,
+          "feedback": false,
+          "requestMode": false,
+          "crossGroup": false,
+          "ownerGroupAccess": false,
+          "ownerRelay": false,
+          "schedule": false
+        },
+        "agent": {
+          "tool-web": true,
+          "tool-ask-user": true,
+          "tool-todo": true
+        }
       },
-      "prompt": {
-        "personaPrefix": "你是 QQ 上的助手。"
+      "safety": {
+        "notes": "不主动私聊。"
       },
-      "suggestedPermission": "read-only",
       "note": ""
     }
   },

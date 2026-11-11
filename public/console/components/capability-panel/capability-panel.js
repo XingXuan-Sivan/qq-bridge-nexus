@@ -1,4 +1,4 @@
-// 能力预设面板：桥接侧的能力补丁（可用工具 + 权限建议 + 平台提示词）。
+// 能力面板：编辑 capability.yml（平台工具、Agent 模块、安全补充）。平台说话方式在行为档案里。
 // 行为页第二标签与运行方案页共用同一份实现，避免两处各写一套。
 // 约定：表格只用 table 组件，字段只用 renderFields，弹窗字段也走 renderFields。
 import { api } from '../../js/api.js';
@@ -6,14 +6,6 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { renderFields, checkListField } from '../../components/form/form.js';
 import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
-
-const PERMISSION_OPTIONS = [
-  { value: '', label: '跟随级别（不提示）' },
-  { value: 'read-only', label: '只读' },
-  { value: 'workspace-write', label: '工作区读写' },
-  { value: 'full-ask', label: '完全访问 · 每次确认' },
-  { value: 'full', label: '完全访问 · 短时授权' },
-];
 
 /**
  * @param {{ tableHost: HTMLElement, editorHost?: HTMLElement, onSaved?: Function }} options
@@ -38,16 +30,14 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
     return `<span class="meta">MCP ${mcp} · 工具 ${tools} · 技能 ${skills}</span>`;
   }
 
-  /** 可见集（null = 全部）→ 「允许 N / 共 M」+ 被禁工具的 pill。 */
+  /** 平台工具可见集 → 「允许 N / 共 M」+ 被禁工具的 pill。 */
   function visibleSummary(cap) {
     const tools = gatedTools();
     if (!catalog) return '<span class="meta">后端未返回工具目录：重启桥接后生效</span>';
-    const blocked = tools.filter((tool) => cap.tools?.visible?.includes(tool.flag) === false);
-    const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
-      ? tools.length
-      : tools.length - blocked.length;
-    const pills = blocked.slice(0, 4).map((tool) => `<span class="pill r">${esc(tool.label)}</span>`).join(' ');
-    return `<span class="meta">允许 ${allowed} / ${tools.length}</span>${pills ? ` ${pills}` : ''}`;
+    const visible = Array.isArray(cap.platformVisible) ? cap.platformVisible : tools.map((tool) => tool.flag);
+    const blocked = tools.filter((tool) => !visible.includes(tool.flag));
+    const pills = blocked.slice(0, 3).map((tool) => `<span class="pill r">${esc(tool.label)}</span>`).join(' ');
+    return `<span class="meta">允许 ${tools.length - blocked.length} / ${tools.length}</span>${pills ? ` ${pills}` : ''}`;
   }
 
   function tableMarkup() {
@@ -55,17 +45,17 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
     const rows = capabilities.map((cap) => [
       `<code>${esc(cap.id)}</code>`,
       visibleSummary(cap),
-      cap.prompt?.personaPrefix
-        ? `<span class="meta">${esc(cap.prompt.personaPrefix.slice(0, 28))}${cap.prompt.personaPrefix.length > 28 ? '…' : ''}</span>`
-        : '<span class="meta">未设置</span>',
+      (cap.agentModules ?? []).length
+        ? `<span class="meta">${esc((cap.agentModules ?? []).join(' / '))}</span>`
+        : '<span class="meta">无本地模块</span>',
       extensionSummary(cap.id),
       `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button> <button class="btn small" type="button" data-cap-advanced="${esc(cap.id)}">高级</button>`,
     ]);
     return dataTableHtml({
       columns: [
         { label: '能力预设', width: '180' },
-        { label: '可用工具' },
-        { label: '平台提示词', width: '220' },
+        { label: '平台工具' },
+        { label: 'Agent 模块', width: '220' },
         { label: 'MCP / 技能', width: '170' },
         { label: '操作', width: '150' },
       ],
@@ -95,23 +85,31 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
     const host = el('capabilityFields');
     if (!host) return;
     const tools = gatedTools();
-    const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
-      ? tools.map((tool) => tool.flag)
-      : cap.tools.visible.filter((flag) => tools.some((tool) => tool.flag === flag));
+    const visible = Array.isArray(cap.platformVisible) ? cap.platformVisible : tools.map((tool) => tool.flag);
+    const modules = (catalog?.agent ?? []).map((module) => ({ value: module.id, label: module.label }));
     const toolsHtml = tools.length ? checkListField({
-      id: 'capabilityVisible',
-      label: '允许调用的工具',
+      id: 'capabilityPlatform',
+      label: '平台工具',
       options: tools.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
-      value: allowed,
+      value: visible.filter((flag) => tools.some((tool) => tool.flag === flag)),
       columns: 2,
-      hint: '勾上 = 允许；只对固定使用这个能力预设的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
+      hint: '勾上 = 允许；只对使用这套能力的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
     })
       : '<div class="meta">后端还没有返回工具目录（桥接进程启动早于本次更新）。重启桥接后，这里会列出可收紧的工具。</div>';
+    const modulesHtml = checkListField({
+      id: 'capabilityAgent',
+      label: 'Agent 模块',
+      options: modules,
+      value: cap.agentModules ?? [],
+      columns: 2,
+      hint: '本地执行能力（文件 / 命令 / 任务）。聊天类能力应保持全关，由守卫行兜底。',
+    });
     renderFields(host, [
-      { name: 'capabilityVisibleBlock', type: 'custom', span: 1, html: toolsHtml },
-      { name: 'capabilityPermission', type: 'select', label: '权限建议', options: PERMISSION_OPTIONS, value: cap.suggestedPermission || '', hint: '只作提示：新建或改会话时建议选这个级别，不会自动套用。' },
-      { name: 'capabilityPersona', type: 'textarea', label: '平台提示词', value: cap.prompt?.personaPrefix || '', hint: '拼进 Agent 的平台补充（可用 {platform} {displayName} {owner} 占位符）。' },
-      { name: 'capabilityNote', type: 'text', label: '备注', value: cap.note || '' },
+      { name: 'capabilityLabel', type: 'text', label: '名称', value: cap.label || '', span: 1 },
+      { name: 'capabilityVisibleBlock', type: 'custom', span: 2, html: toolsHtml },
+      { name: 'capabilityAgentBlock', type: 'custom', span: 2, html: modulesHtml },
+      { name: 'capabilitySafetyNotes', type: 'textarea', label: '安全补充', value: cap.safety?.notes || '', hint: '拼在 persona 安全段末尾；只写这套能力特有的约束。' },
+      { name: 'capabilityNote', type: 'text', label: '备注', value: cap.note || '', hint: '给选方案的人看的说明，不进提示词。' },
     ], { columns: 1 });
   }
 
@@ -125,10 +123,18 @@ export function createCapabilityPanel({ tableHost, onSaved = null }) {
     renderEditorFields(cap);
     wireModal(overlay);
     overlay.querySelector('#capabilitySave')?.addEventListener('click', async () => {
+      const platform = {};
+      for (const tool of gatedTools()) {
+        platform[tool.flag] = overlay.querySelector(`[name="capabilityPlatform"][value="${tool.flag}"]`)?.checked === true;
+      }
+      const agent = {};
+      for (const box of overlay.querySelectorAll('[name="capabilityAgent"]')) {
+        if (box.checked) agent[box.value] = true;
+      }
       const next = {
-        tools: { visible: [...overlay.querySelectorAll('[name="capabilityVisible"]:checked')].map((box) => box.value) },
-        prompt: { personaPrefix: overlay.querySelector('#capabilityPersona')?.value ?? '' },
-        suggestedPermission: overlay.querySelector('#capabilityPermission')?.value ?? '',
+        label: overlay.querySelector('#capabilityLabel')?.value ?? '',
+        tools: { platform, agent },
+        safety: { notes: overlay.querySelector('#capabilitySafetyNotes')?.value ?? '' },
         note: overlay.querySelector('#capabilityNote')?.value ?? '',
       };
       try {

@@ -87,7 +87,7 @@ import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
-import { createCapabilityRegistry } from './runtime/capabilities.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags } from './capabilities/store.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
@@ -3981,32 +3981,22 @@ async function main() {
   }
 
   /** 当前生效方案（缺失/非法时回落到默认方案，不抛错）。 */
-  let capabilityRegistry = null;
-  let capabilitySource = null;
+  /** 能力目录（dsh/agent-presets/<id>/capability.yml）是工具面的唯一源。 */
+  const capabilityStore = createCapabilityStore({
+    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    log: (line) => log(line),
+  });
 
-  /** 能力预设的桥接侧补丁（工具可见集 + 平台提示词）；catalog 就是 DSH 预设目录 + 方案用到的预设。 */
-  function ensureCapabilities() {
-    const catalog = [...new Set([...PRESET_IDS, ...normalizePlans(bridgeCfg.runtime?.plans).map((plan) => plan.tools)])]
-      .filter(Boolean)
-      .map((id) => ({ id, label: id, builtin: PRESET_IDS.includes(id) }));
-    const source = JSON.stringify({ catalog, config: bridgeCfg.capabilities ?? {} });
-    if (!capabilityRegistry || source !== capabilitySource) {
-      capabilitySource = source;
-      capabilityRegistry = createCapabilityRegistry({
-        catalog,
-        config: bridgeCfg.capabilities ?? {},
-        onChange: (next) => saveConfigSection('capabilities', next),
-      });
-    }
-    return capabilityRegistry;
+  /** 会话语义下的能力；解析不到返回 null（旧会话/未迁移方案按宽松处理）。 */
+  function capabilityOf(key) {
+    const id = sessionPlanOf(key)?.capability;
+    return id ? capabilityStore.get(id) : null;
   }
 
   /** 这套方案允许调用该工具吗？只覆盖有副作用的平台工具（读类仍看全局注册开关）。 */
   function capabilityAllows(key, flag) {
     if (!capabilityCovers(flag)) return true;
-    const plan = sessionPlanOf(key);
-    if (!plan?.tools) return true;
-    return ensureCapabilities().allows(plan.tools, flag);
+    return capabilityAllowsFlag(capabilityOf(key), flag);
   }
 
   function activePlan() {
@@ -6946,11 +6936,11 @@ async function main() {
           return;
         }
         // 能力预设的桥接侧补丁（工具可见集 / 平台提示词）：只读列表 + 单条保存。
-        if (req.method === 'GET' && url.pathname === '/api/runtime/capabilities') {
+        if (req.method === 'GET' && (url.pathname === '/api/runtime/capabilities' || url.pathname === '/api/capabilities')) {
           const plans = normalizePlans(bridgeCfg.runtime?.plans);
-          const capabilities = ensureCapabilities().list().map((entry) => ({
+          const capabilities = capabilityStore.list().map((entry) => ({
             ...entry,
-            usedBy: plans.filter((plan) => plan.tools === entry.id).map((plan) => plan.id),
+            usedBy: plans.filter((plan) => plan.capability === entry.id).map((plan) => plan.id),
           }));
           sendJson({ ok: true, catalog: toolCatalogSnapshot(), adapters: adapterRegistry.snapshot(), capabilities });
           return;
@@ -6963,15 +6953,15 @@ async function main() {
           const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
           const body = await readBody();
           try {
-            const saved = ensureCapabilities().save(capabilityId, {
-              tools: body?.tools,
-              prompt: body?.prompt,
-              suggestedPermission: body?.suggestedPermission,
+            const saved = capabilityStore.save(capabilityId, {
+              label: body?.label,
               note: body?.note,
+              tools: body?.tools,
+              safety: body?.safety,
+              prompt: body?.prompt,
             });
-            capabilityRegistry = null;
-            ext.audit.append('runtime.capability.write', { id: capabilityId, visible: saved.tools.visible });
-            sendJson({ ok: true, capability: saved, capabilities: ensureCapabilities().list() });
+            ext.audit.append('capability.write', { id: capabilityId, visible: saved.platformVisible });
+            sendJson({ ok: true, capability: saved, capabilities: capabilityStore.list() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '保存失败' }, 400);
           }

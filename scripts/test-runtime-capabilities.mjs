@@ -1,88 +1,81 @@
 #!/usr/bin/env node
-// 能力预设补丁：工具可见集的归一、迁移与注册表行为。
+// 能力目录（capability.yml）单测：默认模板、读写往返、工具可见集与守卫。
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
-import {
-  createCapabilityRegistry,
-  normalizeCapability,
-  normalizeVisible,
-  visibleAllows,
-} from '../src/runtime/capabilities.mjs';
-import {
-  AGENT_MODULES,
-  LEVEL_ALLOWS,
-  PLATFORM_TOOLS,
-  capabilityCovers,
-  platformToolFlags,
-  platformToolRisk,
-  toolCatalogSnapshot,
-} from '../src/tools/catalog.mjs';
+import { createCapabilityStore, visiblePlatformFlags, capabilityAllowsFlag } from '../src/capabilities/store.mjs';
+import { PLATFORM_TOOLS } from '../src/tools/catalog.mjs';
+import { saveCapabilityFile } from '../src/capabilities/file.mjs';
 
-const ALL = platformToolFlags();
-const GATED = PLATFORM_TOOLS.filter((tool) => capabilityCovers(tool.flag)).map((tool) => tool.flag);
+function tempRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'cap-store-'));
+}
 
-test('工具目录：平台工具与 Agent 模块都有风险等级', () => {
-  assert.ok(PLATFORM_TOOLS.length >= 30);
-  assert.equal(new Set(ALL).size, ALL.length, 'flag 不能重复');
-  for (const tool of PLATFORM_TOOLS) {
-    assert.ok(tool.label, `${tool.flag} 缺 label`);
-    assert.ok(tool.names.length >= 1, `${tool.flag} 缺宿主工具名`);
-    assert.ok(['read', 'send', 'state', 'admin'].includes(tool.risk), `${tool.flag} 风险等级不合法`);
-  }
-  assert.deepEqual(platformToolRisk('nope'), 'admin', '未知工具按 admin 处理');
-  for (const module of AGENT_MODULES) assert.ok(module.risk);
-  assert.ok(GATED.includes('sendMessage'));
-  assert.ok(!GATED.includes('getUnread'), '读类不进能力收紧范围');
-});
-
-test('权限级别的准入矩阵与文档一致', () => {
-  assert.deepEqual([...LEVEL_ALLOWS['read-only']].sort(), ['read', 'send', 'state']);
-  assert.ok(LEVEL_ALLOWS['workspace-write'].includes('write'));
-  assert.ok(LEVEL_ALLOWS['full'].includes('exec'));
-  assert.ok(LEVEL_ALLOWS['full'].includes('admin'));
-  assert.ok(!LEVEL_ALLOWS['full-ask'].includes('read') === false);
-});
-
-test('visible 归一：null/全部、过滤未知、去重', () => {
-  assert.equal(normalizeVisible(null), null);
-  assert.equal(normalizeVisible('all'), null);
-  assert.deepEqual(normalizeVisible(['sendMessage', 'sendMessage', 'nope']), ['sendMessage']);
-  assert.equal(visibleAllows(null, 'sendMessage'), true);
-  assert.equal(visibleAllows(['sendPoke'], 'sendMessage'), false);
-});
-
-test('capability 归一：旧 grants.disable 迁移成 visible，沙箱字段被丢掉', () => {
-  const migrated = normalizeCapability({ sandbox: 'danger-full-access', grants: { disable: ['sendPoke', 'schedule'] }, note: '旧数据' }, 'qq-chat');
-  assert.equal(migrated.sandbox, undefined);
-  assert.ok(migrated.tools.visible.includes('sendMessage'));
-  assert.ok(!migrated.tools.visible.includes('sendPoke'));
-  assert.ok(!migrated.tools.visible.includes('schedule'));
-  assert.equal(migrated.note, '旧数据');
-  const blank = normalizeCapability({}, 'qq-chat-v2');
-  assert.equal(blank.tools.visible, null);
-  assert.equal(blank.suggestedPermission, '');
-  assert.equal(normalizeCapability({}, 'Bad Id'), null);
-});
-
-test('注册表：合并目录、保存触发 onChange、allows 只收紧副作用工具', () => {
-  const changes = [];
-  const registry = createCapabilityRegistry({
-    catalog: [{ id: 'qq-chat', label: '聊天', builtin: true }],
-    config: { 'qq-chat': { tools: { visible: ['sendMessage'] }, suggestedPermission: 'read-only' } },
-    onChange: (next) => changes.push(next),
+test('store lists only directories with capability.yml', () => {
+  const root = tempRoot();
+  fs.mkdirSync(path.join(root, 'empty-dir'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'agent-chat'), { recursive: true });
+  saveCapabilityFile(path.join(root, 'agent-chat'), {
+    id: 'agent-chat',
+    label: '聊天',
+    agent: 'dsh',
+    tools: { platform: { sendMessage: true }, agent: {}, mcp: [], skills: [] },
+    safety: { local_tools: false },
+    prompt: { base: '你是群聊里的角色。' },
   });
-  const chat = registry.get('qq-chat');
-  assert.equal(chat.builtin, true);
-  assert.equal(chat.tools.visible.length, 1);
-  assert.equal(chat.suggestedPermission, 'read-only');
-  assert.equal(registry.allows('qq-chat', 'sendMessage'), true);
-  assert.equal(registry.allows('qq-chat', 'sendPoke'), false);
-  assert.equal(registry.allows('qq-chat', 'getUnread'), true, '读类不受可见集影响');
-  const saved = registry.save('qq-chat', { tools: { visible: GATED }, prompt: { personaPrefix: '你是 QQ 上的 {displayName}。' } });
-  assert.equal(saved.tools.visible.length, GATED.length);
-  assert.equal(saved.prompt.personaPrefix, '你是 QQ 上的 {displayName}。');
-  assert.equal(changes.length, 1);
-  assert.ok(changes[0]['qq-chat'].tools.visible.length === GATED.length);
-  assert.throws(() => registry.save('nope', {}), /没有这个能力预设/);
-  assert.deepEqual(Object.keys(toolCatalogSnapshot()).sort(), ['agent', 'defaultAgents', 'entries', 'gatedRisks', 'levelAllows', 'levelAsks', 'levels', 'platform', 'risks']);
+  const store = createCapabilityStore({ root });
+  const items = store.list();
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'agent-chat');
+  assert.equal(items[0].builtin, true);
+  assert.ok(Array.isArray(items[0].platformVisible));
+});
+
+test('platform visibility: explicit flags win, defaults fill the rest', () => {
+  const capability = {
+    id: 'agent-chat',
+    tools: { platform: { sendMessage: true, sendVoice: false }, agent: {} },
+  };
+  const visible = visiblePlatformFlags(capability);
+  assert.ok(visible.includes('sendMessage'));
+  assert.ok(!visible.includes('sendVoice'));
+  assert.equal(capabilityAllowsFlag(capability, 'sendMessage'), true);
+  assert.equal(capabilityAllowsFlag(capability, 'sendVoice'), false);
+  // 读类工具不归能力管（动态挑一个 risk=read 的平台工具，避免写死名字）
+  const readTool = PLATFORM_TOOLS.find((tool) => tool.risk === 'read');
+  assert.ok(readTool, '至少有一个读类平台工具');
+  assert.equal(capabilityAllowsFlag(capability, readTool.flag), true);
+  // 没有能力时按宽松处理
+  assert.equal(capabilityAllowsFlag(null, 'sendVoice'), true);
+});
+
+test('save writes capability.yml and rebuilds artifacts', () => {
+  const root = tempRoot();
+  fs.mkdirSync(path.join(root, 'agent-chat'), { recursive: true });
+  saveCapabilityFile(path.join(root, 'agent-chat'), {
+    id: 'agent-chat',
+    label: '聊天',
+    agent: 'dsh',
+    tools: { platform: {}, agent: {}, mcp: [], skills: [] },
+    safety: { local_tools: false },
+    prompt: { base: '你是群聊里的角色。' },
+  });
+  const store = createCapabilityStore({ root });
+  const saved = store.save('agent-chat', {
+    label: '聊天（改）',
+    tools: { platform: { sendPoke: false }, agent: {} },
+    safety: { notes: '不主动私聊。' },
+  });
+  assert.equal(saved.label, '聊天（改）');
+  assert.equal(saved.safety.notes, '不主动私聊。');
+  assert.ok(!saved.platformVisible.includes('sendPoke'));
+  assert.ok(fs.existsSync(path.join(root, 'agent-chat', 'agent.cordis.yml')));
+  assert.ok(fs.readFileSync(path.join(root, 'agent-chat', 'preset.yml'), 'utf8').includes('name:'));
+});
+
+test('unknown capability returns null instead of throwing', () => {
+  const store = createCapabilityStore({ root: tempRoot() });
+  assert.equal(store.get('nope'), null);
 });

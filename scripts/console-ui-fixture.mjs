@@ -776,10 +776,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/runtime/capabilities': return json({
             ok: true,
             catalog: toolCatalogSnapshot(),
-          adapters: adaptersSnapshot(),
+            adapters: adaptersSnapshot(),
             capabilities: [
-              { id: 'qq-chat', label: '聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['chat'] },
-              { id: 'qq-chat-v2', label: '二代聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['social-v2'] },
+              { id: 'agent-chat', label: '聊天 Agent', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, agent: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, safety: { local_tools: false, notes: '' }, note: '', usedBy: ['chat', 'social-v2'] },
+              { id: 'agent-readonly', label: 'Agent · 只读', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, agent: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, safety: { local_tools: true, notes: '' }, note: '', usedBy: [] },
             ],
           });
           case '/api/config/behaviors': return json({

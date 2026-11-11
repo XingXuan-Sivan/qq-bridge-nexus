@@ -1,0 +1,236 @@
+{
+  "createdAt": "2026-11-11T12:00:24.126Z",
+  "root": "qq-bridge-nexus",
+  "files": [
+    {
+      "file": "agent-chat.agent.cordis.yml",
+      "bytes": 2809,
+      "sha256": "9d82992ee6f569b7b2e49e3ea8bf63cb40efde6d90fca1bc5a27ee973571baee"
+    },
+    {
+      "file": "agent-chat.persona.md",
+      "bytes": 967,
+      "sha256": "4d9455f4c9c7654828eca92be7361c600de8e553878b6f2c59c25dad1b01e2f6"
+    },
+    {
+      "file": "agent-chat.capability.yml",
+      "bytes": 723,
+      "sha256": "74a50b1bf5477c31fbd2410e820d20bdd7116dab36044087781c29491492d364"
+    },
+    {
+      "file": "agent-chat.extensions.yml",
+      "bytes": 192,
+      "sha256": "825a34a9164c29fd8b6a83970fbd5b02d8b6d83d01328f05a90694ce60e90c72"
+    },
+    {
+      "file": "agent-chat.preset.yml",
+      "bytes": 186,
+      "sha256": "56eb2c214065aa793c6ae2f4fd2813c4c4f20a519f7ea40bb246e56f4472037f"
+    },
+    {
+      "file": "agent-full.agent.cordis.yml",
+      "bytes": 1646,
+      "sha256": "34f4622273fd15ece95bedbd2f54e08ce5aa5d4cad28ba89d4bf0c92c1949874"
+    },
+    {
+      "file": "agent-full.persona.md",
+      "bytes": 1016,
+      "sha256": "94b1820f4f9b9c29b047de200a04f81b359fc71c6acfd4820efa10a5035fde7e"
+    },
+    {
+      "file": "agent-full.capability.yml",
+      "bytes": 874,
+      "sha256": "8222a20dd2df1dc0eeb621ee5a577860c0ca80364c01a0c9109ebfd43813039c"
+    },
+    {
+      "file": "agent-full.extensions.yml",
+      "bytes": 192,
+      "sha256": "825a34a9164c29fd8b6a83970fbd5b02d8b6d83d01328f05a90694ce60e90c72"
+    },
+    {
+      "file": "agent-full.preset.yml",
+      "bytes": 219,
+      "sha256": "d6d36557a1317ef42b40c3a65200d18c606a696e93dbef8e6bb3c225905cdb92"
+    },
+    {
+      "file": "agent-readonly.agent.cordis.yml",
+      "bytes": 1492,
+      "sha256": "67ebd118a47d651905f76a5846245eee41b3cc2a80c2e5566b65afb150e52b2b"
+    },
+    {
+      "file": "agent-readonly.persona.md",
+      "bytes": 968,
+      "sha256": "29537d8024269f60b59df4495c2b7b34f97e8adf8574c3df4f1888cb32e0792c"
+    },
+    {
+      "file": "agent-readonly.capability.yml",
+      "bytes": 763,
+      "sha256": "3a0f92c960697d5b0af42ad87866d252fba34372106cc0221bb5c7743b693fb6"
+    },
+    {
+      "file": "agent-readonly.extensions.yml",
+      "bytes": 192,
+      "sha256": "825a34a9164c29fd8b6a83970fbd5b02d8b6d83d01328f05a90694ce60e90c72"
+    },
+    {
+      "file": "agent-readonly.preset.yml",
+      "bytes": 192,
+      "sha256": "fbd7e10bb90de0a1c4c879808ec606ddf09c16b0bc0b11abefca3a109c681dde"
+    },
+    {
+      "file": "agent-workspace.agent.cordis.yml",
+      "bytes": 1619,
+      "sha256": "25cced0bc21a280242d4c47490b9966729d8f3bc26a08fa724f87432d08ba012"
+    },
+    {
+      "file": "agent-workspace.persona.md",
+      "bytes": 989,
+      "sha256": "34787b3b8348fe802550ab0e5dbdf7db9d3a0c79c8e2a6bb3ef1f8e344456e21"
+    },
+    {
+      "file": "agent-workspace.capability.yml",
+      "bytes": 843,
+      "sha256": "722000e37c2532230c83ffabed4a29f952a5cc65ff45a2d4afa9bfce0380a46a"
+    },
+    {
+      "file": "agent-workspace.extensions.yml",
+      "bytes": 192,
+      "sha256": "825a34a9164c29fd8b6a83970fbd5b02d8b6d83d01328f05a90694ce60e90c72"
+    },
+    {
+      "file": "agent-workspace.preset.yml",
+      "bytes": 210,
+      "sha256": "df02b854de51a566bbd3062e97d92b1db2b0069945b3e64016d4522cfb6d41cc"
+    },
+    {
+      "file": "qq-agent-full.agent.cordis.yml",
+      "bytes": 4483,
+      "sha256": "bae0002f72f3efbb464b6b3d6b30605e85ec6caa9c54965a6d744f9eeee8706d"
+    },
+    {
+      "file": "qq-agent-full.persona.md",
+      "bytes": 1635,
+      "sha256": "3988262a69129632db30b293b0ea88c48b40c50c16dfcfc23055aa5b045afcf5"
+    },
+    {
+      "file": "qq-agent-full.preset.yml",
+      "bytes": 236,
+      "sha256": "639def108f858065fd0fb6b45a313ddca93767dac3b3e94017d2a8437aa5f32f"
+    },
+    {
+      "file": "qq-agent-full.qq-approval-gate.mjs",
+      "bytes": 222,
+      "sha256": "73ca237d19649d47d384e98a3667c3f039046226f5b82abd318bc1032cc91d86"
+    },
+    {
+      "file": "qq-agent-full.qq-tool-restrict.mjs",
+      "bytes": 539,
+      "sha256": "e674dd80df30334e20ceb412926924b9c4bdae01cf75581e75ea309a6a9c80d4"
+    },
+    {
+      "file": "qq-agent-readonly.agent.cordis.yml",
+      "bytes": 4253,
+      "sha256": "9c19df0773f6439b05cd626cd3561bb3ebd0fb51212f40d1e5755139a0aa12a8"
+    },
+    {
+      "file": "qq-agent-readonly.persona.md",
+      "bytes": 1578,
+      "sha256": "dcda5bfa0d5982fa8b1e8e5571e8771e76562b526ff58dd8b7a52375f94fdf8a"
+    },
+    {
+      "file": "qq-agent-readonly.preset.yml",
+      "bytes": 250,
+      "sha256": "6aa6cdea52a58999f9609ee6ab12c2559ed938b0828f0c4efa3120a1eee14fba"
+    },
+    {
+      "file": "qq-agent-readonly.qq-tool-restrict.mjs",
+      "bytes": 539,
+      "sha256": "e674dd80df30334e20ceb412926924b9c4bdae01cf75581e75ea309a6a9c80d4"
+    },
+    {
+      "file": "qq-agent-workspace.agent.cordis.yml",
+      "bytes": 4482,
+      "sha256": "cfc7bea74644f9fe086d93c3f96cd00dcf2c633e460928ff437fee9e57f905bd"
+    },
+    {
+      "file": "qq-agent-workspace.persona.md",
+      "bytes": 1649,
+      "sha256": "92c544c058bf0abb29f3993d6d8633860ff838039d3cb84bdacefa3ad974e999"
+    },
+    {
+      "file": "qq-agent-workspace.preset.yml",
+      "bytes": 262,
+      "sha256": "58a649525a43122f772edead1904018e52d9363a0343a83dc2057558e0987a2f"
+    },
+    {
+      "file": "qq-agent-workspace.qq-approval-gate.mjs",
+      "bytes": 222,
+      "sha256": "73ca237d19649d47d384e98a3667c3f039046226f5b82abd318bc1032cc91d86"
+    },
+    {
+      "file": "qq-agent-workspace.qq-tool-restrict.mjs",
+      "bytes": 539,
+      "sha256": "e674dd80df30334e20ceb412926924b9c4bdae01cf75581e75ea309a6a9c80d4"
+    },
+    {
+      "file": "qq-chat.agent.cordis.yml",
+      "bytes": 7825,
+      "sha256": "4546c2c1c35397bfdc9853987867ca37d3f870f73df92fcaa83930246303b1f8"
+    },
+    {
+      "file": "qq-chat.persona.md",
+      "bytes": 5075,
+      "sha256": "e3c213d0fba673f94be5ae720a66b5127b08230a684d9060a2e8da681baafea1"
+    },
+    {
+      "file": "qq-chat.preset.yml",
+      "bytes": 170,
+      "sha256": "3299c807a27766415c26f638ec469c910257e77d6e3831147fefdf8d29651f6e"
+    },
+    {
+      "file": "qq-chat.qq-tool-restrict.mjs",
+      "bytes": 539,
+      "sha256": "e674dd80df30334e20ceb412926924b9c4bdae01cf75581e75ea309a6a9c80d4"
+    },
+    {
+      "file": "qq-chat-v2.agent.cordis.yml",
+      "bytes": 24714,
+      "sha256": "d44dd5ca107eb29b0c4b38e6c674b774180f2da923f9ef45e9a4646bea67d657"
+    },
+    {
+      "file": "qq-chat-v2.persona.md",
+      "bytes": 21878,
+      "sha256": "1278c0eb70358389989713bcecf81d563038b6db2cdee40ec80db6374b56421f"
+    },
+    {
+      "file": "qq-chat-v2.extensions.yml",
+      "bytes": 363,
+      "sha256": "485267b17c709f46f555974500b38068efbbbc055104fce3934ce510eabb1da9"
+    },
+    {
+      "file": "qq-chat-v2.preset.yml",
+      "bytes": 216,
+      "sha256": "76332d5150bca2c08e39564ce22d137c68aba5cee77c9685ff80f5e64f38498c"
+    },
+    {
+      "file": "qq-chat-v2.qq-tool-restrict.mjs",
+      "bytes": 539,
+      "sha256": "e674dd80df30334e20ceb412926924b9c4bdae01cf75581e75ea309a6a9c80d4"
+    },
+    {
+      "file": "platform-qq.yml",
+      "bytes": 21016,
+      "sha256": "5f7af7e0e971816103cc04cb836cdfaa5c2d63148b6fcb0b73c50a2f8190f025"
+    },
+    {
+      "file": "behavior-social-v1.yml",
+      "bytes": 1102,
+      "sha256": "75b2bb101a02691e9832ac576128482e3d8a4f9a6cc6f09e240a234c88b494a1"
+    },
+    {
+      "file": "behavior-social-v2.yml",
+      "bytes": 2567,
+      "sha256": "20c3be4fe700b1417fc8df2b8742f2df3058bbca77a5e88ac4a0344481f144e3"
+    }
+  ]
+}

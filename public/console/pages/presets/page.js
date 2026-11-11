@@ -279,10 +279,13 @@ function authSummary(preset) {
 function actionButtons(preset) {
   const id = esc(preset.id);
   const remove = preset.builtin
-    ? ''
+    ? `<button class="btn small" type="button" data-preset-act="clone" data-preset-id="${id}">克隆</button>`
     : `<button class="btn small danger" type="button" data-preset-act="delete" data-preset-id="${id}">删除</button>`;
+  const edit = preset.builtin
+    ? `<button class="btn small" type="button" data-preset-act="edit" data-preset-id="${id}" title="内置只读，编辑会提示先克隆">查看</button>`
+    : `<button class="btn small" type="button" data-preset-act="edit" data-preset-id="${id}">编辑</button>`;
   return '<div class="preset-row-actions">'
-    + `<button class="btn small" type="button" data-preset-act="edit" data-preset-id="${id}">编辑</button>`
+    + edit
     + `<button class="btn small primary" type="button" data-preset-act="apply" data-preset-id="${id}">应用</button>`
     + remove
     + '</div>';
@@ -634,7 +637,7 @@ function newPresetFields() {
   ];
 }
 
-function openCreatePresetModal() {
+function openCreatePresetModal(source = null) {
   const existing = document.getElementById('presetCreateModal');
   if (existing) { openModal(existing); return; }
   document.body.insertAdjacentHTML('beforeend', modalHtml({
@@ -646,6 +649,14 @@ function openCreatePresetModal() {
   }));
   const overlay = document.getElementById('presetCreateModal');
   renderFields(overlay.querySelector('#presetNewFields'), newPresetFields(), { layout: 'inline', columns: 1 });
+  if (source) {
+    const idInput = overlay.querySelector('#presetNewId');
+    const nameInput = overlay.querySelector('#presetNewName');
+    const fromSelect = overlay.querySelector('#presetNewFrom');
+    if (idInput) idInput.value = `${source.id}-copy`;
+    if (nameInput) nameInput.value = `${source.name || source.id}（副本）`;
+    if (fromSelect) fromSelect.value = source.id;
+  }
   wireModal(overlay, { onClose: () => overlay.remove() });
   overlay.querySelector('#presetNewCreate').addEventListener('click', () => void createPresetFromForm());
   openModal(overlay);
@@ -847,7 +858,8 @@ export function init() {
     const button = event.target.closest('[data-preset-act]');
     if (!button) return;
     const id = button.dataset.presetId;
-    if (button.dataset.presetAct === 'edit') void openPreset(id);
+    if (button.dataset.presetAct === 'clone') openCreatePresetModal(presetsCache.find((item) => item.id === id) ?? null);
+    else if (button.dataset.presetAct === 'edit') void openPreset(id);
     else if (button.dataset.presetAct === 'apply') void applyPreset(id);
     else if (button.dataset.presetAct === 'delete') void deletePreset(id);
   });

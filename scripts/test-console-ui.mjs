@@ -402,16 +402,17 @@ try {
   });
 
   await test('Runtime capability tool-visible contracts', async () => {
-    await navigate('runtime');
-    await reveal('#runtimeCaps [data-cap-edit]');
-    await page.click('#runtimeCaps [data-cap-edit]');
-    await page.waitForSelector('#runtimeCapEditor .modal', { timeout: 5000 });
-    await page.uncheck('[name="runtimeCapVisible"][value="sendPoke"]');
-    await page.fill('#runtimeCapPersona', '你是 QQ 上的助手。');
-    await page.selectOption('#runtimeCapPermission', 'read-only');
+    await navigate('behavior');
+    await page.click('[data-behavior-tab="capabilities"]');
+    await reveal('#capabilityTable [data-cap-edit]');
+    await page.click('#capabilityTable [data-cap-edit]');
+    await page.waitForSelector('#capabilityEditor .modal', { timeout: 5000 });
+    await page.uncheck('[name="capabilityVisible"][value="sendPoke"]');
+    await page.fill('#capabilityPersona', '你是 QQ 上的助手。');
+    await page.selectOption('#capabilityPermission', 'read-only');
     const [response] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/qq-chat' && r.request().method() === 'PATCH'),
-      page.click('#runtimeCapSave'),
+      page.click('#capabilitySave'),
     ]);
     assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/qq-chat should succeed');
     const body = fixture.requests.at(-1)?.body ?? {};

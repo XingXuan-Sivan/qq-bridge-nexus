@@ -33,9 +33,4 @@ export const RUNTIME_FIELDS = {
       { name: 'runtimeTable', type: 'custom', span: 2, html: '<div id="runtimeTable"></div>' },
     ],
   },
-  caps: {
-    fields: [
-      { name: 'runtimeCaps', type: 'custom', span: 2, html: '<div id="runtimeCaps"></div>' },
-    ],
-  },
 };

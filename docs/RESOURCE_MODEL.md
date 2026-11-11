@@ -1,6 +1,6 @@
 # 资源模型：两端适配、能力、行为与权限（需求与方案稿 v2）
 
-> 状态：**P9.1–P9.2 已实施**（P9.1 工具目录归一：`src/tools/catalog.mjs` + 能力 `tools.visible`；P9.2 平台提示词组装：`src/runtime/prompt-compose.mjs`，安装期拼进 persona.prefix，空值时产物逐字节不变）。其余分期见 §10。
+> 状态：**P9.1–P9.4 已实施**（P9.1 工具目录归一：`src/tools/catalog.mjs` + 能力 `tools.visible`；P9.2 平台提示词组装：`src/runtime/prompt-compose.mjs`，安装期拼进 persona.prefix，空值时产物逐字节不变）。其余分期见 §10。
 > 上游：`docs/UNIFY_PLAN.md`（三线归一执行契约）、`docs/RUNTIME_PROFILE_MODEL.md`（运行方案）。
 > v1 → v2 的变化：D1 取「安装期组装」；补齐**两端适配器**（用户端平台 / Agent 端运行时）、**工具目录归一**与**权限级别矩阵**；内置资源改为只读模板。
 
@@ -268,8 +268,8 @@
 |---|---|---|---|
 | **P9.1** ✅ | 工具目录 `src/tools/catalog.mjs`（37 个平台工具 + 风险分级 + 权限矩阵）、能力 `tools.visible` 取代 `grants.disable`、`v2ToolEnabled(flag,key)` 按会话方案收紧、能力编辑器改「允许调用的工具 + 权限建议 + 平台提示词」、`test-runtime-capabilities` 5/5 | 已完成 |
 | **P9.2** ✅ | `src/runtime/prompt-compose.mjs`：`renderPlatformPrompt`（`{platform}/{displayName}/{owner}` 占位符）、`appendPlatformPrompt`、`composeRows`（只动 persona 行）、`readPlatformPromptFromConfig`；`scripts/build-agent-preset-patches.mjs` 生成 patch 时按 `config.capabilities[id].prompt.personaPrefix` 拼接；`test-prompt-compose` 5/5，内置 5 个预设 `--check` 仍逐字一致 | 已完成（拼接发生在安装期，不改仓库源文件） |
-| **P9.3** | 两端适配器契约 + dsh/qq 内置实现 + 插件扩展点与校验 | 否 | 适配器单测；插件注册/冲突用例 |
-| **P9.4** | 行为档案页两标签 + 预设页只读 + 内置只读/克隆 + 导航与静态基线 | 否 | UI 35/35 + 契约重录 |
+| **P9.3** ✅ | `src/runtime/adapters.mjs`：`normalizeAdapter`/`createAdapterRegistry`/`builtinAdapters`（QQ 平台 + DSH Agent），`GET /api/runtime/adapters`，插件权限 `adapters:provide` 与 `ctx.adapters.register()`，运行方案页摘要显示两端适配器；`test-runtime-adapters` 4/4 | 已完成（换平台=换一份适配器描述，行为/能力/方案不动） |
+| **P9.4** ✅ | 行为档案页两标签（`行为档案`｜`能力预设`），能力面板抽成 `components/capability-panel/` 由两页共用（运行方案页不再重复实现，只留适配器摘要）；能力表合并显示 DSH 侧 MCP/技能授权数量，行内「编辑」改桥接补丁、「高级」跳 Agent 预设页；Agent 预设页对 `builtin` 服务端拒写、行内「克隆」预填模板；导航「预设」更名「Agent 预设」 | 否 | UI 35/35 + 契约重录 |
 | **P9.5** | 权限级别：全局默认 + `allowFull` 开关 + 会话覆盖 + `/perm` + 审计 + 删 `capabilities.sandbox` | **是**（权限改为显式默认/覆盖） | `/perm` 实测；只读档下执行类工具不可见 |
 | **P9.6** | 文档转正（本文 + GLOBAL_CONFIG + RUNTIME_PROFILE_MODEL + STATUS） | 否 | 文档互相引用一致 |
 

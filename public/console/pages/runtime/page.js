@@ -1,10 +1,11 @@
 // 运行方案页：读 /api/runtime/plans，展示当前指针与方案清单，切换走 /api/runtime/switch。
 // 自定义方案（新建/克隆/编辑/删除）只在页内弹窗里改，内置方案只读——要改先克隆。
+// 能力预设的编辑在「行为与能力」页的第二标签（components/capability-panel），这里只显示适配器摘要。
 // 约定：表格只用 table 组件，字段只用 renderFields，页面不自拼工具栏与空态。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { renderFields, checkListField } from '../../components/form/form.js';
+import { renderFields } from '../../components/form/form.js';
 import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { onPageRefresh } from '../../js/router.js';
 import { RUNTIME_FIELDS } from './fields.js';
@@ -16,8 +17,7 @@ const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
 let payload = null;
 let presets = [];
 let behaviors = [];
-let capabilities = [];
-let catalog = null;
+let capsPayload = null;
 
 function el(id) {
   return document.getElementById(id);
@@ -33,6 +33,12 @@ function behaviorLabel(value) {
   return found?.label || value;
 }
 
+function adaptersFor(kind) {
+  const list = (capsPayload?.adapters ?? {})[kind] ?? [];
+  if (!list.length) return '未注册';
+  return list.map((item) => item.label || item.id).join(' / ');
+}
+
 function summaryHtml() {
   if (!payload) return '<span class="meta">读取中…</span>';
   const plan = payload.activePlan ?? planById(payload.active);
@@ -44,6 +50,8 @@ function summaryHtml() {
     <span class="pill">${esc(behaviorLabel(plan.behavior))}</span>
     <span class="pill">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>
     <span class="pill">旧模式 ${esc(MODE_LABEL[legacy.mode] ?? legacy.mode ?? '—')}${legacy.level && legacy.level !== 'L0' ? ` / ${esc(legacy.level)}` : ''}</span>
+    <span class="pill">平台 ${esc(adaptersFor('platform'))}</span>
+    <span class="pill">Agent ${esc(adaptersFor('agent'))}</span>
     <span class="pill">${payload.resetOnRestart ? '重启回到当前方案' : '重启不继承'}</span>`;
 }
 
@@ -101,120 +109,6 @@ function renderTable() {
   initDataTables(host);
 }
 
-function capabilityById(id) {
-  return capabilities.find((item) => item.id === id) ?? null;
-}
-
-function gatedTools() {
-  return (catalog?.platform ?? []).filter((tool) => tool.gated);
-}
-
-/** 可见集（null = 全部）→ 「允许 N / 共 M」+ 被禁工具的 pill。 */
-function visibleSummary(cap) {
-  const tools = gatedTools();
-  const blocked = tools.filter((tool) => cap.tools?.visible?.includes(tool.flag) === false);
-  const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined ? tools.length : tools.length - blocked.length;
-  const pills = blocked.slice(0, 4).map((tool) => `<span class="pill r">${esc(tool.label)}</span>`).join(' ');
-  return `<span class="meta">允许 ${allowed} / ${tools.length}</span>${pills ? ` ${pills}` : ''}`;
-}
-
-function capsMarkup() {
-  if (!capabilities.length) return '<div class="meta">还没有可用的能力预设。</div>';
-  const rows = capabilities.map((cap) => [
-    `<code>${esc(cap.id)}</code>`,
-    visibleSummary(cap),
-    cap.suggestedPermission ? `<span class="pill">${esc(cap.suggestedPermission)}</span>` : '<span class="meta">跟随级别</span>',
-    cap.usedBy?.length ? cap.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ') : '<span class="meta">未被方案引用</span>',
-    `<button class="btn small" type="button" data-cap-edit="${esc(cap.id)}">编辑</button>`,
-  ]);
-  return dataTableHtml({
-    columns: [
-      { label: '能力预设', width: '200' },
-      { label: '可用工具' },
-      { label: '权限建议', width: '140' },
-      { label: '被方案引用', width: '200' },
-      { label: '操作', width: '90' },
-    ],
-    rows,
-    pageSize: 10,
-    meta: `共 ${capabilities.length} 项`,
-    empty: '没有匹配的能力预设。',
-  });
-}
-
-function renderCaps() {
-  const host = el('runtimeCaps');
-  if (!host) return;
-  host.innerHTML = capsMarkup();
-  initDataTables(host);
-}
-
-function capabilityModalHtml(cap) {
-  return modalHtml({
-    id: 'runtimeCapEditor',
-    title: `能力预设 · ${cap.id}`,
-    body: '<div class="form-stack" id="runtimeCapFields"></div>',
-    footer: '<button class="btn" type="button" data-modal-close>取消</button><button class="btn primary" type="button" id="runtimeCapSave">保存</button>',
-  });
-}
-
-/** 弹窗里的字段也走 renderFields：工具授予、权限建议、平台提示词、备注。 */
-function renderCapabilityFields(cap) {
-  const host = el('runtimeCapFields');
-  if (!host) return;
-  const tools = gatedTools();
-  const allowed = cap.tools?.visible === null || cap.tools?.visible === undefined
-    ? tools.map((tool) => tool.flag)
-    : cap.tools.visible.filter((flag) => tools.some((tool) => tool.flag === flag));
-  const toolsHtml = checkListField({
-    id: 'runtimeCapVisible',
-    label: '允许调用的工具',
-    options: tools.map((tool) => ({ value: tool.flag, label: `${tool.label}（${tool.flag}）` })),
-    value: allowed,
-    columns: 2,
-    hint: '勾上 = 允许；只对固定使用这个能力预设的方案生效。读类工具不受这里限制，仍由「全局配置 › 拓展功能」的注册开关控制。',
-  });
-  renderFields(host, [
-    { name: 'runtimeCapVisibleBlock', type: 'custom', span: 1, html: toolsHtml },
-    { name: 'runtimeCapPermission', type: 'select', label: '权限建议', options: [
-      { value: '', label: '跟随级别（不提示）' },
-      { value: 'read-only', label: '只读' },
-      { value: 'workspace-write', label: '工作区读写' },
-      { value: 'full-ask', label: '完全访问 · 每次确认' },
-      { value: 'full', label: '完全访问 · 短时授权' },
-    ], value: cap.suggestedPermission || '', hint: '只作提示：新建或改会话时建议选这个级别，不会自动套用。' },
-    { name: 'runtimeCapPersona', type: 'textarea', label: '平台提示词', value: cap.prompt?.personaPrefix || '', hint: '拼进 Agent 的平台补充（可用 {platform} {displayName} 等占位符，P9.2 接上渲染）。' },
-    { name: 'runtimeCapNote', type: 'text', label: '备注', value: cap.note || '' },
-  ], { columns: 1 });
-}
-
-function openCapabilityEditor(id) {
-  const cap = capabilityById(id);
-  if (!cap) return;
-  document.body.insertAdjacentHTML('beforeend', capabilityModalHtml(cap));
-  const overlay = el('runtimeCapEditor');
-  openModal(overlay);
-  renderCapabilityFields(cap);
-  wireModal(overlay);
-  overlay.querySelector('#runtimeCapSave')?.addEventListener('click', async () => {
-    const next = {
-      tools: { visible: [...overlay.querySelectorAll('[name="runtimeCapVisible"]:checked')].map((box) => box.value) },
-      prompt: { personaPrefix: overlay.querySelector('#runtimeCapPersona')?.value ?? '' },
-      suggestedPermission: overlay.querySelector('#runtimeCapPermission')?.value ?? '',
-      note: overlay.querySelector('#runtimeCapNote')?.value ?? '',
-    };
-    try {
-      const r = await api(`/api/runtime/capabilities/${encodeURIComponent(id)}`, 'PATCH', next);
-      if (!r?.ok) throw new Error(r?.error || '保存失败');
-      showConsoleToast('能力预设已保存');
-      overlay.remove();
-      await load();
-    } catch (error) {
-      showConsoleToast(`保存失败：${error?.message ?? error}`, 'err');
-    }
-  });
-}
-
 function renderSummary() {
   const host = el('runtimeSummary');
   if (host) host.innerHTML = summaryHtml();
@@ -232,10 +126,8 @@ async function load() {
     payload = plans.value;
     presets = presetList.status === 'fulfilled' ? (presetList.value?.presets ?? []) : [];
     behaviors = behaviorList.status === 'fulfilled' ? (behaviorList.value?.behaviors ?? []) : [];
-    capabilities = caps.status === 'fulfilled' ? (caps.value?.capabilities ?? []) : [];
-    catalog = caps.status === 'fulfilled' ? (caps.value?.catalog ?? null) : null;
+    capsPayload = caps.status === 'fulfilled' ? (caps.value ?? null) : null;
     renderSummary();
-    renderCaps();
     fillPlanOptions();
     renderTable();
   } catch (error) {
@@ -455,7 +347,6 @@ export function init() {
   renderFields(hostFor('summary'), RUNTIME_FIELDS.summary.fields, { columns: 2 });
   renderFields(hostFor('switch'), RUNTIME_FIELDS.switch.fields, { columns: 2 });
   renderFields(hostFor('table'), RUNTIME_FIELDS.table.fields, { columns: 2 });
-  renderFields(hostFor('caps'), RUNTIME_FIELDS.caps.fields, { columns: 2 });
   const btn = el('runtimeSwitch');
   if (btn) btn.addEventListener('click', () => { void switchPlan(); });
   const host = hostFor('table');
@@ -474,13 +365,6 @@ export function init() {
       }
       const delId = target.dataset.planDel;
       if (delId) void deletePlan(delId);
-    });
-  }
-  const capsHost = hostFor('caps');
-  if (capsHost) {
-    capsHost.addEventListener('click', (event) => {
-      const id = event.target.closest('[data-cap-edit]')?.dataset.capEdit;
-      if (id) openCapabilityEditor(id);
     });
   }
   onPageRefresh('runtime', () => { void load(); });

@@ -15,6 +15,7 @@ import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
 import { listKinds } from '../src/behaviors/kinds/index.mjs';
 import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
+import { builtinAdapters } from '../src/runtime/adapters.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -348,6 +349,15 @@ function memoryStatusOf(state) {
 function ingestStatusOf(state) {
   const config = state.memoryConfig.ingest;
   return { config, enabled: config.enabled === true, baseUrl: config.baseUrl, pending: 0, enqueued: 0, sent: 0, accepted: 0, batches: 0, failed: 0, lastError: null, lastAt: null, lastStatus: 'idle' };
+}
+
+/** 两端适配器快照（与桥接的 /api/runtime/capabilities 同形）。 */
+function adaptersSnapshot() {
+  return {
+    kinds: ['platform', 'agent'],
+    platform: builtinAdapters().filter((item) => item.kind === 'platform'),
+    agent: builtinAdapters().filter((item) => item.kind === 'agent'),
+  };
 }
 
 export function makeFixtureState() {
@@ -766,6 +776,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/runtime/capabilities': return json({
             ok: true,
             catalog: toolCatalogSnapshot(),
+          adapters: adaptersSnapshot(),
             capabilities: [
               { id: 'qq-chat', label: '聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['chat'] },
               { id: 'qq-chat-v2', label: '二代聊天', builtin: true, agent: 'dsh', tools: { visible: null }, prompt: { personaPrefix: '' }, suggestedPermission: '', note: '', usedBy: ['social-v2'] },

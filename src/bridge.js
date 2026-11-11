@@ -88,6 +88,7 @@ import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
 import { createRuntimeState } from './runtime/active.mjs';
 import { createCapabilityRegistry } from './runtime/capabilities.mjs';
+import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
 import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
@@ -2353,6 +2354,16 @@ async function main() {
       }
     }
   }
+  // 两端适配器：平台（QQ）与 Agent（DSH）各一份内置描述，插件可再注册。
+  const adapterRegistry = createAdapterRegistry({ log });
+  for (const adapter of builtinAdapters()) {
+    try {
+      adapterRegistry.register(adapter.kind, adapter, 'core');
+    } catch (error) {
+      log(`⚠️ 内置适配器注册失败：${error?.message ?? error}`);
+    }
+  }
+
   try {
     plugins = await createPluginKernel({
       rootDir: ROOT,
@@ -2363,6 +2374,7 @@ async function main() {
       deps: {
         commandRegistry,
         memoryRegistry,
+        adapterRegistry,
         sendToQQ: (key, msg) => sendToQQ(key, msg),
         hasSession: (key) => sessions.has(key),
         fetch: globalThis.fetch,
@@ -6707,6 +6719,13 @@ async function main() {
               return;
             }
             if (!id) { sendJson({ ok: false, error: '缺少预设 id' }, 400); return; }
+            // 内置能力预设只读：要改先克隆（克隆走 create 的 from，不在这里放开写）。
+            const builtinPreset = presetStore.list().some((item) => item.id === id && item.builtin);
+            const writesPreset = req.method === 'PUT' || req.method === 'DELETE' || (req.method === 'POST' && action === 'rollback');
+            if (builtinPreset && writesPreset) {
+              sendJson({ ok: false, error: '内置能力预设只读：请先克隆一份再改' }, 400);
+              return;
+            }
             if (req.method === 'GET' && !action) {
               sendJson({ ok: true, preset: presetStore.read(id), backups: presetStore.listBackups(id).slice(0, 8) });
               return;
@@ -6933,7 +6952,11 @@ async function main() {
             ...entry,
             usedBy: plans.filter((plan) => plan.tools === entry.id).map((plan) => plan.id),
           }));
-          sendJson({ ok: true, catalog: toolCatalogSnapshot(), capabilities });
+          sendJson({ ok: true, catalog: toolCatalogSnapshot(), adapters: adapterRegistry.snapshot(), capabilities });
+          return;
+        }
+        if (req.method === 'GET' && url.pathname === '/api/runtime/adapters') {
+          sendJson({ ok: true, ...adapterRegistry.snapshot() });
           return;
         }
         if (req.method === 'PATCH' && url.pathname.startsWith('/api/runtime/capabilities/')) {

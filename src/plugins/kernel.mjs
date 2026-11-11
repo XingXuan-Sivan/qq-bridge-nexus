@@ -289,6 +289,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     promptBlockRegistry.unregisterPlugin(entry.id);
     deps.memoryRegistry?.unregisterPlugin?.(entry.id);
     unregisterTaskTypes(entry.id);
+    deps.adapterRegistry?.unregisterPlugin?.(entry.id);
     entry.commands = [];
     entry.blocks = [];
     entry.memories = [];
@@ -348,7 +349,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [], adapters: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -376,6 +377,11 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
           pending.commands.push({ definition, pluginId });
           return true;
         },
+        registerAdapter: (kind, adapter, pluginId) => {
+          pending.adapters.push({ kind, adapter, pluginId });
+          return true;
+        },
+        unregisterAdapters: (pluginId) => deps.adapterRegistry?.unregisterPlugin?.(pluginId),
         sendToQQ: deps.sendToQQ,
         hasSession: deps.hasSession,
         fetch: deps.fetch,
@@ -410,7 +416,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, adapters: pending.adapters, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -425,6 +431,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     entry.blocks = [];
     entry.memories = [];
     entry.taskTypes = [];
+    entry.adapters = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -465,6 +472,14 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       for (const { definition, pluginId } of desc.taskTypes ?? []) {
         const registered = commitTaskType(definition, pluginId);
         if (registered) entry.taskTypes.push(registered.id);
+      }
+      for (const { kind, adapter, pluginId } of desc.adapters ?? []) {
+        try {
+          const registered = deps.adapterRegistry?.register?.(kind, adapter, pluginId);
+          if (registered) entry.adapters.push(`${kind}/${registered.id}`);
+        } catch (error) {
+          logLine(`⚠️ [plugins] ${entry.id} 注册适配器 ${kind}/${adapter?.id ?? '?'} 失败：${error?.message ?? error}`);
+        }
       }
       audit.append('activate', { plugin: entry.id, version: entry.version });
       logLine(`[plugins] 已加载 ${entry.id}@${entry.version}${entry.hooks.length ? `（${entry.hooks.join('/')}）` : ''}`);

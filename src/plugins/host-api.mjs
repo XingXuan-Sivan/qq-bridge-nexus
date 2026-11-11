@@ -113,6 +113,14 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     };
   }
 
+  if (granted.has('adapters:provide')) {
+    // 两端适配器：平台/Agent 的描述性注册，卸载时内核按 pluginId 批量清。
+    ctx.adapters = {
+      register: (kind, adapter) => deps.registerAdapter?.(kind, adapter, id),
+      unregister: () => deps.unregisterAdapters?.(id),
+    };
+  }
+
   if (granted.has('send:qq')) {
     ctx.qq = {
       async send(key, text) {

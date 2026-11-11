@@ -75,6 +75,7 @@ import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyL
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityRegistry } from '../src/runtime/capabilities.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
+import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
 
 import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
@@ -340,6 +341,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createRuntimeState,
     createCapabilityRegistry,
     capabilityCovers,
+    createAdapterRegistry,
+    builtinAdapters,
     toolCatalogSnapshot,
     migrateAccessModel,
     summarizeAccessConfig,

@@ -1,4 +1,10 @@
 <section class="page-stack behavior-page">
+  <div class="page-tabs" role="tablist">
+    <button class="page-tab active" type="button" role="tab" aria-selected="true" data-behavior-tab="behaviors">行为档案</button>
+    <button class="page-tab" type="button" role="tab" aria-selected="false" data-behavior-tab="capabilities">能力预设</button>
+  </div>
+
+  <div class="page-stack" data-behavior-panel="behaviors">
   <section class="card span-all">
     <h2>档案清单</h2>
     <p class="meta">档案是资源，被运行方案的「行为」字段引用；被引用的档案改名不影响引用，删除前先确认没有被方案使用。</p>
@@ -16,4 +22,17 @@
   </section>
 
   <div id="behaviorFormPanel" class="behavior-groups"></div>
+  </div>
+
+  <div class="page-stack" data-behavior-panel="capabilities" hidden>
+    <section class="card span-all">
+      <div class="card-head">
+        <div>
+          <h2>能力预设</h2>
+          <div class="meta">工具可见集与平台提示词是桥接侧的补丁；沙箱与审批由 DSH 权限预设负责，会话用哪个级别在会话详情里改。</div>
+        </div>
+      </div>
+      <div id="capabilityTable"></div>
+    </section>
+  </div>
 </section>

@@ -7,11 +7,13 @@ import { renderFields } from '../../components/form/form.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { behaviorFields, fillBehaviorForm, readBehaviorForm } from '../presets/behavior-form.js';
 import { BEHAVIOR_FIELDS } from './fields.js';
+import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
 
 let behaviorDoc = null;
 let busy = false;
 let kindSpecs = new Map();
 let kindsPromise = null;
+let capabilityPanel = null;
 
 /** 字段规格由后端 kind 注册表下发，页面不再自带一份（避免两处漂移）。 */
 async function ensureKinds() {
@@ -142,6 +144,28 @@ export function init() {
     void loadDoc(id);
   });
   document.getElementById('behaviorFormSave')?.addEventListener('click', () => void saveDoc());
-  onPageRefresh('behavior', () => setTimeout(() => void refreshList(), 0));
+
+  // 第二标签：能力预设（桥接侧补丁）。标签首次打开时才拉数据，避免进页就发两个请求。
+  const capabilityHost = document.getElementById('capabilityTable');
+  if (capabilityHost) capabilityPanel = createCapabilityPanel({ tableHost: capabilityHost });
+  const tabs = [...document.querySelectorAll('[data-behavior-tab]')];
+  const panels = [...document.querySelectorAll('[data-behavior-panel]')];
+  function showTab(name) {
+    for (const tab of tabs) {
+      const active = tab.dataset.behaviorTab === name;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+    }
+    for (const panel of panels) panel.hidden = panel.dataset.behaviorPanel !== name;
+    if (name === 'capabilities') void capabilityPanel?.load();
+  }
+  for (const tab of tabs) tab.addEventListener('click', () => showTab(tab.dataset.behaviorTab));
+
+  onPageRefresh('behavior', () => {
+    setTimeout(() => void refreshList(), 0);
+    // 标签状态不持久化：每次进页回到「行为档案」，避免上次停在能力预设让人以为档案没了。
+    if (!document.querySelector('[data-behavior-panel="capabilities"]')?.hidden) showTab('behaviors');
+    if (!document.querySelector('[data-behavior-panel="capabilities"]')?.hidden) void capabilityPanel?.load();
+  });
   void refreshList();
 }

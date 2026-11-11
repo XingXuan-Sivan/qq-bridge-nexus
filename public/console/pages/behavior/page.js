@@ -240,24 +240,25 @@ async function loadPlatform(id) {
   }
   if (select && want) select.value = want;
   if (!want) return;
-  const doc = await api(`/api/platform/prompts/${encodeURIComponent(want)}`);
-  if (!doc?.ok) {
-    setMsg(doc?.error || '读取失败', 'err', 'platformMsg');
+  const resp = await api(`/api/platform/prompts/${encodeURIComponent(want)}`);
+  const doc = resp?.prompt ?? resp;
+  if (!resp?.ok || !doc) {
+    setMsg(resp?.error || '读取失败', 'err', 'platformMsg');
     return;
   }
   if (!platformEditor) platformEditor = editorInto(document.getElementById('platformPromptEditor'), doc.text ?? '');
   else platformEditor.setValue(doc.text ?? '');
-  setMsg(`${doc.chars} 字${doc.isFactory ? '（与出厂一致）' : ''}`, 'info', 'platformMsg');
+  setMsg(`${doc.chars ?? 0} 字${doc.isFactory ? '（与出厂一致）' : ''}`, 'info', 'platformMsg');
 }
 
 async function savePlatform() {
-  const id = document.querySelector('[name="platformPromptId"]')?.value;
+  const id = document.getElementById('platformPromptId')?.value;
   if (!id) return;
   setMsg('保存中…', 'info', 'platformMsg');
   try {
     const r = await api(`/api/platform/prompts/${encodeURIComponent(id)}`, 'PUT', { text: platformEditor?.getValue?.() ?? '' });
     if (!r?.ok) throw new Error(r?.error || '保存失败');
-    setMsg(`✅ 已保存（${r.chars ?? 0} 字）；下一轮唤醒生效`, 'ok', 'platformMsg');
+    setMsg(`✅ 已保存（${r.prompt?.chars ?? 0} 字）；下一轮唤醒生效`, 'ok', 'platformMsg');
     showConsoleToast('平台话术已保存');
   } catch (error) {
     setMsg(`❌ ${String(error?.message ?? error)}`, 'err', 'platformMsg');
@@ -265,7 +266,7 @@ async function savePlatform() {
 }
 
 async function restorePlatform() {
-  const id = document.querySelector('[name="platformPromptId"]')?.value;
+  const id = document.getElementById('platformPromptId')?.value;
   if (!id) return;
   if (!window.confirm('还原为出厂话术？当前内容会先备份到 state/platform-backups/。')) return;
   setMsg('还原中…', 'info', 'platformMsg');

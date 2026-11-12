@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { cpSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,13 +163,15 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     await fs.mkdir(path.join(fixture, 'src', 'session'));
     await Promise.all(['key.mjs', 'access.mjs'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', 'session', name), path.join(fixture, 'src', 'session', name))));
-    // 工具注册面从能力预设推导（capabilities/store.mjs → file/build + tools/catalog），
-    // 子进程只有 fixture/src，依赖模块也要一起带上。
+    // 工具注册面从能力预设推导（capabilities/store.mjs + tools/catalog），子进程只有 fixture/src，
+    // 依赖模块也要一起带上。
     await fs.mkdir(path.join(fixture, 'src', 'capabilities'));
     await fs.mkdir(path.join(fixture, 'src', 'tools'));
-    await Promise.all(['store.mjs', 'file.mjs', 'build.mjs'].map((name) =>
-      fs.copyFile(path.join(ROOT, 'src', 'capabilities', name), path.join(fixture, 'src', 'capabilities', name))));
+    await fs.copyFile(path.join(ROOT, 'src', 'capabilities', 'store.mjs'), path.join(fixture, 'src', 'capabilities', 'store.mjs'));
     await fs.copyFile(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), path.join(fixture, 'src', 'tools', 'catalog.mjs'));
+    await fs.mkdir(path.join(fixture, 'src', 'profiles'), { recursive: true });
+    await fs.copyFile(path.join(ROOT, 'src', 'profiles', 'paths.mjs'), path.join(fixture, 'src', 'profiles', 'paths.mjs'));
+    cpSync(path.join(ROOT, 'profiles'), path.join(fixture, 'profiles'), { recursive: true });
     await Promise.all(['mcp-snowluma-safe.js', 'qq-model-view.js', 'sensitive.js'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', name), path.join(fixture, 'src', name))));
     await fs.writeFile(path.join(fixture, 'config.json'), JSON.stringify({ consolePort: api.address().port }));

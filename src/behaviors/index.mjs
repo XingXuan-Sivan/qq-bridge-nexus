@@ -1,14 +1,23 @@
 // 全局配置：行为档案（behavior profiles）。
 //
-// 行为档案描述“QQ 里怎么说话/怎么等待”，不描述运行模式、模型、准入或安全上限。
-// 权威源：config/behaviors/<id>.yml；由 dsh/agent-presets/<id>/preset.yml 的
-// `behavior` 字段引用。缺失或 kind 不匹配一律失败关闭，不做隐式兜底。
+// 行为档案描述“这个平台里怎么说话/怎么等待”，不描述运行模式、模型、准入或安全上限。
+// 权威源：profiles/platforms/<platform>/behaviors/<id>.yml（用户侧平台自己提供），
+// 由 profiles/plans/<id>.yml 的 `behavior` 字段引用。缺失或 kind 不匹配一律失败关闭。
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
+import { REPO_ROOT } from '../profiles/paths.mjs';
 
-export const BEHAVIOR_KINDS = ['v1', 'v2'];
-const TOP_KEYS = new Set(['version', 'kind', 'label', 'description', 'prompt', 'v1', 'v2']);
+// 行为类型 = profiles/platforms/<platform>/behavior-types/<kind>.yml 的 id；
+// 旧档案里的 `v1`/`v2` 仍按引擎别名接受（迁移期兜底）。校验与默认值由引擎模块负责。
+const ENGINE_BY_KIND = { 'social-v1': 'v1', 'social-v2': 'v2', v1: 'v1', v2: 'v2' };
+export const BEHAVIOR_KINDS = Object.keys(ENGINE_BY_KIND);
+
+/** kind → 引擎名；未知类型返回 ''，调用方据此报错。 */
+export function engineOfKind(kind) {
+  return ENGINE_BY_KIND[String(kind ?? '').trim()] ?? '';
+}
+const TOP_KEYS = new Set(['version', 'platform', 'kind', 'label', 'description', 'prompt', 'config']);
 const PROMPT_MAX = 20000;
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
@@ -52,19 +61,22 @@ export function normalizeBehavior(id, raw) {
   }
   const version = Number(source.version);
   if (!Number.isInteger(version) || version < 1) throw new Error(`${value}.version 必须是正整数`);
+  const platform = String(source.platform ?? '').trim();
+  if (!/^[a-z][a-z0-9-]{0,39}$/.test(platform)) throw new Error(`${value}.platform 不合法：${platform || '(空)'}`);
   const kind = String(source.kind ?? '').trim();
-  if (!BEHAVIOR_KINDS.includes(kind)) throw new Error(`${value}.kind 必须是 ${BEHAVIOR_KINDS.join(' / ')}`);
+  const engine = engineOfKind(kind);
+  if (!engine) throw new Error(`${value}.kind 未注册：${kind || '(空)'}（在 behavior-types/ 里加类型）`);
   const label = String(source.label ?? '').trim();
   if (!label) throw new Error(`${value}.label 不能为空`);
   const description = String(source.description ?? '').trim();
-  const bodyKey = kind;
-  const config = assertPlainObject(source[bodyKey], `${value}.${bodyKey}`);
-  const otherKey = kind === 'v1' ? 'v2' : 'v1';
-  if (source[otherKey] !== undefined) throw new Error(`${value} 是 ${kind} 档案，不能同时包含 ${otherKey}`);
-  walkNumbers(config, `${value}.${bodyKey}`);
+  const config = assertPlainObject(source.config, `${value}.config`);
+  for (const otherKey of ['v1', 'v2']) {
+    if (otherKey !== engine && source[otherKey] !== undefined) throw new Error(`${value} 是 ${kind} 档案，旧版 ${otherKey} 段已废弃，请写进 config`);
+  }
+  walkNumbers(config, `${value}.config`);
   const prompt = String(source.prompt ?? '').trim();
   if (prompt.length > PROMPT_MAX) throw new Error(`${value}.prompt 超过 ${PROMPT_MAX} 字`);
-  return { id: value, version, kind, label, description, prompt, config, [bodyKey]: config };
+  return { id: value, version, platform, kind, label, description, prompt, config };
 }
 
 /** 读取 config/behaviors 下所有 .yml 档案；任何损坏都让启动失败。 */
@@ -92,49 +104,12 @@ export function loadBehaviorProfiles({ root, log = () => {} } = {}) {
   return map;
 }
 
-/** 读取 dsh/agent-presets/<id>/preset.yml 的 behavior 绑定。 */
-export function loadPresetBehaviorBindings({ root, presetIds = null, log = () => {} } = {}) {
-  if (!fs.existsSync(root)) throw new Error(`预设目录不存在：${root}`);
-  const ids = Array.isArray(presetIds) && presetIds.length
-    ? presetIds
-    : fs.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
-  const bindings = new Map();
-  for (const id of ids) {
-    const file = path.join(root, id, 'preset.yml');
-    if (!fs.existsSync(file)) continue;
-    const raw = YAML.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-    const behavior = String(raw?.behavior ?? '').trim();
-    if (behavior) bindings.set(id, behavior);
-  }
-  log(`预设行为绑定：${[...bindings.entries()].map(([id, behavior]) => `${id}→${behavior}`).join('、') || '(无)'}`);
-  return bindings;
-}
-
-/** 校验“聊天预设必须有 behavior、运维预设不得有”的启动契约。 */
-export function assertPresetBehaviorBindings({ bindings, behaviors, chatPresetIds = ['qq-chat', 'qq-chat-v2'] }) {
-  for (const id of chatPresetIds) {
-    if (!bindings.has(id)) throw new Error(`聊天预设 ${id} 未绑定 behavior，拒绝启动`);
-    const behavior = behaviors.get(bindings.get(id));
-    if (!behavior) throw new Error(`预设 ${id} 引用的行为档案不存在：${bindings.get(id)}`);
-  }
-  for (const [id, behaviorId] of bindings) {
-    if (!behaviors.has(behaviorId)) throw new Error(`预设 ${id} 引用的行为档案不存在：${behaviorId}`);
-  }
-  return true;
-}
-
-/** 按 preset 的 behavior 字段解析；缺失直接报错，不猜测默认值。 */
-export function resolveBehavior(behaviors, behaviorId, { presetId = '' } = {}) {
+/** 按方案引用解析行为档案；缺失直接报错，不猜测默认值。 */
+export function resolveBehavior(behaviors, behaviorId) {
   const id = String(behaviorId ?? '').trim();
-  if (!id) {
-    const hint = presetId ? `预设 ${presetId}` : '预设';
-    throw new Error(`${hint} 未绑定 behavior（行为档案），拒绝启动`);
-  }
+  if (!id) throw new Error('缺少 behavior（行为档案）引用');
   const behavior = behaviors?.get?.(id);
-  if (!behavior) {
-    const hint = presetId ? `预设 ${presetId}` : '预设';
-    throw new Error(`${hint} 引用的行为档案不存在：${id}`);
-  }
+  if (!behavior) throw new Error(`行为档案不存在：${id}`);
   return behavior;
 }
 
@@ -176,11 +151,12 @@ function splitHeader(text) {
 function behaviorDocumentText(header, data) {
   const body = YAML.stringify({
     version: data.version,
+    platform: data.platform,
     kind: data.kind,
     label: data.label,
     description: data.description ?? '',
     ...(data.prompt ? { prompt: data.prompt } : {}),
-    [data.kind]: data.config,
+    config: data.config,
   }, { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true }).replace(/\n+$/, '');
   const head = String(header ?? '').replace(/\s+$/, '');
   return `${head ? `${head}\n\n` : ''}${body}\n`;
@@ -196,10 +172,11 @@ export function readBehaviorDocument({ root, id } = {}) {
     text,
     header,
     kind: behavior.kind,
+    platform: behavior.platform,
     label: behavior.label,
     description: behavior.description,
     prompt: behavior.prompt ?? '',
-    data: { version: behavior.version, kind: behavior.kind, label: behavior.label, description: behavior.description, prompt: behavior.prompt ?? '', config: behavior.config },
+    data: { version: behavior.version, platform: behavior.platform, kind: behavior.kind, label: behavior.label, description: behavior.description, prompt: behavior.prompt ?? '', config: behavior.config },
   };
 }
 
@@ -208,16 +185,20 @@ export function writeBehaviorData({ root, id, data } = {}) {
   const file = behaviorFile(root, id);
   const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '') : '';
   const header = existing ? splitHeader(existing).header : '';
+  // 档案按平台分目录存放，platform 默认取目录上一级（profiles/platforms/<platform>/behaviors）。
+  const inferredPlatform = path.basename(path.dirname(path.resolve(root)));
   const normalized = normalizeBehavior(String(id), {
     version: data?.version ?? 1,
+    platform: data?.platform ?? inferredPlatform,
     kind: data?.kind,
     label: data?.label,
     description: data?.description ?? '',
     prompt: data?.prompt ?? '',
-    [String(data?.kind)]: data?.config,
+    config: data?.config,
   });
   const text = behaviorDocumentText(header, {
     version: normalized.version,
+    platform: normalized.platform,
     kind: normalized.kind,
     label: normalized.label,
     description: normalized.description,
@@ -225,7 +206,7 @@ export function writeBehaviorData({ root, id, data } = {}) {
     config: normalized.config,
   });
   fs.mkdirSync(root, { recursive: true });
-  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  const backupRoot = path.join(REPO_ROOT, 'state', 'behavior-backups', String(id));
   fs.mkdirSync(backupRoot, { recursive: true });
   if (fs.existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -284,6 +265,7 @@ export function duplicateBehavior({ root, fromId, toId, label } = {}) {
     id: target,
     data: {
       version: source.data.version,
+      platform: source.data.platform,
       kind: source.data.kind,
       label: String(label ?? '').trim() || `${source.label}（副本）`,
       description: source.data.description,

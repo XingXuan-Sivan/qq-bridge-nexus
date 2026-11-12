@@ -1,17 +1,23 @@
-// 命令与工具页：桥接命令注册表（含迁移状态）+ 只读的 DSH 会话命令与 Agent 工具。
+// 命令页：桥接命令注册表；每条命令可改权限（all/admin/owner）与启用状态，改动即时写入 config.json.commands。
 //
 // 页面目录约定（docs/PLUGIN_ROADMAP.md §8.7）：page.js 导出 init()，路由器在片段注入后调用。
 import { api } from '../../js/api.js';
-import { esc } from '../../js/ui.js';
-import { groupedTableHtml, initGroupedTables, tableHtml } from '../../components/table/table.js';
+import { esc, showConsoleToast } from '../../js/ui.js';
+import { groupedTableHtml, initGroupedTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { BEHAVIORS_FIELDS } from './fields.js';
 
 const BEHAVIOR_SCOPE_LABEL = { all: '全部会话', group: '仅群聊', private: '仅私聊' };
+const PERMISSION_LABEL = { all: '所有人', admin: '管理员', owner: '所有者' };
 
 function behaviorGroupName(entry) {
   if (entry.group) return entry.group;
   return entry.source === 'plugin' ? `插件 ${entry.pluginId || '未命名'}` : '其他';
+}
+
+function permissionSelect(entry) {
+  const options = ['all', 'admin', 'owner'].map((value) => `<option value="${value}"${entry.permission === value ? ' selected' : ''}>${PERMISSION_LABEL[value]}</option>`).join('');
+  return `<select class="table-select" data-command-permission="${esc(entry.id)}" aria-label="命令权限">${options}</select>`;
 }
 
 // 命令按 group 聚成指令组；组行可折叠，子行缩进——层级完全由注册时的 group 派生，不手工维护。
@@ -22,56 +28,54 @@ function behaviorTable(rows) {
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(entry);
   }
-  // 分组可折叠表格交给表格组件（groupedTableHtml），页面只负责每组的单元格内容。
   return groupedTableHtml({
     openIndex: 0,
     columns: [
       { label: '指令', width: 200 },
-      { label: '类型', width: 92 },
       { label: '所属', width: 118 },
       { label: '描述' },
-      { label: '权限', width: 84 },
-      { label: '状态', width: 84 },
-      { label: '操作', width: 70 },
+      { label: '权限', width: 120 },
+      { label: '启用', width: 84 },
     ],
     groups: [...groups.entries()].map(([name, items]) => ({
       label: name,
       key: name,
       rows: items.map((entry) => {
-        const migrated = entry.migrated ? '<span class="pill b">注册表</span>' : '<span class="pill">旧链</span>';
         const source = entry.source === 'plugin'
           ? `<span class="pill b">插件 ${esc(entry.pluginId || '')}</span>`
           : '<span class="pill n">内置</span>';
-        const permission = entry.permission === 'owner'
-          ? '<span class="pill r">owner</span>'
-          : entry.permission === 'admin'
-            ? '<span class="pill b">admin</span>'
-            : '<span class="pill n">所有人</span>';
-        const status = entry.source === 'plugin' ? '<span class="pill">随插件</span>' : '<span class="pill g">常开</span>';
-        const action = entry.source === 'plugin'
-          ? `<button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(entry.pluginId || '')}">详情</button>`
-          : '<span class="meta">—</span>';
+        const enabled = `<button type="button" class="field-switch" role="switch" data-command-enabled="${esc(entry.id)}" aria-checked="${entry.enabled !== false ? 'true' : 'false'}" aria-label="启用 ${esc(entry.name)}"><span class="field-switch-track" aria-hidden="true"></span><span>${entry.enabled !== false ? '开' : '关'}</span></button>`;
         const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
         return [
           `<code>${esc(entry.name)}</code>${aliases}`,
-          migrated,
           source,
           `${esc(entry.help || '（没有说明）')} <span class="meta">· ${esc(BEHAVIOR_SCOPE_LABEL[entry.scope] || entry.scope || '')}</span>`,
-          permission,
-          status,
-          action,
+          permissionSelect(entry),
+          enabled,
         ];
       }),
     })),
   });
 }
 
+let currentRows = [];
+
+async function saveCommand(id, patch) {
+  try {
+    const result = await api(`/api/commands/${encodeURIComponent(id)}`, 'POST', patch);
+    if (!result?.ok) throw new Error(result?.error || '保存失败');
+    showConsoleToast('已保存命令设置');
+    await refreshBehaviors();
+  } catch (error) {
+    showConsoleToast(`❌ ${String(error?.message ?? error)}`);
+    await refreshBehaviors();
+  }
+}
+
 async function refreshBehaviors() {
   const meta = document.getElementById('behaviorsMeta');
   const bridgeBox = document.getElementById('behaviorsBridge');
   const empty = document.getElementById('behaviorsEmpty');
-  const dshBox = document.getElementById('behaviorsDsh');
-  const toolsBox = document.getElementById('behaviorsTools');
   if (!meta || !bridgeBox) return;
   try {
     const data = await api('/api/commands');
@@ -85,18 +89,12 @@ async function refreshBehaviors() {
       if (!keyword) return true;
       return [entry.name, entry.help, ...(entry.aliases ?? [])].join(' ').toLowerCase().includes(keyword);
     });
+    currentRows = rows;
     meta.textContent = `注册表 ${data.bridge?.builtin?.length ?? 0} 条内置 + ${data.bridge?.plugin?.length ?? 0} 条插件；显示 ${rows.length} 条`;
     bridgeBox.hidden = rows.length === 0;
     empty.hidden = rows.length !== 0;
     empty.textContent = '没有匹配的命令，换个筛选或关键词试试。';
     bridgeBox.innerHTML = rows.length ? behaviorTable(rows) : '';
-    dshBox.innerHTML = (data.dsh ?? []).length
-      ? tableHtml([{ label: '命令', width: '200px' }, { label: '说明' }], (data.dsh ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.note || '')]))
-      : '<div class="meta">桥接没有记录到会调用的 DSH 命令。</div>';
-    toolsBox.innerHTML = (data.tools ?? []).length
-      ? tableHtml([{ label: '工具', width: '220px' }, { label: '来源', width: '260px' }, { label: '管理方式' }],
-        (data.tools ?? []).map((item) => [`<code>${esc(item.name)}</code>`, esc(item.source), esc(item.managed)]))
-      : '<div class="meta">没有已登记的 Agent 工具。</div>';
   } catch (error) {
     meta.textContent = '';
     bridgeBox.hidden = true;
@@ -107,7 +105,7 @@ async function refreshBehaviors() {
 }
 
 export function init() {
-  // 先渲染工具条与三块表格宿主，下面才取得到节点；select 的装饰由路由器在 init() 之后统一做。
+  // 先渲染工具条与表格宿主，下面才取得到节点；select 的装饰由路由器在 init() 之后统一做。
   document.querySelectorAll('[data-behaviors-fields]').forEach((host) => {
     const spec = BEHAVIORS_FIELDS[host.dataset.behaviorsFields];
     if (spec?.html) host.innerHTML = spec.html;
@@ -120,8 +118,23 @@ export function init() {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { refreshBehaviors().catch(() => {}); }, 180);
   });
+  const bridge = document.getElementById('behaviorsBridge');
+  // 权限与启用：改完立刻保存，不另设「保存」按钮（表格会被重绘，事件委托绑在容器上）。
+  bridge?.addEventListener('change', (event) => {
+    const permission = event.target.closest('[data-command-permission]');
+    if (permission) void saveCommand(permission.dataset.commandPermission, { permission: permission.value });
+  });
+  bridge?.addEventListener('click', (event) => {
+    const enabled = event.target.closest('[data-command-enabled]');
+    if (!enabled) return;
+    const next = enabled.getAttribute('aria-checked') !== 'true';
+    enabled.setAttribute('aria-checked', String(next));
+    const label = enabled.querySelector('span:last-child');
+    if (label) label.textContent = next ? '开' : '关';
+    void saveCommand(enabled.dataset.commandEnabled, { enabled: next });
+  });
   // 组行折叠由表格组件的 initGroupedTables 负责（事件委托绑在容器上，重新渲染 innerHTML 不用重绑）。
-  initGroupedTables(document.getElementById('behaviorsBridge'));
+  initGroupedTables(bridge);
   onPageRefresh('behaviors', () => { refreshBehaviors().catch(() => {}); });
   setInterval(() => { if (getCurrentPage() === 'behaviors' && !document.hidden) refreshBehaviors().catch(() => {}); }, 30_000);
   refreshBehaviors().catch(() => {});

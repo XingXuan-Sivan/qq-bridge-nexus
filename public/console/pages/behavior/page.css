@@ -34,3 +34,15 @@
   font-size: 15px;
   font-weight: 600;
 }
+
+/* 运行方案子面板（原 pages/runtime/page.css）：摘要徽标允许换行。 */
+#runtimeSummary {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 平台子面板（原 pages/platform/page.css）：卡片之间不叠双倍间距，提示词编辑器给足高度。 */
+.behavior-page #platformPromptEditor {
+  min-height: 320px;
+}
+

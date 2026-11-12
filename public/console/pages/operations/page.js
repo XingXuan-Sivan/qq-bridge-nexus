@@ -32,17 +32,7 @@ export function init() {
     document.getElementById('restartMsg').textContent = r.message || '正在重启…';
   });
 
-  document.getElementById('clearWsBtn').addEventListener('click', async () => {
-    if (!confirm('确定清空整个「QQ 聊天」工作区？\n将归档全部 QQ 会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
-    const r = await api('/api/workspace/reset', 'POST', {});
-    const msg = document.getElementById('clearWsMsg');
-    msg.textContent = r.ok ? (`✅ 已归档 ${r.archivedCount} 个会话，工作区已清空`) : ('❌ ' + (r.error || '失败'));
-    msg.className = r.ok ? 'form-actions-status ok' : 'form-actions-status err';
-    // 会话表与活动日志由各自页面在进入时刷新；全局指标由 app.js 的轮询更新。
-  });
-
-  // 紧急关闭：从「全局配置 › 运行模式」搬来，和重启/清空工作区同组（都是破坏性动作，
-  // 放在运维页才不容易误点）。行为与原来一致：二次确认 → 回到 L0 → 刷新状态。
+  // 紧急关闭：与重启同组（都是破坏性动作），行为与原来一致：二次确认 → 回到 L0 → 刷新状态。
   document.getElementById('panicBtn').addEventListener('click', async () => {
     if (!confirm('立即回到安全模式（L0 群友模式）？进行中的高权限会话会被停止。')) return;
     const msg = document.getElementById('panicMsg');

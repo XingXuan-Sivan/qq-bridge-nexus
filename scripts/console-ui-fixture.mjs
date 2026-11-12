@@ -30,7 +30,7 @@ function presetStatusFixture(preset) {
     label: preset === 'qq-chat'
       ? '一代仿真（reserved）'
       : preset === 'qq-chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
-    sourceFile: `dsh/agent-presets/${preset}/agent.cordis.yml`,
+    sourceFile: `profiles/agent-platforms/dsh/agents/${preset}/agent.cordis.yml`,
     installed: true,
     requiresRestart: true,
   };
@@ -740,19 +740,24 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       if (method === 'DELETE' && path.startsWith('/api/extensions/mcp/')) {
         return json({ ok: true, id: decodeURIComponent(path.split('/').pop()) });
       }
-      const behaviorMatch = path.match(/^\/api\/config\/behaviors(?:\/([^/]+))?(?:\/(validate))?$/);
+      const behaviorMatch = path.match(/^\/api\/config\/behaviors(?:\/([^/]+))?(?:\/(validate|reset))?$/);
       if (behaviorMatch) {
         const [, behaviorId, action] = behaviorMatch;
         const docs = state.behaviorDocs;
         if (method === 'GET' && !behaviorId) {
-          return json({ ok: true, behaviors: Object.values(docs).map((doc) => ({ id: doc.id, file: doc.id + '.yml', label: doc.label, kind: doc.kind, valid: true })) });
+          return json({ ok: true, behaviors: Object.values(docs).map((doc) => ({ id: doc.id, file: doc.id + '.yml', label: doc.label, kind: doc.kind, valid: true, builtin: true })) });
         }
         if (method === 'GET' && behaviorId) {
           const doc = docs[behaviorId];
           if (!doc) return json({ ok: false, error: '行为档案不存在' }, 404);
-          return json({ ok: true, id: doc.id, text: '', header: '', kind: doc.kind, label: doc.label, description: doc.description, data: { version: 1, kind: doc.kind, label: doc.label, description: doc.description, config: doc.config } });
+          return json({ ok: true, id: doc.id, text: '', header: '', kind: doc.kind, label: doc.label, description: doc.description, builtin: true, factoryPrompt: doc.factoryPrompt ?? '', data: { version: 1, kind: doc.kind, label: doc.label, description: doc.description, config: doc.config } });
         }
         if (method === 'POST' && action === 'validate') return json({ ok: true, validation: { ok: true } });
+        if (method === 'POST' && action === 'reset') {
+          const doc = docs[behaviorId];
+          if (!doc) return json({ ok: false, error: '行为档案不存在' }, 404);
+          return json({ ok: true, requiresRestart: true, doc: { id: doc.id, kind: doc.kind, label: doc.label, description: doc.description, config: doc.config } });
+        }
         if (method === 'PUT' && behaviorId) {
           const data = body?.data;
           docs[behaviorId] = { id: behaviorId, kind: data?.kind || docs[behaviorId]?.kind || 'v2', label: data?.label || behaviorId, description: data?.description ?? '', config: data?.config ?? {} };
@@ -764,6 +769,23 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         const value = typeof body?.value === 'string' ? body.value.trim() : '';
         state.behaviorDefault = value || null;
         return json({ ok: true, value: state.behaviorDefault, message: value ? '已设为「' + value + '」，下一条消息生效' : '已清空默认行为档案' });
+      }
+      if (path === '/api/config/runtime') {
+        if (method === 'GET') {
+          return json({
+            ok: true,
+            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2' },
+            plans: [
+              { id: 'chat', label: '聊天' },
+              { id: 'social-v1', label: '一代仿真' },
+              { id: 'social-v2', label: '二代仿真' },
+              { id: 'agent-readonly', label: 'Agent · 只读' },
+            ],
+          });
+        }
+        const value = typeof body?.defaultPlan === 'string' ? body.defaultPlan.trim() : '';
+        state.defaultPlan = value || 'social-v2';
+        return json({ ok: true, runtime: { defaultPlan: state.defaultPlan } });
       }
       if (path === '/api/config/send-limit') {
         if (method === 'GET') return json({ ok: true, send: state.limits.send });
@@ -790,6 +812,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         }
         state.fullActive = false;
         return json({ ok: true, permission: fixturePermissionState(state) });
+      }
+      if (method === 'POST' && /\/reset$/.test(path)) {
+        if (path.startsWith('/api/runtime/capabilities/')) return json({ ok: true, requiresRestart: true });
+        if (path.startsWith('/api/runtime/plans/')) return json({ ok: true, requiresRestart: true });
+        return json({ ok: true, requiresRestart: true });
       }
       if (method === 'GET') {
         const profileMatch = path.match(/^\/api\/sessions\/([^/]+)\/profile$/);
@@ -829,8 +856,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             catalog: toolCatalogSnapshot(),
             adapters: adaptersSnapshot(),
             capabilities: [
-              { id: 'agent-chat', label: '聊天 Agent', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, agent: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, safety: { local_tools: false, notes: '' }, note: '', usedBy: ['chat', 'social-v2'] },
-              { id: 'agent-readonly', label: 'Agent · 只读', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, agent: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, safety: { local_tools: true, notes: '' }, note: '', usedBy: [] },
+              { id: 'agent-chat', label: '聊天 Agent', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', usedBy: ['chat', 'social-v2'] },
+              { id: 'agent-readonly', label: 'Agent · 只读', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', usedBy: [] },
             ],
           });
           case '/api/config/behaviors': return json({
@@ -846,16 +873,21 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             platform: 'qq',
             active: state.planId || 'social-v2',
-            fallbackPlan: 'social-v2',
-            resetOnRestart: false,
-            idleMinutes: 10,
-            legacy: { mode: state.mode, level: state.level || 'L0' },
-            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', tools: 'qq-chat-v2', behavior: 'social-v2', audience: 'access' },
+            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access' },
+            defaultPlan: state.defaultPlan ?? 'social-v2',
             plans: [
-              { id: 'chat', label: '聊天', note: '白名单内随时对话', tools: 'qq-chat', behavior: 'none', audience: 'access', builtin: true },
-              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', tools: 'qq-chat-v2', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', tools: 'qq-agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
+              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-agent-readonly', capability: 'agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
             ],
+          });
+          case '/api/platforms': return json({
+            ok: true,
+            platforms: [{ id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2 }],
+          });
+          case '/api/platforms/qq': return json({
+            ok: true,
+            platform: { id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2, behaviors: ['social-v1', 'social-v2'] },
           });
           case '/api/presets': return json({ presets: [{ id: 'qq-chat-v2', trust: 'user' }, { id: 'qq-chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，

@@ -77,7 +77,9 @@ test('接线：默认关闭、端点与 MCP 都要求显式 true、规则注入�
   const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
   const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
-  assert.equal(example.tools.ownerGroupAccess, false, '模板默认关闭');
+  const catalog = fs.readFileSync(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), 'utf8');
+  assert.equal(example.tools, undefined, '模板不再有 tools 段（注册面由能力预设推导）');
+  assert.match(catalog, /flag: 'ownerGroupAccess'[^\n]*defaultOff: true/, '能力预设目录里 ownerGroupAccess=defaultOff');
   assert.equal((bridge.match(/ownerGroupAccess: false/g) ?? []).length, 2, '桥接两处运行时默认都是关闭');
   assert.ok(bridge.includes('enabled: cfg.tools?.ownerGroupAccess === true'), '端点要求显式 true');
   assert.ok(mcp.includes('if (cfg.tools?.ownerGroupAccess === true) {'), 'MCP 只在显式 true 时注册');

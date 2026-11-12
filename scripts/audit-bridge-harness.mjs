@@ -58,7 +58,7 @@ import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs
 // P3 预设编辑器：bridge 直接 import，夹具按同名补回。
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from '../src/presets/store.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { assertPresetBehaviorBindings, loadBehaviorProfiles, loadPresetBehaviorBindings, resolveBehavior } from '../src/behaviors/index.mjs';
+import { engineOfKind, loadBehaviorProfiles, resolveBehavior } from '../src/behaviors/index.mjs';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
 import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
@@ -71,9 +71,10 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
-import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from '../src/runtime/plans.mjs';
+import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from '../src/capabilities/store.mjs';
+import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -107,7 +108,7 @@ import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {} } = {}) {
+export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, plans = [] } = {}) {
   // 取 realpath：macOS 默认的 /var/folders 是 /private/var/folders 的软链接，而语音库解析会返回 realpath（挡 symlink 逃逸），
   // 不先归一的话「库内路径」断言在真实 Mac 上会因为前缀不同而失败。
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qq-audit-bridge-')));
@@ -119,38 +120,46 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     consoleToken: 'fixture-console-token', slang: { enabled: false }, ...config,
   }));
   if (savedState) fs.writeFileSync(path.join(temp, 'state/sessions.json'), JSON.stringify(savedState));
-  // 行为档案与预设绑定：bridge 启动时会强制加载；夹具复制真实文件，避免空目录直接 fail closed。
-  fs.mkdirSync(path.join(temp, 'config/behaviors'), { recursive: true });
-  const mergeBehavior = (base, patch) => {
+  // 四层模型（profiles/）整份复制：平台、Agent 平台、能力预设、运行方案、行为档案都在这里，
+  // 只复制单个文件会让平台话术、工具表或方案列表缺项，测试就会读到空目录。
+  fs.cpSync(path.join(root, 'profiles'), path.join(temp, 'profiles'), { recursive: true });
+  const merge = (base, patch) => {
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return base;
     const out = { ...base };
     for (const [key, value] of Object.entries(patch)) {
       if (value && typeof value === 'object' && !Array.isArray(value)
         && base[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
-        out[key] = mergeBehavior(base[key], value);
+        out[key] = merge(base[key], value);
       } else {
         out[key] = value;
       }
     }
     return out;
   };
+  // 行为档案：测试传入的 behavior 合并进 config 段（兼容旧的 {v1:{...}} / {v2:{...}} 形状）。
   for (const id of ['social-v1', 'social-v2']) {
-    const kind = id === 'social-v1' ? 'v1' : 'v2';
-    const source = parseYaml(fs.readFileSync(path.join(root, 'config/behaviors', `${id}.yml`), 'utf8'));
-    source[kind] = mergeBehavior(source[kind] || {}, behavior[kind] || {});
-    fs.writeFileSync(path.join(temp, 'config/behaviors', `${id}.yml`), stringifyYaml(source));
+    const file = path.join(temp, 'profiles/platforms/qq/behaviors', `${id}.yml`);
+    const source = parseYaml(fs.readFileSync(file, 'utf8'));
+    // kind 已改为 social-v1/social-v2，旧的 {v1:{...}} / {v2:{...}} 入参按引擎名兜底。
+    const patch = behavior.config ?? behavior[source.kind] ?? behavior[String(source.kind).replace(/^social-/, '')] ?? {};
+    source.config = merge(source.config ?? {}, patch);
+    fs.writeFileSync(file, stringifyYaml(source));
   }
-  // 能力预设目录整份复制：注册面由各预设的 capability.yml 求并集推导（platformFlags），
-  // 只复制 preset.yml 会让临时根目录缺少 capability.yml、注册面变成全关。
-  const presetsSrc = path.join(root, 'dsh/agent-presets');
-  if (fs.existsSync(presetsSrc)) fs.cpSync(presetsSrc, path.join(temp, 'dsh/agent-presets'), { recursive: true });
-  for (const id of PRESET_IDS) fs.mkdirSync(path.join(temp, 'dsh/agent-presets', id), { recursive: true });
   // 注册面由能力预设的平台工具表推导，测试要开某个工具就改预设，而不是往 config.tools 塞键。
   if (Object.keys(platformTools).length) {
-    const file = path.join(temp, 'dsh/agent-presets', 'agent-chat', 'capability.yml');
+    const file = path.join(temp, 'profiles/agent-platforms/dsh/capabilities/agent-chat.yml');
     const doc = parseYaml(fs.readFileSync(file, 'utf8'));
     doc.tools = { ...(doc.tools ?? {}), platform: { ...(doc.tools?.platform ?? {}), ...platformTools } };
     fs.writeFileSync(file, stringifyYaml(doc));
+  }
+  for (const id of PRESET_IDS) fs.mkdirSync(path.join(temp, 'profiles/agent-platforms/dsh/agents', id), { recursive: true });
+  // 自定义方案：写进同一套 profiles/plans，内置方案继续只读。
+  for (const plan of plans) {
+    if (!plan?.id) continue;
+    fs.writeFileSync(
+      path.join(temp, 'profiles/plans', `${plan.id}.yml`),
+      stringifyYaml({ version: 1, builtin: false, platform: 'qq', agentPlatform: 'dsh', behavior: 'none', audience: 'access', ...plan }),
+    );
   }
   // r4：额外状态文件（用于测试"启动时读到损坏/旧版文件"这类路径）。
   for (const [rel, content] of Object.entries(files)) {
@@ -298,9 +307,17 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   const timers = new Set();
   const context = vm.createContext({
     fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, AsyncLocalStorage,
-    assertPresetBehaviorBindings, loadBehaviorProfiles, loadPresetBehaviorBindings, resolveBehavior,
+    loadBehaviorProfiles, resolveBehavior, engineOfKind,
     console: { log() {}, error() {} },
     fetch: fakeFetch,
+    // 四层模型的根目录在 src/profiles/paths.mjs 里按仓库根算；夹具把 bridge 搬到 temp 执行，
+    // 这里注入 temp 版本，避免测试写到真实 profiles/ 或读到不存在的目录。
+    PLATFORMS_ROOT: path.join(temp, 'profiles', 'platforms'),
+    AGENT_PLATFORMS_ROOT: path.join(temp, 'profiles', 'agent-platforms'),
+    PLANS_ROOT: path.join(temp, 'profiles', 'plans'),
+    SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
+    CAPABILITIES_ROOT: path.join(temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
+    createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',
@@ -338,8 +355,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     resolveAccess,
     resolveAccessSummary,
     wakeAccessAxis,
-    BUILTIN_PLANS,
-    normalizePlans,
+    BUILTIN_PLANS: undefined,
+    normalizePlans: undefined,
     normalizePlan,
     legacyModeOfPlan,
     legacyLevelOfPlan,

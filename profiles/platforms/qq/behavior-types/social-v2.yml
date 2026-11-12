@@ -1,0 +1,303 @@
+label: 二代仿真
+platform: qq
+engine: v2
+schema:
+  fields:
+    - type: section
+      card: true
+      label: 自动回复
+    - name: autoReplyCheckMs
+      label: 自动回复检查间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: provideRecommendations
+      label: 提供推荐值
+      type: switch
+    - type: section
+      card: true
+      label: 唤醒
+    - name: wake_defaultMode
+      label: 默认潜水方式
+      type: select
+      options:
+        - value: diving
+          label: 潜水
+        - value: active
+          label: 活跃
+    - name: wake_preSleepWaitEnabled
+      label: 睡前观察
+      type: switch
+    - name: wake_preSleepWaitMs
+      label: 睡前观察时长
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_recommendedDefaultInfinite
+      label: 推荐无限期潜水
+      type: switch
+    - name: wake_sleepMinMs
+      label: 潜水最短
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_sleepMaxMs
+      label: 潜水最长
+      type: number
+      step: any
+      hint: 毫秒；0 表示无限
+    - name: wake_recommendedSleepMinMs
+      label: 推荐潜水最短
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_recommendedSleepMaxMs
+      label: 推荐潜水最长
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_recommendedProbability
+      label: 推荐唤醒概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - name: wake_recommendedKeywords
+      label: 推荐唤醒关键词
+      type: textarea
+      rows: 4
+      list: true
+      hint: 每行一个
+    - name: wake_recommendedAtMention
+      label: 推荐：@ 唤醒
+      type: switch
+    - name: wake_recommendedNameMention
+      label: 推荐：名字唤醒
+      type: switch
+    - name: wake_recommendedQuestion
+      label: 推荐：提问唤醒
+      type: switch
+    - name: wake_recommendedPoke
+      label: 推荐：拍一拍唤醒
+      type: switch
+    - name: wake_recommendedHint
+      label: 唤醒推荐提示词
+      type: textarea
+      rows: 3
+    - name: wake_batchWindowMs
+      label: 多条合并窗口
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_maxWakePerMinute
+      label: 每分钟最多唤醒
+      type: number
+      step: any
+    - name: wake_maxWakePerHour
+      label: 每小时最多唤醒
+      type: number
+      step: any
+    - name: wake_noActionLimit
+      label: 无动作上限
+      type: number
+      step: any
+    - name: wake_maxWakeConfigReminders
+      label: 唤醒配置提醒上限
+      type: number
+      step: any
+    - type: section
+      card: true
+      label: 发送
+    - name: send_burstEnabled
+      label: 连发
+      type: switch
+    - name: send_burstMaxMessages
+      label: 连发最多条数
+      type: number
+      step: any
+    - name: send_burstIntervalMinMs
+      label: 连发最小间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_burstIntervalMaxMs
+      label: 连发最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_longGapProbability
+      label: 长停顿概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - name: send_longGapMinMs
+      label: 长停顿最小
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_longGapMaxMs
+      label: 长停顿最大
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_maxMessageChars
+      label: 单条最大字数
+      type: number
+      step: any
+    - name: send_maxGapMs
+      label: 条间最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_gapBaseMs
+      label: 条间基础间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_gapPerCharMs
+      label: 每字追加间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: send_recommendedHint
+      label: 发送推荐提示词
+      type: textarea
+      rows: 3
+    - type: section
+      card: true
+      label: 等待
+    - name: wait_defaultMs
+      label: 默认等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wait_minMs
+      label: 最短等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wait_maxMs
+      label: 最长等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wait_defaultQuietMs
+      label: 默认静默窗口
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wait_minQuietAfterNewMs
+      label: 新消息后最少静默
+      type: number
+      step: any
+      hint: 毫秒
+    - type: section
+      card: true
+      label: 主动机会
+    - name: proactive_enabled
+      label: 主动机会
+      type: switch
+    - name: proactive_checkIntervalMinMs
+      label: 检查最小间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactive_checkIntervalMaxMs
+      label: 检查最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactive_idleThresholdMs
+      label: 空闲阈值
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactive_probability
+      label: 主动概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - type: section
+      card: true
+      label: 表情
+    - name: sticker_enabled
+      label: 表情包
+      type: switch
+    - name: sticker_syncTtlMs
+      label: 同步缓存时长
+      type: number
+      step: any
+      hint: 毫秒
+    - name: sticker_maxListCount
+      label: 列表最多条数
+      type: number
+      step: any
+    - name: sticker_includeInPrompt
+      label: 写进提示词
+      type: switch
+    - name: sticker_promptMaxStickers
+      label: 提示词里最多表情
+      type: number
+      step: any
+    - name: sticker_maxBytes
+      label: 单个表情大小上限
+      type: number
+      step: any
+      hint: 字节
+    - name: sticker_collect_enabled
+      label: 收藏表情
+      type: switch
+    - name: sticker_collect_maxPerMinute
+      label: 每分钟最多收藏
+      type: number
+      step: any
+    - name: sticker_collect_maxPerHour
+      label: 每小时最多收藏
+      type: number
+      step: any
+    - name: sticker_collect_maxRemarkChars
+      label: 收藏备注字数上限
+      type: number
+      step: any
+    - type: section
+      card: true
+      label: 上下文
+    - name: context_recentLimit
+      label: 最近消息条数
+      type: number
+      step: any
+    - name: context_unreadLimit
+      label: 未读条数上限
+      type: number
+      step: any
+    - name: context_contextWindow
+      label: 上下文条数
+      type: number
+      step: any
+    - name: context_inlineWakeMessages
+      label: 唤醒消息内联
+      type: switch
+    - name: context_wakeMessageLimit
+      label: 唤醒消息条数
+      type: number
+      step: any
+    - name: context_wakeRecentLimit
+      label: 唤醒最近条数
+      type: number
+      step: any
+    - name: context_wakeMaxChars
+      label: 唤醒最大字符
+      type: number
+      step: any
+    - type: section
+      card: true
+      label: 反馈
+    - name: feedback_maxLength
+      label: 反馈最大长度
+      type: number
+      step: any
+    - name: feedback_notifyOwnerOnError
+      label: 出错通知 owner
+      type: switch

@@ -389,24 +389,28 @@ export function createModeController({ file, config = {}, applyMode, notifyOwner
     });
   }
 
-  /** 控制台直接设置。控制台持有管理令牌，L1/L2 不需要确认码；L3 仍要求 TOTP。 */
-  function consoleSet(want, { totp = null } = {}) {
+  /**
+   * 控制台直接设置。控制台持有管理令牌，L1/L2 不需要确认码。
+   * L3 默认仍要求 TOTP；skipTotp=true 供「运行方案切换」使用——方案本身就是管理员配置的，
+   * 切换只按时段/场景换档，不再叠一层动态口令。
+   */
+  function consoleSet(want, { totp = null, skipTotp = false } = {}) {
     return serialize(async () => {
       const o = opts();
       const target = normalizeTarget(want?.mode, want?.level, { defaultAgentLevel: o.defaultAgentLevel });
       if (!target) return { ok: false, error: '无效的目标模式/级别' };
       if (levelRank(target.level) > levelRank(st().level)) {
-        if (levelRank(st().level) > 0) {
+        if (levelRank(st().level) > 0 && !skipTotp) {
           audit?.append('mode.console_escalation_denied', { from: st().level, to: target.level, reason: 'elevated' });
           return { ok: false, error: '高权限期间控制台不能再提权（请先降级，或在 QQ 管理通道申请 + 确认）' };
         }
         const since = now() - (st().elevatedEndedAt || 0);
-        if (st().elevatedEndedAt && since < o.consoleEscalationCooldownMs) {
+        if (!skipTotp && st().elevatedEndedAt && since < o.consoleEscalationCooldownMs) {
           audit?.append('mode.console_escalation_denied', { to: target.level, reason: 'cooldown' });
           return { ok: false, error: `刚从高权限回落 ${Math.round(since / 1000)} 秒，控制台提权冷却中（${Math.round(o.consoleEscalationCooldownMs / 60000)} 分钟）；可在 QQ 管理通道申请 + 确认` };
         }
       }
-      if (target.level === 'L3') {
+      if (target.level === 'L3' && !skipTotp) {
         if (!o.allowL3) return { ok: false, error: '配置禁止开启 L3' };
         const seed = getTotpSecret();
         if (!seed) return { ok: false, error: 'L3 需要先配置 TOTP（npm run admin:totp-setup）' };

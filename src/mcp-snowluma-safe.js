@@ -38,10 +38,10 @@ function loadConfig() {
 }
 
 const cfg = loadConfig();
-// 平台工具的注册开关只认能力预设（capability.yml 的平台工具表并集），config.json 不再保存这份开关。
+// 平台工具的注册开关只认能力预设（capabilities/*.yml 的平台工具表并集），config.json 不再保存这份开关。
 // 注册发生在模块加载期，因此改能力预设后要重启 DSH 才会刷新工具清单。
 cfg.tools = platformFlags({
-  root: path.join(ROOT, 'dsh', 'agent-presets'),
+  root: path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
   log: (message) => console.error(message),
 });
 

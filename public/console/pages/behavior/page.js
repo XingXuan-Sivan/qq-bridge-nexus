@@ -1,25 +1,29 @@
-// 行为档案页：两标签 —— 行为档案（清单 + 参数 + 两层提示词）、能力预设。
-// 权威存储：config/behaviors/<id>.yml、dsh/agent-presets/<id>/capability.yml、config/platform/<id>.yml。
+// 行为档案页：三个标签 —— 运行方案（组合层）、行为档案（配置 + 提示词）、能力预设。
+// 权威存储：profiles/platforms/qq/behaviors/<id>.yml、profiles/agent-platforms/dsh/capabilities/<id>.yml、
+// profiles/plans/<id>.yml。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { mountCodeEditor } from '../../components/code-editor/code-editor.js';
 import { modalHtml, openModal, closeModal } from '../../components/modal/modal.js';
+import { mountPromptCard } from '../../components/prompt-card/prompt-card.js';
 import { behaviorFields, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
 import { BEHAVIOR_FIELDS } from './fields.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
+import { init as initPlansPanel } from '../runtime/page.js';
+import { initPlatformPanel } from '../../components/platform-panel/platform-panel.js';
 
 let behaviorDoc = null;
 let behaviorItems = [];
 let busy = false;
 let kindSpecs = new Map();
+let kindMetas = new Map();
 let kindsPromise = null;
 let capabilityPanel = null;
-let promptEditor = null;
-let platformEditor = null;
-let platformPrompts = [];
+let promptCard = null;
+let plansReady = false;
+let platformReady = false;
 
 /** 字段规格由后端 kind 注册表下发，页面不再自带一份（避免两处漂移）。 */
 async function ensureKinds() {
@@ -27,6 +31,7 @@ async function ensureKinds() {
   kindsPromise = api('/api/behaviors/kinds')
     .then((r) => {
       kindSpecs = new Map((Array.isArray(r?.kinds) ? r.kinds : []).map((entry) => [entry.kind, entry.fields]));
+      kindMetas = new Map((Array.isArray(r?.kinds) ? r.kinds : []).map((entry) => [entry.kind, entry]));
     })
     .catch(() => {
       kindsPromise = null;
@@ -46,41 +51,37 @@ function setMsg(text, tone = 'info', id = 'behaviorFormMsg') {
   el.className = `meta ${tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : ''}`.trim();
 }
 
-/** 代码编辑器：容器由页面提供，编辑器用项目组件挂载（不手写 textarea 外观）。 */
-function editorInto(container, value, { language = 'markdown', height = '360px' } = {}) {
-  if (!container) return null;
-  return mountCodeEditor(container, {
-    value: value ?? '',
-    language,
-    height,
-    onChange: null,
-  });
+/** 平台 id 显示名：当前只有 QQ，其余按大写 id 兜底。 */
+function platformLabel(id) {
+  if (!id) return '—';
+  return id === 'qq' ? 'QQ' : String(id).toUpperCase();
 }
 
 function renderBehaviorTable(items) {
   const host = document.getElementById('behaviorTable');
   if (!host) return;
   const rows = items.map((item) => ({
-    attrs: { 'data-filter-kind': item.kind || '' },
+    attrs: { 'data-filter-kind': item.kind || '', 'data-filter-platform': item.platform || 'qq' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
-      `<span class="pill">${esc(item.kind || '?')}</span>`,
+      `<span class="pill">${esc(platformLabel(item.platform || kindMetas.get(item.kind)?.platform || 'qq'))}</span>`,
+      `<span class="meta">${esc(kindMetas.get(item.kind)?.label || item.kind || '?')}</span>`,
       Array.isArray(item.usedBy) && item.usedBy.length
         ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
         : '<span class="meta">未被方案引用</span>',
       `<div class="row-actions">
         <button class="btn small" type="button" data-behavior-edit="${esc(item.id)}">编辑</button>
         <button class="btn small" type="button" data-behavior-clone="${esc(item.id)}">克隆</button>
-        <button class="btn small danger" type="button" data-behavior-delete="${esc(item.id)}">删除</button>
+        ${item.builtin ? '' : `<button class="btn small danger" type="button" data-behavior-delete="${esc(item.id)}">删除</button>`}
       </div>`,
     ],
   }));
-  const kindOptions = [...kindSpecs.keys()].map((kind) => ({ value: kind, label: kind }));
+  const kindOptions = [...kindSpecs.keys()].map((kind) => ({ value: kind, label: kindMetas.get(kind)?.label || kind }));
   host.innerHTML = dataTableHtml({
-    columns: [{ label: '档案' }, { label: '类型', width: '90px' }, { label: '被引用' }, { label: '操作', width: '190px' }],
+    columns: [{ label: '档案' }, { label: '平台', width: '80px' }, { label: '类型', width: '110px' }, { label: '被引用' }, { label: '操作', width: '190px' }],
     rows,
     pageSize: 10,
-    search: { placeholder: '搜索档案 / id' },
+    search: { placeholder: '搜索档案 / 备注 / id' },
     refresh: true,
     filters: [{ id: 'kind', label: '类型', value: '', options: [{ value: '', label: '全部类型' }, ...kindOptions] }],
     actions: '<button class="btn small primary" type="button" id="behaviorCreate">新建</button>',
@@ -90,25 +91,34 @@ function renderBehaviorTable(items) {
 }
 
 async function refreshList(preferred) {
-  const select = document.getElementById('behaviorFormSelect');
-  if (!select) return;
   await ensureKinds();
   const list = await api('/api/config/behaviors');
   const items = Array.isArray(list?.behaviors) ? list.behaviors : [];
   behaviorItems = items;
   renderBehaviorTable(items);
-  select.innerHTML = items.length
-    ? items.map((item) => `<option value="${esc(item.id)}">${esc(item.label || item.id)}（${esc(item.kind || '?')}）</option>`).join('')
-    : '<option value="">（没有行为档案）</option>';
   if (!items.length) {
-    document.getElementById('behaviorFormPanel').innerHTML = '<p class="meta">config/behaviors 下没有可用的行为档案。</p>';
+    document.getElementById('behaviorFormPanel').innerHTML = '<p class="meta">profiles/platforms/qq/behaviors 下没有可用的行为档案。</p>';
     behaviorDoc = null;
-    if (promptEditor) promptEditor.setValue('');
+    promptCard = null;
+    document.getElementById('behaviorPromptCard').innerHTML = '';
     return;
   }
   const want = preferred || behaviorDoc?.id || items[0].id;
-  if (items.some((item) => item.id === want)) select.value = want;
-  await loadDoc(select.value);
+  await loadDoc(items.some((item) => item.id === want) ? want : items[0].id);
+}
+
+function mountBasics(doc) {
+  const host = document.querySelector('[data-behavior-fields="basics"]');
+  if (!host) return;
+  renderFields(host, BEHAVIOR_FIELDS.basics.fields, { columns: 1, layout: 'inline' });
+  const input = document.getElementById('behaviorFormLabel');
+  if (input) {
+    input.value = doc.data?.label ?? '';
+    input.readOnly = Boolean(doc.builtin);
+    input.closest('.field-row')?.classList.toggle('is-readonly', Boolean(doc.builtin));
+  }
+  const reset = document.getElementById('behaviorFormReset');
+  if (reset) reset.hidden = !doc.builtin;
 }
 
 async function loadDoc(id) {
@@ -119,13 +129,30 @@ async function loadDoc(id) {
     const doc = await api(`/api/config/behaviors/${encodeURIComponent(id)}`);
     if (!doc?.ok) throw new Error(doc?.error || '读取失败');
     behaviorDoc = doc;
+    mountBasics(doc);
     panel.innerHTML = '';
     renderFields(panel, behaviorFields(fieldsOf(doc.kind)), { columns: 2 });
     fillBehaviorForm(panel, fieldsOf(doc.kind), doc.data?.config ?? {});
-    const label = document.getElementById('behaviorFormLabel');
-    if (label) label.value = doc.data?.label ?? '';
-    if (!promptEditor) promptEditor = editorInto(document.getElementById('behaviorPromptEditor'), doc.data?.prompt ?? '');
-    else promptEditor.setValue(doc.data?.prompt ?? '');
+    const host = document.getElementById('behaviorPromptCard');
+    const factory = doc.factoryPrompt ?? doc.data?.prompt ?? '';
+    if (!promptCard) {
+      promptCard = mountPromptCard(host, {
+        title: '行为提示词',
+        hint: '描述 QQ 里怎么说话、怎么等待；提示词与上面的配置一起保存，写入同一份档案 YAML。',
+        value: doc.data?.prompt ?? '',
+        factory,
+        onSave: async () => { await saveDoc(); },
+        onRestore: async () => {
+          const restored = await api(`/api/config/behaviors/${encodeURIComponent(behaviorDoc.id)}/reset`, 'POST', {});
+          if (!restored?.ok) throw new Error(restored?.error || '重置失败');
+          await loadDoc(behaviorDoc.id);
+          return { text: restored.data?.prompt ?? '', factory: restored.factoryPrompt ?? '' };
+        },
+      });
+    } else {
+      promptCard.setValue(doc.data?.prompt ?? '');
+      promptCard.setFactory(factory);
+    }
     setMsg('');
   } catch (error) {
     panel.innerHTML = '';
@@ -138,8 +165,10 @@ async function saveDoc() {
   const panel = document.getElementById('behaviorFormPanel');
   if (!panel) return;
   const config = readBehaviorForm(panel, fieldsOf(behaviorDoc.kind));
-  const label = String(document.getElementById('behaviorFormLabel')?.value ?? '').trim() || behaviorDoc.data?.label || behaviorDoc.id;
-  const prompt = promptEditor?.getValue?.() ?? behaviorDoc.data?.prompt ?? '';
+  const label = behaviorDoc.builtin
+    ? behaviorDoc.data?.label || behaviorDoc.id
+    : String(document.getElementById('behaviorFormLabel')?.value ?? '').trim() || behaviorDoc.data?.label || behaviorDoc.id;
+  const prompt = promptCard?.getValue?.() ?? behaviorDoc.data?.prompt ?? '';
   busy = true;
   setMsg('保存中…');
   try {
@@ -148,29 +177,10 @@ async function saveDoc() {
     });
     if (!r?.ok) throw new Error(r?.error || '保存失败');
     setMsg('✅ 已保存；重启桥接后生效', 'ok');
+    showConsoleToast('行为档案已保存');
     await loadDoc(behaviorDoc.id);
   } catch (error) {
     setMsg(`❌ ${String(error?.message ?? error)}`, 'err');
-  } finally {
-    busy = false;
-  }
-}
-
-async function savePrompt() {
-  if (!behaviorDoc || busy) return;
-  const prompt = promptEditor?.getValue?.() ?? '';
-  busy = true;
-  setMsg('保存中…', 'info', 'behaviorPromptMsg');
-  try {
-    const r = await api(`/api/config/behaviors/${encodeURIComponent(behaviorDoc.id)}`, 'PUT', {
-      data: { version: 1, kind: behaviorDoc.kind, label: behaviorDoc.data?.label ?? behaviorDoc.id, description: behaviorDoc.data?.description ?? '', config: behaviorDoc.data?.config ?? {}, prompt },
-    });
-    if (!r?.ok) throw new Error(r?.error || '保存失败');
-    setMsg(`✅ 已保存（${prompt.length} 字）；下一轮唤醒注入`, 'ok', 'behaviorPromptMsg');
-    showConsoleToast('行为提示词已保存');
-    behaviorDoc = { ...behaviorDoc, data: { ...behaviorDoc.data, prompt } };
-  } catch (error) {
-    setMsg(`❌ ${String(error?.message ?? error)}`, 'err', 'behaviorPromptMsg');
   } finally {
     busy = false;
   }
@@ -194,14 +204,18 @@ function openArchiveModal({ mode, source = null }) {
   } else if (mode === 'clone') {
     renderFields(host, [
       { name: 'behaviorArchiveId', type: 'text', label: '新档案 id', placeholder: '小写字母、数字、连字符', value: `${source?.id ?? 'behavior'}-copy` },
-      { name: 'behaviorArchiveLabel', type: 'text', label: '名称', value: `${source?.label ?? source?.id ?? ''}（副本）` },
+      { name: 'behaviorArchiveLabel', type: 'text', label: '备注', value: `${source?.label ?? source?.id ?? ''}（副本）` },
     ], { columns: 1, layout: 'inline' });
   } else {
+    // 平台固定 QQ（当前只有一个用户侧平台）；类型显示类型 yml 的 label，不暴露引擎名。
+    const typeOptions = [...kindMetas.values()].map((meta) => ({ value: meta.kind, label: meta.label || meta.kind }));
+    const templateOptions = [{ value: '', label: '空白（按类型默认值）' }, ...behaviorItems.map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.id}）` }))];
     renderFields(host, [
       { name: 'behaviorArchiveId', type: 'text', label: '档案 id', placeholder: '小写字母、数字、连字符', hint: '创建后不可改名' },
-      { name: 'behaviorArchiveLabel', type: 'text', label: '名称' },
-      { name: 'behaviorArchiveKind', type: 'select', label: '类型', options: [...kindSpecs.keys()].map((k) => ({ value: k, label: k })), value: 'v2' },
-      { name: 'behaviorArchiveFrom', type: 'select', label: '以现有档案为模板', options: [{ value: '', label: '空白（按类型默认值）' }, { value: source?.id ?? '', label: source?.id ?? '' }].filter((o) => o.value !== '' || o.label), value: '' },
+      { name: 'behaviorArchivePlatform', type: 'select', label: '平台', options: [{ value: 'qq', label: 'QQ' }], value: 'qq' },
+      { name: 'behaviorArchiveKind', type: 'select', label: '类型', options: typeOptions, value: typeOptions[0]?.value ?? 'social-v2' },
+      { name: 'behaviorArchiveLabel', type: 'text', label: '备注', placeholder: '一句话说明' },
+      { name: 'behaviorArchiveFrom', type: 'select', label: '以现有档案为模板', options: templateOptions, value: '' },
     ], { columns: 1, layout: 'inline' });
   }
   openModal(overlay);
@@ -234,85 +248,13 @@ function openArchiveModal({ mode, source = null }) {
   });
 }
 
-// ── 平台话术 ────────────────────────────────────────────────
-async function loadPlatform(id) {
-  if (!platformPrompts.length) {
-    const list = await api('/api/platform/prompts');
-    platformPrompts = Array.isArray(list?.prompts) ? list.prompts : [];
-  }
-  const select = document.getElementById('platformPromptId');
-  const want = id || select?.value || platformPrompts[0]?.id;
-  if (select && !select.dataset.filled) {
-    select.innerHTML = platformPrompts
-      .map((p) => `<option value="${esc(p.id)}">${esc(p.platform || p.id)}（${p.chars} 字）</option>`)
-      .join('');
-    select.dataset.filled = '1';
-    select.addEventListener('change', () => void loadPlatform(select.value));
-  }
-  if (select && want) select.value = want;
-  if (!want) return;
-  const resp = await api(`/api/platform/prompts/${encodeURIComponent(want)}`);
-  const doc = resp?.prompt ?? resp;
-  if (!resp?.ok || !doc) {
-    setMsg(resp?.error || '读取失败', 'err', 'platformMsg');
-    return;
-  }
-  if (!platformEditor) platformEditor = editorInto(document.getElementById('platformPromptEditor'), doc.text ?? '');
-  else platformEditor.setValue(doc.text ?? '');
-  setMsg(`${doc.chars ?? 0} 字${doc.isFactory ? '（与出厂一致）' : ''}`, 'info', 'platformMsg');
-}
-
-async function savePlatform() {
-  const id = document.getElementById('platformPromptId')?.value;
-  if (!id) return;
-  setMsg('保存中…', 'info', 'platformMsg');
-  try {
-    const r = await api(`/api/platform/prompts/${encodeURIComponent(id)}`, 'PUT', { text: platformEditor?.getValue?.() ?? '' });
-    if (!r?.ok) throw new Error(r?.error || '保存失败');
-    setMsg(`✅ 已保存（${r.prompt?.chars ?? 0} 字）；下一轮唤醒生效`, 'ok', 'platformMsg');
-    showConsoleToast('平台话术已保存');
-  } catch (error) {
-    setMsg(`❌ ${String(error?.message ?? error)}`, 'err', 'platformMsg');
-  }
-}
-
-async function restorePlatform() {
-  const id = document.getElementById('platformPromptId')?.value;
-  if (!id) return;
-  if (!window.confirm('还原为出厂话术？当前内容会先备份到 state/platform-backups/。')) return;
-  setMsg('还原中…', 'info', 'platformMsg');
-  try {
-    const r = await api(`/api/platform/prompts/${encodeURIComponent(id)}/restore`, 'POST', {});
-    if (!r?.ok) throw new Error(r?.error || '还原失败');
-    await loadPlatform(id);
-    showConsoleToast('已还原出厂');
-  } catch (error) {
-    setMsg(`❌ ${String(error?.message ?? error)}`, 'err', 'platformMsg');
-  }
-}
-
 export function init() {
   const listHost = document.querySelector('[data-behavior-fields="list"]');
   if (listHost) renderFields(listHost, BEHAVIOR_FIELDS.list.fields, { columns: 1 });
-  const host = document.querySelector('[data-behavior-fields="main"]');
-  if (host) renderFields(host, BEHAVIOR_FIELDS.main.fields, { columns: 1, layout: 'inline' });
-  const promptHost = document.querySelector('[data-behavior-fields="prompt"]');
-  if (promptHost) renderFields(promptHost, BEHAVIOR_FIELDS.prompt.fields, { columns: 1 });
-  const platformHost = document.querySelector('[data-behavior-fields="platform"]');
-  if (platformHost) renderFields(platformHost, BEHAVIOR_FIELDS.platform.fields, { columns: 1, layout: 'inline' });
-  document.getElementById('behaviorFormSelect')?.addEventListener('change', (event) => {
-    if (event.target.value) void loadDoc(event.target.value);
-  });
-  document.getElementById('behaviorFormRefresh')?.addEventListener('click', () => void refreshList());
+
   document.querySelector('[data-behavior-fields="list"]')?.addEventListener('click', (event) => {
     const edit = event.target.closest('[data-behavior-edit]');
-    if (edit) {
-      const id = edit.dataset.behaviorEdit;
-      const select = document.getElementById('behaviorFormSelect');
-      if (select) select.value = id;
-      void loadDoc(id);
-      return;
-    }
+    if (edit) { void loadDoc(edit.dataset.behaviorEdit); return; }
     const clone = event.target.closest('[data-behavior-clone]');
     if (clone) {
       const item = behaviorItems.find((entry) => entry.id === clone.dataset.behaviorClone);
@@ -323,13 +265,22 @@ export function init() {
     if (remove) openArchiveModal({ mode: 'delete', source: { id: remove.dataset.behaviorDelete } });
   });
   document.getElementById('behaviorFormSave')?.addEventListener('click', () => void saveDoc());
+  document.getElementById('behaviorFormReset')?.addEventListener('click', async () => {
+    if (!behaviorDoc?.builtin) return;
+    if (!confirm(`把「${behaviorDoc.data?.label || behaviorDoc.id}」重置为出厂内容？`)) return;
+    try {
+      const r = await api(`/api/config/behaviors/${encodeURIComponent(behaviorDoc.id)}/reset`, 'POST', {});
+      if (!r?.ok) throw new Error(r?.error || '重置失败');
+      showConsoleToast('已重置为出厂内容');
+      await loadDoc(behaviorDoc.id);
+    } catch (error) {
+      setMsg(`❌ ${String(error?.message ?? error)}`, 'err');
+    }
+  });
   // 动作按钮由 renderFields 生成、重建后失效，统一在 document 上委托。
   document.addEventListener('click', (event) => {
     const id = event.target.closest('[id]')?.id;
-    if (id === 'behaviorPromptSave') { void savePrompt(); return; }
     if (id === 'behaviorCreate') { openArchiveModal({ mode: 'create' }); return; }
-    if (id === 'platformSave') { void savePlatform(); return; }
-    if (id === 'platformRestore') { void restorePlatform(); }
   });
 
   const capabilityHost = document.getElementById('capabilityTable');
@@ -340,17 +291,17 @@ export function init() {
   const panels = [...document.querySelectorAll('[data-behavior-panel]')];
   // 记住停留的标签页：刷新/切走再回来都回到同一页，而不是永远弹回第一个。
   const TAB_KEY = 'qq-console:tab:behavior';
-  const TAB_NAMES = ['behaviors', 'capabilities'];
+  const TAB_NAMES = ['platform', 'plans', 'behaviors', 'capabilities'];
   function readTab() {
     try {
       const saved = localStorage.getItem(TAB_KEY);
-      return TAB_NAMES.includes(saved) ? saved : 'behaviors';
+      return TAB_NAMES.includes(saved) ? saved : 'platform';
     } catch {
-      return 'behaviors';
+      return 'platform';
     }
   }
   function showTab(name, { persist = true } = {}) {
-    const next = TAB_NAMES.includes(name) ? name : 'behaviors';
+    const next = TAB_NAMES.includes(name) ? name : 'platform';
     for (const tab of tabs) {
       const active = tab.dataset.behaviorTab === next;
       tab.classList.toggle('active', active);
@@ -361,14 +312,29 @@ export function init() {
       try { localStorage.setItem(TAB_KEY, next); } catch { /* 隐身模式忽略 */ }
     }
     if (next === 'capabilities') void capabilityPanel?.load();
+    if (next === 'platform' && !platformReady) {
+      platformReady = true;
+      try { initPlatformPanel(); } catch { platformReady = false; }
+    }
+    if (next === 'plans' && !plansReady) {
+      plansReady = true;
+      try { initPlansPanel(); } catch { plansReady = false; }
+    }
   }
   for (const tab of tabs) tab.addEventListener('click', () => showTab(tab.dataset.behaviorTab));
 
-  void loadPlatform();
   onPageRefresh('behavior', () => {
     setTimeout(() => void refreshList(), 0);
     showTab(readTab(), { persist: false });
   });
   showTab(readTab(), { persist: false });
+  // 从「平台 › 编辑行为」跳过来：切到行为档案，并定位到该平台下选中的档案。
+  document.addEventListener('qq:behavior-focus', () => {
+    showTab('behaviors');
+    if (!behaviorDoc) {
+      const first = document.querySelector('[data-behavior-edit]');
+      if (first) void loadDoc(first.dataset.behaviorEdit);
+    }
+  });
   void refreshList();
 }

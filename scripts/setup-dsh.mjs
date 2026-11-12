@@ -100,7 +100,7 @@ function backupBeforeOverwrite(file, keep = 5) {
 //        （@deepseek-ai/dsh-agent-preset，config.plugins 内联子行列表），
 //        由 bundle 的 patch 文件插入。因此这里做两件事：
 //          ① 把 qq-agent-presets bundle 注册进 profile（link: 依赖 + bundles + junction）；
-//          ② 从仓库权威源（dsh/agent-presets/<preset>/）重新生成 patch 文件。
+//          ② 从仓库权威源（profiles/agent-platforms/dsh/agents/<preset>/）重新生成 patch 文件。
 //        旧目录不再写入、也不删除（见 reportLegacyPresetDir）。
 const BUNDLE_NAMES = ['qq-mode-console', 'qq-agent-presets'];
 
@@ -129,11 +129,11 @@ function reportLegacyPresetDir() {
   for (const name of PRESETS) {
     const installed = path.join(legacy, name, 'agent.cordis.yml');
     if (!fs.existsSync(installed)) continue;
-    const source = path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'agent.cordis.yml');
+    const source = path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'agent.cordis.yml');
     const same = fs.existsSync(source) && fs.readFileSync(installed, 'utf8') === fs.readFileSync(source, 'utf8');
     log(same
       ? `  · ${name}：旧目录副本与仓库源一致（无内容丢失）`
-      : `  ⚠️ ${name}：旧目录副本与仓库源**不一致**——那份手改内容不会再生效，请人工合并到 dsh/agent-presets/${name}/agent.cordis.yml`);
+      : `  ⚠️ ${name}：旧目录副本与仓库源**不一致**——那份手改内容不会再生效，请人工合并到 profiles/agent-platforms/dsh/agents/${name}/agent.cordis.yml`);
   }
 }
 

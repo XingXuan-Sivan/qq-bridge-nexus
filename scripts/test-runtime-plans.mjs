@@ -1,27 +1,30 @@
-// 运行方案（P4）：定义归一、legacy 投影、激活指针的读写与一次性迁移。
+// 运行方案（P4）：文件仓库、归一校验、legacy 投影、激活指针读写。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  BUILTIN_PLANS,
+  BUILTIN_PLAN_ORDER,
+  createPlanStore,
   normalizePlan,
-  normalizePlans,
   legacyModeOfPlan,
   legacyLevelOfPlan,
   planIdForLegacy,
   findPlan,
-  upsertCustomPlan,
-  removeCustomPlan,
-  planToConfig,
 } from '../src/runtime/plans.mjs';
-import { createRuntimeState, RUNTIME_STATE_VERSION } from '../src/runtime/active.mjs';
+const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-plans-'));
+const tmpFile = (name = 'runtime.json') => path.join(tmpRoot(), name);
 
-const tmpFile = (name = 'runtime.json') => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-runtime-')), name);
+function builtinStore() {
+  return createPlanStore({ root: path.join(path.dirname(fileURLToPath(import.meta.url)), '../profiles/plans') });
+}
 
 test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
-  assert.equal(BUILTIN_PLANS.length, 6);
+  const plans = builtinStore().list();
+  assert.equal(plans.length, 6);
+  assert.deepEqual(plans.map((plan) => plan.id), BUILTIN_PLAN_ORDER);
   const expected = {
     chat: ['chat', 'L0'],
     'social-v1': ['reserved', 'L0'],
@@ -30,79 +33,67 @@ test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
     'agent-workspace': ['closed-agent', 'L2'],
     'agent-full': ['closed-agent', 'L3'],
   };
-  for (const plan of BUILTIN_PLANS) {
+  for (const plan of plans) {
+    assert.equal(plan.builtin, true, plan.id);
+    assert.equal(plan.platform, 'qq');
+    assert.equal(plan.agentPlatform, 'dsh');
     assert.deepEqual([legacyModeOfPlan(plan), legacyLevelOfPlan(plan)], expected[plan.id], plan.id);
     assert.equal(planIdForLegacy(...expected[plan.id]), plan.id);
   }
 });
 
-test('归一：内置方案的「能力」不可被配置覆盖，自定义方案原样保留', () => {
-  const plans = normalizePlans([
-    { id: 'social-v2', label: '我的二代', tools: 'qq-agent-full', behavior: 'none', audience: 'owner' },
-    { id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', behavior: 'none', audience: 'owner' },
-  ]);
-  const v2 = findPlan(plans, 'social-v2');
-  assert.equal(v2.label, '我的二代', 'label/note 可覆盖');
-  assert.equal(v2.tools, 'qq-chat-v2', '内置方案的能力不可覆盖（要改就克隆）');
-  assert.equal(v2.behavior, 'social-v2');
-  assert.equal(v2.builtin, true);
-  const custom = findPlan(plans, 'my-agent');
-  assert.equal(custom.builtin, false);
-  assert.equal(custom.tools, 'qq-agent-full');
-});
-
-test('校验：非法 id / 缺能力被丢弃，未知行为回落 none', () => {
-  assert.equal(normalizePlan({ id: 'Bad Id', tools: 'x' }), null);
-  assert.equal(normalizePlan({ id: 'ok-plan' }), null, '没有能力预设的方案没有意义');
-  const plan = normalizePlan({ id: 'ok-plan', tools: 'qq-chat', behavior: '不存在 的 行为' });
-  assert.equal(plan.behavior, 'none');
+test('归一：缺 agent / capability 直接报错，未知行为回落 none', () => {
+  assert.throws(() => normalizePlan({ id: 'Bad Id', agent: 'qq-chat', capability: 'agent-chat' }), /id 不合法/);
+  assert.throws(() => normalizePlan({ id: 'ok-plan', capability: 'agent-chat' }), /agent 不能为空/);
+  assert.throws(() => normalizePlan({ id: 'ok-plan', agent: 'qq-chat' }), /capability 不能为空/);
+  const plan = normalizePlan({ id: 'ok-plan', agent: 'qq-chat', capability: 'agent-chat', behavior: '未知档案' });
+  assert.equal(plan.behavior, '未知档案', '行为只存名字，是否有效由加载侧判断');
   assert.equal(plan.audience, 'access');
-  assert.equal(normalizePlans('not-an-array').length, BUILTIN_PLANS.length);
+  assert.equal(plan.builtin, false);
 });
 
-test('激活指针：首次迁移只写一次，之后 set/get 持久化', () => {
-  const file = tmpFile();
-  const rt = createRuntimeState({ file, platform: 'qq', fallbackPlanId: 'social-v2' });
-  assert.equal(rt.get(), null);
-  const first = rt.migrateOnce('chat');
-  assert.deepEqual(first, { migrated: true, planId: 'chat' });
-  const second = rt.migrateOnce('reserved2');
-  assert.deepEqual(second, { migrated: false, planId: 'chat' }, '已有指针时不再迁移');
-  rt.set('qq', 'agent-readonly');
-  const again = createRuntimeState({ file, platform: 'qq', fallbackPlanId: 'social-v2' });
-  assert.equal(again.get(), 'agent-readonly');
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  assert.equal(raw.version, RUNTIME_STATE_VERSION);
-  assert.deepEqual(raw.active, { qq: 'agent-readonly' });
-  again.set('qq', '');
-  assert.equal(again.get(), null, '空串 = 清掉指针');
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).active, {});
+test('内置方案只读：save / remove 都被拒绝', () => {
+  const store = builtinStore();
+  assert.throws(() => store.save({ id: 'chat', agent: 'qq-chat', capability: 'agent-chat' }), /内置方案/);
+  assert.throws(() => store.remove('social-v2'), /内置方案/);
 });
 
-test('自定义方案：新增/更新落盘字段、内置 id 拒绝、删除保护', () => {
-  const created = upsertCustomPlan([], {
-    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', capability: 'agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+test('自定义方案：写入 / 读取 / 克隆 / 删除都落文件', () => {
+  const root = tmpRoot();
+  const store = createPlanStore({ root });
+  assert.deepEqual(store.list(), []);
+  const saved = store.save({
+    id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh',
+    agent: 'qq-agent-full', capability: 'agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
   });
-  assert.equal(created.plans.length, 1);
-  assert.deepEqual(created.plans[0], {
-    id: 'my-agent', label: '我的 Agent', tools: 'qq-agent-full', capability: 'agent-full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
-  });
-  const updated = upsertCustomPlan(created.plans, { ...created.plans[0], label: '改名后', builtin: true });
-  assert.equal(updated.plans.length, 1);
-  assert.equal(updated.plans[0].label, '改名后');
-  assert.equal(planToConfig(updated.plans[0]).builtin, undefined);
-  assert.throws(() => upsertCustomPlan([], { id: 'chat', tools: 'qq-chat' }), /内置方案/);
-  assert.throws(() => removeCustomPlan(updated.plans, 'chat'), /内置方案/);
-  const afterDelete = removeCustomPlan(updated.plans, 'my-agent');
-  assert.deepEqual(afterDelete, []);
-  assert.throws(() => removeCustomPlan(afterDelete, 'my-agent'), /没有这个方案/);
+  assert.equal(saved.builtin, false);
+  assert.ok(fs.existsSync(path.join(root, 'my-agent.yml')));
+  assert.equal(store.list().length, 1);
+  assert.equal(store.get('my-agent').label, '我的 Agent');
+  const clone = store.clone('my-agent', 'my-agent-2');
+  assert.equal(clone.id, 'my-agent-2');
+  assert.equal(store.list().length, 2);
+  assert.throws(() => store.clone('my-agent', 'my-agent-2'), /已存在/);
+  store.remove('my-agent');
+  assert.equal(store.list().length, 1);
+  assert.equal(store.get('my-agent'), null);
+});
+
+test('方案解析不再有全局指针：默认方案来自 config.runtime.defaultPlan', () => {
+  // 指针（state/runtime.json）已删除；全局默认方案是配置项，内置方案仍是只读文件。
+  assert.equal(fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../state/runtime.json')), true);
+  const store = builtinStore();
+  assert.equal(store.get('social-v2')?.id, 'social-v2');
+  assert.equal(store.get('chat')?.builtin, true);
 });
 
 test('legacy 投影按行为优先：Agent 工具 + 仿真行为仍是仿真引擎', () => {
   // 行为决定引擎，工具只决定能力 —— 允许「带人格的 Agent 进群聊」这类组合。
-  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'social-v2', audience: 'owner' }), 'reserved2');
-  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'social-v1' }), 'reserved');
-  assert.equal(legacyModeOfPlan({ tools: 'qq-agent-full', behavior: 'none' }), 'closed-agent');
-  assert.equal(legacyModeOfPlan({ tools: 'qq-chat', behavior: 'social-v2' }), 'reserved2');
-  assert.equal(legacyModeOfPlan({ tools: 'qq-chat', behavior: 'none' }), 'chat');
+  assert.equal(legacyModeOfPlan({ agent: 'qq-agent-full', behavior: 'social-v2', audience: 'owner' }), 'reserved2');
+  assert.equal(legacyModeOfPlan({ agent: 'qq-agent-full', behavior: 'social-v1' }), 'reserved');
+  assert.equal(legacyModeOfPlan({ agent: 'qq-agent-full', behavior: 'none' }), 'closed-agent');
+  assert.equal(legacyModeOfPlan({ agent: 'qq-chat', behavior: 'social-v2' }), 'reserved2');
+  assert.equal(legacyModeOfPlan({ agent: 'qq-chat', behavior: 'none' }), 'chat');
+  assert.deepEqual(findPlan([{ id: 'a' }], 'a'), { id: 'a' });
+  assert.equal(findPlan([{ id: 'a' }], 'b'), null);
 });

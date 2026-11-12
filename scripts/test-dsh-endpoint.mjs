@@ -123,8 +123,8 @@ test('桥接接线：留空自动识别时，DSH 不可用期间定期重新识�
 });
 
 test('preset：不再使用 DSH 0.2.1 不认的提示词变量（cwd）', () => {
-  for (const dir of fs.readdirSync(new URL('../dsh/agent-presets/', import.meta.url))) {
-    const f = new URL(`../dsh/agent-presets/${dir}/agent.cordis.yml`, import.meta.url);
+  for (const dir of fs.readdirSync(new URL('../profiles/agent-platforms/dsh/agents/', import.meta.url))) {
+    const f = new URL(`../profiles/agent-platforms/dsh/agents/${dir}/agent.cordis.yml`, import.meta.url);
     if (!fs.existsSync(f)) continue;
     assert.ok(!fs.readFileSync(f, 'utf8').includes('{{cwd}}'), `${dir} 不得使用 {{cwd}}`);
   }

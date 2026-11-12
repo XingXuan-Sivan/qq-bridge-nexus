@@ -49,6 +49,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     const rows = capabilities.map((cap) => ({
       cells: [
         `<code>${esc(cap.id)}</code><div class="meta">${esc(cap.label || '')}</div>`,
+        `<span class="pill">${esc(String(cap.agentPlatform || 'dsh').toUpperCase())}</span>`,
         visibleSummary(cap),
         extensionSummary(cap),
         `<div class="row-actions">
@@ -59,7 +60,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '能力预设' }, { label: '工具' }, { label: 'MCP · 技能', width: '220px' }, { label: '操作', width: '160px' }],
+      columns: [{ label: '能力预设' }, { label: 'Agent 平台', width: '100px' }, { label: '工具' }, { label: 'MCP · 技能', width: '220px' }, { label: '操作', width: '160px' }],
       rows,
       pageSize: 20,
       search: { placeholder: '搜索能力预设 / id' },
@@ -101,9 +102,10 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     const skills = Array.isArray(cap.tools?.skills) ? cap.tools.skills : [];
     draft = {
       id: cap.id,
+      builtin: Boolean(cap.builtin),
       label: cap.label || '',
       note: cap.note || '',
-      notes: cap.safety?.notes || '',
+      notes: cap.note || '',
       platform: new Set(cap.platformVisible ?? []),
       agent: new Set(cap.agentModules ?? []),
       servers,
@@ -135,7 +137,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       rows.push({
         attrs: { 'data-filter-kind': 'agent' },
         cells: [
-          selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id, 'data-select-group': 'tools' } }),
+          selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id, 'data-select-group': 'tools', disabled: 'disabled' } }),
           `${esc(entry.label)}<div class="meta"><code>${esc(entry.id)}</code></div>`,
           esc(entry.desc || 'Agent 运行时模块'),
           `<span class="cap-pill-row"><span class="pill">Agent</span>${riskPill(entry.risk)}</span>`,
@@ -279,26 +281,32 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       <section class="card span-all">
         <div class="card-head">
           <div>
-            <h2>编辑能力 · <code>${esc(draft.id)}</code></h2>
-            <div class="meta">保存后重写 <code>capability.yml</code> 并重建 preset / agent / extensions 三份产物。</div>
+            <h2>基本信息 · <code>${esc(draft.id)}</code></h2>
+            <div class="meta">保存后写回 <code>profiles/agent-platforms/dsh/capabilities/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</div>
           </div>
           <div class="row-actions">
             <button class="btn primary" type="button" id="capabilitySave">保存</button>
+            <button class="btn" type="button" id="capabilityReset" ${draft.builtin ? '' : 'hidden'}>重置</button>
             <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
             <span class="meta" id="capabilitySaveMsg" role="status"></span>
           </div>
         </div>
         <div id="capabilityEditorFields"></div>
       </section>
-      <section class="card span-all"><h2>平台工具</h2><p class="meta">「平台」是 QQ 桥接提供的工具，「Agent」是装进 DSH 预设的运行时模块；两边共用这张允许表。</p><div id="capEditorPlatform"></div></section>
+      <section class="card span-all"><h2>平台工具</h2><p class="meta">「平台」是 QQ 桥接提供的工具，由这张表决定是否暴露；「Agent」模块由 Agent 预设决定，这里只读展示。</p><div id="capEditorPlatform"></div></section>
       <section class="card span-all"><h2>MCP 服务器</h2><p class="meta">勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。</p><div id="capEditorServers"></div></section>
       <section class="card span-all"><h2>MCP 工具</h2><p class="meta">只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。</p><div id="capEditorTools"></div></section>
       <section class="card span-all"><h2>技能</h2><div id="capEditorSkills"></div></section>`;
     renderFields(editorHost.querySelector('#capabilityEditorFields'), [
       { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },
-      { name: 'capabilitySafetyNotes', type: 'textarea', label: '安全补充', value: draft.notes, hint: '拼在 persona 安全段末尾；只写这套能力特有的约束。' },
       { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选方案的人看的说明，不进提示词。' },
     ], { columns: 1 });
+    if (draft.builtin) {
+      for (const id of ['capabilityLabel', 'capabilityNote']) {
+        const input = editorHost.querySelector(`#${id}`);
+        if (input) { input.readOnly = true; input.classList.add('is-readonly'); }
+      }
+    }
     renderEditorTables();
   }
 
@@ -347,8 +355,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     if (msg) msg.textContent = '保存中…';
     const platform = {};
     for (const entry of platformTools()) platform[entry.flag] = draft.platform.has(entry.flag);
-    const agent = {};
-    for (const entry of agentModules()) agent[entry.id] = draft.agent.has(entry.id);
+    // Agent 模块由 Agent 预设决定，能力预设不再保存 tools.agent。
     // capability.yml 的 tools.mcp 是 [{server, tools: '*' | [名称]}] 列表，按这个形状写回。
     // 没改过的通配配置保持 `- server: "*"`，避免把「以后新增的服务器也允许」悄悄收窄。
     const mcp = draft.mcpAll
@@ -360,10 +367,8 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     const payload = {
       label: editorHost.querySelector('#capabilityLabel')?.value?.trim() ?? '',
       note: editorHost.querySelector('#capabilityNote')?.value?.trim() ?? '',
-      safety: { notes: editorHost.querySelector('#capabilitySafetyNotes')?.value?.trim() ?? '' },
       tools: {
         platform,
-        agent,
         mcp,
         skills: draft.skillsAll ? ['*'] : [...draft.skills],
       },
@@ -373,9 +378,8 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       if (!result?.ok) throw new Error(result?.error || '保存失败');
       draft.label = payload.label;
       draft.note = payload.note;
-      draft.notes = payload.safety.notes;
       showConsoleToast('能力预设已保存');
-      if (msg) msg.textContent = '✅ 已保存；生成物已重建';
+      if (msg) msg.textContent = '✅ 已保存';
       await load();
       onSaved?.();
     } catch (error) {
@@ -417,8 +421,26 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   editorHost?.addEventListener('change', syncFromEvents);
   editorHost?.addEventListener('click', (event) => {
     if (event.target.closest('#capabilitySave')) { void save(); return; }
+    if (event.target.closest('#capabilityReset')) { void resetCapability(); return; }
     if (event.target.closest('#capabilityCancel')) { draft = null; renderEditor(); }
   });
+
+  /** 内置能力重置：用 .defaults/<id>.yml 覆盖当前文件（后端校验只允许内置）。 */
+  async function resetCapability() {
+    if (!draft?.builtin) return;
+    if (!window.confirm(`把「${draft.label || draft.id}」重置为出厂内容？`)) return;
+    const msg = editorHost.querySelector('#capabilitySaveMsg');
+    try {
+      const r = await api(`/api/runtime/capabilities/${encodeURIComponent(draft.id)}/reset`, 'POST', {});
+      if (!r?.ok) throw new Error(r?.error || '重置失败');
+      showConsoleToast('已重置为出厂内容');
+      await load();
+      const fresh = capabilities.find((item) => item.id === draft.id);
+      if (fresh) { loadDraft(fresh); renderEditor(); }
+    } catch (error) {
+      if (msg) msg.textContent = `重置失败：${error?.message ?? error}`;
+    }
+  }
 
   /** 新建 / 克隆：id + 名称两个字段，克隆时带模板。 */
   async function createCapability(source) {
@@ -454,7 +476,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   }
 
   async function deleteCapability(id) {
-    if (!window.confirm(`删除能力预设 ${id}？目录会被移除，产物一并删除。`)) return;
+    if (!window.confirm(`删除能力预设 ${id}？对应的 capability.yml 会一并删除。`)) return;
     try {
       const r = await api(`/api/capabilities/${encodeURIComponent(id)}`, 'DELETE');
       if (!r?.ok) throw new Error(r?.error || '删除失败');

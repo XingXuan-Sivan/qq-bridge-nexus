@@ -1,27 +1,87 @@
-// 能力目录（dsh/agent-presets/<id>/capability.yml）的唯一读取口。
-// 桥接只认这里：工具可见、Agent 模块、MCP/技能、安全段都从 capability.yml 派生，
-// 运行期只有 capability.yml 一份源，不再有运行期补丁。
-import path from 'node:path';
+// Agent 侧能力预设：profiles/agent-platforms/dsh/capabilities/<id>.yml。
+//
+// 能力预设只描述「这个 Agent 拿到什么」——平台工具开关、Agent 工具模块、MCP 服务器/工具、
+// 技能；不再包含提示词底稿、安全段、排序或风险上限（那些由 Agent 平台适配器与系统提供）。
 import fs from 'node:fs';
-import { loadCapabilityFile, normalizeCapabilityFile, saveCapabilityFile, defaultCapability } from './file.mjs';
-import { writeArtifacts } from './build.mjs';
+import path from 'node:path';
+import YAML from 'yaml';
+import { AGENT_PLATFORMS_ROOT } from '../profiles/paths.mjs';
 import { capabilityCovers, capabilityDefaults, PLATFORM_TOOLS, AGENT_MODULES, BUILTIN_CAPABILITY_IDS } from '../tools/catalog.mjs';
 
-/** 目录名即能力 id；只认带 capability.yml 的子目录。 */
-function capabilityDirs(root) {
-  if (!fs.existsSync(root)) return [];
-  return fs.readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter((name) => fs.existsSync(path.join(root, name, 'capability.yml')));
+export const CAPABILITIES_ROOT = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'capabilities');
+
+const CAPABILITY_HEADER = '# 能力预设（Agent 侧）：只描述拿到什么工具与能力，不写提示词/安全段。\n'
+  + '# 由控制台「行为档案 › 能力预设」维护；保存即写回本文件，无需重建产物。';
+
+function boolMap(value) {
+  const out = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+  for (const [key, item] of Object.entries(value)) {
+    if (item === true || item === false) out[key] = item;
+  }
+  return out;
 }
 
-/** 平台工具可见集：显式写了就按显式，没写按能力的默认模板（目录里 defaultOff 的工具默认不进）。 */
+function mcpList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const server = String(item?.server ?? '').trim();
+    if (!server) return null;
+    const tools = item?.tools;
+    return {
+      server,
+      tools: tools === '*' || tools === undefined || tools === null ? '*' : (Array.isArray(tools) ? tools.map(String) : '*'),
+    };
+  }).filter(Boolean);
+}
+
+function stringList(value) {
+  return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
+}
+
+/** 归一并校验一份能力预设；id 来自文件名。Agent 模块不在这里（由 Agent 预设计决定）。 */
+export function normalizeCapability(raw, { id, source = 'capability' } = {}) {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+  if (!value) throw new Error(`${source} 必须是对象`);
+  const name = String(id ?? value.id ?? '').trim();
+  if (!/^[a-z][a-z0-9-]{1,39}$/.test(name)) throw new Error(`${source}.id 不合法：${name || '(空)'}`);
+  const label = String(value.label ?? '').trim() || name;
+  return {
+    version: Number.isInteger(Number(value.version)) ? Number(value.version) : 1,
+    id: name,
+    label,
+    note: String(value.note ?? '').trim(),
+    tools: {
+      platform: boolMap(value.tools?.platform),
+      mcp: mcpList(value.tools?.mcp),
+      skills: stringList(value.tools?.skills),
+    },
+  };
+}
+
+function capabilityText(capability) {
+  const body = YAML.stringify({
+    version: capability.version,
+    id: capability.id,
+    label: capability.label,
+    note: capability.note,
+    tools: capability.tools,
+  }, { lineWidth: 0, singleQuote: true }).replace(/\n+$/, '');
+  return `${CAPABILITY_HEADER}\n\n${body}\n`;
+}
+
+export function capabilityFile(root, id) {
+  const name = String(id ?? '').trim();
+  if (!/^[a-z][a-z0-9-]{1,39}$/.test(name)) throw new Error(`能力预设 id 不合法：${name || '(空)'}`);
+  return path.join(root, `${name}.yml`);
+}
+
+/** 平台工具可见集：显式写了按显式，没写按能力的默认模板（defaultOff 默认不进）。 */
 export function visiblePlatformFlags(capability) {
-  const preset = capabilityDefaults(capability.id) ?? capabilityDefaults('agent-chat');
+  const preset = capabilityDefaults(capability?.id) ?? capabilityDefaults('agent-chat');
   const allVisible = preset?.platform === true;
   const defaults = new Set(Array.isArray(preset?.platform) ? preset.platform : []);
-  const explicit = capability.tools?.platform ?? {};
+  const explicit = capability?.tools?.platform ?? {};
   const visible = [];
   for (const tool of PLATFORM_TOOLS) {
     const value = explicit[tool.flag];
@@ -31,26 +91,27 @@ export function visiblePlatformFlags(capability) {
   return visible;
 }
 
-/** 这套能力允许该工具吗？只对「可收紧」的副作用工具有意义（读类恒 true）。 */
+/** 这套能力允许该工具吗？只对可收紧的副作用工具有意义（读类恒 true）。 */
 export function capabilityAllowsFlag(capability, flag) {
   if (!capabilityCovers(flag)) return true;
   if (!capability) return true;
   return visiblePlatformFlags(capability).includes(flag);
 }
 
-/** 能力的 Agent 模块 id 列表（`tools.agent` 里为 true 的键）。 */
-export function agentModulesOf(capability) {
-  const ids = [];
-  for (const [key, value] of Object.entries(capability.tools?.agent ?? {})) {
-    if (value !== true) continue;
-    const module = AGENT_MODULES.find((item) => item.id === key || key.replaceAll('_', '-') === item.id);
-    ids.push(module?.id ?? key);
-  }
-  return ids;
+/** 能力的 Agent 模块 id 列表（历史字段，已不再由能力决定）。 */
+export function agentModulesOf() {
+  return [];
 }
 
-export function createCapabilityStore({ root, log = () => {} } = {}) {
-  const cache = new Map();
+export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {} } = {}) {
+  function files() {
+    if (!fs.existsSync(root)) return [];
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
+      .map((entry) => entry.name)
+      .filter((name) => name !== 'example.yml')
+      .sort();
+  }
 
   function decorate(capability) {
     return {
@@ -61,45 +122,43 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     };
   }
 
+  function readFile(file) {
+    const id = file.replace(/\.ya?ml$/i, '');
+    const raw = YAML.parse(fs.readFileSync(path.join(root, file), 'utf8').replace(/^\uFEFF/, ''));
+    return normalizeCapability(raw, { id, source: `capabilities/${file}` });
+  }
+
   function list() {
-    const items = [];
-    for (const id of capabilityDirs(root)) {
-      const loaded = loadCapabilityFile(path.join(root, id), { id });
-      if (!loaded) continue;
-      items.push(decorate(loaded.capability));
-    }
-    return items.sort((a, b) => a.id.localeCompare(b.id));
+    return files().map(readFile).map(decorate).sort((a, b) => a.id.localeCompare(b.id));
   }
 
   function get(id) {
     const name = String(id ?? '').trim();
     if (!name) return null;
-    const loaded = loadCapabilityFile(path.join(root, name), { id: name });
-    return loaded ? decorate(loaded.capability) : null;
+    const capability = list().find((item) => item.id === name);
+    return capability ?? null;
   }
 
-  /** 保存 = 写回 capability.yml 并立刻重建三份产物（产物是能力的纯函数）。 */
+  /** 保存 = 只写这一个 YAML；不再生成 DSH 产物（工具面由 Agent 平台在装配时读取）。 */
   function save(id, patch = {}) {
-    const dir = path.join(root, id);
-    const current = loadCapabilityFile(dir, { id })?.capability ?? defaultCapability(id);
-    const next = {
-      ...current,
-      ...pick(patch, ['label', 'note', 'order', 'risk']),
-      prompt: { ...current.prompt, ...(patch.prompt ?? {}) },
-      safety: { ...current.safety, ...(patch.safety ?? {}) },
+    const current = get(id);
+    const base = current ?? normalizeCapability({ label: id, note: '', tools: {} }, { id });
+    const builtin = BUILTIN_CAPABILITY_IDS.includes(base.id);
+    const next = normalizeCapability({
+      ...base,
+      // 内置预设的名称/备注是固定文案，只允许改工具面。
+      label: builtin ? base.label : (patch.label ?? base.label),
+      note: builtin ? base.note : (patch.note ?? base.note),
       tools: {
-        platform: patch.tools?.platform ? { ...patch.tools.platform } : current.tools.platform,
-        agent: patch.tools?.agent ? { ...patch.tools.agent } : current.tools.agent,
-        mcp: patch.tools?.mcp ?? current.tools.mcp,
-        skills: patch.tools?.skills ?? current.tools.skills,
+        platform: patch.tools?.platform ?? base.tools.platform,
+        mcp: patch.tools?.mcp ?? base.tools.mcp,
+        skills: patch.tools?.skills ?? base.tools.skills,
       },
-    };
-    const normalized = normalizeCapabilityFile(next, { id });
-    saveCapabilityFile(dir, normalized.capability);
-    writeArtifacts(dir, normalized.capability);
-    cache.delete(id);
-    log(`[capabilities] 已保存 ${id}${normalized.warnings.length ? `（${normalized.warnings.length} 条告警）` : ''}`);
-    return decorate(normalized.capability);
+    }, { id });
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(capabilityFile(root, id), capabilityText(next), 'utf8');
+    log(`[capabilities] 已保存 ${id}`);
+    return decorate(next);
   }
 
   /** 删除自定义能力；内置四条不允许删（只能克隆改）。 */
@@ -108,34 +167,35 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     const current = get(name);
     if (!current) throw new Error('没有这个能力预设');
     if (current.builtin) throw new Error('内置能力预设只读：请先克隆一份再改');
-    fs.rmSync(path.join(root, name), { recursive: true, force: true });
-    cache.delete(name);
+    fs.rmSync(capabilityFile(root, name), { force: true });
+    log(`[capabilities] 已删除 ${name}`);
     return { id: name };
   }
 
-  return { list, get, save, remove, root };
-}
+  /** 内置能力重置：把 .defaults/<id>.yml 抄回当前文件（自定义能力没有出厂副本）。 */
+  function reset(id) {
+    const name = String(id ?? '').trim();
+    if (!BUILTIN_CAPABILITY_IDS.includes(name)) throw new Error('只有内置能力预设可以重置');
+    const factory = path.join(root, '.defaults', `${name}.yml`);
+    if (!fs.existsSync(factory)) throw new Error('缺少出厂副本，无法重置');
+    fs.mkdirSync(root, { recursive: true });
+    fs.copyFileSync(factory, capabilityFile(root, name));
+    log(`[capabilities] 已重置 ${name}`);
+    return decorate(readFile(`${name}.yml`));
+  }
 
-function pick(source, keys) {
-  const out = {};
-  for (const key of keys) if (source[key] !== undefined) out[key] = source[key];
-  return out;
+  return { root, list, get, save, remove, reset };
 }
 
 /**
- * 平台工具注册开关：所有能力预设 `platformVisible` 的并集。
- *
- * 这是「平台注册哪些 QQ 工具」的唯一来源——控制台不再有第二份开关表，MCP 脚本启动时
- * 也用这个函数，避免桥接与 MCP 各自读一份配置产生分歧。`defaultOff` 的工具只有被
- * 某个能力显式写 `true` 时才会注册。
+ * 平台工具注册开关：所有能力预设 platformVisible 的并集。
+ * 桥接与 MCP 脚本共用这一个函数，避免两份配置产生分歧。
  */
-export function platformFlags({ root, log = () => {} } = {}) {
+export function platformFlags({ root = CAPABILITIES_ROOT, log = () => {} } = {}) {
   const flags = Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, false]));
   try {
     const capabilities = createCapabilityStore({ root, log }).list();
     if (!capabilities.length) {
-      // 目录里一个能力预设都没有（新克隆、最小部署、隔离夹具）：按目录默认值注册，
-      // 否则「没配置」会被解释成「所有工具都关闭」，模型连读消息都做不到。
       for (const tool of PLATFORM_TOOLS) flags[tool.flag] = tool.defaultOff !== true;
       log('[capabilities] 没有能力预设，平台工具按目录默认值注册');
       return flags;

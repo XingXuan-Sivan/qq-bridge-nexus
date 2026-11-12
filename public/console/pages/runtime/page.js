@@ -1,6 +1,7 @@
-// 运行方案页：读 /api/runtime/plans，展示当前指针与方案清单，切换走 /api/runtime/switch。
+// 运行方案面板：作为「行为档案 › 运行方案」标签渲染。全局默认方案在 config.runtime.defaultPlan，
+// 会话可在「会话与审批 › 详情」里单独指定；方案本身只做组合，不直接切换全局指针。
 // 自定义方案（新建/克隆/编辑/删除）只在页内弹窗里改，内置方案只读——要改先克隆。
-// 能力预设的编辑在「行为与能力」页的第二标签（components/capability-panel），这里只显示适配器摘要。
+// 能力预设的编辑在「能力预设」标签（components/capability-panel）。
 // 约定：表格只用 table 组件，字段只用 renderFields，页面不自拼工具栏与空态。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
@@ -10,17 +11,24 @@ import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js
 import { onPageRefresh } from '../../js/router.js';
 import { RUNTIME_FIELDS } from './fields.js';
 
-const MODE_LABEL = { chat: '聊天模式', reserved: '一代仿真', reserved2: '二代仿真', 'closed-agent': '封闭 Agent' };
 const BEHAVIOR_LABEL = { none: '不带行为', inherit: '跟随默认行为' };
 const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
 
 let payload = null;
 let presets = [];
 let behaviors = [];
+let platforms = [];
+let agents = [];
 let capsPayload = null;
-
 function el(id) {
   return document.getElementById(id);
+}
+
+const AGENT_FALLBACK = ['qq-chat', 'qq-chat-v2', 'qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full'];
+
+function agentOptions() {
+  const ids = agents.length ? agents : AGENT_FALLBACK;
+  return ids.map((id) => ({ value: id, label: id }));
 }
 
 function planById(id) {
@@ -43,33 +51,21 @@ function summaryHtml() {
   if (!payload) return '<span class="meta">读取中…</span>';
   const plan = payload.activePlan ?? planById(payload.active);
   if (!plan) return '<span class="meta">还没有激活任何方案。</span>';
-  const legacy = payload.legacy ?? {};
   return `
     <span class="pill g">${esc(plan.label)}</span>
-    <span class="pill">能力预设 ${esc(plan.capability || plan.tools)}</span>
+    <span class="pill">能力预设 ${esc(plan.capability || '—')}</span>
     <span class="pill">${esc(behaviorLabel(plan.behavior))}</span>
     <span class="pill">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>
-    <span class="pill">旧模式 ${esc(MODE_LABEL[legacy.mode] ?? legacy.mode ?? '—')}${legacy.level && legacy.level !== 'L0' ? ` / ${esc(legacy.level)}` : ''}</span>
     <span class="pill">平台 ${esc(adaptersFor('platform'))}</span>
     <span class="pill">Agent ${esc(adaptersFor('agent'))}</span>
-    <span class="pill">${payload.resetOnRestart ? '重启回到当前方案' : '重启不继承'}</span>`;
-}
-
-function fillPlanOptions() {
-  const select = el('runtimePlan');
-  if (!select) return;
-  const active = payload?.active ?? '';
-  select.innerHTML = (payload?.plans ?? []).map((plan) => {
-    const suffix = plan.builtin ? '' : '（自定义）';
-    return `<option value="${esc(plan.id)}">${esc(plan.label)}${suffix}</option>`;
-  }).join('');
-  if (active && planById(active)) select.value = active;
+    <span class="pill">${payload.resetOnRestart ? '重启沿用默认方案' : '重启不继承'}</span>`;
 }
 
 function rowHtml(plan) {
   return [
     `<code>${esc(plan.id)}</code><div class="meta">${esc(plan.label)}</div>`,
-    `<span class="meta">${esc(plan.capability || plan.tools)}</span>`,
+    `<span class="meta">${esc(plan.platform || 'qq')} · ${esc(plan.agent || '—')}</span>`,
+    `<span class="meta">${esc(plan.capability || '')}</span>`,
     `<span class="meta">${esc(behaviorLabel(plan.behavior))}</span>`,
     `<span class="meta">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>`,
     `<span class="pill">${plan.builtin ? '内置' : '自定义'}</span>`,
@@ -87,6 +83,7 @@ function tableMarkup() {
   return dataTableHtml({
     columns: [
       { label: '方案', width: '210' },
+      { label: '平台 · Agent', width: '210' },
       { label: '能力预设', width: '170' },
       { label: '行为', width: '140' },
       { label: '受众', width: '110' },
@@ -116,19 +113,21 @@ function renderSummary() {
 
 async function load() {
   try {
-    const [plans, presetList, behaviorList, caps] = await Promise.allSettled([
+    const [plans, presetList, behaviorList, caps, platformList] = await Promise.allSettled([
       api('/api/runtime/plans'),
       api('/api/runtime/capabilities'),
       api('/api/config/behaviors'),
       api('/api/runtime/capabilities'),
+      api('/api/platforms'),
     ]);
     if (plans.status !== 'fulfilled') throw plans.reason;
     payload = plans.value;
     presets = presetList.status === 'fulfilled' ? (presetList.value?.capabilities ?? []) : [];
     behaviors = behaviorList.status === 'fulfilled' ? (behaviorList.value?.behaviors ?? []) : [];
     capsPayload = caps.status === 'fulfilled' ? (caps.value ?? null) : null;
+    platforms = platformList.status === 'fulfilled' ? (platformList.value?.platforms ?? []) : [];
+    agents = [...new Set((payload?.plans ?? []).map((plan) => plan.agent).filter(Boolean))];
     renderSummary();
-    fillPlanOptions();
     renderTable();
   } catch (error) {
     const host = el('runtimeSummary');
@@ -136,32 +135,10 @@ async function load() {
   }
 }
 
-async function switchPlan() {
-  const msg = el('runtimeMsg');
-  const planId = el('runtimePlan')?.value || '';
-  const totp = el('runtimeTotp')?.value?.trim() || '';
-  if (!planId) {
-    if (msg) msg.textContent = '先选择一个方案';
-    return;
-  }
-  if (msg) msg.textContent = '切换中…';
-  try {
-    const result = await api('/api/runtime/switch', 'POST', { planId, totp });
-    if (msg) msg.textContent = `已切到「${result?.plan?.label ?? planId}」`;
-    showConsoleToast('运行方案已切换');
-    const totpInput = el('runtimeTotp');
-    if (totpInput) totpInput.value = '';
-    await load();
-  } catch (error) {
-    if (msg) msg.textContent = `切换失败：${error?.message || '未知错误'}`;
-  }
-}
-
 // ── 方案编辑器（新建 / 克隆 / 编辑） ─────────────────────────────────────────
 function editorFields(plan) {
   const behaviorOptions = [
     { value: 'none', label: '不带行为（纯工具/对话）' },
-    { value: 'inherit', label: '跟随默认行为' },
     ...behaviors.filter((item) => item.id !== 'none' && item.id !== 'inherit')
       .map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.kind || '行为'}）` })),
   ];
@@ -173,9 +150,24 @@ function editorFields(plan) {
     },
     { name: 'runtimeEditLabel', type: 'text', label: '名称', value: plan?.label || '', maxlength: 40 },
     {
-      name: 'runtimeEditTools', type: 'select', label: '能力预设', value: plan?.capability || plan?.tools || '',
+      name: 'runtimeEditPlatform', type: 'select', label: '平台', value: plan?.platform || platforms[0]?.id || 'qq',
+      options: platforms.map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.id}）` })),
+      hint: '用户侧平台：行为档案与平台话术都来自这里。',
+    },
+    {
+      name: 'runtimeEditAgentPlatform', type: 'text', label: 'Agent 平台', value: plan?.agentPlatform || 'dsh',
+      readonly: true,
+      hint: '当前只有 DSH；将来接入别的 Agent 平台时改这里。',
+    },
+    {
+      name: 'runtimeEditAgent', type: 'select', label: 'Agent', value: plan?.agent || agentOptions()[0]?.value || '',
+      options: agentOptions(),
+      hint: 'Agent 是装进 DSH 的运行时（预设）；在「插件 › 预设」里维护。',
+    },
+    {
+      name: 'runtimeEditTools', type: 'select', label: '能力预设', value: plan?.capability || '',
       options: presets.map((item) => ({ value: item.id, label: `${item.id} · ${item.label || item.id}` })),
-      hint: '能力预设决定工具授权与沙箱；在「能力预设」页维护。',
+      hint: '能力预设决定拿到哪些工具；会话权限级别再决定实际能用哪些。',
     },
     {
       name: 'runtimeEditBehavior', type: 'select', label: '行为档案', value: plan?.behavior || 'none',
@@ -224,6 +216,9 @@ async function savePlan() {
   const body = {
     id: el('runtimeEditId')?.value.trim() ?? '',
     label: el('runtimeEditLabel')?.value.trim() ?? '',
+    platform: el('runtimeEditPlatform')?.value ?? 'qq',
+    agentPlatform: 'dsh',
+    agent: el('runtimeEditAgent')?.value ?? '',
     capability: el('runtimeEditTools')?.value ?? '',
     behavior: el('runtimeEditBehavior')?.value ?? 'none',
     audience: el('runtimeEditAudience')?.value ?? 'access',
@@ -235,6 +230,10 @@ async function savePlan() {
   }
   if (!body.capability) {
     setEditorMsg('先选一套能力预设');
+    return;
+  }
+  if (!body.agent) {
+    setEditorMsg('先选一个 Agent');
     return;
   }
   setEditorMsg('保存中…');
@@ -344,11 +343,10 @@ function hostFor(name) {
 }
 
 export function init() {
-  renderFields(hostFor('summary'), RUNTIME_FIELDS.summary.fields, { columns: 2 });
-  renderFields(hostFor('switch'), RUNTIME_FIELDS.switch.fields, { columns: 2 });
-  renderFields(hostFor('table'), RUNTIME_FIELDS.table.fields, { columns: 2 });
-  const btn = el('runtimeSwitch');
-  if (btn) btn.addEventListener('click', () => { void switchPlan(); });
+  const summaryHost = hostFor('summary');
+  if (summaryHost) renderFields(summaryHost, RUNTIME_FIELDS.summary.fields, { columns: 2 });
+  const tableHost = hostFor('table');
+  if (tableHost) renderFields(tableHost, RUNTIME_FIELDS.table.fields, { columns: 2 });
   const host = hostFor('table');
   if (host) {
     host.addEventListener('click', (event) => {
@@ -367,6 +365,6 @@ export function init() {
       if (delId) void deletePlan(delId);
     });
   }
-  onPageRefresh('runtime', () => { void load(); });
+  onPageRefresh('behavior:plans', () => { void load(); });
   void load();
 }

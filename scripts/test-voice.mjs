@@ -121,7 +121,8 @@ console.log('## 配置项（AI 发语音默认关闭，等语音库准备好再�
   //      这条断言会去断言**用户的当前状态**并失败 —— 测试不该因为用户用了功能而变红。
   // 用户当前值只做提示，不参与判定。
   const exCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
-  ok(exCfg.tools?.sendVoice === false, 'config.example.json tools.sendVoice=false（出厂默认不给 AI 发语音）');
+  const catalogSrc = fs.readFileSync(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), 'utf8');
+  ok(/flag: 'sendVoice'[^\n]*defaultOff: true/.test(catalogSrc), '能力预设目录里 sendVoice=defaultOff（出厂默认不给 AI 发语音）');
   ok(exCfg.voice?.enabled === false, 'config.example.json voice.enabled=false（出厂默认总闸关闭）');
   ok(exCfg.voice?.allowAbsolutePath === false, '出厂默认禁止绝对路径（安全默认）');
   ok(Number(exCfg.voice?.maxPerHour) > 0, '出厂默认带每小时限流');
@@ -136,7 +137,7 @@ console.log('## 配置项（AI 发语音默认关闭，等语音库准备好再�
   ok(ex.voice?.dir === 'audio', 'config.example.json 含 voice 段');
   // 代码里的默认值也必须一致，否则删掉 config.json 里那两行就会变回"默认开"
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
-  ok(/sendVoice: false,/.test(bridgeSrc), 'bridge.js 里 tools 默认 sendVoice: false');
+  ok(/sendVoice: false,/.test(bridgeSrc), 'bridge.js 里 socialV2.tools 默认 sendVoice: false');
   ok(/voice = \{[\s\S]{0,200}?enabled: false,/.test(bridgeSrc), 'bridge.js 里 voice 默认 enabled: false');
 }
 
@@ -198,13 +199,13 @@ if (!hasVoiceTool()) {
 
 console.log('## preset 人设已描述语音能力（否则 AI 不知道自己会说话）');
 {
-  const preset = fs.readFileSync(path.join(ROOT, 'dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'), 'utf8');
+  const preset = fs.readFileSync(path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', 'qq-chat-v2', 'agent.cordis.yml'), 'utf8');
   ok(preset.includes('qq_send_voice'), 'qq-chat-v2 人设提到 qq_send_voice');
   ok(preset.includes('qq_list_voices'), 'qq-chat-v2 人设提到 qq_list_voices');
   ok(preset.includes('verified=true'), '人设说明 verified=true 的语义');
   ok(/不要假装发了语音/.test(preset), '人设禁止假装发语音');
   // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
-  // （dsh/agent-presets/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
+  // （profiles/agent-platforms/dsh/agents/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
   const restrict = fs.readFileSync(path.join(ROOT, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs'), 'utf8');
   ok(restrict.includes("'mcp__snowluma__'"), 'preset 白名单以前缀放行 mcp__snowluma__*（覆盖语音工具）');
 }

@@ -10,6 +10,9 @@ const TARGET_ROW = (kindId, idId, idPlaceholder) => `<div class="control-row">
 </div>`;
 
 export const OPERATIONS_FIELDS = {
+  activity: {
+    fields: [{ name: 'operationsActivity', type: 'custom', span: 2, html: '<pre id="activity" class="activity-log">（空）</pre>' }],
+  },
   testSend: {
     fields: [
       { name: 'testSendTarget', type: 'custom', label: '目标', span: 2, html: TARGET_ROW('tsKind', 'tsId', '群号 / QQ 号') },
@@ -31,7 +34,6 @@ export const OPERATIONS_FIELDS = {
         className: 'form-actions--pair',
         items: [
           { id: 'restartBtn', label: '重启桥接', variant: 'danger', status: 'restartMsg' },
-          { id: 'clearWsBtn', label: '清空 QQ 聊天工作区', variant: 'danger', status: 'clearWsMsg' },
           { id: 'panicBtn', label: '紧急关闭', variant: 'danger', status: 'panicMsg' },
         ],
       },
@@ -39,7 +41,7 @@ export const OPERATIONS_FIELDS = {
         name: 'maintenanceNote',
         type: 'custom',
         span: 2,
-        html: '<div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；清空工作区会归档全部 QQ 会话并清空活动日志。紧急关闭会立即回到 L0 群友模式，并停止进行中的高权限会话（两者都不可撤销）。</div>',
+        html: '<div class="meta">由守护窗口启动时，重启后 5 秒自动恢复；「清空所有会话」在「会话与审批」页的表格工具栏。紧急关闭会立即回到 L0 群友模式，并停止进行中的高权限会话（不可撤销）。</div>',
       },
     ],
   },

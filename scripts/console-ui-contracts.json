@@ -16,9 +16,9 @@
   },
   {
     "method": "POST",
-    "path": "/api/config/behavior-default",
+    "path": "/api/config/runtime",
     "body": {
-      "value": "social-v1"
+      "defaultPlan": "social-v1"
     }
   },
   {
@@ -65,18 +65,13 @@
   },
   {
     "method": "POST",
-    "path": "/api/runtime/switch",
-    "body": {
-      "planId": "social-v2",
-      "totp": ""
-    }
-  },
-  {
-    "method": "POST",
     "path": "/api/runtime/plans",
     "body": {
       "id": "my-agent",
       "label": "我的 Agent",
+      "platform": "qq",
+      "agentPlatform": "dsh",
+      "agent": "qq-chat",
       "capability": "agent-chat",
       "behavior": "social-v2",
       "audience": "owner",
@@ -87,11 +82,8 @@
     "method": "PATCH",
     "path": "/api/runtime/capabilities/agent-chat",
     "body": {
-      "label": "聊天（改）",
+      "label": "聊天 Agent",
       "note": "",
-      "safety": {
-        "notes": "不主动私聊。"
-      },
       "tools": {
         "platform": {
           "getPrompt": false,
@@ -131,16 +123,6 @@
           "ownerGroupAccess": false,
           "ownerRelay": false,
           "schedule": false
-        },
-        "agent": {
-          "tool-fs": false,
-          "tool-fs-search": false,
-          "tool-pwsh": false,
-          "tool-jobs": false,
-          "tool-web": true,
-          "tool-ask-user": true,
-          "tool-todo": true,
-          "qq-approval-gate": false
         },
         "mcp": [
           {

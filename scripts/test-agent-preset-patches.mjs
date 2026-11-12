@@ -1,6 +1,6 @@
 // 钉住 DSH 0.1.7 preset 装配的「防漂移」契约（纯离线，不需要 DSH 在跑）：
 //   1. bundle patch（dsh-bundles/qq-agent-presets/presets/*.patch.yml）与仓库权威源
-//      （dsh/agent-presets/<preset>/{preset.yml,agent.cordis.yml}）逐字一致；
+//      （profiles/agent-platforms/dsh/agents/<preset>/{preset.yml,agent.cordis.yml}）逐字一致；
 //   2. patch 的形状符合新机制：insert 一条 @deepseek-ai/dsh-agent-preset 行，
 //      config 里带 id/name/description/order/plugins；
 //   3. 守卫行只能用「从 profile 目录可解析」的引用方式（裸说明符），
@@ -43,13 +43,13 @@ for (const name of PRESETS) {
   ok(row.id === presetRowId(name), `${name}: 行 id = ${presetRowId(name)}（非 preset 名，便于按行定位）`);
   ok(row.name === '@deepseek-ai/dsh-agent-preset', `${name}: 行 name = @deepseek-ai/dsh-agent-preset`);
   ok(row.config?.id === name, `${name}: config.id = ${name}（桥接按这个 id 解析 preset）`);
-  const meta = load(path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'preset.yml'));
+  const meta = load(path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'preset.yml'));
   ok(row.config.name === meta.name && row.config.description === meta.description && row.config.order === meta.order,
     `${name}: preset.yml 的 name/description/order 原样带进 config`);
   ok(Array.isArray(row.config.plugins) && row.config.plugins.length > 0, `${name}: config.plugins 非空（新机制里必填）`);
 
   // 与源行列表逐字对比：只允许守卫行的 name 被改写。
-  const source = load(path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'agent.cordis.yml'));
+  const source = load(path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'agent.cordis.yml'));
   const expected = structuredClone(source);
   for (const r of expected) if (RELATIVE_ROW_REWRITES.has(r.name)) r.name = RELATIVE_ROW_REWRITES.get(r.name);
   assert.deepEqual(row.config.plugins, expected, `${name}: config.plugins 必须与 agent.cordis.yml 完全一致（守卫名除外）`);
@@ -93,8 +93,10 @@ console.log('## 4. bundle 声明与安全边界');
   // 一份实现：两个 preset 目录下的同名文件必须是 re-export 壳，且导出同名成员。
   const canonicalMod = await import(pathToFileURL(canonical).href);
   for (const name of PRESETS) {
-    const shim = path.join(REPO_ROOT, 'dsh', 'agent-presets', name, 'qq-tool-restrict.mjs');
-    ok(/^export \* from '\.\.\/\.\.\/\.\.\/dsh-bundles\/qq-agent-presets\/qq-tool-restrict\.mjs'$/m.test(read(shim).trim()),
+    const shim = path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'qq-tool-restrict.mjs');
+    const shimText = read(shim).trim();
+    const spec = shimText.match(/^export \* from '(.+)'$/m)?.[1];
+    ok(spec !== undefined && path.resolve(path.dirname(shim), spec) === path.resolve(canonical),
       `${name}/qq-tool-restrict.mjs 是指向唯一实现的 re-export 壳`);
     const shimMod = await import(pathToFileURL(shim).href);
     assert.equal(shimMod.apply, canonicalMod.apply, `${name}: 壳与实现在同一模块实例上`);

@@ -3,6 +3,8 @@
 > 状态：**G1–G4 已提交；G5 已完成**（2026-11-09）。P10 能力归一已实施（`CAPABILITY_UNIFY_SPEC.md`）：旧「预设」页已删除，能力与行为合并到「行为与能力」页两个标签，模型以该 SPEC 为准；本文的「预设层」表述保留作历史对照。
 > G1 文档 `f75949e`、G2 行为档案 `4ace129`、G3 全局配置页 `aa2176a`、G4 动态 picker / CM6 / 统一 `yaml` `169da58`。G5 完成文档收尾、控制台二轮（保存条、编辑器/终端组件、工具表、MCP 层级表，见 `docs/STATUS.md` 6.16）与 `js-yaml` 迁移；表格可选能力（D23）留待有使用点再补。
 > 相关文档：`docs/SESSION_SUBSYSTEM.md`、`docs/EXTENSION_PLATFORM.md`、`docs/guides/CONFIGURATION.md`、`docs/STATUS.md` 6.12–6.16。
+>
+> **2026-11-12 更新**：本文描述的三层模型已演进为四层（用户侧平台 / Agent 侧平台 / 运行方案 / 会话权限），目录统一到 `profiles/`，`config/behaviors`、`config/platform`、`dsh/agent-presets` 已删除；全局默认方案改为 `config.json` 的 `runtime.defaultPlan`，不再有 `state/mode.json` 运行时指针。当前模型以 [`docs/PROFILES_MODEL.md`](PROFILES_MODEL.md) 为准，本文保留作历史对照。
 
 ## 0. 结论
 

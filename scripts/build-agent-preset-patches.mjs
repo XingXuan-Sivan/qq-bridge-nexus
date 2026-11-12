@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// build-agent-preset-patches.mjs — 把 dsh/agent-presets/<preset>/ 的 preset 源文件
+// build-agent-preset-patches.mjs — 把 profiles/agent-platforms/dsh/agents/<preset>/ 的 preset 源文件
 // 渲染成 DSH 0.1.7 的 bundle patch 文件（dsh-bundles/qq-agent-presets/presets/<preset>.patch.yml）。
 //
 // 背景（为什么需要「生成」这一步）：
@@ -7,7 +7,7 @@
 //   0.1.7：注册表既不扫目录也不接受 preset 路径，preset 变成一条普通 loader 行
 //          （@deepseek-ai/dsh-agent-preset），它的 config.plugins 必须是**内联的行列表**，
 //          只能由 bundle 的 patch 文件插入。于是同一份行列表必然存在两种表示：
-//            源（人写/控制台改）：dsh/agent-presets/<preset>/{preset.yml,agent.cordis.yml}
+//            源（人写/控制台改）：profiles/agent-platforms/dsh/agents/<preset>/{preset.yml,agent.cordis.yml}
 //            装（DSH 读）：      dsh-bundles/qq-agent-presets/presets/<preset>.patch.yml
 //          本脚本是两者之间**唯一**的转换器：源是唯一权威，产物是纯生成物（文件头写明「请勿手工编辑」）。
 //          setup-dsh.mjs 在安装时会重新生成；test-agent-preset-patches.mjs 用 --check 钉住不漂移。
@@ -55,7 +55,7 @@ export function patchFileFor(name) {
   return path.join(BUNDLE_DIR, 'presets', `${name}.patch.yml`);
 }
 function sourceDirFor(name) {
-  return path.join(REPO_ROOT, 'dsh', 'agent-presets', name);
+  return path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name);
 }
 
 /** 能力预设里的平台提示词（config.json > capabilities[id].prompt.personaPrefix）。 */
@@ -144,7 +144,7 @@ export function renderPatch(name) {
   };
   const header = [
     `# 本文件由 scripts/build-agent-preset-patches.mjs 生成，请勿手工编辑。`,
-    `# 源：dsh/agent-presets/${name}/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。`,
+    `# 源：profiles/agent-platforms/dsh/agents/${name}/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。`,
     `# 作用：把 ${name} 作为一条 @deepseek-ai/dsh-agent-preset 行插入 profile（DSH 0.1.7+ 的 preset 机制）。`,
     `# 守卫行 qq-tool-restrict 用裸说明符 ${GUARD_SPECIFIER}：子行 name 按 profile 目录解析，`,
     `# 该包以 link: 依赖注册在 profile package.json（node_modules junction 由 setup-dsh.mjs 维护）。`,

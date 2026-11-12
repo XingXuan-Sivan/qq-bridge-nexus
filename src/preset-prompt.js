@@ -1,7 +1,7 @@
 // 二代仿真预设提示词（「仿真」层）的读取与安全改写。
 //
 // 边界说明：
-//   仿真提示词 = 预设内置（dsh/agent-presets/<preset>/agent.cordis.yml 的 persona.prefix），
+//   仿真提示词 = 预设内置（profiles/agent-platforms/dsh/agents/<preset>/agent.cordis.yml 的 persona.prefix），
 //                规定 AI 怎么调工具、怎么参与群聊（行为与协议）；改完需重启 DSH 生效。
 //   人格提示词 = roles/<名称>.md，规定 AI 是谁、什么性格（人设与语气）；
 //                由桥接每条消息注入，保存即生效。
@@ -40,7 +40,7 @@ export const PRESET_BLOCKING_SUBSTRINGS = [
   '不会自动发送到 QQ',
 ];
 // 一代（qq-chat）：不用 MCP 工具，靠空格分句 + [SILENT]，因此工具面那几条不适用。
-// 这三条都逐字出现在一代预设的正文里（见 dsh/agent-presets/qq-chat/agent.cordis.yml）——
+// 这三条都逐字出现在一代预设的正文里（见 profiles/agent-platforms/dsh/agents/qq-chat/agent.cordis.yml）——
 // 清单必须与预设实际文案一致，否则控制台会用一个预设自己都不满足的条件把它锁死。
 export const PRESET_BLOCKING_SUBSTRINGS_V1 = [
   '群友没有管理权限',

@@ -27,7 +27,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadBehaviorDefault(), loadPermission(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -468,27 +468,26 @@ const roleDefaultSection = {
   },
 };
 
-// ── 默认行为档案（config.json 的 behavior.default）──────────────────────────────
-async function loadBehaviorDefault() {
-  const select = $('behaviorDefaultSelect');
+// ── 默认运行方案（config.json 的 runtime.defaultPlan）─────────────────────────
+async function loadRuntimeDefault() {
+  const select = $('runtimeDefaultSelect');
   if (!select) return;
-  const r = await api('/api/config/behavior-default');
-  const current = r?.value ?? '';
-  const options = Array.isArray(r?.options) ? r.options : [];
-  select.innerHTML = '<option value="">（未设置，预设必须自带 behavior）</option>'
-    + options.map((item) => '<option value="' + esc(item.id) + '">' + esc(item.label || item.id) + '（' + esc(item.kind) + '）</option>').join('');
-  select.value = options.some((item) => item.id === current) ? current : '';
+  const r = await api('/api/config/runtime');
+  const current = r?.runtime?.defaultPlan ?? '';
+  const plans = Array.isArray(r?.plans) ? r.plans : [];
+  select.innerHTML = plans.map((plan) => `<option value="${esc(plan.id)}">${esc(plan.label || plan.id)}</option>`).join('');
+  if (current) select.value = current;
 }
 
-const behaviorDefaultSection = {
-  id: 'behaviorDefault',
-  label: '默认行为档案',
-  read: () => ({ value: $('behaviorDefaultSelect')?.value ?? '' }),
+const runtimeDefaultSection = {
+  id: 'runtimeDefault',
+  label: '默认运行方案',
+  read: () => ({ defaultPlan: $('runtimeDefaultSelect')?.value ?? '' }),
   save: async (value) => {
-    const r = await api('/api/config/behavior-default', 'POST', { value: value?.value ?? '' });
+    const r = await api('/api/config/runtime', 'POST', { defaultPlan: value?.defaultPlan ?? '' });
     if (!r?.ok) return { ok: false, message: r?.error || '保存失败' };
-    await loadBehaviorDefault();
-    return { ok: true, message: r.message || '已保存，下一条消息生效' };
+    await loadRuntimeDefault();
+    return { ok: true, message: '已保存；新建与未单独设置的会话立即使用该方案' };
   },
 };
 
@@ -549,7 +548,7 @@ export function init() {
   // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, behaviorDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
+    sections: [securitySection, globalAccessSection, runtimeDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',

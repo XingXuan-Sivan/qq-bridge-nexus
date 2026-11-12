@@ -24,21 +24,21 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import YAML from 'yaml';
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
 import {
-  assertPresetBehaviorBindings,
   listBehaviorFiles,
   readBehaviorDocument,
   writeBehaviorData,
   duplicateBehavior,
   removeBehaviorFile,
   BEHAVIOR_KINDS,
+  engineOfKind,
   loadBehaviorProfiles,
-  loadPresetBehaviorBindings,
   readBehaviorFile,
   resolveBehavior,
   validateBehaviorText,
   writeBehaviorFile,
 } from './behaviors/index.mjs';
-import { listKinds } from './behaviors/kinds/index.mjs';
+import { getKind, defaultsForEngine } from './behaviors/kinds/index.mjs';
+import { loadBehaviorTypes } from './behaviors/types.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -89,11 +89,12 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
-import { BUILTIN_PLANS, normalizePlans, normalizePlan, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan, RUNTIME_PLATFORM, upsertCustomPlan, removeCustomPlan } from './runtime/plans.mjs';
-import { createRuntimeState } from './runtime/active.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from './capabilities/store.mjs';
-// P10.9：平台话术 = config/platform/<id>.yml，读写只经这一层（注入块 core-platform-prompt 用同一份）。
+import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan, RUNTIME_PLATFORM } from './runtime/plans.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, CAPABILITIES_ROOT } from './capabilities/store.mjs';
+// 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './platform/prompt.mjs';
+import { listPlatforms, loadPlatform } from './platforms/index.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
   PERMISSION_LABEL,
@@ -686,7 +687,7 @@ const PRESET_BACKUP_KEEP = 10;
  *
  * 早先只允许 qq-chat / qq-chat-v2，导致 qq-agent-* 与自建预设的提示词卡被前端直接隐藏。
  * 现在改为「目录里真的有 agent.cordis.yml」才算数，既支持所有预设，又挡住了路径穿越：
- * 名字必须是 [a-z0-9-] 且解析后的文件必须落在 dsh/agent-presets 下。
+ * 名字必须是 [a-z0-9-] 且解析后的文件必须落在 profiles/agent-platforms/dsh/agents 下。
  * 返回 null 由调用方回 400。
  */
 const PRESET_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -695,7 +696,7 @@ function editablePresetName(raw) {
   const name = String(raw ?? '').trim();
   if (!name) return PRESET_NAMES.v2;
   if (!PRESET_ID_RE.test(name)) return null;
-  const dir = path.resolve(ROOT, 'dsh', 'agent-presets');
+  const dir = path.resolve(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
   const file = path.resolve(dir, name, 'agent.cordis.yml');
   if (!file.startsWith(dir + path.sep)) return null;
   return fs.existsSync(file) ? name : null;
@@ -709,7 +710,7 @@ function presetKind(name) {
 }
 
 function presetSourceYaml(name) {
-  return path.join(ROOT, 'dsh', 'agent-presets', name, 'agent.cordis.yml');
+  return path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'agent.cordis.yml');
 }
 
 function dshHomeDir() {
@@ -1033,22 +1034,11 @@ async function refreshPersonaCardCache(providerId, id, provider = null) {
   return { ...card, text };
 }
 
-/** 全局默认行为档案：预设没绑定 behavior 时兜底（预设在 preset.yml 里绑定时仍以预设为准）。 */
-function configDefaultBehaviorName(cfgValue = bridgeCfg) {
-  const raw = cfgValue?.behavior?.default;
-  const value = String(raw ?? '').trim();
-  if (!value) return null;
-  return cfgValue?.behaviors?.has?.(value) ? value : null;
-}
-
-function setConfigDefaultBehavior(name) {
-  const configFile = path.join(ROOT, 'config.json');
-  const file = readConfigObject(configFile);
-  const behavior = { ...(file.behavior ?? {}) };
-  if (name) behavior.default = name; else delete behavior.default;
-  file.behavior = behavior;
-  atomicWriteJson(configFile, file);
-  if (bridgeCfg) bridgeCfg.behavior = { ...(bridgeCfg.behavior ?? {}), default: name ?? undefined };
+// 运行方案文件仓库（profiles/plans/*.yml）：方案的唯一定义处，config.json 只留指针。
+let planFileStore = null;
+function planStore() {
+  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), log });
+  return planFileStore;
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
 // silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
@@ -1596,6 +1586,27 @@ function loadConfig() {
       }
     }
   }
+  // 结构迁移：默认行为档案并入运行方案（chat 方案引用具体档案），方案定义搬进 profiles/plans。
+  // 旧键留在文件里只会让人以为还能改，启动时自愈删除一次。
+  {
+    const configFile = path.join(ROOT, 'config.json');
+    const fresh = readConfigObject(configFile);
+    let changed = false;
+    if (fresh.behavior && 'default' in fresh.behavior) { delete fresh.behavior.default; changed = true; }
+    if (fresh.runtime && 'plans' in fresh.runtime) { delete fresh.runtime.plans; changed = true; }
+    if (!fresh.runtime?.defaultPlan) {
+      fresh.runtime = { ...(fresh.runtime ?? {}), defaultPlan: normalizeRuntimePlanId(fresh.runtime?.defaultPlan) || 'social-v2' };
+      changed = true;
+    }
+    if (changed) {
+      try {
+        atomicWriteJson(configFile, fresh);
+        log('config.json：已移除 behavior.default（并入 chat 方案）与 runtime.plans（改存 profiles/plans）');
+      } catch (error) {
+        log(`⚠️ 迁移 config.json 失败：${error?.message ?? error}`);
+      }
+    }
+  }
   cfg.behaviorPrompt = normalizeBehaviorPrompt(file.behaviorPrompt);
   // 人格卡注入上限：注入块 `core-persona` 是唯一来源；旧键只做一次性迁移。
   // 迁移后 config.json 里不再保留 `limits.personaInjectChars` / `role.maxInjectChars`。
@@ -1673,9 +1684,9 @@ function loadConfig() {
 
   // 系统级 v2 配置：从旧 socialV2 拆出，迁移后只保留 config.* 这些新键。
   // 平台工具的注册开关不再单独配置：由各能力预设「平台工具」表的并集推导，
-  // 唯一源是 dsh/agent-presets/<id>/capability.yml；单会话仍由 capabilityAllows 收紧副作用工具。
+  // 唯一源是 profiles/agent-platforms/dsh/capabilities/<id>.yml；单会话仍由 capabilityAllows 收紧副作用工具。
   cfg.tools = platformFlags({
-    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    root: CAPABILITIES_ROOT,
     log: (message) => log(`⚠️ ${message}`),
   });
   // 旧的读点（webImage / ownerRelay / ownerGroupAccess / sendVoice / setStickerRemark）
@@ -1693,45 +1704,37 @@ function loadConfig() {
     promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
 
-  // 运行方案（P4）：定义在 config.runtime.plans，当前指针在 state/runtime.json。
-  // 旧 state/mode.json 只作为首次迁移的输入；之后 mode/level 由方案的 legacy 投影得出。
+  // 运行方案（P4）：定义在 profiles/plans/*.yml，全局默认在 config.runtime.defaultPlan；
+  // 具体会话可以用自己的 planId 覆盖（state/profiles），没有覆盖才用全局默认。
   cfg.runtime = {
-    plans: Array.isArray(file.runtime?.plans) ? file.runtime.plans : [],
-    fallbackPlan: normalizeRuntimePlanId(file.runtime?.fallbackPlan) || 'social-v2',
+    defaultPlan: normalizeRuntimePlanId(file.runtime?.defaultPlan) || 'social-v2',
     idleMinutes: Number(file.runtime?.idleMinutes) > 0 ? Number(file.runtime.idleMinutes) : 10,
     resetOnRestart: file.runtime?.resetOnRestart !== false,
   };
-  // 方案数组只原样保留；归一与合并内置动作留给 ensureRuntime()（配置重载后也能刷新）。
+  // 方案定义在 profiles/plans/*.yml，config.json 只留全局指针与回退 id。
 
+  // 行为档案来自用户侧平台（QQ）自己的目录；方案直接引用档案 id，不再由预设绑定。
+  cfg.behaviors = loadBehaviorProfiles({ root: path.join(PLATFORMS_ROOT, 'qq', 'behaviors'), log });
+  const behaviorOfPlan = (planId) => {
+    const plan = planStore().get(planId);
+    return plan && plan.behavior !== 'none' ? cfg.behaviors.get(plan.behavior) : null;
+  };
+  const chatV1Behavior = behaviorOfPlan('social-v1');
+  const chatV2Behavior = behaviorOfPlan('social-v2');
 
-  // 行为档案：QQ 交互参数按预设绑定，不再塞在 config.social/socialV2。
-  cfg.behaviors = loadBehaviorProfiles({ root: path.join(ROOT, 'config', 'behaviors'), log });
-  cfg.presetBehaviors = loadPresetBehaviorBindings({
-    root: path.join(ROOT, 'dsh', 'agent-presets'),
-    presetIds: PRESET_IDS,
-    log,
-  });
-  assertPresetBehaviorBindings({
-    bindings: cfg.presetBehaviors,
-    behaviors: cfg.behaviors,
-    chatPresetIds: ['qq-chat', 'qq-chat-v2'],
-  });
-
-  // 默认 v1/v2 视图：没有会话上下文时（启动、全局 API）使用默认预设的行为。
-  const chatV1Behavior = cfg.behaviors.get(cfg.presetBehaviors.get('qq-chat'));
-  const chatV2Behavior = cfg.behaviors.get(cfg.presetBehaviors.get('qq-chat-v2'));
+  // 默认 v1/v2 视图：没有会话上下文时（启动、全局 API）使用内置仿真方案的档案。
   const legacyV2 = cfg.socialV2;
-  let defaultSocialV1 = { enabled: true, ...(chatV1Behavior?.v1 ?? {}) };
+  let defaultSocialV1 = { enabled: true, ...(chatV1Behavior?.config ?? {}) };
   let defaultSocialV2 = {
     ...legacyV2,
-    ...(chatV2Behavior?.v2 ?? {}),
+    ...(chatV2Behavior?.config ?? {}),
     tools: cfg.tools,
     compact: cfg.compact,
     voice: cfg.voice,
     media: cfg.media,
     initialPromptMaxChars: cfg.limits.initialPromptMaxChars,
     send: {
-      ...(chatV2Behavior?.v2?.send ?? {}),
+      ...(chatV2Behavior?.config?.send ?? {}),
       maxSendPerMinute: cfg.limits.send.maxSendPerMinute,
       maxSendPerHour: cfg.limits.send.maxSendPerHour,
     },
@@ -2157,6 +2160,7 @@ async function main() {
   // 插件内核（docs/PLUGIN_KERNEL.md §5/§12）：插件出问题只影响它自己，绝不挡住桥接启动。
   // 命令注册表先于插件内核创建：插件在 activate 里就可能注册命令，内核需要拿到同一个实例。
   const commandRegistry = createCommandRegistry({ log });
+  commandRegistry.loadOverrides(cfg.commands ?? {});
 
   // 内置段落的块化（P4 迁移第一批：贴纸 + 记忆摘要）。
   // 与插件块共用 createPromptBlockRegistry 的排序/限额/错误隔离语义，但用自己的注册表：
@@ -2259,9 +2263,12 @@ async function main() {
     log,
     now: Date.now,
   });
-  const presetPolicy = createPresetPolicy({ root: path.join(ROOT, 'dsh', 'agent-presets'), log });
+  const agentPresetsRoot = AGENT_PLATFORMS_ROOT
+    ? path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'agents')
+    : path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
+  const presetPolicy = createPresetPolicy({ root: agentPresetsRoot, log });
   const presetStore = createPresetStore({
-    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    root: agentPresetsRoot,
     backupRoot: path.join(STATE_DIR, 'preset-editor-backups'),
     factoryRoot: path.join(ROOT, 'assets', 'default-presets'),
     presetIds: PRESET_IDS,
@@ -2326,10 +2333,8 @@ async function main() {
       id: 'core-initial-prompt', label: '初始提示词', slot: 'identity', priority: 130,
       render: (ctx) => ctx.initialPromptText || ''
     });
-    registerCoreBlock({
-      id: 'core-anti-ai', label: '反AI味', slot: 'behavior', priority: 140,
-      render: () => '【反AI味】你不是客服：不用有求必应，可以装傻、已读乱回、拒绝推荐；少用“一绝/真管用/保证/绝对”这类词。'
-    });
+    // 行为提示词只来自行为档案（profiles/platforms/<platform>/behaviors/<id>.yml 的 prompt），
+    // 不再额外注册一段硬编码的「反AI味」，否则同一段内容会注入两次。
     registerCoreBlock({
       id: 'core-platform-prompt',
       label: '平台提示词',
@@ -3932,10 +3937,9 @@ async function main() {
   let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
-  // 运行方案（P4）：定义来自 config.runtime.plans，指针来自 state/runtime.json；currentMode 是它的 legacy 投影。
+  // 运行方案（P4）：定义来自 profiles/plans/*.yml，全局默认来自 config.runtime.defaultPlan。
   let runtimePlans = [];
   let runtimePlansSource = null;
-  let runtimeState = null;
   let lastMode = currentMode;
   // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
   // 旧版本这里硬编码 'router-standard'，但 DSH 0.1.5 已移除该 preset，硬编码会导致
@@ -4074,29 +4078,16 @@ async function main() {
     }
     return keys.filter(Boolean);
   }
-  /** 运行方案：数据层单例（定义随 config 重载刷新，指针在 state/runtime.json）。 */
+  /** 运行方案：文件仓库是定义源（profiles/plans/*.yml），全局默认在 config.runtime.defaultPlan。 */
   function ensureRuntime() {
-    // 方案清单跟着 config 走：配置重载（或 POST 后置空）时按新引用重算，避免用旧清单。
-    const source = bridgeCfg?.runtime?.plans ?? null;
-    if (runtimePlansSource !== source) {
-      runtimePlans = normalizePlans(source);
-      runtimePlansSource = source;
-    }
-    if (!runtimeState) {
-      runtimeState = createRuntimeState({
-        file: path.join(STATE_DIR, 'runtime.json'),
-        platform: bridgeCfg?.platform?.id ?? RUNTIME_PLATFORM,
-        fallbackPlanId: bridgeCfg?.runtime?.fallbackPlan ?? 'social-v2',
-        log,
-      });
-    }
-    return runtimeState;
+    runtimePlans = planStore().list();
+    return runtimePlans;
   }
 
   /** 当前生效方案（缺失/非法时回落到默认方案，不抛错）。 */
-  /** 能力目录（dsh/agent-presets/<id>/capability.yml）是工具面的唯一源。 */
+  /** 能力目录（profiles/agent-platforms/dsh/capabilities/<id>.yml）是工具面的唯一源。 */
   const capabilityStore = createCapabilityStore({
-    root: path.join(ROOT, 'dsh', 'agent-presets'),
+    root: CAPABILITIES_ROOT,
     log: (line) => log(line),
   });
 
@@ -4110,7 +4101,7 @@ async function main() {
    * 平台提示词：QQ 里怎么用工具、怎么说话、怎么等。
    * 只有新能力体系的会话才注入 —— 旧 `qq-*` 预设的 persona 里自带同段文字，重复注入会打架。
    */
-  const PLATFORM_PROMPT_ROOT = path.join(ROOT, 'config', 'platform');
+  const PLATFORM_PROMPT_ROOT = PLATFORMS_ROOT;
   function platformIdOf(key) {
     const platform = String(key ?? '').split(':')[0];
     return /^[a-z][a-z0-9-]{0,39}$/.test(platform) ? platform : 'qq';
@@ -4153,9 +4144,9 @@ async function main() {
   }
 
   function activePlan() {
-    const rt = ensureRuntime();
-    const id = rt.get() ?? rt.fallbackPlanId;
-    return findPlan(runtimePlans, id) ?? findPlan(BUILTIN_PLANS, 'social-v2') ?? BUILTIN_PLANS[0];
+    const plans = ensureRuntime();
+    const id = bridgeCfg?.runtime?.defaultPlan || 'social-v2';
+    return findPlan(plans, id) ?? plans[0] ?? null;
   }
 
   /** 某会话固定的方案（只看档案，不看全局指针）。 */
@@ -4167,16 +4158,10 @@ async function main() {
   }
 
   /**
-   * 某会话当前生效的方案：会话固定优先，否则全局方案。
-   * 全局指针只有在与 currentMode 投影一致时才采信 —— 指针落后（改配置、迁移、或管理通道
-   * 写入失败）时宁可退回旧投影，也不要让「引擎说 chat、能力却是 agent」这种半截状态。
+   * 某会话当前生效的方案：会话固定优先，否则全局默认。
    */
   function planOf(key) {
-    const sessionPlan = sessionPlanOf(key);
-    if (sessionPlan) return sessionPlan;
-    const plan = activePlan();
-    if (!plan) return null;
-    return legacyModeOfPlan(plan) === currentMode ? plan : null;
+    return sessionPlanOf(key) ?? activePlan();
   }
 
   /** 受众为 owner 的方案只允许管理员私聊使用（取代旧 closed-agent 全局排他）。 */
@@ -4291,10 +4276,11 @@ async function main() {
   function planMode(plan) {
     if (!plan) return null;
     const raw = plan.behavior ?? 'none';
-    const behaviorId = raw === 'inherit' ? configDefaultBehaviorName(cfg) : raw;
-    const kind = behaviorKindOf(behaviorId);
-    if (kind === 'v2') return 'reserved2';
-    if (kind === 'v1') return 'reserved';
+    const behaviorId = raw === 'inherit' ? 'none' : raw;
+    // 行为类型现在叫 social-v1/social-v2，引擎由类型注册表给出；不能再拿 kind 直接比 'v1'/'v2'。
+    const engine = engineOfKind(behaviorKindOf(behaviorId));
+    if (engine === 'v2') return 'reserved2';
+    if (engine === 'v1') return 'reserved';
     return legacyModeOfPlan({ ...plan, behavior: 'none' });
   }
 
@@ -4435,12 +4421,7 @@ async function main() {
     applyRuntimeModeTransition(fromMode, mode);
     currentMode = mode;
     currentLevel = mode === 'closed-agent' ? level : 'L0';
-    // 方案指针跟着走：调用方指定了 planId 就用它，否则按旧「模式 + 级别」折算。
-    try {
-      ensureRuntime().set(RUNTIME_PLATFORM, normalizeRuntimePlanId(ctx.planId) || planIdForLegacy(mode, level));
-    } catch (error) {
-      log(`⚠️ 写入运行方案指针失败：${error?.message ?? error}`);
-    }
+    // 模式切换只影响 DSH 权限预设；运行方案由全局默认 + 会话覆盖决定，不再跟随模式写指针。
     if (mode === 'closed-agent') lastAgentLevel = currentLevel;
     // owner 的会话会因此换新（或稍后从休眠恢复，那时会改成「恢复」交接）：下一条发给它的消息带上私聊交接
     if (fromMode !== mode || fromLevel !== currentLevel) {
@@ -4967,26 +4948,26 @@ async function main() {
   }
 
   /**
-   * 会话当前使用的行为档案。P6 起只看方案：none = 不带行为，inherit = 预设绑定 → 全局默认，
-   * 其余按档案 id 解析。是否「有仿真引擎」由 behavior kind 决定（planMode），不再看模式枚举。
+   * 会话当前使用的行为档案。P6 起只看方案：none = 不带行为，其余按档案 id 解析。
+   * 是否「有仿真引擎」由行为 kind 决定（planMode），不再看模式枚举。
    */
   function behaviorFor(key) {
     const plan = planOf(key);
     const raw = plan?.behavior ?? 'none';
-    if (raw === 'none') return null;
-    const presetId = modePreset(key, effectiveMode(key), cfg);
-    const behaviorId = raw === 'inherit'
-      ? ((presetId ? cfg.presetBehaviors.get(presetId) : '') || configDefaultBehaviorName(cfg))
-      : raw;
-    if (!behaviorId || behaviorId === 'none') return null;
-    return resolveBehavior(cfg.behaviors, behaviorId, { presetId: presetId || key });
+    if (!raw || raw === 'none' || raw === 'inherit') return null;
+    try {
+      return resolveBehavior(cfg.behaviors, raw);
+    } catch (error) {
+      log(`⚠️ 方案 ${plan?.id ?? key} 引用的行为档案不可用：${error?.message ?? error}`);
+      return null;
+    }
   }
 
   /** 行为档案 + 系统级配置的运行时视图（迁移期兼容未搬走的系统键）。 */
   function behaviorConfigFor(key) {
     const behavior = behaviorFor(key);
     if (!behavior) return {};
-    if (behavior.kind === 'v1') return behavior.v1;
+    if (engineOfKind(behavior.kind) === 'v1') return behavior.config;
     return behaviorV2View(behavior);
   }
 
@@ -4994,14 +4975,14 @@ async function main() {
     const base = cfg.socialV2 ?? {};
     return {
       ...base,
-      ...behavior.v2,
+      ...behavior.config,
       tools: base.tools ?? {},
       compact: base.compact,
       voice: base.voice,
       media: base.media,
       initialPromptMaxChars: base.initialPromptMaxChars,
       send: {
-        ...(behavior.v2.send ?? {}),
+        ...(behavior.config.send ?? {}),
         maxSendPerMinute: cfg.limits?.send?.maxSendPerMinute,
         maxSendPerHour: cfg.limits?.send?.maxSendPerHour,
       },
@@ -5020,12 +5001,14 @@ async function main() {
       return fn();
     }
     if (!behavior) return fn();
-    if (behavior.kind === 'v1') return behaviorContext.run({ social: behavior.v1, socialV2: cfg.socialV2 }, fn);
+    if (engineOfKind(behavior.kind) === 'v1') return behaviorContext.run({ social: behavior.config, socialV2: cfg.socialV2 }, fn);
     return behaviorContext.run({ social: cfg.social, socialV2: behaviorV2View(behavior) }, fn);
   }
 
   /** 判断一个会话 key 是否仍被当前模式/白名单允许（供唤醒调度与 HTTP 路由共用）。 */
   function isSessionAllowedInCurrentMode(key) {
+    // closed-agent 是全局独占引擎：期间只服务 owner 私聊，群会话不能新建或复用。
+    if (currentMode === 'closed-agent' && parseKey(key)?.kind === 'group') return false;
     return passiveAllowed(key);
   }
 
@@ -5465,14 +5448,7 @@ async function main() {
           const r = await ext.controller.initialize(actualMode);
           const c = ext.controller.current();
           if (c.mode && c.mode !== currentMode && r.action !== 'fallback') currentMode = c.mode;
-          // P4：方案的激活指针。启动校验可能已经回落过（applyModeChange 已写入），这里只补「从没有过」的情况。
-          const rt = ensureRuntime();
-          const migrated = rt.migrateOnce(planIdForLegacy(currentMode, currentLevel));
-          if (!migrated.migrated) {
-            const plan = findPlan(runtimePlans, rt.get()) ?? findPlan(BUILTIN_PLANS, rt.fallbackPlanId);
-            if (plan) currentMode = legacyModeOfPlan(plan);
-          }
-          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: rt.get() });
+          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: activePlan()?.id ?? null });
         } catch (error) {
           log(`⚠️ 管理控制器启动校验失败：${error?.message ?? error}；按安全模式运行`);
           if (currentMode === 'closed-agent') { currentMode = L0_MODES.includes(cfg.admin?.safeMode) ? cfg.admin.safeMode : 'reserved2'; }
@@ -6807,8 +6783,26 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/commands') {
-          // 三个来源分开返回，页面自己标来源；桥接不假装能管 DSH 的命令与工具。组装见 src/commands/payload.mjs。
+          // 桥接命令注册表；页面可以逐条改权限与启用状态（存在 config.json 的 commands 里）。
           sendJson(buildCommandsPayload(commandRegistry));
+          return;
+        }
+        const commandPatch = url.pathname.match(/^\/api\/commands\/([^/]+)$/);
+        if (req.method === 'POST' && commandPatch) {
+          const id = decodeURIComponent(commandPatch[1]);
+          try {
+            const body = await readBody();
+            commandRegistry.setOverride(id, {
+              ...('permission' in body ? { permission: body.permission } : {}),
+              ...('enabled' in body ? { enabled: body.enabled } : {}),
+            });
+            saveConfigSection('commands', commandRegistry.overrideSnapshot());
+            const entry = commandRegistry.list().find((item) => item.id === id) ?? null;
+            audit('command.update', { id, permission: entry?.permission, enabled: entry?.enabled });
+            sendJson({ ok: true, command: entry });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message || '保存命令设置失败' }, 400);
+          }
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/extensions') {
@@ -6912,21 +6906,35 @@ async function main() {
         }
         // 行为类型（kind）注册表：字段规格的唯一来源，控制台按它渲染表单。
         if (url.pathname === '/api/behaviors/kinds' && req.method === 'GET') {
-          sendJson({ ok: true, kinds: listKinds() });
+          // 类型来自 profiles/platforms/qq/behavior-types；字段规格优先取类型 yml 里的 schema，缺省回落到引擎模块。
+          const types = loadBehaviorTypes({ root: path.join(PLATFORMS_ROOT, 'qq') });
+          const kinds = types.map((type) => {
+            const engine = getKind(type.engine);
+            return {
+              kind: type.id,
+              label: type.label,
+              platform: type.platform || 'qq',
+              engine: type.engine,
+              fields: Array.isArray(type.schema?.fields) ? type.schema.fields : (engine?.fields ?? []),
+              defaults: defaultsForEngine(type.engine),
+            };
+          });
+          sendJson({ ok: true, kinds });
           return;
         }
         // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
-        const behaviorRoute = url.pathname.match(/^\/api\/config\/behaviors(?:\/([a-z0-9][a-z0-9._-]{0,63}))?(?:\/(validate))?$/);
+        const behaviorRoute = url.pathname.match(/^\/api\/config\/behaviors(?:\/([a-z0-9][a-z0-9._-]{0,63})(?:\/(clone|validate|reset))?)?$/);
         if (behaviorRoute) {
           const id = behaviorRoute[1];
           const action = behaviorRoute[2];
-          const behaviorsRoot = path.join(ROOT, 'config', 'behaviors');
+          const behaviorsRoot = path.join(PLATFORMS_ROOT, 'qq', 'behaviors');
           try {
             if (!id && req.method === 'GET') {
               // 「被引用」= 哪些运行方案把这个档案当作行为；换行为时先看这里再删。
-              const plans = normalizePlans(bridgeCfg.runtime?.plans);
+              const plans = planStore().list();
               const behaviors = listBehaviorFiles({ root: behaviorsRoot }).map((entry) => ({
                 ...entry,
+                builtin: fs.existsSync(path.join(behaviorsRoot, '.defaults', `${entry.id}.yml`)),
                 usedBy: plans.filter((plan) => plan.behavior === entry.id).map((plan) => plan.id),
               }));
               sendJson({ ok: true, behaviors });
@@ -6945,6 +6953,7 @@ async function main() {
                     id: target,
                     data: {
                       version: 1,
+                      platform: 'qq',
                       kind: BEHAVIOR_KINDS.includes(body?.kind) ? body.kind : 'v2',
                       label: String(body?.label ?? '').trim() || target,
                       description: String(body?.description ?? ''),
@@ -6971,8 +6980,16 @@ async function main() {
               }
               return;
             }
+            if (req.method === 'POST' && action === 'reset') {
+              const factory = path.join(behaviorsRoot, '.defaults', `${id}.yml`);
+              if (!fs.existsSync(factory)) { sendJson({ ok: false, error: '只有内置行为档案可以重置' }, 400); return; }
+              fs.copyFileSync(factory, path.join(behaviorsRoot, `${id}.yml`));
+              ext.audit.append('config.behavior.reset', { id });
+              sendJson({ ok: true, ...readBehaviorDocument({ root: behaviorsRoot, id }), requiresRestart: true });
+              return;
+            }
             if (req.method === 'DELETE' && !action) {
-              const plans = normalizePlans(bridgeCfg.runtime?.plans);
+              const plans = planStore().list();
               const usedBy = plans.filter((plan) => plan.behavior === id).map((plan) => plan.id);
               if (usedBy.length) {
                 sendJson({ ok: false, error: `这套行为正被方案引用（${usedBy.join('、')}），先换掉再删` }, 409);
@@ -6984,8 +7001,16 @@ async function main() {
               return;
             }
             if (req.method === 'GET') {
-              // 表单需要结构化 data；文本仍原样返回，供备份/排查使用。
-              sendJson({ ok: true, ...readBehaviorDocument({ root: behaviorsRoot, id }) });
+              // 表单需要结构化 data；文本仍原样返回，供备份/排查使用。出厂提示词用于「还原」与一致性提示。
+              const doc = readBehaviorDocument({ root: behaviorsRoot, id });
+              const builtin = fs.existsSync(path.join(behaviorsRoot, '.defaults', `${id}.yml`));
+              let factoryPrompt = null;
+              if (builtin) {
+                try {
+                  factoryPrompt = readBehaviorDocument({ root: path.join(behaviorsRoot, '.defaults'), id }).data?.prompt ?? null;
+                } catch { factoryPrompt = null; }
+              }
+              sendJson({ ok: true, ...doc, builtin, factoryPrompt });
               return;
             }
             if (req.method === 'POST' && action === 'validate') {
@@ -7008,10 +7033,22 @@ async function main() {
           }
           return;
         }
-        // 平台话术（P10.9）：每个平台一份 config/platform/<id>.yml，只读写正文。
+        // 平台清单（用户侧平台层）：profiles/platforms/<id>/ 是唯一源。
+        if (req.method === 'GET' && (url.pathname === '/api/platforms' || /^\/api\/platforms\/[a-z][a-z0-9-]{0,39}$/.test(url.pathname))) {
+          const id = url.pathname === '/api/platforms' ? '' : url.pathname.split('/').pop();
+          if (!id) {
+            sendJson({ ok: true, platforms: listPlatforms({ root: PLATFORMS_ROOT }) });
+            return;
+          }
+          const platform = loadPlatform({ root: PLATFORMS_ROOT, id });
+          if (!platform) { sendJson({ ok: false, error: '平台不存在' }, 404); return; }
+          sendJson({ ok: true, platform });
+          return;
+        }
+        // 平台话术（P10.9）：profiles/platforms/<id>/prompt.md，只读写正文。
         const platformRoute = url.pathname.match(/^\/api\/platform\/prompts(?:\/([a-z][a-z0-9-]{0,39}))?(?:\/(restore))?$/);
         if (platformRoute) {
-          const platformRoot = path.join(ROOT, 'config', 'platform');
+          const platformRoot = PLATFORMS_ROOT;
           const id = platformRoute[1];
           const action = platformRoute[2];
           try {
@@ -7044,7 +7081,7 @@ async function main() {
           return;
         }
         // DSH 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
-        // 权威源仍是 dsh/agent-presets/<id>/，应用前备份，apply 负责 build + setup。
+        // 权威源仍是 profiles/agent-platforms/dsh/agents/<id>/，应用前备份，apply 负责 build + setup。
         if (req.method === 'POST' && url.pathname === '/api/extensions/presets/create') {
           try {
             const body = await readBody();
@@ -7275,30 +7312,71 @@ async function main() {
           sendJson({ ok: true, mode: currentMode, level: currentLevel, closedAgentPreset, dshSynced: lastObservedDshMode === currentMode });
           return;
         }
-        // 运行方案（P4）：读定义与当前指针。控制台用它渲染「运行方案」页与会话下拉。
+        // 运行方案（P4）：读定义与全局默认。控制台用它渲染方案页与会话下拉。
         if (req.method === 'GET' && url.pathname === '/api/runtime/plans') {
-          const rt = ensureRuntime();
+          const plans = ensureRuntime();
           const plan = activePlan();
           sendJson({
             ok: true,
-            platform: rt.platform,
-            plans: runtimePlans,
-            active: rt.get(),
+            platform: cfg.platform?.id ?? RUNTIME_PLATFORM,
+            plans,
+            active: plan?.id ?? null,
             activePlan: plan,
-            fallbackPlan: rt.fallbackPlanId,
+            defaultPlan: cfg.runtime?.defaultPlan ?? '',
             legacy: { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) },
             resetOnRestart: cfg.runtime?.resetOnRestart !== false,
             idleMinutes: cfg.runtime?.idleMinutes ?? 10,
           });
           return;
         }
+        // 全局默认运行方案：新建/未指定/重建的会话都用它；会话自己的 planId 优先。
+        if (url.pathname === '/api/config/runtime') {
+          if (req.method === 'GET') {
+            sendJson({ ok: true, runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '' }, plans: ensureRuntime() });
+            return;
+          }
+          if (req.method === 'POST') {
+            const body = await readBody();
+            const defaultPlan = normalizeRuntimePlanId(body.defaultPlan);
+            if (!defaultPlan || !findPlan(ensureRuntime(), defaultPlan)) {
+              sendJson({ ok: false, error: '没有这个运行方案' }, 400);
+              return;
+            }
+            const current = readConfigObject(configFile);
+            atomicWriteJson(configFile, { ...current, runtime: { ...(current.runtime ?? {}), defaultPlan } });
+            cfg.runtime.defaultPlan = defaultPlan;
+            ext.audit.append('runtime.defaultPlan', { plan: defaultPlan });
+            sendJson({ ok: true, runtime: { defaultPlan }, plans: ensureRuntime() });
+            return;
+          }
+        }
         // 能力预设的桥接侧补丁（工具可见集 / 平台提示词）：只读列表 + 单条保存。
         if (req.method === 'GET' && (url.pathname === '/api/runtime/capabilities' || url.pathname === '/api/capabilities')) {
-          const plans = normalizePlans(bridgeCfg.runtime?.plans);
-          const capabilities = capabilityStore.list().map((entry) => ({
-            ...entry,
-            usedBy: plans.filter((plan) => plan.capability === entry.id).map((plan) => plan.id),
-          }));
+          const plans = planStore().list();
+          // Agent 模块的勾选状态由「引用这个能力的方案」所用的 Agent 预设决定：
+          // 读 agent.cordis.yml 里的插件 id，前端按目录里的模块 id 做交集展示（只读）。
+          const agentModuleIds = (agentId) => {
+            const ids = new Set();
+            if (!agentId) return ids;
+            try {
+              const file = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'agents', agentId, 'agent.cordis.yml');
+              const text = fs.readFileSync(file, 'utf8');
+              for (const match of text.matchAll(/^\s*-\s*id:\s*([a-z0-9][a-z0-9-]*)\s*$/gmu)) ids.add(match[1]);
+            } catch {
+              // 预设文件缺失时按「没有模块」展示，不阻断能力列表。
+            }
+            return ids;
+          };
+          const capabilities = capabilityStore.list().map((entry) => {
+            const usedBy = plans.filter((plan) => plan.capability === entry.id);
+            const modules = new Set();
+            usedBy.forEach((plan) => agentModuleIds(plan.agent).forEach((id) => modules.add(id)));
+            return {
+              ...entry,
+              usedBy: usedBy.map((plan) => plan.id),
+              agentModules: [...modules],
+            };
+          });
           sendJson({ ok: true, catalog: toolCatalogSnapshot(), adapters: adapterRegistry.snapshot(), capabilities });
           return;
         }
@@ -7315,10 +7393,6 @@ async function main() {
             const created = capabilityStore.save(id, {
               label,
               note: body?.note ?? base?.note ?? '',
-              order: Number(body?.order) || 100,
-              risk: base?.risk ?? { max: 'send' },
-              prompt: base?.prompt ?? { base: '' },
-              safety: base?.safety ?? {},
               tools: base?.tools ?? { platform: {}, agent: {}, mcp: [], skills: [] },
             });
             ext.audit.append('capability.create', { id, from: from || null });
@@ -7331,7 +7405,7 @@ async function main() {
         if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/capabilities/')) {
           const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
           try {
-            const usedBy = normalizePlans(bridgeCfg.runtime?.plans).filter((plan) => plan.capability === capabilityId).map((plan) => plan.id);
+            const usedBy = planStore().list().filter((plan) => plan.capability === capabilityId).map((plan) => plan.id);
             if (usedBy.length) throw new Error(`这套能力正被方案引用（${usedBy.join('、')}），先换掉再删`);
             const removed = capabilityStore.remove(capabilityId);
             ext.audit.append('capability.remove', { id: capabilityId });
@@ -7345,6 +7419,17 @@ async function main() {
           sendJson({ ok: true, ...adapterRegistry.snapshot() });
           return;
         }
+        if (req.method === 'POST' && /^\/api\/runtime\/capabilities\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
+          const capabilityId = decodeURIComponent(url.pathname.split('/')[4]);
+          try {
+            const capability = capabilityStore.reset(capabilityId);
+            ext.audit.append('capability.reset', { id: capabilityId });
+            sendJson({ ok: true, capability, capabilities: capabilityStore.list() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '重置失败' }, 400);
+          }
+          return;
+        }
         if (req.method === 'PATCH' && url.pathname.startsWith('/api/runtime/capabilities/')) {
           const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
           const body = await readBody();
@@ -7353,8 +7438,6 @@ async function main() {
               label: body?.label,
               note: body?.note,
               tools: body?.tools,
-              safety: body?.safety,
-              prompt: body?.prompt,
             });
             ext.audit.append('capability.write', { id: capabilityId, visible: saved.platformVisible });
             sendJson({ ok: true, capability: saved, capabilities: capabilityStore.list() });
@@ -7363,44 +7446,11 @@ async function main() {
           }
           return;
         }
-        // 按方案切换：确认 / 审计 / TOTP / 回落仍走管理控制器，方案的 legacy 投影只用来定格目标。
-        if (req.method === 'POST' && url.pathname === '/api/runtime/switch') {
-          const body = await readBody();
-          const planId = normalizeRuntimePlanId(body.planId);
-          const plan = findPlan(runtimePlans, planId);
-          if (!plan) {
-            sendJson({ ok: false, error: '没有这个运行方案' }, 400);
-            return;
-          }
-          if (!controllerReady) await initControllerOnce(currentMode);
-          const target = { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) };
-          const r = await ext.controller.consoleSet(target, { totp: body.totp ?? null });
-          if (!r.ok) {
-            sendJson({ ok: false, error: r.error, mode: currentMode, level: currentLevel }, r.error?.includes('TOTP') ? 403 : 409);
-            return;
-          }
-          // consoleSet 内部按 legacy 折算写了指针；自定义方案要把它校正回真正的 planId。
-          ensureRuntime().set(RUNTIME_PLATFORM, plan.id);
-          sendJson({
-            ok: true,
-            plan,
-            active: plan.id,
-            mode: currentMode,
-            level: currentLevel,
-            dshSynced: lastObservedDshMode === currentMode,
-          });
-          return;
-        }
-        // 保存 / 更新一套自定义方案（P5）：内置方案只读，要改先克隆。
+        // 保存 / 更新一套自定义方案：写 profiles/plans/<id>.yml；内置方案只读，要改先克隆。
         if (req.method === 'POST' && url.pathname === '/api/runtime/plans') {
           const body = await readBody();
           try {
-            const current = cfg.runtime?.plans;
-            const { plans: nextPlans, plan } = upsertCustomPlan(current, body);
-            const merged = { ...(cfg.runtime ?? {}), plans: nextPlans };
-            cfg.runtime = merged;
-            saveConfigSection('runtime', merged);
-            runtimeState = null; // 下次 ensureRuntime() 重新读配置里的定义
+            const plan = planStore().save(body);
             ensureRuntime();
             sendJson({ ok: true, plan, plans: runtimePlans });
           } catch (error) {
@@ -7408,19 +7458,28 @@ async function main() {
           }
           return;
         }
-        // 删除一套自定义方案；正在使用的方案不允许直接删（先切走）。
+        // 内置方案重置为出厂内容（自定义方案没有出厂副本）。
+        if (req.method === 'POST' && /^\/api\/runtime\/plans\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
+          const planId = normalizeRuntimePlanId(url.pathname.split('/')[4]);
+          try {
+            const plan = planStore().reset(planId);
+            ensureRuntime();
+            ext.audit.append('runtime.plan.reset', { plan: planId });
+            sendJson({ ok: true, plan, plans: runtimePlans });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message || '重置失败' }, 400);
+          }
+          return;
+        }
+        // 删除一套自定义方案；正在作为全局默认或内置的方案不允许删。
         if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/plans/')) {
           const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/runtime/plans/'.length)));
-          if (planId && ensureRuntime().get() === planId) {
-            sendJson({ ok: false, error: '这套方案正在使用，先切到别的方案再删' }, 409);
+          if (planId && activePlan()?.id === planId) {
+            sendJson({ ok: false, error: '这套方案正作为全局默认，先换一个默认方案再删' }, 409);
             return;
           }
           try {
-            const nextPlans = removeCustomPlan(cfg.runtime?.plans, planId);
-            const merged = { ...(cfg.runtime ?? {}), plans: nextPlans };
-            cfg.runtime = merged;
-            saveConfigSection('runtime', merged);
-            runtimeState = null;
+            planStore().remove(planId);
             ensureRuntime();
             sendJson({ ok: true, plans: runtimePlans });
           } catch (error) {
@@ -7513,27 +7572,10 @@ async function main() {
           }
         }
         // 全局配置页的「默认行为档案」下拉：预设没有 behavior 绑定时用它兜底（绑定仍以 preset.yml 为准）。
+        // 默认行为档案已并入运行方案（chat 方案引用具体档案），这里只剩 410。
         if (url.pathname === '/api/config/behavior-default') {
-          const options = [...(cfg.behaviors?.entries?.() ?? [])].map(([id, behavior]) => ({ id, label: behavior.label, kind: behavior.kind }));
-          if (req.method === 'GET') {
-            sendJson({ ok: true, value: configDefaultBehaviorName(cfg), options });
-            return;
-          }
-          if (req.method === 'POST') {
-            const body = await readBody();
-            const raw = typeof body.value === 'string' ? body.value.trim() : '';
-            if (raw) {
-              if (!cfg.behaviors?.has?.(raw)) { sendJson({ ok: false, error: `行为档案「${raw}」不存在` }, 400); return; }
-              setConfigDefaultBehavior(raw);
-              log(`控制台：默认行为档案已设为 ${raw}（下一条消息生效）`);
-              sendJson({ ok: true, value: raw, message: `已设为「${raw}」，下一条消息生效；档案 kind 需与运行模式一致` });
-            } else {
-              setConfigDefaultBehavior(null);
-              log('控制台：默认行为档案已清空（预设未绑定的仿真会话将拒绝启动）');
-              sendJson({ ok: true, value: null, message: '已清空默认行为档案' });
-            }
-            return;
-          }
+          sendJson({ ok: false, error: '默认行为档案已并入运行方案（profiles/plans/chat.yml）' }, 410);
+          return;
         }
         const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, sessions.keys());
         // 按会话设置人格卡（逻辑在 src/role-per-key.js）：use = default（跟全局）/ off（不挂卡）/ role（用 role 这张卡）

@@ -46,7 +46,7 @@ const YAML = await import(pathToFileURL(path.join(DSH_MODULES, 'js-yaml/index.js
 const yaml = YAML.default ?? YAML;
 
 for (const preset of ['qq-chat', 'qq-chat-v2']) {
-  const file = path.resolve(process.cwd(), 'dsh/agent-presets', preset, 'agent.cordis.yml');
+  const file = path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/agents', preset, 'agent.cordis.yml');
   console.log(`\n${preset} (${path.relative(process.cwd(), file)}):`);
   const doc = yaml.load(fs.readFileSync(file, 'utf8'));
   const row = doc.find((r) => r.id === 'persona');

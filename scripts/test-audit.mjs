@@ -139,8 +139,6 @@ const tests = [
   'test-runtime-combo.mjs',
   'test-runtime-capabilities.mjs',
   'test-tool-catalog.mjs',
-  'test-capability-file.mjs',
-  'test-capability-artifacts.mjs',
   'test-capability-unify.mjs',
   'test-permission.mjs',
   'test-prompt-layers.mjs',

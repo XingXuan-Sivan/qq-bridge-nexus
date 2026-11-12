@@ -148,7 +148,8 @@ try {
     assert.equal(legacyIds.length, 196);
     const missing = legacyIds.filter(x => !ids.includes(x) && !retiredIds.has(x));
     assert.deepEqual(missing, []);
-    assert.equal(new Set(ids).size, ids.length, 'Duplicate DOM IDs detected');
+    const dupIds = [...new Set(ids.filter((x, i) => ids.indexOf(x) !== i))];
+    assert.equal(new Set(ids).size, ids.length, `Duplicate DOM IDs detected: ${dupIds.join(',')}`);
   });
 
   if (!original) await test('All navigation destinations work and preserve unsaved form values across polling', async () => {
@@ -282,17 +283,19 @@ try {
     assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('默认行为档案在全局配置，行为档案独立成页', async () => {
+  await test('默认运行方案在全局配置，行为档案独立成页', async () => {
     await hydrate('config');
     assert.equal(await page.locator('[data-config-section="behavior"]').count(), 0);
-    await page.waitForFunction(() => document.getElementById('behaviorDefaultSelect')?.options.length >= 2);
-    assert.equal(await page.locator('#behaviorDefaultSelect').inputValue(), 'social-v2');
-    await page.selectOption('#behaviorDefaultSelect', 'social-v1');
-    await saveBarWrite('/api/config/behavior-default');
-    assert.deepEqual(fixture.requests.at(-1).body, { value: 'social-v1' });
+    await page.waitForFunction(() => document.getElementById('runtimeDefaultSelect')?.options.length >= 2);
+    assert.equal(await page.locator('#runtimeDefaultSelect').inputValue(), 'social-v2');
+    await page.selectOption('#runtimeDefaultSelect', 'social-v1');
+    await saveBarWrite('/api/config/runtime');
+    assert.deepEqual(fixture.requests.at(-1).body, { defaultPlan: 'social-v1' });
 
     await navigate('behavior');
-    await page.waitForFunction(() => document.getElementById('behaviorFormSelect')?.options.length >= 2);
+    await page.click('[data-behavior-tab="behaviors"]');
+    await page.waitForSelector('#behaviorTable [data-behavior-edit="social-v1"]', { timeout: 5000 });
+    await page.click('#behaviorTable [data-behavior-edit="social-v1"]');
     await page.waitForFunction(() => document.getElementById('behaviorFormLabel')?.value === '一代仿真默认行为');
     await page.locator('#behaviorFormPanel [data-field="contextWindow"]').fill('25');
     await page.locator('#behaviorFormSave').click({ force: true });
@@ -303,38 +306,43 @@ try {
   });
 
   await test('Runtime plan switch contracts', async () => {
-    await navigate('runtime');
-    // 切换走运行方案页：方案 id 由下拉给出，OTP 留空；确认、审计与回落仍由管理通道负责。
-    await reveal('#runtimePlan');
-    await page.selectOption('#runtimePlan', 'social-v2');
-    assert.deepEqual(await clickWrite('#runtimeSwitch', '/api/runtime/switch'), { planId: 'social-v2', totp: '' });
+    await navigate('behavior');
+    // 方案切换卡已删除：全局只保留「默认方案」，会话可单独覆盖。
+    await page.click('[data-behavior-tab="plans"]');
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator('#runtimeSwitch').count(), 0, '不再有方案切换按钮');
+    assert.equal(await page.locator('#runtimePlan').count(), 0, '不再有方案切换下拉');
   });
 
-  await test('Prompt layer tabs contracts', async () => {
+  await test('Behavior page merges prompt into one save', async () => {
     await navigate('behavior');
-    // 平台话术不再是独立标签：它和行为提示词一起放在「行为档案」标签页里。
-    await reveal('#platformSave');
-    await page.waitForFunction(() => document.querySelector('#platformMsg')?.textContent?.includes('字'), null, { timeout: 5000 });
-    await reveal('#behaviorPromptSave');
-    assert.ok(await page.locator('#behaviorPromptSave').count(), '行为提示词保存按钮');
+    await page.click('[data-behavior-tab="behaviors"]');
+    await reveal('#behaviorFormSave');
+    assert.equal(await page.locator('#behaviorPromptSave').count(), 0, '提示词卡不再有独立保存按钮');
+    assert.equal(await page.locator('#platformSave').count(), 0, '行为档案页不再有平台话术卡');
+    assert.ok(await page.locator('#behaviorPromptCard .prompt-card-body').count() > 0, '提示词编辑在独立卡片里');
+    assert.ok(await page.locator('#behaviorPromptCard [data-prompt-edit], #behaviorPromptCard [data-prompt-save]').count() > 0, '提示词卡有编辑/保存按钮');
     await page.click('[data-behavior-tab="capabilities"]');
     await page.waitForSelector('#capabilityCreate', { timeout: 5000 });
-    await page.click('[data-behavior-tab="behaviors"]');
   });
 
   await test('Runtime plan editor contracts', async () => {
-    await navigate('runtime');
+    await navigate('behavior');
+    await page.click('[data-behavior-tab="plans"]');
     await reveal('#runtimeNew');
     await page.click('#runtimeNew');
     await page.waitForSelector('#runtimePlanEditor .modal', { timeout: 5000 });
     await page.fill('#runtimeEditId', 'my-agent');
     await page.fill('#runtimeEditLabel', '我的 Agent');
+    await page.selectOption('#runtimeEditPlatform', 'qq');
+    await page.selectOption('#runtimeEditAgent', 'qq-chat');
     await page.selectOption('#runtimeEditTools', 'agent-chat');
     await page.selectOption('#runtimeEditBehavior', 'social-v2');
     await page.selectOption('#runtimeEditAudience', 'owner');
     await page.fill('#runtimeEditNote', '带人格进群');
     assert.deepEqual(await clickWrite('#runtimeEditSave', '/api/runtime/plans'), {
-      id: 'my-agent', label: '我的 Agent', capability: 'agent-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
+      id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat',
+      capability: 'agent-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
     });
   });
 
@@ -343,23 +351,25 @@ try {
     await page.click('[data-behavior-tab="capabilities"]');
     await reveal('#capabilityTable [data-cap-edit]');
     await page.click('#capabilityTable [data-cap-edit]');
+    await page.waitForSelector('#capabilityEditor #capabilityLabel', { timeout: 5000 });
     // 平台工具表分页展示，先用搜索把 sendPoke 筛出来再勾选。
-    await page.fill('#capEditorPlatform [data-table-search]', 'sendPoke');
+    const search = page.locator('#capEditorPlatform [data-table-search]');
+    await search.waitFor({ state: 'visible', timeout: 5000 });
+    await search.fill('sendPoke');
     await page.waitForSelector('#capabilityEditor [data-cap-platform="sendPoke"]', { state: 'attached' });
-    await page.fill('#capabilityLabel', '聊天（改）');
+    assert.equal(await page.locator('#capabilityLabel').getAttribute('readonly'), '', '内置能力的名称只读');
     await page.click('[data-cap-platform="sendPoke"]');
-    await page.fill('#capabilitySafetyNotes', '不主动私聊。');
     const [response] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/agent-chat' && r.request().method() === 'PATCH'),
       page.click('#capabilitySave'),
     ]);
     assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/agent-chat should succeed');
     const body = fixture.requests.at(-1)?.body ?? {};
-    assert.equal(body.label, '聊天（改）');
+    assert.equal(body.label, '聊天 Agent', '内置名称保持原值');
     assert.equal(body.tools?.platform?.sendPoke, false, '取消勾选的平台工具要写成 false');
     assert.equal(body.tools?.platform?.sendMessage, true, '其余平台工具保持 true');
-    assert.equal(body.tools?.agent?.['tool-web'], true, 'Agent 模块按勾选写成 true');
-    assert.equal(body.safety?.notes, '不主动私聊。');
+    assert.equal(body.tools?.agent, undefined, 'Agent 模块由预设定，不再随能力保存');
+    assert.equal(body.safety, undefined, '安全补充字段已删除，不再提交');
     assert.equal(body.tools?.visible, undefined, '可见集不再直接提交，由能力文件推导');
     assert.equal(body.sandbox, undefined, '沙箱不再由能力预设承载');
   });

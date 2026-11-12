@@ -4,7 +4,7 @@ import { OVERVIEW_FIELDS } from '../overview/fields.js';
 
 export const CONFIG_FIELDS = {
   mode: OVERVIEW_FIELDS.mode,
-  behaviorDefault: OVERVIEW_FIELDS.behaviorDefault,
+  runtimeDefault: OVERVIEW_FIELDS.runtimeDefault,
   roleDefault: OVERVIEW_FIELDS.roleDefault,
   personaSettings: OVERVIEW_FIELDS.personaSettings,
   permission: OVERVIEW_FIELDS.permission,

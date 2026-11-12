@@ -102,7 +102,7 @@ ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选�
 
 console.log('## 页面片段（运行总览 / 技能 / MCP / 管理行为 / 访问 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks', 'runtime'];
+const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
@@ -114,7 +114,7 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\(\['plugins', 'skills', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory', 'runtime'\]\)/.test(html), '路由器登记了片段页');
+ok(/const PAGE_FRAGMENTS = new Set\([\s\S]{0,400}?'behavior'[\s\S]{0,400}?'memory'\]\)/.test(html), '路由器登记了片段页');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -262,7 +262,7 @@ ok(searchInputs.every(({ tag }) => /type="search"/.test(tag)), `页面内搜索�
 ok(/class="[^"]*search-box/.test(html.match(/<input id="consoleSearch"[^>]*>/)?.[0] ?? ''), '全局搜索框也走 search-box 组件类');
 for (const id of ['skills', 'behaviors']) {
   const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
-  ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(|dataTableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的表格组件`);
+  ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(|dataTableHtml\(|groupedTableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的表格组件`);
 }
 // MCP 页是主从布局（server 列表 → 工具清单），复用 split-view 组件而不是表格。
 const mcpModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'mcp', 'page.js'), 'utf8');

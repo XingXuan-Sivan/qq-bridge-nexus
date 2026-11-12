@@ -25,7 +25,14 @@ function defaultsOf(fields) {
 }
 
 export function getKind(kind) {
-  return KINDS.get(String(kind ?? '')) ?? null;
+  const engine = String(kind ?? '');
+  return KINDS.get(engine) ?? KINDS.get(engine.replace(/^social-/, '')) ?? null;
+}
+
+/** 引擎的字段默认值：类型 yml 只带 label/engine/schema，默认值仍由引擎决定。 */
+export function defaultsForEngine(engine) {
+  const entry = KINDS.get(String(engine ?? ''));
+  return entry ? defaultsOf(entry.fields) : {};
 }
 
 export function listKinds() {

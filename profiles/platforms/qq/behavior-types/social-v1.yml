@@ -1,0 +1,160 @@
+label: 一代仿真
+platform: qq
+engine: v1
+schema:
+  fields:
+    - type: section
+      card: true
+      label: 触发与上下文
+    - name: triggerProbability
+      label: 触发概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+      hint: 0–1
+    - name: contextWindow
+      label: 上下文条数
+      type: number
+      step: any
+      min: 1
+    - name: maxReplyChars
+      label: 单条最大字数
+      type: number
+      step: any
+      min: 0
+    - name: mustReplyKeywords
+      label: 必回关键词
+      type: textarea
+      rows: 4
+      list: true
+      hint: 每行一个
+    - type: section
+      card: true
+      label: 主动检查
+    - name: activeCheckMinMs
+      label: 主动检查最小间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: activeCheckMaxMs
+      label: 主动检查最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: activeReplyDelayMinMs
+      label: 主动回复延迟最小
+      type: number
+      step: any
+      hint: 毫秒
+    - name: activeReplyDelayMaxMs
+      label: 主动回复延迟最大
+      type: number
+      step: any
+      hint: 毫秒
+    - name: activeDurationEnabled
+      label: 主动持续
+      type: switch
+    - name: activeDurationMinMs
+      label: 主动持续最小
+      type: number
+      step: any
+      hint: 毫秒
+    - name: activeDurationMaxMs
+      label: 主动持续最大
+      type: number
+      step: any
+      hint: 毫秒
+    - type: section
+      card: true
+      label: 主动机会
+    - name: proactiveEnabled
+      label: 主动机会
+      type: switch
+    - name: proactiveIdleThresholdMs
+      label: 触发主动的空闲阈值
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactiveCheckMinMs
+      label: 主动机会检查最小间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactiveCheckMaxMs
+      label: 主动机会检查最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: proactiveProbability
+      label: 主动机会概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - type: section
+      card: true
+      label: 空闲重试
+    - name: idleWindowMs
+      label: 空闲窗口
+      type: number
+      step: any
+      hint: 毫秒
+    - name: idleRetryProbability
+      label: 空闲重试概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - name: idleRetryWaitMs
+      label: 空闲重试等待
+      type: number
+      step: any
+      hint: 毫秒
+    - type: section
+      card: true
+      label: 连发与间隔
+    - name: burstEnabled
+      label: 连发
+      type: switch
+    - name: burstIntervalMinMs
+      label: 连发最小间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: burstIntervalMaxMs
+      label: 连发最大间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: longGapProbability
+      label: 长停顿概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - name: longGapMinMs
+      label: 长停顿最小
+      type: number
+      step: any
+      hint: 毫秒
+    - name: longGapMaxMs
+      label: 长停顿最大
+      type: number
+      step: any
+      hint: 毫秒
+    - type: section
+      card: true
+      label: 其它
+    - name: skipProbability
+      label: 跳过概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1
+    - name: surrenderProbability
+      label: 放弃概率
+      type: number
+      step: 0.01
+      min: 0
+      max: 1

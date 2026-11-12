@@ -1,0 +1,11 @@
+version: 1
+id: social-v1
+label: 一代仿真
+note: 按策略自然参与群聊（v1 行为）。
+builtin: true
+platform: qq
+agentPlatform: dsh
+agent: qq-chat
+behavior: social-v1
+capability: agent-chat
+audience: access

@@ -7,7 +7,7 @@ import { writePlatformPrompt, readPlatformPrompt } from '../src/platform/prompt.
 import { readBehaviorDocument, writeBehaviorData } from '../src/behaviors/index.mjs';
 
 const ROOT = process.cwd();
-const PRESETS = path.join(ROOT, 'dsh', 'agent-presets');
+const PRESETS = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
 
 /** 取出 persona.prefix 文本（旧预设的权威文案）。 */
 function personaOf(presetId) {

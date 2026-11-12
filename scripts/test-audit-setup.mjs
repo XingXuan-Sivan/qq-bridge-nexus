@@ -28,7 +28,8 @@ function fixture(name, patch = '') {
   // 生成器依赖 src/runtime 的提示词组装（P9.2 起）；夹具只拷这一份，避免整棵 src 进来。
   fs.mkdirSync(path.join(repo, 'src/runtime'), { recursive: true });
   fs.copyFileSync(path.join(root, 'src/runtime/prompt-compose.mjs'), path.join(repo, 'src/runtime/prompt-compose.mjs'));
-  fs.cpSync(path.join(root, 'dsh'), path.join(repo, 'dsh'), { recursive: true });
+  // 权威源：profiles/（平台、Agent 平台、能力、方案）+ dsh-bundles（生成 patch 的产物）。
+  fs.cpSync(path.join(root, 'profiles'), path.join(repo, 'profiles'), { recursive: true });
   fs.cpSync(path.join(root, 'dsh-bundles'), path.join(repo, 'dsh-bundles'), { recursive: true });
   fs.cpSync(parserRoot, path.join(repo, 'node_modules/yaml'), { recursive: true });
   fs.mkdirSync(path.join(home, 'profiles/web'), { recursive: true });

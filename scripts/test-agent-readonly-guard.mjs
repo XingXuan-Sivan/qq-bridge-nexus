@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const presetDir = path.join(root, 'dsh', 'agent-presets', 'qq-agent-readonly');
+const presetDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', 'qq-agent-readonly');
 const guardUrl = pathToFileURL(path.join(root, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
 
 function flatten(rows) {
@@ -122,7 +122,7 @@ test('operator 守卫：拒绝派生/编排类与凭据读取，其余交给审�
 
 test('L2/L3 preset：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
   for (const [id, level] of [['qq-agent-workspace', 'L2'], ['qq-agent-full', 'L3']]) {
-    const rows = flatten(parseYaml(fs.readFileSync(path.join(root, 'dsh', 'agent-presets', id, 'agent.cordis.yml'), 'utf8')));
+    const rows = flatten(parseYaml(fs.readFileSync(path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', id, 'agent.cordis.yml'), 'utf8')));
     assert.equal(rows.find((r) => r.id === 'qq-approval-gate')?.config?.level, level, id);
     assert.equal(rows.find((r) => r.id === 'qq-tool-restrict')?.config?.profile, 'operator', id);
     for (const forbidden of ['dsh-tool-subagent', 'dsh-tool-workflow', 'dsh-workflow-ptc', 'dsh-plugin-manager', 'dsh-tool-skill', 'dsh-plan-mode', 'dsh-tool-goal']) {

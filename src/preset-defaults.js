@@ -2,7 +2,7 @@
 // 的 persona.prefix 读，不再单独维护一份 .md 副本。
 //
 // 与 assets/default-roles 同一思路：用户把预设里的 persona.prefix 改坏了，可以在控制台一键还原，
-// 不必回仓库找原文件。权威源仍是 dsh/agent-presets/<preset>/agent.cordis.yml，
+// 不必回仓库找原文件。权威源仍是 profiles/agent-platforms/dsh/agents/<preset>/agent.cordis.yml，
 // assets/default-presets/ 是它的出厂快照（「还原出厂预设」用的也是这一份）。
 import fs from 'node:fs';
 import path from 'node:path';

@@ -1,0 +1,43 @@
+version: 1
+platform: qq
+kind: social-v1
+label: 一代仿真默认行为
+description: reserved 的默认节奏：按概率参与群聊，活跃后批量看消息、按空格分条回复。
+prompt: |-
+  你在群里按「等着看」的节奏活动：没人叫你时不要主动插话；被叫到、被引用、被提问时才开口。
+
+  只发群友会读的那部分：不要复述指令，不要解释系统。[SILENT] 表示这一轮决定不说话；其余文本按普通回复发到当前会话。
+config:
+  triggerProbability: 0.1
+  contextWindow: 20
+  activeCheckMinMs: 10000
+  activeCheckMaxMs: 30000
+  activeReplyDelayMinMs: 2000
+  activeReplyDelayMaxMs: 8000
+  activeDurationEnabled: true
+  activeDurationMinMs: 900000
+  activeDurationMaxMs: 1800000
+  idleWindowMs: 360000
+  idleRetryProbability: 0.25
+  idleRetryWaitMs: 120000
+  proactiveEnabled: true
+  proactiveIdleThresholdMs: 1800000
+  proactiveCheckMinMs: 2700000
+  proactiveCheckMaxMs: 5400000
+  proactiveProbability: 0.2
+  skipProbability: 0.15
+  surrenderProbability: 0
+  maxReplyChars: 500
+  mustReplyKeywords:
+    - deepseek
+    - 小鲸鱼
+    - 大肥鱼
+    - 鲸鱼
+    - d指导
+    - 在吗
+  burstEnabled: true
+  burstIntervalMinMs: 1000
+  burstIntervalMaxMs: 3000
+  longGapProbability: 0.1
+  longGapMinMs: 2500
+  longGapMaxMs: 5000

@@ -50,7 +50,7 @@ test('示例配置、桥接内置默认值与模块默认值一致', () => {
   assert.equal((src.match(/maxBytes: 10 \* 1024 \* 1024,/g) ?? []).length, 2, 'bridge.js 的两处表情默认值都是 10MB');
   const ex = JSON.parse(fs.readFileSync(path.join(root, 'config.example.json'), 'utf8'));
   assert.ok(!('socialV2' in ex), '示例配置不再包含 socialV2');
-  const behavior = fs.readFileSync(path.join(root, 'config', 'behaviors', 'social-v2.yml'), 'utf8');
+  const behavior = fs.readFileSync(path.join(root, 'profiles', 'platforms', 'qq', 'behaviors', 'social-v2.yml'), 'utf8');
   assert.match(behavior, /maxBytes:\s*10485760/, '默认 v2 行为档案的表情上限是 10MB');
   assert.equal(stickerMaxBytes(ex), DEFAULT_STICKER_MAX_BYTES);
 });

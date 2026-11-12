@@ -1,5 +1,9 @@
 # 运行方案模型（Runtime Plan）
 
+> ⚠️ **历史设计稿（已实施，部分章节过时）**：2026-11-12 起方案、行为档案、能力预设统一落在 `profiles/`，
+> 与本文不同的地方以 **[PROFILES_MODEL.md](PROFILES_MODEL.md)** 为准。本文描述的 `config.json` 内 `runtime.plans`、
+> `config/behaviors`、`dsh/agent-presets` 等存储已删除。
+
 > 状态：设计稿 v3，未动工。
 > 执行顺序、配置键归属、页面合并与冲突裁定以 `docs/UNIFY_PLAN.md` 为准（该文是三份文档的唯一裁定）。
 > v2 的五字段方案把人格与模型也塞了进去，属过度设计——本轮按意见改为三字段，人格与模型回到"单独配置"；同时补上行为档案的接口化与页面归属。

@@ -1,6 +1,6 @@
 // DSH 预设源的读写层（P3 预设编辑器）。
 //
-// 权威源仍然是 dsh/agent-presets/<id>/ 下的三个文件：
+// 权威源仍然是 profiles/agent-platforms/dsh/agents/<id>/ 下的三个文件：
 // - preset.yml        元数据（name/description/order）
 // - extensions.yml    Hub 授权（mcp / skills），可选
 // - agent.cordis.yml  插件行（人格、工具面、compaction）

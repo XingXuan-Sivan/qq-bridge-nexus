@@ -1,0 +1,205 @@
+version: 1
+tools:
+  - flag: getPrompt
+    label: 读取提示词
+    names:
+      - qq_get_prompt
+    risk: read
+  - flag: getUnread
+    label: 读取未读消息
+    names:
+      - qq_get_unread_messages
+    risk: read
+  - flag: getRecent
+    label: 读取最近消息
+    names:
+      - qq_get_recent_messages
+    risk: read
+  - flag: getMyRecent
+    label: 读取自己发过的消息
+    names:
+      - qq_get_my_recent_messages
+    risk: read
+  - flag: getMessageDetail
+    label: 查看单条消息
+    names:
+      - qq_get_message_detail
+    risk: read
+  - flag: getImages
+    label: 查看消息图片
+    names:
+      - qq_get_message_images
+    risk: read
+  - flag: getForwardMsg
+    label: 查看合并转发
+    names:
+      - qq_get_forward_msg
+    risk: read
+  - flag: getActiveMembers
+    label: 查看活跃成员
+    names:
+      - qq_get_active_members
+    risk: read
+  - flag: waitMessages
+    label: 等待新消息
+    names:
+      - qq_wait_for_messages
+    risk: read
+  - flag: socialState
+    label: 查看会话状态
+    names:
+      - qq_social_state
+    risk: read
+  - flag: listStickers
+    label: 查看收藏表情
+    names:
+      - qq_list_stickers
+    risk: read
+  - flag: getStickerImage
+    label: 查看表情图片
+    names:
+      - qq_get_sticker_image
+    risk: read
+  - flag: getSelfImage
+    label: 查看自己的形象
+    names:
+      - qq_get_self_image
+    risk: read
+  - flag: personProfile
+    label: 查看/记录群友档案
+    names:
+      - qq_get_person
+      - qq_note_person
+    risk: read
+  - flag: memory
+    label: 本机轻量记忆
+    names:
+      - qq_memory_append
+      - qq_memory_query
+      - qq_memory_remove
+      - qq_memory_clear
+      - qq_memory_recall
+      - qq_memory_note
+    risk: state
+  - flag: slangQuery
+    label: 查询黑话
+    names:
+      - qq_slang_query
+    risk: read
+  - flag: slangSubmit
+    label: 提交黑话候选
+    names:
+      - qq_slang_submit
+    risk: state
+  - flag: markRead
+    label: 标记已读
+    names:
+      - qq_mark_read
+    risk: state
+  - flag: setWakeConfig
+    label: 调整唤醒配置
+    names:
+      - qq_set_wake_config
+    risk: state
+  - flag: stickerNote
+    label: 记录表情含义
+    names:
+      - qq_sticker_note
+    risk: state
+  - flag: setStickerRemark
+    label: 设置表情备注
+    names:
+      - qq_set_sticker_remark
+    risk: state
+    defaultOff: true
+  - flag: collectSticker
+    label: 收藏表情
+    names:
+      - qq_collect_sticker
+    risk: state
+  - flag: sendGroup
+    label: 发送群消息
+    names:
+      - qq_send_group_message
+    risk: send
+  - flag: sendPrivate
+    label: 发送私聊消息
+    names:
+      - qq_send_private_message
+    risk: send
+  - flag: reply
+    label: 引用回复
+    names:
+      - qq_reply
+    risk: send
+  - flag: sendBurst
+    label: 分多条发送
+    names:
+      - qq_send_burst
+    risk: send
+  - flag: sendMessage
+    label: 统一发送
+    names:
+      - qq_send_message
+    risk: send
+  - flag: sendPoke
+    label: 拍一拍
+    names:
+      - qq_send_poke
+    risk: send
+  - flag: sendSticker
+    label: 发表情
+    names:
+      - qq_send_sticker
+    risk: send
+  - flag: sendVoice
+    label: 发语音
+    names:
+      - qq_send_voice
+      - qq_list_voices
+    risk: send
+    defaultOff: true
+  - flag: webImage
+    label: 搜索/发送网图
+    names:
+      - qq_search_images
+      - qq_preview_image
+      - qq_send_web_image
+    risk: send
+    defaultOff: true
+  - flag: feedback
+    label: 向管理端反馈
+    names:
+      - qq_report_feedback
+    risk: admin
+  - flag: requestMode
+    label: 申请切换模式
+    names:
+      - qq_request_mode_change
+    risk: admin
+  - flag: crossGroup
+    label: 跨群查询
+    names:
+      - qq_cross_group_query
+    risk: admin
+  - flag: ownerGroupAccess
+    label: owner 群权限管理
+    names:
+      - qq_owner_peek_group
+      - qq_owner_group_rule
+    risk: admin
+    defaultOff: true
+  - flag: ownerRelay
+    label: 让群会话代为转达
+    names:
+      - qq_ask_group_session
+    risk: admin
+    defaultOff: true
+  - flag: schedule
+    label: 定时任务
+    names:
+      - qq_schedule_create
+      - qq_schedule_list
+      - qq_schedule_update
+      - qq_schedule_delete
+    risk: admin

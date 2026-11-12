@@ -154,7 +154,9 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
   //   ③ 用户编辑器给 config.json 写个 UTF-8 BOM 也会让裸 JSON.parse 崩
   //      （桥接自己的 readJsonSafe 有去 BOM，所以生产路径不受影响，但脚本读法粗糙）。
   // 用户当前值只提示、不判定（见下）。
-  ok(ex.tools?.sendVoice === false, 'config.example.json: tools.sendVoice=false（出厂默认关）');
+  const catalogSrc = read('src/tools/catalog.mjs');
+  ok(/flag: 'sendVoice'[^\n]*defaultOff: true/.test(catalogSrc), '能力预设目录：sendVoice=defaultOff（出厂默认关）');
+  ok(ex.tools === undefined, 'config.example.json 不再有 tools 段（注册面由能力预设推导）');
   ok(ex.voice?.enabled === false, 'config.example.json: voice.enabled=false（出厂默认关）');
   try {
     const local = JSON.parse(read('config.json').replace(/^\uFEFF/, ''));
@@ -170,11 +172,11 @@ console.log('## qq-bridge 语音系统：控制台与 preset');
   ok(html.includes('initVoiceSection'), '控制台只剩语音库卡，不再有全局 sendVoice 开关');
   ok(html.includes('id="voiceList"') && html.includes('id="voiceSendBtn"'), '控制台有语音库调试面板');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
-  const preset = read(path.join('dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml'));
+  const preset = read(path.join('profiles', 'agent-platforms', 'dsh', 'agents', 'qq-chat-v2', 'agent.cordis.yml'));
   ok(preset.includes('qq_send_voice') && preset.includes('qq_list_voices'), 'qq-chat-v2 人设描述语音能力');
   ok(/语音\*\*默认是关闭的\*\*/.test(preset), '人设说明默认关闭');
   // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
-  // （dsh/agent-presets/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
+  // （profiles/agent-platforms/dsh/agents/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
   ok(read(path.join('dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs')).includes("'mcp__snowluma__'"),
     'preset 白名单前缀放行语音工具');
 }

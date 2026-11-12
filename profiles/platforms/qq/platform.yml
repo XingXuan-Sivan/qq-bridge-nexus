@@ -1,0 +1,12 @@
+version: 1
+id: qq
+label: QQ
+tools: tools.yml
+prompt:
+  active: prompt.md
+  default: prompt.default.md
+behaviors:
+  dir: behaviors
+  kinds:
+    - v1
+    - v2

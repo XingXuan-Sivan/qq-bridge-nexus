@@ -1,0 +1,7 @@
+version: 1
+id: dsh
+label: DeepSeek Harness
+tools: tools.yml
+capabilities: capabilities
+agents: agents
+artifacts: dsh/agent-presets

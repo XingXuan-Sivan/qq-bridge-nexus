@@ -61,7 +61,7 @@ try { persona.Config({ text: 'x' }); } catch { oldRejected = true; }
 check('dsh-persona 仍拒绝旧字段 text（故障前提成立）', oldRejected);
 
 for (const p of ['qq-chat', 'qq-chat-v2']) {
-  const f = path.join(ROOT, 'dsh/agent-presets', p, 'agent.cordis.yml');
+  const f = path.join(ROOT, 'profiles/agent-platforms/dsh/agents', p, 'agent.cordis.yml');
   const row = yaml.load(fs.readFileSync(f, 'utf8')).find((r) => r.id === 'persona');
   let schemaOk = false;
   try { persona.Config(row.config); schemaOk = true; } catch {}
@@ -87,7 +87,7 @@ for (const p of ['qq-chat', 'qq-chat-v2']) {
   const row = doc?.[0]?.insert?.[0];
   check(`patch ${p}: 是 @deepseek-ai/dsh-agent-preset 行`, row?.name === '@deepseek-ai/dsh-agent-preset');
   check(`patch ${p}: config.id = ${p}`, row?.config?.id === p);
-  const source = yaml.load(fs.readFileSync(path.join(ROOT, 'dsh/agent-presets', p, 'agent.cordis.yml'), 'utf8'));
+  const source = yaml.load(fs.readFileSync(path.join(ROOT, 'profiles/agent-platforms/dsh/agents', p, 'agent.cordis.yml'), 'utf8'));
   const srcPersona = source.find((r) => r.id === 'persona');
   const patchPersona = (row?.config?.plugins ?? []).find((r) => r.id === 'persona');
   check(`patch ${p}: persona.prefix 与源逐字一致`, norm(srcPersona?.config?.prefix ?? '') === norm(patchPersona?.config?.prefix ?? ''));

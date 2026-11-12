@@ -1,29 +1,28 @@
 #!/usr/bin/env node
-// 能力目录（capability.yml）单测：默认模板、读写往返、工具可见集与守卫。
+// 能力预设（profiles/agent-platforms/dsh/capabilities/<id>.yml）单测：读写往返、工具可见集与守卫。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import YAML from 'yaml';
 import { createCapabilityStore, visiblePlatformFlags, capabilityAllowsFlag } from '../src/capabilities/store.mjs';
 import { PLATFORM_TOOLS } from '../src/tools/catalog.mjs';
-import { saveCapabilityFile } from '../src/capabilities/file.mjs';
 
 function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cap-store-'));
 }
 
-test('store lists only directories with capability.yml', () => {
+function writeCapability(root, id, data) {
+  fs.writeFileSync(path.join(root, `${id}.yml`), YAML.stringify({ version: 1, id, ...data }), 'utf8');
+}
+
+test('store lists only capability files', () => {
   const root = tempRoot();
-  fs.mkdirSync(path.join(root, 'empty-dir'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'agent-chat'), { recursive: true });
-  saveCapabilityFile(path.join(root, 'agent-chat'), {
-    id: 'agent-chat',
+  fs.writeFileSync(path.join(root, 'README.md'), '# 说明\n', 'utf8');
+  writeCapability(root, 'agent-chat', {
     label: '聊天',
-    agent: 'dsh',
     tools: { platform: { sendMessage: true }, agent: {}, mcp: [], skills: [] },
-    safety: { local_tools: false },
-    prompt: { base: '你是群聊里的角色。' },
   });
   const store = createCapabilityStore({ root });
   const items = store.list();
@@ -51,28 +50,25 @@ test('platform visibility: explicit flags win, defaults fill the rest', () => {
   assert.equal(capabilityAllowsFlag(null, 'sendVoice'), true);
 });
 
-test('save writes capability.yml and rebuilds artifacts', () => {
+test('save writes back the capability file without artifacts', () => {
   const root = tempRoot();
-  fs.mkdirSync(path.join(root, 'agent-chat'), { recursive: true });
-  saveCapabilityFile(path.join(root, 'agent-chat'), {
-    id: 'agent-chat',
+  writeCapability(root, 'agent-chat', {
     label: '聊天',
-    agent: 'dsh',
     tools: { platform: {}, agent: {}, mcp: [], skills: [] },
-    safety: { local_tools: false },
-    prompt: { base: '你是群聊里的角色。' },
   });
   const store = createCapabilityStore({ root });
   const saved = store.save('agent-chat', {
     label: '聊天（改）',
-    tools: { platform: { sendPoke: false }, agent: {} },
-    safety: { notes: '不主动私聊。' },
+    note: '只读工具全开',
+    tools: { platform: { sendPoke: false }, agent: {}, mcp: [], skills: [] },
   });
-  assert.equal(saved.label, '聊天（改）');
-  assert.equal(saved.safety.notes, '不主动私聊。');
+  assert.equal(saved.label, '聊天', '内置能力的名称不可改，保存时保留原值');
+  assert.equal(saved.note, '', '内置能力的备注同样不可改');
   assert.ok(!saved.platformVisible.includes('sendPoke'));
-  assert.ok(fs.existsSync(path.join(root, 'agent-chat', 'agent.cordis.yml')));
-  assert.ok(fs.readFileSync(path.join(root, 'agent-chat', 'preset.yml'), 'utf8').includes('name:'));
+  const onDisk = YAML.parse(fs.readFileSync(path.join(root, 'agent-chat.yml'), 'utf8'));
+  assert.equal(onDisk.label, '聊天');
+  assert.equal(onDisk.tools.platform.sendPoke, false);
+  assert.ok(!fs.existsSync(path.join(root, 'agent-chat', 'agent.cordis.yml')), '不应再生成产物文件');
 });
 
 test('unknown capability returns null instead of throwing', () => {

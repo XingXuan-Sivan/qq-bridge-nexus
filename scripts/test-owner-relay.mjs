@@ -92,7 +92,9 @@ test('接线：开关默认关闭、MCP 仅显式 true 才注册、端点不复�
   const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
   const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
-  assert.equal(example.tools.ownerRelay, false, '模板默认关闭');
+  const catalog = fs.readFileSync(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), 'utf8');
+  assert.equal(example.tools, undefined, '模板不再有 tools 段（注册面由能力预设推导）');
+  assert.match(catalog, /flag: 'ownerRelay'[^\n]*defaultOff: true/, '能力预设目录里 ownerRelay=defaultOff');
   assert.ok(/ownerRelay: false/.test(bridge), '桥接运行时默认关闭');
   assert.ok(bridge.includes('enabled: cfg.tools?.ownerRelay === true'), '端点要求显式 true');
   assert.ok(mcp.includes('if (cfg.tools?.ownerRelay === true) {'), 'MCP 只在显式 true 时注册');

@@ -1,0 +1,15 @@
+version: 1
+id: agent-chat
+label: 聊天 Agent
+note: 无本地工具，只做对话与问答
+tools:
+  platform: {}
+  agent:
+    tool-web: true
+    tool-ask-user: true
+    tool-todo: true
+  mcp:
+    - server: "*"
+      tools: "*"
+  skills:
+    - "*"

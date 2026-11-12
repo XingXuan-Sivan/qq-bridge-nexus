@@ -20,15 +20,14 @@ else { initDateFields(); initTimeFields(); }
 export const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
   config: ['全局配置', '把工具与能力，装进一套配置。', '安全与静默、准入、行为档案与系统能力收在一页；预设页只保留预设本体。'],
-  runtime: ['运行方案', '把能力、行为与受众，配成一套方案。', '切换运行方案；确认、审计与回落仍由管理通道负责。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
   skills: ['技能', '让 AI 知道，自己会什么。', '查看 DSH、仓库与外部技能；外部技能可新增、导入、编辑、启停与删除。'],
-  behavior: ['行为档案', '让 AI 的说话节奏，有据可循。', '按 v1 / v2 的表单编辑行为档案；预设通过 behavior 引用，保存后重启桥接生效。'],
+  behavior: ['平台配置', '平台、方案与档案，一处配齐。', '平台、运行方案、行为档案与能力预设四层都在这一页；保存后重启桥接生效。'],
   'prompt-blocks': ['注入块', '提示词由哪些块拼成，一处看清。', '按槽位查看每次唤醒的拼装顺序，改开关与字数上限；可按会话预览真实提示词。'],
   mcp: ['MCP 与工具', '把外部能力，接成标准接口。', '查看桥接内置 MCP 的真实工具清单，并在本页管理外部 MCP；工具参考已并入本页。'],
-  behaviors: ['命令与工具', '桥接命令、DSH 命令与 Agent 工具，一处看清。', '按注册表查看桥接命令（含迁移状态），并只读列出 DSH 会话命令与 Agent 工具。'],
+  behaviors: ['命令', '桥接命令，一处看清也管得住。', '按注册表查看桥接命令，并逐条调整权限与启用状态；DSH 与 Agent 侧工具由能力预设负责。'],
   slang: ['黑话词库', '读懂群聊里的，言外之意。', '从候选到确认，让 AI 逐渐熟悉大家的表达习惯。'],
   memory: ['记忆', '记住该记的，忘掉该忘的。', '选择注入源、管理记忆 provider 预算与本机轻量记忆，查看最近注入与主动回忆，并决定是否把对话写回记忆服务。'],
   scheduler: ['定时任务', '到点的事，交给桥接记着。', '按时区和规则定时发消息，或叫 AI 到点来说；可以发给管理员私聊、白名单好友和群。'],
@@ -40,7 +39,7 @@ let currentConsolePage = 'overview';
 
 // 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
 // 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory', 'runtime']);
+const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory']);
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 

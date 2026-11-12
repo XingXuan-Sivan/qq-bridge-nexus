@@ -9,6 +9,8 @@
   "accessSecurityActions",
   "accessTokenActions",
   "accessWhitelistActions",
+  "clearWsBtn",
+  "clearWsMsg",
   "description: 离线示例\\n",
   "kind: v2\\n",
   "label: 默认 v2\\n",

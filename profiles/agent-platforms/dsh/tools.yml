@@ -1,0 +1,34 @@
+version: 1
+modules:
+  - id: tool-fs
+    label: 文件读写
+    risk: write
+    desc: 读写工作区里的文件
+  - id: tool-fs-search
+    label: 文件检索
+    risk: read
+    desc: 按名字或内容在工作区里查找文件
+  - id: tool-pwsh
+    label: 执行命令
+    risk: exec
+    desc: 执行 PowerShell 命令
+  - id: tool-jobs
+    label: 后台任务
+    risk: exec
+    desc: 启动、查看和结束后台任务
+  - id: tool-web
+    label: 联网搜索/抓取
+    risk: read
+    desc: 搜索网页并抓取正文
+  - id: tool-ask-user
+    label: 向用户提问
+    risk: read
+    desc: 需要确认时向用户发问并等待回答
+  - id: tool-todo
+    label: 任务列表
+    risk: read
+    desc: 维护多步骤任务的进度清单
+  - id: qq-approval-gate
+    label: 审批闸门
+    risk: admin
+    desc: 高风险操作的确认与放行

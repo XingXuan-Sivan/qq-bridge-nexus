@@ -1,5 +1,5 @@
 // 运行总览的字段规格：静态块全部搬进来，页面只留卡片与宿主 div。
-// 动态部分（静默时段行、活动日志、模型目录）仍由 page.js 渲染。
+// 动态部分（模型目录等）仍由 page.js 渲染；活动日志已移到「调试与运维」首张卡。
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
@@ -9,8 +9,6 @@ const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
   <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
   <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
 </div>`;
-
-const ACTIVITY_HTML = `<pre id="activity" class="activity-log">（空）</pre>`;
 
 const SEND_LIMIT_HTML = `<div class="field-inline">
   <label class="field-inline-label" for="sendLimitMin">每分钟最多</label>
@@ -59,18 +57,14 @@ const DSH_NOTES = `<div id="dshModelNotices"></div>
 export const OVERVIEW_FIELDS = {
   // 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），不能再套 .card 或字段外壳。
   metrics: { bare: true, html: METRICS_HTML },
-  activity: {
-    fields: [{ name: 'overviewActivity', type: 'custom', span: 2, html: ACTIVITY_HTML }],
-  },
-  behaviorDefault: {
+  runtimeDefault: {
     fields: [
       {
-        name: 'behaviorDefaultSelect',
+        name: 'runtimeDefaultSelect',
         type: 'select',
-        label: '默认行为档案',
-        placeholder: '（未设置，预设必须自带 behavior）',
+        label: '默认运行方案',
         options: [],
-        hint: '预设在 preset.yml 里绑定 behavior 时以预设为准；这里只在预设未绑定时兜底。档案 kind 必须与运行模式一致。',
+        hint: '新建、未单独设置和重建的会话都用这个方案；某个会话要换方案，在「会话与审批 › 详情」里单独指定。',
       },
     ],
   },

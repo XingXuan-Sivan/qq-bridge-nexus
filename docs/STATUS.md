@@ -607,3 +607,59 @@ npm run test:console-ui
 4. **侧栏图标**：行为档案 `◆`→`⌗`、人格与角色 `◉`→`♥`，各自调字号保持与其他菜单同一视觉重量。
 
 **验收**：`test-console-ui` **32/32**（新增「添加一行 → 移除 → 回空表」与「来源=人格卡只剩一行」断言）；`node --check` 通过；截图确认管理员行可编辑、两个筛选可用、图标大小一致。
+
+### 2026-11-12（D28）四层模型重构：profiles/ 统一存储与产物链删除
+
+1. **目录归一**：新增 `profiles/`（`platforms/<id>/`、`agent-platforms/<id>/`、`plans/`、`schemas/`），行为档案、平台话术、能力预设、运行方案、Agent preset 源全部搬入；删除 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/`，无兼容层。
+2. **四层语义**：平台（QQ 等）提供行为档案与平台工具目录；Agent 平台（DSH）提供模块目录与能力预设；方案 = 平台 + Agent 平台 + Agent + 行为档案 + 能力预设；会话权限级别再决定实际可用的工具。新增 `docs/PROFILES_MODEL.md` 作为权威说明。
+3. **数据格式**：行为档案改为 `version/platform/kind/label/description/prompt/config` 七键（提示词与配置同文件、同一次保存）；能力预设只留 `tools:{platform,agent,mcp,skills}`，删除 order/prompt.base/safety/risk 与三份产物生成（`src/capabilities/build.mjs`、`scripts/build-capability-artifacts.mjs` 已删）；方案改为 `platform/agentPlatform/agent/behavior/capability/audience`，内置六条只读可克隆。
+4. **加载器**：新增 `src/profiles/paths.mjs`、`src/platforms/index.mjs`；重写 `src/behaviors/index.mjs`、`src/capabilities/store.mjs`（单文件、保存不再生成产物）、`src/platform/prompt.mjs`（`prompt.md` + `prompt.default.md`）、`src/runtime/plans.mjs`（文件仓库 `createPlanStore`）。桥接改为只依赖这三层接口 + 方案仓库，切换方案不再要求 TOTP。
+5. **配置归一**：`config.json` 删除 `behavior.default`、`runtime.plans`、`tools`（38 键）与 `role.maxInjectChars`/`limits.personaInjectChars`（启动时自动清理并写回）；`config.example.json` 同步删掉 `tools`。
+6. **控制台**：新增「平台」页（平台清单 / 平台话术 / 工具目录）；侧栏按「管理（运行总览、平台、会话与审批、全局配置、调试与运维）」「聊天行为（注入块、人格与角色、记忆、黑话词库、定时任务、行为档案、运行方案）」重排；行为档案页把提示词并入档案卡一次保存、删掉独立的提示词与平台话术卡；运行方案页新增平台/Agent 平台/Agent 字段，内置方案只显示「克隆」；能力编辑去掉「重建产物」与安全补充文案。
+7. **自检**：新增 `scripts/check-profiles.mjs`（平台四件套、工具风险值、内置能力/方案、引用闭合、旧目录不得存在）。
+8. **测试**：审计夹具改为整份复制 `profiles/` 并注入临时根常量；脚本路径从 `dsh/agent-presets` 迁到 `profiles/agent-platforms/dsh/agents`（20 处）；重写 `test-runtime-plans`、`test-runtime-capabilities`、`test-behavior-profiles`、`test-prompt-*`、`test-platform-prompt`；删除 `test-capability-file`、`test-capability-artifacts`。顺带修出两个真 bug：能力预设 `boolMap` 会丢掉显式 `false`（取消默认开启工具后保存被恢复）、行为档案写盘的 platform 推断错误。
+
+**验收**：`node scripts/test-audit.mjs` **116/116（exit 0）**；`test-console-static` 全部通过；`test-console-ui` **34/34、42 次 mock 写**；`test-voice` 83/0、`test-voice-system` 51/0；`node scripts/check-profiles.mjs` 通过（1 个平台、4 个能力预设、6 个方案、5 个 Agent）；`node --check` 对 bridge/plans/capabilities/platform/behaviors/console 页全过。
+
+**已知限制**：Agent preset 仍要重新生成 patch 并重启 DSH 才生效；切换方案不再二次确认（TOTP 只用于权限提级）；外部平台/Agent 平台目前只有 QQ 与 DSH 两个实现，接口已按可扩展方式拆开但未写第二个实现。
+
+### 2026-11-12（D29）四层模型界面收口：方案并入行为档案页、默认方案与提示词卡片
+
+1. **导航与标签合并**：删除独立「运行方案」页（`pages/runtime/page.html`、`page.css`、路由与 `#section-runtime` 一并删除），运行方案改为「行为档案」页的第一个标签；标签顺序 运行方案 / 行为档案 / 能力预设，默认停在运行方案，标签记忆键 `qq-console:tab:behavior`。侧栏平台用 `▣`、行为档案用 `◈`。
+2. **方案解析改为「全局默认 + 会话覆盖」**：删除 `state/runtime.json` 指针与 `GET/POST /api/runtime/switch`；`activePlan()` 读 `config.runtime.defaultPlan`（默认 `social-v2`），`planOf(key)` = 会话 `planId` 覆盖 ?? 全局默认；新增 `GET/POST /api/config/runtime`；全局配置「人格与行为」卡的「默认行为档案」改为「默认运行方案」（`runtimeDefaultSelect`，走 `/api/config/runtime`），`config.json` 的 `behavior.default` 启动时删除。
+3. **提示词卡片统一**：新增 `components/prompt-card/`（`mountPromptCard`：注释放上方、只读编辑器、编辑内容/保存内容、还原出厂、`N 字 · 与出厂一致/不一致`）。行为提示词独立成卡（位于档案卡之后、反馈卡之后），平台「平台话术」改名「平台提示词」并改用同一组件。
+4. **行为档案页重排**：删除「选择档案 / 刷新」，名称移入独立「基本信息」卡（自带保存与重置）；档案清单保留刷新/搜索/类型筛选。
+5. **内置预设只读 + 重置**：行为档案、能力预设、方案清单的内置项不显示删除、名称与备注只读（其余可改），新建时可作模板；出厂基准为 `profiles/**/.defaults/<id>.yml`（12 份），新增三个 reset 接口：`POST /api/config/behaviors/<id>/reset`、`POST /api/runtime/capabilities/<id>/reset`、`POST /api/runtime/plans/<id>/reset`。
+6. **能力预设调整**：编辑卡标题改「基本信息 · id」；平台工具表里的 Agent 模块行置灰不可勾选（Agent 模块由 Agent 预设决定），保存不再提交 `tools.agent`。
+7. **平台页**：平台清单补统一工具栏（刷新 + 搜索）与「操作 · 编辑行为」（跳行为档案页并选中该平台档案）；「平台提示词」走 prompt-card。
+8. **顺带修复**：`config/fields.js` 漏映射 `runtimeDefault`（默认方案下拉恒空）；`core-anti-ai` 硬编码注入块删除（行为提示词只来自档案 `prompt`，避免重复注入）；closed-agent 期间群会话不允许复用改按 `parseKey(key).kind === 'group'` 判断（此前 `qq:group:*` 前缀判断失效）；能力 store 保留显式 `false`（取消默认开启工具不再被恢复）。
+
+**验收**：`node scripts/test-audit.mjs` **116/116（exit 0）**；`test-console-ui` **34/34、41 次 mock 写**（契约重录仅含预期变化）；`test-console-static` 全部通过；`test-runtime-plans`、`test-runtime-capabilities`、`test-mode-handover`、`test-prompt-golden`（已重录基线）通过；`node scripts/check-profiles.mjs` 通过；三档截图（1600/1180/760）核对三个标签页与平台页。
+
+**已知限制**：方案解析改成全局默认后不再有「当前方案」指针，正在运行的会话要等下次解析才切换；内置重置会覆盖整份配置文件（含提示词），恢复后需重启桥接生效。
+
+### 2026-11-12（D30）平台合并入「平台配置」、命令可管理、行为类型目录化
+
+1. **页面合并**：删除独立「平台」页，平台清单 / 平台提示词 / 平台工具并入「平台配置」页作为第一个标签；侧栏「平台配置」用 `▣`，位置在「会话与审批」之后、「全局配置」之前；聊天行为组不再有「行为档案」入口。标签顺序 平台 / 运行方案 / 行为档案 / 能力预设，默认平台；`platform-panel` 抽成组件，`编辑行为` 通过 `qq:behavior-focus` 事件跳到行为档案并选中该平台档案。
+2. **命令页可管理**：`命令与工具` 改名「命令」，去掉 DSH 会话命令与 Agent 工具栏；每条命令可就地改权限（all/admin/owner）与启用状态，写入 `config.json.commands`（`POST /api/commands/<id>`），`registry.list()` 返回有效值，`dispatch` 先看 `enabled` 再看权限。
+3. **行为类型目录化**：新增 `profiles/platforms/qq/behavior-types/{social-v1,social-v2}.yml`（`label` / `engine` / `schema.fields`）；档案 `kind` 从 `v1/v2` 迁移为 `social-v1/social-v2`，`src/behaviors/types.mjs` 提供加载，`ENGINE_BY_KIND` 与 `getKind` 别名兼容；新建弹窗改为「平台 + 类型（label）+ 备注 + 以现有档案为模板」，列表加平台列。
+4. **统一口径**：行为档案列表显示 平台 / 类型（类型显示 label）；能力预设列表新增「Agent 平台」列；全局配置的默认运行方案下拉只显示方案名（去掉 `（自定义）`）。
+5. **引擎判定修复**：`planMode` / `behaviorConfigFor` / `withBehavior` 改用 `engineOfKind(kind)` 判断 v1/v2（此前直接比 `kind === 'v1'`，行为类型改名后会把仿真方案判成 closed-agent）；审计夹具的行为参数同时兼容 `{v1:{}}` / `{v2:{}}` 旧形状。
+
+**验收**：`node scripts/test-audit.mjs` **116/116（exit 0）**；`test-console-ui` **34/34、41 次 mock 写**；`test-console-static` 全部通过；`node scripts/check-profiles.mjs` 通过（新增 behavior-types 校验：类型 engine 合法、schema.fields 非空、档案 kind 必须已注册）。
+
+**已知限制**：行为类型目前只有平台侧两个引擎（v1/v2），新增类型需要同时提供 `engine` 对应的解析模块；命令的启停与权限覆盖写 `config.json.commands`，不重启也立即生效，但外部插件命令只有重新注册后才会出现在列表里。
+
+### 2026-11-12（D31）平台配置页与命令系统细节收口
+
+1. **黑话页**：「黑话系统参数（可调）」移到词库卡片之前，改名「黑话配置」。
+2. **行为档案列表**：修复平台列总显示 `—`（按档案 `platform`、类型注册的 `platform`、最后按 `qq` 兜底）；「备注」列改名「档案」，搜索占位同步。
+3. **标签页分割线**：`.page-tabs` 增加 `grid-column:1 / -1`，平台配置页四标签的下划线不再只铺到最后一个标签。
+4. **命令默认权限**：内置命令未显式声明权限时默认 `admin`（原 `owner`），管理员及以上可直接用；单条覆盖仍写 `config.json.commands`。
+5. **能力预设的 Agent 模块只读展示**：`GET /api/runtime/capabilities` 为每个能力计算 `agentModules`（取引用它的方案所用 Agent 预设 `agent.cordis.yml` 的插件 id），控制台按目录模块 id 交集以「勾选 + 置灰」显示，不再全部空白；保存仍不写 `tools.agent`。
+6. **活动日志**：从「运行总览」移到「调试与运维」第一张卡，`#activity` 仍在，轮询逻辑不变。
+7. **清空所有会话**：按钮从「调试与运维 › 桥接控制」移到「会话与审批」表格工具栏右侧，文案「清空所有会话」，调用同一 `/api/workspace/reset`。
+8. **提示词卡片按钮**：统一为「编辑内容 / 取消编辑」（切换）、「保存」（未编辑时置灰）、「还原」；编辑中取消会丢弃未保存改动。
+9. **默认运行方案**：下拉只显示方案名（历史 D30 已去掉「（自定义）」，本轮无新改动，保持）。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **34/34、41 次 mock 写**；桥接重启后 `/api/runtime/capabilities` 的 `agentModules`、`/api/commands` 默认权限、`/api/config/runtime` 均实机核对；活动日志与清空按钮位置经截图确认。

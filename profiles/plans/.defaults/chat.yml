@@ -1,0 +1,11 @@
+version: 1
+id: chat
+label: 聊天模式
+note: 白名单内，随时对话。
+builtin: true
+platform: qq
+agentPlatform: dsh
+agent: qq-chat
+behavior: none
+capability: agent-chat
+audience: access

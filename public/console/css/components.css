@@ -459,6 +459,8 @@ tr:last-child td {
 .slang-tabs,.page-tabs {
   display:flex;
   gap:5px;
+  width:100%;
+  grid-column:1 / -1;
   border-bottom:1px solid var(--card-border);
   margin:22px 0 18px
 }

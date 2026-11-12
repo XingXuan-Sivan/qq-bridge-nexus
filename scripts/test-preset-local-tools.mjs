@@ -28,7 +28,7 @@ import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-nam
 import { dshModulesDir } from './dsh-modules.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PRESETS_DIR = path.join(ROOT, 'dsh', 'agent-presets');
+const PRESETS_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
 
 /** 仿真模式使用的 preset（不允许有任何本地执行能力）。 */
 const SIMULATION_PRESETS = ['qq-chat', 'qq-chat-v2'];

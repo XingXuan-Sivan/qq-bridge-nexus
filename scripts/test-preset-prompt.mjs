@@ -17,7 +17,7 @@ import {
   renderPresetPromptYaml,
 } from '../src/preset-prompt.js';
 
-const PRESET_PATH = new URL('../dsh/agent-presets/qq-chat-v2/agent.cordis.yml', import.meta.url);
+const PRESET_PATH = new URL('../profiles/agent-platforms/dsh/agents/qq-chat-v2/agent.cordis.yml', import.meta.url);
 const source = fs.readFileSync(PRESET_PATH, 'utf8');
 const originalPrefix = extractPresetPrefix(source);
 
@@ -29,7 +29,7 @@ const originalPrefix = extractPresetPrefix(source);
 // 这条测试同时钉住两件事：① 每代预设都能通过自己的清单；② 清单本身没写错字。
 test('每代内置预设都满足自己那一代的安全不变量', () => {
   for (const [name, gen] of [['qq-chat', 'v1'], ['qq-chat-v2', 'v2']]) {
-    const text = fs.readFileSync(new URL(`../dsh/agent-presets/${name}/agent.cordis.yml`, import.meta.url), 'utf8');
+    const text = fs.readFileSync(new URL(`../profiles/agent-platforms/dsh/agents/${name}/agent.cordis.yml`, import.meta.url), 'utf8');
     const prefix = extractPresetPrefix(text);
     assert.equal(typeof prefix, 'string', `${name} 应能抽出 persona.prefix`);
     const blockers = presetPromptBlockers(prefix, gen);

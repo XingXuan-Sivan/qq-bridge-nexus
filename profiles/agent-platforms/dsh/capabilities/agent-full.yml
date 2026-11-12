@@ -1,0 +1,19 @@
+version: 1
+id: agent-full
+label: Agent · 完全访问
+note: 跨工作区与进程管理；仅在短时授权窗口内可钉
+tools:
+  platform: {}
+  agent:
+    tool-fs: true
+    tool-fs-search: true
+    tool-pwsh: true
+    tool-jobs: true
+    tool-web: true
+    tool-ask-user: true
+    tool-todo: true
+  mcp:
+    - server: "*"
+      tools: "*"
+  skills:
+    - "*"

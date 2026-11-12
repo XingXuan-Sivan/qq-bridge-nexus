@@ -214,7 +214,7 @@ await test('R7 未知 preset 名直接被拒（含路径穿越形态）', async 
   try {
     h.setPresets([]); // 模拟 DSH 未连接：清单为空
     // 给临时仓库放一份真实的预设源文件，验证「已知 preset 不会被误伤」
-    const presetFile = path.join(h.temp, 'dsh', 'agent-presets', 'qq-chat-v2', 'agent.cordis.yml');
+    const presetFile = path.join(h.temp, 'profiles', 'agent-platforms', 'dsh', 'agents', 'qq-chat-v2', 'agent.cordis.yml');
     fs.mkdirSync(path.dirname(presetFile), { recursive: true });
     fs.writeFileSync(presetFile, '- id: persona\n  config:\n    prefix: |-\n      测试用仿真提示词。\n');
     await withServer(h, async (port) => {

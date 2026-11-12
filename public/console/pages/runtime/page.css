@@ -1,5 +1,0 @@
-/* 运行方案页：只补本页特有的间距，控件与表格样式沿用组件。 */
-#runtimeSummary {
-  flex-wrap: wrap;
-  gap: 8px;
-}

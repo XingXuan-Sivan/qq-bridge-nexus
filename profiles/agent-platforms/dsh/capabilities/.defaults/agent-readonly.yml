@@ -1,0 +1,17 @@
+version: 1
+id: agent-readonly
+label: Agent · 只读
+note: 只读文件与检索，不改任何东西
+tools:
+  platform: {}
+  agent:
+    tool-fs: true
+    tool-fs-search: true
+    tool-web: true
+    tool-ask-user: true
+    tool-todo: true
+  mcp:
+    - server: "*"
+      tools: "*"
+  skills:
+    - "*"

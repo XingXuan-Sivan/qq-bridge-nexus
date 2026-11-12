@@ -70,6 +70,9 @@
   "platform": {
     "id": "qq"
   },
+  "runtime": {
+    "defaultPlan": "social-v2"
+  },
   "snowluma": {
     "wsUrl": "ws://127.0.0.1:3001",
     "httpUrl": "http://127.0.0.1:3000",
@@ -206,46 +209,6 @@
     "maxResults": 8,
     "timeoutMs": 35000
   },
-  "tools": {
-    "getPrompt": true,
-    "getUnread": true,
-    "getRecent": true,
-    "socialState": true,
-    "sendGroup": true,
-    "sendPrivate": true,
-    "reply": true,
-    "sendBurst": true,
-    "sendMessage": true,
-    "waitMessages": true,
-    "feedback": true,
-    "getMyRecent": true,
-    "getMessageDetail": true,
-    "getActiveMembers": true,
-    "setWakeConfig": true,
-    "markRead": true,
-    "memory": true,
-    "slangQuery": true,
-    "slangSubmit": true,
-    "getImages": true,
-    "getForwardMsg": true,
-    "sendPoke": true,
-    "listStickers": true,
-    "getStickerImage": true,
-    "sendSticker": true,
-    "setStickerRemark": false,
-    "stickerNote": true,
-    "collectSticker": true,
-    "getSelfImage": true,
-    "personProfile": true,
-    "requestMode": true,
-    "crossGroup": true,
-    "schedule": true,
-    "handoverMemory": true,
-    "sendVoice": false,
-    "ownerRelay": false,
-    "ownerGroupAccess": false,
-    "webImage": false
-  },
   "compact": {
     "enabled": false,
     "thresholdTokens": 80000,
@@ -276,5 +239,10 @@
       "maxSendPerHour": 120
     },
     "initialPromptMaxChars": 2000
+  },
+  "permission": {
+    "default": "read-only",
+    "allowFull": false,
+    "fullTtlMin": 30
   }
 }

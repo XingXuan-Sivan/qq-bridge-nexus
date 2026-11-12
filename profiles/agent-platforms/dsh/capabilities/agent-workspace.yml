@@ -1,0 +1,19 @@
+version: 1
+id: agent-workspace
+label: Agent · 工作区读写
+note: 在工作区内读写与执行，越界触发审批
+tools:
+  platform: {}
+  agent:
+    tool-fs: true
+    tool-fs-search: true
+    tool-pwsh: true
+    tool-jobs: true
+    tool-web: true
+    tool-ask-user: true
+    tool-todo: true
+  mcp:
+    - server: "*"
+      tools: "*"
+  skills:
+    - "*"

@@ -9,13 +9,14 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 const COMBO = {
   id: 'agent-chat',
   label: '带人格的 Agent',
-  tools: 'qq-agent-full',
+  agent: 'qq-agent-full',
+  capability: 'agent-full',
   behavior: 'social-v2',
   audience: 'owner',
 };
 
 test('Agent 工具 + 仿真行为：引擎按行为投影成 reserved2，能力仍是 agent 预设', async () => {
-  const h = await bridgeHarness({ config: { runtime: { plans: [COMBO] } } });
+  const h = await bridgeHarness({ plans: [COMBO] });
   try {
     h.state.profiles['qq:group:456'] = { planId: 'agent-chat', mode: 'inherit' };
     assert.equal(h.effectiveMode('qq:group:456'), 'reserved2');
@@ -27,7 +28,7 @@ test('Agent 工具 + 仿真行为：引擎按行为投影成 reserved2，能力�
 });
 
 test('受众 owner：群聊被拦下，管理员私聊照常', async () => {
-  const h = await bridgeHarness({ config: { runtime: { plans: [COMBO] } } });
+  const h = await bridgeHarness({ plans: [COMBO] });
   try {
     h.state.profiles['qq:group:456'] = { planId: 'agent-chat', mode: 'inherit' };
     assert.equal(h.passiveAllowed('qq:group:456'), false);
@@ -38,12 +39,10 @@ test('受众 owner：群聊被拦下，管理员私聊照常', async () => {
   }
 });
 
-test('全局指针落后于 currentMode 时不采信：宁可退回旧投影', async () => {
-  const h = await bridgeHarness({ config: { runtime: { plans: [COMBO] } } });
+test('全局默认方案决定未固定会话的引擎（不再有 runtime 指针）', async () => {
+  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'chat' } } });
   try {
-    // 指针写的是组合方案（投影 reserved2），但 currentMode 还是 chat —— 指针不可信。
     h.state.profiles['qq:group:456'] = { planId: '', mode: 'inherit' };
-    h.state.runtime = { version: 1, active: { qq: 'agent-chat' } };
     assert.equal(h.effectiveMode('qq:group:456'), 'chat');
   } finally {
     await h.close();
@@ -51,7 +50,7 @@ test('全局指针落后于 currentMode 时不采信：宁可退回旧投影', a
 });
 
 test('social-v2 全局方案下，未固定方案的会话按仿真引擎跑', async () => {
-  const h = await bridgeHarness({ config: { runtime: { plans: [{ id: 'social-v2', tools: 'qq-chat-v2', behavior: 'social-v2', audience: 'access' }] } } });
+  const h = await bridgeHarness();
   try {
     h.setMode('reserved2');
     h.state.profiles['qq:group:456'] = { mode: 'inherit' };

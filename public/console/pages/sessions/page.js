@@ -298,9 +298,26 @@ function renderSessions() {
         ],
       },
     ],
+    actions: '<button class="btn small danger" type="button" id="sessionsClearWorkspace">清空所有会话</button>',
     empty: '还没有会话：全局准入名单里的群或好友发来消息、或被唤醒后，会话会显示在这里。',
   });
   initDataTables(box, { onRefresh: refreshSessions });
+
+  const clearButton = box.querySelector('#sessionsClearWorkspace');
+  clearButton?.addEventListener('click', async () => {
+    if (!window.confirm('确定清空所有会话？\n将归档全部 QQ 会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
+    clearButton.disabled = true;
+    try {
+      const r = await api('/api/workspace/reset', 'POST', {});
+      if (!r?.ok) throw new Error(r?.error || '清空失败');
+      showConsoleToast(`已归档 ${r.archivedCount} 个会话，工作区已清空`);
+      await refreshSessions();
+    } catch (error) {
+      showConsoleToast(`清空失败：${String(error?.message ?? error)}`);
+    } finally {
+      clearButton.disabled = false;
+    }
+  });
 
   box.querySelectorAll('[data-manage-key]').forEach((btn) => btn.addEventListener('click', () => {
     openDetail(btn.dataset.manageKey);

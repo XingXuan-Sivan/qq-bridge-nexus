@@ -17,6 +17,7 @@ import { init as initAccessPage, loadSecurity, securitySection, tokenSection } f
 import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobalAccess } from '../sessions/page.js';
 import { initVoiceSection } from './voice-section.js';
 import { mountCompact, compactSection } from './compact.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
@@ -48,7 +49,11 @@ const dshModelSection = {
   save: async (payload) => {
     // 第一次换到第三方提供方：保存前再确认一次隐私（与按钮时代同一道闸）。
     if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
-      && !confirm(`${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`)) {
+      && !(await confirmBox({
+        title: '切换第三方提供方',
+        message: `${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`,
+        confirmText: '切换',
+      }))) {
       return { ok: true, skipped: true, message: '已取消（未切换提供方）' };
     }
     const r = await api('/api/dsh/model', 'POST', payload);
@@ -335,10 +340,10 @@ function renderSilence() {
   renderSilenceRanges();
   renderManualSilence(r.manualSilence);
   const pill = $('silenceStatePill');
-  if (r.manual) { pill.textContent = '静默中 · 手动'; pill.className = 'pill r'; }
-  else if (r.active) { pill.textContent = `静默中 · 定时（${r.active.name}），到 ${r.active.untilText}`; pill.className = 'pill r'; }
-  else if (r.override) { pill.textContent = `正常 · 本段已临时恢复，到 ${r.override.untilText}`; pill.className = 'pill b'; }
-  else { pill.textContent = '正常'; pill.className = 'pill g'; }
+  if (r.manual) { pill.textContent = '静默中 · 手动'; pill.className = 'tag tag--danger'; }
+  else if (r.active) { pill.textContent = `静默中 · 定时（${r.active.name}），到 ${r.active.untilText}`; pill.className = 'tag tag--danger'; }
+  else if (r.override) { pill.textContent = `正常 · 本段已临时恢复，到 ${r.override.untilText}`; pill.className = 'tag tag--primary'; }
+  else { pill.textContent = '正常'; pill.className = 'tag tag--success'; }
   const up = (r.upcoming || []).slice(0, 4).map((x) => `${x.name} ${x.startText.replace(/（.*）/, '')}–${x.endText.slice(11)}`);
   $('silenceUpcoming').textContent = r.config.enabled
     ? (up.length ? `接下来：${up.join('；')}` : '接下来 14 天没有静默时段')

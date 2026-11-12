@@ -5,6 +5,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { SKILLS_FIELDS } from './fields.js';
 
@@ -20,13 +21,13 @@ let skillsCache = [];
 
 function sourcePill(source) {
   const label = SOURCE_LABEL[source] ?? source ?? '内置';
-  return `<span class="pill ${source === 'user' ? 'b' : 'n'}">${esc(label)}</span>`;
+  return `<span class="tag${source === 'user' ? ' tag--primary' : ' tag--info'}">${esc(label)}</span>`;
 }
 
 function activePill(active) {
   return active
-    ? '<span class="pill g">启用</span>'
-    : '<span class="pill n">停用</span>';
+    ? '<span class="tag tag--success">启用</span>'
+    : '<span class="tag tag--info">停用</span>';
 }
 
 function actionButtons(skill) {
@@ -234,7 +235,7 @@ async function handleAction(action, id) {
   if (action === 'view') { await openEditor(id, true); return; }
   if (action === 'edit') { await openEditor(id, false); return; }
   if (action === 'delete') {
-    if (!confirm(`删除技能 ${id}？此操作不可撤销。`)) return;
+    if (!(await confirmBox({ message: `删除技能 ${id}？此操作不可撤销。`, danger: true, confirmText: '删除' }))) return;
     try {
       await api(`/api/extensions/skills/${encodeURIComponent(id)}`, 'DELETE');
       showConsoleToast('技能已删除');

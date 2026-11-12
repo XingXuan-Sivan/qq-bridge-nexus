@@ -6,6 +6,7 @@ import { setMsg } from '../../components/message/message.js';
 import { renderFields } from '../../components/form/form.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { USAGE_FIELDS } from './usage-fields.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 // ── 消耗走势图（手写 SVG） ───────────────────────────────────────────────
 // 为什么不用图表库：控制台 CSP 是 default-src 'self'，不能引外部脚本；
@@ -192,9 +193,9 @@ function usageBar(share) {
   return `<span class="usage-bar-wrap"><span class="usage-bar-track"><span class="usage-bar-fill" data-pct="${width}"></span></span><span class="meta">${(ratio * 100).toFixed(1)}%</span></span>`;
 }
 function usageTierTag(tier) {
-  if (tier === 'peak') return '<span class="pill r usage-tier">高峰</span>';
-  if (tier === 'off') return '<span class="pill g usage-tier">空闲</span>';
-  if (tier === 'mixed') return '<span class="pill b usage-tier">跨时段</span>';
+  if (tier === 'peak') return '<span class="tag tag--danger usage-tier">高峰</span>';
+  if (tier === 'off') return '<span class="tag tag--success usage-tier">空闲</span>';
+  if (tier === 'mixed') return '<span class="tag tag--primary usage-tier">跨时段</span>';
   return '<span class="meta">—</span>';
 }
 
@@ -227,8 +228,8 @@ function renderUsageConversations(r) {
   const rows = list.map((c) => {
     const key = String(c.key ?? '');
     const isInternal = key.startsWith('internal:');
-    const type = isInternal ? '<span class="pill b">内部</span>'
-      : (key.startsWith('private:') ? '<span class="pill b">私聊</span>' : '<span class="pill g">群</span>');
+    const type = isInternal ? '<span class="tag tag--primary">内部</span>'
+      : (key.startsWith('private:') ? '<span class="tag tag--primary">私聊</span>' : '<span class="tag tag--success">群</span>');
     const b = c.buckets || {};
     return {
       cells: [
@@ -511,7 +512,12 @@ export function init() {
     showConsoleToast('用量已刷新');
   });
   document.getElementById('usageClear').addEventListener('click', async () => {
-    if (!confirm('确定清空 token 用量账本？累计花费与逐轮明细都会被删除，且不可恢复（下一次同步会从 DSH 重新拉取会话累计值）。')) return;
+    if (!(await confirmBox({
+      title: '清空用量账本',
+      message: '确定清空 token 用量账本？累计花费与逐轮明细都会被删除，且不可恢复（下一次同步会从 DSH 重新拉取会话累计值）。',
+      confirmText: '清空',
+      danger: true,
+    }))) return;
     const msg = document.getElementById('usageMsg');
     try {
       const r = await api('/api/tokens/reset', 'POST', {});

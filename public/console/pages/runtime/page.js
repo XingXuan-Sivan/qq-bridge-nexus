@@ -10,6 +10,7 @@ import { renderFields } from '../../components/form/form.js';
 import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { onPageRefresh } from '../../js/router.js';
 import { RUNTIME_FIELDS } from './fields.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 const BEHAVIOR_LABEL = { none: '不带行为', inherit: '跟随默认行为' };
 const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
@@ -52,13 +53,13 @@ function summaryHtml() {
   const plan = payload.activePlan ?? planById(payload.active);
   if (!plan) return '<span class="meta">还没有激活任何方案。</span>';
   return `
-    <span class="pill g">${esc(plan.label)}</span>
-    <span class="pill">能力预设 ${esc(plan.capability || '—')}</span>
-    <span class="pill">${esc(behaviorLabel(plan.behavior))}</span>
-    <span class="pill">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>
-    <span class="pill">平台 ${esc(adaptersFor('platform'))}</span>
-    <span class="pill">Agent ${esc(adaptersFor('agent'))}</span>
-    <span class="pill">${payload.resetOnRestart ? '重启沿用默认方案' : '重启不继承'}</span>`;
+    <span class="tag tag--success">${esc(plan.label)}</span>
+    <span class="tag">能力预设 ${esc(plan.capability || '—')}</span>
+    <span class="tag">${esc(behaviorLabel(plan.behavior))}</span>
+    <span class="tag">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>
+    <span class="tag">平台 ${esc(adaptersFor('platform'))}</span>
+    <span class="tag">Agent ${esc(adaptersFor('agent'))}</span>
+    <span class="tag">${payload.resetOnRestart ? '重启沿用默认方案' : '重启不继承'}</span>`;
 }
 
 function rowHtml(plan) {
@@ -68,7 +69,7 @@ function rowHtml(plan) {
     `<span class="meta">${esc(plan.capability || '')}</span>`,
     `<span class="meta">${esc(behaviorLabel(plan.behavior))}</span>`,
     `<span class="meta">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>`,
-    `<span class="pill">${plan.builtin ? '内置' : '自定义'}</span>`,
+    `<span class="tag">${plan.builtin ? '内置' : '自定义'}</span>`,
     `<span class="meta">${esc(plan.note || '')}</span>`,
     `<div class="row">
       <button class="btn small" type="button" data-plan-edit="${esc(plan.id)}">${plan.builtin ? '克隆' : '编辑'}</button>
@@ -249,13 +250,18 @@ async function savePlan() {
 
 async function deletePlan(planId) {
   if (!planId) return;
-  if (!confirm(`删除运行方案「${planId}」？正在使用的方案需要先切走。`)) return;
+  if (!(await confirmBox({
+    title: '删除运行方案',
+    message: `删除运行方案「${planId}」？正在使用的方案需要先切走。`,
+    confirmText: '删除',
+    danger: true,
+  }))) return;
   try {
     await api(`/api/runtime/plans/${encodeURIComponent(planId)}`, 'DELETE');
     showConsoleToast('运行方案已删除');
     await load();
   } catch (error) {
-    alert(error?.message || '删除失败');
+    await alertBox({ message: error?.message || '删除失败', type: 'danger' });
   }
 }
 

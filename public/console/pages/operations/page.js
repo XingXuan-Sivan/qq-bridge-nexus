@@ -3,6 +3,7 @@
 // 片段由路由器注入后再调 init()，这里直接绑定按钮。
 import { api } from '../../js/api.js';
 import { renderFields } from '../../components/form/form.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { OPERATIONS_FIELDS } from './fields.js';
 
 // 静态控件按字段规格渲染：页面只留卡片与宿主，渲染之后再取 id。
@@ -27,14 +28,14 @@ export function init() {
   });
 
   document.getElementById('restartBtn').addEventListener('click', async () => {
-    if (!confirm('确定重启桥接？')) return;
+    if (!(await confirmBox({ message: '确定重启桥接？', danger: true, confirmText: '重启' }))) return;
     const r = await api('/api/restart', 'POST', {});
     document.getElementById('restartMsg').textContent = r.message || '正在重启…';
   });
 
   // 紧急关闭：与重启同组（都是破坏性动作），行为与原来一致：二次确认 → 回到 L0 → 刷新状态。
   document.getElementById('panicBtn').addEventListener('click', async () => {
-    if (!confirm('立即回到安全模式（L0 群友模式）？进行中的高权限会话会被停止。')) return;
+    if (!(await confirmBox({ message: '立即回到安全模式（L0 群友模式）？进行中的高权限会话会被停止。', danger: true, confirmText: '立即关闭' }))) return;
     const msg = document.getElementById('panicMsg');
     msg.className = 'form-actions-status';
     msg.textContent = '正在关闭…';
@@ -49,7 +50,7 @@ export function init() {
     const kind = document.getElementById('aiNotifyKind').value;
     const id = document.getElementById('aiNotifyId').value.trim();
     const message = document.getElementById('aiNotifyMessage').value.trim();
-    if (!id || !message) { alert('请填写群号/QQ 号和提醒内容'); return; }
+    if (!id || !message) { await alertBox({ title: '无法投递', message: '请填写群号/QQ 号和提醒内容', type: 'warning' }); return; }
     const r = await api('/api/console/notify-ai', 'POST', { key: kind + ':' + id, message });
     const msg = document.getElementById('aiNotifyMsg');
     msg.textContent = r.ok ? ('✅ 已投递到 DSH：' + r.sessionId) : ('❌ ' + (r.error || '失败'));

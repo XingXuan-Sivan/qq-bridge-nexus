@@ -7,6 +7,7 @@ import { closeModal, openModal, wireModal } from '../../components/modal/modal.j
 import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { SLANG_FIELDS } from './fields.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 let slangEntriesCache = [];
 let slangSelected = new Set();
@@ -29,7 +30,7 @@ function slangStatusLabel(status) {
   return { candidate: '候选', confirmed: '已确认', rejected: '已拒绝' }[status] || esc(status);
 }
 function slangStatusClass(status) {
-  return { candidate: 'pill b', confirmed: 'pill g', rejected: 'pill r' }[status] || 'pill';
+  return { candidate: 'tag tag--primary', confirmed: 'tag tag--success', rejected: 'tag tag--danger' }[status] || 'tag';
 }
 function slangSourceLabel(e) {
   if (e.source === 'manual') return '手动';
@@ -192,7 +193,7 @@ function bindSlangRowEvents(host, status) {
   host.querySelectorAll('[data-slang-adopt]').forEach((btn) => btn.addEventListener('click', () => openSlangModal(btn.dataset.slangAdopt, 'edit', { adoptGuess: true })));
   host.querySelectorAll('[data-slang-reject]').forEach((btn) => btn.addEventListener('click', async () => {
     const r2 = await api('/api/slang/' + btn.dataset.slangReject + '/reject', 'POST', {});
-    if (!r2.ok) alert(r2.error || '拒绝失败');
+    if (!r2.ok) await alertBox({ message: r2.error || '拒绝失败', type: 'danger' });
     setSlangMsg(r2.ok ? '✅ 已拒绝' : ('❌ ' + (r2.error || '失败')), r2.ok);
     refreshSlang();
   }));
@@ -200,14 +201,14 @@ function bindSlangRowEvents(host, status) {
     const e = slangEntriesCache.find((x) => x.id === btn.dataset.slangRestore);
     if (!e) return;
     const r2 = await api('/api/slang/' + e.id, 'PATCH', { status: 'candidate' });
-    if (!r2.ok) alert(r2.error || '恢复失败');
+    if (!r2.ok) await alertBox({ message: r2.error || '恢复失败', type: 'danger' });
     setSlangMsg(r2.ok ? '✅ 已恢复为候选' : ('❌ ' + (r2.error || '失败')), r2.ok);
     refreshSlang();
   }));
   host.querySelectorAll('[data-slang-del]').forEach((btn) => btn.addEventListener('click', async () => {
-    if (!confirm('确定删除该黑话？')) return;
+    if (!(await confirmBox({ title: '删除黑话', message: '确定删除该黑话？', confirmText: '删除', danger: true }))) return;
     const r2 = await api('/api/slang/' + btn.dataset.slangDel, 'DELETE', {});
-    if (!r2.ok) alert(r2.error || '删除失败');
+    if (!r2.ok) await alertBox({ message: r2.error || '删除失败', type: 'danger' });
     setSlangMsg(r2.ok ? '✅ 已删除' : ('❌ ' + (r2.error || '失败')), r2.ok);
     slangSelected.delete(btn.dataset.slangDel);
     refreshSlang();
@@ -301,54 +302,74 @@ export function init() {
 
   document.getElementById('slangBatchResearch').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');
-    if (!ids.length) { alert('请先勾选要研究的候选词'); return; }
+    if (!ids.length) { await alertBox({ message: '请先勾选要研究的候选词', type: 'warning' }); return; }
     const r = await api('/api/slang/research', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已送 ${r.count} 条候选到 DSH 深度联网研究，完成后刷新查看结果` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) refreshSlang();
   });
   document.getElementById('slangBatchConfirm').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');
-    if (!ids.length) { alert('请先勾选要确认的候选词'); return; }
-    if (!confirm(`确定批量确认 ${ids.length} 条候选？缺少含义的会被跳过。`)) return;
+    if (!ids.length) { await alertBox({ message: '请先勾选要确认的候选词', type: 'warning' }); return; }
+    if (!(await confirmBox({ message: `确定批量确认 ${ids.length} 条候选？缺少含义的会被跳过。`, confirmText: '批量确认' }))) return;
     const r = await api('/api/slang/batch-confirm', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已确认 ${r.confirmedCount} 条，跳过 ${r.skippedCount} 条` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) { slangSelected.clear(); refreshSlang(); }
   });
   document.getElementById('slangBatchReject').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');
-    if (!ids.length) { alert('请先勾选要拒绝的候选词'); return; }
-    if (!confirm(`确定拒绝 ${ids.length} 条候选？`)) return;
+    if (!ids.length) { await alertBox({ message: '请先勾选要拒绝的候选词', type: 'warning' }); return; }
+    if (!(await confirmBox({
+      title: '批量拒绝候选',
+      message: `确定拒绝 ${ids.length} 条候选？`,
+      confirmText: '拒绝',
+      danger: true,
+    }))) return;
     const r = await api('/api/slang/batch-reject', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已拒绝 ${r.rejectedCount} 条` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) { slangSelected.clear(); refreshSlang(); }
   });
   document.getElementById('slangBatchDeleteCand').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('candidate');
-    if (!ids.length) { alert('请先勾选要删除的候选词'); return; }
-    if (!confirm(`确定删除 ${ids.length} 条候选？此操作不可恢复！`)) return;
+    if (!ids.length) { await alertBox({ message: '请先勾选要删除的候选词', type: 'warning' }); return; }
+    if (!(await confirmBox({
+      title: '批量删除候选',
+      message: `确定删除 ${ids.length} 条候选？此操作不可恢复！`,
+      confirmText: '删除',
+      danger: true,
+    }))) return;
     const r = await api('/api/slang/batch-delete', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已删除 ${r.removedCount} 条候选` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) { slangSelected.clear(); refreshSlang(); }
   });
   document.getElementById('slangBatchDeleteConfirmed').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('confirmed');
-    if (!ids.length) { alert('请先勾选要删除的已确认词条'); return; }
-    if (!confirm(`确定删除 ${ids.length} 条已确认黑话？此操作不可恢复！`)) return;
+    if (!ids.length) { await alertBox({ message: '请先勾选要删除的已确认词条', type: 'warning' }); return; }
+    if (!(await confirmBox({
+      title: '批量删除已确认黑话',
+      message: `确定删除 ${ids.length} 条已确认黑话？此操作不可恢复！`,
+      confirmText: '删除',
+      danger: true,
+    }))) return;
     const r = await api('/api/slang/batch-delete', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已删除 ${r.removedCount} 条已确认` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) { slangSelected.clear(); refreshSlang(); }
   });
   document.getElementById('slangBatchDeleteRejected').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('rejected');
-    if (!ids.length) { alert('请先勾选要删除的已拒绝词条'); return; }
-    if (!confirm(`确定删除 ${ids.length} 条已拒绝词条？此操作不可恢复！`)) return;
+    if (!ids.length) { await alertBox({ message: '请先勾选要删除的已拒绝词条', type: 'warning' }); return; }
+    if (!(await confirmBox({
+      title: '批量删除已拒绝词条',
+      message: `确定删除 ${ids.length} 条已拒绝词条？此操作不可恢复！`,
+      confirmText: '删除',
+      danger: true,
+    }))) return;
     const r = await api('/api/slang/batch-delete', 'POST', { ids });
     setSlangMsg(r.ok ? `✅ 已删除 ${r.removedCount} 条已拒绝` : ('❌ ' + (r.error || '失败')), r.ok);
     if (r.ok) { slangSelected.clear(); refreshSlang(); }
   });
   document.getElementById('slangBatchRestore').addEventListener('click', async () => {
     const ids = selectedIdsForStatus('rejected');
-    if (!ids.length) { alert('请先勾选要恢复的已拒绝词条'); return; }
+    if (!ids.length) { await alertBox({ message: '请先勾选要恢复的已拒绝词条', type: 'warning' }); return; }
     let okCount = 0;
     for (const id of ids) {
       const r = await api('/api/slang/' + id, 'PATCH', { status: 'candidate' });
@@ -414,12 +435,12 @@ export function init() {
   document.getElementById('slangModalDirectConfirm').addEventListener('click', async () => {
     if (!slangModalId) return;
     const payload = readSlangModalPayload();
-    if (!payload.meaning) { alert('请先填写含义，确认后才会注入 AI 上下文'); return; }
+    if (!payload.meaning) { await alertBox({ message: '请先填写含义，确认后才会注入 AI 上下文', type: 'warning' }); return; }
     const e = slangEntriesCache.find((x) => x.id === slangModalId);
     if (!e) return;
     const path = slangModalMode === 'confirm' ? `/api/slang/${e.id}/confirm` : `/api/slang/${e.id}`;
     const r2 = await api(path, slangModalMode === 'confirm' ? 'POST' : 'PATCH', payload);
-    if (!r2.ok) alert(r2.error || '保存失败');
+    if (!r2.ok) await alertBox({ message: r2.error || '保存失败', type: 'danger' });
     setSlangMsg(r2.ok ? (slangModalMode === 'confirm' ? '✅ 已确认转正' : '✅ 已保存') : ('❌ ' + (r2.error || '失败')), r2.ok);
     closeSlangModal();
     refreshSlang();

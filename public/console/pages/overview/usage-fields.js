@@ -1,6 +1,8 @@
 // 令牌与花费 / 上下文压缩。页面只留说明与宿主；指标块、图表控件、表格宿主与压缩设置都在这里生成，
 // id 与迁移前一致（page.js 按 id 取值）。图表是手写 SVG，控件保持 data-usage-* 属性契约不变。
 
+import { collapseHtml } from '../../components/collapse/collapse.js';
+
 // 四个指标直接作为「花费概览」卡片的网格项（卡片外壳与顶部的连接指标卡共用 .overview-summary 样式）。
 const SUMMARY_HTML = `
   <div class="metric"><span>总花费</span><strong id="metricUsageCost">—</strong><small id="metricUsageCostHint">读取中…</small></div>
@@ -34,13 +36,17 @@ const CONVERSATIONS_HTML = `<div id="usageConversations">加载中…</div>`;
 
 const TURNS_BODY_HTML = `<div id="usageTurns">加载中…</div>`;
 
-const RECENT_HTML = `<details class="settings-group"><summary>最近调用流水（实时，最新 40 条）</summary><div class="settings-content">
-<div id="usageRecent">（空）</div>
-</div></details>`;
+const RECENT_HTML = collapseHtml({
+  id: 'usage-recent',
+  title: '最近调用流水（实时，最新 40 条）',
+  body: '<div class="settings-content"><div id="usageRecent">（空）</div></div>',
+});
 
-const PRICES_HTML = `<details class="settings-group"><summary>当前生效的价目表</summary><div class="settings-content">
-<div id="usagePrices">读取中…</div>
-</div></details>`;
+const PRICES_HTML = collapseHtml({
+  id: 'usage-prices',
+  title: '当前生效的价目表',
+  body: '<div class="settings-content"><div id="usagePrices">读取中…</div></div>',
+});
 
 export const USAGE_FIELDS = {
   summary: { html: SUMMARY_HTML },

@@ -21,7 +21,7 @@ const SEND_LIMIT_HTML = `<div class="field-inline">
 <div class="meta" id="sendLimitHits">最近 24 小时没有被拦过</div>`;
 
 const SILENCE_HEAD = `<div class="control-row">
-  <span class="pill n" id="silenceStatePill">—</span>
+  <span class="tag tag--info" id="silenceStatePill">—</span>
   <button type="button" id="silentToggle" class="btn">开启手动静默</button>
   <button type="button" id="silentApply" class="btn" disabled>保存静默策略</button>
   <span class="control-note" id="manualSilenceNote">开启后 AI 按下面的策略停手，直到你关闭手动静默。</span>

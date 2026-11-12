@@ -4,6 +4,7 @@ import { tableToolbarHtml } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
 import { renderFields } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
@@ -39,13 +40,13 @@ function visibleItems() {
 }
 
 function badgesHtml(item) {
-  // 与插件卡保持同一套标签：.pill / .pill g / .pill b / .pill r
+  // 与插件卡保持同一套标签：.pill / .tag tag--success / .tag tag--primary / .tag tag--danger
   const badges = [];
-  if (item.default) badges.push('<span class="pill g">默认</span>');
+  if (item.default) badges.push('<span class="tag tag--success">默认</span>');
   badges.push(item.source === 'local'
-    ? '<span class="pill">内部</span>'
-    : `<span class="pill b">外部 · ${esc(item.provider)}</span>`);
-  if (item.stale) badges.push('<span class="pill r">缓存</span>');
+    ? '<span class="tag">内部</span>'
+    : `<span class="tag tag--primary">外部 · ${esc(item.provider)}</span>`);
+  if (item.stale) badges.push('<span class="tag tag--danger">缓存</span>');
   return badges.join('');
 }
 
@@ -106,7 +107,7 @@ function renderStatus() {
     modeText.textContent = active
       ? (active.source === 'local' ? '内部人格' : `${active.provider}${active.stale ? ' · 缓存' : ' · 在线'}`)
       : '跟随仿真提示词';
-    modeText.className = active && active.source !== 'local' && !active.stale ? 'pill g' : (active?.stale ? 'pill r' : 'pill n');
+    modeText.className = active && active.source !== 'local' && !active.stale ? 'tag tag--success' : (active?.stale ? 'tag tag--danger' : 'tag tag--info');
   }
 }
 
@@ -295,7 +296,7 @@ async function saveAsInternal() {
 async function deleteCurrent() {
   if (!editing?.item) return;
   const item = editing.item;
-  if (!window.confirm(`确定删除人格「${item.name}」？此操作不可撤销。`)) return;
+  if (!(await confirmBox({ message: `确定删除人格「${item.name}」？此操作不可撤销。`, danger: true, confirmText: '删除' }))) return;
   try {
     if (item.source === 'local') await api('/api/roles/delete', 'POST', { name: item.id });
     else await api('/api/personas/delete', 'POST', { uid: item.uid });
@@ -320,7 +321,7 @@ async function setDefault(uid) {
 async function restoreDefault(uid) {
   const item = model.items.find((entry) => entry.uid === uid);
   if (!item) return;
-  if (!window.confirm(`把「${item.name}」恢复成出厂内容？当前内容会先备份。`)) return;
+  if (!(await confirmBox({ message: `把「${item.name}」恢复成出厂内容？当前内容会先备份。`, confirmText: '恢复默认' }))) return;
   try {
     const r = await api('/api/roles/restore-default', 'POST', { name: item.id });
     showConsoleToast(r.unchanged ? `「${item.name}」已是出厂内容` : `已重置「${item.name}」`);
@@ -333,7 +334,7 @@ async function restoreDefault(uid) {
 async function deleteCard(uid) {
   const item = model.items.find((entry) => entry.uid === uid);
   if (!item) return;
-  if (!window.confirm(`确定删除人格「${item.name}」？此操作不可撤销。`)) return;
+  if (!(await confirmBox({ message: `确定删除人格「${item.name}」？此操作不可撤销。`, danger: true, confirmText: '删除' }))) return;
   try {
     if (item.source === 'local') await api('/api/roles/delete', 'POST', { name: item.id });
     else await api('/api/personas/delete', 'POST', { uid });

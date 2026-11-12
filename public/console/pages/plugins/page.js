@@ -6,6 +6,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { PLUGINS_FIELDS } from './fields.js';
 
 // 渲染工具行、设置块与详情弹窗的控件；开关由 bindSwitches 统一接管（值在 aria-checked 上）。
@@ -26,17 +27,17 @@ function renderPluginsFields() {
 // ── 桥接插件 ────────────────────────────────────────────────────────────────
 // 只读视图：加载/校验/失败都在桥接启动时决定，这里不做「伪热重载」。
 const PLUGIN_STATUS_LABELS = {
-  active: ['已加载', 'pill g'],
-  disabled: ['已禁用', 'pill'],
-  invalid: ['清单无效', 'pill r'],
-  failed: ['加载失败', 'pill r'],
-  stopped: ['已停止', 'pill']
+  active: ['已加载', 'tag tag--success'],
+  disabled: ['已禁用', 'tag'],
+  invalid: ['清单无效', 'tag tag--danger'],
+  failed: ['加载失败', 'tag tag--danger'],
+  stopped: ['已停止', 'tag']
 };
 const PLUGIN_ACTION_LABELS = { enable: '启用', disable: '停用', reload: '重载', uninstall: '卸载' };
 
 async function runPluginAction(id, action, button) {
   const label = PLUGIN_ACTION_LABELS[action] || action;
-  if (action === 'uninstall' && !window.confirm(`卸载 ${id}？目录会移到 state/_trash，不会硬删。`)) return;
+  if (action === 'uninstall' && !(await confirmBox({ message: `卸载 ${id}？目录会移到 state/_trash，不会硬删。`, danger: true, confirmText: '卸载' }))) return;
   if (button) button.disabled = true;
   try {
     const data = action === 'uninstall'
@@ -281,24 +282,24 @@ async function refreshPlugins() {
     // #pluginsList 本身已是 .tile-list（grid 容器），卡片直接作为它的子项；
     // 再包一层 .tile-list 会让内层只占外层的一个网格列，卡片被迫单列。
     list.innerHTML = plugins.map((plugin) => {
-      const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'pill'];
+      const [label, cls] = PLUGIN_STATUS_LABELS[plugin.status] || [plugin.status || '未知', 'tag'];
       const hooks = (plugin.hooks || []).length ? plugin.hooks.join(' / ') : '无';
       const counters = plugin.counters || {};
       const commands = (plugin.commands || []).length;
       const blocks = (plugin.blocks || []).length;
-      const permissions = (plugin.permissions || []).map((permission) => `<span class="pill">${esc(permission)}</span>`).join('');
+      const permissions = (plugin.permissions || []).map((permission) => `<span class="tag">${esc(permission)}</span>`).join('');
       const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
       const toggle = plugin.status === 'active'
         ? `<button class="btn small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
         : `<button class="btn small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       const failures = Number(counters.hookErrors) || 0;
       return `<div class="tile">
-        <div class="tile-head"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="pill b">v${esc(plugin.version || '—')}</span></div>
+        <div class="tile-head"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="tag tag--primary">v${esc(plugin.version || '—')}</span></div>
         <div class="meta">${esc(plugin.description || '这个插件没有写说明。')}</div>
         <div class="row">
-          <span class="pill">${esc(plugin.id)}</span>${permissions}
-          <span class="pill">钩子 ${esc(hooks)}</span>${commands ? `<span class="pill">命令 ${commands}</span>` : ''}${blocks ? `<span class="pill">注入块 ${blocks}</span>` : ''}
-          <span class="pill">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="pill r">失败 ${failures}</span>` : ''}
+          <span class="tag">${esc(plugin.id)}</span>${permissions}
+          <span class="tag">钩子 ${esc(hooks)}</span>${commands ? `<span class="tag">命令 ${commands}</span>` : ''}${blocks ? `<span class="tag">注入块 ${blocks}</span>` : ''}
+          <span class="tag">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="tag tag--danger">失败 ${failures}</span>` : ''}
         </div>
         ${error}
         <div class="row tile-actions">${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="btn small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>

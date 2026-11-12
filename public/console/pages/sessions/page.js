@@ -29,7 +29,7 @@ function platformOf(entry) {
 }
 
 function kindPill(entry) {
-  return entry.kind === 'group' ? '<span class="pill g">群</span>' : '<span class="pill b">私聊</span>';
+  return entry.kind === 'group' ? '<span class="tag tag--success">群</span>' : '<span class="tag tag--primary">私聊</span>';
 }
 
 function modeCell(entry) {
@@ -43,8 +43,8 @@ function personaCell(entry) {
   const p = entry.persona || {};
   if (!p.source || p.source === 'none') return '<span class="meta">未挂卡</span>';
   const name = p.name ? esc(p.name) : '<span class="meta">（未命名）</span>';
-  const source = p.source === 'provider' ? '<span class="pill b">provider</span>' : '<span class="pill">全局卡</span>';
-  const stale = p.stale ? '<span class="pill r">缓存</span>' : '';
+  const source = p.source === 'provider' ? '<span class="tag tag--primary">provider</span>' : '<span class="tag">全局卡</span>';
+  const stale = p.stale ? '<span class="tag tag--danger">缓存</span>' : '';
   return `<div class="persona-name">${name}</div><div class="session-tags">${source}${stale}</div>`;
 }
 
@@ -57,8 +57,8 @@ function whenCell(ts) {
 
 function accessPill(value) {
   return value === 'allow'
-    ? '<span class="pill g">允许</span>'
-    : '<span class="pill r">拒绝</span>';
+    ? '<span class="tag tag--success">允许</span>'
+    : '<span class="tag tag--danger">拒绝</span>';
 }
 
 function accessCell(entry) {
@@ -68,8 +68,8 @@ function accessCell(entry) {
 }
 
 function nameCell(entry) {
-  const ownerTag = entry.owner ? ' <span class="pill r">管理员</span>' : '';
-  const platformTag = `<span class="pill">${esc(platformOf(entry))}</span>`;
+  const ownerTag = entry.owner ? ' <span class="tag tag--danger">管理员</span>' : '';
+  const platformTag = `<span class="tag">${esc(platformOf(entry))}</span>`;
   const name = `<strong>${esc(entry.displayName || entry.key)}</strong>`;
   const keyLine = entry.displayName ? `<span class="meta">${esc(entry.key)}</span>` : '';
   return `<div class="session-name">${name}</div>`
@@ -77,10 +77,10 @@ function nameCell(entry) {
 }
 
 function dshCell(entry) {
-  if (!entry.sessionId) return '<span class="pill">未建</span>';
+  if (!entry.sessionId) return '<span class="tag">未建</span>';
   const status = entry.dsh?.status || 'unknown';
   const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
-  const pill = status === 'online' ? 'pill g' : status === 'missing' ? 'pill r' : 'pill';
+  const pill = status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag';
   return `<span class="${pill}">${esc(label)}</span>`;
 }
 
@@ -249,7 +249,7 @@ function renderSessions() {
   if (!box) return;
   const platforms = platformOptions();
   const rows = sessionsCache.map((entry) => {
-    const unread = entry.unread ? `<span class="pill r">${entry.unread}</span>` : '<span class="meta">0</span>';
+    const unread = entry.unread ? `<span class="tag tag--danger">${entry.unread}</span>` : '<span class="meta">0</span>';
     const delProfile = entry.hasProfile
       ? ` <button type="button" class="btn small danger" data-drop-key="${esc(entry.key)}">删档案</button>`
       : '';
@@ -358,7 +358,7 @@ function renderPending(rows) {
   const box = document.getElementById('pendingList');
   if (!box) return;
   const body = rows.map((x) => {
-    const kind = x.kind === 'approval' ? '<span class="pill r">审批</span>' : '<span class="pill b">提问</span>';
+    const kind = x.kind === 'approval' ? '<span class="tag tag--danger">审批</span>' : '<span class="tag tag--primary">提问</span>';
     let detail = '';
     if (x.kind === 'approval') detail = `${esc(x.toolName || '')}${x.reason ? '：' + esc(x.reason) : ''}`;
     else if (Array.isArray(x.questions)) detail = x.questions.map((q) => esc(q.question)).join(' / ');
@@ -454,10 +454,10 @@ let detailDirty = false;
 let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
 
 function detailDshLabel(health, sessionId) {
-  if (!sessionId) return '<span class="pill">未建</span>';
+  if (!sessionId) return '<span class="tag">未建</span>';
   const status = health?.status || 'unknown';
   const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
-  return `<span class="${status === 'online' ? 'pill g' : status === 'missing' ? 'pill r' : 'pill'}">${esc(label)}</span>`;
+  return `<span class="${status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag'}">${esc(label)}</span>`;
 }
 
 // 详情弹窗的 DSH 模型目录：打开时取一次，供运行卡的提供方/模型/思考强度下拉使用。
@@ -758,7 +758,7 @@ async function loadDetailTasks(key) {
     const tasks = (r?.tasks || []).filter((t) => Array.isArray(t.targets) && t.targets.includes(key));
     if (!tasks.length) { box.innerHTML = '<span class="meta">没有指向这个会话的定时任务</span>'; return; }
     box.innerHTML = tasks.slice(0, 10).map((t) => `<div class="u-mt-2">`
-      + `<span class="pill ${t.enabled === false ? '' : 'g'}">${t.enabled === false ? '暂停' : '启用'}</span> `
+      + `<span class="tag${t.enabled === false ? '' : ' tag--success'}">${t.enabled === false ? '暂停' : '启用'}</span> `
       + `<strong>${esc(t.name || t.id || '未命名')}</strong> `
       + `<span class="meta">${esc(t.scheduleText || '')}${t.nextRunText ? ' · 下次 ' + esc(t.nextRunText) : ''}</span>`
       + `</div>`).join('');

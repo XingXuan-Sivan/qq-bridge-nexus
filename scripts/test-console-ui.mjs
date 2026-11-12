@@ -65,6 +65,19 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('dialog', (dialog) => { dialog.accept().catch(() => {}); });
+  // 控制台的 confirm/alert 已换成 in-page 的 message-box（confirmBox/alertBox）。
+  // 既有用例默认「弹确认就点确定」，与上面原生 dialog 的 accept 行为保持一致。
+  await page.addInitScript(() => {
+    const clickConfirm = () => {
+      document.querySelectorAll('[data-box-confirm]').forEach((button) => button.click());
+    };
+    const start = () => {
+      clickConfirm();
+      new MutationObserver(clickConfirm).observe(document.documentElement, { childList: true, subtree: true });
+    };
+    if (document.documentElement) start();
+    else document.addEventListener('DOMContentLoaded', start, { once: true });
+  });
   await page.goto(fixture.url);
   // 控制台已片段化：各页 HTML 在第一次进入该页时才注入（router.hydratePage）。
   // 所以这里先逐页 hydrate 一遍，后面「全量 legacy ID 都在」以及按 id 取元素才有东西可取。

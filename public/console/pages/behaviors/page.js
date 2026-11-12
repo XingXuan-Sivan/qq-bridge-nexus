@@ -42,8 +42,8 @@ function behaviorTable(rows) {
       key: name,
       rows: items.map((entry) => {
         const source = entry.source === 'plugin'
-          ? `<span class="pill b">插件 ${esc(entry.pluginId || '')}</span>`
-          : '<span class="pill n">内置</span>';
+          ? `<span class="tag tag--primary">插件 ${esc(entry.pluginId || '')}</span>`
+          : '<span class="tag tag--info">内置</span>';
         const enabled = `<button type="button" class="field-switch" role="switch" data-command-enabled="${esc(entry.id)}" aria-checked="${entry.enabled !== false ? 'true' : 'false'}" aria-label="启用 ${esc(entry.name)}"><span class="field-switch-track" aria-hidden="true"></span><span>${entry.enabled !== false ? '开' : '关'}</span></button>`;
         const aliases = (entry.aliases || []).length ? ` <span class="meta">别名 ${esc(entry.aliases.join('、'))}</span>` : '';
         return [

@@ -2,16 +2,13 @@
 //
 // 约定：只生成 DOM 结构，不拼样式字符串；样式集中在 css/{base,layout,components}.css，通过既有类名生效。
 
-let toastTimer = null;
+import { toast } from '../components/message/message.js';
 
-/** 右下角的短提示（错误也用同一条通道，文案里自己带 ❌/✅）。 */
+/** 右上角短提示：旧调用点保持原签名，内部按文案前缀推断类型。 */
 export function showConsoleToast(message) {
-  const toast = document.getElementById('consoleToast');
-  if (!toast) return;
-  toast.textContent = message;
-  toast.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toast.hidden = true; }, 4200);
+  const text = String(message ?? '');
+  const type = text.startsWith('❌') ? 'danger' : text.startsWith('⚠') ? 'warning' : text.startsWith('✅') ? 'success' : 'info';
+  toast({ type, message: text });
 }
 
 /** HTML 转义：所有从接口拿到的文本进模板前都要过这里。 */

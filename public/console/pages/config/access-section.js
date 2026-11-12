@@ -6,6 +6,7 @@ import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../componen
 import { modalHtml, openModal, closeModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { ACCESS_FIELDS } from './access-fields.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -220,8 +221,8 @@ export function init() {
         ownerQQ: $('ownerQQ').value.trim(),
         admins: readAdminsFromDom(),
       });
-      if (r.ok) { refreshWhitelist(); alert('管理员已保存并生效'); }
-      else alert(r.error || '保存失败');
+      if (r.ok) { refreshWhitelist(); await alertBox({ title: '已保存', message: '管理员已保存并生效', type: 'success' }); }
+      else await alertBox({ message: r.error || '保存失败', type: 'danger' });
       return;
     }
     const capsButton = event.target.closest('[data-admin-caps]');

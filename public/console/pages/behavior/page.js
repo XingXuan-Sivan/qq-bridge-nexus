@@ -5,6 +5,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { renderFields } from '../../components/form/form.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal } from '../../components/modal/modal.js';
 import { mountPromptCard } from '../../components/prompt-card/prompt-card.js';
@@ -64,7 +65,7 @@ function renderBehaviorTable(items) {
     attrs: { 'data-filter-kind': item.kind || '', 'data-filter-platform': item.platform || 'qq' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
-      `<span class="pill">${esc(platformLabel(item.platform || kindMetas.get(item.kind)?.platform || 'qq'))}</span>`,
+      `<span class="tag">${esc(platformLabel(item.platform || kindMetas.get(item.kind)?.platform || 'qq'))}</span>`,
       `<span class="meta">${esc(kindMetas.get(item.kind)?.label || item.kind || '?')}</span>`,
       Array.isArray(item.usedBy) && item.usedBy.length
         ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
@@ -267,7 +268,7 @@ export function init() {
   document.getElementById('behaviorFormSave')?.addEventListener('click', () => void saveDoc());
   document.getElementById('behaviorFormReset')?.addEventListener('click', async () => {
     if (!behaviorDoc?.builtin) return;
-    if (!confirm(`把「${behaviorDoc.data?.label || behaviorDoc.id}」重置为出厂内容？`)) return;
+    if (!(await confirmBox({ message: `把「${behaviorDoc.data?.label || behaviorDoc.id}」重置为出厂内容？`, confirmText: '重置' }))) return;
     try {
       const r = await api(`/api/config/behaviors/${encodeURIComponent(behaviorDoc.id)}/reset`, 'POST', {});
       if (!r?.ok) throw new Error(r?.error || '重置失败');

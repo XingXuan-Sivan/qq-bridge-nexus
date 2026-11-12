@@ -9,6 +9,7 @@ import { initTimeFields } from '../../components/time/time.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 
 // ── 定时任务 ────────────────────────────────────────────────────────────────
 // 规则的计算、限额、到点执行都在桥接（src/scheduler/）；这里只负责编辑和展示。
@@ -18,7 +19,7 @@ const SCHED_LIMIT_FIELDS = [
   ['missedGraceMin', '错过多久内补发', '分钟'], ['jitterMin', '固定时间随机偏移', '± 分钟'], ['maxTextChars', '文字最长', '字'], ['maxInstructionChars', 'AI 说明最长', '字'],
 ];
 const SCHED_WEEK = ['', '一', '二', '三', '四', '五', '六', '日'];
-const SCHED_STATUS = { sent: ['已发送', 'pill g'], partial: ['部分发送', 'pill b'], skipped: ['已跳过', 'pill b'], failed: ['失败', 'pill r'], missed: ['错过', 'pill'], finished: ['已结束', 'pill'], invalid: ['规则无效', 'pill r'] };
+const SCHED_STATUS = { sent: ['已发送', 'tag tag--success'], partial: ['部分发送', 'tag tag--primary'], skipped: ['已跳过', 'tag tag--primary'], failed: ['失败', 'tag tag--danger'], missed: ['错过', 'tag'], finished: ['已结束', 'tag'], invalid: ['规则无效', 'tag tag--danger'] };
 
 let schedState = null;
 let schedEditingId = null;
@@ -66,7 +67,7 @@ function renderScheduler() {
   setSwitch(schedEl('schedAllowAiGroup'), st.allowAiGroup);
   const pill = schedEl('schedStatePill');
   pill.textContent = st.enabled ? (r.writable === false ? '只读（数据文件读取失败）' : '运行中') : '已关闭';
-  pill.className = st.enabled && r.writable !== false ? 'pill g' : 'pill r';
+  pill.className = st.enabled && r.writable !== false ? 'tag tag--success' : 'tag tag--danger';
   schedEl('schedLimits').innerHTML = SCHED_LIMIT_FIELDS.map(([k, label, unit]) => `<div><label for="schedLim_${k}">${esc(label)}（${esc(unit)}）</label><input type="number" id="schedLim_${k}" min="0" value="${esc(st.limits[k])}" title="默认 ${esc(r.defaults?.limits?.[k] ?? '')}"></div>`).join('');
   setSwitch(schedEl('schedQuietEnabled'), st.limits.quietEnabled);
   schedEl('schedQuietStart').value = st.limits.quietStart;
@@ -74,10 +75,10 @@ function renderScheduler() {
   renderSchedPluginKinds();
   const targetLabel = (k) => (r.targets.find((t) => t.key === k)?.label) || k;
   const taskRows = r.tasks.map((t) => {
-    const badges = [t.kindLabel ? `<span class="pill b">${esc(t.kindLabel)}</span>` : (t.kind === 'ai' ? '<span class="pill b">AI 来说</span>' : '<span class="pill">固定文字</span>'),
-      `<span class="pill">来源：${esc({ console: '控制台', 'owner-command': '管理员命令', 'owner-chat-ai': '私聊 AI' }[t.createdBy] || t.createdBy)}</span>`,
-      t.pendingConfirm ? '<span class="pill r">待你确认</span>' : ''].join(' ');
-    const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'pill'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta u-mt-2">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
+    const badges = [t.kindLabel ? `<span class="tag tag--primary">${esc(t.kindLabel)}</span>` : (t.kind === 'ai' ? '<span class="tag tag--primary">AI 来说</span>' : '<span class="tag">固定文字</span>'),
+      `<span class="tag">来源：${esc({ console: '控制台', 'owner-command': '管理员命令', 'owner-chat-ai': '私聊 AI' }[t.createdBy] || t.createdBy)}</span>`,
+      t.pendingConfirm ? '<span class="tag tag--danger">待你确认</span>' : ''].join(' ');
+    const last = t.lastResult ? `<span class="${(SCHED_STATUS[t.lastResult] || ['', 'tag'])[1]}">${esc((SCHED_STATUS[t.lastResult] || [t.lastResult])[0])}</span>${t.lastReason ? `<div class="meta u-mt-2">${esc(t.lastReason)}</div>` : ''}` : '<span class="meta">—</span>';
     return [
       checkCellHtml({ value: String(t.id), checked: Boolean(t.enabled), label: `启用 #${t.id}`, attrs: { 'data-sched-toggle': t.id } }),
       `<b>#${t.id} ${esc(t.name)}</b><div class="u-mt-4">${badges}</div><div class="meta u-mt-4">${esc(t.kind === 'ai' ? t.instruction : (t.kind === 'text' ? t.text : JSON.stringify(t.payload ?? {})))}</div>`,
@@ -98,7 +99,7 @@ function renderScheduler() {
   });
   initDataTables(schedEl('schedList'), { onRefresh: () => refreshScheduler() });
   const historyRows = r.history.map((h) => {
-    const [label, cls] = SCHED_STATUS[h.status] || [h.status, 'pill'];
+    const [label, cls] = SCHED_STATUS[h.status] || [h.status, 'tag'];
     const when = new Date(h.at).toLocaleString('zh-CN', { hour12: false, timeZone: st.timezone });
     return [
       esc(when),
@@ -119,20 +120,25 @@ function renderScheduler() {
   if (historyRows.length) initDataTables(schedEl('schedHistory'));
   schedEl('schedList').querySelectorAll('[data-sched-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
     const res = await api(`/api/scheduler/tasks/${cb.dataset.schedToggle}/${cb.checked ? 'enable' : 'disable'}`, 'POST', {});
-    if (!res.ok) alert(res.error || '操作失败');
+    if (!res.ok) await alertBox({ message: res.error || '操作失败', type: 'danger' });
     refreshScheduler();
   }));
   schedEl('schedList').querySelectorAll('[data-sched-run]').forEach((b) => b.addEventListener('click', async () => {
     const res = await api(`/api/scheduler/tasks/${b.dataset.schedRun}/run`, 'POST', {});
-    if (!res.ok) alert(res.error || '试发失败');
+    if (!res.ok) await alertBox({ message: res.error || '试发失败', type: 'danger' });
     else showConsoleToast(`#${b.dataset.schedRun} 试发：` + res.outcomes.map((o) => `${targetLabel(o.target)} ${(SCHED_STATUS[o.status] || [o.status])[0]}${o.reason ? '（' + o.reason + '）' : ''}`).join('；'));
     refreshScheduler();
   }));
   schedEl('schedList').querySelectorAll('[data-sched-edit]').forEach((b) => b.addEventListener('click', () => openSchedEditor(r.tasks.find((t) => String(t.id) === b.dataset.schedEdit))));
   schedEl('schedList').querySelectorAll('[data-sched-del]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm(`确定删除任务 #${b.dataset.schedDel}？`)) return;
+    if (!(await confirmBox({
+      title: '删除定时任务',
+      message: `确定删除任务 #${b.dataset.schedDel}？`,
+      confirmText: '删除',
+      danger: true,
+    }))) return;
     const res = await api(`/api/scheduler/tasks/${b.dataset.schedDel}`, 'DELETE', {});
-    if (!res.ok) alert(res.error || '删除失败');
+    if (!res.ok) await alertBox({ message: res.error || '删除失败', type: 'danger' });
     refreshScheduler();
   }));
 }
@@ -466,7 +472,7 @@ schedEl('schedLimitsSave').addEventListener('click', async () => {
   if (r.ok) refreshScheduler();
 });
 schedEl('schedLimitsReset').addEventListener('click', async () => {
-  if (!confirm('把安全限制恢复成默认值？')) return;
+  if (!(await confirmBox({ message: '把安全限制恢复成默认值？', confirmText: '恢复默认' }))) return;
   const r = await api('/api/scheduler/settings', 'POST', { limits: schedState?.defaults?.limits || {} });
   schedMsg('schedLimitsMsg', r.ok ? '✅ 已恢复默认' : '❌ ' + (r.error || '失败'), r.ok);
   if (r.ok) refreshScheduler();

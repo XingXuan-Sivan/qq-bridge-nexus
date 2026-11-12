@@ -27,13 +27,13 @@ const TIMING_LABEL = {
 };
 
 const STATUS_LABEL = {
-  injected: ['正常', 'pill g'],
-  truncated: ['截断', 'pill r'],
-  budget: ['超预算跳过', 'pill r'],
-  error: ['失败', 'pill r'],
-  off: ['已关闭', 'pill'],
-  empty: ['空', 'pill'],
-  idle: ['未调用', 'pill'],
+  injected: ['正常', 'tag tag--success'],
+  truncated: ['截断', 'tag tag--danger'],
+  budget: ['超预算跳过', 'tag tag--danger'],
+  error: ['失败', 'tag tag--danger'],
+  off: ['已关闭', 'tag'],
+  empty: ['空', 'tag'],
+  idle: ['未调用', 'tag'],
 };
 
 const PROFILE_LABEL = { wake: '唤醒', reminder: '收尾提醒', context: '前置上下文' };
@@ -55,21 +55,21 @@ function summaryHtml() {
   const limits = payload?.limits ?? {};
   const perProfile = (payload?.profiles ?? []).map((profile) => {
     const count = blocks.filter((block) => (block.profiles ?? ['wake']).includes(profile)).length;
-    return `<span class="pill">${esc(PROFILE_LABEL[profile] || profile)} ${count} 块</span>`;
+    return `<span class="tag">${esc(PROFILE_LABEL[profile] || profile)} ${count} 块</span>`;
   }).join('');
   const budget = Number(limits.total) > 0 ? `${Number(limits.total)} 字` : '不限';
   const blockBudget = Number(limits.perBlockDefault) > 0 ? `${Number(limits.perBlockDefault)} 字` : '不限';
   const stats = payload?.stats ?? {};
   return `${perProfile}
-    <span class="pill">启用 ${enabled}/${blocks.length}</span>
-    <span class="pill">总预算 ${esc(budget)}</span>
-    <span class="pill">单块默认 ${esc(blockBudget)}</span>
-    <span class="pill">人格卡注入上限 ${Number(limits.roleInjectMaxChars) || 0} 字</span>
-    <span class="pill">渲染 ${Number(stats.renders) || 0} 次 · 注入 ${Number(stats.injected) || 0} 次 · 跳过 ${Number(stats.skipped) || 0} 块</span>`;
+    <span class="tag">启用 ${enabled}/${blocks.length}</span>
+    <span class="tag">总预算 ${esc(budget)}</span>
+    <span class="tag">单块默认 ${esc(blockBudget)}</span>
+    <span class="tag">人格卡注入上限 ${Number(limits.roleInjectMaxChars) || 0} 字</span>
+    <span class="tag">渲染 ${Number(stats.renders) || 0} 次 · 注入 ${Number(stats.injected) || 0} 次 · 跳过 ${Number(stats.skipped) || 0} 块</span>`;
 }
 
 function rowHtml(block) {
-  const [label, cls] = STATUS_LABEL[block.lastStatus] || [block.lastStatus || '未调用', 'pill'];
+  const [label, cls] = STATUS_LABEL[block.lastStatus] || [block.lastStatus || '未调用', 'tag'];
   const owner = block.owner || (block.pluginId === 'core' ? 'core' : `plugin:${block.pluginId}`);
   const when = block.lastRunAt ? new Date(block.lastRunAt).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
   const chars = block.lastRunAt ? (block.maxChars ? `${Number(block.lastChars) || 0} / ${block.maxChars}` : `${Number(block.lastChars) || 0}`) : '—';
@@ -78,11 +78,11 @@ function rowHtml(block) {
   const timing = block.timing === 'reason' && reasons.length
     ? `按原因 · ${reasons.slice(0, 2).join(' / ')}${reasons.length > 2 ? ` 等 ${reasons.length} 个` : ''}`
     : (TIMING_LABEL[block.timing] || block.timing || '每次唤醒');
-  const profiles = (block.profiles ?? ['wake']).map((profile) => `<span class="pill">${esc(PROFILE_LABEL[profile] || profile)}</span>`).join('');
+  const profiles = (block.profiles ?? ['wake']).map((profile) => `<span class="tag">${esc(PROFILE_LABEL[profile] || profile)}</span>`).join('');
   const title = detail ? ` title="${esc(detail)}"` : '';
   // 人格卡这类「不经过注册表」的虚拟块没有真正的开关键：人格卡始终注入，只让它配上限。
   const enabledCell = block.synthetic
-    ? '<span class="pill">常开</span>'
+    ? '<span class="tag">常开</span>'
     : `<button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button>`;
   return {
     // 行属性给工具栏的两个筛选器用：槽位 + 来源（核心 / 插件 / 人格卡虚拟块）。
@@ -93,7 +93,7 @@ function rowHtml(block) {
     cells: [
       enabledCell,
       `<code>${esc(block.id)}</code><div class="meta">${esc(block.label || '')}</div>`,
-      `<span class="pill">${esc(slotLabel(block.slot))}</span>`,
+      `<span class="tag">${esc(slotLabel(block.slot))}</span>`,
       `<div class="meta"${title}>${esc(timing)}</div><div class="row">${profiles}</div>`,
       `<span class="meta">${esc(owner)}</span>`,
       `<input type="number" data-block-max="${esc(block.id)}" min="0" max="200000" step="100" value="${block.maxChars ?? ''}" placeholder="跟随默认" aria-label="${esc(block.id)} 上限（留空跟随默认）">`,
@@ -238,9 +238,9 @@ async function save() {
 function previewBlocksTable(blocks) {
   if (!Array.isArray(blocks) || !blocks.length) return '';
   const rows = blocks.map((block) => [
-    `<span class="pill">${esc(slotLabel(block.slot))}</span>`,
+    `<span class="tag">${esc(slotLabel(block.slot))}</span>`,
     `<code>${esc(block.id)}</code>`,
-    `<span class="${(STATUS_LABEL[block.status] || ['', 'pill'])[1]}">${esc((STATUS_LABEL[block.status] || [block.status || ''])[0])}</span>`,
+    `<span class="${(STATUS_LABEL[block.status] || ['', 'tag'])[1]}">${esc((STATUS_LABEL[block.status] || [block.status || ''])[0])}</span>`,
     `<span class="meta">${Number(block.chars) || 0}</span>`,
   ]);
   return `<div class="u-mt-12">${tableHtml([
@@ -267,7 +267,7 @@ async function preview() {
     const result = await api('/api/prompt-preview', 'POST', { key, profile, reason });
     if (msg) msg.textContent = `已生成：${Number(result.chars) || 0} 字`;
     const budget = Number(result.maxTotalChars) > 0 ? `${Number(result.maxTotalChars)} 字` : '不限';
-    body.innerHTML = `<div class="row"><span class="pill">${esc(PROFILE_LABEL[result.profile] || result.profile)}</span><span class="pill">${Number(result.chars) || 0} 字</span><span class="pill">预算 ${esc(budget)}</span><span class="pill">${esc(result.key)}</span></div>
+    body.innerHTML = `<div class="row"><span class="tag">${esc(PROFILE_LABEL[result.profile] || result.profile)}</span><span class="tag">${Number(result.chars) || 0} 字</span><span class="tag">预算 ${esc(budget)}</span><span class="tag">${esc(result.key)}</span></div>
       <pre class="code-area pb-preview-text">${esc(result.text || '')}</pre>
       ${previewBlocksTable(result.blocks)}`;
   } catch (error) {

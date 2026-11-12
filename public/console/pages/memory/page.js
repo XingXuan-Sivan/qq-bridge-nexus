@@ -6,6 +6,7 @@ import { tableHtml, dataTableHtml, initDataTables } from '../../components/table
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
+import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { MEMORY_FIELDS } from './fields.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
@@ -95,7 +96,7 @@ function renderProviderCards(providers) {
         <div class="memory-provider-head">
           <strong>${esc(p.label ?? providerLabel(p.id))}</strong>
           <code>${esc(p.id)}</code>
-          <span class="pill">${p.sync ? '同步' : '异步'} · ${p.capabilities?.write ? '可写' : '只读'}</span>
+          <span class="tag">${p.sync ? '同步' : '异步'} · ${p.capabilities?.write ? '可写' : '只读'}</span>
           <span class="meta">${esc(providerStatusLine(p.id))}</span>
         </div>
         <div data-provider-fields></div>
@@ -364,30 +365,30 @@ async function loadLocalMemory({ quiet = false } = {}) {
 
 async function clearSessionMemory(key) {
   if (!key) return;
-  if (!window.confirm(`清空 ${key} 的全部记忆（话题 / 想法 / 印象 / 规则）？`)) return;
+  if (!(await confirmBox({ message: `清空 ${key} 的全部记忆（话题 / 想法 / 印象 / 规则）？`, danger: true, confirmText: '清空' }))) return;
   try {
     const data = await api('/api/memory/entries/clear', 'POST', { key, category: '' });
-    if (!data.ok) { window.alert(data.error || '清空失败'); return; }
+    if (!data.ok) { await alertBox({ message: data.error || '清空失败', type: 'danger' }); return; }
     if (localSessionKey === key) {
       localView = null;
       if (document.getElementById('memMemoryModal')?.classList.contains('open')) loadLocalMemory({ quiet: true });
     }
     renderSessionTable();
   } catch (error) {
-    window.alert(error.message);
+    await alertBox({ message: error.message, type: 'danger' });
   }
 }
 
 async function deleteSessionMemory(key) {
   if (!key) return;
-  if (!window.confirm(`删除会话 ${key} 及其全部记忆？删除后这一行会消失，之后在 QQ 里再产生记忆时会重新出现。`)) return;
+  if (!(await confirmBox({ message: `删除会话 ${key} 及其全部记忆？删除后这一行会消失，之后在 QQ 里再产生记忆时会重新出现。`, danger: true, confirmText: '删除' }))) return;
   try {
     const data = await api('/api/memory/sessions', 'DELETE', { key });
-    if (!data.ok) { window.alert(data.error || '删除失败'); return; }
+    if (!data.ok) { await alertBox({ message: data.error || '删除失败', type: 'danger' }); return; }
     if (localSessionKey === key) localSessionKey = '';
     renderSessionTable();
   } catch (error) {
-    window.alert(error.message);
+    await alertBox({ message: error.message, type: 'danger' });
   }
 }
 
@@ -408,14 +409,14 @@ function openSessionAdd() {
 async function saveSessionAdd() {
   const input = document.getElementById('memSessionKey');
   const key = (input?.value || '').trim();
-  if (!key) { window.alert('会话 key 不能为空'); return; }
+  if (!key) { await alertBox({ title: '无法新增', message: '会话 key 不能为空', type: 'warning' }); return; }
   try {
     const data = await api('/api/memory/sessions', 'POST', { key });
-    if (!data.ok) { window.alert(data.error || '新增失败'); return; }
+    if (!data.ok) { await alertBox({ message: data.error || '新增失败', type: 'danger' }); return; }
     closeModal(document.getElementById('memSessionAddModal'));
     renderSessionTable();
   } catch (error) {
-    window.alert(error.message);
+    await alertBox({ message: error.message, type: 'danger' });
   }
 }
 
@@ -503,7 +504,7 @@ async function saveEntry() {
 async function removeEntry(id) {
   const key = localKey();
   if (!key || !id) return;
-  if (!window.confirm(`删除这条${CATEGORY_LABEL[localCategory]}？`)) return;
+  if (!(await confirmBox({ message: `删除这条${CATEGORY_LABEL[localCategory]}？`, danger: true, confirmText: '删除' }))) return;
   try {
     const r = await api('/api/memory/entries', 'DELETE', { key, category: localCategory, id });
     msg('memLocalMsg', r.ok ? '✅ 已删除' : `❌ ${r.error || '失败'}`, r.ok ? 'ok' : 'err');

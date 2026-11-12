@@ -6,6 +6,7 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
 import { dataTableHtml, initDataTables, tableToolbarHtml } from '../../components/table/table.js';
 import { MCP_FIELDS } from './fields.js';
@@ -48,14 +49,14 @@ function toolDescription(tool) {
 
 function sourceTag(server) {
   const external = server.source === 'external';
-  return `<span class="pill${external ? ' b' : ' n'}">${external ? '外部' : '内置'}</span>`;
+  return `<span class="tag${external ? ' tag--primary' : ' tag--info'}">${external ? '外部' : '内置'}</span>`;
 }
 
 function statusTag(server) {
-  if (server.status === 'error') return '<span class="pill r">读取失败</span>';
-  if (server.status === 'running' || server.status === 'online') return '<span class="pill g">在线</span>';
-  if (server.status === 'disabled') return '<span class="pill">已停用</span>';
-  return `<span class="pill">${esc(server.status === 'stopped' ? '已停止' : server.status ?? '已停止')}</span>`;
+  if (server.status === 'error') return '<span class="tag tag--danger">读取失败</span>';
+  if (server.status === 'running' || server.status === 'online') return '<span class="tag tag--success">在线</span>';
+  if (server.status === 'disabled') return '<span class="tag">已停用</span>';
+  return `<span class="tag">${esc(server.status === 'stopped' ? '已停止' : server.status ?? '已停止')}</span>`;
 }
 
 // 列表筛选与选中态都放在这里：refresh 只换数据，不重置用户的筛选与选择。
@@ -88,7 +89,7 @@ function visibleServers() {
 function toolbarMarkup(servers, summary) {
   const toolCount = Number(summary.tools) || servers.reduce((sum, server) => sum + (Number(server.toolCount) || (server.tools ?? []).length), 0);
   const errors = Number(summary.errors) || servers.filter((server) => server.status === 'error').length;
-  const warning = errors ? `<span class="pill r" title="部分 server 连接失败；打开详情可查看原因">${errors} 个读取失败</span>` : '';
+  const warning = errors ? `<span class="tag tag--danger" title="部分 server 连接失败；打开详情可查看原因">${errors} 个读取失败</span>` : '';
   return tableToolbarHtml({
     refresh: true,
     filters: [
@@ -429,7 +430,7 @@ async function handleAction(action, id) {
       return;
     }
     if (action === 'delete') {
-      if (!window.confirm(`删除外部 MCP「${id}」？`)) return;
+      if (!(await confirmBox({ message: `删除外部 MCP「${id}」？`, danger: true, confirmText: '删除' }))) return;
       const data = await api(`/api/extensions/mcp/${encodeURIComponent(id)}`, 'DELETE');
       if (data.ok === false) throw new Error(data.error || '删除失败');
       showConsoleToast('已删除');

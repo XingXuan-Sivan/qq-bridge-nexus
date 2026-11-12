@@ -4,6 +4,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { renderFields } from '../form/form.js';
+import { confirmBox } from '../message-box/message-box.js';
 import { modalHtml, openModal, closeModal } from '../modal/modal.js';
 import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../table/table.js';
 
@@ -12,8 +13,8 @@ const EDITOR_TABLES = ['capEditorPlatform', 'capEditorServers', 'capEditorTools'
 
 function riskPill(risk) {
   const text = PLATFORM_RISK_TEXT[risk] ?? risk ?? '—';
-  const tone = risk === 'admin' ? 'r' : risk === 'send' ? 'b' : 'g';
-  return `<span class="pill ${tone}">${esc(text)}</span>`;
+  const tone = risk === 'admin' ? 'tag--danger' : risk === 'send' ? 'tag--primary' : 'tag--success';
+  return `<span class="tag ${tone}">${esc(text)}</span>`;
 }
 
 export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
@@ -49,7 +50,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     const rows = capabilities.map((cap) => ({
       cells: [
         `<code>${esc(cap.id)}</code><div class="meta">${esc(cap.label || '')}</div>`,
-        `<span class="pill">${esc(String(cap.agentPlatform || 'dsh').toUpperCase())}</span>`,
+        `<span class="tag">${esc(String(cap.agentPlatform || 'dsh').toUpperCase())}</span>`,
         visibleSummary(cap),
         extensionSummary(cap),
         `<div class="row-actions">
@@ -129,7 +130,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
           (entry.names ?? []).length
             ? `<span class="cap-tool-names">${entry.names.map((name) => `<code>${esc(name)}</code>`).join('')}</span>`
             : '<span class="meta">—</span>',
-          `<span class="cap-pill-row"><span class="pill">平台</span>${riskPill(entry.risk)}</span>`,
+          `<span class="cap-pill-row"><span class="tag">平台</span>${riskPill(entry.risk)}</span>`,
         ],
       });
     }
@@ -140,7 +141,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
           selectCellHtml({ value: entry.id, checked: draft.agent.has(entry.id), label: `允许 ${entry.label}`, attrs: { 'data-cap-agent': entry.id, 'data-select-group': 'tools', disabled: 'disabled' } }),
           `${esc(entry.label)}<div class="meta"><code>${esc(entry.id)}</code></div>`,
           esc(entry.desc || 'Agent 运行时模块'),
-          `<span class="cap-pill-row"><span class="pill">Agent</span>${riskPill(entry.risk)}</span>`,
+          `<span class="cap-pill-row"><span class="tag">Agent</span>${riskPill(entry.risk)}</span>`,
         ],
       });
     }
@@ -428,7 +429,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   /** 内置能力重置：用 .defaults/<id>.yml 覆盖当前文件（后端校验只允许内置）。 */
   async function resetCapability() {
     if (!draft?.builtin) return;
-    if (!window.confirm(`把「${draft.label || draft.id}」重置为出厂内容？`)) return;
+    if (!(await confirmBox({ message: `把「${draft.label || draft.id}」重置为出厂内容？`, confirmText: '重置' }))) return;
     const msg = editorHost.querySelector('#capabilitySaveMsg');
     try {
       const r = await api(`/api/runtime/capabilities/${encodeURIComponent(draft.id)}/reset`, 'POST', {});
@@ -476,7 +477,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
   }
 
   async function deleteCapability(id) {
-    if (!window.confirm(`删除能力预设 ${id}？对应的 capability.yml 会一并删除。`)) return;
+    if (!(await confirmBox({ message: `删除能力预设 ${id}？对应的 capability.yml 会一并删除。`, danger: true, confirmText: '删除' }))) return;
     try {
       const r = await api(`/api/capabilities/${encodeURIComponent(id)}`, 'DELETE');
       if (!r?.ok) throw new Error(r?.error || '删除失败');

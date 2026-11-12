@@ -12,6 +12,7 @@ import { bindCounters, bindSwitches, getSwitch, renderFields, setSwitch } from '
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { permissionLevelLabel, permissionLevelOptions } from '../../js/permission-levels.js';
 import { SESSIONS_FIELDS } from './fields.js';
+import { cardHtml } from '../../components/card/card.js';
 
 const MODE_LABEL = {
   chat: '聊天模式',
@@ -995,8 +996,33 @@ export function mountGlobalAccess(host) {
   void refreshGlobalAccess();
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 卡片外壳由 components/card 的 cardHtml 生成，page.html 只留 #sessionsCards 宿主；
+// body 里是标签条与两个面板的 [data-sessions-fields] 挂载点，弹窗在宿主之外。
+const SESSIONS_CARDS = [
+  {
+    title: '会话与审批',
+    description: '「会话映射」是桥接当前握着的全部会话：只显示平台侧身份与状态，改名会写回 DSH 侧栏标题；单独指定人格、仿真模式等配置不在这一页改。「审批 / 提问」只读，批准或回答都要去对应 QQ 会话里回复。',
+    body: '<div data-sessions-fields="tabs"></div>'
+      + '<div class="page-panel" data-sessions-panel="sessions">'
+      + '<div data-sessions-fields="sessionsPanel"></div>'
+      + '</div>'
+      + '<div class="page-panel" data-sessions-panel="pending" hidden>'
+      + '<div data-sessions-fields="pendingPanel"></div>'
+      + '</div>',
+  },
+];
+
+function renderCards() {
+  const host = document.getElementById('sessionsCards');
+  if (!host) return;
+  host.innerHTML = SESSIONS_CARDS.map((card) => cardHtml(card)).join('');
+}
+
 export function init() {
-  // 先渲染字段规格（标签条 / 两个面板宿主 / 改名弹窗），下面取节点才不会拿到空。
+  // 先长出卡片外壳：下面的 [data-sessions-fields] 与弹窗节点都依赖这些节点。
+  renderCards();
+  // 再渲染字段规格（标签条 / 两个面板宿主 / 改名弹窗），下面取节点才不会拿到空。
   document.querySelectorAll('[data-sessions-fields]').forEach((host) => {
     const spec = SESSIONS_FIELDS[host.dataset.sessionsFields];
     if (spec?.html) host.innerHTML = spec.html;

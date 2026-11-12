@@ -4,10 +4,46 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
+import { cardHtml } from '../../components/card/card.js';
+import { collapseHtml } from '../../components/collapse/collapse.js';
+import { tileHtml } from '../../components/tile/tile.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { PLUGINS_FIELDS } from './fields.js';
+
+// 卡片外壳统一由 card 组件生成（page.html 只留 #pluginsCards 宿主）。
+// 两张 .is-group 卡本来就没有标题（可见标题是 <summary>），所以只给 className 与 body。
+function renderCards() {
+  const host = document.getElementById('pluginsCards');
+  if (!host) return;
+  host.innerHTML = [
+    cardHtml({
+      title: '桥接插件',
+      description: '可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。',
+      body: `<div data-plugins-fields="toolbar"></div>
+      <div data-plugins-fields="list"></div>
+      <div data-plugins-fields="detail"></div>`,
+    }),
+    cardHtml({
+      className: 'is-group',
+      body: collapseHtml({
+        elementId: 'pluginRuntimeGroup',
+        title: '运行设置',
+        body: '<div data-plugins-fields="runtime"></div>',
+      }),
+    }),
+    cardHtml({
+      className: 'is-group',
+      body: collapseHtml({
+        title: '安装插件',
+        body: `<div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
+          <div data-plugins-fields="install"></div>
+          <div data-plugins-fields="installPath"></div>`,
+      }),
+    }),
+  ].join('');
+}
 
 // 渲染工具行、设置块与详情弹窗的控件；开关由 bindSwitches 统一接管（值在 aria-checked 上）。
 // 必须在 init() 最前面跑：下面的 getElementById 依赖这些节点。
@@ -287,23 +323,28 @@ async function refreshPlugins() {
       const counters = plugin.counters || {};
       const commands = (plugin.commands || []).length;
       const blocks = (plugin.blocks || []).length;
-      const permissions = (plugin.permissions || []).map((permission) => `<span class="tag">${esc(permission)}</span>`).join('');
-      const error = plugin.error ? `<div class="meta err">${esc(plugin.error)}</div>` : '';
+      const permissions = (plugin.permissions || []).map((permission) => `<span class="tag">${esc(permission)}</span>`);
       const toggle = plugin.status === 'active'
         ? `<button class="btn small" data-plugin-action="disable" data-plugin-id="${esc(plugin.id)}">停用</button>`
         : `<button class="btn small" data-plugin-action="enable" data-plugin-id="${esc(plugin.id)}">启用</button>`;
       const failures = Number(counters.hookErrors) || 0;
-      return `<div class="tile">
-        <div class="tile-head"><strong>${esc(plugin.name || plugin.id)}</strong><span class="${cls}">${esc(label)}</span><span class="tag tag--primary">v${esc(plugin.version || '—')}</span></div>
-        <div class="meta">${esc(plugin.description || '这个插件没有写说明。')}</div>
-        <div class="row">
-          <span class="tag">${esc(plugin.id)}</span>${permissions}
-          <span class="tag">钩子 ${esc(hooks)}</span>${commands ? `<span class="tag">命令 ${commands}</span>` : ''}${blocks ? `<span class="tag">注入块 ${blocks}</span>` : ''}
-          <span class="tag">调用 ${Number(counters.hookCalls) || 0}</span>${failures ? `<span class="tag tag--danger">失败 ${failures}</span>` : ''}
-        </div>
-        ${error}
-        <div class="row tile-actions">${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="btn small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button></div>
-      </div>`;
+      return tileHtml({
+        id: plugin.id,
+        title: plugin.name || plugin.id,
+        badges: [`<span class="${cls}">${esc(label)}</span>`, `<span class="tag tag--primary">v${esc(plugin.version || '—')}</span>`],
+        description: plugin.description || '这个插件没有写说明。',
+        tags: [
+          `<span class="tag">${esc(plugin.id)}</span>`,
+          ...permissions,
+          `<span class="tag">钩子 ${esc(hooks)}</span>`,
+          commands ? `<span class="tag">命令 ${commands}</span>` : '',
+          blocks ? `<span class="tag">注入块 ${blocks}</span>` : '',
+          `<span class="tag">调用 ${Number(counters.hookCalls) || 0}</span>`,
+          failures ? `<span class="tag tag--danger">失败 ${failures}</span>` : '',
+        ],
+        error: plugin.error || '',
+        actions: `${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small" data-plugin-action="detail" data-plugin-id="${esc(plugin.id)}">详情</button><button class="btn small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button>`,
+      });
     }).join('');
   } catch (error) {
     meta.textContent = '';
@@ -369,6 +410,8 @@ async function savePluginPersistEnabled() {
 
 /** 绑定事件、注册刷新回调，并做首次加载。入口脚本启动时调一次。 */
 export function init() {
+  // 先拼卡片外壳：下面 renderPluginsFields 与各处 getElementById 都依赖这些节点。
+  renderCards();
   renderPluginsFields();
   // 详情弹窗的遮罩必须挂在 body 上：片段注入在 .card 里，而 .card 有动画/滤镜，
   // 会给 position:fixed 造出包含块，遮罩就只盖住卡片、盖不住整页。

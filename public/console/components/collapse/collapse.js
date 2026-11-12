@@ -5,15 +5,16 @@
 const TEXT_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => TEXT_ESCAPES[c]);
 
-export function collapseHtml({ id = '', title = '', body = '', open = false, persist = false, className = '' } = {}) {
+export function collapseHtml({ id = '', title = '', body = '', open = false, persist = false, className = '', elementId = '' } = {}) {
   const classes = ['settings-group', className].filter(Boolean).join(' ');
   const attrs = [
     `class="${classes}"`,
+    elementId ? `id="${esc(elementId)}"` : '',
     id ? `data-collapse-id="${esc(id)}"` : '',
     persist && id ? `data-collapse-persist="${esc(id)}"` : '',
     open ? 'open' : '',
   ].filter(Boolean).join(' ');
-  return `<details ${attrs}><summary>${esc(title)}</summary><div class="settings-body">${body}</div></details>`;
+  return `<details ${attrs}><summary>${esc(title)}</summary><div class="settings-content">${body}</div></details>`;
 }
 
 /** 恢复已记忆的展开状态，并监听后续 toggle（幂等）。 */

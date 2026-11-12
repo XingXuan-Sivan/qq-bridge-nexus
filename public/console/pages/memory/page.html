@@ -1,35 +1,3 @@
-<section id="section-memory-inject" class="card span-all">
-  <h2>记忆注入</h2>
-  <div class="meta">每次唤醒只选一个 provider 当记忆来源；没有预热好的缓存时按空块处理，不影响其它注入块。记忆块本身在「插件 → 注入块」里显示为 <code>core-memory</code>，可单独关掉或改上限。</div>
-  <div data-memory-fields="inject"></div>
-</section>
-
-<section id="section-memory-providers" class="card span-all">
-  <h2>记忆提供者</h2>
-  <div class="meta">本机轻量记忆（<code>local-digest</code>）是内置默认实现，同步、零延迟；soulkit（<code>soulkit</code>）通过插件接入，异步预热、失败静默。缓存与超时都在内核注册表里，provider 自己不管。</div>
-  <div data-memory-fields="providers"></div>
-</section>
-
-<section id="section-memory-local" class="card span-all">
-  <h2>本机轻量记忆</h2>
-  <div class="meta">按会话存放：话题、想说的话、对群友的印象、管理员长期规则。上面是注入与存储上限；下面列出已建立记忆的会话与各自条数，可「新增会话」「管理」「删除」，长期规则也在弹窗里改。</div>
-  <div data-memory-fields="local"></div>
-</section>
-
-<section id="section-memory-tools" class="card span-all">
-  <h2>工具与交接</h2>
-  <div class="meta">这些开关只影响 AI 能不能用对应工具 / 能力，不改变已存的记忆数据。</div>
-  <div data-memory-fields="tools"></div>
-</section>
-
-<section id="section-memory-ingest" class="card span-all">
-  <h2>写回记忆服务</h2>
-  <div class="meta">把 QQ 会话里的用户消息与 AI 回复批量写给记忆服务；队列落盘在 <code>state/memory-ingest-pending.json</code>，服务不可用时保留重试，不阻塞消息处理。</div>
-  <div data-memory-fields="ingest"></div>
-</section>
-
-<section id="section-memory-history" class="card span-all">
-  <h2>最近记忆活动</h2>
-  <div class="meta">最近 20 次注入与主动回忆（时间、来源、字数、状态）。</div>
-  <div data-memory-fields="history"></div>
+<section class="page-stack" data-page="memory">
+  <div id="memoryCards" class="page-stack"></div>
 </section>

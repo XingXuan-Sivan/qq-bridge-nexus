@@ -373,3 +373,22 @@ span.time-field
 | 6 | `badge` / `tabs` / `empty-state` / `collapse`（可选） | 0.5–1 天 | 纯一致性收益 |
 
 合计约 7–8 个工作日；阶段 2 结束时给一次规格确认（有需要改的地方此时改最便宜）。
+
+## 8. 通用组件（2026-11-12）
+
+控制台的非表单展示件统一收在 `public/console/components/`，全部 ESM、零构建；页面只调用函数生成 HTML/DOM，不再各写一套结构。
+
+| 组件 | 入口 | 说明 |
+| --- | --- | --- |
+| 标签 | `tag/tag.js` | `tag(text, { type, size, title })`；`type` = default/primary/success/warning/danger/info。旧 `.pill*` 已删除，页面不再手写标签样式。 |
+| 提示条 | `alert/alert.js` | `alertHtml({ id, type, title, description, closable, persist })`；`persist` = local（刷新后仍关闭）/ session（本次会话）/ none。`hydrateAlerts(root)` 负责恢复关闭状态，`resetAlert(id)` 可重新显示。 |
+| 浮层提示 | `message/message.js` | `toast({ type, title, message, duration })`；旧 `showConsoleToast` 保留为薄包装。`setMsg/clearMsg` 仍用于表单行内状态。 |
+| 折叠面板 | `collapse/collapse.js` | `collapseHtml({ id, title, body, open })`；页面级展开记忆由 `initGroups()` 统一负责（不要再用 `persist` 叠一套存储）。 |
+| 卡片 | `card/card.js` | `cardHtml({ id, title, note, description, actions, body, footer })`、`mountCard(host, spec)`。页面卡片一律由 JS 生成，`page.html` 只留容器与宿主。 |
+| 卡片列表 | `tile/tile.js` | `tileHtml({ id, title, badges, description, tags, error, actions, interactive })`；插件页、人格页共用。 |
+| 消息弹窗 | `message-box/message-box.js` | `confirmBox({...}) → Promise<boolean>`、`alertBox({...}) → Promise<void>`；替代控制台页面内的原生 `confirm/alert`（401 门页除外）。表单弹窗仍用 `modal/modal.js`。 |
+
+约定：
+- 颜色只走 `css/components.css` 的 token（`--pill-*` / `--warn-*` / `--ok` / `--danger`），页面不新增配色。
+- 新页面不得再手写 `.card` 外壳、`.tag`、`<details class="settings-group">` 或原生 `confirm/alert`；静态门禁会拦。
+- 组件返回的是 HTML 字符串时，调用方负责转义动态文本（组件内部只转义自身接收的 title/text）。

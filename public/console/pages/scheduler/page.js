@@ -2,6 +2,7 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
+import { cardHtml } from '../../components/card/card.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initDateFields } from '../../components/date/date.js';
@@ -36,6 +37,47 @@ function schedMsg(id, text, ok) {
   el.textContent = text;
   const base = el.classList.contains('modal-status') ? 'modal-status' : 'form-actions-status';
   el.className = ok == null ? base : `${base} ${ok ? 'ok' : 'err'}`;
+}
+
+// 卡片外壳统一由 card 组件生成（page.html 只留 #schedulerCards 宿主）。
+// 标题原样保留为 <h3>（cardHtml 只产出 h2），所以放在 body 顶部，字号仍由 .card h3 决定。
+function renderCards() {
+  const host = schedEl('schedulerCards');
+  if (!host) return;
+  host.innerHTML = [
+    cardHtml({
+      body: `<h3>定时任务</h3>
+  <div class="meta">总开关和安全限制只能在这里或管理员命令里改，AI 改不了。时间一律按任务的时区计算，和这台电脑的时区无关。</div>
+
+  <div class="form-inline-bar u-mt-10">
+    <div class="form-inline-fields" data-sched-fields="header" data-sched-layout="inline"></div>
+    <div class="form-inline-tail">
+      <span class="tag tag--info" id="schedStatePill">—</span>
+      <div data-sched-fields="headerActions"></div>
+    </div>
+  </div>`,
+    }),
+    cardHtml({
+      body: `<h3>谁可以登记</h3>
+  <div class="meta">AI 只能在下面允许的范围里登记任务；登记后先暂停，需要你确认。</div>
+  <div data-sched-fields="policy" data-sched-columns="1"></div>`,
+    }),
+    cardHtml({
+      body: `<h3>安全限制</h3>
+  <div class="meta">每个账号最多能挂多少任务、多久跑一次，防止失控；免打扰只拦定时任务发往群的消息。</div>
+  <div data-sched-fields="limits"></div>
+  <div data-sched-fields="limitsActions"></div>`,
+    }),
+    cardHtml({
+      body: `<h3>任务列表</h3>
+  <div data-sched-fields="taskList"></div>`,
+    }),
+    cardHtml({
+      body: `<h3>执行记录</h3>
+  <div class="meta">最近 100 条；管理员私聊里也可以用 <code>/remind</code> 管理。在二代仿真里也可以直接跟 AI 说「每天六点给我发个早安」，AI 登记后桥接会另发一条确认给你。</div>
+  <div data-sched-fields="history"></div>`,
+    }),
+  ].join('');
 }
 
 /** 把 fields.js 的规格渲染进每个 `<div data-sched-fields="…">`。init() 里第一件事。 */
@@ -413,7 +455,8 @@ function schedPreview() {
 }
 
 export function init() {
-  // 先按规格把控件渲染出来，后面所有 schedEl(id) 才取得到节点。
+  // 先拼卡片外壳，再按规格把控件渲染出来，后面所有 schedEl(id) 才取得到节点。
+  renderCards();
   renderSchedFieldGroups();
   // 开关是 <button role="switch">，点击委托必须显式绑；不绑就点不动（form.js 只在 createForm 里绑）。
   bindSwitches(document.getElementById('section-scheduler'));

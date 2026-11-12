@@ -8,6 +8,7 @@ import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../componen
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { MEMORY_FIELDS } from './fields.js';
+import { cardHtml } from '../../components/card/card.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
 const STATUS_TEXT = { injected: '已注入', truncated: '已截断', empty: '空', error: '失败', off: '已关闭', idle: '未调用' };
@@ -645,7 +646,57 @@ function saveIngest() {
   }, 'memIngestMsg');
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 卡片一律由 components/card 的 cardHtml 生成：page.html 只留卡片宿主，
+// 标题、说明段与内容挂载点都在这里声明；body 里的 [data-memory-fields] 再由 init() 渲染。
+const MEMORY_CARDS = [
+  {
+    id: 'section-memory-inject',
+    title: '记忆注入',
+    description: '每次唤醒只选一个 provider 当记忆来源；没有预热好的缓存时按空块处理，不影响其它注入块。记忆块本身在「插件 → 注入块」里显示为 <code>core-memory</code>，可单独关掉或改上限。',
+    body: '<div data-memory-fields="inject"></div>',
+  },
+  {
+    id: 'section-memory-providers',
+    title: '记忆提供者',
+    description: '本机轻量记忆（<code>local-digest</code>）是内置默认实现，同步、零延迟；soulkit（<code>soulkit</code>）通过插件接入，异步预热、失败静默。缓存与超时都在内核注册表里，provider 自己不管。',
+    body: '<div data-memory-fields="providers"></div>',
+  },
+  {
+    id: 'section-memory-local',
+    title: '本机轻量记忆',
+    description: '按会话存放：话题、想说的话、对群友的印象、管理员长期规则。上面是注入与存储上限；下面列出已建立记忆的会话与各自条数，可「新增会话」「管理」「删除」，长期规则也在弹窗里改。',
+    body: '<div data-memory-fields="local"></div>',
+  },
+  {
+    id: 'section-memory-tools',
+    title: '工具与交接',
+    description: '这些开关只影响 AI 能不能用对应工具 / 能力，不改变已存的记忆数据。',
+    body: '<div data-memory-fields="tools"></div>',
+  },
+  {
+    id: 'section-memory-ingest',
+    title: '写回记忆服务',
+    description: '把 QQ 会话里的用户消息与 AI 回复批量写给记忆服务；队列落盘在 <code>state/memory-ingest-pending.json</code>，服务不可用时保留重试，不阻塞消息处理。',
+    body: '<div data-memory-fields="ingest"></div>',
+  },
+  {
+    id: 'section-memory-history',
+    title: '最近记忆活动',
+    description: '最近 20 次注入与主动回忆（时间、来源、字数、状态）。',
+    body: '<div data-memory-fields="history"></div>',
+  },
+];
+
+function renderCards() {
+  const host = document.getElementById('memoryCards');
+  if (!host) return;
+  host.innerHTML = MEMORY_CARDS.map((card) => cardHtml(card)).join('');
+}
+
 export function init() {
+  // 卡片外壳先长出来：下面所有 [data-memory-fields] 查询都依赖这些节点。
+  renderCards();
   document.querySelectorAll('[data-memory-fields]').forEach((host) => {
     const spec = MEMORY_FIELDS[host.dataset.memoryFields];
     if (spec) renderFields(host, spec, { columns: 2 });

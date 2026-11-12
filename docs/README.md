@@ -22,6 +22,7 @@
 | [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) | **扩展平台实施偏差台账**：只记与 `EXTENSION_PLATFORM.md` 不一致的临时改动、分期调整、验收缺口与回写设计检查 | ✅ 现行（2026-11-08 起，实施前先读） |
 | [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表（P3a）：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands`、管理行为页与 P3b 预留 | ✅ 与当前实现同步（2026-11-03） |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界约定**：静态资源路径穿越守卫、未启用=404 与先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复顺序、插件 UI 沙箱与样式隔离、验收清单 | ✅ 现行约定（2026-11-04 起，改路由/静态资源/插件 UI 前必读） |
+| [CONSOLE_COMPONENTS.md](CONSOLE_COMPONENTS.md) | **控制台通用组件库**：`tag` / `alert` / `message` / `collapse` / `card` / `tile` / `message-box` 的 API、迁移规则（卡片全 JS 生成、`.pill` 已改 `.tag`）与门禁断言 | ✅ 现行（2026-11-12 起，改控制台组件前先看） |
 | [CONSOLE_UI.md](CONSOLE_UI.md) | **控制台前端结构与组件约定**：零构建下的目录分层、`components/<name>/{js,css}` 规范、组件 css 自包含、页面专属组件何时上提，以及搜索框「漏写 `type` 导致退回浏览器默认外观」的根因与修法 | 🚧 约定已定、迁移进行中（2026-11-06 起，改 `public/console/` 前先看） |
 | [CONSOLE_UI_REWORK.md](CONSOLE_UI_REWORK.md) | **基础层与组件层改造清单**：主题映射（163 令牌 → 语义别名 + 间距/断点）、`grid.css` 与 input 选择器根因改造、`field`/`button`/`select`/`badge`/`empty-state`/`tabs`/`collapse` 的 API 与首批迁移页、**必须不变的 225 个 DOM id 与 25 条接口契约**、需要重录的门禁与截图 | 📋 清单已定、未动工（2026-11-06） |
 | [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂（文本/数字/密码/多行/下拉/单选组/多选组/复选/开关/文件/**日期/时间/日期时间/时间区间**/只读/动作区）、`createForm()` 内核（类型化取值、字段与跨字段校验、条件显示、提交态、脏值守卫）、**字段注解（说明/警告/危险/文档）与块级提示**、a11y 约定、以 `social-v2`（130 控件）为试点的两步迁移法 | 📋 规格已定、未动工（2026-11-06）；优先于其余组件 |

@@ -185,10 +185,8 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
 
 test('③ 控制台：静默开关卡片里有定时静默面板；旧「静默期间」设置已移除', () => {
   const html = readConsoleSource();
-  const sec = html.slice(html.indexOf('<section id="section-silent"'), html.indexOf('</section>', html.indexOf('<section id="section-silent"')));
-  // 控件已搬进 pages/overview/fields.js：卡片里只剩宿主 div，控件 id / 选项都在整份控制台源码里断言。
-  // 工厂生成的控件只有 `name: 'x'`（渲染时才变成 id），手写 HTML 里的才是 `id="x"`。
-  assert.match(sec, /data-overview-fields="silence"/);
+  // 卡片外壳与静默面板都由 pages/config 生成（cardHtml），控件在 fields 规格里；整份源码里断言即可。
+  assert.match(html, /data-overview-fields="silence"/);
   const hasId = (id) => html.includes(`id="${id}"`) || html.includes(`name: '${id}'`) || html.includes(`id: '${id}'`);
   for (const id of ['silentToggle', 'silenceStatePill', 'manualSilenceStages', 'manualAdminApplies', 'silenceEnabled', 'silenceTz', 'silenceRanges', 'silenceAdd', 'silencePeak', 'silenceSave', 'silenceUpcoming']) assert.ok(hasId(id), id);
   // 开启与关闭合并成一个按钮后，不应再留旧的两个按钮。

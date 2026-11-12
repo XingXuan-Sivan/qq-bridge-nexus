@@ -1,28 +1,6 @@
-      <section class="card span-all">
-      <h2>桥接插件</h2>
-      <div class="meta">可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。</div>
-      <div data-plugins-fields="toolbar"></div>
-      <div data-plugins-fields="list"></div>
-      <div data-plugins-fields="detail"></div>
-      </section>
-
-      <section class="card span-all is-group">
-      <details class="settings-group" id="pluginRuntimeGroup">
-        <summary>运行设置</summary>
-        <div class="settings-content">
-          <div data-plugins-fields="runtime"></div>
-        </div>
-      </details>
-      </section>
-
-      <section class="card span-all is-group">
-      <details class="settings-group">
-        <summary>安装插件</summary>
-        <div class="settings-content">
-          <div class="meta">安装即执行代码：只在本机控制台操作，每次安装 / 卸载都写审计。zip 里必须恰好有一个含 <code>plugin.json</code> 的目录；上限 5MB，不允许符号链接。</div>
-          <div data-plugins-fields="install"></div>
-          <div data-plugins-fields="installPath"></div>
-        </div>
-      </details>
-      </section>
-    <!-- 页面片段由路由器按需注入（pages/<id>/page.html）：这里只留容器，不放内容。 -->
+<!-- 卡片外壳由 page.js 的 renderCards() 用 components/card/card.js 生成，这里只留宿主。
+     宿主用 .page-stack（display:contents）让卡片继续做 main 栅格的直接子项，和注入前一样。 -->
+<section class="page-stack" data-page="plugins">
+  <div id="pluginsCards" class="page-stack"></div>
+</section>
+<!-- 页面片段由路由器按需注入（pages/<id>/page.html）：这里只留容器，不放内容。 -->

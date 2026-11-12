@@ -6,6 +6,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables, tableHtml } from '../../components/table/table.js';
 import { bindSwitches, getSwitch, renderFields } from '../../components/form/form.js';
 import { onPageRefresh } from '../../js/router.js';
+import { cardHtml } from '../../components/card/card.js';
 import { PROMPT_BLOCK_FIELDS } from './fields.js';
 
 const SLOT_LABEL = {
@@ -280,6 +281,32 @@ function hostFor(name) {
   return document.querySelector(`[data-prompt-blocks-fields="${name}"]`);
 }
 
+// 卡片外壳统一由 card 组件生成（page.html 只留 #promptBlocksCards 宿主）。
+// 说明文字走 description（<p class="meta">，与原来的 <div class="meta"> 视觉一致）。
+function renderCards() {
+  const host = document.getElementById('promptBlocksCards');
+  if (!host) return;
+  host.innerHTML = [
+    cardHtml({
+      title: '注入块',
+      description: '每次唤醒的提示词由这些块按「槽位 → 优先级」拼成，块之间统一空一行。关掉一块，当轮就不带它、预算立即回收；单块上限留空表示跟随「单块默认上限」（0 = 不限）。改完点「保存修改」，下一轮唤醒生效。',
+      body: '<div data-prompt-blocks-fields="summary"></div>',
+    }),
+    cardHtml({
+      title: '块清单',
+      description: '表格按渲染顺序排列。预算填 0 表示不限：总预算用完时，排在后面的块整块跳过；单块默认上限只兜底「没有单独配过上限」的内置块。',
+      body: `<div data-prompt-blocks-fields="limits"></div>
+      <div data-prompt-blocks-fields="table"></div>`,
+    }),
+    cardHtml({
+      title: '按会话预览',
+      description: '用真实会话拼一遍完整提示词，只读：不会取走托付与定时说明，也不记账。',
+      body: `<div data-prompt-blocks-fields="preview"></div>
+      <div data-prompt-blocks-fields="previewOut"></div>`,
+    }),
+  ].join('');
+}
+
 function renderAll() {
   renderFields(hostFor('summary'), PROMPT_BLOCK_FIELDS.summary, { columns: 2 });
   renderFields(hostFor('limits'), PROMPT_BLOCK_FIELDS.limits, { columns: 2 });
@@ -289,6 +316,8 @@ function renderAll() {
 }
 
 export function init() {
+  // 先拼卡片外壳：renderAll() 与下面的 host 查询都依赖这些 [data-prompt-blocks-fields] 宿主。
+  renderCards();
   renderAll();
   // 表格每轮 load() 都会重建内部 DOM，所以监听挂在不重建的容器上。
   const host = hostFor('table');

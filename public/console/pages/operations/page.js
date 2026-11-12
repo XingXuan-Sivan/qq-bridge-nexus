@@ -5,6 +5,39 @@ import { api } from '../../js/api.js';
 import { renderFields } from '../../components/form/form.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { OPERATIONS_FIELDS } from './fields.js';
+import { cardHtml } from '../../components/card/card.js';
+
+// 卡片外壳由 components/card 的 cardHtml 生成，page.html 只留 #operationsCards 宿主；
+// 卡片里的 [data-operations-fields] 挂载点交给 renderOperationsFieldGroups() 渲染。
+const OPERATIONS_CARDS = [
+  {
+    id: 'section-activity',
+    title: '活动日志（最近 100 条）',
+    note: '每 3 秒自动同步',
+    body: '<div data-operations-fields="activity"></div>',
+  },
+  {
+    id: 'section-test-send',
+    title: '测试发送',
+    body: '<div data-operations-fields="testSend"></div>',
+  },
+  {
+    id: 'section-notify',
+    title: '后台控制端引导',
+    body: '<div data-operations-fields="notify"></div>',
+  },
+  {
+    id: 'section-maintenance',
+    title: '桥接控制',
+    body: '<div data-operations-fields="maintenance"></div>',
+  },
+];
+
+function renderCards() {
+  const host = document.getElementById('operationsCards');
+  if (!host) return;
+  host.innerHTML = OPERATIONS_CARDS.map((card) => cardHtml(card)).join('');
+}
 
 // 静态控件按字段规格渲染：页面只留卡片与宿主，渲染之后再取 id。
 function renderOperationsFieldGroups() {
@@ -15,6 +48,7 @@ function renderOperationsFieldGroups() {
 }
 
 export function init() {
+  renderCards();
   renderOperationsFieldGroups();
   document.getElementById('tsSend').addEventListener('click', async () => {
     const r = await api('/api/test-send', 'POST', {

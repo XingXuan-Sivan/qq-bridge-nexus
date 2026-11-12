@@ -19,6 +19,7 @@ export function tileHtml({
   tags = [],
   error = '',
   actions = '',
+  body = '',
   interactive = false,
   className = '',
 } = {}) {
@@ -28,10 +29,12 @@ export function tileHtml({
     .join(' ');
   const badgeHtml = badges.filter(Boolean).join('');
   const tagHtml = tags.filter(Boolean).join('');
-  return `<div class="${classes}"${attrs ? ` ${attrs}` : ''}>
+  const inner = body || `
     <div class="tile-head"><strong>${esc(title)}</strong>${badgeHtml}</div>
     ${description ? `<div class="meta">${esc(description)}</div>` : ''}
-    ${tagHtml ? `<div class="row tile-tags">${tagHtml}</div>` : ''}
+    ${tagHtml ? `<div class="row tile-tags">${tagHtml}</div>` : ''}`;
+  return `<div class="${classes}"${attrs ? ` ${attrs}` : ''}>
+    ${inner}
     ${error ? `<div class="meta err">${esc(error)}</div>` : ''}
     ${actions ? `<div class="row tile-actions">${actions}</div>` : ''}
   </div>`;

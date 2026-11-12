@@ -8,6 +8,8 @@ import { dataTableHtml, initDataTables, selectCellHtml } from '../../components/
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { SLANG_FIELDS } from './fields.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
+import { cardHtml } from '../../components/card/card.js';
+import { collapseHtml } from '../../components/collapse/collapse.js';
 
 let slangEntriesCache = [];
 let slangSelected = new Set();
@@ -282,7 +284,55 @@ function loadSlangConfig() {
   }).catch(() => {});
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 两张卡片都由 components/card 的 cardHtml 生成；page.html 只剩两个宿主，
+// 中间的「黑话配置」折叠分组不是卡片，仍留在 HTML 里。
+// 第二张卡的 body 里保留原来的分栏挂载点：[data-slang-fields] 由 init() 填规格，
+// #slangPanel* 与 #slang*List 是表格的挂载点，setSlangTab/refreshSlang 按 id 取。
+const SLANG_INTRO_CARD = {
+  title: '群聊黑话 / 网络用语库',
+  actions: '<span class="form-actions-status" id="slangMsg"></span>',
+  description: 'DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。'
+    + '候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；'
+    + '确认后的词条会写入「黑话提示词」，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。',
+};
+
+const SLANG_LIBRARY_CARD = {
+  title: '词库',
+  body: '<div data-slang-fields="tabs"></div>'
+    + '<div class="slang-panel active" id="slangPanelCandidate">'
+    + '<div data-slang-fields="barCandidate"></div>'
+    + '<div id="slangCandidateList" class="slang-list"></div>'
+    + '</div>'
+    + '<div class="slang-panel" id="slangPanelConfirmed">'
+    + '<div data-slang-fields="barConfirmed"></div>'
+    + '<div id="slangConfirmedList" class="slang-list"></div>'
+    + '</div>'
+    + '<div class="slang-panel" id="slangPanelRejected">'
+    + '<div data-slang-fields="barRejected"></div>'
+    + '<div id="slangRejectedList" class="slang-list"></div>'
+    + '</div>',
+};
+
+function renderCards() {
+  const intro = document.getElementById('slangCards');
+  if (intro) intro.innerHTML = cardHtml(SLANG_INTRO_CARD);
+  const config = document.getElementById('slangConfigPanel');
+  if (config) {
+    config.innerHTML = collapseHtml({
+      id: 'slang-config',
+      className: 'span-all',
+      title: '黑话配置',
+      body: '<div data-slang-fields="config"></div>',
+    });
+  }
+  const library = document.getElementById('slangLibraryCards');
+  if (library) library.innerHTML = cardHtml(SLANG_LIBRARY_CARD);
+}
+
 export function init() {
+  // 卡片外壳先长出来：下面 root.querySelectorAll('[data-slang-fields]') 与所有 getElementById 都依赖它。
+  renderCards();
   const root = document.getElementById('section-slang');
   // 字段规格先渲染，后面所有 getElementById 才取得到节点。
   root.querySelectorAll('[data-slang-fields]').forEach((host) => {

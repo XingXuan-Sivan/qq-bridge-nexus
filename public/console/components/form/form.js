@@ -2,6 +2,7 @@
 // 设计口径见 docs/CONSOLE_FORMS.md。所有工厂返回 HTML 字符串，与 components/table 的 dataTableHtml 一致；
 // 事件绑定、校验、回填交给 createForm()，页面不再自己读 DOM。
 import { esc } from '../../js/ui.js';
+import { alertHtml } from '../alert/alert.js';
 import { dataTableHtml } from '../table/table.js';
 
 /* ---------------------------------------------------------------- 基础工具 */
@@ -337,7 +338,9 @@ export function formActions({ primary = '保存', secondary = [], sticky = false
 }
 
 export function formCallout({ tone = 'info', title = '', body = '' }) {
-  return `<div class="form-callout" data-tone="${esc(tone)}"${tone === 'danger' ? ' role="alert"' : ''}>${title ? `<strong>${esc(title)}</strong>` : ''}${body ? `<span>${esc(body)}</span>` : ''}</div>`;
+  // 统一走 Alert 组件：颜色、图标与圆角只维护一处。
+  const type = tone === 'danger' ? 'danger' : tone === 'warn' ? 'warning' : tone === 'success' ? 'success' : 'info';
+  return alertHtml({ type, title, description: body });
 }
 
 const FIELD_FACTORIES = {

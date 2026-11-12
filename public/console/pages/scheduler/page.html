@@ -1,36 +1,6 @@
-<div class="card span-all">
-  <h2>定时任务</h2>
-  <div class="meta">总开关和安全限制只能在这里或管理员命令里改，AI 改不了。时间一律按任务的时区计算，和这台电脑的时区无关。</div>
-
-  <div class="form-inline-bar u-mt-10">
-    <div class="form-inline-fields" data-sched-fields="header" data-sched-layout="inline"></div>
-    <div class="form-inline-tail">
-      <span class="tag tag--info" id="schedStatePill">—</span>
-      <div data-sched-fields="headerActions"></div>
-    </div>
-  </div>
-</div>
-
-<div class="card span-all">
-  <h3>谁可以登记</h3>
-  <div class="meta">AI 只能在下面允许的范围里登记任务；登记后先暂停，需要你确认。</div>
-  <div data-sched-fields="policy" data-sched-columns="1"></div>
-</div>
-
-<div class="card span-all">
-  <h3>安全限制</h3>
-  <div class="meta">每个账号最多能挂多少任务、多久跑一次，防止失控；免打扰只拦定时任务发往群的消息。</div>
-  <div data-sched-fields="limits"></div>
-  <div data-sched-fields="limitsActions"></div>
-</div>
-
-<div class="card span-all">
-  <h3>任务列表</h3>
-  <div data-sched-fields="taskList"></div>
-</div>
-
-<div class="card span-all">
-  <h3>执行记录</h3>
-  <div class="meta">最近 100 条；管理员私聊里也可以用 <code>/remind</code> 管理。在二代仿真里也可以直接跟 AI 说「每天六点给我发个早安」，AI 登记后桥接会另发一条确认给你。</div>
-  <div data-sched-fields="history"></div>
-</div>
+<!-- 卡片外壳由 page.js 的 renderCards() 用 components/card/card.js 生成，这里只留宿主。
+     宿主用 .page-stack（display:contents）让卡片继续做 main 栅格的直接子项，和注入前一样。
+     这几张卡的标题原本是 h3，cardHtml 只产出 h2，所以标题留在 body 顶部，字号仍由 .card h3 管。 -->
+<section class="page-stack" data-page="scheduler">
+  <div id="schedulerCards" class="page-stack"></div>
+</section>

@@ -18,6 +18,7 @@ import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobal
 import { initVoiceSection } from './voice-section.js';
 import { mountCompact, compactSection } from './compact.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
+import { cardHtml } from '../../components/card/card.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
@@ -523,9 +524,103 @@ function showConfigSection(name, { persist = true } = {}) {
   if (name === 'security') void loadPermission();
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 卡片一律由 components/card 的 cardHtml 生成：page.html 只留每个标签面板的宿主，
+// 标题、副标题（data-note）、说明段与卡头按钮都在这里声明。
+// body 里只放挂载点（[data-overview-fields] / [data-access-fields] / [data-config-compact]），
+// 控件仍由 fields 规格渲染，页面不手写。
+const CONFIG_CARDS = {
+  configRuntimeCards: [
+    {
+      id: 'section-personabehavior',
+      title: '人格与行为',
+      note: '下一条消息生效',
+      body: '<div data-overview-fields="runtimeDefault"></div>'
+        + '<div data-overview-fields="roleDefault"></div>'
+        + '<div data-overview-fields="personaSettings"></div>',
+    },
+    {
+      id: 'section-sendlimit',
+      title: '发言上限',
+      note: '保存后立即生效',
+      description: '二代仿真里每个群 / 私聊 AI 最多能发多少条，防止刷屏和账号风控；填 0 表示不限。',
+      body: '<div data-overview-fields="sendLimit"></div>',
+    },
+    {
+      id: 'section-dsh',
+      title: 'DSH 模型与思考强度',
+      note: '下一条消息生效',
+      description: '当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span>',
+      body: '<div data-overview-fields="dsh"></div>',
+    },
+    {
+      id: 'section-compact-config',
+      title: '上下文压缩',
+      note: '保存后下一轮结束时生效',
+      body: '<div data-config-compact></div>',
+    },
+  ],
+  configSecurityCards: [
+    {
+      title: '所有者与管理员',
+      description: '按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里保留所有者与管理员列表。'
+        + '<strong>所有者</strong>（ownerQQ）全局唯一、拥有最高权限，可在自己的私聊里审批、进入 closed-agent；'
+        + '<strong>管理员</strong>是另一组按人配置的权限，只在各自私聊生效。',
+      body: '<div data-access-fields="whitelist"></div>',
+    },
+    {
+      id: 'section-permission',
+      title: '权限级别',
+      note: '保存后立即生效',
+      description: '级别到 DSH 预设只有一份映射：只读 → read-only、工作区读写 → workspace-write、'
+        + '完全访问 · 每次确认 → qq-full-ask、完全访问 · 短时授权 → danger-full-access。'
+        + 'full 档只有总开关打开、且该会话拿到一次性授权时才真的钉上去。',
+      body: '<div data-overview-fields="permission"></div>',
+    },
+    {
+      title: '访问令牌',
+      note: '保存后立即生效',
+      body: '<div data-access-fields="token"></div>',
+    },
+    {
+      title: '安全提示',
+      body: '<div data-access-fields="security"></div>',
+    },
+  ],
+  configAccessCards: [
+    {
+      title: '全局准入',
+      description: '这份名单是全局总闸门，会话内勾选改的也是它。',
+      // 卡头右侧：保存状态与保存按钮；id 与原来一致，init() 里的监听按 id 取节点。
+      // 仍用 .row-actions 包一层（原结构如此）：cardHtml 的 actions 落在 .row 里，
+      // 而窄屏下 .row>.meta 会被强制换行，包一层能保持状态文字与按钮同一行。
+      actions: '<div class="row-actions">'
+        + '<span class="meta" id="globalAccessSaveMsg" role="status"></span>'
+        + '<button class="btn primary" type="button" id="globalAccessSave">保存准入</button>'
+        + '</div>',
+      body: '<div data-sessions-access></div>',
+    },
+    {
+      id: 'section-silent',
+      title: '静默与发言限制',
+      body: '<div data-overview-fields="silence"></div>',
+    },
+  ],
+};
+
+function renderCards() {
+  for (const [hostId, cards] of Object.entries(CONFIG_CARDS)) {
+    const host = $(hostId);
+    if (!host) continue;
+    host.innerHTML = cards.map((card) => cardHtml(card)).join('');
+  }
+}
+
 // ── 初始化 ──────────────────────────────────────────────────────────────────
 export function init() {
-  // 先把字段规格渲染成 DOM，后面所有 $(id) 才取得到节点。
+  // 卡片外壳先长出来：下面所有 $(id) / [data-*] 查询（含 access-section 与 compact）都依赖这些节点。
+  renderCards();
+  // 再把字段规格渲染成 DOM，后面所有 $(id) 才取得到节点。
   renderOverviewFieldGroups();
   // 五个水平分区标签（.page-tabs，与记忆页同一套组件）
   document.querySelectorAll('[data-config-section]').forEach((button) => {

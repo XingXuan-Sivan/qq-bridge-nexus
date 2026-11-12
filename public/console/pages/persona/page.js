@@ -8,6 +8,8 @@ import { confirmBox } from '../../components/message-box/message-box.js';
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
+import { cardHtml } from '../../components/card/card.js';
+import { tileHtml } from '../../components/tile/tile.js';
 
 const model = { items: [], providers: [], providerErrors: {}, default: null, limits: null };
 let roleFilter = 'all';
@@ -65,18 +67,19 @@ function actionsHtml(item) {
     </div>`;
 }
 
-function cardHtml(item) {
+function roleCardHtml(item) {
   const sub = item.source === 'local'
     ? `${item.chars ?? 0} 字符`
     : `${item.chars ?? '—'} 字符 · ${esc(item.description || '外部人格卡')}`;
-  return `
-    <div class="tile" data-uid="${esc(item.uid)}">
+  return tileHtml({
+    id: item.uid,
+    body: `
       <button class="tile-body" type="button" data-open="1" data-uid="${esc(item.uid)}">
         <div class="tile-head"><strong>${esc(item.name)}</strong>${badgesHtml(item)}</div>
         <small>${sub}</small>
-      </button>
-      ${actionsHtml(item)}
-    </div>`;
+      </button>`,
+    actions: actionsHtml(item),
+  });
 }
 
 function renderRoleList() {
@@ -95,7 +98,7 @@ function renderRoleList() {
     host.innerHTML = '<div class="empty-state">没有符合条件的人格卡。外部服务离线时，只有「用过的缓存卡」会显示出来。</div>';
     return;
   }
-  host.innerHTML = items.map(cardHtml).join('');
+  host.innerHTML = items.map(roleCardHtml).join('');
 }
 
 function renderStatus() {
@@ -411,7 +414,37 @@ function bind() {
   });
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 卡片外壳由 components/card 的 cardHtml 生成，page.html 只留 #personaCards 宿主；
+// 人格卡墙（#roleList）与工具栏（#roleToolbar）仍是 body 里的挂载点，由 renderToolbar() 填充。
+const PERSONA_CARDS = [
+  {
+    title: '人格与角色',
+    description: '当前人格：<b id="roleText">-</b> <span class="tag tag--info" id="roleModeText">读取中…</span>',
+    body: `<div class="layer-note">
+      <strong>两层提示词的分工</strong>
+      <ol>
+        <li><b>仿真提示词</b>（预设内置）：AI 怎么调工具、怎么参与群聊 —— <i>行为与协议</i>。</li>
+        <li><b>人格提示词</b>（本页编辑）：AI 是谁、什么性格、怎么说话 —— <i>人设与语气</i>。</li>
+      </ol>
+      <p>每条消息发给 AI 时，按 <code>仿真提示词 → 人格提示词 → 本轮消息</code> 的顺序拼装。人格层保存即生效；仿真层需重启 DSH。</p>
+    </div>`,
+  },
+  {
+    title: '人格列表',
+    body: '<div id="roleToolbar"></div><div id="roleList" class="tile-list">加载中…</div>',
+  },
+];
+
+function renderCards() {
+  const host = document.getElementById('personaCards');
+  if (!host) return;
+  host.innerHTML = PERSONA_CARDS.map((card) => cardHtml(card)).join('');
+}
+
 export function init() {
+  // 卡片外壳先长出来：#roleText / #roleToolbar / #roleList 都在卡片 body 里。
+  renderCards();
   renderToolbar();
   bind();
   void refresh();

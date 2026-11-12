@@ -9,6 +9,7 @@ import { confirmBox } from '../../components/message-box/message-box.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal } from '../../components/modal/modal.js';
 import { mountPromptCard } from '../../components/prompt-card/prompt-card.js';
+import { cardHtml } from '../../components/card/card.js';
 import { behaviorFields, fillBehaviorForm, readBehaviorForm } from './behavior-form.js';
 import { BEHAVIOR_FIELDS } from './fields.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
@@ -249,7 +250,77 @@ function openArchiveModal({ mode, source = null }) {
   });
 }
 
+// ── 卡片外壳 ────────────────────────────────────────────────────────────────
+// 九个卡片外壳全部由 components/card 的 cardHtml 生成；page.html 只剩四个标签面板与卡片宿主。
+// 面板按顺序拆宿主：#behaviorFormPanel（档案字段组）夹在「基本信息」卡和「行为提示词」卡之间，
+// #capabilityEditor 在「能力预设」卡之后，所以 behaviors / capabilities 各用两个宿主。
+// 两张提示词卡没有标题和正文：它们只是 mountPromptCard() 的宿主（id 与 className 保持原样）。
+const BEHAVIOR_CARDS = {
+  behaviorPlatformCards: [
+    {
+      title: '平台',
+      description: '用户侧适配层：行为档案、平台提示词与工具清单都在 <code>profiles/platforms/&lt;id&gt;/</code>。',
+      body: '<div id="platformTable"></div>',
+    },
+    { id: 'platformPromptCard', className: 'prompt-card' },
+    {
+      title: '平台工具',
+      description: '只读清单（<code>tools.yml</code>）；会话实际能用哪些由运行方案与会话权限级别决定。',
+      body: '<div id="platformTools"></div>',
+    },
+  ],
+  behaviorPlansCards: [
+    {
+      title: '运行方案',
+      description: '会话可在「会话与审批 › 详情」单独指定；没指定的用「全局配置 › 默认运行方案」。',
+      body: '<div data-runtime-fields="summary"></div>',
+    },
+    {
+      title: '方案清单',
+      description: '内置方案只读，复制后可改；自定义方案随能力预设一起管理。',
+      body: '<div data-runtime-fields="table"></div>',
+    },
+  ],
+  behaviorDocCards: [
+    {
+      title: '档案清单',
+      description: '档案是资源，被运行方案的「行为」字段引用；改名不影响引用，删除前先确认没有被方案使用。',
+      body: '<div data-behavior-fields="list"></div>',
+    },
+    {
+      title: '基本信息',
+      description: '写入 <code>profiles/platforms/qq/behaviors</code>，重启桥接后生效。',
+      body: '<div class="form-stack" data-behavior-fields="basics"></div>'
+        + '<div class="form-actions">'
+        + '<button class="btn primary" type="button" id="behaviorFormSave">保存</button>'
+        + '<button class="btn" type="button" id="behaviorFormReset" hidden>重置</button>'
+        + '<span class="meta" id="behaviorFormMsg" role="status"></span>'
+        + '</div>',
+    },
+  ],
+  behaviorPromptCards: [
+    { id: 'behaviorPromptCard', className: 'prompt-card' },
+  ],
+  behaviorCapabilityCards: [
+    {
+      title: '能力预设',
+      description: '唯一源：<code>profiles/agent-platforms/dsh/capabilities/&lt;id&gt;.yml</code>；Agent 模块由 Agent 预设决定。',
+      body: '<div id="capabilityTable"></div>',
+    },
+  ],
+};
+
+function renderCards() {
+  for (const [hostId, cards] of Object.entries(BEHAVIOR_CARDS)) {
+    const host = document.getElementById(hostId);
+    if (!host) continue;
+    host.innerHTML = cards.map((card) => cardHtml(card)).join('');
+  }
+}
+
 export function init() {
+  // 卡片外壳先长出来：下面 [data-behavior-fields]、#capabilityTable、#behaviorFormSave 等都在卡片里。
+  renderCards();
   const listHost = document.querySelector('[data-behavior-fields="list"]');
   if (listHost) renderFields(listHost, BEHAVIOR_FIELDS.list.fields, { columns: 1 });
 

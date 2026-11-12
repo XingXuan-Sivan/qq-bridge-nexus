@@ -171,8 +171,8 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
 
 test('⑤ 控制台：全局配置的「行为与模型」有上下文压缩卡片', () => {
   const html = readConsoleSource();
-  // 卡片宿主在 config/page.html，控件由 pages/config/compact.js 生成。
-  assert.match(html, /id="section-compact-config"/);
+  // 卡片外壳由 pages/config/page.js 的 cardHtml({ id: 'section-compact-config' }) 生成，page.html 只留宿主。
+  assert.match(html, /id="section-compact-config"|id: 'section-compact-config'/, '压缩卡片（JS 生成或静态）应存在');
   assert.match(html, /data-config-compact/);
   assert.match(html, /行为与模型/);
   // 控件已改成字段规格（compact.js 的 FIELDS），源文件里不再有拼好的 input HTML；

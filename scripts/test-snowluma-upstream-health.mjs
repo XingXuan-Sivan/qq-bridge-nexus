@@ -172,7 +172,7 @@ test('/api/status 暴露 snowluma 健康快照，且只给操作者', () => {
 });
 
 test('控制台有对应的告警条与卡片', () => {
-  assert.match(consoleHtml, /id="snowlumaWarn"/, '控制台应有 SnowLuma 告警条');
+  assert.match(consoleHtml, /snowlumaWarn/, '控制台应有 SnowLuma 告警条');
   assert.match(consoleHtml, /renderSnowlumaHealth\(/, '告警条必须被接线到 /api/status 的渲染路径');
   assert.match(consoleHtml, /\[Hook\]/, '告警文案必须把排查方向指向 SnowLuma 的 [Hook] 日志');
 });

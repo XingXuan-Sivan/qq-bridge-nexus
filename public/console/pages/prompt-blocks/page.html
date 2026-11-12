@@ -1,19 +1,5 @@
-<section class="card span-all">
-      <h2>注入块</h2>
-      <div class="meta">每次唤醒的提示词由这些块按「槽位 → 优先级」拼成，块之间统一空一行。关掉一块，当轮就不带它、预算立即回收；单块上限留空表示跟随「单块默认上限」（0 = 不限）。改完点「保存修改」，下一轮唤醒生效。</div>
-      <div data-prompt-blocks-fields="summary"></div>
-      </section>
-
-      <section class="card span-all">
-      <h2>块清单</h2>
-      <div class="meta">表格按渲染顺序排列。预算填 0 表示不限：总预算用完时，排在后面的块整块跳过；单块默认上限只兜底「没有单独配过上限」的内置块。</div>
-      <div data-prompt-blocks-fields="limits"></div>
-      <div data-prompt-blocks-fields="table"></div>
-      </section>
-
-      <section class="card span-all">
-      <h2>按会话预览</h2>
-      <div class="meta">用真实会话拼一遍完整提示词，只读：不会取走托付与定时说明，也不记账。</div>
-      <div data-prompt-blocks-fields="preview"></div>
-      <div data-prompt-blocks-fields="previewOut"></div>
-      </section>
+<!-- 卡片外壳由 page.js 的 renderCards() 用 components/card/card.js 生成，这里只留宿主。
+     宿主用 .page-stack（display:contents）让卡片继续做 main 栅格的直接子项，和注入前一样。 -->
+<section class="page-stack" data-page="prompt-blocks">
+  <div id="promptBlocksCards" class="page-stack"></div>
+</section>

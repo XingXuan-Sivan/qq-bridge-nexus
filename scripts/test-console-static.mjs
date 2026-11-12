@@ -107,9 +107,11 @@ for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
   const fragment = page?.html ? fs.readFileSync(page.html, 'utf8') : '';
-  ok(/<h2[\s>]/.test(fragment), `pages/${id}/page.html 自带标题`);
   const module = page?.js ? fs.readFileSync(page.js, 'utf8') : '';
+  // 卡片已改为 JS 生成（cardHtml）：标题可以来自 page.js；两条满足其一即可。
+  ok(/<h2[\s>]/.test(fragment) || /cardHtml\(/.test(module), `pages/${id}/page.html 或 page.js 提供卡片标题`);
   ok(/export function init\(/.test(module), `pages/${id}/page.js 导出 init()`);
+  ok(!/class="card[\s"]/.test(fragment), `pages/${id}/page.html 不再手写卡片外壳（应交给 cardHtml）`);
 }
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
@@ -244,6 +246,30 @@ const modalModule = fs.readFileSync(path.join(componentDir, 'modal', 'modal.js')
 for (const fn of ['openModal', 'closeModal', 'isModalOpen', 'wireModal']) {
   ok(new RegExp(`export function ${fn}\\(`).test(modalModule), `modal.js 导出 ${fn}`);
 }
+const componentApis = {
+  'tag/tag.js': ['tag'],
+  'alert/alert.js': ['alertHtml', 'mountAlert', 'hydrateAlerts', 'dismissAlert', 'resetAlert'],
+  'message/message.js': ['toast', 'setMsg', 'clearMsg'],
+  'collapse/collapse.js': ['collapseHtml'],
+  'card/card.js': ['cardHtml', 'mountCard'],
+  'tile/tile.js': ['tileHtml'],
+  'message-box/message-box.js': ['confirmBox', 'alertBox'],
+};
+for (const [file, exportsList] of Object.entries(componentApis)) {
+  const source = fs.readFileSync(path.join(componentDir, file), 'utf8');
+  for (const name of exportsList) {
+    ok(new RegExp(`export function ${name}\\(`).test(source), `${file} 导出 ${name}`);
+  }
+}
+const sharedCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'components.css'), 'utf8');
+for (const selector of ['.tag {', '.tag--danger', '.alert {', '.message-stack {', '.card-foot {', '.modal--sm']) {
+  ok(sharedCss.includes(selector), `components.css 定义 ${selector}`);
+}
+ok(!/^\.pill\b/m.test(sharedCss), 'components.css 不再定义 .pill（已彻底改名 .tag）');
+ok(!/class="pill\b/.test([...fs.readdirSync(path.join(ROOT, 'public', 'console', 'pages'))]
+  .map((id) => path.join(ROOT, 'public', 'console', 'pages', id, 'page.html'))
+  .filter((file) => fs.existsSync(file))
+  .map((file) => fs.readFileSync(file, 'utf8')).join('\n')), '页面 html 不再手写 .pill');
 const uiModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'ui.js'), 'utf8');
 ok(!/function (simpleTable|renderTable)\(/.test(uiModule), 'ui.js 不再自带表格生成器（已搬到 components/table.js）');
 // 搜索框：外观只有一处（components/search-box），页面里每个搜索输入都必须写明 type="search"。

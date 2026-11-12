@@ -5,71 +5,23 @@
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="security">安全</button>
     <button type="button" class="page-tab" role="tab" aria-selected="false" data-config-section="voice">扩展功能</button>
   </div>
+  <!-- 卡片外壳由 page.js 的 renderCards() 用 components/card 生成，这里只留每个面板的宿主。
+       宿主用 .page-stack（display:contents）：生成的 section 直接成为 .config-panel 的 flex 子项，
+       面板间距仍由 .config-panel 的 gap 决定，注入前后布局一致。 -->
   <div class="config-body">
     <section class="config-panel active" data-config-panel="runtime">
-      <section id="section-personabehavior" class="card span-all">
-        <h2 data-note="下一条消息生效">人格与行为</h2>
-        <div data-overview-fields="runtimeDefault"></div>
-        <div data-overview-fields="roleDefault"></div>
-        <div data-overview-fields="personaSettings"></div>
-      </section>
-      <section id="section-sendlimit" class="card span-all">
-        <h2 data-note="保存后立即生效">发言上限</h2>
-        <div class="meta">二代仿真里每个群 / 私聊 AI 最多能发多少条，防止刷屏和账号风控；填 0 表示不限。</div>
-        <div data-overview-fields="sendLimit"></div>
-      </section>
-      <section id="section-dsh" class="card span-all">
-        <h2 data-note="下一条消息生效">DSH 模型与思考强度</h2>
-        <div class="meta">当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span></div>
-        <div data-overview-fields="dsh"></div>
-      </section>
-      <section id="section-compact-config" class="card span-all">
-        <h2 data-note="保存后下一轮结束时生效">上下文压缩</h2>
-        <div data-config-compact></div>
-      </section>
+      <div id="configRuntimeCards" class="page-stack"></div>
     </section>
 
     <section class="config-panel" data-config-panel="security" hidden>
-      <section class="card span-all">
-        <h2>所有者与管理员</h2>
-        <p class="meta">按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里保留所有者与管理员列表。<strong>所有者</strong>（ownerQQ）全局唯一、拥有最高权限，可在自己的私聊里审批、进入 closed-agent；<strong>管理员</strong>是另一组按人配置的权限，只在各自私聊生效。</p>
-        <div data-access-fields="whitelist"></div>
-      </section>
-      <section id="section-permission" class="card span-all">
-        <h2 data-note="保存后立即生效">权限级别</h2>
-        <p class="meta">级别到 DSH 预设只有一份映射：只读 → read-only、工作区读写 → workspace-write、完全访问 · 每次确认 → qq-full-ask、完全访问 · 短时授权 → danger-full-access。full 档只有总开关打开、且该会话拿到一次性授权时才真的钉上去。</p>
-        <div data-overview-fields="permission"></div>
-      </section>
-      <section class="card span-all">
-        <h2 data-note="保存后立即生效">访问令牌</h2>
-        <div data-access-fields="token"></div>
-      </section>
-      <section class="card span-all">
-        <h2>安全提示</h2>
-        <div data-access-fields="security"></div>
-      </section>
+      <div id="configSecurityCards" class="page-stack"></div>
     </section>
 
     <section class="config-panel" data-config-panel="access" hidden>
-      <section class="card span-all">
-        <div class="card-head">
-          <div>
-            <h2>全局准入</h2>
-            <div class="meta">这份名单是全局总闸门，会话内勾选改的也是它。</div>
-          </div>
-          <div class="row-actions">
-            <span class="meta" id="globalAccessSaveMsg" role="status"></span>
-            <button class="btn primary" type="button" id="globalAccessSave">保存准入</button>
-          </div>
-        </div>
-        <div data-sessions-access></div>
-      </section>
-      <section id="section-silent" class="card span-all">
-        <h2>静默与发言限制</h2>
-        <div data-overview-fields="silence"></div>
-      </section>
+      <div id="configAccessCards" class="page-stack"></div>
     </section>
 
+    <!-- 扩展功能没有静态卡片：voice-section.js 自己往 #voicePanel 里挂载。 -->
     <section class="config-panel" data-config-panel="voice" hidden>
       <div id="voicePanel"></div>
     </section>

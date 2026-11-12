@@ -39,9 +39,12 @@ function writeDismissed(set) {
  */
 export function alertHtml({
   id = '',
+  elementId = '',
   type = 'info',
   title = '',
   description = '',
+  html = '',
+  hidden = false,
   closable = false,
   persist = 'local',
   actions = '',
@@ -52,16 +55,19 @@ export function alertHtml({
   const attrs = [
     `class="${classes}"`,
     'role="status"',
+    elementId ? `id="${esc(elementId)}"` : '',
     id ? `data-alert-id="${esc(id)}"` : '',
     closable ? `data-alert-persist="${esc(persist)}"` : '',
+    hidden ? 'hidden' : '',
   ].filter(Boolean).join(' ');
   const closeBtn = closable
     ? '<button class="alert-close" type="button" data-alert-close aria-label="关闭提示">×</button>'
     : '';
   const head = title ? `<strong class="alert-title">${esc(title)}</strong>` : '';
   const desc = description ? `<p class="alert-desc">${esc(description)}</p>` : '';
+  const raw = html ? `<div class="alert-body-html">${html}</div>` : '';
   const foot = actions ? `<div class="alert-actions">${actions}</div>` : '';
-  return `<div ${attrs}>${closeBtn}<div class="alert-body">${head}${desc}${foot}</div></div>`;
+  return `<div ${attrs}>${closeBtn}<div class="alert-body">${head}${desc}${raw}${foot}</div></div>`;
 }
 
 export function dismissAlert(id, persist = 'local') {

@@ -647,35 +647,7 @@
   font-size: 11px;
 }
 
-/* 块级提示 */
-.form-callout {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  font-size: 11px;
-  line-height: 1.65;
-}
-
-.form-callout strong {
-  font-size: 12px;
-  color: var(--text);
-}
-
-.form-callout[data-tone="warn"] {
-  border-color: var(--warn-border);
-  background: var(--warn-bg);
-  color: var(--warn-fg);
-}
-
-.form-callout[data-tone="danger"] {
-  border-color: var(--danger-border);
-  background: var(--danger);
-  color: var(--danger-solid, #cf222e);
-}
+/* 块级提示已统一用 components/alert（formCallout 现在返回 .alert 结构）。 */
 
 /* 动作区：主按钮靠右 */
 .form-actions {

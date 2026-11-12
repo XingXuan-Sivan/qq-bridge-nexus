@@ -663,3 +663,15 @@ npm run test:console-ui
 9. **默认运行方案**：下拉只显示方案名（历史 D30 已去掉「（自定义）」，本轮无新改动，保持）。
 
 **验收**：`test-console-static` 全部通过；`test-console-ui` **34/34、41 次 mock 写**；桥接重启后 `/api/runtime/capabilities` 的 `agentModules`、`/api/commands` 默认权限、`/api/config/runtime` 均实机核对；活动日志与清空按钮位置经截图确认。
+
+### 2026-11-12（D32）控制台通用组件库：卡片全 JS 化、标签/提示/弹窗统一
+
+1. **新组件**（`public/console/components/<name>/`）：`tag`（`.tag`，彻底取代 `.pill`）、`alert`（标题 + 描述 + 关闭记忆，可携带 HTML 内容）、`message`（`toast` 堆叠 + 页内 `setMsg/clearMsg`）、`collapse`（`<details>` 封装）、`card`（`cardHtml`/`mountCard`）、`tile`（插件与人格卡片）、`message-box`（`confirmBox`/`alertBox`，替代控制台页面里的原生 confirm/alert）。
+2. **卡片全部改为 JS 生成**：overview / plugins / prompt-blocks / scheduler / config / slang / behavior / memory / operations / sessions / persona 共 11 个页面，`page.html` 只留容器与宿主（宿主统一 `.page-stack`，`display:contents`，避免卡片被栅格挤半宽）；`init()` 首句渲染卡片，再渲染字段与表格。
+3. **标签与提示**：全站 `.pill*` → `.tag*`（19 个文件，含四处动态状态映射）；`showConsoleToast` 转发到 `toast()`，删除旧 `#consoleToast` 节点；安全提示两张告警条（state 权限 / SnowLuma 上游）改由 `alertHtml` 生成（保留动态 id 与内容）；`formCallout` 改为返回 Alert 结构，删除 `.form-callout`、`.warn-box` 死样式。
+4. **折叠与插件卡片**：slang 的「黑话配置」与 plugins 的「运行设置 / 安装插件」改由 `collapseHtml` 生成；plugin 与 persona 列表改用 `tileHtml`（persona 保留可点击 `.tile-body`，用 `body` 槽）。
+5. **门禁**：`test-console-static` 新增组件导出断言、共享样式断言、「page.html 不得手写 `class="card`」「页面 html 不得手写 `.pill`」、卡片标题允许来自 `cardHtml(`；`test-console-ui` 的 `addInitScript` 自动点击 `[data-box-confirm]`，原生弹窗迁移不影响用例。
+6. **文档**：新增 `docs/CONSOLE_COMPONENTS.md`（组件 API、迁移规则、门禁），`docs/README.md` 索引补一行。
+
+**验收**：`test-console-static` 全部通过；`test-console-ui` **34/34、41 次 mock 写**；`test-audit` **116/116**；三档截图（1600/1180/760）核对卡片、标签、告警条、折叠面板与插件/人格卡片。
+

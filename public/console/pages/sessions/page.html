@@ -1,16 +1,5 @@
-<section class="card span-all" data-page="sessions">
-  <h2>会话与审批</h2>
-  <div class="meta">「会话映射」是桥接当前握着的全部会话：只显示平台侧身份与状态，改名会写回 DSH 侧栏标题；单独指定人格、仿真模式等配置不在这一页改。「审批 / 提问」只读，批准或回答都要去对应 QQ 会话里回复。</div>
-
-  <div data-sessions-fields="tabs"></div>
-
-  <div class="page-panel" data-sessions-panel="sessions">
-    <div data-sessions-fields="sessionsPanel"></div>
-  </div>
-
-  <div class="page-panel" data-sessions-panel="pending" hidden>
-    <div data-sessions-fields="pendingPanel"></div>
-  </div>
+<section class="page-stack" data-page="sessions">
+  <div id="sessionsCards" class="page-stack"></div>
 </section>
 
 <div class="modal-overlay" id="sessionRenameOverlay">

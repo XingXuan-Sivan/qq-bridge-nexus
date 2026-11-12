@@ -5,6 +5,7 @@
 
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { initGroups } from '../components/groups/groups.js';
+import { hydrateAlerts } from '../components/alert/alert.js';
 import { decorateSelects, initSelects } from '../components/select/select.js';
 import { initDateFields } from '../components/date/date.js';
 import { initTimeFields } from '../components/time/time.js';
@@ -131,6 +132,7 @@ function hydratePage(page) {
     // 折叠分组：默认展开第一组，之后按页面记忆用户展开过哪些（跨页一致的体验）。
     // 必须放在 init() 之后——有些页面的分组是 init() 里渲染出来的。
     initGroups(host, { pageId: page });
+    hydrateAlerts(host);
     decorateSelects(host);
     initDateFields(host);
     initTimeFields(host);

@@ -6,93 +6,26 @@
     <button class="page-tab" type="button" role="tab" aria-selected="false" data-behavior-tab="capabilities">能力预设</button>
   </div>
 
+  <!-- 卡片外壳由 page.js 的 renderCards() 用 components/card 生成；面板里只留卡片宿主。
+       宿主是 .page-stack（display:contents），生成的 section 直接成为 main 网格项。
+       面板里非卡片的挂载点（#behaviorFormPanel、#capabilityEditor）仍留在各自面板里，
+       需要保持顺序的地方拆成前后两个宿主（文档卡 → 表单组 → 提示词卡）。 -->
   <div class="page-stack" data-behavior-panel="platform">
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>平台</h2>
-          <div class="meta">用户侧适配层：行为档案、平台提示词与工具清单都在 <code>profiles/platforms/&lt;id&gt;/</code>。</div>
-        </div>
-      </div>
-      <div id="platformTable"></div>
-    </section>
-
-    <section class="card span-all prompt-card" id="platformPromptCard"></section>
-
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>平台工具</h2>
-          <div class="meta">只读清单（<code>tools.yml</code>）；会话实际能用哪些由运行方案与会话权限级别决定。</div>
-        </div>
-      </div>
-      <div id="platformTools"></div>
-    </section>
+    <div id="behaviorPlatformCards" class="page-stack"></div>
   </div>
 
   <div class="page-stack" data-behavior-panel="plans" hidden>
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>运行方案</h2>
-          <div class="meta">会话可在「会话与审批 › 详情」单独指定；没指定的用「全局配置 › 默认运行方案」。</div>
-        </div>
-      </div>
-      <div data-runtime-fields="summary"></div>
-    </section>
-
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>方案清单</h2>
-          <div class="meta">内置方案只读，复制后可改；自定义方案随能力预设一起管理。</div>
-        </div>
-      </div>
-      <div data-runtime-fields="table"></div>
-    </section>
+    <div id="behaviorPlansCards" class="page-stack"></div>
   </div>
 
   <div class="page-stack" data-behavior-panel="behaviors" hidden>
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>档案清单</h2>
-          <div class="meta">档案是资源，被运行方案的「行为」字段引用；改名不影响引用，删除前先确认没有被方案使用。</div>
-        </div>
-      </div>
-      <div data-behavior-fields="list"></div>
-    </section>
-
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>基本信息</h2>
-          <div class="meta">写入 <code>profiles/platforms/qq/behaviors</code>，重启桥接后生效。</div>
-        </div>
-      </div>
-      <div class="form-stack" data-behavior-fields="basics"></div>
-      <div class="form-actions">
-        <button class="btn primary" type="button" id="behaviorFormSave">保存</button>
-        <button class="btn" type="button" id="behaviorFormReset" hidden>重置</button>
-        <span class="meta" id="behaviorFormMsg" role="status"></span>
-      </div>
-    </section>
-
+    <div id="behaviorDocCards" class="page-stack"></div>
     <div id="behaviorFormPanel" class="behavior-groups"></div>
-
-    <section class="card span-all prompt-card" id="behaviorPromptCard"></section>
+    <div id="behaviorPromptCards" class="page-stack"></div>
   </div>
 
   <div class="page-stack" data-behavior-panel="capabilities" hidden>
-    <section class="card span-all">
-      <div class="card-head">
-        <div>
-          <h2>能力预设</h2>
-          <div class="meta">唯一源：<code>profiles/agent-platforms/dsh/capabilities/&lt;id&gt;.yml</code>；Agent 模块由 Agent 预设决定。</div>
-        </div>
-      </div>
-      <div id="capabilityTable"></div>
-    </section>
+    <div id="behaviorCapabilityCards" class="page-stack"></div>
     <div id="capabilityEditor" class="behavior-groups" hidden></div>
   </div>
 </section>

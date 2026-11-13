@@ -95,6 +95,8 @@ import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, CAPABILITIES_ROOT } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './platform/prompt.mjs';
+// OneBot 的动作名与参数构造（QQ 后端的实现细节）；四处发送入口共用这一份。
+import { oneBotSendCall } from './platform/onebot.mjs';
 import { listPlatforms, loadPlatform } from './platforms/index.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
@@ -2851,10 +2853,7 @@ async function main() {
         // 语音条比图片大、要过一次 SILK 转码，给 60s 预算（文本/图片共用同一 sendChain，
         // 所以这条语音发完之前后面的文本会自然排队，不会插队到语音前面）。
         const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-        const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-        const params = kind === 'private'
-          ? { user_id: Number(id), message: [recordSegment] }
-          : { group_id: Number(id), message: [recordSegment] };
+        const { action, params } = oneBotSendCall(kind, id, [recordSegment]);
         const res = await fetch(`${httpUrl}/${action}`, {
           method: 'POST',
           headers: {
@@ -3034,8 +3033,7 @@ async function main() {
       throw new Error(`表情 ${entry.id} 的图片下载失败（QQ CDN 网络异常或地址已失效）：${error?.message ?? error}`);
     }
     segments.push({ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } });
-    const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-    const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
+    const { action, params } = oneBotSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     // 与文本发送共用 sendChain，保证“先文字后表情”的真人顺序不被并发工具调用打乱。
     let sendResolve;
@@ -3097,8 +3095,7 @@ async function main() {
     const assertSendAllowed = captureSendGuard(key);
     const { kind, id } = parseKey(key) ?? {};
     const segments = [{ type: 'image', data: { file: 'base64://' + buffer.toString('base64') } }];
-    const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-    const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
+    const { action, params } = oneBotSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     let done;
     let fail;
@@ -12492,8 +12489,7 @@ async function main() {
       throw new Error('发送内容包含会话令牌，已阻止发送');
     }
     segments.push({ type: 'text', data: { text: escapeCqText(rawMessage) } });
-    const action = kind === 'private' ? 'send_private_msg' : 'send_group_msg';
-    const params = kind === 'private' ? { user_id: Number(id), message: segments } : { group_id: Number(id), message: segments };
+    const { action, params } = oneBotSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     const res = await fetch(`${httpUrl}/${action}`, {
       method: 'POST',

@@ -75,6 +75,8 @@ import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, pl
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from '../src/capabilities/store.mjs';
 import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
+// OneBot 发送动作收口（B1）：bridge.js 的四处发送入口都调它，夹具剥 import 后必须补回。
+import { oneBotSendCall } from '../src/platform/onebot.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -321,6 +323,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
     CAPABILITIES_ROOT: path.join(temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
+    oneBotSendCall,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',

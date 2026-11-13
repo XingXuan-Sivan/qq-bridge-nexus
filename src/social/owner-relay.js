@@ -1,4 +1,3 @@
-import { key } from '../session/key.mjs';
 // 管理员私聊托付：让「目标会话自己的会话」去那里说话（v0.4.2，方案 C）。
 //
 // 背景：每个会话（group:<id> / private:<id>）在 Agent 侧是独立的 AI 会话，各有一个会话令牌，
@@ -15,6 +14,8 @@ import { key } from '../session/key.mjs';
 //   · 托付内容只放在内存里（不落盘），过期自动丢弃。
 //
 // 词汇：容器词用「会话」；工具名 `qq_ask_group_session` 与开关 `ownerRelay` 是 0.1.x 的公开面。
+
+import { key } from '../session/key.mjs';
 
 export const OWNER_RELAY_DEFAULTS = Object.freeze({
   maxPerHour: 10,          // 全局每小时最多托付次数

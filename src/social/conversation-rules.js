@@ -1,4 +1,3 @@
-import { key } from '../session/key.mjs';
 // 管理员私聊的跨会话能力（默认关闭，开关 socialV2.tools.ownerGroupAccess）：
 //   ① 只读查看白名单会话：最近消息 + 该会话的记忆摘要 + 长期规则（qq_owner_peek_group）；
 //   ② 给会话设长期规则（qq_owner_group_rule）：由**桥接**写进目标会话的记忆（ownerRules 字段），
@@ -14,6 +13,8 @@ import { key } from '../session/key.mjs';
 //
 // 词汇：容器词用「会话」（conversation）；工具名 `qq_owner_group_rule` / `qq_owner_peek_group`
 // 与开关 `ownerGroupAccess` 是 0.1.x 的公开面，保持不变。
+
+import { key } from '../session/key.mjs';
 
 export const CONVERSATION_RULE_LIMITS = Object.freeze({
   maxRules: 10,   // 每个会话最多几条长期规则

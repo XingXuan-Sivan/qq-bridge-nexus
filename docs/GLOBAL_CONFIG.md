@@ -475,7 +475,7 @@ behaviorKind  = behavior.kind
 - 预设结构化保存（meta/extensions）全部改走 `yaml` Document；`js-yaml` 从桥接自有代码中移除，避免两个 YAML 库并存；
 - DSH 自己 bundle 里的 `js-yaml` 不属于桥接依赖，保持不动。
 
-迁移影响（已完成）：桥接自有代码已全部改用 `yaml`——`src/presets/store.mjs` 用 `parseDocument`/`setIn`（保注释，`test-preset-store` 6/6），`src/extensions/skill-store.mjs`、`src/extensions/preset-policy.mjs`、`scripts/build-agent-preset-patches.mjs`、`scripts/setup-dsh.mjs` 及 3 个测试改用 `parse`/`stringify`；产出与旧 `js-yaml` 逐字一致（`lineWidth: 0` + `singleQuote: true` + `aliasDuplicateObjects: false`），patch 文件无 diff。`js-yaml` 已从 `package.json` 删除。仅 `scripts/test-setup-dsh-idempotent.mjs`、`scripts/verify-dsh-020-adaptation.mjs`、`scripts/verify-persona-config.mjs` 仍按路径加载 **DSH 自带的** `js-yaml`（用于验证 DSH 侧解析结果），不属于桥接依赖。
+迁移补充（2026-11-13）：`test-setup-dsh-idempotent.mjs` 已改用本仓库的 `yaml`，不再关心 DSH 装了什么；`verify-persona-config.mjs` 只有在**磁盘上真有 `@deepseek-ai/*`** 时才 import DSH 自己的 `dsh-persona` schema 做对照，拿不到就降级成结构断言并打印原因——0.2.2 起包内联进 `app.asar`，Node 无法从归档 import，硬依赖会让脚本随宿主升级而崩。桥接自有代码依旧不依赖 `js-yaml`。
 
 ### 8.3 保存交互
 

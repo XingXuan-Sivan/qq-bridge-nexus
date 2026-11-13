@@ -604,3 +604,62 @@ Bing **RSS** 仅作兜底；5 分钟查询缓存；空结果显式 `note`。安�
 
 - npm 上已经有 0.2.1-rc.4 / rc.5，没有核对。
 - 命令行版 rc.3 没有实测（它和桌面版用同一批包）。
+
+## 附：DSH 0.2.2-rc.2 对账与「适配资产」重构（2026-11-13）
+
+> 本轮不做功能改动，只把「适配正确性依赖人记得对账」改成机械可检查的工程结构。
+> 完整偏差记录见 `docs/PLAN_DEVIATIONS.md` D28。
+
+### 1. 宿主侧的事实变化
+
+- 0.2.2 起 `@deepseek-ai/*`（326 个 `dsh-*` 包）**全部内联进** `resources/app.asar`（约 208 MB），
+  磁盘上不再有 `resources/app/node_modules/@deepseek-ai`。所有「按路径读包」的脚本因此整体失效。
+- Node 无法 `import` asar 内的模块（只能按偏移读文本），所以「用 DSH 自己的 schema 校验配置」这条
+  只能降级成结构断言，并显式打印降级原因。
+- asar 头部的 `offset` 字段在本版本是**字符串**，`Number()` 之后才能当文件偏移用。
+
+### 2. 守卫名单的三处修正
+
+- 实测工具名 **65** 个（宿主自身包）。原名单里有 **11 个从未存在过的假名**，其中
+  `dev_mode_set` / `dev_mode_status` / `dev_mode_subagent` 三个尤其危险——旧扫描器用
+  `!n.startsWith('dev_')` 把整个前缀豁免掉，它们**从来没有被断言过**，静默失效已经很久。
+- 补入 **20 个** 真实存在但未覆盖的名字。
+- 名单改成「10 个能力分组 → 全量派生」：`LOCAL_EXECUTION_TOOLS`（61）、
+  `RUNTIME_INJECTOR_TOOLS`（18）、`RESTRICTED_TOOL_NAMES`（79）、`OPERATOR_DENY_TOOLS`（30）
+  不再各抄一份；巡检约束从「豁免名单」改成「运行期注入器只能是 `dev_` 前缀，且 `dev_` 前缀一律拒绝」。
+
+### 3. 新增的三件资产
+
+| 文件 | 作用 |
+| --- | --- |
+| `scripts/dsh-package-source.mjs` | 宿主包访问的唯一入口：目录后端 / `app.asar` 后端 / `DSH_TOOL_PACKAGES` 显式覆盖；对外只有 `listPackages` / `listFiles` / `readFile` |
+| `scripts/dsh-baseline.mjs` + `dsh-baseline.json` | 基线闸门：同一宿主版本下工具集漂移即红；宿主换版本时打印增删差异并提示复核后刷新 |
+| `scripts/clean-selftest-tmp.mjs` | 清扫测试留在系统临时目录的夹具（前缀从源码里抽取，不用维护清单） |
+
+### 4. 验证脚本拆成三层
+
+`verify-dsh-020-adaptation.mjs` 删除，由 `verify-adaptation.mjs` 取代：
+
+```text
+npm run verify:repo        # 仓库不变式，必须 0 红，可进 CI
+npm run verify:deploy      # 本机部署状态，环境不符则跳过
+npm run verify:live        # 活协议契约，需要运行中的 DSH
+npm run verify:adaptation  # = --layer all（升级验收）
+```
+
+拆分的直接原因：旧脚本对 0.2.2 跑出 10 条失败，其中**只有 1 条是真的**（5 条读错 profile、
+2 条 `{{cwd}}` 语义相反、1 条正则没跟上重构、1 条把白名单工具当成违规）。长期挂红会训练人忽略红色。
+
+同批修正的过时断言：
+
+- `{{cwd}}`：0.2.1 起是**非法**提示词变量（`unknown prompt variable`），断言方向从「必须保留」反转为「不得出现」。
+- profile 路径：不再硬编码 `profiles/web`，改为按 `dsh.profile.bundles` 是否含 `qq-agent-presets` 探测。
+- `strictPreset`：钉行为契约（`agentPlan` 失败必须直接抛错），不再钉实现细节。
+- MCP 数量：不再断言「恰好 3 个」（那是旧实现的快照），改为「必需的三个都在 + id 无重复」。
+
+### 5. 实测结果（2026-11-13）
+
+- `npm run test:audit`：116/116 脚本通过
+- `npm run verify:repo`：54 通过 / 0 失败 / 0 跳过
+- `npm run verify:live`：21 通过（自动探测到桌面版的随机端口，零环境变量）
+- `npm run baseline:check`：与基线一致（宿主 0.2.2-rc.2，65 个工具名，守卫 79 个）

@@ -170,8 +170,8 @@ const tests = [
   'test-platform.mjs',
   // 表情单张大小上限 socialV2.sticker.maxBytes（默认 10MB）：收藏/发送用它；图片识别用 r4 的 socialV2.media（默认 8MB）。
   'test-sticker-limits.mjs',
-  // 管理员私聊跨群只读 + 群长期规则（默认关闭）：只有 owner 私聊能用、只读不改已读、规则由桥接写入并注入目标群唤醒。
-  'test-group-rules.mjs',
+  // 管理员私聊跨会话只读 + 会话长期规则（默认关闭）：只有 owner 私聊能用、只读不改已读、规则由桥接写入并注入目标会话唤醒。
+  'test-conversation-rules.mjs',
   'test-slang-tabs.mjs',
   // NapCat 管理：版本显示（后端自报 / Windows 安装文件）、检查更新（只提示）、目录与启动文件设置、系统「浏览…」窗口（Mac / Windows）。
   'test-napcat-manage.mjs',

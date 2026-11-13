@@ -4,16 +4,21 @@
 // 业务规则都在 src/social/* 与 src/admin/* 里，便于离线测试。
 //
 // 状态文件（都在 state/ 下，随 state ACL 一起收紧，不入库）：
-//   state/social/people.json     人物库（含各群名片、成员关系、分层记忆）
+//   state/social/people.json     人物库（含各会话显示名、成员关系、分层记忆）
 //   state/admin/control.json     当前模式/级别、待确认申请、TOTP 防重放计数
 //   state/admin/audit.jsonl      管理审计（哈希链）
 //   state/admin/totp.json        TOTP 秘密（npm run admin:totp-setup 生成；也可用环境变量）
+//
+// 词汇：0.2.0 起社交模型的容器词是「会话」（conversation）。这里是对 bridge 暴露的**唯一门面**，
+// 所以名下函数一律用中性词；`bridge.js` 内部还叫 group 的变量都是 OneBot 协议面或会话类型，
+// 不属于这一层。
 
 import fs from 'node:fs';
 import { idOfKey, isGroupKey, isPrivateKey, key as buildKey, sameSession } from './session/key.mjs';
 import path from 'node:path';
-import { createPeopleRegistry, normalizeQQ, normalizeGroupId } from './social/people.js';
+import { createPeopleRegistry, normalizeQQ, normalizeConversationId } from './social/people.js';
 import { buildPersonView, renderPeopleBlock } from './social/memory-policy.js';
+import { conversationRecordable as conversationRecordableIn } from './social/conversation-config.js';
 import { createAuditLog } from './admin/audit-log.js';
 import { createModeController, LEVEL_TEXT, MODE_TEXT } from './admin/mode-control.js';
 import { createApprovalRegistry, describeToolArgs } from './admin/approvals.js';
@@ -21,8 +26,8 @@ import { parseOwnerCommand, ADMIN_HELP } from './admin/owner-commands.js';
 import { canOpenLevel } from './admin/admins.mjs';
 
 // bridge.js 只 import 这一个模块（测试夹具按名字注入绑定，入口越少越不容易漂移）。
-export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/group-events.js';
-export { checkCrossGroup, queryPresence, queryActivity } from './social/cross-group.js';
+export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/conversation-events.js';
+export { checkCrossConversation, queryPresence, queryActivity } from './social/cross-conversation.js';
 export { resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, levelPermissionMap, normalizeAgentPreset, agentPresetIds, chatAgentPresets, agentPresetLevel } from './admin/agent-permission.js';
 export { L0_MODES, LEVEL_TEXT } from './admin/mode-control.js';
 export { createReconnectWatchdog } from './lib/ws-watchdog.mjs';
@@ -109,18 +114,20 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     return sameSession(k, buildKey('private', owner.id, { platform: owner.platform, account: owner.account }));
   };
 
-  function groupRecordable(groupId) {
-    return cfg.continuity?.groups?.[String(groupId)]?.recordable !== false;
+  // 配置里的会话级规则（`continuity.conversations`，旧键 `groups` 仍可读）—— 双读只在
+  // social/conversation-config.js 里实现一次，这里只是把配置对象绑进去。
+  function conversationRecordable(conversationId) {
+    return conversationRecordableIn(cfg.continuity, conversationId);
   }
 
   /** 消息入口调用：记录「看到此人发言」。返回 people.observeMessage 的结果或 null。 */
   function observeMessage({ kind, id, event, directedAtSelf }) {
     if (!continuityEnabled()) return null;
-    if (kind === 'group' && !groupRecordable(id)) return null;
+    if (kind === 'group' && !conversationRecordable(id)) return null;
     try {
       return people.observeMessage({
         kind,
-        groupId: kind === 'group' ? id : null,
+        conversationId: kind === 'group' ? id : null,
         userId: event?.user_id ?? event?.sender?.user_id,
         card: kind === 'group' ? (event?.sender?.card ?? '') : '',
         nickname: event?.sender?.nickname ?? '',
@@ -136,7 +143,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   function peopleBlockFor(key, userIds) {
     if (!continuityEnabled() || cfg.continuity?.injectPeople === false) return '';
     const m = isGroupKey(key) ? [key, String(idOfKey(key))] : null;
-    if (m && !groupRecordable(m[1])) return '';
+    if (m && !conversationRecordable(m[1])) return '';
     const seen = new Set();
     const persons = [];
     for (const uid of userIds) {
@@ -158,7 +165,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     const p = people.getPerson(userId);
     if (!p) return null;
     const m = isGroupKey(key) ? [key, String(idOfKey(key))] : null;
-    if (m && !groupRecordable(m[1])) return null;
+    if (m && !conversationRecordable(m[1])) return null;
     const v = buildPersonView(p, key, continuity(), { now: now(), maxNotes: 10 });
     if (!v) return null;
     const { text, ...rest } = v;
@@ -198,13 +205,13 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     return lines.join('\n');
   }
 
-  function whoisText(qq) {
-    const p = people.getPerson(qq);
-    if (!p) return `人物库里没有 QQ ${qq}。`;
-    const lines = [`QQ ${p.qq}${p.nickname ? `（昵称 ${p.nickname}）` : ''}`, `认识程度：${p.acquaintance}${p.acquaintanceSetBy === 'admin' ? '（管理员设定）' : ''}；首次见到 ${fmt(p.firstSeenAt)}；最近 ${fmt(p.lastSeenAt)}`];
-    if (p.preferredName) lines.push(`跨群称呼：${p.preferredName.value}`);
-    for (const [gid, g] of Object.entries(p.groups)) {
-      lines.push(`· 群 ${gid}：${g.status === 'member' ? '在群' : '已离开'}，名片「${g.card || '—'}」，发言 ${g.messageCount} 条${g.cardHistory?.length > 1 ? `，曾用 ${g.cardHistory.slice(0, -1).map((h) => h.value).join('/')}` : ''}`);
+  function whoisText(userId) {
+    const p = people.getPerson(userId);
+    if (!p) return `人物库里没有 ${userId}。`;
+    const lines = [`用户 ${p.qq}${p.nickname ? `（昵称 ${p.nickname}）` : ''}`, `认识程度：${p.acquaintance}${p.acquaintanceSetBy === 'admin' ? '（管理员设定）' : ''}；首次见到 ${fmt(p.firstSeenAt)}；最近 ${fmt(p.lastSeenAt)}`];
+    if (p.preferredName) lines.push(`跨会话称呼：${p.preferredName.value}`);
+    for (const [cid, entry] of Object.entries(p.conversations)) {
+      lines.push(`· 会话 ${cid}：${entry.status === 'member' ? '在' : '已离开'}，显示名「${entry.card || '—'}」，发言 ${entry.messageCount} 条${entry.cardHistory?.length > 1 ? `，曾用 ${entry.cardHistory.slice(0, -1).map((h) => h.value).join('/')}` : ''}`);
     }
     if (p.private) lines.push(`· 私聊：${p.private.messageCount} 条`);
     const showPrivate = cfg.admin?.showPrivateNotes === true;
@@ -222,7 +229,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   function reviewText() {
     const lines = [];
     for (const p of Object.values(people.data.people)) {
-      for (const n of p.notes) if (n.shareStatus === 'pending') lines.push(`共享申请：QQ ${p.qq} [${n.id}] ${n.scope}：${n.text}  → /share approve ${p.qq} ${n.id}`);
+      for (const n of p.notes) if (n.shareStatus === 'pending') lines.push(`共享申请：用户 ${p.qq} [${n.id}] ${n.scope}：${n.text}  → /share approve ${p.qq} ${n.id}`);
     }
     for (const r of (people.data.legacyReview ?? []).slice(-10)) {
       lines.push(`旧记忆待确认：${r.scope} 名字「${r.name}」（${r.reason}${r.candidates?.length ? `，候选 ${r.candidates.join('/')}` : ''}）：${(r.traits ?? []).join('、')}`);
@@ -304,12 +311,12 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
           return reply(whoisText(cmd.userId));
         case 'people': {
           const list = people.listPeople({ query: cmd.query, limit: 20 });
-          return reply(list.length ? list.map((p) => `${p.qq} ${p.nickname || ''} [${Object.entries(p.groups).map(([g, x]) => `${g}:${x.card || '—'}`).join(' ')}] ${p.acquaintance}`).join('\n') : '没有匹配的人物。');
+          return reply(list.length ? list.map((p) => `${p.qq} ${p.nickname || ''} [${Object.entries(p.conversations).map(([cid, entry]) => `${cid}:${entry.card || '—'}`).join(' ')}] ${p.acquaintance}`).join('\n') : '没有匹配的人物。');
         }
         case 'person-name':
           people.updatePerson(cmd.userId, { preferredName: cmd.name });
           audit.append('person.updated', { userId: cmd.userId, field: 'preferredName' });
-          return reply(`已设置 QQ ${cmd.userId} 的跨群称呼为「${cmd.name.slice(0, 30)}」。`);
+          return reply(`已设置用户 ${cmd.userId} 的跨会话称呼为「${cmd.name.slice(0, 30)}」。`);
         case 'person-acq':
           people.updatePerson(cmd.userId, { acquaintance: cmd.level });
           audit.append('person.updated', { userId: cmd.userId, field: 'acquaintance' });
@@ -368,7 +375,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     continuityEnabled,
     adminEnabled,
     isOwnerPrivateKey,
-    groupRecordable,
+    conversationRecordable,
     observeMessage,
     peopleBlockFor,
     personViewFor,
@@ -377,14 +384,14 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     statusText,
     whoisText,
     normalizeQQ,
-    normalizeGroupId,
+    normalizeConversationId,
   };
 }
 // Agent 侧的平台基础设施也走门面：对外名字（resolveDshBaseUrl 等）是 0.1.x 的公开
 // 导出，保持不变；实现从 agent 侧适配器换成门面转发。
 export { resolveAgentBaseUrl as resolveDshBaseUrl, listAgentBaseUrlCandidates as dshBaseUrlCandidates, detectAgentDesktop as detectDshDesktop } from './agent-side/agent-client.mjs';
 export { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './social/sticker-collect.js';
-export { GROUP_RULE_LIMITS, validateOwnerGroupAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, groupRuleResultText, groupRuleNoticeText } from './social/group-rules.js';
+export { CONVERSATION_RULE_LIMITS, validateOwnerConversationAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, conversationRuleResultText, conversationRuleNoticeText } from './social/conversation-rules.js';
 export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';
 // 为什么这里直接 re-export 适配器文件而不是门面：`qqBackendLabel` / `qqBackendFromVersionInfo`
 // 是 0.1.x 的**公开导出名**，文件名本身也被 scripts/test-qq-backend-label.mjs 钉住；

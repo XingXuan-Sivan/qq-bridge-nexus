@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { addRule, normalizeRules, removeRule, rulesPromptBlock, GROUP_RULE_LIMITS } from '../social/group-rules.js';
+import { addRule, normalizeRules, removeRule, rulesPromptBlock, CONVERSATION_RULE_LIMITS } from '../social/conversation-rules.js';
 
 // 本机轻量记忆：local-digest provider 自己的存储与「管理」实现。
 //
@@ -21,7 +21,7 @@ export const LOCAL_MEMORY_LIMITS = Object.freeze({
   maxTopics: 50,
   maxThoughts: 50,
   maxImpressions: 200,
-  maxRules: GROUP_RULE_LIMITS.maxRules,
+  maxRules: CONVERSATION_RULE_LIMITS.maxRules,
   maxTraits: 10,
   traitChars: 50,
   itemChars: 200,
@@ -314,7 +314,7 @@ export function createLocalMemory({ file, limits = () => ({}), sanitize = (t) =>
     }
     if (category === 'rule') {
       if (!text) return { ok: false, status: 400, error: '规则内容不能为空' };
-      if (text.length > GROUP_RULE_LIMITS.maxChars) return { ok: false, status: 400, error: `规则不能超过 ${GROUP_RULE_LIMITS.maxChars} 字` };
+      if (text.length > CONVERSATION_RULE_LIMITS.maxChars) return { ok: false, status: 400, error: `规则不能超过 ${CONVERSATION_RULE_LIMITS.maxChars} 字` };
       const r = addRule(b.rules, text, { now: now(), maxRules: L.maxRules, maxChars: L.itemChars });
       if (r.error) return { ok: false, status: 400, error: r.error };
       b.rules = r.rules;

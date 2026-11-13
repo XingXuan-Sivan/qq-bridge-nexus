@@ -315,7 +315,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     flushQueue, retireSession, sessions, getDshHealth, reconcileDshSessions, rebuildSession,
     profileModelOf, profileModelSignature, modelLabelForKey, sessionCanSeeImages, ensureChatModel,
     effectiveMode, passiveAllowed, proactiveAllowed,
-    ext, handleMemberNotice, reconcileGroupMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
+    ext, handleMemberNotice, reconcileConversationMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
     setLevel(value) { currentLevel = value; },
     getMode() { return { mode: currentMode, level: currentLevel }; },
     voiceCfg, voiceLibrary, resolveVoicePathForV2, resolveVoicePathForOperator,

@@ -1,8 +1,14 @@
 # 人际连续性：跨群认人、人物记忆、入群感知、跨群协作（v0.3.0）
 
 > 代码：`src/social/people.js`（人物库）· `src/social/memory-policy.js`（可见性过滤）·
-> `src/social/group-events.js`（成员事件）· `src/social/cross-group.js`（跨群查询）·
+> `src/social/conversation-events.js`（成员事件）· `src/social/cross-conversation.js`（跨会话查询）·
+> `src/social/conversation-config.js`（会话级配置的双读收敛点）· `src/social/conversation-rules.js`（会话长期规则）·
 > 接线在 `src/bridge-extensions.js` 与 `src/bridge.js`。离线测试：`scripts/test-continuity.mjs`、`scripts/test-integration-v030.mjs`。
+>
+> **词汇（0.2.0 起）**：社交模型的容器统一叫「会话」（conversation）——代码标识符、`people.json` 字段、
+> `continuity.*` 配置键、API 字段名一律如此。**不改**的是协议与文法面：OneBot 的 `group_id` /
+> `group_increase` / `send_group_msg`、会话 key 的 `qq:group:<id>` 段、关系状态值 `member|left`、
+> 记忆作用域文法 `group:<id>`、配置键 `crossGroup` / `allow.groups`。
 
 ## 1. 一个 QQ 号可以同时在多个群
 
@@ -22,7 +28,7 @@
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "people": {
     "<QQ号>": {
       "qq": "...",
@@ -30,10 +36,10 @@
       "nickname": "QQ 昵称", "nicknameHistory": [{ "value": "...", "at": 0 }],
       "acquaintance": "listed | observed | talked | familiar",   // 认识程度
       "acquaintanceSetBy": null | "admin",                       // 管理员设定后不再自动变化
-      "preferredName": { "value": "跨群称呼", "setBy": "admin", "at": 0 } | null,
+      "preferredName": { "value": "跨会话称呼", "setBy": "admin", "at": 0 } | null,
       "preferences": { "teasing": "ok|avoid", "proactiveChat": "...", "poke": "...", "recallPast": "..." },
-      "groups": {
-        "<群号>": { "status": "member | left", "card": "本群名片", "cardHistory": [], "firstSeenAt": 0, "lastSeenAt": 0,
+      "conversations": {
+        "<群号>": { "status": "member | left", "card": "本会话显示名", "cardHistory": [], "firstSeenAt": 0, "lastSeenAt": 0,
                    "joinedAt": 0, "leftAt": null, "joinCount": 0, "messageCount": 0, "source": "message|join|baseline|reconcile" }
       },
       "private": { "firstSeenAt": 0, "lastSeenAt": 0, "messageCount": 0 } | null,
@@ -46,11 +52,15 @@
       "aliases": ["<管理员标注的小号>"], "talkCount": 0
     }
   },
-  "groups": { "<群号>": { "baselineAt": 0, "lastReconcileAt": 0 } },
+  "conversations": { "<群号>": { "baselineAt": 0, "lastReconcileAt": 0 } },
   "legacyReview": [ /* 旧版记忆迁移时映射不上的条目，待人工确认 */ ],
   "migrations": { "memberImpressions": { "<会话key>": 0 } }
 }
 ```
+
+**v1 → v2（0.2.0）**：唯一的变化是容器键 `groups` → `conversations`（人物下的会话记录、顶层对账基线各一处），
+值一律不动，`status` 仍是 `member | left`。加载 v1 文件时自动迁移：先写 `pre-migrate-v1` 备份，
+再原地换键并写盘；迁移后旧键不再残留，程序继续用新结构读写。
 
 **认识程度**：首次部署对账时已在群里的人 = `listed`；看过 TA 说话 = `observed`；私聊、@机器人、引用机器人 = `talked`；
 `familiar` 只能由管理员设定（「经常发言」不会自动升级为熟人）。
@@ -68,16 +78,17 @@
 | 策略 | 在 B 群里关于「也在 A 群的人」能看到什么 |
 | --- | --- |
 | `none` | 只有 B 群自己的记录；连「在别的群见过」都不提 |
-| `identity`（默认） | + 「是同一个 QQ 号」「在另外 N 个群见过」（群有 `label` 时显示标签）、管理员设定的跨群称呼、认识程度、互动偏好。**不带任何别处的记忆内容** |
+| `identity`（默认） | + 「是同一个 QQ 号」「在另外 N 处见过」（会话有 `label` 时显示标签）、管理员设定的跨会话称呼、认识程度、互动偏好。**不带任何别处的记忆内容** |
 | `shared` | + `visibility=public` 且已批准的记忆：管理员写的 global 记忆、AI 申请共享并经管理员 `/share approve` 批准的群内记忆 |
 
-群级覆盖：`continuity.groups.<群号>.sharePolicy` 只能把某个群调**更严**；两个群之间生效的是两边较严的一档。
-`recordable: false` 的群不写人物库、不出现在其他群的视图里，其记录即使被批准过也不外流。
+会话级覆盖：`continuity.conversations.<群号>.sharePolicy`（旧键 `continuity.groups` 仍可读）只能把某个会话调**更严**；
+两个会话之间生效的是两边较严的一档。
+`recordable: false` 的会话不写人物库、不出现在其他会话的视图里，其记录即使被批准过也不外流。
 
 **可见性在注入时由程序执行**：所有给模型的人物信息都经过 `memory-policy.js` 的 `noteVisibleIn()` / `buildPersonView()`；
 唤醒提示词的【在场人物】小节只包含本轮消息里出现的发言者（最多 8 人 / 1500 字，可配置）。
 
-**冲突处理**：本群名片 > 管理员设定的跨群称呼 > QQ 昵称；本群记录排在跨群记录之前并告诉模型「本群记录为准」；
+**冲突处理**：本会话显示名 > 管理员设定的跨会话称呼 > QQ 昵称；本会话记录排在跨会话记录之前并告诉模型「本会话记录为准」；
 置顶（含被纠正过的条目）优先于普通印象，`explicit` 优先于 `impression`；文字相同的条目只保留一条。
 
 **删除是真删除**：`/person <QQ> forget`（或控制台 `POST /api/people/delete`）删除此人全部作用域的记录；
@@ -89,7 +100,7 @@ SnowLuma 1.14.22 实际发出的通知（对照其源码 `packages/onebot/src/ev
 
 | 通知 | 字段 | 桥接处理 |
 | --- | --- | --- |
-| `group_increase`（sub_type `approve` / `invite`） | group_id, user_id, operator_id | 查人物库分类 → 二代消息流插入 `[入群]` 事件 → 按配置唤醒 |
+| `group_increase`（sub_type `approve` / `invite`） | group_id, user_id, operator_id | 查人物库分类 → 二代消息流插入 `[加入]` 事件 → 按配置唤醒 |
 | `group_decrease`（`leave` / `kick` / `kick_me` / `disband`） | group_id, user_id, operator_id | 记录离开；默认不唤醒、不追问原因 |
 | `group_card` | group_id, user_id, card_new, card_old | 更新名片历史。**注意**：SnowLuma 是在「该成员下一次发言」时对比缓存派生出这个事件的，不是实时推送 |
 | `group_recall` | group_id, user_id, operator_id, message_id | 只记录，不回应、不复述 |
@@ -107,13 +118,14 @@ AI 收到的唤醒提示只描述行为规则（不强制欢迎），具体人�
 
 ## 6. 熟人加入新群
 
-账号 A 在群 1 认识 X → X 加入群 2：群 2 的事件流里是 `[入群] <群2名片>（QQ x）… 在别处认识的人`，
-【在场人物】显示「在另外 1 个群见过」（群 1 有 `label` 时显示标签）+ 管理员设定的称呼。
+账号 A 在群 1 认识 X → X 加入群 2：群 2 的事件流里是 `[加入] <群2名片>（x）… 在别处认识的人`，
+【在场人物】显示「在另外 1 处见过」（群 1 有 `label` 时显示标签）+ 管理员设定的称呼。
 默认 `identity` 策略下，群 1 里的聊天内容与记忆**不会**出现在群 2 的提示词里。
 
 ## 7. 跨群协作（默认关闭）
 
-`crossGroup.enabled=true` 并配置**有向**链接后，群会话可用 `qq_cross_group_query`：
+`crossGroup.enabled=true` 并配置**有向**链接后，会话可用 `qq_cross_group_query`（工具名是 0.1.x 公开契约，未随
+词汇调整而改名）：
 
 ```json
 "crossGroup": { "enabled": true, "links": [ { "from": "<群A>", "to": "<群B>", "allow": ["presence", "activity"] } ] }

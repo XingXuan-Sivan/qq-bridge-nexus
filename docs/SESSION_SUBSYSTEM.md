@@ -187,7 +187,7 @@ resolve(axis, key):
 | `proactive` | timeout / replyCheck / proactiveCheck / memberJoin / memberLeave / roleRefresh | 没有新消息、由 bot 自己或定时器发起（潜水到期、回复检查、主动机会、群事件反应、读新角色卡） |
 | `operator` | bootstrap / admin / scheduled / ownerRelay | 操作者或系统通道，不受会话准入约束（定时任务在调度器里按目标会话主动轴判定并通知创建者） |
 
-未登记的原因按 `proactive` 失败关闭；`test-session-proactive` 会扫描 `src/bridge.js` 与 `src/social/group-events.js`
+未登记的原因按 `proactive` 失败关闭；`test-session-proactive` 会扫描 `src/bridge.js` 与 `src/social/conversation-events.js`
 里的原因字面量，漏登记直接失败。排程侧同样判一次（`scheduleWakeV2`、`scheduleReplyCheckV2`、
 `setupSleepTimerV2Impl`），DSH 断线补投（`flushQueue`）投递前再判一次；准入名单变化（`/api/access` 与会话详情
 `PATCH .../profile`）会调 `rescheduleProactiveChecksAfterAccessChange()`，立刻撤掉主动机会与回复检查定时器、

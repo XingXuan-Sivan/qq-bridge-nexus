@@ -1,6 +1,7 @@
-// v0.4.2 回归：管理员私聊托付群会话（方案 C）。
-// 只有管理员私聊的会话能托付；目标必须是白名单群；开关默认关闭；有限频；托付只交给目标群自己的会话，
+// v0.4.2 回归：管理员私聊托付会话（方案 C）。
+// 只有管理员私聊的会话能托付；目标必须是白名单内的多方会话；开关默认关闭；有限频；托付只交给目标会话自己的会话，
 // 不改变「会话令牌只能发到自己的会话」这条隔离。全部用假数据，不连 QQ/DSH。
+// 词汇：容器叫「会话」（conversation）；`qq:group:` 是会话 key 的文法，不改。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,46 +21,46 @@ const base = {
   isOwnerPrivateKey: (k) => k === OWNER,
   isTargetAllowed: (k) => k === `qq:group:${ALLOWED_GROUP}`,
   enabled: true,
-  targetGroupId: ALLOWED_GROUP,
+  targetConversationId: ALLOWED_GROUP,
   instruction: '在群里随便冒个泡',
   maxChars: 300,
 };
 
-test('合法托付：管理员私聊 → 白名单群', () => {
+test('合法托付：管理员私聊 → 白名单内的多方会话', () => {
   const r = validateOwnerRelay(base);
   assert.equal(r.ok, true);
   assert.equal(r.targetKey, `qq:group:${ALLOWED_GROUP}`);
   assert.equal(r.instruction, '在群里随便冒个泡');
 });
 
-test('拒绝：开关关闭 / 令牌不对 / 非管理员私聊 / 群会话发起 / 白名单外 / 非群号 / 超长 / 空内容', () => {
+test('拒绕：开关关闭 / 令牌不对 / 非管理员私聊 / 会话自己发起 / 白名单外 / 非数字 id / 超长 / 空内容', () => {
   assert.match(validateOwnerRelay({ ...base, enabled: false }).error, /未启用/);
   assert.match(validateOwnerRelay({ ...base, tokenOk: false }).error, /token/);
   assert.match(validateOwnerRelay({ ...base, fromKey: 'qq:private:30003' }).error, /只有管理员/);
-  assert.match(validateOwnerRelay({ ...base, fromKey: `qq:group:${ALLOWED_GROUP}` }).error, /只有管理员/, '群会话不能托付别的群（防群内提示词注入）');
-  assert.match(validateOwnerRelay({ ...base, targetGroupId: '40004' }).error, /白名单/);
-  assert.match(validateOwnerRelay({ ...base, targetGroupId: 'abc' }).error, /群号/);
-  assert.match(validateOwnerRelay({ ...base, targetGroupId: 'qq:group:20002' }).error, /群号/);
+  assert.match(validateOwnerRelay({ ...base, fromKey: `qq:group:${ALLOWED_GROUP}` }).error, /只有管理员/, '多方会话不能托付别的会话（防会话内提示词注入）');
+  assert.match(validateOwnerRelay({ ...base, targetConversationId: '40004' }).error, /白名单/);
+  assert.match(validateOwnerRelay({ ...base, targetConversationId: 'abc' }).error, /会话 id/);
+  assert.match(validateOwnerRelay({ ...base, targetConversationId: 'qq:group:20002' }).error, /会话 id/);
   assert.match(validateOwnerRelay({ ...base, instruction: 'x'.repeat(301) }).error, /300/);
   assert.match(validateOwnerRelay({ ...base, instruction: '   ' }).error, /不能为空/);
   // 开关检查在身份检查之前也无妨，但令牌检查必须最先：不给无效令牌任何信息。
   assert.match(validateOwnerRelay({ ...base, tokenOk: false, enabled: false }).error, /token/);
 });
 
-test('限频：全局与单群上限，一小时后恢复', () => {
+test('限频：全局与单个会话上限，一小时后恢复', () => {
   let t = 0;
   const lim = createOwnerRelayLimiter({ now: () => t });
   const cfg = { maxPerHour: 3, maxPerTargetPerHour: 2 };
   assert.equal(lim.take('qq:group:1', cfg), null);
   assert.equal(lim.take('qq:group:1', cfg), null);
-  assert.match(lim.take('qq:group:1', cfg), /这个群/);
+  assert.match(lim.take('qq:group:1', cfg), /这个会话/);
   assert.equal(lim.take('qq:group:2', cfg), null);
   assert.match(lim.take('qq:group:3', cfg), /每小时 3 次/);
   t = 3600_000;
   assert.equal(lim.take('qq:group:1', cfg), null);
 });
 
-test('待办：peek 不取走、take 取走、过期丢弃、每群有上限', () => {
+test('待办：peek 不取走、take 取走、过期丢弃、每个会话有上限', () => {
   let t = 0;
   const store = createOwnerRelayStore({ now: () => t, maxPerKey: 2 });
   store.add('qq:group:1', 'a', 1000);
@@ -77,7 +78,7 @@ test('待办：peek 不取走、take 取走、过期丢弃、每群有上限', (
 test('提示词与返回文案：标明来源、不让原样转发、不让模型谎称已发出', () => {
   const block = ownerRelayPromptBlock([{ instruction: '冒个泡' }]);
   assert.match(block, /管理员托付/);
-  assert.match(block, /不是群友消息/);
+  assert.match(block, /不是这里的参与者消息/);
   assert.match(block, /不要原样复述/);
   assert.match(block, /不要发送会话令牌/);
   assert.equal(ownerRelayPromptBlock([]), '');
@@ -88,7 +89,7 @@ test('提示词与返回文案：标明来源、不让原样转发、不让模�
   assert.equal(c.notifyOwner, false);
 });
 
-test('接线：开关默认关闭、MCP 仅显式 true 才注册、端点不复用目标群令牌', () => {
+test('接线：开关默认关闭、MCP 仅显式 true 才注册、端点不复用目标会话令牌', () => {
   const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
   const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));

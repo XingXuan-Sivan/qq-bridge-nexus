@@ -106,9 +106,9 @@ test('⑤ 新增唤醒原因必须登记，否则闸门分类表会漏判', () =
   // evaluateWakeTriggerV2 的返回值（私聊/任意消息/@/名字/关键词/提问/指定成员/概率）
   const evalBody = sliceBetween('function evaluateWakeTriggerV2(', '\n  }\n');
   for (const m of evalBody.matchAll(/return [`']([a-zA-Z]+)/g)) reasons.add(m[1]);
-  // 群事件桥接的 wakeReason（memberJoin / memberLeave）
-  const groupEvents = fs.readFileSync(new URL('../src/social/group-events.js', import.meta.url), 'utf8');
-  for (const m of groupEvents.matchAll(/wakeReason:\s*[`']([a-zA-Z]+)/g)) reasons.add(m[1]);
+  // 成员事件桥接的 wakeReason（memberJoin / memberLeave）
+  const memberEvents = fs.readFileSync(new URL('../src/social/conversation-events.js', import.meta.url), 'utf8');
+  for (const m of memberEvents.matchAll(/wakeReason:\s*[`']([a-zA-Z]+)/g)) reasons.add(m[1]);
   assert.ok(reasons.size >= 10, `应扫描到足够多的原因，实际 ${reasons.size}`);
   for (const reason of reasons) {
     assert.ok(Object.hasOwn(WAKE_REASON_AXES, reason), `唤醒原因「${reason}」没有登记到 WAKE_REASON_AXES（src/session/access.mjs）`);

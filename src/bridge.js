@@ -162,9 +162,11 @@ import {
   applyStickerNote,
   markStickerUsed
 } from './sticker-lib.js';
-// v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
+// v0.3.0：人际连续性（人物库/成员事件/跨会话协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
+// 0.2.0：社交模型的容器词汇统一叫「会话」（conversation）；入站协议字段 `group_id`、会话 key 的
+// `qq:group:<id>` 段、关系状态值 member/left 属协议/文法面，保持不变。
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossConversation, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerConversationAccess, peekView, conversationRuleResultText, conversationRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
@@ -1722,7 +1724,7 @@ function loadConfig() {
     ...(file.admin ?? {}),
   };
   if (file.admin?.maxElevatedMs) cfg.admin.maxElevatedMs = { L1: 14400000, L2: 7200000, L3: 3600000, ...file.admin.maxElevatedMs };
-  // 跨群协作：默认关闭；链接是有向的、按能力授权（见 src/social/cross-group.js）。
+  // 跨会话协作：默认关闭；链接是有向的、按能力授权（见 src/social/cross-conversation.js）。
   cfg.crossGroup = { enabled: false, links: [], ...(file.crossGroup ?? {}) };
 
   // 系统级 v2 配置：从旧 socialV2 拆出，迁移后只保留 config.* 这些新键。
@@ -11328,7 +11330,7 @@ async function main() {
           if (!userId) { sendJson({ ok: false, error: 'userId 必须是 QQ 号（身份只认 QQ 号，不接受名字）' }, 400); return; }
           const gm = parseKey(key);
           const gmId = gm?.kind === 'group' ? String(gm.id) : null;
-          if (gmId && !ext.groupRecordable(gmId)) { sendJson({ ok: false, error: '本群设置为不记录人物（continuity.groups.<群号>.recordable=false）' }, 403); return; }
+          if (gmId && !ext.conversationRecordable(gmId)) { sendJson({ ok: false, error: '本会话设置为不记录人物（continuity.conversations.<会话>.recordable=false，旧键 groups 仍可读）' }, 403); return; }
           if (url.pathname === '/api/socialV2/person') {
             const view = ext.personViewFor(key, userId);
             sendJson({ ok: true, key, userId, known: !!view, person: view, note: view ? '只包含当前会话可见的内容；同名不同号是不同的人' : '人物库里还没有这个 QQ 号' });
@@ -11341,7 +11343,7 @@ async function main() {
           // 私聊会话只能给「对方本人」记私聊记忆；不能在 A 的私聊里给 B 写档案。
           if (isPrivateKey(key) && key !== sessionKey('private', userId)) { sendJson({ ok: false, error: '私聊里只能记录与对方本人有关的记忆' }, 403); return; }
           // 群会话：对象必须是本群见过的人（防止凭空给任意 QQ 号建档/投毒）。
-          if (gmId && !ext.people.getPerson(userId)?.groups?.[gmId]) { sendJson({ ok: false, error: '这个 QQ 号没有在本群出现过，不能记录' }, 403); return; }
+          if (gmId && !ext.people.getPerson(userId)?.conversations?.[gmId]) { sendJson({ ok: false, error: '这个 QQ 号没有在本会话出现过，不能记录' }, 403); return; }
           try {
             const note = ext.people.addNote(userId, {
               text: redactKnownTokensOnly(content),
@@ -11387,7 +11389,9 @@ async function main() {
           });
           return;
         }
-        // ── v0.3.0 AI 工具：跨群受控查询（默认关闭；只返回统计/成员关系，不返回内容）──
+        // ── v0.3.0 AI 工具：跨会话受控查询（默认关闭；只返回统计/成员关系，不返回内容）──
+        // 路径与工具名（/cross-group、qq_cross_group_query）是 0.1.x 的公开面，不改；
+        // 请求/响应字段从 0.2.0 起叫 targetConversationId，旧名 targetGroupId 仍然接受并回显一次。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/cross-group') {
           const body = await readBody();
           const key = apiKey(body.key);
@@ -11396,22 +11400,23 @@ async function main() {
           if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '会话不在当前模式允许范围内' }, 403); return; }
           if (!v2ToolEnabled('crossGroup')) { sendJson({ ok: false, error: '工具未启用：qq_cross_group_query' }, 403); return; }
           const capability = String(body.capability ?? '');
-          const target = String(body.targetGroupId ?? '').trim();
-          const check = checkCrossGroup(cfg, key, target, capability);
+          const target = String(body.targetConversationId ?? body.targetGroupId ?? '').trim();
+          const check = checkCrossConversation(cfg, key, target, capability);
           ext.audit.append('crossgroup.query', { from: key, to: target, capability, ok: check.ok, reason: check.ok ? undefined : check.reason });
           if (!check.ok) { sendJson({ ok: false, error: check.reason }, 403); return; }
+          const echo = { targetConversationId: target, targetGroupId: target };
           if (capability === 'presence') {
             const userId = ext.normalizeQQ(body.userId);
             if (!userId) { sendJson({ ok: false, error: 'presence 需要 userId（QQ 号）' }, 400); return; }
-            sendJson({ ok: true, capability, targetGroupId: target, userId, ...queryPresence(ext.people, target, userId) });
+            sendJson({ ok: true, capability, ...echo, userId, ...queryPresence(ext.people, target, userId) });
             return;
           }
-          sendJson({ ok: true, capability, targetGroupId: target, ...queryActivity(socialV2.conversations.get(sessionKey('group', target)) ?? null) });
+          sendJson({ ok: true, capability, ...echo, ...queryActivity(socialV2.conversations.get(sessionKey('group', target)) ?? null) });
           return;
         }
         // ── v0.4.2 AI 工具：管理员私聊托付群会话（方案 C，默认关闭）──
-        // 私聊会话不能直接往群里发（会话令牌只能发到自己的会话）；这里只把托付交给目标群**自己的**会话，
-        // 由它按群里的上下文自己组织语言、用自己的令牌发言。会话隔离本身不变。
+        // 私聊会话不能直接往别处发（会话令牌只能发到自己的会话）；这里只把托付交给目标会话**自己的**会话，
+        // 由它按当地的上下文自己组织语言、用自己的令牌发言。会话隔离本身不变。
         if (req.method === 'POST' && url.pathname === '/api/socialV2/owner-relay') {
           const body = await readBody();
           const key = apiKey(body.key);
@@ -11424,12 +11429,13 @@ async function main() {
             isTargetAllowed: (targetKey) => v2SessionAllowed(targetKey),
             // 默认关闭的风险工具：必须显式 true 才放行（不沿用 v2ToolEnabled 的「非 false 即开」）
             enabled: cfg.tools?.ownerRelay === true,
-            targetGroupId: body.targetGroupId,
+            // 0.2.0 起字段叫 targetConversationId；旧名 targetGroupId 仍然接受（已发出的提示词与工具描述里是旧名）。
+            targetConversationId: body.targetConversationId ?? body.targetGroupId,
             instruction: body.instruction,
             maxChars: relayCfg.maxChars,
           });
           if (!check.ok) {
-            ext.audit.append('ownerrelay.reject', { from: key, to: String(body.targetGroupId ?? ''), reason: check.error });
+            ext.audit.append('ownerrelay.reject', { from: key, to: String(body.targetConversationId ?? body.targetGroupId ?? ''), reason: check.error });
             sendJson({ ok: false, error: check.error }, check.status);
             return;
           }
@@ -11457,24 +11463,24 @@ async function main() {
           sendJson({ ok: true, key, message: '已换新令牌：下一次唤醒时 AI 会拿到新令牌，旧令牌立即失效' });
           return;
         }
-        // 管理员私聊的跨群只读能力（默认关闭，socialV2.tools.ownerGroupAccess === true 才放行）：
-        //   GET /api/socialV2/owner-peek  只读查看白名单群的最近消息、记忆摘要和长期规则（不标记已读、不能代发）
+        // 管理员私聊的跨会话只读能力（默认关闭，socialV2.tools.ownerGroupAccess === true 才放行）：
+        //   GET /api/socialV2/owner-peek  只读查看白名单会话的最近消息、记忆摘要和长期规则（不标记已读、不能代发）
         // 增删规则改走通用记忆管理面 /api/memory/rules（控制台与 AI 同一套 manage）。
         if (req.method === 'GET' && url.pathname === '/api/socialV2/owner-peek') {
           const key = String(url.searchParams.get('key') ?? '').trim();
-          const targetGroupId = url.searchParams.get('targetGroupId');
+          const targetConversationId = url.searchParams.get('targetConversationId') ?? url.searchParams.get('targetGroupId');
           const agentToken = req.headers['x-agent-token'];
-          const check = validateOwnerGroupAccess({
+          const check = validateOwnerConversationAccess({
             fromKey: key,
             tokenOk: !!agentToken && agentTokenOk(key, agentToken) && v2SessionAllowed(key),
             isOwnerPrivateKey: ext.isOwnerPrivateKey,
             isTargetAllowed: (targetKey) => v2SessionAllowed(targetKey),
             // 默认关闭的跨会话能力：必须显式 true 才放行
             enabled: cfg.tools?.ownerGroupAccess === true,
-            targetGroupId,
+            targetConversationId,
           });
           if (!check.ok) {
-            ext.audit.append('ownerpeek.reject', { from: key, to: String(targetGroupId ?? ''), reason: check.error });
+            ext.audit.append('ownerpeek.reject', { from: key, to: String(targetConversationId ?? ''), reason: check.error });
             sendJson({ ok: false, error: check.error }, check.status);
             return;
           }
@@ -11534,8 +11540,12 @@ async function main() {
             sendJson({ ok: true, person: p });
             return;
           }
-          const list = ext.people.listPeople({ groupId: url.searchParams.get('groupId') || null, query: url.searchParams.get('q') || '', limit: Number(url.searchParams.get('limit')) || 100 });
-          sendJson({ ok: true, stats: ext.people.stats(), people: list.map((p) => ({ qq: p.qq, nickname: p.nickname, acquaintance: p.acquaintance, lastSeenAt: p.lastSeenAt, groups: Object.fromEntries(Object.entries(p.groups).map(([g, x]) => [g, { card: x.card, status: x.status }])), notes: p.notes.length })), legacyReview: ext.people.data.legacyReview ?? [] });
+          const list = ext.people.listPeople({ conversationId: url.searchParams.get('conversationId') ?? url.searchParams.get('groupId') ?? null, query: url.searchParams.get('q') || '', limit: Number(url.searchParams.get('limit')) || 100 });
+          // 会话列表同时给新名和旧名：“groups”是 0.1.x 控制台/脚本读的字段，留一版别名。
+          sendJson({ ok: true, stats: ext.people.stats(), people: list.map((p) => {
+            const conversations = Object.fromEntries(Object.entries(p.conversations).map(([cid, x]) => [cid, { card: x.card, status: x.status }]));
+            return { qq: p.qq, nickname: p.nickname, acquaintance: p.acquaintance, lastSeenAt: p.lastSeenAt, conversations, groups: conversations, notes: p.notes.length };
+          }), legacyReview: ext.people.data.legacyReview ?? [] });
           return;
         }
         if (req.method === 'POST' && url.pathname.startsWith('/api/people/')) {
@@ -11544,7 +11554,7 @@ async function main() {
           const qq = ext.normalizeQQ(body.qq);
           try {
             if (action === 'reconcile') {
-              const r = await reconcileGroupMembers({ force: true });
+              const r = await reconcileConversationMembers({ force: true });
               sendJson({ ok: true, results: r });
               return;
             }
@@ -11675,34 +11685,35 @@ async function main() {
           sendJson({ ok: true, provider: r.provider, key, category: category || 'all', removed: r.result?.removed ?? {} });
           return;
         }
-        // 长期规则：控制台可对任意群增删；AI 仍要求「管理员私聊 + agent token + ownerGroupAccess + 白名单」。
+        // 长期规则：控制台可对任意会话增删；AI 仍要求「管理员私聊 + agent token + ownerGroupAccess + 白名单」。
+        // 0.2.0 起字段叫 targetConversationId，旧名 targetGroupId 仍然接受。
         if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/api/memory/rules') {
           const body = req.method === 'POST' ? await readBody() : {};
           const sourceKey = String((req.method === 'GET' ? url.searchParams.get('key') : body.key) ?? '').trim();
-          const targetGroupId = req.method === 'GET' ? url.searchParams.get('targetGroupId') : body.targetGroupId;
+          const targetConversationId = req.method === 'GET' ? (url.searchParams.get('targetConversationId') ?? url.searchParams.get('targetGroupId')) : (body.targetConversationId ?? body.targetGroupId);
           let targetKey = sourceKey;
           if (!memConsole) {
-            const check = validateOwnerGroupAccess({
+            const check = validateOwnerConversationAccess({
               fromKey: sourceKey,
               tokenOk: !!req.headers['x-agent-token'] && agentTokenOk(sourceKey, req.headers['x-agent-token']) && v2SessionAllowed(sourceKey),
               isOwnerPrivateKey: ext.isOwnerPrivateKey,
               isTargetAllowed: (k) => v2SessionAllowed(k),
               enabled: cfg.tools?.ownerGroupAccess === true,
-              targetGroupId,
+              targetConversationId,
             });
             if (!check.ok) {
-              ext.audit.append('grouprule.reject', { from: sourceKey, to: String(targetGroupId ?? ''), reason: check.error });
+              ext.audit.append('grouprule.reject', { from: sourceKey, to: String(targetConversationId ?? ''), reason: check.error });
               memDeny(check.error, check.status);
               return;
             }
             targetKey = check.targetKey;
-          } else if (!/^[1-9]\d{0,11}$/.test(String(targetGroupId ?? '').trim())) {
-            // 控制台按会话 key 操作：必须是群会话（规则是「为本群设定」）
+          } else if (!/^[1-9]\d{0,11}$/.test(String(targetConversationId ?? '').trim())) {
+            // 控制台按会话 key 操作：必须是多方会话（规则是「为本会话设定」）
             const m = /^qq:group:([1-9]\d{0,11})$/.exec(targetKey);
-            if (!m) { memDeny('targetGroupId 必须是群号（或传 qq:group:<群号> 的 key）', 400); return; }
+            if (!m) { memDeny('targetConversationId 必须是会话 id（或传 qq:group:<会话 id> 的 key）', 400); return; }
             targetKey = sessionKey('group', m[1]);
           } else {
-            targetKey = sessionKey('group', String(targetGroupId).trim());
+            targetKey = sessionKey('group', String(targetConversationId).trim());
           }
           if (req.method === 'GET') {
             const r = await memCall('local-digest', 'list', { key: targetKey });
@@ -11725,9 +11736,9 @@ async function main() {
             if (!r.result?.duplicate && rule) {
               ext.audit.append('grouprule.add', { from: sourceKey, to: targetKey, ruleId: rule.id, chars: rule.text.length, source: memConsole ? 'console' : 'agent' });
               appendActivity(`${sourceKey} 设定 ${targetKey} 长期规则 #${rule.id}：${rule.text.slice(0, 60)}`);
-              if (!memConsole) void sendOwnerDirect(groupRuleNoticeText(targetKey, 'add', rule));
+              if (!memConsole) void sendOwnerDirect(conversationRuleNoticeText(targetKey, 'add', rule));
             }
-            sendJson({ ok: true, targetKey, duplicate: !!r.result?.duplicate, rules: r.result?.rules ?? [], message: r.result?.duplicate ? `${targetKey} 已有同样的规则 #${rule.id}，没有重复添加。` : groupRuleResultText(targetKey, 'add', rule) });
+            sendJson({ ok: true, targetKey, duplicate: !!r.result?.duplicate, rules: r.result?.rules ?? [], message: r.result?.duplicate ? `${targetKey} 已有同样的规则 #${rule.id}，没有重复添加。` : conversationRuleResultText(targetKey, 'add', rule) });
             return;
           }
           if (action === 'remove') {
@@ -11736,8 +11747,8 @@ async function main() {
             const rule = r.result?.item;
             ext.audit.append('grouprule.remove', { from: sourceKey, to: targetKey, ruleId: rule?.id, source: memConsole ? 'console' : 'agent' });
             appendActivity(`${sourceKey} 删除 ${targetKey} 长期规则 #${rule?.id}：${String(rule?.text ?? '').slice(0, 60)}`);
-            if (!memConsole) void sendOwnerDirect(groupRuleNoticeText(targetKey, 'remove', rule));
-            sendJson({ ok: true, targetKey, rules: (await memoryRegistry.manage({ provider: 'local-digest', action: 'list', params: { key: targetKey } })).result?.rules ?? [], message: groupRuleResultText(targetKey, 'remove', rule) });
+            if (!memConsole) void sendOwnerDirect(conversationRuleNoticeText(targetKey, 'remove', rule));
+            sendJson({ ok: true, targetKey, rules: (await memoryRegistry.manage({ provider: 'local-digest', action: 'list', params: { key: targetKey } })).result?.rules ?? [], message: conversationRuleResultText(targetKey, 'remove', rule) });
             return;
           }
           memDeny('action 只能是 list / add / remove', 400);
@@ -15895,7 +15906,7 @@ async function main() {
     if (String(reason).startsWith('memberJoin')) {
       const category = String(reason).split(':')[1] || '';
       return {
-        branch: `【唤醒】${key}\n原因：有人加入了本群（见未读里的 [入群] 事件）。\n${joinWakeInstruction(category)}\n看完再决定：想打招呼就自然说一句；不想就安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        branch: `【唤醒】${key}\n原因：有人加入了本会话（见未读里的 [加入] 事件）。\n${joinWakeInstruction(category)}\n看完再决定：想打招呼就自然说一句；不想就安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
         fallback: ''
       };
     }
@@ -15919,7 +15930,7 @@ async function main() {
     }
     if (reason === 'ownerRelay') {
       return {
-        branch: `【唤醒】${key}\n原因：管理员在私聊里托付你在本群做一件事（见文末【管理员托付】）。\n先看看群里此刻在聊什么，再决定怎么开口最自然。`,
+        branch: `【唤醒】${key}\n原因：管理员在私聊里托付你在本会话做一件事（见文末【管理员托付】）。\n先看看会话里此刻在聊什么，再决定怎么开口最自然。`,
         fallback: ''
       };
     }
@@ -17398,9 +17409,9 @@ async function main() {
     return msg;
   }
 
-  async function fetchMemberInfo(groupId, userId) {
+  async function fetchMemberInfo(conversationId, userId) {
     if (typeof bot.getGroupMemberInfo !== 'function') return null;
-    const m = await withTimeout(bot.getGroupMemberInfo(Number(groupId), Number(userId), { noCache: true }), 8000, '查询群成员资料');
+    const m = await withTimeout(bot.getGroupMemberInfo(Number(conversationId), Number(userId), { noCache: true }), 8000, '查询群成员资料');
     // SnowLuma 找不到成员时返回 ok + 空字段（不是错误），空串按「无名片」处理。
     return { card: String(m?.card ?? ''), nickname: String(m?.nickname ?? '') };
   }
@@ -17409,16 +17420,16 @@ async function main() {
     if (!ext.continuityEnabled()) return null;
     const ev = normalizeMemberNotice(event);
     if (!ev) return null;
-    const key = sessionKey('group', ev.groupId);
+    const key = sessionKey('group', ev.conversationId);
     const r = await processMemberEvent(ev, {
       people: ext.people,
       continuity: ext.continuity(),
-      groupAllowed: (gid) => passiveAllowed(sessionKey('group', String(gid))),
+      conversationAllowed: (cid) => passiveAllowed(sessionKey('group', String(cid))),
       fetchMember: fetchMemberInfo,
       log,
     });
     if (!r.handled) return r;
-    if (ev.kind === 'join' || ev.kind === 'leave' || ev.kind === 'card') { groupMemberNameCache.delete(`${ev.groupId}:${ev.userId}`); groupMemberIdsCache.delete(ev.groupId); }
+    if (ev.kind === 'join' || ev.kind === 'leave' || ev.kind === 'card') { groupMemberNameCache.delete(`${ev.conversationId}:${ev.userId}`); groupMemberIdsCache.delete(ev.conversationId); }
     if (r.streamText) appendActivity(`${key} ${r.streamText}`);
     if (effectiveMode(key) !== 'reserved2' || !r.streamText || !isSessionAllowedInCurrentMode(key)) return r;
     appendSocialV2Notice(key, { text: r.streamText, userId: ev.userId });
@@ -17437,27 +17448,27 @@ async function main() {
 
   // 成员名单对账：首次部署把现有成员标成 listed（不当新人）；之后补记断线期间漏掉的入群/退群（不唤醒）。
   const memberReconcileAt = new Map();
-  async function reconcileGroupMembers({ force = false } = {}) {
+  async function reconcileConversationMembers({ force = false } = {}) {
     if (!ext.continuityEnabled() || cfg.continuity?.reconcileOnConnect === false) return [];
     if (typeof bot.getGroupMemberList !== 'function') return [];
     const out = [];
     let selfId = null;
     try { selfId = (await bot.getLoginInfo())?.user_id ?? null; } catch {}
-    for (const gid of accessIds('passive', 'group')) {
-      if (!ext.groupRecordable(gid)) continue;
-      const last = memberReconcileAt.get(gid) ?? 0;
+    for (const cid of accessIds('passive', 'group')) {
+      if (!ext.conversationRecordable(cid)) continue;
+      const last = memberReconcileAt.get(cid) ?? 0;
       if (!force && Date.now() - last < 10 * 60 * 1000) continue;
-      memberReconcileAt.set(gid, Date.now());
+      memberReconcileAt.set(cid, Date.now());
       try {
-        const members = await withTimeout(bot.getGroupMemberList(Number(gid), { noCache: true }), 15000, '拉取群成员名单');
-        const r = ext.people.reconcileGroup(gid, Array.isArray(members) ? members : (Array.isArray(members?.data) ? members.data : []), { selfId });
+        const members = await withTimeout(bot.getGroupMemberList(Number(cid), { noCache: true }), 15000, '拉取群成员名单');
+        const r = ext.people.reconcileConversation(cid, Array.isArray(members) ? members : (Array.isArray(members?.data) ? members.data : []), { selfId });
         if (r) {
           out.push(r);
-          log(`群 ${gid} 成员对账：${r.baseline ? '首次建档' : '增量'}，共 ${r.total} 人${r.baseline ? '（全部标为 listed，不当新人）' : `，补记入群 ${r.missedJoins} / 退群 ${r.missedLeaves}`}`);
+          log(`会话 ${cid} 成员对账：${r.baseline ? '首次建档' : '增量'}，共 ${r.total} 人${r.baseline ? '（全部标为 listed，不当新人）' : `，补记入群 ${r.missedJoins} / 退群 ${r.missedLeaves}`}`);
         }
       } catch (error) {
-        log(`群 ${gid} 成员对账失败（下次连接时重试）：${error?.message ?? error}`);
-        memberReconcileAt.delete(gid);
+        log(`会话 ${cid} 成员对账失败（下次连接时重试）：${error?.message ?? error}`);
+        memberReconcileAt.delete(cid);
       }
     }
     return out;
@@ -18108,7 +18119,7 @@ async function main() {
     // 让 MCP 工具（另一个进程）也能拿到正确的 token。
     void syncTokenToFile();
     // v0.3.0：成员名单对账（首次部署建档 / 补记断线期间漏掉的入群退群；只记录不唤醒）。
-    setTimeout(() => { void reconcileGroupMembers().catch((error) => log(`成员对账异常：${error?.message ?? error}`)); }, 5000);
+    setTimeout(() => { void reconcileConversationMembers().catch((error) => log(`成员对账异常：${error?.message ?? error}`)); }, 5000);
   });
 
   /**

@@ -7,7 +7,7 @@
 ## 0.2.0（未发布）—— 用户侧 / Agent 侧平台解耦
 
 目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
-B0–B7 已落地，B8（社交模型 `group→conversation`）未开始。
+B0–B8 已落地。
 
 ### 重构：两侧适配器（B0–B5）
 - **B0 常量去 QQ**：`RUNTIME_PLATFORM`、`DEFAULT_PROMPT_VARS`、`catalog.mjs` 的 `provider` 参数化、
@@ -71,6 +71,33 @@ B0–B7 已落地，B8（社交模型 `group→conversation`）未开始。
 > B7 的两个设计取舍（详见规格 §6.1）：端点改名是为避开 `profiles/platforms/` 的配置面；
 > `resolveSendTarget()` 的类型校验只认**已知别名**，不用 `shapeOfType()` 兜底 ——
 > 否则「平台声明了 `group`」会变成「`channel` / `thread` 也放行」。
+
+### 重构：社交模型词汇（B8）
+- **容器词统一叫「会话」**：`src/social/group-events.js → conversation-events.js`、
+  `cross-group.js → cross-conversation.js`、`group-rules.js → conversation-rules.js`；新增
+  `src/social/conversation-config.js`（`continuity.conversations` 与旧键 `continuity.groups` 的**唯一**双读处，
+  只读不写回）。导出同步改名：`checkCrossConversation` / `validateOwnerConversationAccess` /
+  `CONVERSATION_RULE_LIMITS` / `conversationRuleResultText` / `conversationRuleNoticeText` /
+  `reconcileConversationMembers` / `conversationRecordable` / `normalizeConversationId`；`bridge.js` 的成员事件与
+  成员对账改用 `ev.conversationId`。
+- **数据升到 v2**：`state/social/people.json` 里人物下的 `groups` 与顶层对账基线都改为 `conversations`；
+  加载 v1 文件时自动迁移（先写 `pre-migrate-v1` 备份、**键换值不动**、`status` 仍是 `member | left`）。
+  `continuity.groups` 属于配置，双读兼容、两边都有时合并，但不回写。
+- **API 字段换新 + 旧名别名**：`targetGroupId` → `targetConversationId`（入站先读新名再回落旧名；
+  `/api/socialV2/cross-group` 的响应把两个都回显一次）；端点**路径**不改名。
+- **提示词与文案中性化**：`[入群]` → `[加入]`（修 bug：事件流早已写 `[加入]`，唤醒提示词却让模型去未读里
+  找 `[入群]`）、本群 → 本会话、跨群 → 跨会话、「在另外 N 处见过」。
+  `scripts/fixtures/wake-prompt-golden.json` 重生成，diff 只剩这两行词汇变化。
+- **一处行为放宽**：`checkCrossConversation()` 改用 `isGroupKey()` 判「会话形状」而不是 `kind === 'group'`，
+  `channel` / `thread` 形状的会话也能发起受控跨会话查询；QQ 部署下两种判法等价。
+- **明确不改**（协议/文法/契约面）：OneBot 的 `group_id` / `send_group_msg` / `getGroupMemberInfo` /
+  `group_increase|decrease|card|recall`、会话 key 的 `qq:group:<id>` 段、关系状态 `member|left`、
+  `notes[].scope` 的 `group:<id>`、配置键 `crossGroup` / `allow.groups` / `ownerGroupAccess` / `ownerRelay`、
+  `qq_*` 工具名与 `crossgroup.query` 审计键、人物库的 `members` 字段。边界表见规格 §6.2。
+- **新增回归**：`test-continuity.mjs` +2（people.json v1→v2 真迁移；`continuity.conversations` 新/旧键双读，共 28 条）；
+  `test-group-rules.mjs → test-conversation-rules.mjs`（+ 旧字段名仍 200，共 7 条）；`test-integration-v030.mjs`
+  新增 owner-relay 旧名与 cross-group 双回显断言（共 21 条）；`test-owner-relay` / `test-session-proactive` /
+  `audit-bridge-harness` 注入表同步。
 
 ### 修复
 - 审计夹具的 Agent 地址发现改为离线桩（旧名 `resolveDshBaseUrl` 改名后未同步，导致 bridge 落到真实现、

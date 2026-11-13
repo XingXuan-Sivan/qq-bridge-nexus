@@ -348,7 +348,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B5** ✅ | 运行期适配器：新建 `src/user-side/`（`runtime-registry` / `builtin` / `user-platform` + `adapters/qq/`）与 `src/agent-side/`（已有 registry/builtin + `adapters/dsh/` + `agent-client` 门面）；`dsh-client.js` → `agent-side/adapters/dsh/client.mjs`，`lib/dsh-endpoint` 与 `lib/dsh-health` → 同目录，`platform/onebot` + `lib/qq-backend-label` → `user-side/adapters/qq/`，`platform/prompt` → `user-side/prompt.mjs`；bridge / self-test / control-center 只依赖门面；边界与例外见 §2.5 | 大（bridge 18 处 + 18 个 importer + 夹具） | 高 |
 | **B6** ✅ | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归（实装见 §5.4） | kernel/host-api/manifest + `src/user-side/` 四个新模块 | 中高 |
 | **B7** ✅ | 控制台元数据化：`/api/runtime/platforms` + `/api/runtime/agent-platforms` 驱动列名/筛选/表单，文案去 QQ，`/api/send/*` 收敛到 `resolveSendTarget` + `sendAction`（端点命名见 §6.1） | bridge + `src/*-side/metadata.mjs` + console 全站 | 中 |
-| **B8** | 社交模型 `group→conversation`、`成员→participant`（`/api/socialV2/*` 46 端点） | social 7 文件 1195 行 | 高 |
+| **B8** ✅ | 社交模型容器词 `group→conversation`：`src/social/` 三个模块改名（`conversation-events` / `cross-conversation` / `conversation-rules`）+ 新增 `conversation-config.js`（双读收敛点）；`people.json` 升 v2（自动迁移 + `pre-migrate-v1` 备份）；`/api/socialV2/*` 字段名换新 + 旧名别名；文案中性化（`[入群]→[加入]`）。**`members` 与 `member\|left` 不改**，边界见 §6.2 | social 7 文件（约 1300 行）+ 6 个测试 + 提示词基线夹具 | 高 |
 
 反向约束（写进提交说明）：
 
@@ -376,6 +376,30 @@ bridge 只调这两个模块，控制台只有 `public/console/js/platforms.js` 
 类型等价只认**已知别名**（`private` / `direct` / `chat` / `dm`），未知类型只与自身相等 —— 用 `shapeOfType()`
 兜底会把「平台声明了 `group`」变成「`channel` / `thread` 也放行」，等于取消校验。
 
+### 6.2 B8 实装：词汇边界（改什么 / 不改什么）
+
+社交模型的**容器**统一叫「会话」（conversation）。这条边界只管「东西叫什么」，不管「协议怎么说话」——
+两者混淆会让一次重命名变成一次协议迁移。
+
+| 面 | 0.2.0 起 | 理由 |
+| --- | --- | --- |
+| 代码标识符 | `group-events.js→conversation-events.js`、`cross-group.js→cross-conversation.js`、`group-rules.js→conversation-rules.js`；`checkCrossConversation` / `validateOwnerConversationAccess` / `CONVERSATION_RULE_LIMITS` / `conversationRuleResultText` / `conversationRuleNoticeText` / `reconcileConversationMembers` / `conversationRecordable` / `normalizeConversationId` | 内核不该把「多方会话」等同于「QQ 群」：`channel` / `thread` 将来也是多方 |
+| 数据 | `people.json` **v2**：人物下与顶层对账基线的 `groups` → `conversations`；`continuity.groups` → `continuity.conversations` | 数据升版本 + 迁移函数（加载 v1 时先写 `pre-migrate-v1` 备份再换键）；`continuity` 是配置不是数据，**双读不写回** |
+| API | 请求/响应字段 `targetGroupId` → `targetConversationId`；`/api/socialV2/cross-group` 响应**同时回显**旧名一次 | 0.1.x 的 MCP 客户端与已发出的提示词里是旧名；别名至少保留一整轮。端点**路径**不改名 |
+| 提示词与文案 | 「本群→本会话」「跨群→跨会话」「在另外 N 处见过」、`[入群]`→`[加入]` | `[入群]` 那处是**真 bug**：事件流早已写真 `[加入]`，唤醒提示词却让模型去未读里找 `[入群]` |
+| **不改**：OneBot 协议面 | `group_id`、`send_group_msg`、`getGroupMemberInfo`、`group_increase/decrease/card/recall` | 平台报文，改名等于换协议 |
+| **不改**：会话 key 文法 | `qq:group:<id>` 的 type 段 | key 是持久化主键，改名要全库迁移，收益为零 |
+| **不改**：值域 | 关系状态 `member\|left`；`notes[].scope` / `visibility` 的 `group:<id>` / `private:<id>` | 旧文件里到处都是，且 `LEGACY_RE` 只认这两种形态 |
+| **不改**：配置键与外部契约 | `crossGroup`（含 `links[].from/to`）/ `allow.groups` / `ownerGroupAccess` / `ownerRelay`；`qq_*` 工具名、`crossgroup.query` 审计键 | 用户配置与已发布给模型的工具名 |
+| **不改**：成员字段 | `members`、`acquaintance`、`joinCount` 等 | 规划里曾是 `成员→participant`，落地时放弃：`members` 描述的是「这个会话里有谁」，不携带平台的群语义 |
+
+**一处行为放宽（须记在 commit message）**：`checkCrossConversation()` 用 `isGroupKey()` 判「会话形状」而不是
+`kind === 'group'`，所以 `channel` / `thread` 形状的会话也能发起受控跨会话查询。QQ 部署下两种判法等价
+（key 的 type 段只有 `group` / `private`），差异只在将来接入多形态平台时出现。
+
+**旧名兼容是双向的**：入站字段先读新名再回落旧名（`targetConversationId ?? targetGroupId`），跨会话查询的
+响应把两个都写回去 —— 只做单向兼容的话，旧客户端能读不能写，或新客户端在旧部署上拿不到字段。
+
 ---
 
 ## 7. 验收
@@ -391,6 +415,10 @@ bridge 只调这两个模块，控制台只有 `public/console/js/platforms.js` 
 | `test-plugin-kernel` 新增三条 | `transport:provide` + `create(config)` 产物 + 停用后 `close()`、`onOutbound` 链式/丢弃/非法段、`send:qq` 别名与 `ctx.qq === ctx.message`（20 条） | ✅ B6 |
 | `scripts/test-platform-metadata.mjs` | 元数据形状（含 `limits`）、插件平台并入同表且小写归一、`create()` 产物的 `conversationTypes`/`limits`、`resolveSendTarget` 的校验顺序与别名等价（`direct`↔`private` 放行、未知类型被拒）、Agent 侧不泄漏 `protocol`（11 条） | ✅ B7 |
 | `test:user-platform-pipeline` | 整桥 + mock 平台的端到端流水（建会话 → 收消息 → 准入 → 唤醒 → 发消息） | 待补（B7 已收敛发送入口，缺的是流水本身） |
+| `scripts/test-continuity.mjs` 新增两条 | `people.json` v1→v2：加载即迁（键换、值不动、`version===2`、`pre-migrate-v1` 备份、迁后仍可写）；`continuity.conversations` 新键与旧键 `groups` 双读，两边都有时合并（合计 28 条） | ✅ B8 |
+| `scripts/test-conversation-rules.mjs`（原 `test-group-rules.mjs`） | `targetConversationId` 新字段；`targetGroupId` 旧名仍返回 200 且结果一致；规则文案是中性表述（7 条） | ✅ B8 |
+| `test-integration-v030.mjs` 新增断言 | owner-relay 旧字段名照样走白名单校验（403 而不是 400）；cross-group 响应同时回显 `targetConversationId` 与 `targetGroupId`，旧名请求仍 200（合计 21 条） | ✅ B8 |
+| `scripts/fixtures/wake-prompt-golden.json` | 随文案中性化重新生成，`git diff` 只剩两行词汇变化（`看群里此刻→看此刻`、`[入群]→[加入]`）；块开关/截断/黑话关闭四个变体逐字节一致 | ✅ B8 |
 
 ### 7.2 静态验收（可机械化）
 
@@ -407,6 +435,8 @@ git grep -nE '\bqq\b|\bdsh\b|snowluma|napcat' -- src/ ':!src/*/adapters/*' ':!sr
 - ✅ `docs/PROFILES_MODEL.md` 增补 `adapters/runtime.mjs` 契约（声明面不得 import `src/`，协议面由 `builtin.mjs` 拼装）。
 - ✅ `docs/FOLDER_MAP.md` 增补 `src/user-side/`、`src/agent-side/` 的职责与边界。
 - ✅ B7 增补 §6.1：`/api/runtime/platforms` 与 `/api/platforms` 的分工，避免下一个人再把两个端点当成重复实现。
+- ✅ B8 增补 §6.2（词汇边界表：改什么 / 不改什么 / 一处行为放宽）；`guides/CONTINUITY.md` 同步 `people.json` v2 与
+  `[加入]`；`FOLDER_MAP.md` 同步三个模块改名与 `conversation-config.js`。
 
 ---
 

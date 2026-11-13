@@ -1,31 +1,20 @@
-// 铁律 L7 的注册期断言：仿真会话的 preset **不得包含本地执行能力**。
+// 铁律 L7 的登记期断言：仿真会话的 preset 不得包含本地执行能力。
 //
-// 为什么必须有这个文件
-// --------------------
-// `QSH_PLAN.md` §0.1 的结论是：QQ 动作闸门全部跑在桥接进程内，而 OneBot 的
-// 127.0.0.1:3000 HTTP 接口可被任何本机进程用 Bearer token 直接调用。因此
-// **"仿真会话拿不到 shell"是整个分层安全模型唯一的真边界**。
+// QQ 动作闸门全部跑在桥接进程内，而 OneBot 的 HTTP 接口可被本机任意进程调用 ⇒
+// 「仿真会话拿不到 shell」是分层安全模型唯一的真边界。
 //
-// 但在此之前没有任何断言检查过这件事：
-//   · `test-audit-setup-guards.mjs` 把工具名**喂**给 guard，验证它拒绝——这证明
-//     guard 逻辑对，**不证明本地工具已从工具清单里隐藏**；
-//   · `probe-tools.mjs` 只断言"模型某一轮没有调用本地工具"——**没调用 ≠ 不在清单里**。
+// 本文件从真实 preset 文件解析组成，断言守卫被挂载、restrict 名单覆盖每个已知危险工具。
+// 名单与分组一律**从守卫导入**，不在本文件手抄。
 //
-// 本测试补上注册期那一半：从**真实 preset 文件**里解析出 preset 组成，断言
-// 工具守卫被挂载，并且守卫的 restrict 名单覆盖每一个已知本地执行工具。
-// 它不依赖运行中的 DSH，因此可以进 `npm run test:audit`，每次回归都跑。
-//
-// 口径说明：这里断言的是"preset 声明会隐藏/拒绝这些名字"。真正的端到端断言
-// （注册出来的清单里确实没有）需要活的 DSH，属 `probe-tools.mjs` 的范畴。
+// 唯一的豁免是 RUNTIME_INJECTOR_TOOLS（dev_* 运行时注入器，静态扫不到），并受两条约束：
+// 注入器名字必须以 dev_ 开头（防止任意名字混进来绕过对账），执行期必须按 dev_ 前缀拒绝。
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-names.mjs';
-import { dshModulesDir } from './dsh-modules.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PRESETS_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
@@ -35,113 +24,6 @@ const SIMULATION_PRESETS = ['qq-chat', 'qq-chat-v2'];
 
 /** 封闭 agent 的 preset：按设计**允许**完整本地工具面。 */
 const CLOSED_AGENT_PRESETS = ['qsh-closed'];
-
-/**
- * 本地执行能力清单。
- *
- * ⚠️ 这里**必须**含每一个能执行本地命令、读写本地文件或派生 agent 的工具名。
- * 名字取自 DSH 0.1.7-rc.2 实际注册的工具（见 qq-tool-restrict.mjs 的注释）。
- * 2026-09-27 的对账替换：`cordis_define`/`cordis_undefine`/`cordis_run`/`cordis_stop`
- * 在 0.1.7 里已不存在（dsh-tool-cordis 现在只注册 cordis_inspect_list/query），
- * 同一轮补上 `load_workspace_dependencies`（自带 Python/Node/pnpm 路径）与
- * `list_subagent_models`（派生 agent 家族）。
- *
- * 两类失败模式，本文件都要防：
- *   ① **漏**（本地工具不在守卫名单里 ⇒ 留在 schema）——由 test 3 对账 RESTRICTED_TOOL_NAMES 防；
- *   ② **拼错假名**（名字根本不存在 ⇒ `tools.restrict` 抛错被吞 ⇒ 静默失效）——
- *      由 test 6 用「假 restrict 会对未知名字抛错」来防。
- *
- * 2026-09-29 针对 DSH 0.2.0-rc.2 重新对账（用 `scripts/scan-dsh-tool-names.mjs`
- * 从安装包里抽真实工具名双向求差）。旧名字全部还在（0 假名），新增 13 个危险语义名字：
- *   · 全局层默认启用、仿真会话真的会继承的三个 MCP 资源工具
- *     （`dsh-base` 的 `mcp-resources` 行没被 disabled）；
- *   · 派生 agent / 执行外部代码：subagent_codex / subagent_claude_code /
- *     spawn_teammate / team_task_*（现只在 DSH 自带 preset 里挂，列进来当回归网）；
- *   · plugin_manager（插件装载权 = 任意代码执行）；
- *   · schedule_*（无人值守的自我调度）。
- */
-const LOCAL_EXECUTION_TOOLS = [
-  'pwsh', 'bash',
-  'read', 'read_image', 'write', 'edit', 'str_replace_editor',
-  'glob', 'grep',
-  'load_workspace_dependencies',
-  'subagent', 'subagent_fork', 'list_subagent_models',
-  'send_message', 'interrupt_agent', 'list_agents',
-  'workflow', 'ralph',
-  'cordis_inspect_list', 'cordis_inspect_query',
-  'dsh_snapshot', 'dsh_rollback', 'incident_resolved',
-  'job_list', 'job_output', 'job_kill', 'skill', 'present',
-  'get_goal', 'create_goal', 'update_goal',
-  'dev_mode_set', 'dev_mode_status', 'dev_mode_subagent',
-  // 0.2.0 新增对账
-  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
-  'subagent_codex', 'subagent_claude_code',
-  'spawn_teammate', 'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
-  'plugin_manager',
-  'schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete',
-];
-
-/**
- * 工具名 → 真实存在与否。抽取实现在 `scripts/dsh-tool-names.mjs`（唯一实现，
- * 与 `scan-dsh-tool-names.mjs` 共用），用来抓"拼错的假名"。
- *
- * 历史坑：本测试过去自带一份**模糊**抽取器（全文件乱扫 `name: 'x'` + 只认少数
- * 包名前缀 + 只读包根目录的 cordis.patch.yml）。0.2.0 对账时它把 10 个**真实存在**
- * 的工具名报成假名：`dsh-mcp-resources` / `dsh-experimental-tool-agent-team` 不匹配
- * 它的包名白名单，`subagent_codex` 写在 `dsh-web-app/presets/*.patch.yml` 而非包根。
- * 误判方向很危险——它会逼人把真名字从守卫名单里删掉，等于自己拆掉安全边界。
- * 现在只保留一条实现，两边不可能再漂移。
- */
-function collectDshToolNames() {
-  // 找不到 DSH 安装目录时 dsh-modules.mjs 会抛错；离线环境（CI / 未部署 DSH 的开发机）按「跳过」处理，
-  // 不能把「没装 DSH」误报成「守卫有假名」。设 DSH_INSTALL_MODULES 或 DSH_HOME 即可启用。
-  let names;
-  try { ({ names } = collectDshToolNamesShared()); } catch { return null; }
-  return names.size === 0 ? null : new Set(names.keys());
-}
-
-/** 本机安装的 DSH 版本（读不到时返回 null，按"未知"处理：不做版本放宽）。 */
-function localDshVersion() {
-  let dir;
-  try { dir = dshModulesDir(); } catch { return null; }
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(dir, '..', 'package.json'), 'utf8'));
-    const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(pkg.version ?? ''));
-    return m ? { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]), raw: pkg.version } : null;
-  } catch { return null; }
-}
-
-/** 本机 DSH 是否早于 0.3（0.1.x 时名单里有些名字本来就还没出现）。 */
-function dshPredatesToolExemptions() {
-  const v = localDshVersion();
-  if (!v) return false; // 版本未知时从严：不放宽
-  return v.major === 0 && v.minor < 3;
-}
-/**
- * 不在 npm 版 DSH 里、只存在于**可选第三方 bundle** 的工具名：在装了该 bundle 的机器上真实存在，
- * 所以守卫必须继续 restrict 它们；在没装的机器上找不到属于正常情况，不算拼错的假名。
- *   dsh-plugin-guard（web profile 的可选 bundle）→ dsh_snapshot / dsh_rollback / incident_resolved
- */
-const OPTIONAL_BUNDLE_TOOL_NAMES = new Set(['dsh_snapshot', 'dsh_rollback', 'incident_resolved']);
-/** 允许出现在名单里、但不属于"本地执行"语义的名字（开发/注入器）。 */
-const DEV_TOOL_PREFIX = /^dev_/;
-
-/**
- * 0.1.x 的 DSH 里**还没有**的工具名（0.3.x 才加）：本机装的是 0.1.1-rc.2，这些名字
- * 在安装目录里当然找不到。它们不是拼错的假名——是守卫名单按**目标版本**（桌面版 DSH
- * 0.3.x）写的。
- *
- * 判定方式按版本走：本机 DSH < 0.3 时容许这些名字缺席；本机 DSH ≥ 0.3 时不再容许
- * （那时它们应该真的在工具包里，缺席就意味着名单又被改坏了）。这样既不会在旧环境里
- * 逼人删掉真名字，也不会在升级后继续放行拼错的名字。
- */
-const TOOL_NAMES_ADDED_AFTER_0_1 = new Set([
-  'load_workspace_dependencies', 'list_subagent_models', 'present',
-  'list_mcp_resources', 'list_mcp_resource_templates', 'read_mcp_resource',
-  'subagent_codex', 'subagent_claude_code',
-  'spawn_teammate', 'team_task_create', 'team_task_get', 'team_task_list', 'team_task_update',
-  'plugin_manager', 'schedule_update',
-]);
 
 /** 允许出现的 MCP 命名空间前缀（QQ 动作面）。 */
 const EXPECTED_SAFE_PREFIXES = [
@@ -156,6 +38,39 @@ function readPreset(id) {
   const cordis = path.join(dir, 'agent.cordis.yml');
   assert.ok(fs.existsSync(cordis), `preset 有 agent.cordis.yml：${id}`);
   return { dir, yml: fs.readFileSync(cordis, 'utf8'), cordis };
+}
+
+/**
+ * 导入 preset 目录下的守卫（它是个 `export *` 壳，指向 bundle 里的唯一实现）。
+ *
+ * 走壳而不是直接 import 实现，是为了顺带证明壳本身没坏——部署到 profile 的是壳，
+ * 壳断了等于守卫没挂上。
+ */
+async function guardFor(id) {
+  const { dir } = readPreset(id);
+  const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
+  assert.ok(fs.existsSync(guardPath), `${id} 的守卫文件存在`);
+  return import(pathToFileURL(guardPath).href);
+}
+
+const guardMain = await guardFor('qq-chat');
+
+/** 权威名单（来自守卫，不是本文件手抄）。 */
+const DANGEROUS = guardMain.LOCAL_EXECUTION_TOOLS;
+const RESTRICTED = guardMain.RESTRICTED_TOOL_NAMES;
+const INJECTOR = guardMain.RUNTIME_INJECTOR_TOOLS;
+const GROUPS = guardMain.TOOL_GROUPS;
+
+/** 带假 tools 服务跑一遍真实守卫，捕获它实际下发的 restrict 与 guard。 */
+async function applyGuard(id) {
+  const mod = await guardFor(id);
+  const restricted = new Set();
+  const fakeTools = {
+    restrict({ deny }) { for (const n of deny ?? []) restricted.add(n); },
+    guard(fn) { this._guard = fn; },
+  };
+  mod.apply({ tools: fakeTools });
+  return { mod, restricted, fakeTools };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,92 +100,101 @@ test('模拟会话的 preset 不得挂载 tool-web 的 search/fetch', () => {
   }
 });
 
-test('守卫的 restrict 名单覆盖每一个已知本地执行工具', async () => {
+test('守卫导出的名单与自己声明的分组自洽', () => {
+  // 结构约束：RESTRICTED = 危险工具 ∪ 注入器族，且两者不相交。
+  const union = new Set([...DANGEROUS, ...INJECTOR]);
+  assert.deepEqual(
+    [...RESTRICTED].sort(), [...union].sort(),
+    'RESTRICTED_TOOL_NAMES 必须恰好等于「危险工具 ∪ 注入器族」——多出来的名字没有人知道它属于哪一类',
+  );
+  assert.equal(new Set(RESTRICTED).size, RESTRICTED.length, '名单里不允许有重复名字');
+
+  // 每个分组都必须非空：空分组通常是删名字时忘了改结构，会让下面"按组派生"悄悄失效。
+  for (const [group, names] of Object.entries(GROUPS)) {
+    assert.ok(Array.isArray(names) && names.length > 0, `分组 ${group} 不能为空`);
+    for (const n of names) {
+      assert.match(n, /^[a-z][a-z0-9_]*$/, `分组 ${group} 里的 "${n}" 不像工具名`);
+    }
+  }
+
+  // 无害工具不得混进危险名单（否则与执行期白名单自相矛盾）。
+  for (const allowed of ['ask_user_question', 'todo_write', 'compress']) {
+    assert.ok(!RESTRICTED.includes(allowed),
+      `${allowed} 是无害模型侧工具，不应出现在 restrict 名单里（会与 SAFE_EXACT 自相矛盾）`);
+  }
+});
+
+test('守卫的 restrict 名单覆盖每一个已知危险工具', async () => {
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
-    assert.ok(fs.existsSync(guardPath), `${id} 的守卫文件存在`);
+    const { restricted, fakeTools } = await applyGuard(id);
 
-    // 用假 tools 服务调用真实守卫，捕获它实际下发的 restrict 请求。
-    const restricted = new Set();
-    const fakeTools = {
-      restrict({ deny }) { for (const n of deny ?? []) restricted.add(n); },
-      guard(fn) { this._guard = fn; },
-    };
-    const mod = await import(pathToFileURL(guardPath).href);
-    mod.apply({ tools: fakeTools });
-
-    const violations = LOCAL_EXECUTION_TOOLS.filter((t) => !restricted.has(t));
+    const violations = DANGEROUS.filter((t) => !restricted.has(t));
     assert.deepEqual(
       violations, [],
-      `${id}: 以下本地执行工具未出现在 restrict 名单里，会留在模型的工具清单中：`
+      `${id}: 以下危险工具未出现在 restrict 名单里，会留在模型的工具清单中：`
       + `${violations.join(', ')}。注册期隐藏失败 ⇒ §5.2 的 L7 断言不成立。`,
     );
 
     // 执行期白名单也必须拒绝它们（restrict 与 guard 是两道，不能只靠一道）。
     assert.equal(typeof fakeTools._guard, 'function', `${id}: 守卫注册了执行期白名单`);
-    for (const tool of LOCAL_EXECUTION_TOOLS) {
+    for (const tool of DANGEROUS) {
       const verdict = fakeTools._guard({ name: tool });
       assert.ok(
         typeof verdict === 'string' && verdict.length > 0,
-        `${id}: 本地工具 "${tool}" 必须在执行期被拒绝，实际返回 ${JSON.stringify(verdict)}`,
+        `${id}: 危险工具 "${tool}" 必须在执行期被拒绝，实际返回 ${JSON.stringify(verdict)}`,
       );
     }
   }
 });
 
-test('守卫导出的名单与本测试的清单一致（防两份名单各自漂移）', async () => {
-  // 先前这个测试只是"复制"名单的前 19 个名字，导致守卫里多出的 7 个名字
-  // 从来没被断言过。现在改为**导入**守卫自己导出的数组，两边不可能漂移。
+test('注入器族只能是 dev_ 前缀，且执行期按前缀拒绝', async () => {
+  for (const n of INJECTOR) {
+    assert.ok(n.startsWith('dev_'),
+      `注入器族里的 "${n}" 不以 dev_ 开头：这一族享有"静态扫不到也算正常"的豁免，`
+      + '不能用来装别的名字');
+  }
+  // 前缀兜底：将来注入器改了具体名字（枚举必然过期），执行期仍然挡住。
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const mod = await import(pathToFileURL(path.join(dir, 'qq-tool-restrict.mjs')).href);
-    assert.ok(
-      Array.isArray(mod.RESTRICTED_TOOL_NAMES) && mod.RESTRICTED_TOOL_NAMES.length > 0,
-      `${id}: 守卫必须导出 RESTRICTED_TOOL_NAMES，供测试对账`,
-    );
-    const missing = LOCAL_EXECUTION_TOOLS.filter((t) => !mod.RESTRICTED_TOOL_NAMES.includes(t));
-    assert.deepEqual(missing, [],
-      `${id}: 守卫导出的名单缺少本地执行工具：${missing.join(', ')}`);
-    // 反向：名单里不该混入"允许的无害工具"。
-    for (const allowed of ['ask_user_question', 'todo_write', 'compress']) {
-      assert.ok(!mod.RESTRICTED_TOOL_NAMES.includes(allowed),
-        `${id}: ${allowed} 是无害模型侧工具，不应出现在 restrict 名单里（会与 SAFE_EXACT 自相矛盾）`);
+    const { fakeTools } = await applyGuard(id);
+    for (const name of ['dev_inject_plugin', 'dev_some_future_tool', 'dev_']) {
+      const verdict = fakeTools._guard({ name });
+      assert.ok(typeof verdict === 'string' && verdict.length > 0,
+        `${id}: dev_ 前缀的 "${name}" 必须在执行期被拒绝（不依赖枚举完整性）`);
     }
   }
 });
 
-test('守卫名单里的每个名字都是 DSH 真实注册的工具（防拼错假名静默失效）', async () => {
-  // 为什么必须测：`tools.restrict()` 对未知名字会**抛错**，而守卫逐个 try/catch
-  // 只打日志 ⇒ 拼错的名字 = **静默 no-op**。这正是本名单初版的真实缺陷：
-  // pwsh_persistent / bash_persistent / cordis / goal_write / goal_read 五个假名
-  // 让整批限制悄悄少生效，而套件当时全绿。
-  const dshNames = collectDshToolNames();
-  if (dshNames === null) {
-    console.log('  ⏭  跳过：未找到 DSH 工具包（设 DSH_TOOL_PACKAGES 指向 @deepseek-ai 目录即可启用）');
+test('守卫名单里的每个危险名字都是 DSH 真实注册的工具（防拼错假名静默失效）', async () => {
+  // 为什么必须测：`tools.restrict()` 对未知名字会抛错，而守卫逐个 try/catch
+  // 只打日志 ⇒ 拼错的名字 = **静默 no-op**。历史上两次真事故都是这样：
+  // 0.1.7 的 pwsh_persistent 等 5 个假名、0.2.1 起消失却从未被断言的 dev_mode_* 3 个。
+  let names;
+  try { ({ names } = collectDshToolNamesShared()); } catch (error) {
+    // 离线环境（未安装 DSH / 定位失败）按「跳过」处理，不能把「没装 DSH」误报成假名。
+    console.log(`  ⏭  跳过：无法读取 DSH 工具包（${error?.message ?? error}）`);
     return;
   }
+  if (names.size === 0) {
+    console.log('  ⏭  跳过：未扫到任何 DSH 包');
+    return;
+  }
+
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const mod = await import(pathToFileURL(path.join(dir, 'qq-tool-restrict.mjs')).href);
-    // 旧版 DSH 上「0.3 才加的名字」缺席是版本差异，不是拼错；升级后不再放宽。
-    const exempt = dshPredatesToolExemptions() ? TOOL_NAMES_ADDED_AFTER_0_1 : new Set();
+    const mod = await guardFor(id);
     const fabricated = mod.RESTRICTED_TOOL_NAMES
-      .filter((n) => !DEV_TOOL_PREFIX.test(n) && !OPTIONAL_BUNDLE_TOOL_NAMES.has(n)
-        && !exempt.has(n) && !dshNames.has(n));
+      .filter((n) => !mod.RUNTIME_INJECTOR_TOOLS.includes(n))
+      .filter((n) => !names.has(n));
     assert.deepEqual(fabricated, [],
       `${id}: 以下名字在 DSH 已安装的工具包里找不到 ⇒ restrict 会抛错并被吞掉，`
-      + `限制静默失效：${fabricated.join(', ')}`);
+      + `限制静默失效：${fabricated.join(', ')}。`
+      + '（若该名字属于运行时注入器，应放进 RUNTIME_INJECTOR_TOOLS；'
+      + '若它属于可选插件，请先确认插件确实会注册它。）');
   }
 });
 
 test('守卫仍放行 QQ MCP 命名空间与无害模型侧工具', async () => {
   for (const id of SIMULATION_PRESETS) {
-    const { dir } = readPreset(id);
-    const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
-    const fakeTools = { restrict() {}, guard(fn) { this._guard = fn; } };
-    const mod = await import(pathToFileURL(guardPath).href);
-    mod.apply({ tools: fakeTools });
+    const { fakeTools } = await applyGuard(id);
 
     for (const prefix of EXPECTED_SAFE_PREFIXES) {
       assert.equal(
@@ -288,6 +212,27 @@ test('守卫仍放行 QQ MCP 命名空间与无害模型侧工具', async () => 
         `${id}: 未知工具 ${JSON.stringify(name)} 必须被拒绝（fail-closed）`,
       );
     }
+  }
+});
+
+test('operator / readonly 两个 profile 的名单从分组派生，不各自手抄', () => {
+  const operatorDeny = new Set(guardMain.OPERATOR_DENY_TOOLS);
+  // operator 明确要拒绝的组：派生 / 编排 / 插件 / 调度 / 跨会话 / MCP 资源。
+  for (const group of ['agents', 'plugins', 'schedule', 'sessionQuery', 'mcpResources']) {
+    for (const name of GROUPS[group]) {
+      assert.ok(operatorDeny.has(name), `OPERATOR_DENY_TOOLS 漏了 ${group} 组的 "${name}"`);
+    }
+  }
+  // operator 需要保留的能力：shell 与文件读写（由审批闸门管），不能被误禁。
+  for (const name of ['pwsh', 'bash', 'read', 'write', 'edit']) {
+    assert.ok(!operatorDeny.has(name), `operator 需要 "${name}"（审批闸门负责），不应被拒绝`);
+  }
+  // readonly 白名单只允许只读能力。
+  for (const name of guardMain.READONLY_AGENT_TOOLS) {
+    assert.ok(
+      ['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch'].includes(name),
+      `READONLY_AGENT_TOOLS 里的 "${name}" 超出"只读"范围`,
+    );
   }
 });
 

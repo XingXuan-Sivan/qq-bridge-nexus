@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dshModulesDir } from './dsh-modules.mjs';
+import { fileURLToPath } from 'node:url';
+import YAML from 'yaml';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 夹具放系统临时目录，**不要**放仓库的 state/：harden-state-acl.mjs 会把 state/ 的
@@ -87,11 +87,11 @@ const hasBareArray = /^[ \t]*\[\][ \t]*$/m.test(finalPatch);
 console.log(`${hasBareArray ? '❌' : '✅'} 无独立成行的空数组 []`);
 if (hasBareArray) failed += 1;
 
-// 断言 4：YAML 可解析且顶层是数组
-const YAML = await import(pathToFileURL(path.join(dshModulesDir(), 'js-yaml/index.js')).href);
-const yaml = YAML.default ?? YAML;
+// 断言 4：YAML 可解析且顶层是数组。
+// 用本仓库依赖的 `yaml`，不再去 DSH 安装目录里挖 js-yaml：0.2.2 起 @deepseek-ai/* 内联进
+// app.asar，Node 无法从归档里 import，旧写法会让这条断言随宿主升级而崩。
 let doc;
-try { doc = yaml.load(finalPatch); } catch (e) {
+try { doc = YAML.parse(finalPatch); } catch (e) {
   console.log(`❌ YAML 解析失败: ${e.message}`); failed += 1;
 }
 if (doc) {

@@ -4,7 +4,9 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
-## 0.1.0 —— 2026-11-13
+## 0.1.1 —— 2026-11-13
+
+0.1.0 基线后的第一批结构性改动：只动 Agent 平台产物链路、模式持久化与版本身份，不含用户可见行为变化。
 
 ### 重构：Agent 平台适配层（产物目录迁移 + build/install 分离 + 模式存取抽象）
 - **产物目录**：`dsh-bundles/` → `artifacts/dsh/`（`git mv` 保留历史），全仓 34 个文件的引用一并替换；旧目录已不存在（代码/脚本里不再有任何引用，只剩文档里的迁移记录）。产物根约定为 `artifacts/<agent平台 id>/`。
@@ -33,6 +35,8 @@
   P2「中立 Agent IR」的规划、触发条件、验收与反模式）；同步 `PROFILES_MODEL.md`、`FOLDER_MAP.md`、
   `guides/DSH_SETUP.md`、`EXTENSION_PLATFORM.md` 与两份 README 的目录说明。
 - 门禁：`verify:repo` 62 通过 0 失败；`test:audit` 116/116；`test:artifact-pipeline`、`test:setup-idempotent` 全过。
+
+## 0.1.0 —— 2026-11-13
 
 ### 变更：控件标尺统一与四类非字段控件（social-v2 表单零手写）
 - 新增控件标尺令牌 `--control-h`(40px) / `--control-h-sm`(32px) / `--badge-h` / `--field-label-w`：输入框、下拉框、按钮、开关、状态徽标同源高度，不再靠 padding 撑出约 36–41px 的偏差；`button.small` 走 32px 次级高度。

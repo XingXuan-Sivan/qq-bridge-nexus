@@ -72,7 +72,7 @@ export function createMcpInventory({
       cwd: root,
       env: process.env,
     });
-    const client = new Client({ name: 'qq-bridge-extension-catalog', version: '0.1.0' });
+    const client = new Client({ name: 'qq-bridge-extension-catalog', version: '0.1.1' });
     try {
       await timeout(client.connect(transport), timeoutMs, `${server.name} initialize`);
       const result = await timeout(client.listTools(), timeoutMs, `${server.name} tools/list`);

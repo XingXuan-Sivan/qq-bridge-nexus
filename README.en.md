@@ -1,10 +1,10 @@
 # QQ ↔ DeepSeek Harness Bridge
 
-**Supported systems: Windows · macOS · Linux** (qq-bridge-nexus v0.1.0 · repository <https://github.com/XingXuan-Sivan/qq-bridge-nexus>)
+**Supported systems: Windows · macOS · Linux** (qq-bridge-nexus v0.1.1 · repository <https://github.com/XingXuan-Sivan/qq-bridge-nexus>)
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
-> **qq-bridge-nexus v0.1.0** ([XingXuan-Sivan/qq-bridge-nexus](https://github.com/XingXuan-Sivan/qq-bridge-nexus)) — started from [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 and now a full rewrite (origin and licensing in [NOTICE.md](NOTICE.md)).
+> **qq-bridge-nexus v0.1.1** ([XingXuan-Sivan/qq-bridge-nexus](https://github.com/XingXuan-Sivan/qq-bridge-nexus)) — started from [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 and now a full rewrite (origin and licensing in [NOTICE.md](NOTICE.md)).
 > It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and runs on **Windows, macOS and Linux**.
 > Most documentation is in Chinese: the step-by-step deployment guide is [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md), the changelog is [CHANGELOG.md](CHANGELOG.md),
 > and the documentation index is [docs/README.md](docs/README.md).

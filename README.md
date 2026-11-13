@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-**支持系统：Windows · macOS · Linux**（qq-bridge-nexus v0.1.0 · 仓库 <https://github.com/XingXuan-Sivan/qq-bridge-nexus>）
+**支持系统：Windows · macOS · Linux**（qq-bridge-nexus v0.1.1 · 仓库 <https://github.com/XingXuan-Sivan/qq-bridge-nexus>）
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
@@ -14,11 +14,11 @@
 
 ---
 
-## 🆕 qq-bridge-nexus v0.1.0（首个发布基线）
+## 🆕 qq-bridge-nexus v0.1.1
 
 > 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四层配置模型、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
 > 原版的消息桥接、多群白名单、二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查等能力全部保留并继续演进。
-> 下表括号里的版本号指上游 qq-bridge-nexus 的历史版本，**相关能力均已包含在 0.1.0 中**；部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准。
+> 下表括号里的版本号指上游 qq-bridge-nexus 的历史版本，**相关能力均已包含在本版本中**；部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准。
 > 问题反馈与 Release 下载：本仓库的 Issues / Releases。
 
 | 新功能 | 一句话 | 文档 |
@@ -91,7 +91,7 @@ NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。�
 
 ---
 
-> ⚠️ **当前版本 `v0.1.0`，适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
+> ⚠️ **当前版本 `v0.1.1`，适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
 > 鉴权用 `~/.dsh` 里持久化的浏览器会话签名密钥**离线铸造 Cookie**（DSH 0.1.7 起进程启动 token 只存在于内存、不再落盘）；
 > agent preset 是 `@deepseek-ai/dsh-agent-preset` Cordis 行（由 `setup-dsh.mjs` 写入，旧的 `~/.dsh/.agent-presets/` 目录机制已废）。
 > DSH 0.2.0 时的适配改动（会话待处理队列解析、QQ 安全守卫的工具名单对账等）见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md)。

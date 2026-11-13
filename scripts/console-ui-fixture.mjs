@@ -27,9 +27,9 @@ const timestamp = '2026-09-20T08:30:00.000Z';
 function presetStatusFixture(preset) {
   return {
     preset,
-    label: preset === 'qq-chat'
+    label: preset === 'chat'
       ? '一代仿真（reserved）'
-      : preset === 'qq-chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
+      : preset === 'chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
     sourceFile: `profiles/agent-platforms/dsh/agents/${preset}/agent.cordis.yml`,
     installed: true,
     requiresRestart: true,
@@ -400,15 +400,15 @@ export function makeFixtureState() {
       备用角色: { slug: '备用角色', description: '备用设定', overlay: '', systemAppend: '' },
     },
     simPrompts: {
-      'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
-      'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+      'chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
+      'chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
       // 自建预设：persona.prefix 为空，用来验证「提示词卡不该被隐藏、空内容也能编辑」。
       'demo-agent': '',
     },
     // 「初始版本」：与 simPrompts 起始值一致，用来测「已修改 / 还原」。
     simDefaults: {
-      'qq-chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
-      'qq-chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
+      'chat-v2': '你是 QQ 群里的仿真群友。\n\n【二代仿真模式 —— 安全规则（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【二代仿真模式 —— 工具协议（最高优先级）】\n1. 文本输出不会自动发送到 QQ。',
+      'chat': '你是 QQ 群里的仿真群友（一代）。\n\n【一代仿真模式 —— 安全规则】\n1. 你没有本地工具。\n\n【一代仿真模式 —— 工具协议】\n1. 回复会自动转发到 QQ。',
       'demo-agent': '',
     },
     roleInjectMax: 6000,
@@ -440,7 +440,7 @@ export function makeFixtureState() {
       proactiveCheckMaxMs: 900000, proactiveProbability: 0.2,
     },
     socialStates: { 'group:123456789': { phase: 'active' }, 'group:100003': { phase: 'idle' } },
-    v2: { enabled: true, agentPreset: 'qq-chat-v2', provideRecommendations: true, tools: {} },
+    v2: { enabled: true, agentPreset: 'chat-v2', provideRecommendations: true, tools: {} },
     behaviors: {
       'social-v1': 'version: 1\nkind: v1\nlabel: 默认 v1\ndescription: 离线示例\nv1:\n  triggerProbability: 0.2\n',
       'social-v2': 'version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n',
@@ -454,7 +454,7 @@ export function makeFixtureState() {
     tools: { getPrompt: true, getUnread: true, getRecent: true, socialState: true, sendMessage: true, sendVoice: true },
     // 会话初始提示词（离线示例）：整段内容都是虚构的演示文本。
     initPrompt: '离线示例：这是一个演示用的群聊环境说明，不会写进任何真实配置。',
-    slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'qq-chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
+    slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
     slang: [
       { id: 'demo-candidate', content: '有被治愈到', meaning: '感到温暖和安慰', status: 'candidate', count: 4, source: 'auto', evidence: [{ sender: '演示群友', text: '今天这张图，有被治愈到。' }], createdAt: timestamp, updatedAt: timestamp },
       { id: 'demo-guess', content: '示例新词', meaning: '', status: 'candidate', count: 2, source: 'auto', evidence: [{ sender: '演示群友', text: '这也太示例新词了吧。' }], lastGuess: { meaning: '（演示推测）形容事情很离谱', usage: '吐槽时用', example: '', at: timestamp }, createdAt: timestamp, updatedAt: timestamp },
@@ -702,7 +702,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       const presetDelete = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)$/);
       if (presetDelete && method === 'DELETE') {
         const id = presetDelete[1];
-        if (['qq-chat', 'qq-chat-v2'].includes(id)) return json({ ok: false, error: '系统自带预设不能删除' }, 400);
+        if (['chat', 'chat-v2'].includes(id)) return json({ ok: false, error: '系统自带预设不能删除' }, 400);
         return json({ ok: true, id, presets: [] });
       }
       const presetAction = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(agent|factory)$/);
@@ -873,12 +873,12 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             platform: 'qq',
             active: state.planId || 'social-v2',
-            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access' },
+            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', agent: 'chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access' },
             defaultPlan: state.defaultPlan ?? 'social-v2',
             plans: [
-              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-agent-readonly', capability: 'agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
+              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', agent: 'chat', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', agent: 'chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', agent: 'readonly', capability: 'agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
             ],
           });
           case '/api/platforms': return json({
@@ -889,7 +889,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             platform: { id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2, behaviors: ['social-v1', 'social-v2'] },
           });
-          case '/api/presets': return json({ presets: [{ id: 'qq-chat-v2', trust: 'user' }, { id: 'qq-chat', trust: 'user' }] });
+          case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
           // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。
           case '/api/plugins': return json({
@@ -942,7 +942,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             presets: [
               {
-                id: 'qq-chat',
+                id: 'chat',
                 name: 'QQ 群聊',
                 description: '离线预览用的安全群聊预设。',
                 order: 1,
@@ -953,7 +953,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
               },
               {
-                id: 'qq-chat-v2',
+                id: 'chat-v2',
                 name: 'QQ 群聊（二代）',
                 description: '离线预览用的二代群聊预设。',
                 order: 2,
@@ -976,10 +976,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               },
             ],
           });
-          case '/api/extensions/presets/qq-chat': return json({
+          case '/api/extensions/presets/chat': return json({
             ok: true,
             preset: {
-              id: 'qq-chat',
+              id: 'chat',
               meta: { name: 'QQ 群聊（一代）', description: '离线预览用的群聊预设。', order: 1 },
               extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
               extensionsExists: true,
@@ -993,10 +993,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               backups: [],
             },
           });
-          case '/api/extensions/presets/qq-chat-v2': return json({
+          case '/api/extensions/presets/chat-v2': return json({
             ok: true,
             preset: {
-              id: 'qq-chat-v2',
+              id: 'chat-v2',
               meta: { name: 'QQ 群聊（二代）', description: '离线预览用的二代群聊预设。', order: 2 },
               extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
               extensionsExists: true,
@@ -1184,7 +1184,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             });
           }
           case '/api/preset/sim-prompt': {
-            const preset = String(url.searchParams.get('preset') || 'qq-chat-v2');
+            const preset = String(url.searchParams.get('preset') || 'chat-v2');
             const content = state.simPrompts[preset] ?? '';
             const initial = state.simDefaults[preset];
             return json({
@@ -1194,7 +1194,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               bytes: Buffer.byteLength(content, 'utf8'),
               warnings: [],
               status: presetStatusFixture(preset),
-              presets: [presetStatusFixture('qq-chat'), presetStatusFixture('qq-chat-v2')],
+              presets: [presetStatusFixture('chat'), presetStatusFixture('chat-v2')],
               hasDefault: initial !== undefined,
               modified: content !== (initial ?? ''),
               defaultContent: initial ?? '',
@@ -1202,7 +1202,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             });
           }
           case '/api/preset/sim-prompt/backups': {
-            const preset = String(url.searchParams.get('preset') || 'qq-chat-v2');
+            const preset = String(url.searchParams.get('preset') || 'chat-v2');
             return json({ ok: true, backups: [{ file: `${preset}.agent.cordis.yml.fixture`, mtime: Date.parse(timestamp) }] });
           }
           case '/api/dsh/model': {
@@ -1504,19 +1504,19 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               limits: { injectMaxChars: state.roleInjectMax, source: 'promptBlocks.core-persona.maxChars' },
             });
           case '/api/preset/sim-prompt': {
-            const preset = String(body.preset || 'qq-chat-v2');
+            const preset = String(body.preset || 'chat-v2');
             const content = String(body.content ?? '');
             const unchanged = content === state.simPrompts[preset];
             if (!unchanged) state.simPrompts[preset] = content;
             return json({ ok: true, unchanged, chars: content.length, warnings: [], synced: true, requiresRestart: !unchanged, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/reset': {
-            const preset = String(body.preset || 'qq-chat-v2');
+            const preset = String(body.preset || 'chat-v2');
             state.simPrompts[preset] = state.simDefaults[preset];
             return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], synced: true, requiresRestart: true, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/restore': {
-            const preset = String(body.preset || 'qq-chat-v2');
+            const preset = String(body.preset || 'chat-v2');
             return json({ ok: true, restoredFrom: `${preset}.agent.cordis.yml.fixture`, requiresRestart: true });
           }
           case '/api/dsh/effort': state.dshEffort = body.reasoningEffort; return json({ ok: true, reasoningEffort: body.reasoningEffort });

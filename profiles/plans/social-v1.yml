@@ -5,7 +5,7 @@ note: 按策略自然参与群聊（v1 行为）。
 builtin: true
 platform: qq
 agentPlatform: dsh
-agent: qq-chat
+agent: chat
 behavior: social-v1
 capability: agent-chat
 audience: access

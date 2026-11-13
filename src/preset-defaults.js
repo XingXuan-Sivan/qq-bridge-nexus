@@ -12,8 +12,8 @@ import { parse } from 'yaml';
 /** 出厂预设目录（每个预设一个子目录，内含 agent.cordis.yml）。 */
 export const DEFAULT_PROMPTS_DIR = fileURLToPath(new URL('../assets/default-presets/', import.meta.url));
 
-/** 支持「还原初始版本」的预设（与 PRESET_NAMES 一致）。 */
-export const DEFAULT_PROMPT_PRESETS = ['qq-chat', 'qq-chat-v2'];
+/** 支持「还原初始版本」的预设（带出厂快照的两个仿真预设）。 */
+export const DEFAULT_PROMPT_PRESETS = ['chat', 'chat-v2'];
 
 const AGENT_FILE = 'agent.cordis.yml';
 

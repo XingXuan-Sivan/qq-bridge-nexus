@@ -91,7 +91,7 @@ state/sessions/
   "binding": {
     "sessionId": "session-…",
     "workspaceId": "workspace-…",
-    "fingerprint": "reserved2|qq-chat-v2|…",
+    "fingerprint": "reserved2|chat-v2|…",
     "status": "online",
     "checkedAt": 0,
     "createdAt": 0
@@ -248,7 +248,7 @@ planMode(plan):                      # P6：引擎由行为决定，能力由工
 
 ### 5.2 预设与模型
 
-- 预设：P6 起**方案能力优先**（`plan.tools`，如 `qq-chat-v2` / `qq-agent-workspace`）；否则 `profile.presetId`；再否则由有效模式推导（chat → `qq-chat`，reserved → `qq-chat`，reserved2 → `qq-chat-v2`；closed-agent 由管理级别固定）。保存前校验安全清单。
+- 预设：P6 起**方案能力优先**（`plan.tools`，如 `chat-v2` / `workspace`）；否则 `profile.presetId`；再否则由有效模式推导（chat → `chat`，reserved → `chat`，reserved2 → `chat-v2`；closed-agent 由管理级别固定）。保存前校验安全清单。
 - 模型：`profile.model` 优先；否则用 `cfg.dsh` 全局默认。校验 provider/model 是否在 DSH 目录中；不在则拒绝保存并提示。
 - 会话级模型/预设保存后不保证当前 DSH 会话立刻换模型：下一次唤醒前按指纹判断重建；UI 明示「下次唤醒生效」。
 

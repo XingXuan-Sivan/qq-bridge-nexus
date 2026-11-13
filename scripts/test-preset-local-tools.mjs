@@ -20,7 +20,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PRESETS_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
 
 /** 仿真模式使用的 preset（不允许有任何本地执行能力）。 */
-const SIMULATION_PRESETS = ['qq-chat', 'qq-chat-v2'];
+const SIMULATION_PRESETS = ['chat', 'chat-v2'];
 
 /** 封闭 agent 的 preset：按设计**允许**完整本地工具面。 */
 const CLOSED_AGENT_PRESETS = ['qsh-closed'];
@@ -53,7 +53,7 @@ async function guardFor(id) {
   return import(pathToFileURL(guardPath).href);
 }
 
-const guardMain = await guardFor('qq-chat');
+const guardMain = await guardFor('chat');
 
 /** 权威名单（来自守卫，不是本文件手抄）。 */
 const DANGEROUS = guardMain.LOCAL_EXECUTION_TOOLS;

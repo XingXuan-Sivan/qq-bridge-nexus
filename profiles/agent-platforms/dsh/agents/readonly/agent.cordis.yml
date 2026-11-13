@@ -1,4 +1,4 @@
-# The `qq-agent-readonly` agent preset：qq-bridge 管理通道的 L1「本地只读 Agent」。
+# The `readonly` agent preset：qq-bridge 管理通道的 L1「本地只读 Agent」。
 #
 # 安全设计（硬边界，不依赖提示词）：
 # - 只挂载只读工具：read / read_image（dsh-tool-fs 也会注册 write/edit，但守卫在执行期拒绝）、

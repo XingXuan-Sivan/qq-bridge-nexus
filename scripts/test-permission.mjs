@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PERMISSION_LEVELS,
-  DSH_PERMISSION_PRESET,
   normalizePermissionConfig,
   normalizeSessionPermission,
   resolvePermission,
   canPinLevel,
   presetForLevel,
 } from '../src/session/permission.mjs';
+import { permissionPresetMap } from '../src/admin/agent-permission.js';
+
+// 级别 → 平台预设名的映射已下沉到 Agent 侧适配器（B4），内核只负责降级/校验。
+const DSH_PERMISSION_PRESET = permissionPresetMap();
 
 test('四档与预设映射唯一', () => {
   assert.deepEqual(PERMISSION_LEVELS, ['read-only', 'workspace-write', 'full-ask', 'full']);
@@ -44,8 +47,10 @@ test('full 需要 allowFull 且授权窗口内才允许钉', () => {
 });
 
 test('不允许 full 时降级为 full-ask', () => {
-  assert.equal(presetForLevel('full', { allowFull: false }).level, 'full-ask');
-  assert.equal(presetForLevel('full', { allowFull: false }).preset, 'qq-full-ask');
-  assert.equal(presetForLevel('full', { allowFull: true, grantActive: true }).preset, 'danger-full-access');
-  assert.equal(presetForLevel('read-only').level, 'read-only');
+  const presets = DSH_PERMISSION_PRESET;
+  assert.equal(presetForLevel('full', { allowFull: false, presets }).level, 'full-ask');
+  assert.equal(presetForLevel('full', { allowFull: false, presets }).preset, 'qq-full-ask');
+  assert.equal(presetForLevel('full', { allowFull: true, grantActive: true, presets }).preset, 'danger-full-access');
+  assert.equal(presetForLevel('read-only', { presets }).level, 'read-only');
+  assert.equal(presetForLevel('read-only', { presets }).preset, 'read-only');
 });

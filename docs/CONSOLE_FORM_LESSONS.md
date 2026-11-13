@@ -193,7 +193,7 @@ return fieldShell({ id, label, required, control: `<div class="field-inline" rol
 
 ### 1.37 一个页面服务两代时，校验和文案都要跟着当前代次走
 
-仿真提示词只有一份文本框，但一代（`qq-chat`）和二代（`qq-chat-v2`）的段落名完全不同：一代是「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」，二代是「【二代仿真模式 —— 安全规则】」「【二代仿真模式 —— 工具协议】」。服务端的 `presetPromptWarnings(content)` 原先只认二代段落且不接 `preset` 参数，切到一代就永远报「缺少二代段落」。`presetPromptBlockers` 早已按代次取清单，warnings 却没跟上——**同一个「按代次取清单」的约定要覆盖所有校验/提示，不能只改一处**。现在的签名是 `presetPromptWarnings(content, preset = 'v2')`，`bridge.js` 三个调用点都传 `preset === PRESET_NAMES.v1 ? 'v1' : 'v2'`。`scripts/test-preset-prompt.mjs` 有一条回归钉住「一代内容按二代校验必须报两段缺失、按一代校验必须为空」。
+仿真提示词只有一份文本框，但一代（`chat`）和二代（`chat-v2`）的段落名完全不同：一代是「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」，二代是「【二代仿真模式 —— 安全规则】」「【二代仿真模式 —— 工具协议】」。服务端的 `presetPromptWarnings(content)` 原先只认二代段落且不接 `preset` 参数，切到一代就永远报「缺少二代段落」。`presetPromptBlockers` 早已按代次取清单，warnings 却没跟上——**同一个「按代次取清单」的约定要覆盖所有校验/提示，不能只改一处**。现在的签名是 `presetPromptWarnings(content, preset = 'v2')`，`bridge.js` 三个调用点都传 `preset === PRESET_NAMES.v1 ? 'v1' : 'v2'`。`scripts/test-preset-prompt.mjs` 有一条回归钉住「一代内容按二代校验必须报两段缺失、按一代校验必须为空」。
 
 ### 1.38 分栏页的标签条必须和内容同一张卡；工具条也要进规格文件
 
@@ -505,7 +505,7 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 ### 1.86 `pageSize: rows.length` 等于「永远只有一页」
 
-预设编辑页的授权表用 `tableOf(rows, …)`，里面写的是 `pageSize: Math.max(rows.length, 1)`。服务器表只有 4 条时看不出问题；换到工具表（qq-chat-v2 的 `*` 允许全部 server，48 个工具）就变成「分页不生效、一屏全出来」，用户报的是「有时」——其实是行数一多就必然出现。
+预设编辑页的授权表用 `tableOf(rows, …)`，里面写的是 `pageSize: Math.max(rows.length, 1)`。服务器表只有 4 条时看不出问题；换到工具表（chat-v2 的 `*` 允许全部 server，48 个工具）就变成「分页不生效、一屏全出来」，用户报的是「有时」——其实是行数一多就必然出现。
 
 **规则**：表格的每页条数固定写 10 或 20，不要拿 `rows.length` 当页大小；「不想分页」时用 `pager:false` 表达，而不是把 pageSize 调大。
 

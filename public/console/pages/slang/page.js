@@ -278,7 +278,7 @@ function loadSlangConfig() {
     document.getElementById('slangCooldown').value = c.extractCooldownMs ?? 300000;
     document.getElementById('slangThresholds').value = (c.inferenceThresholds || [2, 4, 8]).join(', ');
     document.getElementById('slangInjectMax').value = c.injectMax ?? 8;
-    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'qq-chat';
+    document.getElementById('slangLearnerPreset').value = c.learnerPreset || 'chat';
     document.getElementById('slangWorkspaceTitle').value = c.workspaceTitle || 'QQ 黑话学习';
     setSwitch(document.getElementById('slangAutoResearch'), c.autoResearch !== false);
   }).catch(() => {});

@@ -90,13 +90,13 @@ await test('L1 使用只读 agent preset + read-only；缺少只读 preset 时�
   const r = await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L1' });
   assert.equal(r.ok, true, r.error);
   await h.ensureSession(`qq:private:${OWNER}`);
-  assert.equal(h.calls.created.at(-1).agentPreset, 'qq-agent-readonly');
+  assert.equal(h.calls.created.at(-1).agentPreset, 'readonly');
   assert.ok(h.calls.commands.some((c) => c.line === '/permission read-only'));
   await h.ext.controller.panic();
-  h.setPresets(['standard', 'qq-chat', 'qq-chat-v2']);
+  h.setPresets(['standard', 'chat', 'chat-v2']);
   const r2 = await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L1' });
   assert.equal(r2.ok, false);
-  assert.match(r2.error, /qq-agent-readonly/);
+  assert.match(r2.error, /readonly/);
   assert.equal(h.getMode().level, 'L0');
 });
 

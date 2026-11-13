@@ -1,14 +1,13 @@
-﻿// 会话权限级别：桥接侧只负责“选哪一档、能不能钉”，DSH 侧只认权限预设名。
+﻿// 会话权限级别：桥接侧只负责“选哪一档、能不能钉”。
+//
+// 这里**不认识任何具体平台**：级别 → 平台预设名的映射由 Agent 侧适配器给出
+// （profiles/agent-platforms/<id>/adapters/runtime.mjs 的 PERMISSION_PRESET_FOR_LEVEL），
+// 经 src/admin/agent-permission.js 的 permissionPresetMap() 注入。
 export const PERMISSION_LEVELS = ['read-only', 'workspace-write', 'full-ask', 'full'];
 export const SESSION_PERMISSIONS = ['inherit', ...PERMISSION_LEVELS];
 
-// 唯一映射：级别 → DSH 权限预设。danger-full-access 只在这里出现。
-export const DSH_PERMISSION_PRESET = {
-  'read-only': 'read-only',
-  'workspace-write': 'workspace-write',
-  'full-ask': 'qq-full-ask',
-  full: 'danger-full-access',
-};
+/** 默认映射：级别与平台预设同名（中立平台的假定）。有差异时由调用方传 presets。 */
+export const IDENTITY_PERMISSION_PRESETS = Object.freeze(Object.fromEntries(PERMISSION_LEVELS.map((level) => [level, level])));
 
 export const PERMISSION_LABEL = {
   'read-only': '只读',
@@ -51,10 +50,12 @@ export function canPinLevel(level, { allowFull = false, grantActive = false } = 
 
 export function presetForLevel(level, opts = {}) {
   const wanted = PERMISSION_LEVELS.includes(level) ? level : 'read-only';
+  // 映射缺项时回落同名：宁可让平台侧报「没有这个预设」，也不要静默挑一个档位。
+  const presets = opts.presets && typeof opts.presets === 'object' ? opts.presets : IDENTITY_PERMISSION_PRESETS;
   if (wanted === 'full' && !canPinLevel('full', opts)) {
-    return { level: 'full-ask', preset: DSH_PERMISSION_PRESET['full-ask'] };
+    return { level: 'full-ask', preset: presets['full-ask'] ?? 'full-ask' };
   }
-  return { level: wanted, preset: DSH_PERMISSION_PRESET[wanted] };
+  return { level: wanted, preset: presets[wanted] ?? wanted };
 }
 
 export function permissionText(level) {

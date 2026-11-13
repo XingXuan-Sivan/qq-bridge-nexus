@@ -75,7 +75,7 @@ if (persona) {
 }
 
 // ── 仓库配置（始终执行）──────────────────────────────────────────────────────
-for (const preset of ['qq-chat', 'qq-chat-v2']) {
+for (const preset of ['chat', 'chat-v2']) {
   const file = path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/agents', preset, 'agent.cordis.yml');
   console.log(`\n${preset} (${path.relative(process.cwd(), file)}):`);
   const doc = YAML.parse(fs.readFileSync(file, 'utf8'));

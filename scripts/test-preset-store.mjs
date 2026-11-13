@@ -10,7 +10,7 @@ const GOOD_YAML = `- id: persona\n  name: '@deepseek-ai/dsh-persona'\n  config:\
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'preset-store-'));
-  const dir = path.join(root, 'qq-chat');
+  const dir = path.join(root, 'chat');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'preset.yml'), 'name: QQ 聊天\ndescription: 默认聊天预设\norder: 10\n');
   fs.writeFileSync(path.join(dir, 'agent.cordis.yml'), GOOD_YAML);
@@ -18,7 +18,7 @@ function fixture() {
     root,
     backupRoot: path.join(root, 'backups'),
     scriptsDir: path.join(root, 'scripts'),
-    presetIds: ['qq-chat'],
+    presetIds: ['chat'],
   };
 }
 
@@ -26,7 +26,7 @@ test('list/read 归一化元数据与缺失的 extensions', () => {
   const f = fixture();
   const store = createPresetStore(f);
   assert.equal(store.list()[0].name, 'QQ 聊天');
-  const preset = store.read('qq-chat');
+  const preset = store.read('chat');
   assert.equal(preset.meta.order, 10);
   assert.equal(preset.extensionsExists, false);
   assert.deepEqual(preset.extensions, { mcp: { allow: [], tools: { allow: [], deny: [] } }, skills: { allow: [] } });
@@ -37,13 +37,13 @@ test('list/read 归一化元数据与缺失的 extensions', () => {
 test('writeMeta/writeExtensions 写回并留备份，agent YAML 不动', () => {
   const f = fixture();
   const store = createPresetStore(f);
-  store.writeMeta('qq-chat', { name: '新名字', description: '新说明', order: 3 });
-  store.writeExtensions('qq-chat', { mcp: { allow: ['test-ext'], tools: { allow: ['tool_a'], deny: ['tool_b'] } }, skills: { allow: ['demo'] } });
-  const preset = store.read('qq-chat');
+  store.writeMeta('chat', { name: '新名字', description: '新说明', order: 3 });
+  store.writeExtensions('chat', { mcp: { allow: ['test-ext'], tools: { allow: ['tool_a'], deny: ['tool_b'] } }, skills: { allow: ['demo'] } });
+  const preset = store.read('chat');
   assert.equal(preset.meta.name, '新名字');
   assert.deepEqual(preset.extensions.mcp.tools.deny, ['tool_b']);
-  assert.equal(fs.readFileSync(path.join(f.root, 'qq-chat', 'agent.cordis.yml'), 'utf8'), GOOD_YAML);
-  assert.ok(store.listBackups('qq-chat').length >= 2);
+  assert.equal(fs.readFileSync(path.join(f.root, 'chat', 'agent.cordis.yml'), 'utf8'), GOOD_YAML);
+  assert.ok(store.listBackups('chat').length >= 2);
   fs.rmSync(f.root, { recursive: true, force: true });
 });
 
@@ -58,20 +58,20 @@ test('validateAgentYaml 拒绝空列表/缺 persona/缺 guard/重复 id', () => 
 test('restore 回滚到最近一次备份', () => {
   const f = fixture();
   const store = createPresetStore(f);
-  store.writeMeta('qq-chat', { name: '改过', description: '临时', order: 9 });
-  store.restore('qq-chat');
-  assert.equal(store.read('qq-chat').meta.name, 'QQ 聊天');
+  store.writeMeta('chat', { name: '改过', description: '临时', order: 9 });
+  store.restore('chat');
+  assert.equal(store.read('chat').meta.name, 'QQ 聊天');
   fs.rmSync(f.root, { recursive: true, force: true });
 });
 
 test('Document 写回保留 meta/extensions 注释与文件头', () => {
   const f = fixture();
-  const dir = path.join(f.root, 'qq-chat');
+  const dir = path.join(f.root, 'chat');
   fs.writeFileSync(path.join(dir, 'preset.yml'), '# 手写注释：不要丢\nname: QQ 聊天\ndescription: 默认聊天预设\norder: 10\n');
   fs.writeFileSync(path.join(dir, 'extensions.yml'), '# 扩展授权：由控制台预设编辑器维护；缺文件或空文件 = 全部拒绝。\n# 业务注释：保留\nmcp:\n  allow: [old]\n');
   const store = createPresetStore(f);
-  store.writeMeta('qq-chat', { name: '新名字', description: '新说明', order: 3 });
-  store.writeExtensions('qq-chat', { mcp: { allow: ['new'], tools: { allow: [], deny: [] } }, skills: { allow: [] } });
+  store.writeMeta('chat', { name: '新名字', description: '新说明', order: 3 });
+  store.writeExtensions('chat', { mcp: { allow: ['new'], tools: { allow: [], deny: [] } }, skills: { allow: [] } });
   const metaText = fs.readFileSync(path.join(dir, 'preset.yml'), 'utf8');
   const extText = fs.readFileSync(path.join(dir, 'extensions.yml'), 'utf8');
   assert.match(metaText, /手写注释：不要丢/);

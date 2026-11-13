@@ -12,7 +12,7 @@ const GROUP = 'qq:group:456';
 function policyWith(getModel) {
   return createSessionPolicy({
     getMode: () => 'reserved2',
-    modePreset: () => 'qq-chat-v2',
+    modePreset: () => 'chat-v2',
     getModel,
     getOwnerQQ: () => 123,
     getLevel: () => 'L0',
@@ -24,7 +24,7 @@ test('会话模型签名：空签名不进指纹，模型变化会改变指纹',
   const base = policyWith(() => '');
   const withModel = policyWith(() => 'deepseek-official/deepseek-flash/high');
   assert.equal(JSON.parse(base.policyOf(GROUP)).length, 3);
-  assert.deepEqual(withModel.policyOf(GROUP), `["reserved2","qq-chat-v2",null,"deepseek-official/deepseek-flash/high"]`);
+  assert.deepEqual(withModel.policyOf(GROUP), `["reserved2","chat-v2",null,"deepseek-official/deepseek-flash/high"]`);
   assert.notEqual(base.policyOf(GROUP), withModel.policyOf(GROUP));
 });
 

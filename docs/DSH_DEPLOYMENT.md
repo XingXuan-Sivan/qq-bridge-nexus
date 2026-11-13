@@ -44,7 +44,7 @@ QQ 客户端（机器人号）
 桥接 node src/bridge.js（桥接控制台 127.0.0.1:3100；state/ 运行时数据不入库）
    ⇅  DSH Web API（离线铸造 Cookie 鉴权）
 DSH（桌面版 desktop profile / 命令行版 web profile）
-  ├─ agent preset：qq-chat / qq-chat-v2（群友，无本地工具）/ qq-agent-readonly（L1）/ qq-agent-workspace（L2）/ qq-agent-full（L3）
+  ├─ agent preset：chat / chat-v2（群友，无本地工具）/ readonly（L1）/ workspace（L2）/ full（L3）
   ├─ MCP：mcp-snowluma（src/mcp-snowluma-safe.js）、mcp-snowluma-host、mcp-web-search-safe
   └─ 权限预设：read-only / workspace-write / qq-full-ask
 
@@ -297,7 +297,7 @@ node scripts/setup-dsh.mjs
 ```
 
 预期输出包含：
-- `preset patch …` 五行：`qq-chat` / `qq-chat-v2`（群友）、`qq-agent-readonly`（L1）、`qq-agent-workspace`（L2）、`qq-agent-full`（L3）
+- `preset patch …` 五行：`chat` / `chat-v2`（群友）、`readonly`（L1）、`workspace`（L2）、`full`（L3）
 - `cordis.patch.yml: 权限预设已更新 … qq-full-ask`（再次运行时为「已是最新（含 qq-full-ask）」）
 - `cordis.patch.yml: MCP 条目已同步`
 - 开头一行 `未指定 profile，自动选择 desktop（…）` 或 `… web（…）`——桌面版应为 desktop
@@ -528,7 +528,7 @@ zip -r "../qq-bridge-backup/qq-bridge-$(date +%Y%m%d-%H%M%S).zip" config.json st
 
 回滚到上游 v0.2.0-r3 的注意事项：
 - 旧版不认识 `state/social/`、`state/admin/`，会忽略它们（不会损坏）；
-- DSH profile 里 v0.3.0 加的 `qq-full-ask` 权限预设与 `qq-agent-readonly` preset 会残留但无害；
+- DSH profile 里 v0.3.0 加的 `qq-full-ask` 权限预设与 `readonly` preset 会残留但无害；
 - v0.3.0 写过的 JSON 状态文件带 `version` 字段，若将来用**更旧的 v0.3.x** 读到**更新结构**的文件，会拒绝加载并提示（不会覆盖）。
 
 ## 16. 常见错误
@@ -553,7 +553,7 @@ zip -r "../qq-bridge-backup/qq-bridge-$(date +%Y%m%d-%H%M%S).zip" config.json st
 | 启动报「桥接只能运行一个实例」/ 退出码 2 | 已有一个桥接在跑：先退出另一个（控制中心或 `start.bat` 窗口） |
 | QQ 上完全没反应，日志显示已连接 | 后端收不到 QQ 数据，见 README「SnowLuma 版本与上游健康」；不是桥接问题 |
 | 日志 `⛔ 群聊/仿真会话缺少 preset` | 第 8 节没做或没重启 DSH：重跑 `node scripts/setup-dsh.mjs` 并重启 DSH |
-| `/mode agent L1` 回复「切换失败：L1 需要 agent preset qq-agent-readonly」 | 同上；用 `npm run probe:permission` 确认 |
+| `/mode agent L1` 回复「切换失败：L1 需要 agent preset readonly」 | 同上；用 `npm run probe:permission` 确认 |
 | `/level L3` 回复「需要 TOTP」 | 第 9 节未做；或用 `admin.allowL3=false` 禁用了 L3 |
 | L3 切换失败「DSH 中没有权限预设 qq-full-ask」 | 第 8 节的 setup 没生效或 DSH 未重启；桥接**不会**退回到免审批的 danger-full-access |
 | 收到「🚨 告警：检测到不是经 QQ 管理通道/控制台发起的模式变更」 | 有人在 DSH 设置里直接改了 `qq-mode`。默认已自动回退；确认是否本人操作 |

@@ -79,8 +79,8 @@ export const SLANG_FIELDS = {
         name: 'slangLearnerPreset',
         type: 'text',
         label: '学习会话 preset',
-        placeholder: 'qq-chat',
-        hint: '送研究时用哪个 DSH 预设开会话，一般保持 qq-chat。',
+        placeholder: 'chat',
+        hint: '送研究时用哪个 DSH 预设开会话，一般保持 chat。',
       },
       {
         name: 'slangWorkspaceTitle',

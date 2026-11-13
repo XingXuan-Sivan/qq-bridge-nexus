@@ -21,10 +21,10 @@
 
 | 级别 | 模式 | agent preset | DSH 权限预设 | 开启条件 |
 | --- | --- | --- | --- | --- |
-| **L0** 群友 | chat / reserved / reserved2 | qq-chat / qq-chat-v2（无本地工具，原版守卫） | （纵深防御：建会话后钉 read-only） | 默认 |
-| **L1** 本地只读 Agent | closed-agent | **qq-agent-readonly**（新增：工具白名单只有读文件/检索/联网只读） | `read-only`（ask） | 确认码 |
-| **L2** 工作区读写 Agent | closed-agent | **qq-agent-workspace**（新增：pwsh/文件/检索/联网，无子代理与工作流；**审批闸门**：执行命令每次审批） | `workspace-write`（ask） | 确认码 |
-| **L3** 高权限 Agent | closed-agent | **qq-agent-full**（同上；**审批闸门**：除只读外每次调用都审批，含写文件） | **`qq-full-ask`**（danger-full-access + ask，由 setup-dsh 注入） | 确认码 + **TOTP** |
+| **L0** 群友 | chat / reserved / reserved2 | chat / chat-v2（无本地工具，原版守卫） | （纵深防御：建会话后钉 read-only） | 默认 |
+| **L1** 本地只读 Agent | closed-agent | **readonly**（新增：工具白名单只有读文件/检索/联网只读） | `read-only`（ask） | 确认码 |
+| **L2** 工作区读写 Agent | closed-agent | **workspace**（新增：pwsh/文件/检索/联网，无子代理与工作流；**审批闸门**：执行命令每次审批） | `workspace-write`（ask） | 确认码 |
+| **L3** 高权限 Agent | closed-agent | **full**（同上；**审批闸门**：除只读外每次调用都审批，含写文件） | **`qq-full-ask`**（danger-full-access + ask，由 setup-dsh 注入） | 确认码 + **TOTP** |
 | ~~完全访问免审批~~ | — | — | `danger-full-access`（approval: never） | **不存在，任何入口都不允许** |
 
 为什么 L2/L3 需要桥接自己的审批闸门（`artifacts/dsh/qq-agent-presets/qq-approval-gate.mjs`）：rc.2 的审批**只在工具请求越过当前沙箱时**才触发 ——
@@ -40,7 +40,7 @@ closed-agent 只放行 owner 私聊；切换后群聊暂停响应，私聊由**�
 
 换会话本身不能避免，但不再「换一次就忘一次」：
 
-- **聊天会话休眠复用**：进 agent 时，群和 owner 私聊原来的聊天会话（qq-chat / qq-chat-v2，从没挂过本地工具）**不归档**，
+- **聊天会话休眠复用**：进 agent 时，群和 owner 私聊原来的聊天会话（chat / chat-v2，从没挂过本地工具）**不归档**，
   只停掉在途工作、撤销映射、作废会话令牌；回落到**同一模式、同一 preset**时原样复用，AI 记得之前在聊什么。
   群会话恢复后第一条消息会带一句「刚才休眠了多久、这段时间群里的消息没收到」。
   休眠超过 `admin.dormantMaxMs`（默认 24 小时）、回到的模式 / preset 不同（例如 `safeMode` 是 `chat`）、手动重置会话或清空工作区时归档，不复用。
@@ -81,7 +81,7 @@ closed-agent 只放行 owner 私聊；切换后群聊暂停响应，私聊由**�
 | `/mode` | 查看当前模式、级别、待确认申请、待审批、TOTP 状态、人物库统计 |
 | `/mode reserved2` · `/mode chat` · `/mode reserved` | 切换群友模式（降级/平移，一步完成） |
 | `/mode agent [L1\|L2\|L3]` | 申请切到运维 Agent（缺省级别 `admin.defaultAgentLevel`，默认 L1） |
-| `/level L1\|L2\|L3\|L0` · `/permission read-only\|workspace-write\|qq-full-ask` | 调整级别；`/permission danger-full-access` 被明确拒绝 |
+| `/level L1\|L2\|L3\|L0` · `/permission read-only\|workspace-write\|full-ask`（`full` 同义） | 调整级别；`/permission danger-full-access` 被明确拒绝。只认内核级别词，平台侧预设名（`qq-full-ask`）不作为命令词 |
 | `确认 <码>` / `确认 <码> <6位动态码>` | 确认申请（L3 必须附 TOTP） |
 | `/cancel` | 取消全部待确认申请 |
 | `/panic` 或 `紧急关闭` | 立即回到 `admin.safeMode`（默认 reserved2）/ L0 |

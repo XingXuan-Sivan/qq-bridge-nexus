@@ -17,6 +17,7 @@ const MODE_WORDS = {
   运维: 'closed-agent',
 };
 
+// 只认内核级别词；平台侧的权限预设名（如 dsh 的 qq-full-ask）不属于内核词汇。
 const PERMISSION_WORDS = {
   'read-only': 'L1',
   readonly: 'L1',
@@ -24,7 +25,7 @@ const PERMISSION_WORDS = {
   'workspace-write': 'L2',
   workspace: 'L2',
   工作区: 'L2',
-  'qq-full-ask': 'L3',
+  'full-ask': 'L3',
   full: 'L3',
   完全访问: 'L3',
 };

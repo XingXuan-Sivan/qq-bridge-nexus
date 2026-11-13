@@ -50,7 +50,7 @@ profiles/
 │       │   ├── agent-workspace.yml
 │       │   └── agent-full.yml
 │       ├── templates/rows.yml    # 安装/生成产物用的行模板
-│       ├── agents/               # 要装进 DSH 的 preset（qq-chat、qq-chat-v2、qq-agent-*）
+│       ├── agents/               # 要装进 DSH 的 preset（chat、chat-v2、qq-agent-*）
 │       └── adapters/             # 该平台的构建/安装适配器（P1 起）
 │           ├── build.mjs         # planArtifacts()：源码 → 产物文件清单（纯函数）
 │           └── install.mjs       # install()：产物装进运行时（写 profile patch / junction）
@@ -106,7 +106,7 @@ label: 聊天 Agent
 note: …
 platform: qq
 agentPlatform: dsh
-agent: qq-chat          # 该能力对应的 DSH preset
+agent: chat          # 该能力对应的 DSH preset
 tools:
   platform: { sendGroup: true, getPrompt: true, … }   # 平台工具开关（true/false 都保留）
   agent: { tool-web: true, tool-todo: true, … }       # Agent 模块开关
@@ -127,7 +127,7 @@ label: 二代仿真
 builtin: true
 platform: qq
 agentPlatform: dsh
-agent: qq-chat-v2
+agent: chat-v2
 behavior: social-v2
 capability: agent-chat
 audience: access
@@ -183,8 +183,25 @@ export async function install({ repoRoot, profile, env, log }) {     // 失败�
 }
 ```
 
-新增一个 Agent 平台 = 加一个 `profiles/agent-platforms/<id>/` 目录并实现这两个文件；
+`profiles/agent-platforms/<id>/adapters/runtime.mjs`（0.2.0 / B4 起）：运行期只读描述与映射，**同步、纯常量 + 纯函数**（启动时由 `src/agent-side/builtin.mjs` 同步 import）：
+
+```js
+export const id = 'dsh';
+export const capabilities = Object.freeze(['session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact']);
+export const PERMISSION_PRESET_FOR_LEVEL = Object.freeze({ 'read-only': 'read-only', …, full: 'danger-full-access' });
+export const LEVEL_PERMISSION_PRESET = Object.freeze({ L1: 'read-only', L2: 'workspace-write', L3: 'qq-full-ask' });
+export const AGENT_PRESET_IDS = Object.freeze(['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
+export const AGENT_PRESET_FOR_LEVEL = Object.freeze({ L1: 'readonly', L2: 'workspace', L3: 'full' });
+export const AGENT_PRESET_ALIASES = Object.freeze({ 'qq-chat': 'chat', … });      // 旧名读入归一
+export function resolveLevelPlan(level, ctx) {}                     // 内核级别 → 平台落地
+export function normalizeAgentPreset(name) {}
+```
+
+内核侧只认接口，不认平台名：`src/agent-side/runtime-registry.mjs`（中立、零平台名、fail-closed 抛错）负责登记与转发，`src/agent-side/builtin.mjs` 是**唯一**允许写具体平台目录的装配点，`src/admin/agent-permission.js` 只做转发。`verify:repo` 会钉住这条边界：`src/` 不得再出现旧 preset 名，也不得在 `builtin.mjs` 之外装配平台。
+
+新增一个 Agent 平台 = 加一个 `profiles/agent-platforms/<id>/` 目录并实现这三个文件；
 调度器无需改动。调度器刻意**不 import `src/`**（只依赖 Node 内置模块），这样离线夹具只要拷 `scripts/` 子集 + `profiles/` 整棵就能跑。
+运行时同理：换 Agent 平台只需改 `src/agent-side/builtin.mjs` 的一行 import，内核其余文件不动。
 
 ---
 

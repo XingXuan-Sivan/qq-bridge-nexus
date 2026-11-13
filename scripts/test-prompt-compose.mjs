@@ -44,11 +44,11 @@ test('composeRows：只改 persona 行，其余行与顺序不动', () => {
 });
 
 test('从 config 读平台提示词', () => {
-  const config = { capabilities: { 'qq-chat': { prompt: { personaPrefix: '你是 QQ 机器人。' } } } };
-  assert.equal(readPlatformPromptFromConfig(config, 'qq-chat'), '你是 QQ 机器人。');
-  assert.equal(readPlatformPromptFromConfig(config, 'qq-chat-v2'), '');
-  assert.equal(readPlatformPromptFromConfig({}, 'qq-chat'), '');
-  assert.equal(readPlatformPromptFromConfig(null, 'qq-chat'), '');
+  const config = { capabilities: { 'chat': { prompt: { personaPrefix: '你是 QQ 机器人。' } } } };
+  assert.equal(readPlatformPromptFromConfig(config, 'chat'), '你是 QQ 机器人。');
+  assert.equal(readPlatformPromptFromConfig(config, 'chat-v2'), '');
+  assert.equal(readPlatformPromptFromConfig({}, 'chat'), '');
+  assert.equal(readPlatformPromptFromConfig(null, 'chat'), '');
 });
 
 test('内置预设：没有平台提示词时，生成的 patch 与仓库产物逐字一致', () => {

@@ -22,7 +22,7 @@ import { discoverDshSessionCookie, NodeApiClient, unwrap } from '../src/dsh-clie
 
 const ROOT = process.cwd();
 const DSH_HOME = dshHome();
-const PRESET_IDS = ['qq-chat', 'qq-chat-v2'];
+const PRESET_IDS = ['chat', 'chat-v2'];
 
 // ── 层选择 ──────────────────────────────────────────────────────────────────
 function parseLayer() {
@@ -276,6 +276,39 @@ if (want('repo')) {
   check('repo', 'closed-agent 计划失败时直接抛错（不再重试建会话）',
     /if \(agentPlan && !agentPlan\.ok\)\s*\{\s*throw/.test(bridgeCode));
 
+  // ── 1d-2. 平台解耦不变式（B4）───────────────────────────────────────────
+  // 内核只通过 src/agent-side/runtime-registry.mjs 问平台能力；具体平台装配点只在
+  // src/agent-side/builtin.mjs。否则「内核认识 DSH」会以新的形式回来。
+  const srcFiles = [];
+  const walkSrc = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkSrc(full);
+      else if (/\.(?:mjs|js)$/.test(entry.name)) srcFiles.push(full);
+    }
+  };
+  walkSrc(path.join(ROOT, 'src'));
+  const srcCode = new Map(srcFiles.map((f) => [path.relative(ROOT, f).replace(/\\/g, '/'), stripComments(fs.readFileSync(f, 'utf8'))]));
+  const adapterRuntime = path.join(ROOT, 'profiles/agent-platforms/dsh/adapters/runtime.mjs');
+  check('repo', 'DSH 适配器 runtime.mjs 存在且导出 preset 权威清单',
+    fs.existsSync(adapterRuntime) && /export const AGENT_PRESET_IDS/.test(fs.readFileSync(adapterRuntime, 'utf8')));
+  const stalePresetFiles = [...srcCode]
+    .filter(([, code]) => /qq-chat|qq-agent-(?:readonly|workspace|full)/.test(code))
+    .map(([f]) => f);
+  check('repo', '内核代码不再出现旧 preset 名（qq-chat / qq-agent-*）', stalePresetFiles.length === 0, stalePresetFiles.join(', '));
+  const registrationPoints = [...srcCode]
+    .filter(([, code]) => /registerAgentPlatform\(/.test(code))
+    .map(([f]) => f)
+    .filter((f) => f !== 'src/agent-side/runtime-registry.mjs');
+  check('repo', '具体 Agent 平台只在 src/agent-side/builtin.mjs 装配',
+    registrationPoints.every((f) => f === 'src/agent-side/builtin.mjs'), registrationPoints.join(', '));
+  check('repo', 'src/admin/dsh-permission.js 已下沉到适配器（不再存在）',
+    !fs.existsSync(path.join(ROOT, 'src/admin/dsh-permission.js')));
+  check('repo', 'src/session/permission.mjs 不再导出平台权限预设名',
+    !/DSH_PERMISSION_PRESET|qq-full-ask/.test(srcCode.get('src/session/permission.mjs') ?? ''));
+  check('repo', 'preset 名去用户平台前缀（bridge 的 PRESET_NAMES 已是 chat / chat-v2）',
+    /PRESET_NAMES\s*=\s*\{[^}]*v1:\s*'chat'/.test(bridgeCode) && !/'qq-chat/.test(bridgeCode));
+
   // ── 1e. 版本身份一致性 ──────────────────────────────────────────────────
   // v0.1.5 曾带着自称 0.1.2-alpha.1 的 package-lock.json 发布出去（package.json 却是
   // 0.1.5），三个 MCP server 的 serverInfo.version 也停在 0.1.0。版本漂移没有防线就会
@@ -453,7 +486,7 @@ if (want('live')) {
     check('live', 'DSH 全局默认模型 = deepseek-flash', dm?.value?.model === 'deepseek-flash', `当前 ${dm?.value?.model}`);
     const ap = await rpc('agentPresets/list', {});
     const presetIds = ap.value?.presets?.map((p) => p.id) ?? [];
-    check('live', 'agentPresets/list 含 qq-chat 与 qq-chat-v2', presetIds.includes('qq-chat') && presetIds.includes('qq-chat-v2'), presetIds.join(', '));
+    check('live', 'agentPresets/list 含 chat 与 chat-v2', presetIds.includes('chat') && presetIds.includes('chat-v2'), presetIds.join(', '));
     // 0.1.7 把设置命名空间从 `agent-presets` 改名为 `agent-preset-registry`，而且「用户默认」
     // 是易失字段 selectedDefault，不会出现在 describe 的 value 里。部署默认由 registry 行的
     // config.default 决定（dsh-web-app 的 patch 写的是 standard）。桥接在 closedAgentPreset
@@ -491,9 +524,9 @@ if (want('live')) {
     let probeSessionId = null;
     try {
       await api.ensureAuth();
-      const created = unwrap(await api.sessions.create({ cwd: probeDir, agentPreset: 'qq-chat-v2' }), 'session.create');
+      const created = unwrap(await api.sessions.create({ cwd: probeDir, agentPreset: 'chat-v2' }), 'session.create');
       probeSessionId = created.sessionId;
-      check('live', 'session/create 挂 qq-chat-v2 preset 成功', typeof probeSessionId === 'string' && probeSessionId.length > 0, probeSessionId);
+      check('live', 'session/create 挂 chat-v2 preset 成功', typeof probeSessionId === 'string' && probeSessionId.length > 0, probeSessionId);
       unwrap(await api.sessions.selectModel({
         sessionId: probeSessionId, provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max',
       }), 'session.selectModel');

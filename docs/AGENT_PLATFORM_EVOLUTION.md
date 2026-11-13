@@ -132,7 +132,7 @@ npm run verify:repo              # 含 P1/P3 的文本断言与全量语法检�
 
 ```yaml
 version: 1
-id: qq-chat
+id: chat
 label: QQ 聊天角色
 order: 10
 behavior: social-v1

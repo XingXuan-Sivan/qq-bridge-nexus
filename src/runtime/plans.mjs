@@ -6,6 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { PLANS_ROOT } from '../profiles/paths.mjs';
+// 方案里的 agent 是 Agent 平台托管的 preset id；哪个 id 属于管理通道哪一级由平台适配器声明
+// （AGENT_PRESET_FOR_LEVEL），这里不写死任何 preset 名。
+import { agentPresetLevel } from '../agent-side/runtime-registry.mjs';
+import '../agent-side/builtin.mjs';
 
 // 方案里的 platform 是用户侧平台 id。它不再有内置默认值：由 createPlanStore 从
 // 配置（config.json 的 platform.id）传入，缺失时保持空串 —— 猜一个平台会把会话写到
@@ -163,19 +167,13 @@ export function legacyModeOfPlan(plan) {
   if (!plan) return 'chat';
   if (plan.behavior === 'social-v2') return 'reserved2';
   if (plan.behavior === 'social-v1') return 'reserved';
-  if (String(plan.agent || '').startsWith('qq-agent-')) return 'closed-agent';
+  if (agentPresetLevel(plan.agent)) return 'closed-agent';
   return 'chat';
 }
 
-const LEVEL_BY_AGENT = {
-  'qq-agent-readonly': 'L1',
-  'qq-agent-workspace': 'L2',
-  'qq-agent-full': 'L3',
-};
-
 /** 方案对应的旧级别（仅 agent 方案有；其余 L0）。 */
 export function legacyLevelOfPlan(plan) {
-  return LEVEL_BY_AGENT[plan?.agent] ?? 'L0';
+  return agentPresetLevel(plan?.agent) ?? 'L0';
 }
 
 /** 旧「模式 + 级别」→ 最接近的方案 id（迁移与会话覆盖用，不参与运行时判断）。 */

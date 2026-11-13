@@ -23,7 +23,7 @@ import { canOpenLevel } from './admin/admins.mjs';
 // bridge.js 只 import 这一个模块（测试夹具按名字注入绑定，入口越少越不容易漂移）。
 export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/group-events.js';
 export { checkCrossGroup, queryPresence, queryActivity } from './social/cross-group.js';
-export { resolveLevelPlan, permissionCommandSucceeded } from './admin/dsh-permission.js';
+export { resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, levelPermissionMap, normalizeAgentPreset, agentPresetIds, chatAgentPresets, agentPresetLevel } from './admin/agent-permission.js';
 export { L0_MODES, LEVEL_TEXT } from './admin/mode-control.js';
 export { createReconnectWatchdog } from './lib/ws-watchdog.mjs';
 export { describeAgentError, agentErrorUserText, isConfigError } from './lib/agent-errors.mjs';
@@ -100,8 +100,14 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
 
   const continuity = () => cfg.continuity ?? {};
   const continuityEnabled = () => cfg.continuity?.enabled !== false;
-  const adminEnabled = () => cfg.admin?.enabled !== false && !!normalizeQQ(cfg.ownerQQ);
-  const isOwnerPrivateKey = (k) => !!normalizeQQ(cfg.ownerQQ) && sameSession(k, buildKey('private', normalizeQQ(cfg.ownerQQ)));
+  const ownerAddress = () => cfg.owner ?? null;
+  // 管理通道只看有没有 owner（地址模型下不再要求 QQ 号码形态）。
+  const adminEnabled = () => cfg.admin?.enabled !== false && !!ownerAddress();
+  const isOwnerPrivateKey = (k) => {
+    const owner = ownerAddress();
+    if (!owner) return false;
+    return sameSession(k, buildKey('private', owner.id, { platform: owner.platform, account: owner.account }));
+  };
 
   function groupRecordable(groupId) {
     return cfg.continuity?.groups?.[String(groupId)]?.recordable !== false;

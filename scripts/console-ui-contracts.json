@@ -71,7 +71,7 @@
       "label": "我的 Agent",
       "platform": "qq",
       "agentPlatform": "dsh",
-      "agent": "qq-chat",
+      "agent": "chat",
       "capability": "agent-chat",
       "behavior": "social-v2",
       "audience": "owner",
@@ -280,7 +280,7 @@
         12
       ],
       "injectMax": 8,
-      "learnerPreset": "qq-chat",
+      "learnerPreset": "chat",
       "workspaceTitle": "QQ 黑话学习",
       "autoResearch": true
     }

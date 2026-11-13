@@ -214,15 +214,15 @@ await test('R7 未知 preset 名直接被拒（含路径穿越形态）', async 
   try {
     h.setPresets([]); // 模拟 DSH 未连接：清单为空
     // 给临时仓库放一份真实的预设源文件，验证「已知 preset 不会被误伤」
-    const presetFile = path.join(h.temp, 'profiles', 'agent-platforms', 'dsh', 'agents', 'qq-chat-v2', 'agent.cordis.yml');
+    const presetFile = path.join(h.temp, 'profiles', 'agent-platforms', 'dsh', 'agents', 'chat-v2', 'agent.cordis.yml');
     fs.mkdirSync(path.dirname(presetFile), { recursive: true });
     fs.writeFileSync(presetFile, '- id: persona\n  config:\n    prefix: |-\n      测试用仿真提示词。\n');
     await withServer(h, async (port) => {
-      for (const bad of ['../../etc', '..\\..\\..\\x', 'qq-chat/../../x', 'standard']) {
+      for (const bad of ['../../etc', '..\\..\\..\\x', 'chat/../../x', 'standard']) {
         const res = await call(port, '/api/preset/sim-prompt?preset=' + encodeURIComponent(bad));
         assert.equal(res.status, 400, `preset=${bad} 必须被拒，实际 ${res.status}`);
       }
-      const ok = await call(port, '/api/preset/sim-prompt?preset=qq-chat-v2');
+      const ok = await call(port, '/api/preset/sim-prompt?preset=chat-v2');
       assert.equal(ok.status, 200, `已知 preset 仍应可用：${ok.body}`);
       assert.equal(ok.json?.content, '测试用仿真提示词。');
     });

@@ -4,5 +4,7 @@ label: DeepSeek Harness
 tools: tools.yml
 capabilities: capabilities
 agents: agents
+# 运行期适配器：能力声明与权限/agent preset 映射（内核只经 src/agent-side/registry 读）。
+runtime: adapters/runtime.mjs
 # 产物目录不在这里声明：约定为 <仓库根>/artifacts/<id>/，
 # 由同目录的 adapters/build.mjs（planArtifacts）与 adapters/install.mjs 决定。

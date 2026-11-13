@@ -62,7 +62,7 @@ node scripts/test-preset-local-tools.mjs
 
 | 项 | 怎么验证 |
 | --- | --- |
-| DSH 权限预设目录含 qq-full-ask、`commands/execute "/permission …"` 生效、prompt 不执行斜杠命令、qq-agent-readonly 已加载 | `npm run probe:permission`（需 DSH 运行） |
+| DSH 权限预设目录含 qq-full-ask、`commands/execute "/permission …"` 生效、prompt 不执行斜杠命令、readonly 已加载 | `npm run probe:permission`（需 DSH 运行） |
 | L1 守卫确实收到 `profile: readonly-agent` 配置 | L1 下让 Agent 尝试写一个文件，应被「不在 L1 只读 Agent 白名单内」拒绝 |
 | SnowLuma 实际推送的成员通知字段 | `npm run probe:member-events -- 300`（只读、默认打码） |
 | 入群唤醒、熟人认出、审批消息里的参数展示、TOTP 端到端、自动回落 | 见 [../DSH_DEPLOYMENT.md](../DSH_DEPLOYMENT.md) 第 12 节 |

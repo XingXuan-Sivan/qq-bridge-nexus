@@ -54,7 +54,7 @@ function classify(section) {
 const buckets = { platform: [], engine: [], safety: [] };
 // 两个旧预设都取，但按段落去重（v2 与 v1 有大量同文段落）。
 const seen = new Set();
-for (const presetId of ['qq-chat-v2', 'qq-chat']) {
+for (const presetId of ['chat-v2', 'chat']) {
   for (const section of splitSections(personaOf(presetId))) {
     const key = section.text.replace(/\s+/g, '');
     if (!key || seen.has(key)) continue;

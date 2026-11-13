@@ -348,13 +348,13 @@ try {
     await page.fill('#runtimeEditId', 'my-agent');
     await page.fill('#runtimeEditLabel', '我的 Agent');
     await page.selectOption('#runtimeEditPlatform', 'qq');
-    await page.selectOption('#runtimeEditAgent', 'qq-chat');
+    await page.selectOption('#runtimeEditAgent', 'chat');
     await page.selectOption('#runtimeEditTools', 'agent-chat');
     await page.selectOption('#runtimeEditBehavior', 'social-v2');
     await page.selectOption('#runtimeEditAudience', 'owner');
     await page.fill('#runtimeEditNote', '带人格进群');
     assert.deepEqual(await clickWrite('#runtimeEditSave', '/api/runtime/plans'), {
-      id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh', agent: 'qq-chat',
+      id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh', agent: 'chat',
       capability: 'agent-chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
     });
   });

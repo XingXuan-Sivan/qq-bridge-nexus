@@ -25,7 +25,8 @@ function el(id) {
   return document.getElementById(id);
 }
 
-const AGENT_FALLBACK = ['qq-chat', 'qq-chat-v2', 'qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full'];
+// 兜底清单 = Agent 平台托管的能力档名（不带用户平台前缀）；真实清单由 /api/runtime 的 agents 给出。
+const AGENT_FALLBACK = ['chat', 'chat-v2', 'readonly', 'workspace', 'full'];
 
 function agentOptions() {
   const ids = agents.length ? agents : AGENT_FALLBACK;

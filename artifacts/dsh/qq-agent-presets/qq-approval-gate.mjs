@@ -1,4 +1,4 @@
-// qq-bridge 运维 Agent 的审批闸门（L2 qq-agent-workspace / L3 qq-agent-full 两个 preset 共用）。
+// qq-bridge 运维 Agent 的审批闸门（L2 workspace / L3 full 两个 preset 共用）。
 //
 // 为什么需要（对照 DSH 0.2.0-rc.2 安装包核实）：DSH 的审批只在工具**请求越过当前沙箱**时才触发；
 // 沙箱本身是 workspace-write 时，工作区内的命令直接执行；沙箱是 danger-full-access 时**没有可越过的边界**，

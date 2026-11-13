@@ -10,7 +10,8 @@ import { createAuditLog } from '../src/admin/audit-log.js';
 import { createModeController, parseConfirm, normalizeTarget } from '../src/admin/mode-control.js';
 import { createApprovalRegistry, parseApprovalReply, describeToolArgs } from '../src/admin/approvals.js';
 import { parseOwnerCommand } from '../src/admin/owner-commands.js';
-import { resolveLevelPlan, permissionCommandSucceeded, LEVEL_PERMISSION_PRESET } from '../src/admin/dsh-permission.js';
+import { resolveLevelPlan, permissionCommandSucceeded } from '../src/admin/agent-permission.js';
+import { LEVEL_PERMISSION_PRESET } from '../profiles/agent-platforms/dsh/adapters/runtime.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-admin-'));
 
@@ -359,16 +360,16 @@ test('权限映射：L3 绝不落到 danger-full-access；缺预设时 fail-clos
   assert.ok(!Object.values(LEVEL_PERMISSION_PRESET).includes('danger-full-access'));
   const catalog = ['read-only', 'workspace-write', 'danger-full-access'];
   assert.equal(resolveLevelPlan('L3', { permissionCatalog: catalog }).ok, false);
-  assert.equal(resolveLevelPlan('L3', { presetIds: ['qq-agent-full'], permissionCatalog: [...catalog, 'qq-full-ask'] }).permissionPreset, 'qq-full-ask');
+  assert.equal(resolveLevelPlan('L3', { presetIds: ['full'], permissionCatalog: [...catalog, 'qq-full-ask'] }).permissionPreset, 'qq-full-ask');
   assert.equal(resolveLevelPlan('L1', { presetIds: ['standard'] }).ok, false, 'L1 缺只读 preset 时拒绝');
-  assert.equal(resolveLevelPlan('L1', { presetIds: ['qq-agent-readonly'] }).agentPreset, 'qq-agent-readonly');
+  assert.equal(resolveLevelPlan('L1', { presetIds: ['readonly'] }).agentPreset, 'readonly');
   // v0.3.0 审计修订：L2/L3 使用带审批闸门的运维 preset，缺失时 fail-closed，不再退回 DSH 默认 preset
-  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'qq-chat'] }).ok, false);
-  assert.equal(resolveLevelPlan('L2', { presetIds: ['qq-agent-workspace'] }).agentPreset, 'qq-agent-workspace');
-  assert.equal(resolveLevelPlan('L3', { presetIds: ['qq-agent-full'], permissionCatalog: [...catalog, 'qq-full-ask'] }).agentPreset, 'qq-agent-full');
-  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'qq-agent-workspace'], closedAgentPreset: 'standard' }).agentPreset, 'qq-agent-workspace', '未显式允许时忽略自选 preset');
-  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'qq-agent-workspace'], closedAgentPreset: 'standard', allowCustomAgentPreset: true }).custom, true);
-  assert.equal(resolveLevelPlan('L2', { presetIds: ['qq-chat', 'qq-agent-workspace'], closedAgentPreset: 'qq-chat', allowCustomAgentPreset: true }).agentPreset, 'qq-agent-workspace', '自选 preset 不能是群友 preset');
+  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'chat'] }).ok, false);
+  assert.equal(resolveLevelPlan('L2', { presetIds: ['workspace'] }).agentPreset, 'workspace');
+  assert.equal(resolveLevelPlan('L3', { presetIds: ['full'], permissionCatalog: [...catalog, 'qq-full-ask'] }).agentPreset, 'full');
+  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'workspace'], closedAgentPreset: 'standard' }).agentPreset, 'workspace', '未显式允许时忽略自选 preset');
+  assert.equal(resolveLevelPlan('L2', { presetIds: ['standard', 'workspace'], closedAgentPreset: 'standard', allowCustomAgentPreset: true }).custom, true);
+  assert.equal(resolveLevelPlan('L2', { presetIds: ['chat', 'workspace'], closedAgentPreset: 'chat', allowCustomAgentPreset: true }).agentPreset, 'workspace', '自选 preset 不能是群友 preset');
   assert.equal(permissionCommandSucceeded({ result: { kind: 'success', text: 'preset read-only' } }, 'read-only'), true);
   assert.equal(permissionCommandSucceeded({ result: { kind: 'error', text: 'unknown preset' } }, 'read-only'), false);
   assert.equal(permissionCommandSucceeded(undefined, 'read-only'), false);

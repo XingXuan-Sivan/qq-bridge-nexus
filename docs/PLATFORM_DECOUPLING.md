@@ -86,7 +86,7 @@
 
 ---
 
-### 2.5 实施偏差（B2 / B3 落地时相对上述设计的取舍）
+### 2.5 实施偏差（B2 / B3 / B4 落地时相对上述设计的取舍）
 
 | 项 | 设计 | 实施 | 理由 |
 | --- | --- | --- | --- |
@@ -98,6 +98,10 @@
 | `cfg.ownerQQ` 去留（B3） | 直接删除 | 保留为**派生视图**（仅当 owner 落在本进程平台、无 account、纯数字时回落为 number） | 旧控制台、插件、日志仍有读 `ownerQQ` 的调用；唯一的真相是 `cfg.owner`，派生值在 `loadConfig` / `noteOwnerChange` / `/api/whitelist` 三处统一计算 |
 | 裸 id 的归属（B3） | 全局唯一裸 id | 裸 id 只在**本进程平台且同账号**下解释；换平台或换账号的同号是不同人 | 多账号下 `qq@napcat:10001` 与 `qq@snowluma:10001` 是两个账号，不按 id 混同 |
 | `ownerQQ` DOM id（B3） | —— | 控制台字段与 `/api/whitelist` 的键改为 `owner`；`ownerQQ` 移入 `console-ui-retired-ids.json` | 接口仍接受 `ownerQQ` 作为回退（旧脚本、旧前端不炸），但新前端只发 `owner` |
+| 映射落点（B4） | 内核 `src/admin/` 里的常量表 | 拆成三层：`src/agent-side/runtime-registry.mjs`（中立注册表，零平台名）+ `src/agent-side/builtin.mjs`（唯一装配点）+ `profiles/agent-platforms/dsh/adapters/runtime.mjs`（映射与能力声明的权威源） | 让 `src/admin/*` 直接 import `profiles/agent-platforms/dsh/` 会让内核反向依赖具体平台，违反 §7.2；注册表同时把 B5 的 AgentPlatform 接口提前落地 |
+| preset 名（B4） | `chat / readonly / workspace / full` | 按上述改名（旧 `qq-chat` / `qq-chat-v2` / `qq-agent-*`），另留 `AGENT_PRESET_ALIASES` 读入归一 | 改名是硬约束（§3.5），但旧 `config.json`、旧 profile 不该因一次升级就报错；归一放在 `loadConfig`、`resolveLevelPlan` 的 `presetIds`、`agentPresetLevel` 反查三处 |
+| bundle 包名（B4） | 一并去前缀 | **不改**：`artifacts/dsh/qq-agent-presets/` 与权限预设名 `qq-full-ask` 保持原样 | 前者是 profile `package.json` 的 `link:` 依赖名与守卫行的裸说明符（`qq-agent-presets/qq-tool-restrict.mjs`），改名要连带 node_modules junction 与环境自愈；后者是 DSH profile `cordis.patch.yml` 里的 preset id，属平台侧命名。二者都在「Agent 平台内部」，不构成内核耦合 |
+| 旧 DSH 会话（B4） | 自动迁移 | 不迁移，`install` 适配器只在安装时**报告**残留的旧 preset 目录/patch，由用户重建会话 | dsh 侧会话绑定的是 preset id，桥接无法安全改写；`state/sessions/*.json` 只存 `planId` 不存 raw preset 名，故桥接自身无需迁移 |
 
 ---
 
@@ -218,10 +222,10 @@ export function describe() { return { label, modelLabel, permissionLevels }; }
 
 | 现状 | 目标 |
 | --- | --- |
-| `src/admin/dsh-permission.js` 直接写 `read-only/workspace-write/qq-full-ask` | 映射表移入 `adapters/dsh/runtime.mjs` 的 `applyPermission` |
-| `src/session/permission.mjs` 的 `DSH_PERMISSION_PRESET` | 同上；内核只保留 `read-only/workspace-write/full-ask/full` 四级 |
-| `preset` 名 `qq-agent-*` | 改为能力档名（`chat/readonly/workspace/full`），用户平台差异走 prompt 层 |
-| `dsh-client.js` 被 bridge 直接 import | bridge 只见 `AgentPlatform` 接口；`dsh-client.js` 移入 `adapters/dsh/` |
+| `src/admin/dsh-permission.js` 直接写 `read-only/workspace-write/qq-full-ask` | ✅ 映射表移入 `adapters/dsh/runtime.mjs`（B4；该文件已删除，`src/admin/agent-permission.js` 只做转发） |
+| `src/session/permission.mjs` 的 `DSH_PERMISSION_PRESET` | ✅ 同上；内核只保留 `read-only/workspace-write/full-ask/full` 四级，`presetForLevel` 接受 `opts.presets` 注入（B4） |
+| `preset` 名 `qq-agent-*` | ✅ 改为能力档名 `chat / chat-v2 / readonly / workspace / full`（B4）；用户平台差异走 prompt 层 |
+| `dsh-client.js` 被 bridge 直接 import | bridge 只见 `AgentPlatform` 接口；`dsh-client.js` 移入 `adapters/dsh/`（B5） |
 
 ---
 
@@ -309,7 +313,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B1** ✅ | 发送收口：4 处 `send_*_msg` 三元式 → `sendAction(address, segments)`；v1 管线退化为 v2 薄封装；段类型与降级策略接线 | bridge.js + md-to-plain + 3 个媒体函数 | 低（收益最高） |
 | **B2** ✅ | 地址模型：`key.mjs` 支持 `@account` 与开放 type、id 字符串化；`withAddress()` 上下文 + 15 个 import 点改造；`sessions.json` 迁移脚本（见 §2.5：实际未做，旧文法已是新文法子集） | key.mjs + 15 模块 + bridge | 中高（主键） |
 | **B3** ✅ | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址；`admins` 项新增 `platform`/`account`/`id`（`qq` 保留为别名）；`QQ_RE` 移除、`cfg.ownerQQ` 降为派生视图 | bridge + 控制台 + 6 个测试 | 中 |
-| **B4** | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名 | 2 个文件 + preset 名迁移 | 中 |
+| **B4** ✅ | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名（`chat / chat-v2 / readonly / workspace / full`，旧名经 `AGENT_PRESET_ALIASES` 归一；见 §2.5） | 2 个文件 + preset 名迁移 | 中 |
 | **B5** | 运行期适配器：新建 `src/user-side/` 与 `src/agent-side/`，`dsh-client.js` 与 SDK 直连下沉为两个 runtime 实现，bridge 只依赖接口 | 大（bridge 1618 行相关段） | 高 |
 | **B6** | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归 | kernel/host-api/manifest | 中高 |
 | **B7** | 控制台元数据化：品牌与文案、`/api/platforms` 与 `/api/agent-platforms` 驱动表单、列名与筛选读元数据、`/api/send/*` 收敛 | console 全站 | 中 |

@@ -304,7 +304,7 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 | **模型目录** | `deepseek-flash` 仍在（新增 `deepseek-v4-pro`），思考档位 `off/low/high/max`。当时控制台把 `off` 过滤掉（QQ 聊天助手依赖思考）。**v1.0.2 起改为放开**：档位完全以目录为准，选 `off` 时控制台提示可能影响工具调用和回复质量；实测 `deepseek-flash` / `deepseek-v4-pro` 公布 `off/low/high/max`（`defaultEffort: high`）。DSH 桌面版 0.2.1 的提供方名是 `deepseek-account` |
 | **`settings/update` 参数形状** | 是平铺多参数（见 §4.2），桥接原本就对 |
 | **preset / bundle 机制** | `@deepseek-ai/dsh-agent-preset` 行 + `artifacts/dsh/qq-agent-presets` bundle patch 仍有效；两个 preset 的 persona schema 仍通过；`id: qq-mode` 行 + 导出的 `Config` 仍能让命名空间可读写（§4.2） |
-| **`session/create` + preset** | 活 DSH 实测：挂 `qq-chat-v2` 成功，`agentPresets/list` 含 `qq-chat` 与 `qq-chat-v2` |
+| **`session/create` + preset** | 活 DSH 实测：挂 `chat-v2` 成功，`agentPresets/list` 含 `chat` 与 `chat-v2` |
 | **`session/modelCatalog`** | 仍可用，返回 `default` / `routableProviders` / `groups` / `failures`，桥接控制台的提供方 / 模型 / 思考强度下拉都依赖它（`src/dsh-model.js`，60 秒缓存）。条目里**没有** `inputModalities`，看图能力用「已知表 + 未知」表达 |
 
 ---
@@ -336,7 +336,7 @@ HTTP transport 下起作用，而三个 MCP server 全是 stdio。清掉是为�
 | 时刻 | 发生的事 |
 | --- | --- |
 | 22:07:45 | 入站：`@小鲸鱼`（owner）→ 进未读队列 |
-| 22:07:54 | 桥接**新建 DSH 会话**、挂上 `qq-chat-v2` preset、模型固定 `deepseek-official/deepseek-flash (max)` |
+| 22:07:54 | 桥接**新建 DSH 会话**、挂上 `chat-v2` preset、模型固定 `deepseek-official/deepseek-flash (max)` |
 | 22:07:56 | agent 调 `qq_get_prompt` → 拿到会话令牌与人设 ✅ |
 | 22:08:02 | agent 调 `qq_send_message` → **成功 2/2 条** |
 | 22:08:15 | 入站：`没事` |
@@ -469,7 +469,7 @@ SnowLuma 同一账号的 **HTTP token（3000）与 WS token（3001）不同**，
 | `bot_status` 真的出现了 | 1.14.9：**0** 次；1.14.20：**3** 次（带 `sub_type`/`user_id`） |
 | 桥接连通 | 走完「首次 1006 → 自愈 WS token → 已连接」；`/api/status.snowluma` 给出 `good:true`、**`goodSource:"heartbeat"`** |
 | 收到 QQ 消息 | `lastPacketKind: message/group`；静默态下正确「仅入库不唤醒」 |
-| **完整往返** | 唤醒 → DSH 建会话并挂 `qq-chat-v2` → 工具发送 `成功 1/1 条` → 群里实际出现两条回复 |
+| **完整往返** | 唤醒 → DSH 建会话并挂 `chat-v2` → 工具发送 `成功 1/1 条` → 群里实际出现两条回复 |
 
 > ⚠️ **更正**：本文 v0.2.1 附录 A 曾暗示「升级 SnowLuma 可能修注入（1.14.17 刷新过原生组件）」。
 > 字节级证据表明**原生组件根本没有变**，那条推断是错的。升级只换 JS 层
@@ -591,8 +591,8 @@ Bing **RSS** 仅作兜底；5 分钟查询缓存；空结果显式 `note`。安�
 - 我们的 preset 补丁、`qq-mode-console`、profile patch 引用的 DSH 包在 rc.3 里都存在。
 - 端口：rc.3 的服务宿主由 Electron 主程序以 Node 模式启动（`--port 0`，随机端口），进程名仍是 `DeepSeek Harness`，
   所以 macOS 的 `lsof -c DeepSeek`、Windows 的 `tasklist` 按 `DeepSeek Harness*.exe` 找端口都照常可用（Windows 只核对了代码，没有实机）。
-- 运行中的 rc.3 只读查询：`settings/describe` 正常，`qq-mode` = `reserved2`；`agentPresets/list` 含 qq-chat、qq-chat-v2、
-  qq-agent-readonly/workspace/full；默认模型 `deepseek-flash`；`session/modelCatalog` 正常。
+- 运行中的 rc.3 只读查询：`settings/describe` 正常，`qq-mode` = `reserved2`；`agentPresets/list` 含 chat、chat-v2、
+  readonly/workspace/full；默认模型 `deepseek-flash`；`session/modelCatalog` 正常。
 - `npm run test:audit` 71/72，和更新前一样（没过的 `test-console-encoding.mjs` 只在 Windows 上能通过）。
 
 ### 现象

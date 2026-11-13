@@ -23,11 +23,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { composeRows, readPlatformPromptFromConfig } from '../../../../src/runtime/prompt-compose.mjs';
+import { AGENT_PRESET_IDS } from './runtime.mjs';
 
 export const agentPlatform = 'dsh';
 
-/** 由桥接托管的 preset（顺序即 patch 层顺序）。qq-agent-readonly 是 v0.3.0 管理通道的 L1 只读 Agent。 */
-export const PRESETS = ['qq-chat', 'qq-chat-v2', 'qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full'];
+/**
+ * 由桥接托管的 preset（顺序即 patch 层顺序）。
+ *
+ * 权威清单在 adapters/runtime.mjs 的 AGENT_PRESET_IDS：build / install / 控制台
+ * 都读同一份，避免「构建产物多一个、内核不认」这类漂移。
+ */
+export const PRESETS = [...AGENT_PRESET_IDS];
 
 /** preset 行 id：与 config.id（桥接解析的 preset 名）区分开，方便在 profile patch 里按行定位。 */
 export function presetRowId(name) {

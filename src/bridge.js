@@ -158,7 +158,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
@@ -679,16 +679,18 @@ async function listExternalPersonas() {
 //   人格提示词 = roles/<名称>.md，规定 AI 是谁、什么性格（人设与语气）
 // 仿真层改完需要重启 DSH 才生效（preset 由 DSH 在会话创建时装配）；
 // 人格层由桥接每条消息注入，保存即生效。
-// 两代仿真各自有独立的预设提示词：一代 qq-chat（空格分条 / [SILENT]），
-// 二代 qq-chat-v2（一切皆工具）。控制台可分别查看与修改。
-const PRESET_NAMES = { v1: 'qq-chat', v2: 'qq-chat-v2' };
+// 两代仿真各自有独立的预设提示词：一代 chat（空格分条 / [SILENT]），
+// 二代 chat-v2（一切皆工具）。控制台可分别查看与修改。
+// 预设名是「能力档名」，不带用户平台前缀（0.1.x 的 qq-chat / qq-chat-v2 由
+// normalizeAgentPreset 归一，旧 config.json 不必手改）。
+const PRESET_NAMES = { v1: 'chat', v2: 'chat-v2' };
 const PRESET_BACKUP_DIR = path.join(STATE_DIR, 'preset-backups');
 const PRESET_BACKUP_KEEP = 10;
 
 /**
  * 控制台的 preset 参数校验：接受任一**确实存在的**预设目录（缺省 = 二代）。
  *
- * 早先只允许 qq-chat / qq-chat-v2，导致 qq-agent-* 与自建预设的提示词卡被前端直接隐藏。
+ * 早先只允许 qq-chat / qq-chat-v2，导致管理档与自建预设的提示词卡被前端直接隐藏。
  * 现在改为「目录里真的有 agent.cordis.yml」才算数，既支持所有预设，又挡住了路径穿越：
  * 名字必须是 [a-z0-9-] 且解析后的文件必须落在 profiles/agent-platforms/dsh/agents 下。
  * 返回 null 由调用方回 400。
@@ -726,7 +728,7 @@ function installedPresetYaml(name) {
 
 // 这里**没有**模块级的 resolvePresetName —— 曾经有一个，但它被 main() 内部同名函数完全遮蔽
 // （函数声明提升到 main 作用域，main 里所有调用点都落到内部那个），是纯死代码。
-// 而且它的语义是错的：未知名字静默回退到 qq-chat-v2，等于 fail-OPEN —— 一旦哪天有人把它
+// 而且它的语义是错的：未知名字静默回退到 chat-v2，等于 fail-OPEN —— 一旦哪天有人把它
 // "复活"成真正生效的实现，群聊会话就会在 preset 清单校验失败时照样建起来。
 // 真正在用的那个（main() 内，带 strict 开关）在名字不可用时返回 '' 让调用方拒绝建会话。
 // 同理不再保留 PRESET_NAME_SET：它只服务于那个死函数，留着只会诱惑下一个人去用它。
@@ -1216,7 +1218,7 @@ function loadConfig() {
     snowluma: { wsUrl: 'ws://127.0.0.1:3001', accessToken: '', ...(file.snowluma ?? {}) },
     // 空 => 每个会话在 state/agents/<key> 下建独立工作目录
     sessionCwd: file.sessionCwd ?? '',
-    agentPreset: file.agentPreset ?? 'qq-chat',
+    agentPreset: file.agentPreset ?? 'chat',
     workspaceTitle: file.workspaceTitle ?? 'QQ 聊天',
     ownerQQ,
     // 结构化 owner：`{ platform, account, id }`。权限判定只认它；ownerQQ 只是旧字段视图。
@@ -1249,7 +1251,7 @@ function loadConfig() {
       extractCooldownMs: 5 * 60 * 1000,
       inferenceThresholds: [2, 4, 8],
       injectMax: 8,
-      learnerPreset: 'qq-chat',
+      learnerPreset: 'chat',
       workspaceTitle: 'QQ 黑话学习',
       autoResearch: true,
       ...(file.slang ?? {})
@@ -1305,7 +1307,7 @@ function loadConfig() {
     socialV2: {
       enabled: true,
       autoReplyCheckMs: 30000,
-      agentPreset: 'qq-chat-v2',
+      agentPreset: 'chat-v2',
       provideRecommendations: true,
       tools: {
         getPrompt: true,
@@ -1760,6 +1762,11 @@ function loadConfig() {
     get: () => behaviorContext.getStore()?.socialV2 ?? defaultSocialV2,
     set: (value) => { defaultSocialV2 = value; },
   });
+
+  // preset 名去用户平台前缀后（0.2.0），旧 config.json 里可能还是 qq-*；读入时统一归一。
+  cfg.agentPreset = normalizeAgentPreset(cfg.agentPreset) || PRESET_NAMES.v1;
+  if (cfg.slang) cfg.slang.learnerPreset = normalizeAgentPreset(cfg.slang.learnerPreset) || PRESET_NAMES.v1;
+  if (defaultSocialV2) defaultSocialV2.agentPreset = normalizeAgentPreset(defaultSocialV2.agentPreset) || PRESET_NAMES.v2;
 
   return cfg;
 }
@@ -4289,7 +4296,7 @@ async function main() {
     const sessionId = explicitSessionId || sessions.get(key)?.sessionId;
     if (!sessionId || !api.commands?.execute) return { ok: true, skipped: true };
     const level = permissionLevelOf(key);
-    const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key) });
+    const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() });
     try {
       const r = unwrap(await api.commands.execute(sessionId, `/permission ${plan.preset}`), 'commands.execute');
       const ok = permissionCommandSucceeded(r, plan.preset);
@@ -5329,7 +5336,7 @@ async function main() {
     // 为什么：`sessionPolicy()` 包含 `modePreset()` 的结果，而 `modePreset()` 依赖
     // `dshPresetIds`（来自 DSH 的 `agentPresets/list`）。启动瞬间或一次瞬时失败时
     // 这个清单可能是空的，`resolvePresetName(strict)` 于是返回 ''，算出来的策略就变成
-    // `["reserved2","",null]` —— 与已存的 `["reserved2","qq-chat-v2",null]` 不等，
+    // `["reserved2","",null]` —— 与已存的 `["reserved2","chat-v2",null]` 不等，
     // 于是**所有** QQ 会话在这一个 tick 里被集体退役：DSH 会话被停掉归档、agentToken 轮换、
     // 映射删除，每个群的上下文全丢，日志里只有一句「会话权限已变化」。
     // 一次网络抖动换来全体失忆，代价完全不成比例。清单为空时宁可不判定，等下一轮。
@@ -13201,7 +13208,7 @@ async function main() {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
           {
             const chatSession = !sessionPlanOf(key)?.capability;
-            const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key) }).preset;
+            const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() }).preset;
             if (pinnedPermissions.get(key) !== wanted) {
               const repinned = await pinSessionPermission(key, { reason: 'mode-change', throwOnError: false, sessionId: existing });
               if (!repinned.ok && !chatSession && !cfg.permission.allowFull) {
@@ -13257,7 +13264,7 @@ async function main() {
       let lastError = null;
       const preset = modePreset(key, effectiveMode(key), cfg);
       // 非 closed-agent（chat / reserved / reserved2，会话可能属于 QQ 群）必须 fail-closed：
-      // 拿不到 qq-chat* 就拒绝建会话，绝不让 DSH 用默认 preset（standard）顶上——那会把
+      // 拿不到内置仿真 preset 就拒绝建会话，绝不让 DSH 用默认 preset（standard）顶上——那会把
       // bash/文件读写等本地工具暴露给 QQ 群里的任何人（见 RULES.md「无本地工具」）。
       // closed-agent 仅 owner 私聊、本来就用完整工具面，回退不构成提权。
       const strictPreset = currentMode !== 'closed-agent';

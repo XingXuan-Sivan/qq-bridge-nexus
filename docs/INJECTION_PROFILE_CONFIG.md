@@ -172,7 +172,7 @@
   └ social-v1.yml / social-v2.yml / 自定义
 
 DSH 预设 preset（用户可建，DSH 侧）
-  └ qq-chat / qq-chat-v2 / qq-agent-* / 自定义
+  └ chat / chat-v2 / qq-agent-* / 自定义
 
 权限级别 permission（仅 agent）
   └ read-only(L1) / workspace(L2) / full(L3)
@@ -267,7 +267,7 @@ DSH 预设 preset（用户可建，DSH 侧）
       "label": "二代仿真",
       "protocol": "social-v2",
       "behavior": "social-v2",
-      "preset": "qq-chat-v2",
+      "preset": "chat-v2",
       "permission": null,
       "builtin": true,
       "risk": "verified"
@@ -277,7 +277,7 @@ DSH 预设 preset（用户可建，DSH 侧）
       "label": "Agent · L3",
       "protocol": "agent",
       "behavior": null,
-      "preset": "qq-agent-full",
+      "preset": "full",
       "permission": "full",
       "builtin": true,
       "risk": "verified"

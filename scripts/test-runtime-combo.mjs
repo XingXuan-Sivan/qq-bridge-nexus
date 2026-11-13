@@ -9,7 +9,7 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 const COMBO = {
   id: 'agent-chat',
   label: '带人格的 Agent',
-  agent: 'qq-agent-full',
+  agent: 'full',
   capability: 'agent-full',
   behavior: 'social-v2',
   audience: 'owner',

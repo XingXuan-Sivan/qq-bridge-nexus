@@ -1,4 +1,4 @@
-# The `qq-chat` agent preset: QQ 群聊机器人（最低权限面）。
+# The `chat` agent preset: 群聊会话机器人（最低权限面）。
 #
 # 安全设计（硬边界）：
 # - 不挂载任何本地工具：无 bash/pwsh、无文件读写、无子代理/工作流 ——

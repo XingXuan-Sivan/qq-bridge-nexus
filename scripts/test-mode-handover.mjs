@@ -29,18 +29,18 @@ const ownerPm = (t) => ({ post_type: 'message', message_type: 'private', user_id
 const promptText = (p) => (Array.isArray(p?.content) ? p.content.map((c) => String(c?.text ?? '')).join('\n') : '');
 
 test('① 模块：休眠判定、休眠表清洗、交接文本', () => {
-  assert.equal(isHibernatablePolicy(pol('reserved2', 'qq-chat-v2', null)), true);
-  assert.equal(isHibernatablePolicy(pol('chat', 'qq-chat', null)), true);
-  assert.equal(isHibernatablePolicy(pol('closed-agent', 'qq-agent-workspace', '123', 'L2', 'workspace-write')), false, '高权限会话不能休眠');
+  assert.equal(isHibernatablePolicy(pol('reserved2', 'chat-v2', null)), true);
+  assert.equal(isHibernatablePolicy(pol('chat', 'chat', null)), true);
+  assert.equal(isHibernatablePolicy(pol('closed-agent', 'workspace', '123', 'L2', 'workspace-write')), false, '高权限会话不能休眠');
   assert.equal(isHibernatablePolicy(pol('reserved2', '', null)), false, '没有明确 preset 的不休眠');
   assert.equal(isHibernatablePolicy('not json'), false);
 
   const now = 1_000_000;
   const clean = normalizeDormant({
-    [GROUP_KEY]: { sessionId: 's1', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
-    'group:': { sessionId: 's2', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
+    [GROUP_KEY]: { sessionId: 's1', policy: pol('reserved2', 'chat-v2', null), dormantAt: now },
+    'group:': { sessionId: 's2', policy: pol('reserved2', 'chat-v2', null), dormantAt: now },
     [OWNER_KEY]: { sessionId: 's3', policy: pol('closed-agent', 'x', '1', 'L2', 'y'), dormantAt: now },
-    'qq:group:789': { sessionId: '', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
+    'qq:group:789': { sessionId: '', policy: pol('reserved2', 'chat-v2', null), dormantAt: now },
   });
   assert.deepEqual(Object.keys(clean), [GROUP_KEY], '坏 key、高权限、空 id 都丢弃');
 
@@ -48,7 +48,7 @@ test('① 模块：休眠判定、休眠表清洗、交接文本', () => {
   const base = { now: now + 1000, maxMs: 60_000, currentPolicy: d.policy, allowed: true };
   assert.equal(dormantDecision(d, { ...base, inClosedAgent: true }), 'keep', 'agent 期间继续休眠');
   assert.equal(dormantDecision(d, { ...base, inClosedAgent: false }), 'resume');
-  assert.equal(dormantDecision(d, { ...base, inClosedAgent: false, currentPolicy: pol('chat', 'qq-chat', null) }), 'archive', '回到的模式 / preset 不同 → 归档');
+  assert.equal(dormantDecision(d, { ...base, inClosedAgent: false, currentPolicy: pol('chat', 'chat', null) }), 'archive', '回到的模式 / preset 不同 → 归档');
   assert.equal(dormantDecision(d, { ...base, inClosedAgent: false, allowed: false }), 'archive', '不再被允许 → 归档');
   assert.equal(dormantDecision(d, { ...base, now: now + 120_000, inClosedAgent: true }), 'archive', '过期 → 归档');
 

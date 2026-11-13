@@ -1,13 +1,13 @@
 # 本文件由 scripts/build-artifacts.mjs 生成，请勿手工编辑。
-# 源：profiles/agent-platforms/dsh/agents/qq-chat/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。
-# 作用：把 qq-chat 作为一条 @deepseek-ai/dsh-agent-preset 行插入 profile（DSH 0.1.7+ 的 preset 机制）。
+# 源：profiles/agent-platforms/dsh/agents/chat/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。
+# 作用：把 chat 作为一条 @deepseek-ai/dsh-agent-preset 行插入 profile（DSH 0.1.7+ 的 preset 机制）。
 # 守卫行 qq-tool-restrict 用裸说明符 qq-agent-presets/qq-tool-restrict.mjs：子行 name 按 profile 目录解析，
 # 该包以 link: 依赖注册在 profile package.json（node_modules junction 由 install.mjs 维护）。
 - insert:
-    - id: preset-qq-chat
+    - id: preset-chat
       name: '@deepseek-ai/dsh-agent-preset'
       config:
-        id: qq-chat
+        id: chat
         name: QQ 聊天角色
         description: 桥接到 QQ 群的聊天智能体。性格/说话方式在 agent.cordis.yml 的 persona 段自定义。
         order: 10

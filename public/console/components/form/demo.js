@@ -33,7 +33,7 @@ form.innerHTML = [
       ${col('col-12 col-md-6', switchField({ id: 'demoSwitch', label: '自动重载', checked: true, onLabel: '开', offLabel: '关', hint: '文件变化后 500ms 内重载' }))}
       ${col('col-12 col-md-6', checkboxField({ id: 'demoAgree', label: '我已知晓修改会立即生效', checked: false, hint: '高风险操作需要二次确认' }))}
       ${col('col-12 col-md-6', fileField({ id: 'demoFile', label: '插件包', accept: '.zip', maxBytes: 5 * 1024 * 1024, warn: '只允许包含 plugin.json 的 zip，解压时会拒绝符号链接' }))}
-      ${col('col-12 col-md-6', textField({ id: 'demoPreset', label: 'Agent 预设', value: 'qq-chat', hint: '仅聊天模式与封闭 Agent 生效' }))}
+      ${col('col-12 col-md-6', textField({ id: 'demoPreset', label: 'Agent 预设', value: 'chat', hint: '仅聊天模式与封闭 Agent 生效' }))}
     </div>
   </section>`,
   `<section class="form-section"><legend>日期与时间</legend>

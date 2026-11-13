@@ -29,10 +29,10 @@
 | 页面 | 现在能做什么 | 缺口 |
 | --- | --- | --- |
 | 插件 | 列表、启停、重载、详情、zip/目录安装、卸载、注入块、运行设置 | 插件配置不可改；无测试/日志/市场；`plugins.<id>.config` 只读 |
-| MCP | 内置 server 真实工具清单；外部 MCP 新增/编辑/测试/刷新/日志/删除；Hub 元工具 | 技能尚未接入 Hub；预设策略目前只有 `qq-chat-v2` 的 `extensions.yml`，编辑器在 P3 |
+| MCP | 内置 server 真实工具清单；外部 MCP 新增/编辑/测试/刷新/日志/删除；Hub 元工具 | 技能尚未接入 Hub；预设策略目前只有 `chat-v2` 的 `extensions.yml`，编辑器在 P3 |
 | 技能 | 只读扫描 `SKILL.md` | 不能安装、编辑、启停、删除；不能分配 preset |
 | 工具参考 | 已并入 MCP 页（server 概览 + 工具参考） | 独立页面与导航已移除，旧 `#reference` 重定向到 `#mcp` |
-| 预设 | 只能改 `qq-chat` / `qq-chat-v2` 的提示词正文 | 五个 preset 写死在 `profiles/agent-platforms/dsh/agents/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
+| 预设 | 只能改 `chat` / `chat-v2` 的提示词正文 | 五个 preset 写死在 `profiles/agent-platforms/dsh/agents/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
 
 关键代码位置：
 
@@ -95,7 +95,7 @@ mcp:external/github
 skill:builtin/pdf
 skill:local/my-writing
 plugin:builtin/soulkit-persona
-preset:builtin/qq-chat-v2
+preset:builtin/chat-v2
 ```
 
 规则：
@@ -278,9 +278,9 @@ running → stopping → stopped
 
 | 档位 | 能力 | 默认 preset | 说明 |
 | --- | --- | --- | --- |
-| `safe` | QQ MCP、搜索、记忆、`compress`、ask/todo | `qq-chat-v2` | 群/好友默认；不含文件/执行 |
-| `workspace` | 读写 DSH 工作区、查看文件、项目操作；不含任意 shell | 可新建或基于 `qq-agent-workspace` | 可由开发者绑定到群 |
-| `operator` | shell、进程、完整 DSH 能力，包括操作电脑 | 可新建或基于 `qq-agent-full` | 可由开发者绑定到群 |
+| `safe` | QQ MCP、搜索、记忆、`compress`、ask/todo | `chat-v2` | 群/好友默认；不含文件/执行 |
+| `workspace` | 读写 DSH 工作区、查看文件、项目操作；不含任意 shell | 可新建或基于 `workspace` | 可由开发者绑定到群 |
+| `operator` | shell、进程、完整 DSH 能力，包括操作电脑 | 可新建或基于 `full` | 可由开发者绑定到群 |
 | `custom` | 按工具 allow/deny 自由组合 | 用户定义 | 工具清单以 catalog 为准 |
 
 规则：
@@ -290,7 +290,7 @@ running → stopping → stopped
 - **`arm` 只改 Hub 授权，不改 DSH preset。** 它可以把当前会话在 Hub 层临时提升到另一个能力档位（例如 `/arm workspace`），但只覆盖经 Hub 暴露的扩展/MCP 工具；不会让已经创建的 DSH 会话获得 `read/write/edit/pwsh` 等原生工具。原生工具仍由建会话时的 preset 决定。`arm` 授权默认只活在本次进程内，重启自动解除；要长期高权限，应在建会话时选高权限 preset。
 - **guard 以 preset 声明为准。** 已知工具按 catalog 风险分级；默认安全集不含危险工具；自定义 preset 可以显式 allow；未在 catalog 中声明的工具仍拒绝（防止拼写/注入绕过），但不是把危险工具永久焊死。
 - **审计不阻断。** 记录谁在哪个会话、哪个 preset、什么时候使用了高权限工具；是否弹确认由 preset 的 `confirmDangerous` 决定（默认建议开启，但不是硬编码）。
-- 现有 `qq-agent-readonly` / `qq-agent-workspace` / `qq-agent-full` 可作为档位模板；是否需要把它们从 closed-agent 专用改成可复用 preset，在 P2 实现时确认。
+- 现有 `readonly` / `workspace` / `full` 可作为档位模板；是否需要把它们从 closed-agent 专用改成可复用 preset，在 P2 实现时确认。
 
 ### 4.7 `arm` 与切换预设的边界
 
@@ -594,7 +594,7 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设的 MCP allowlist 与工具级 allow/deny；Hub 执行期校验。
 - 验收：新增外部 server 不需要重启 DSH；未授权 preset 调用被拒；断线/超时/日志可见；`compress` 正常。
 
-**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`profiles/agent-platforms/dsh/agents/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
+**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`profiles/agent-platforms/dsh/agents/chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
 
 ### P3 技能 / 插件配置 / 预设编辑器
 

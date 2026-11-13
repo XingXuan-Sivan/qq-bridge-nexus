@@ -13,11 +13,14 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Document, parse, parseDocument } from 'yaml';
+import { agentPresetIds } from '../agent-side/runtime-registry.mjs';
+// 副作用：确保内置 Agent 平台已注册（agentPresetIds() 未注册时抛错）。
+import '../agent-side/builtin.mjs';
 
 const execFileAsync = promisify(execFile);
 const PRESET_FILES = ['preset.yml', 'extensions.yml', 'agent.cordis.yml'];
-// 与 scripts/build-agent-preset-patches.mjs 的 PRESETS 保持一致；测试会比对。
-export const PRESET_IDS = ['qq-chat', 'qq-chat-v2', 'qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full'];
+// 由 Agent 平台适配器声明（AGENT_PRESET_IDS）；测试会与构建适配器的 PRESETS 比对。
+export const PRESET_IDS = agentPresetIds();
 
 function stamp(now = Date.now()) {
   const d = new Date(now);

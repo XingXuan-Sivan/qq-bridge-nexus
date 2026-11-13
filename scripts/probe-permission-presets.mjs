@@ -5,8 +5,8 @@
 //
 // 它会：
 //   1. 读 permissionPresets/catalog，确认 read-only / workspace-write / qq-full-ask 都在；
-//   2. 读 agentPresets/list，确认 qq-agent-readonly / qq-agent-workspace / qq-agent-full 已加载；
-//   3. 在一个**临时工作区**里建一个 qq-agent-readonly 会话，执行 `/permission read-only`
+//   2. 读 agentPresets/list，确认 readonly / workspace / full 已加载；
+//   3. 在一个**临时工作区**里建一个 readonly 会话，执行 `/permission read-only`
 //      和 `/permission`（只读查询），确认返回文本形如 "preset read-only" / "current preset ..."；
 //   4. 用 session/prompt 发一条 "/permission workspace-write" 文本，确认它**没有**被当成命令执行
 //      （rc.2 的 prompt 不解析斜杠命令）——这是「QQ 文本透传无法改权限」的实测依据；
@@ -32,13 +32,13 @@ for (const want of ['read-only', 'workspace-write', 'qq-full-ask']) ok(names.inc
 
 const list = await rpc('agentPresets/list', {});
 const presetIds = (list?.value?.presets ?? []).map((p) => p.id);
-for (const id of ['qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full']) ok(presetIds.includes(id), `agent preset ${id} 已加载`, presetIds.join(', '));
+for (const id of ['readonly', 'workspace', 'full']) ok(presetIds.includes(id), `agent preset ${id} 已加载`, presetIds.join(', '));
 
 const ws = await rpc('workspace/create', { request: { path: probeWorkspaceDir('perm-probe') } });
 const workspaceId = ws?.value?.workspace?.workspaceId;
 ok(!!workspaceId, '临时工作区已创建');
 if (workspaceId) {
-  const created = await rpc('session/create', { request: { workspaceId, agentPreset: presetIds.includes('qq-agent-readonly') ? 'qq-agent-readonly' : undefined } });
+  const created = await rpc('session/create', { request: { workspaceId, agentPreset: presetIds.includes('readonly') ? 'readonly' : undefined } });
   const sessionId = created?.value?.sessionId;
   ok(!!sessionId, '临时会话已创建');
   if (sessionId) {

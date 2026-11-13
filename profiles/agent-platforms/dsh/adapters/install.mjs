@@ -17,6 +17,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { PRESETS, bundleDir, planArtifacts } from './build.mjs';
+import { AGENT_PRESET_ALIASES, BRIDGE_OWNED_PRESETS, PERMISSION_PRESETS } from './runtime.mjs';
 
 export const agentPlatform = 'dsh';
 
@@ -29,26 +30,18 @@ const MANAGED_MCP_IDS = ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-sa
 /**
  * v0.3.0 管理通道的权限预设（DSH 0.2.0-rc.2：预设表只能在 profile patch 里覆盖 `id: permission` 行的 config）。
  *
+ * 具体取值与「桥接拥有哪几项」都在 adapters/runtime.mjs（PERMISSION_PRESETS /
+ * BRIDGE_OWNED_PRESETS）：安装适配器不再自带一份副本，避免两处真相分叉。
+ *
  * 加入 qq-full-ask = danger-full-access + **ask**（L3：完全访问但每次越权都要 owner 审批）。
  * DSH 内置的 danger-full-access 是 approval: never（不弹审批直接执行），桥接**绝不**使用它；
  * 这里保留内置三项只是为了不改变 DSH Web UI 里用户原有的选择。
  * 已有用户自定义的 permission 覆盖时：只补缺失的预设，不改用户已有的条目（幂等）。
  */
-const QQ_PERMISSION_PRESETS = {
-  'read-only': { sandbox: 'read-only', approval: 'ask' },
-  'workspace-write': { sandbox: 'workspace-write', approval: 'ask' },
-  'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' },
-  'qq-full-ask': {
-    sandbox: 'danger-full-access',
-    approval: 'ask',
-    name: 'QQ 桥接 L3（完全访问 + 每次审批）',
-    description: '由 qq-bridge 管理通道在 owner 确认 + TOTP 后启用；所有越权操作仍需 owner 审批',
-  },
-};
 
 // 桥接会用到的三个预设：名字与取值都由桥接「拥有」——用户把它们改宽（例如 approval: never）会让
 // L1/L2/L3 的承诺失效，所以这里强制改回（只会收紧，不会放宽）。
-const BRIDGE_OWNED_PRESETS = ['read-only', 'workspace-write', 'qq-full-ask'];
+// （清单在 adapters/runtime.mjs 的 BRIDGE_OWNED_PRESETS，已在上方 import。）
 
 /**
  * 没有指定 profile 时自动识别。
@@ -184,6 +177,34 @@ export async function install(ctx = {}) {
     }
   }
 
+  /**
+   * 0.2.0 把 preset 名从 `qq-*` 改成能力档名（chat / chat-v2 / readonly / workspace / full）。
+   *
+   * 旧 patch 文件与旧会话绑定会指向已经不存在的 preset。这里只报告、不删用户的文件：
+   * bundle 的 package.json 已换成新列表，旧 patch 不会再被加载；但用户可能还想要里面的
+   * 手改内容，删不删由人决定。
+   */
+  function reportRenamedPresets() {
+    const aliases = Object.entries(AGENT_PRESET_ALIASES);
+    const stalePatch = (() => {
+      try {
+        return fs.readdirSync(path.join(bundleDir(REPO_ROOT), 'presets'))
+          .filter((file) => aliases.some(([old]) => file === `${old}.patch.yml`));
+      } catch { return []; }
+    })();
+    if (stalePatch.length) {
+      log(`注意：presets/ 下有旧名 patch（${stalePatch.join(', ')}），已不被 package.json 引用，可自行清理`);
+    }
+    const staleDir = (() => {
+      try {
+        return fs.readdirSync(path.join(DSH_HOME, '.agent-presets'))
+          .filter((dir) => AGENT_PRESET_ALIASES[dir]);
+      } catch { return []; }
+    })();
+    if (staleDir.length) log(`注意：${path.join(DSH_HOME, '.agent-presets')} 下有旧名预设目录（${staleDir.join(', ')}），0.1.7 起不再被读取`);
+    log(`preset 名已去用户平台前缀：${aliases.map(([old, next]) => `${old}→${next}`).join('，')}；绑定旧名的 DSH 会话需要重建`);
+  }
+
   function mcpEntries() {
     const node = process.execPath;
     const servers = {
@@ -224,15 +245,15 @@ export async function install(ctx = {}) {
     const changes = [];
     // 新建覆盖行时：补齐 DSH 内置的三项（覆盖 config 会替换整张表，不补的话用户在 DSH Web UI 里原有的选项会消失）。
     // 用户已有自己的覆盖行时：**不**替用户加回 danger-full-access（用户可能有意删掉了它）。
-    const wanted = created ? Object.keys(QQ_PERMISSION_PRESETS) : BRIDGE_OWNED_PRESETS;
+    const wanted = created ? Object.keys(PERMISSION_PRESETS) : BRIDGE_OWNED_PRESETS;
     for (const name of wanted) {
       if (!presets[name] || typeof presets[name] !== 'object' || Array.isArray(presets[name])) {
-        presets[name] = { ...QQ_PERMISSION_PRESETS[name] };
+        presets[name] = { ...PERMISSION_PRESETS[name] };
         changes.push(`+${name}`);
       }
     }
     for (const name of BRIDGE_OWNED_PRESETS) {
-      const want = QQ_PERMISSION_PRESETS[name];
+      const want = PERMISSION_PRESETS[name];
       const have = presets[name];
       if (have.sandbox !== want.sandbox) { have.sandbox = want.sandbox; changes.push(`${name}.sandbox→${want.sandbox}`); }
       if (have.approval !== 'ask') { have.approval = 'ask'; changes.push(`${name}.approval→ask`); }
@@ -460,6 +481,7 @@ export async function install(ctx = {}) {
   for (const name of BUNDLE_NAMES) links[name] = ensureBundle(name);
   patchProfilePackage(links);
   reportLegacyPresetDir();
+  reportRenamedPresets();
   ensureLocalModeFile();
   autoInstallProfileBundles();
   log('Done. Restart DSH (or reload the profile) so the new presets/MCP take effect.');

@@ -1,4 +1,4 @@
-// L1「本地只读 Agent」（qq-agent-readonly preset）的硬边界：
+// L1「本地只读 Agent」（readonly preset）的硬边界：
 //   · preset 行列表里没有任何 shell / 子代理 / 工作流 / 任务类行；
 //   · 守卫以 profile: readonly-agent 运行，只多放行只读工具，写入/执行一律拒绝；
 //   · 不带 profile 时守卫行为与原版完全一致（群友会话不因此多出读文件能力）。
@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const presetDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', 'qq-agent-readonly');
+const presetDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', 'readonly');
 const guardUrl = pathToFileURL(path.join(root, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
 
 function flatten(rows) {
@@ -63,8 +63,11 @@ test('不带 profile 时守卫与原版一致：群友会话依旧不能读文�
 });
 
 test('桥接的 L1 映射指向这个 preset，L3 不映射到免审批预设', async () => {
-  const { L1_AGENT_PRESET, LEVEL_PERMISSION_PRESET, QQ_FULL_ASK_PRESET } = await import(pathToFileURL(path.join(root, 'src', 'admin', 'dsh-permission.js')).href);
-  assert.equal(L1_AGENT_PRESET, 'qq-agent-readonly');
+  // 权限映射的权威源已下沉到 Agent 侧适配器（B4）：内核 src/ 不再认识任何平台名。
+  const runtime = await import(pathToFileURL(path.join(root, 'profiles', 'agent-platforms', 'dsh', 'adapters', 'runtime.mjs')).href);
+  const { LEVEL_PERMISSION_PRESET, FULL_ASK_PRESET: QQ_FULL_ASK_PRESET } = runtime;
+  const L1_AGENT_PRESET = runtime.AGENT_PRESET_FOR_LEVEL.L1;
+  assert.equal(L1_AGENT_PRESET, 'readonly');
   assert.equal(LEVEL_PERMISSION_PRESET.L1, 'read-only');
   assert.equal(QQ_FULL_ASK_PRESET.approval, 'ask', 'L3 预设必须保留审批');
   assert.notEqual(LEVEL_PERMISSION_PRESET.L3, 'danger-full-access');
@@ -121,7 +124,7 @@ test('operator 守卫：拒绝派生/编排类与凭据读取，其余交给审�
 });
 
 test('L2/L3 preset：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
-  for (const [id, level] of [['qq-agent-workspace', 'L2'], ['qq-agent-full', 'L3']]) {
+  for (const [id, level] of [['workspace', 'L2'], ['full', 'L3']]) {
     const rows = flatten(parseYaml(fs.readFileSync(path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', id, 'agent.cordis.yml'), 'utf8')));
     assert.equal(rows.find((r) => r.id === 'qq-approval-gate')?.config?.level, level, id);
     assert.equal(rows.find((r) => r.id === 'qq-tool-restrict')?.config?.profile, 'operator', id);

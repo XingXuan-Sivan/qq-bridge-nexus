@@ -1,6 +1,6 @@
 // QQ 桥接安全硬边界：只允许 QQ MCP 工具与少量无害模型侧工具。
 //
-// 本文件是 qq-agent-presets bundle 里的唯一权威实现，由 qq-chat / qq-chat-v2 两个 preset 的
+// 本文件是 qq-agent-presets bundle 里的唯一权威实现，由 chat / chat-v2 两个 preset 的
 // qq-tool-restrict 行共同引用；各 preset 目录下的同名文件只是 re-export 壳。
 //
 // 引用必须写成「包名/子路径」：preset 子行的 name 按声明它的 loader 上下文（profile 目录）
@@ -151,7 +151,7 @@ const SAFE_EXACT = new Set([
 ])
 
 /**
- * v0.3.0：L1「本地只读 Agent」（qq-agent-readonly preset）额外放行的只读工具。
+ * v0.3.0：L1「本地只读 Agent」（readonly preset）额外放行的只读工具。
  *
  * 为什么 L1 不能只靠 DSH 的 read-only 沙箱：rc.2 文档写明 Windows 上 read-only 是 partial
  * （ACL 只限制写、硬链接/NUL 等仍有缝隙），而且沙箱拒绝写入后模型可以申请「越权重试」，
@@ -161,7 +161,7 @@ const SAFE_EXACT = new Set([
 export const READONLY_AGENT_TOOLS = Object.freeze(['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch'])
 
 /**
- * v0.3.0：L2/L3 运维 Agent（qq-agent-workspace / qq-agent-full）的 profile。
+ * v0.3.0：L2/L3 运维 Agent（workspace / full）的 profile。
  *
  * 只拒绝「派生 / 编排 / 插件 / 调度 / 跨会话 / 宿主自省」这几类；shell 与文件写入
  * 是否放行由 qq-approval-gate.mjs 决定（守卫只能拒绝，不能要求审批）。

@@ -1,0 +1,49 @@
+refactor(agent-platform): B4 权限映射下沉，preset 名去用户平台前缀
+
+平台解耦 0.2.0 第四批。内核不再认识任何具体 Agent 平台：级别→平台预设的
+映射、preset 清单、能力声明全部搬到 profiles/agent-platforms/dsh/adapters/
+runtime.mjs，内核只经中立注册表问接口。
+
+结构
+- 新增 src/agent-side/runtime-registry.mjs：中立注册表（零平台名、同步、
+  未注册即抛错 fail-closed），转发 resolveLevelPlan / permissionCommandSucceeded
+  / normalizeAgentPreset / agentPresetLevel / chatAgentPresets / agentPresetIds。
+- 新增 src/agent-side/builtin.mjs：唯一允许写具体平台目录的装配点。
+- 新增 profiles/agent-platforms/dsh/adapters/runtime.mjs：PERMISSION_PRESET_FOR_LEVEL
+  / LEVEL_PERMISSION_PRESET / FORBIDDEN_PERMISSION_PRESETS / BRIDGE_OWNED_PRESETS /
+  AGENT_PRESET_IDS / AGENT_PRESET_FOR_LEVEL / AGENT_PRESET_ALIASES 的权威源。
+- 删除 src/admin/dsh-permission.js，改为 src/admin/agent-permission.js（只转发）。
+- src/session/permission.mjs 去掉 DSH_PERMISSION_PRESET，presetForLevel 接受
+  opts.presets 注入；内核只留 read-only / workspace-write / full-ask / full 四级。
+- src/runtime/plans.mjs、src/presets/store.mjs、preset-defaults、bridge 均改为
+  从注册表取清单，不再硬编码档名。
+
+preset 改名（硬约束 §3.5）
+- chat / chat-v2 / readonly / workspace / full（旧 qq-chat、qq-chat-v2、qq-agent-*）。
+  源目录、artifacts patch、profiles plans、控制台兜底、文档与 45 个脚本同步迁移。
+- AGENT_PRESET_ALIASES 在读入侧归一旧名（loadConfig、resolveLevelPlan 的
+  presetIds、agentPresetLevel 反查），旧 config.json 与旧 profile 不必手改。
+- 故意不改：bundle 包名 artifacts/dsh/qq-agent-presets/ 与权限预设名 qq-full-ask
+  —— 它们是 profile link: 依赖名与 DSH profile 里的 preset id，属平台内部命名。
+- install.mjs 新增 reportRenamedPresets()：只报告残留的旧 preset 目录/patch，
+  不自动删；绑定旧名的 DSH 会话需重建（桥接 side state 只存 planId，无需迁移）。
+
+顺手修掉 B3 漏网
+- bridge-extensions.js 的 adminEnabled / isOwnerPrivateKey 仍用 normalizeQQ(cfg.ownerQQ)，
+  地址化 owner 下会误关管理通道；改为按 cfg.owner 地址比较。
+- src/admin/owner-commands.js 的 PERMISSION_WORDS 去掉平台预设名 qq-full-ask，
+  只认内核级别词（read-only / workspace-write / full-ask / full）。
+
+门禁
+- 新增 verify:repo 检查（68 项，原 62）：DSH 适配器导出 AGENT_PRESET_IDS、内核代码
+  无旧 preset 名、平台只在 builtin.mjs 装配、dsh-permission.js 不存在、
+  permission.mjs 无平台预设名、PRESET_NAMES 已去前缀。
+- verify:repo 68/68、test:audit 118/118、test:artifact-pipeline 全通过、
+  test:console-ui 34/34。
+
+文档
+- docs/PLATFORM_DECOUPLING.md：§2.5 补 B4 三条偏差（映射落点分三层、preset 名
+  归一、bundle 包名与权限预设名不改、旧会话不迁移）；§3.5 硬约束标注已落地；
+  §6 B4 标 ✅。
+- docs/PROFILES_MODEL.md 增补 adapters/runtime.mjs 契约；docs/FOLDER_MAP.md 增补
+  src/agent-side/；docs/guides/ADMIN_CHANNEL.md 的 /permission 命令词改为 full-ask。

@@ -34,7 +34,7 @@ class FakeWebSocket {
 }
 globalThis.WebSocket = FakeWebSocket;
 
-const { NodeApiClient } = await import(pathToFileURL(path.join(ROOT, 'src/dsh-client.js')).href);
+const { NodeApiClient } = await import(pathToFileURL(path.join(ROOT, 'src/agent-side/adapters/dsh/client.mjs')).href);
 const client = new NodeApiClient('http://127.0.0.1:3080', undefined, {});
 // 不走真实鉴权：本测试只关心 follow 的重放行为。
 client.ensureAuth = async () => { client.cookie = 'test-cookie'; };

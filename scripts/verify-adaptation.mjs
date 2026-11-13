@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import YAML from 'yaml';
 import { dshHome, candidateProfiles, directoryModulesDir } from './dsh-package-source.mjs';
-import { discoverDshSessionCookie, NodeApiClient, unwrap } from '../src/dsh-client.js';
+import { discoverDshSessionCookie, NodeApiClient, unwrap } from '../src/agent-side/adapters/dsh/client.mjs';
 
 const ROOT = process.cwd();
 const DSH_HOME = dshHome();
@@ -309,6 +309,32 @@ if (want('repo')) {
   check('repo', 'preset 名去用户平台前缀（bridge 的 PRESET_NAMES 已是 chat / chat-v2）',
     /PRESET_NAMES\s*=\s*\{[^}]*v1:\s*'chat'/.test(bridgeCode) && !/'qq-chat/.test(bridgeCode));
 
+  // ── 1d-3. 运行期适配器（B5）──────────────────────────────────────────────
+  // 内核只经两道门面问平台；具体协议与传输实现住在 src/*-side/adapters/<id>/。
+  // 这条不变式一破，src/ 就会重新长出「认识 DSH 的客户端」与「认识 OneBot 的发送函数」。
+  const userFacade = fs.readFileSync(path.join(ROOT, 'src/user-side/user-platform.mjs'), 'utf8');
+  check('repo', '用户侧门面导出中立名（buildSendCall / describeBackend / readBackendInfo）',
+    ['buildSendCall', 'describeBackend', 'readBackendInfo'].every((n) => new RegExp(`export function ${n}\\(`).test(userFacade)));
+  const agentFacade = fs.readFileSync(path.join(ROOT, 'src/agent-side/agent-client.mjs'), 'utf8');
+  check('repo', 'Agent 侧门面导出中立名（AgentApiClient / discoverLaunchToken / resolveAgentHome）',
+    ['AgentApiClient', 'discoverLaunchToken', 'resolveAgentHome'].every((n) => new RegExp(`export const ${n} =`).test(agentFacade)));
+  check('repo', 'src/dsh-client.js 与 src/platform/ 已下沉（不再存在）',
+    !fs.existsSync(path.join(ROOT, 'src/dsh-client.js')) && !fs.existsSync(path.join(ROOT, 'src/platform')));
+  const mainDirect = ['src/bridge.js', 'src/self-test.js']
+    .filter((f) => /from '\.\/(?:user|agent)-side\/adapters\//.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
+  check('repo', '主程序不直接 import 具体平台适配器（只经门面）', mainDirect.length === 0, mainDirect.join(', '));
+  // bridge-extensions 是公开 API 聚合层，允许一处 re-export（旧导出名契约，
+  // 由 scripts/test-platform-adapters.mjs 逐条钉住），故此处只查其余文件。
+  const adapterImporters = [...srcCode]
+    .filter(([f, code]) => {
+      if (f.includes('/adapters/')) return false;
+      if (/(?:user|agent)-side\/builtin\.mjs$/.test(f)) return false;
+      if (f === 'src/bridge-extensions.js') return false;
+      return /from '\.\/[^']*\/adapters\//.test(code);
+    })
+    .map(([f]) => f);
+  check('repo', 'adapters/ 外的内核模块不 import 具体平台实现', adapterImporters.length === 0, adapterImporters.join(', '));
+
   // ── 1e. 版本身份一致性 ──────────────────────────────────────────────────
   // v0.1.5 曾带着自称 0.1.2-alpha.1 的 package-lock.json 发布出去（package.json 却是
   // 0.1.5），三个 MCP server 的 serverInfo.version 也停在 0.1.0。版本漂移没有防线就会
@@ -328,7 +354,7 @@ if (want('repo')) {
   // spawnSync 在受限环境（DSH 沙箱的 workspace-write）会以 EPERM 失败——那是**环境**
   // 不允许起子进程，不是文件有语法错。显式记为跳过，否则会输出一串假失败。
   const SYNTAX_FILES = [
-    'src/bridge.js', 'src/dsh-client.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
+    'src/bridge.js', 'src/agent-side/adapters/dsh/client.mjs', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
     'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js',
     'src/runtime/mode-store.mjs',
     'scripts/setup-dsh.mjs', 'scripts/install-agent-platform.mjs', 'scripts/build-artifacts.mjs',
@@ -336,7 +362,7 @@ if (want('repo')) {
     'profiles/agent-platforms/dsh/adapters/build.mjs',
     'profiles/agent-platforms/dsh/adapters/install.mjs',
   ];
-  const probe = spawnSync(process.execPath, ['--check', path.join(ROOT, 'src/dsh-client.js')], { encoding: 'utf8' });
+  const probe = spawnSync(process.execPath, ['--check', path.join(ROOT, 'src/agent-side/adapters/dsh/client.mjs')], { encoding: 'utf8' });
   if (probe.error?.code === 'EPERM') {
     skip('repo', `${SYNTAX_FILES.length} 个文件的语法检查`, '本环境不允许 spawn 子进程（EPERM）；请在普通终端重跑');
   } else {

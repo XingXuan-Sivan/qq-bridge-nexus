@@ -21,8 +21,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { discoverDshSessionCookie } from '../src/dsh-client.js';
-import { resolveDshBaseUrl } from '../src/lib/dsh-endpoint.mjs';
+import { discoverDshSessionCookie } from '../src/agent-side/adapters/dsh/client.mjs';
+import { resolveDshBaseUrl } from '../src/agent-side/adapters/dsh/endpoint.mjs';
 
 // 未设 DSH_BASE_URL 时自动识别：桌面版 19387 / 命令行版 3080（v0.4.1）。
 export const PROBE_BASE = process.env.DSH_BASE_URL || (await resolveDshBaseUrl('')).url;

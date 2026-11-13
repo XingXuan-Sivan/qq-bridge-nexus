@@ -62,7 +62,7 @@ const DEFAULT_RULES = {
     //    ⚠️ 代价必须说清：allowPaths 是**按文件**粒度放行的，所以 bridge.js / dsh-client.js
     //    今后新增的真实泄漏不会被扫出来。要收紧，正确做法是给扫描器加
     //    「文件 + 规则名」粒度（或让凭据规则只认高熵字面量），而不是继续往这里加文件。
-    'docs/guides/PRIVACY.md', 'src/bridge.js', 'src/dsh-client.js',
+    'docs/guides/PRIVACY.md', 'src/bridge.js', 'src/agent-side/adapters/dsh/client.mjs',
   ],
 };
 

@@ -151,7 +151,7 @@ note: …
 | --- | --- |
 | 读平台与工具目录 | `src/platforms/index.mjs`：`listPlatforms` / `loadPlatform` / `readPlatformTools` / `PLATFORM_TOOL_RISKS` |
 | 行为档案读写 | `src/behaviors/index.mjs`：`loadBehaviorProfiles` / `normalizeBehavior` / `resolveBehavior` / `readBehaviorDocument` / `writeBehaviorData` / `duplicateBehavior` / `removeBehaviorFile` |
-| 平台话术 | `src/platform/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
+| 平台话术 | `src/user-side/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
 | 能力预设 | `src/capabilities/store.mjs`：`createCapabilityStore` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
 | 运行方案 | `src/runtime/plans.mjs`：`createPlanStore`（list/get/save/remove/clone）/ `normalizePlan` / `findPlan` / `legacyModeOfPlan` |
 | 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
@@ -159,6 +159,7 @@ note: …
 | 平台适配器发现 | `scripts/agent-platform-adapters.mjs`：`ADAPTER_KINDS` / `adapterFile` / `listAgentPlatforms` / `loadAdapter` / `normalizeArtifactFiles`。**约定优于声明**：只看 `profiles/agent-platforms/<id>/adapters/<kind>.mjs` 存不存在，不读 `agent-platform.yml` |
 | 产物构建调度 | `scripts/build-artifacts.mjs`：`buildArtifacts({targets, check})`。遍历平台 → 调 `planArtifacts()` → 校验路径/去重 → 写盘；`--check` 只比对不写（漂移即非零退出） |
 | 产物安装调度 | `scripts/install-agent-platform.mjs`：`installAgentPlatform({agentPlatform, profile})`。**先 build 再 install**，避免装到旧产物 |
+| 运行期适配器 `runtime.mjs` | `profiles/agent-platforms/<id>/adapters/runtime.mjs` 是**声明面**：能力、权限映射、preset 清单等纯常量与纯函数，**不得 import `src/`**（否则四层模型反向依赖内核，构建期无法单独打包）。协议面（RPC 客户端、鉴权、事件解包）在 `src/agent-side/adapters/<id>/`，由 `src/agent-side/builtin.mjs` 用 `protocol` 字段与声明面拼装后注册；内核只经 `src/agent-side/agent-client.mjs` 门面调用（B4 / B5） |
 
 自检：`node scripts/check-profiles.mjs`（校验目录四件套、工具风险值、内置能力/方案、引用闭合、旧目录不得存在）。
 产物链路自检：`npm run verify:artifacts`（产物未漂移）、`npm run test:artifact-pipeline`（发现/校验/幂等/mock 平台隔离）。

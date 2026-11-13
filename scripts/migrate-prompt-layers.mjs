@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
-import { writePlatformPrompt, readPlatformPrompt } from '../src/platform/prompt.mjs';
+import { writePlatformPrompt, readPlatformPrompt } from '../src/user-side/prompt.mjs';
 import { readBehaviorDocument, writeBehaviorData } from '../src/behaviors/index.mjs';
 
 const ROOT = process.cwd();

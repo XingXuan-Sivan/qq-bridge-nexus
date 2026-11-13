@@ -11,7 +11,7 @@ import {
 import {
   readPlatformPrompt, writePlatformPrompt, restorePlatformPrompt,
   listPlatformPrompts, renderPlatformText,
-} from '../src/platform/prompt.mjs';
+} from '../src/user-side/prompt.mjs';
 
 function tmpRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cap-prompt-'));

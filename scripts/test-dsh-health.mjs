@@ -1,4 +1,4 @@
-// DSH 探活判定（src/lib/dsh-health.js）离线测试：连续 2 次失败才算不可用；失败原因分类用真实的 fetch 错误形状验证。
+// DSH 探活判定（src/agent-side/adapters/dsh/health.mjs）离线测试：连续 2 次失败才算不可用；失败原因分类用真实的 fetch 错误形状验证。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -6,7 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { classifyDshError, createDshHealth } from '../src/lib/dsh-health.js';
+import { classifyDshError, createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -62,10 +62,10 @@ test('原因分类：中断、鉴权、HTTP 状态、其他；标签是中文且
 test('桥接接线：用 createDshHealth（阈值 2）判定；端口重新识别仍在第一次失败时开始；日志写明次数与原因', () => {
   const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
   const fn = src.slice(src.indexOf('const checkDsh = async () => {'), src.indexOf('let controllerInitPromise = null;'));
-  assert.match(src, /const dshHealth = createDshHealth\(\{ threshold: 2 \}\);/);
+  assert.match(src, /const dshHealth = createAgentHealth\(\{ threshold: 2 \}\);/);
   assert.ok(fn.indexOf('if (!ok && dshBaseUrlAuto') < fn.indexOf('dshHealth.fail(lastErr)'), '重新识别端口在计数判定之前、第一次失败就做');
   assert.match(fn, /连续 \$\{v\.failures\} 次探活失败，原因：\$\{v\.reason\.label\}/);
   assert.match(fn, /DSH 探活偶发失败 \$\{rec\.recoveredFrom\} 次/);
   assert.ok(!fn.includes("log('⚠️ DSH 不可用（重启中？）"), '不再失败一次就报不可用');
-  assert.match(fs.readFileSync(path.join(root, 'src', 'bridge-extensions.js'), 'utf8'), /dsh-health\.js/);
+  assert.match(fs.readFileSync(path.join(root, 'src', 'bridge-extensions.js'), 'utf8'), /agent-side\/agent-client\.mjs/);
 });

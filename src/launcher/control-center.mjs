@@ -33,7 +33,7 @@ import { inspectNapCat, napcatLaunchSpec, napcatDefaultHome, NAPCAT_DEFAULT_WEBU
 import { pickDialog } from './pick-dialog.mjs';
 // NapCat 是否已在别处运行：看它的 WebUI 端口（默认 6099，可在设置 napcatWebuiPort 改）
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
-import { resolveDshBaseUrl } from '../lib/dsh-endpoint.mjs';
+import { resolveAgentBaseUrl } from '../agent-side/agent-client.mjs';
 // 静态资源守卫与控制台共用一套：解码一次、拒绝穿越/盘符/符号链接/白名单外扩展名。
 import { resolveStaticPath, serveStaticFile } from '../http/static.mjs';
 
@@ -543,7 +543,7 @@ export async function startControlCenter({ open = true, port: portOverride = nul
       try { out.bridgeApi = await bridgeApi('/api/status'); } catch (e) { out.bridgeApiError = String(e?.message ?? e); }
     }
     // dsh.baseUrl 留空 = 自动识别（固定端口 19387 / 3080，再找桌面版 0.2.1 起的随机端口）；页面以桥接的 dshReady 为准
-    const dshUrl = (await resolveDshBaseUrl(cfg.value?.dsh?.baseUrl ?? '', { timeoutMs: 400 })).url;
+    const dshUrl = (await resolveAgentBaseUrl(cfg.value?.dsh?.baseUrl ?? '', { timeoutMs: 400 })).url;
     try {
       const u = new URL(dshUrl);
       out.dsh = { url: dshUrl, reachable: await portOpen(Number(u.port) || 80, u.hostname === 'localhost' ? '127.0.0.1' : u.hostname) };

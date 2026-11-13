@@ -75,8 +75,13 @@ import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, pl
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags } from '../src/capabilities/store.mjs';
 import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
-// OneBot 发送动作收口（B1）：bridge.js 的四处发送入口都调它，夹具剥 import 后必须补回。
-import { oneBotSendCall } from '../src/platform/onebot.mjs';
+// 发送调用构造与后端称呼（B5）：bridge.js 只经 src/user-side/user-platform.mjs 门面调用，
+// 夹具剥 import 后必须按门面的名字补回。实现本身在 adapters/qq/ 里。
+import { buildSendCall, describeBackend, readBackendInfo } from '../src/user-side/user-platform.mjs';
+// Agent 侧的探活走门面（B5）：health 是真实现（纯状态机、不联网），能验证「连续 2 次失败才判不可用」。
+// 地址发现 **不能** 用真实现：它会查本机进程（lsof/netstat），装了 DSH 的机器上会摸到真 DSH，
+// 所以按下面的 resolveAgentBaseUrl 离线桩注入（见 context 定义处）。
+import { createAgentHealth } from '../src/agent-side/agent-client.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -107,7 +112,7 @@ import * as memoryDefaults from '../src/memory/defaults.mjs';
 import * as memoryIngest from '../src/memory/ingest.mjs';
 import * as memoryLocalStore from '../src/memory/local-store.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
-import { unwrap, createTurnCollector } from '../src/dsh-client.js';
+import { unwrap, createTurnCollector } from '../src/agent-side/adapters/dsh/client.mjs';
 // P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
 // createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
 import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
@@ -323,7 +328,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
     CAPABILITIES_ROOT: path.join(temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
-    oneBotSendCall,
+    // 发送调用构造与后端称呼（B5）：bridge.js 只经门面调用，夹具剥 import 后按门面名补回。
+    buildSendCall, describeBackend, readBackendInfo,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',
@@ -332,11 +338,12 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     process: { pid: process.pid, platform: process.platform, kill: process.kill, env: {}, exit: (code) => { throw new Error('unexpected exit ' + code); } },
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; },
     clearTimeout, setInterval: () => ({ unref() {} }), clearInterval: () => {},
-    NodeApiClient: class { constructor() { return api; } },
+    AgentApiClient: class { constructor() { return api; } },
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,
     // bridge.js 从 src/http/security.mjs 导入（夹具会剥掉 import），这里给同名常量。
     SECURITY_HEADERS,
-    discoverDshLaunchToken: () => '', resolveDshHome: () => path.join(os.tmpdir(), 'qq-bridge-audit-no-dsh-home'), unwrap, createTurnCollector,
+    discoverLaunchToken: () => '', resolveAgentHome: () => path.join(os.tmpdir(), 'qq-bridge-audit-no-dsh-home'), unwrap, createTurnCollector,
+    createAgentHealth,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
     ...modelPrices, ...dshModel, ...quoteForward, ...modeHandover, ...roleCard, ...tokenLedger,
     createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...dshAuthHintLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...presetDefaults, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
@@ -466,7 +473,8 @@ createExtensionCatalog,
     },
     cleanupTemp: () => {},
     // DSH 地址识别桩成离线：真实实现会查本机进程（lsof/netstat），装了 DSH 的机器上会找到真 DSH。
-    resolveDshBaseUrl: async (configured) => ({ url: String(configured || '') || 'http://127.0.0.1:3080', auto: !configured, reachable: false, candidates: [] }),
+    // B5 起 bridge 按中立名 resolveAgentBaseUrl 调用（旧名 resolveDshBaseUrl 只留在 bridge-extensions 的公开别名里）。
+    resolveAgentBaseUrl: async (configured) => ({ url: String(configured || '') || 'http://127.0.0.1:3080', auto: !configured, reachable: false, candidates: [] }),
     ...globals,
   });
   // Execute the pure model view in the bridge realm. Its plain-object checks

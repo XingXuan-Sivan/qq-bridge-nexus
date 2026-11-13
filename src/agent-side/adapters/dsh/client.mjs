@@ -1,4 +1,13 @@
 // Node 环境的 DSH Web API 客户端。
+//
+// 位置：src/agent-side/adapters/dsh/。它是 **DSH 的协议实现**，不是内核：RPC 方法名、
+// 参数包装、鉴权换 Cookie、remote.mux 事件流都是 DSH 的事实。内核（bridge.js /
+// self-test.js）只经 src/agent-side/agent-client.mjs 这道门面使用它，因此换一个
+// Agent 平台时，本文件整份换掉，调用方不动。
+//
+// 为什么不去掉日志里的 `[dsh-client]` 前缀：那是运行期日志的过滤锚点，改名会连带
+// 丢掉历史排查经验；它出现在适配器目录里是完全合理的。
+//
 // 兼容 DSH 0.1.2-alpha.1 引入、并在 0.1.5-rc.1 上复核通过的协议：
 // 1. RPC 方法从点号改为斜杠（host.describe -> host/describe 等）；
 // 2. payload 包装为 { args: { <参数名>: 原payload } }（session/list 用 _request，其余多为 request）；

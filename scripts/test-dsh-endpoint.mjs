@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
-import { dshBaseUrlCandidates, detectDshDesktop, resolveDshBaseUrl } from '../src/lib/dsh-endpoint.mjs';
+import { dshBaseUrlCandidates, detectDshDesktop, resolveDshBaseUrl } from '../src/agent-side/adapters/dsh/endpoint.mjs';
 
 function fakeHome({ desktop }) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-dshhome-'));
@@ -56,8 +56,8 @@ test('macOS：没有 dsh-runtimes 时按桌面版 App 包的 Info.plist 识别�
 
 // ── DSH 桌面版 0.2.1：随机端口的动态发现 ────────────────────────────────────────
 import http from 'node:http';
-import { parseLsofPorts, parseNetstatPorts, parseTasklistPids, listDesktopListenPorts, looksLikeDsh } from '../src/lib/dsh-endpoint.mjs';
-import { NodeApiClient } from '../src/dsh-client.js';
+import { parseLsofPorts, parseNetstatPorts, parseTasklistPids, listDesktopListenPorts, looksLikeDsh } from '../src/agent-side/adapters/dsh/endpoint.mjs';
+import { NodeApiClient } from '../src/agent-side/adapters/dsh/client.mjs';
 
 test('解析：lsof / netstat / tasklist 只取 DSH 进程的回环监听端口', async () => {
   assert.deepEqual(parseLsofPorts('p99338\nf26\nn127.0.0.1:57764\nf27\nn*:9999\nn[::1]:50000\n'), [57764, 50000], '只要回环地址，不要 *:端口');

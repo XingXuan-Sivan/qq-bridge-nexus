@@ -1,6 +1,6 @@
 // Offline regression tests. No real DSH/QQ endpoints or local credentials are read.
 import assert from 'node:assert/strict';
-import { NodeApiClient } from '../src/dsh-client.js';
+import { NodeApiClient } from '../src/agent-side/adapters/dsh/client.mjs';
 import { fileURLToPath } from 'node:url';
 
 const originalFetch = globalThis.fetch;

@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from './dsh-client.js';
-import { resolveDshBaseUrl } from './lib/dsh-endpoint.mjs';
+// Agent 侧协议只经中立门面（具体实现在 src/agent-side/adapters/dsh/client.mjs）。
+import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentBaseUrl } from './agent-side/agent-client.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -40,17 +40,17 @@ async function main() {
   // 未给参数时按 config.json 的 dsh.baseUrl；留空则自动识别（桌面版 19387 / 命令行版 3080）
   let cfgBase = '';
   try { cfgBase = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')).dsh?.baseUrl ?? ''; } catch {}
-  const baseUrl = process.argv[2] ?? (await resolveDshBaseUrl(cfgBase)).url;
+  const baseUrl = process.argv[2] ?? (await resolveAgentBaseUrl(cfgBase)).url;
   let auth;
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
     auth = {
-      token: cfg.dsh?.authToken || discoverDshLaunchToken(),
+      token: cfg.dsh?.authToken || discoverLaunchToken(),
       header: cfg.dsh?.authHeader,
       prefix: cfg.dsh?.authPrefix
     };
   } catch {}
-  const api = new NodeApiClient(baseUrl, undefined, auth);
+  const api = new AgentApiClient(baseUrl, undefined, auth);
   selfTestApi = api;
   const promptText = process.argv[3] ?? '只回复两个字：收到';
 

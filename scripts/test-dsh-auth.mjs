@@ -16,7 +16,7 @@
 import {
   NodeApiClient, discoverDshLaunchToken, discoverDshSessionCookie,
   readBrowserSessionSecret, resolveDshHome, mintBrowserSessionCookie, isLoopbackBase
-} from '../src/dsh-client.js';
+} from '../src/agent-side/adapters/dsh/client.mjs';
 
 const BASE = process.env.DSH_BASE_URL || 'http://127.0.0.1:3080';
 

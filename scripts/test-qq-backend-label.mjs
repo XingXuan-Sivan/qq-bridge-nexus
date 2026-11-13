@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { qqBackendFromVersionInfo, qqBackendLabel } from '../src/lib/qq-backend-label.js';
+import { qqBackendFromVersionInfo, qqBackendLabel } from '../src/user-side/adapters/qq/qq-backend-label.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 

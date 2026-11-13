@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from '../src/dsh-client.js';
+import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from '../src/agent-side/adapters/dsh/client.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');

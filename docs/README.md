@@ -71,6 +71,7 @@
 | [guides/TOKEN_USAGE_CONSOLE.md](guides/TOKEN_USAGE_CONSOLE.md) | 「令牌与花费」看板：数据来源、计价口径、API、配置 |
 | [guides/PRIVACY.md](guides/PRIVACY.md) | 隐私边界：哪些数据留在本机、哪些会出站 |
 | [guides/VOICE.md](guides/VOICE.md) | 语音发送全解：独立工具、桥接 CLI、AI 工具、控制台面板与配置解析顺序 |
+| [guides/ADD_USER_PLATFORM.md](guides/ADD_USER_PLATFORM.md) | 新增用户平台（微信 / B 站等）：声明面、装配点、不变式与自检（接第二个平台前必读） |
 
 ---
 

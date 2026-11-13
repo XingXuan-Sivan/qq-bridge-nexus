@@ -31,7 +31,7 @@
 
 | # | 文件 | 改动 | 对治的问题 |
 | --- | --- | --- | --- |
-| 1 | `src/dsh-client.js` | 新增 `inboxItemsOfProjections` / `inboxItemIds` / `controlBaselineInboxItems`；`_readSessionQueue` 改为「`session/projections` 主路径 + `session/control` 回退」；`METHOD_ARG_WRAPPERS` 增加 `session/projections` | §2 队列读不出来 |
+| 1 | `src/dsh-client.js`（0.2.0 / B5 起为 `src/agent-side/adapters/dsh/client.mjs`） | 新增 `inboxItemsOfProjections` / `inboxItemIds` / `controlBaselineInboxItems`；`_readSessionQueue` 改为「`session/projections` 主路径 + `session/control` 回退」；`METHOD_ARG_WRAPPERS` 增加 `session/projections` | §2 队列读不出来 |
 | 2 | `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs` | restrict 名单 **52 → 67**，补 15 个名字 | §3 工具面漂移 |
 | 3 | `scripts/dsh-tool-names.mjs`（新增） | 工具名抽取的**唯一实现**（原测试里那份模糊抽取器误报真名） | §3 对账工具 |
 | 4 | `scripts/scan-dsh-tool-names.mjs`（新增） | 拿安装包与守卫名单双向求差的 CLI（`npm run scan:tool-names`） | §3 对账工具 |

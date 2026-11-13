@@ -86,7 +86,7 @@
 
 ---
 
-### 2.5 实施偏差（B2 / B3 / B4 落地时相对上述设计的取舍）
+### 2.5 实施偏差（B2 – B5 落地时相对上述设计的取舍）
 
 | 项 | 设计 | 实施 | 理由 |
 | --- | --- | --- | --- |
@@ -102,6 +102,12 @@
 | preset 名（B4） | `chat / readonly / workspace / full` | 按上述改名（旧 `qq-chat` / `qq-chat-v2` / `qq-agent-*`），另留 `AGENT_PRESET_ALIASES` 读入归一 | 改名是硬约束（§3.5），但旧 `config.json`、旧 profile 不该因一次升级就报错；归一放在 `loadConfig`、`resolveLevelPlan` 的 `presetIds`、`agentPresetLevel` 反查三处 |
 | bundle 包名（B4） | 一并去前缀 | **不改**：`artifacts/dsh/qq-agent-presets/` 与权限预设名 `qq-full-ask` 保持原样 | 前者是 profile `package.json` 的 `link:` 依赖名与守卫行的裸说明符（`qq-agent-presets/qq-tool-restrict.mjs`），改名要连带 node_modules junction 与环境自愈；后者是 DSH profile `cordis.patch.yml` 里的 preset id，属平台侧命名。二者都在「Agent 平台内部」，不构成内核耦合 |
 | 旧 DSH 会话（B4） | 自动迁移 | 不迁移，`install` 适配器只在安装时**报告**残留的旧 preset 目录/patch，由用户重建会话 | dsh 侧会话绑定的是 preset id，桥接无法安全改写；`state/sessions/*.json` 只存 `planId` 不存 raw preset 名，故桥接自身无需迁移 |
+| 适配器边界（B5） | §3.1 约定下的全部平台相关模块 | 只下沉**传输层**：`dsh-client` / `dsh-endpoint` / `dsh-health` / `onebot` / `qq-backend-label` / `prompt`；`dsh-model`、`qq-model-view`、`mcp-snowluma-safe`、`snowluma-conn` 留在 `src/` | `adapters/` 回答的是「怎么连上平台」；「连上之后拿它做什么」（模型目录视图、MCP 桥、控制台文案）属内核业务，随 B7/B8 元数据化再收敛。一次搬完会让 B5 的回归面从「路径等价」扩大到「行为等价」 |
+| `snowluma-conn.js`（B5） | 一并下沉进 `adapters/qq/` | **不动**，仍在 `src/` 根，登记为唯一豁免 | 它是仓库外独立工具（`voice-tool/`）按固定路径引用的**外部契约**，`scripts/test-snowluma-conn.mjs` 钉死了这个路径；移动会打断仓库外调用方 |
+| `bridge-extensions.js` 直连（B5） | 全部经门面 | 保留**一处**直连 `user-side/adapters/qq/qq-backend-label.js` | `qqBackendLabel` / `qqBackendFromVersionInfo` 是 0.1.x 的公开导出名，文件名也被 `scripts/test-qq-backend-label.mjs` 钉住；门面用的是中立名（`describeBackend` / `readBackendInfo`），凭空造不出旧名字。测试从「一律禁止」改成「只允许这一条」的精确比对 |
+| 声明面与协议面（B5） | 适配器是一个模块 | 拆成两面：`profiles/agent-platforms/<id>/adapters/runtime.mjs`（能力、权限映射、preset 清单——纯常量与纯函数）与 `src/agent-side/adapters/<id>/`（RPC 客户端、鉴权、事件解包），由 `builtin.mjs` 用 `protocol` 字段拼装 | 声明面被构建期适配器与浏览器端复用，不能 import 依赖本机凭据与 npm SDK 的协议面；让它反向依赖 `src/` 等于把四层模型变成内核的从属物 |
+| 门面导出方式（B5） | 统一 `export const X = impl.X` | Agent 侧 `export const X = protocol.X`（协议是模块级单例）；用户侧一律**转发函数** | 用户侧将来要在同一进程里切多个平台（多平台在线），把引用绑死在模块加载期会拿到启动时的那一个 |
+| 夹具同步（B5） | —— | 审计夹具注入表改按门面的中立名补回（`buildSendCall` / `describeBackend` / `readBackendInfo` / `AgentApiClient` / `discoverLaunchToken` / `resolveAgentHome`） | 夹具剥掉 bridge 的 import 后靠同名注入提供绑定；改名不同步会让 bridge 落到门面的**真实现**上。`resolveAgentBaseUrl` 尤其致命：真实现会扫本机进程找 DSH，单次启动多花约 0.8 秒，把 `test-backfill` 里「记原始发送时间」的 2 秒容差顶成随机失败。现在由 `test-platform-adapters.mjs` 钉住「地址发现必须离线桩掉、注入表不得残留旧符号」 |
 
 ---
 
@@ -225,7 +231,7 @@ export function describe() { return { label, modelLabel, permissionLevels }; }
 | `src/admin/dsh-permission.js` 直接写 `read-only/workspace-write/qq-full-ask` | ✅ 映射表移入 `adapters/dsh/runtime.mjs`（B4；该文件已删除，`src/admin/agent-permission.js` 只做转发） |
 | `src/session/permission.mjs` 的 `DSH_PERMISSION_PRESET` | ✅ 同上；内核只保留 `read-only/workspace-write/full-ask/full` 四级，`presetForLevel` 接受 `opts.presets` 注入（B4） |
 | `preset` 名 `qq-agent-*` | ✅ 改为能力档名 `chat / chat-v2 / readonly / workspace / full`（B4）；用户平台差异走 prompt 层 |
-| `dsh-client.js` 被 bridge 直接 import | bridge 只见 `AgentPlatform` 接口；`dsh-client.js` 移入 `adapters/dsh/`（B5） |
+| `dsh-client.js` 被 bridge 直接 import | ✅ 已移入 `src/agent-side/adapters/dsh/client.mjs`（B5）；bridge / self-test 只见 `src/agent-side/agent-client.mjs` 门面，`src/agent-side/adapters/` 由 `builtin.mjs` 装配进 `protocol` |
 
 ---
 
@@ -303,7 +309,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 
 ## 6. 迁移批次
 
-每批独立可提交、均可通过 `verify:repo`（62 项）+ `test:audit`（118 项）+ `test:artifact-pipeline`。批次之间有依赖，不可乱序。
+每批独立可提交、均可通过 `verify:repo`（73 项）+ `test:audit`（119 项）+ `test:artifact-pipeline` + `test:console-ui`（34 项）。批次之间有依赖，不可乱序。
 
 状态：`✅` 已提交 / `—` 未开始。
 
@@ -314,7 +320,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B2** ✅ | 地址模型：`key.mjs` 支持 `@account` 与开放 type、id 字符串化；`withAddress()` 上下文 + 15 个 import 点改造；`sessions.json` 迁移脚本（见 §2.5：实际未做，旧文法已是新文法子集） | key.mjs + 15 模块 + bridge | 中高（主键） |
 | **B3** ✅ | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址；`admins` 项新增 `platform`/`account`/`id`（`qq` 保留为别名）；`QQ_RE` 移除、`cfg.ownerQQ` 降为派生视图 | bridge + 控制台 + 6 个测试 | 中 |
 | **B4** ✅ | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名（`chat / chat-v2 / readonly / workspace / full`，旧名经 `AGENT_PRESET_ALIASES` 归一；见 §2.5） | 2 个文件 + preset 名迁移 | 中 |
-| **B5** | 运行期适配器：新建 `src/user-side/` 与 `src/agent-side/`，`dsh-client.js` 与 SDK 直连下沉为两个 runtime 实现，bridge 只依赖接口 | 大（bridge 1618 行相关段） | 高 |
+| **B5** ✅ | 运行期适配器：新建 `src/user-side/`（`runtime-registry` / `builtin` / `user-platform` + `adapters/qq/`）与 `src/agent-side/`（已有 registry/builtin + `adapters/dsh/` + `agent-client` 门面）；`dsh-client.js` → `agent-side/adapters/dsh/client.mjs`，`lib/dsh-endpoint` 与 `lib/dsh-health` → 同目录，`platform/onebot` + `lib/qq-backend-label` → `user-side/adapters/qq/`，`platform/prompt` → `user-side/prompt.mjs`；bridge / self-test / control-center 只依赖门面；边界与例外见 §2.5 | 大（bridge 18 处 + 18 个 importer + 夹具） | 高 |
 | **B6** | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归 | kernel/host-api/manifest | 中高 |
 | **B7** | 控制台元数据化：品牌与文案、`/api/platforms` 与 `/api/agent-platforms` 驱动表单、列名与筛选读元数据、`/api/send/*` 收敛 | console 全站 | 中 |
 | **B8** | 社交模型 `group→conversation`、`成员→participant`（`/api/socialV2/*` 46 端点） | social 7 文件 1195 行 | 高 |
@@ -331,12 +337,13 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 
 ### 7.1 新增回归
 
-| 用例 | 断言 |
-| --- | --- |
-| `test:user-platform-pipeline` | mock 平台（内存 transport）走通：建会话 → 收消息 → 准入 → 唤醒 → 发消息 → 撤回 → 断线重连；`src/` 中无该平台字面量 |
-| `test:cross-platform-isolation` | 同一进程 qq + mock 并活跃；A 平台上下文里产 B 平台 key 会抛错；`sessions.json` 无覆盖 |
-| `test:transport-plugin` | 插件注册 transport：入站仍过准入（未准入会话插件拿不到正文）；出站走 `sendAction`；卸载后连接关闭 |
-| `test:capability-degrade` | 缺 `sticker`/`forward` 能力时降级为文本占位；缺 `poke` 时**报错**而非静默 |
+| 用例 | 断言 | 状态 |
+| --- | --- | --- |
+| `scripts/test-platform-adapters.mjs` | 两侧注册表 fail-closed、门面只出中立名、内核不直连 `adapters/`、平台专属文件不回 `src/` 根；夹具的平台桩用中立名且地址发现强制离线（14 条） | ✅ B5 |
+| `test:user-platform-pipeline` | mock 平台（内存 transport）走通：建会话 → 收消息 → 准入 → 唤醒 → 发消息 → 撤回 → 断线重连；`src/` 中无该平台字面量 | 待 B6 |
+| `test:cross-platform-isolation` | 同一进程 qq + mock 并活跃；A 平台上下文里产 B 平台 key 会抛错；`sessions.json` 无覆盖 | 待 B6 |
+| `test:transport-plugin` | 插件注册 transport：入站仍过准入（未准入会话插件拿不到正文）；出站走 `buildSendCall`；卸载后连接关闭 | 待 B6 |
+| `test:capability-degrade` | 缺 `sticker`/`forward` 能力时降级为文本占位；缺 `poke` 时**报错**而非静默 | 待 B6 |
 
 ### 7.2 静态验收（可机械化）
 
@@ -349,9 +356,9 @@ git grep -nE '\bqq\b|\bdsh\b|snowluma|napcat' -- src/ ':!src/*/adapters/*' ':!sr
 
 ### 7.3 文档
 
-- 新增 `docs/guides/ADD_USER_PLATFORM.md`（对称于已有的新增 Agent 平台指南）。
-- `docs/PROFILES_MODEL.md` 增补 `adapters/runtime.mjs` 契约。
-- `docs/FOLDER_MAP.md` 增补 `src/user-side/`、`src/agent-side/`。
+- ✅ 新增 [`guides/ADD_USER_PLATFORM.md`](guides/ADD_USER_PLATFORM.md)（对称于 Agent 平台的接入指南）。
+- ✅ `docs/PROFILES_MODEL.md` 增补 `adapters/runtime.mjs` 契约（声明面不得 import `src/`，协议面由 `builtin.mjs` 拼装）。
+- ✅ `docs/FOLDER_MAP.md` 增补 `src/user-side/`、`src/agent-side/` 的职责与边界。
 
 ---
 

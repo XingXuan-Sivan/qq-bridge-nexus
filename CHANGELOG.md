@@ -4,6 +4,38 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
+## 0.2.0（未发布）—— 用户侧 / Agent 侧平台解耦
+
+目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
+B0–B5 已落地，B6（插件接管连接）/ B7（控制台元数据化）/ B8（社交模型 `group→conversation`）未开始。
+
+### 重构：两侧适配器（B0–B5）
+- **B0 常量去 QQ**：`RUNTIME_PLATFORM`、`DEFAULT_PROMPT_VARS`、`catalog.mjs` 的 `provider` 参数化、
+  `splitForQQ`/`mdToPlain` 中性命名。
+- **B1 发送收口**：四处 `send_*_msg` 三元式收成 `buildSendCall(kind, id, segments) → {action, params}`，
+  由桥接自己发 HTTP；段类型与降级策略接线。
+- **B2 地址模型**：会话 key 支持 `@account` 与开放 type，id 一律字符串化，`withAddress()` 上下文防串号
+  （旧 `qq:group:123` 原样可读，无需迁移）。
+- **B3 owner 结构化**：`owner: {platform, account, id}`，准入白名单按地址；`QQ_RE` 移除，
+  `cfg.ownerQQ` 降为派生视图。
+- **B4 权限映射下沉**：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` →
+  `profiles/agent-platforms/dsh/adapters/runtime.mjs`；preset 改为能力档名
+  （`chat / chat-v2 / readonly / workspace / full`，旧名经 `AGENT_PRESET_ALIASES` 归一）。
+- **B5 运行期适配器**：新增 `src/user-side/`（注册表 + 装配点 + 中立门面 + `adapters/qq/`）与
+  `src/agent-side/`（`adapters/dsh/` + `agent-client.mjs` 门面）。`src/dsh-client.js`、
+  `src/platform/onebot.mjs`、`src/platform/prompt.mjs`、`src/lib/dsh-endpoint.mjs`、
+  `src/lib/dsh-health.js`、`src/lib/qq-backend-label.js` 全部下沉；`bridge.js` / `self-test.js` /
+  控制中心只依赖门面。新增 `scripts/test-platform-adapters.mjs`（14 条契约）与
+  [docs/guides/ADD_USER_PLATFORM.md](docs/guides/ADD_USER_PLATFORM.md)。
+- **两条保留的外部契约**（见 §2.5）：`src/snowluma-conn.js` 不得移动（仓库外 `voice-tool/` 按固定路径引用）；
+  `bridge-extensions.js` 保留对 `qq-backend-label.js` 的一处直连（0.1.x 公开导出名与文件名均被测试钉住）。
+
+### 修复
+- 审计夹具的 Agent 地址发现改为离线桩（旧名 `resolveDshBaseUrl` 改名后未同步，导致 bridge 落到真实现、
+  每次启动扫本机进程多花约 0.8 秒，`test-backfill` 的 2 秒容差断言因此随机失败）。
+
+---
+
 ## 0.1.1 —— 2026-11-13
 
 0.1.0 基线后的第一批结构性改动：只动 Agent 平台产物链路、模式持久化与版本身份，不含用户可见行为变化。

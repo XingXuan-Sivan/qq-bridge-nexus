@@ -204,6 +204,9 @@ const tests = [
   'test-agent-token-guard.mjs',
   // AI 收藏表情的后端适配：SnowLuma 照旧 base64://；NapCat 只收本地路径时改用桥接自建的受控临时文件（用完即删）。
   'test-sticker-collect.mjs',
+  // B5 运行期适配器：两侧注册表的 fail-closed、门面委托（buildSendCall / AgentApiClient），
+  // 以及「平台专属实现不得回流 src/ 根与 src/lib/」。
+  'test-platform-adapters.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

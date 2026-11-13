@@ -6,7 +6,7 @@
 // 消息就会静默发到错误会话 —— 所以这里必须抛错，不能兜底。
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ONEBOT_CONVERSATIONS, oneBotSendCall } from '../src/platform/onebot.mjs';
+import { ONEBOT_CONVERSATIONS, oneBotSendCall } from '../src/user-side/adapters/qq/onebot.mjs';
 
 test('group 用 send_group_msg + group_id', () => {
   const message = [{ type: 'text', data: { text: 'hi' } }];

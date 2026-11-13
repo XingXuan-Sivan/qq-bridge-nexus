@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { NodeApiClient, unwrap, discoverDshLaunchToken } from '../src/dsh-client.js';
+import { NodeApiClient, unwrap, discoverDshLaunchToken } from '../src/agent-side/adapters/dsh/client.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');

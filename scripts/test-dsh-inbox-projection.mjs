@@ -27,7 +27,7 @@ import {
   inboxItemsOfProjections,
   inboxItemIds,
   controlBaselineInboxItems,
-} from '../src/dsh-client.js';
+} from '../src/agent-side/adapters/dsh/client.mjs';
 
 /** 一条真实的 DSH 0.2.0 inbox 项（2026 实测采样，内容已替换为占位符）。 */
 const realInboxItem = (id, text) => ({

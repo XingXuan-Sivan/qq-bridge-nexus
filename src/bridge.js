@@ -16,7 +16,9 @@ import { defaultPromptState, readDefaultPrompt } from './preset-defaults.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
-import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken, resolveDshHome } from './dsh-client.js';
+// Agent 侧协议（RPC 客户端、凭据发现、返回包解包）只经这道门面；具体实现是
+// src/agent-side/adapters/<id>/，由 builtin.mjs 装配。
+import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth } from './agent-side/agent-client.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -94,9 +96,10 @@ import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from '
 import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, CAPABILITIES_ROOT } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
-import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './platform/prompt.mjs';
-// OneBot 的动作名与参数构造（QQ 后端的实现细节）；四处发送入口共用这一份。
-import { oneBotSendCall } from './platform/onebot.mjs';
+import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
+// 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
+// 内核只经 src/user-side/user-platform.mjs 这一道门面问；四处发送入口共用。
+import { buildSendCall, describeBackend, readBackendInfo } from './user-side/user-platform.mjs';
 import { listPlatforms, loadPlatform } from './platforms/index.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
@@ -158,7 +161,7 @@ import {
 } from './sticker-lib.js';
 // v0.3.0：人际连续性（人物库/入群事件/跨群协作）与 owner 管理通道（模式切换/权限分级/审批增强）。
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, resolveDshBaseUrl, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk, qqBackendFromVersionInfo, qqBackendLabel, createDshHealth } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossGroup, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerGroupAccess, peekView, groupRuleResultText, groupRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
 import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
@@ -1199,7 +1202,7 @@ function loadConfig() {
     ? Number(owner.id) : null;
   const cfg = {
     dsh: {
-      // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/lib/dsh-endpoint.mjs）
+      // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/agent-side/adapters/dsh/endpoint.mjs）
       baseUrl: '',
       provider: 'deepseek-official',
       // 多模态模型：DeepSeek-V41-Flash（DSH 模型目录里 inputModalities 含 image）。
@@ -1559,10 +1562,10 @@ function loadConfig() {
   // DSH 0.1.7 起 launch token 是**每进程现生成的 32 字节随机数，只存在内存里**，
   // 不落盘、不可推导；只有启动器把 `dsh web` 的 stdout 重定向到文件时才能从日志读到。
   // 所以这里发现的 token 只是兜底，主路径是客户端用 ~/.dsh 里持久化的签名密钥
-  // 离线铸造会话 Cookie（见 dsh-client 的 mintBrowserSessionCookie）。
+  // 离线铸造会话 Cookie（见 src/agent-side/adapters/dsh/client.mjs 的 mintBrowserSessionCookie）。
   // authTokenExplicit 记录「token 是用户填的还是这里猜的」，客户端据此排优先级。
   cfg.dsh.authTokenExplicit = Boolean(cfg.dsh.authToken);
-  if (!cfg.dsh.authToken) cfg.dsh.authToken = discoverDshLaunchToken();
+  if (!cfg.dsh.authToken) cfg.dsh.authToken = discoverLaunchToken();
 
   // 思考强度可能被手工改成非法值（config.json 是用户可编辑的）。DeepSeek 适配器对非法值
   // 会硬拒绝，若直接透传会让每个会话的 selectModel 每次都失败；这里统一规范化并告警。
@@ -2902,7 +2905,7 @@ async function main() {
         // 语音条比图片大、要过一次 SILK 转码，给 60s 预算（文本/图片共用同一 sendChain，
         // 所以这条语音发完之前后面的文本会自然排队，不会插队到语音前面）。
         const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-        const { action, params } = oneBotSendCall(kind, id, [recordSegment]);
+        const { action, params } = buildSendCall(kind, id, [recordSegment]);
         const res = await fetch(`${httpUrl}/${action}`, {
           method: 'POST',
           headers: {
@@ -3082,7 +3085,7 @@ async function main() {
       throw new Error(`表情 ${entry.id} 的图片下载失败（QQ CDN 网络异常或地址已失效）：${error?.message ?? error}`);
     }
     segments.push({ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } });
-    const { action, params } = oneBotSendCall(kind, id, segments);
+    const { action, params } = buildSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     // 与文本发送共用 sendChain，保证“先文字后表情”的真人顺序不被并发工具调用打乱。
     let sendResolve;
@@ -3144,7 +3147,7 @@ async function main() {
     const assertSendAllowed = captureSendGuard(key);
     const { kind, id } = parseKey(key) ?? {};
     const segments = [{ type: 'image', data: { file: 'base64://' + buffer.toString('base64') } }];
-    const { action, params } = oneBotSendCall(kind, id, segments);
+    const { action, params } = buildSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     let done;
     let fail;
@@ -3221,9 +3224,9 @@ async function main() {
 
   // 网关是不是 NapCat（决定收藏表情走哪条路）。按连接缓存，重连后重新判断。
   let backendIsNapCat = null;
-  // 日志里的 QQ 后端称呼（qq-backend-label.js）：连上后由 get_version_info 填充
+  // 日志里的后端称呼（实现在 src/user-side/adapters/qq/qq-backend-label.js）：连上后由 get_version_info 填充
   let qqBackendInfo = null;
-  function backendLabelNow() { return qqBackendLabel({ viaPlatform: cfg.snowluma?.viaPlatform === true, backend: qqBackendInfo }); }
+  function backendLabelNow() { return describeBackend({ viaPlatform: cfg.snowluma?.viaPlatform === true, backend: qqBackendInfo }); }
 
   async function isNapCatBackend() {
     if (backendIsNapCat !== null) return backendIsNapCat;
@@ -3748,18 +3751,18 @@ async function main() {
   // DSH 侧。dsh.baseUrl 留空时自动识别端口（桌面版 0.2.0 写死 19387、0.2.1 起随机端口；命令行版默认 3080）。
   let dshBaseUrlAuto = false;   // 留空自动识别时为 true：DSH 不可用期间 checkDsh 会定期重新识别
   {
-    const ep = await resolveDshBaseUrl(cfg.dsh.baseUrl);
+    const ep = await resolveAgentBaseUrl(cfg.dsh.baseUrl);
     if (ep.auto) log(`DSH 地址自动识别：${ep.url}${ep.discovered ? '（DSH 桌面版随机端口，按进程监听端口发现）' : ''}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；DSH 不可用期间会定期重新识别）'}`);
     cfg.dsh.baseUrl = ep.url;
     dshBaseUrlAuto = ep.auto;
   }
-  const api = new NodeApiClient(cfg.dsh.baseUrl, undefined, {
+  const api = new AgentApiClient(cfg.dsh.baseUrl, undefined, {
     token: cfg.dsh.authToken,
     // true=用户在 config.json 里显式填的；false=从日志猜的。猜来的不优先于离线铸造。
     tokenExplicit: cfg.dsh.authTokenExplicit === true,
     header: cfg.dsh.authHeader,
     prefix: cfg.dsh.authPrefix,
-    // 默认只允许把 launch token 交给回环地址；远程 DSH 需要显式 opt-in（见 dsh-client.ensureAuth）。
+    // 默认只允许把 launch token 交给回环地址；远程 DSH 需要显式 opt-in（见 Agent 适配器的 ensureAuth）。
     allowRemote: cfg.dsh.allowRemote === true
   });
   // DSH 的模型目录 RPC：0.1.5 是 `session/modelCatalog`。**不能走基类门面**
@@ -5422,15 +5425,15 @@ async function main() {
       }
     }
   };
-  // 连续 2 次（约 10 秒）探活失败才判定「DSH 不可用」；偶发失败一次只在恢复时记一笔（src/lib/dsh-health.js）
-  const dshHealth = createDshHealth({ threshold: 2 });
+  // 连续 2 次（约 10 秒）探活失败才判定「DSH 不可用」；偶发失败一次只在恢复时记一笔（src/agent-side/adapters/dsh/health.mjs）
+  const dshHealth = createAgentHealth({ threshold: 2 });
   // 401：凭据读错目录时给出具体提示（src/dsh-auth-hint.js）；10 分钟内只提示一次。
   const dshAuthHint = createAuthHintGate();
   const dshProbe = createDshProbe({
     probe: () => api.settings.describe({}),
     isAutoBaseUrl: () => dshBaseUrlAuto,
     rediscover: async () => {
-      const ep = await resolveDshBaseUrl('', { timeoutMs: 600 });
+      const ep = await resolveAgentBaseUrl('', { timeoutMs: 600 });
       return ep ? { reachable: Boolean(ep.reachable), url: ep.url } : null;
     },
     applyUrl: (url) => {
@@ -5509,7 +5512,7 @@ async function main() {
     } else {
       const v = dshHealth.fail(lastErr);
       // DSH 从没就绪过（启动时就 401）也要提示：否则日志里只有「事件流 0 帧」，看不出是凭据的问题。
-      if (isDshAuthError(lastErr) && dshAuthHint.fail()) log(buildDshAuthHint({ dshHome: resolveDshHome() }));
+      if (isDshAuthError(lastErr) && dshAuthHint.fail()) log(buildDshAuthHint({ dshHome: resolveAgentHome() }));
       if (dshReady && v.unavailable) {
         dshReady = false;
         log(`⚠️ DSH 不可用（连续 ${v.failures} 次探活失败，原因：${v.reason.label}），QQ 消息将入队等待`);
@@ -12555,7 +12558,7 @@ async function main() {
       throw new Error('发送内容包含会话令牌，已阻止发送');
     }
     segments.push({ type: 'text', data: { text: escapeCqText(rawMessage) } });
-    const { action, params } = oneBotSendCall(kind, id, segments);
+    const { action, params } = buildSendCall(kind, id, segments);
     const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     const res = await fetch(`${httpUrl}/${action}`, {
       method: 'POST',
@@ -18020,7 +18023,7 @@ async function main() {
     Promise.race([bot.request('get_version_info', {}), new Promise((r) => setTimeout(() => r(null), 3000))])
       .then((r) => {
         if (r?.status === 'ok' && r.data) {
-          qqBackendInfo = qqBackendFromVersionInfo(r.data);
+          qqBackendInfo = readBackendInfo(r.data);
           backendIsNapCat = isNapCatVersionInfo(r.data);
         }
       })

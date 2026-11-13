@@ -81,7 +81,7 @@ export function loadSearchConfig(root) {
   };
 }
 
-/** DSH home：与 dsh-client 的判定保持一致（`DSH_HOME` 优先）。 */
+/** Agent 主目录：与 Agent 适配器（src/agent-side/adapters/dsh/client.mjs）的判定保持一致（`DSH_HOME` 优先）。 */
 export function resolveDshHome() {
   return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
 }

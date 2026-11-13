@@ -11,7 +11,7 @@
 // ⚠️ 不要用 process.exit()：成功路径上 undici 的 keep-alive socket 仍在关闭，
 // 强行退出会在 Windows 上触发 libuv 断言（0xC0000409），把成功跑成非 0 退出码。
 // 这里只设 process.exitCode，让事件循环自己排空。
-import { discoverDshSessionCookie } from '../src/dsh-client.js';
+import { discoverDshSessionCookie } from '../src/agent-side/adapters/dsh/client.mjs';
 
 const BASE = process.argv[2] || process.env.DSH_BASE_URL || 'http://127.0.0.1:3080';
 const WANTED = ['chat', 'chat-v2'];

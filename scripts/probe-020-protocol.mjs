@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { discoverDshSessionCookie } from '../src/dsh-client.js';
+import { discoverDshSessionCookie } from '../src/agent-side/adapters/dsh/client.mjs';
 
 const BASE = process.env.DSH_BASE_URL || 'http://127.0.0.1:3080';
 const cookie = discoverDshSessionCookie(BASE);

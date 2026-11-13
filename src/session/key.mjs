@@ -1,5 +1,5 @@
 /**
- * 会话标识（session key）：`<platform>:<group|private>:<id>`，例如 `qq:group:903621673`。
+ * 会话标识（session key）：`<platform>:<group|private>:<id>`，例如 `qq:group:100000003`。
  *
  * 为什么不继续用 `group:<id>` / `private:<id>`（P8）：
  *   旧形态把「平台」写死成 QQ——同一个 key 在 Discord/Telegram 接入时无法表达，

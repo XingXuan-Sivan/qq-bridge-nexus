@@ -58,7 +58,7 @@ M1 透传面的两条硬限制（决定了「未覆盖」的判定，见 `src/co
 
 ## 2. OneBot 动作（198 个规范名）
 
-各节按源码文件内的定义顺序排列。「桥接已在用」来自对 `qq-bridge-enhanced/src` 的静态扫描，动态拼接的动作名可能漏计。
+各节按源码文件内的定义顺序排列。「桥接已在用」来自对 `qq-bridge-nexus/src` 的静态扫描，动态拼接的动作名可能漏计。
 
 ### 2.1 信息（5 个，`packages/onebot/src/actions/info.ts`）
 

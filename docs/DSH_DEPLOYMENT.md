@@ -1,10 +1,10 @@
-# DSH_DEPLOYMENT.md —— 给部署 agent 的完整部署说明（qq-bridge-enhanced）
+# DSH_DEPLOYMENT.md —— 给部署 agent 的完整部署说明（qq-bridge-nexus）
 
 > **读者**：之后负责部署本项目的 DSH agent（或任何没有参与开发的人）。
 > **约定**：每一步都写明「在哪个目录执行 / 前置条件 / 预期结果」。命令分 **Windows（PowerShell）** 与 **macOS（终端 zsh）** 两套，
 > 只有一套的地方表示两边相同。**不要猜测配置字段**——所有字段都在本文第 7 节与
 > [guides/CONFIGURATION.md](guides/CONFIGURATION.md) 里有说明；没写到的字段保持模板默认值。
-> 仓库：https://github.com/h-D-ACE/dsh-qq
+> 仓库：https://github.com/XingXuan-Sivan/qq-bridge-nexus
 >
 > **硬性边界（部署 agent 必须遵守）**
 > 1. **不要**下载、安装、启动 QQ 后端（SnowLuma / NapCat），也**不要**登录 QQ —— 这些必须由用户本人完成（QQ 登录需要用户扫码；
@@ -21,7 +21,7 @@
 
 | 项 | 值 |
 | --- | --- |
-| 项目 | qq-bridge-enhanced：QQ ↔ DeepSeek Harness（DSH）桥接，把一个 QQ 账号变成 DSH agent 驱动的「AI 群友」。基于上游 Derpyu520/qq-bridge v0.2.0-r3（已合并 r4 的修复） |
+| 项目 | qq-bridge-nexus：QQ ↔ DeepSeek Harness（DSH）桥接，把一个 QQ 账号变成 DSH agent 驱动的「AI 群友」。基于上游 Derpyu520/qq-bridge v0.2.0-r3（已合并 r4 的修复） |
 | 操作系统 | **Windows 10/11 x64**、**macOS**（Apple Silicon / Intel）或 **Linux**（x64 / arm64，桌面或无图形界面的服务器） |
 | QQ 后端 | **Windows**：SnowLuma（推荐，完整版 `…-win-x64.zip`）或 NapCat（NapCat.Shell）；**macOS**：NapCat（用 NapCat Mac 安装器装进 Mac 版 QQ）。都由用户自行下载、安装、登录；**Linux**：SnowLuma 2.x（`…-linux-x64.tar.gz` / `…-linux-arm64.tar.gz`）或 NapCat |
 | 接口平台 | 仓库里的 `interface-platform/`：桥接和 QQ 后端之间的统一接入层，由控制中心启停。桥接经它收发（「接入桥接」后） |
@@ -184,7 +184,7 @@ nc -z 127.0.0.1 3001 && echo OK          # 预期 OK
 
 端口不通 → 告诉用户「请先启动 QQ 后端并登录 QQ，开启 OneBot WebSocket 服务端」，然后等待；**不要尝试启动它**。
 
-## 5. 获取 qq-bridge-enhanced
+## 5. 获取 qq-bridge-nexus
 
 二选一。下文把解压/克隆后的目录称为 **`<BRIDGE>`**。**路径里不要有中文或空格**（避免批处理与路径编码问题）。
 接口平台就在 `<BRIDGE>/interface-platform/` 里，不需要单独获取。
@@ -192,27 +192,27 @@ nc -z 127.0.0.1 3001 && echo OK          # 预期 OK
 > 由 DSH agent 部署时：DSH 的沙箱可能**不允许在工作区里写入可执行文件或解压 ZIP**（报 EPERM / 拒绝访问）。
 > 遇到时请用户**手动创建**目标文件夹（必要时手动解压），再让 agent 在其中继续后面的步骤。
 
-**方式 A：Release ZIP（推荐）**——到 https://github.com/h-D-ACE/dsh-qq/releases 下载最新的 `qq-bridge-enhanced-v<版本>.zip`
+**方式 A：Release ZIP（推荐）**——到 https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases 下载最新的 `qq-bridge-nexus-v<版本>.zip`
 和同名 `.sha256`，校验后解压：
 
 ```powershell
 # Windows（在想放置的父目录执行；把 <版本> 换成实际版本号）
-(Get-FileHash .\qq-bridge-enhanced-v<版本>.zip -Algorithm SHA256).Hash.ToLower()   # 应与 .sha256 文件里的值一致
-Expand-Archive .\qq-bridge-enhanced-v<版本>.zip -DestinationPath .
-cd .\qq-bridge-enhanced-v<版本>
+(Get-FileHash .\qq-bridge-nexus-v<版本>.zip -Algorithm SHA256).Hash.ToLower()   # 应与 .sha256 文件里的值一致
+Expand-Archive .\qq-bridge-nexus-v<版本>.zip -DestinationPath .
+cd .\qq-bridge-nexus-v<版本>
 ```
 
 ```bash
 # macOS
-shasum -a 256 qq-bridge-enhanced-v<版本>.zip     # 应与 .sha256 文件里的值一致
-unzip qq-bridge-enhanced-v<版本>.zip && cd qq-bridge-enhanced-v<版本>
+shasum -a 256 qq-bridge-nexus-v<版本>.zip     # 应与 .sha256 文件里的值一致
+unzip qq-bridge-nexus-v<版本>.zip && cd qq-bridge-nexus-v<版本>
 ```
 
 **方式 B：git**
 
 ```
-git clone https://github.com/h-D-ACE/dsh-qq.git qq-bridge-enhanced
-cd qq-bridge-enhanced
+git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git qq-bridge-nexus
+cd qq-bridge-nexus
 ```
 
 预期：`<BRIDGE>` 下能看到 `package.json`、`src/bridge.js`、`config.example.json`、`interface-platform/`、
@@ -457,9 +457,9 @@ curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/admin/status | python
 15. **上下文压缩**（v1.1.1）：控制台「令牌与花费 → 上下文压缩」能看到每个会话上一步读了多少；某个会话超过阈值后，
     这一轮结束约 20 秒，桥接日志出现 `[compact] 已压缩 … 的上下文（自动：…）`，下一轮它每步读的 token 明显变少。
 
-16. **按会话设置人格**（v1.1.2）：控制台「人格与角色 → 按会话设置人格」把管理员私聊设成另一张卡、生效方式选「立即切换」后点「保存」
+16. **按会话设置人格**：控制台「人格与角色 → 按会话设置人格」把管理员私聊设成另一张卡、生效方式选「立即切换」后点「保存」
     → 页面显示「已唤醒 1 个会话重新读卡」，只有这个私聊收到新卡，群里照旧；或在私聊里发 `/role 名字`、`/role default` 只改这个私聊。
-17. **断线补收**（v1.1.2）：让电脑睡眠（或停掉 NapCat）超过 2 分钟，期间让人在群里 @ 机器人，再恢复 →
+17. **断线补收**：让电脑睡眠（或停掉 NapCat）超过 2 分钟，期间让人在群里 @ 机器人，再恢复 →
     桥接日志出现 `[backfill] 和 QQ 的连接断过…` 和 `[backfill] 补收完成：group:… N 条`，AI 随后被唤醒并看到这几条（唤醒提示说明是补收的）。
 
 每一项的离线等价测试都在 `npm run test:audit` 里；**第 1~17 项本身需要部署后集成验证**。

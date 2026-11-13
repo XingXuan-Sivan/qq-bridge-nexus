@@ -43,14 +43,14 @@ test('soulkit-memory：注册 memory-provider/1，key 削平台前缀，query �
   assert.deepEqual(provider.capabilities, { sync: false, write: false, listable: true });
 
   const longQuery = '问'.repeat(700);
-  const result = await provider.fetch({ key: 'qq:group:903621673', query: longQuery });
+  const result = await provider.fetch({ key: 'qq:group:100000003', query: longQuery });
   assert.equal(result.text, TEXT);
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /\/api\/recall$/);
   assert.equal(calls[0].options.method, 'POST');
   const body = JSON.parse(calls[0].options.body);
   assert.equal(body.platform, 'qq');
-  assert.equal(body.chat, 'group:903621673');
+  assert.equal(body.chat, 'group:100000003');
   assert.equal(body.view, 'self');
   assert.equal(body.query.length, 600);
   assert.equal('limit' in body, false, '字符预算不是条数预算，不应透传成 limit');
@@ -58,9 +58,9 @@ test('soulkit-memory：注册 memory-provider/1，key 削平台前缀，query �
 
 test('soulkit-memory：私聊 key 与认不出的 key 都按 soulkit 形态传', async () => {
   const { provider, calls } = await setup();
-  await provider.fetch({ key: 'qq:private:2897715886' });
+  await provider.fetch({ key: 'qq:private:1000000002' });
   await provider.fetch({ key: 'custom:key' });
-  assert.equal(JSON.parse(calls[0].options.body).chat, 'private:2897715886');
+  assert.equal(JSON.parse(calls[0].options.body).chat, 'private:1000000002');
   assert.equal(JSON.parse(calls[1].options.body).chat, 'custom:key');
   assert.equal('query' in JSON.parse(calls[0].options.body), false, '空 query 不传');
 });

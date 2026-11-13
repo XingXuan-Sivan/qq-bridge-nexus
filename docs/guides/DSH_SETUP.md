@@ -9,11 +9,11 @@
 1. **克隆/获取仓库**：
 
    ```bash
-   git clone https://github.com/h-D-ACE/dsh-qq.git
+   git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git
    cd dsh-qq
    ```
 
-   > 默认分支 `main` 即当前版本 **v1.1.2**（适配 DSH 0.2.0-rc.2 与 0.2.1），clone 下来无需切换分支；也可以从 [Releases](https://github.com/h-D-ACE/dsh-qq/releases) 下载 ZIP。完整部署以 [../DSH_DEPLOYMENT.md](../DSH_DEPLOYMENT.md) 为准。
+   > 默认分支 `main` 即当前版本 **v0.1.0**（适配 DSH 0.2.0-rc.2 与 0.2.1），clone 下来无需切换分支；也可以从 [Releases](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases) 下载 ZIP。完整部署以 [../DSH_DEPLOYMENT.md](../DSH_DEPLOYMENT.md) 为准。
 
 2. **安装依赖**：
 
@@ -118,7 +118,7 @@
 - **发送消息报 `unauthorized` / HTTP 401**：`config.json` 的 `snowluma.accessToken` 与 SnowLuma 的 OneBot 实例 token 不一致。将 SnowLuma WebUI 中 HTTP 与 WebSocket 两端的 accessToken 设为相同，再填入 `config.json`，然后重启桥。
 - **DSH 一直 401（事件流「本次收到 0 帧」、读模型目录 / 写设置都报 HTTP 401，QQ 消息全部入队）**：几乎都是**桥接读错了 DSH 的数据目录**，不是 DSH 版本或协议变了。
   - 原理：桥接用 DSH 数据目录里 `.credentials.yaml` 的 `client-connection/browser-session` 签名密钥在本机铸造会话 Cookie（DSH 0.1.7 起进程启动 token 只在内存里，不能再从日志读）。数据目录默认是 `~/.dsh`（官方桌面版在 Windows / macOS / Linux 上都用它，已对照 0.2.1-rc.3 安装包核实）。DSH 实际用的若是别的目录——自己设过 `DSH_HOME`、用了第三方桌面壳（反馈里见过 `%APPDATA%\dsh-desktop\harness`）——桥接读到的就是另一份或陈旧的密钥，所有请求都 401，事件流连上就被关掉，所以一帧都没有。
-  - 新版桥接（v1.1.2 之后，见 CHANGELOG「未发布」）遇到 401 会直接在日志里说明：读的是哪个文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录（10 分钟提示一次）。
+  - 新版桥接（见 CHANGELOG）遇到 401 会直接在日志里说明：读的是哪个文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录（10 分钟提示一次）。
   - 处理：把环境变量 `DSH_HOME` 设成 DSH 实际的数据目录（里面有 `.credentials.yaml` 和 `profiles` 文件夹）。Windows：`setx DSH_HOME "<目录>"`，然后**关掉再重新打开**控制中心（`setx` 只对之后新开的程序生效）；macOS / Linux：`export DSH_HOME="<目录>"` 后启动控制中心，Linux 服务写进服务的环境变量。
   - **还要重跑 `node scripts/setup-dsh.mjs` 并重启 DSH**：preset（qq-chat / qq-chat-v2）和 MCP 工具要装进 DSH 实际用的那个目录的 profile 里，否则鉴权通过后桥接也会因为缺 preset 拒绝建会话。
   - 自己验证时注意：DSH 的接口是 `POST /api/<命名空间>/<方法>`，请求体是 `{"type":"client-request","rpcId":"…","method":"session/modelCatalog","payload":{"args":{}}}`。**用 GET 请求会得到 404**（官方 DSH 也一样），不代表接口不存在；`/api/session/stream` 在官方 DSH 上也不存在。事件流仍是 WebSocket `/api/remote.mux`。

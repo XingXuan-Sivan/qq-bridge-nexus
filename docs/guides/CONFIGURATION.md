@@ -1,6 +1,6 @@
 # 配置说明（v0.3.0 起新增的字段）
 
-> **2026-11-09 规划**：配置结构将按 [GLOBAL_CONFIG.md](../GLOBAL_CONFIG.md) 的三层模型重构；`social` / `socialV2` 的行为字段会迁入 `config/behaviors/*.yml`，`social-v1` / `social-v2` / `access` 页面会删除。本文只描述**当前版本**的字段，实施后同步改写。
+> **2026-11-09 规划**：配置结构将按 ](../archive/models/GLOBAL_CONFIG.md) 的三层模型重构；`social` / `socialV2` 的行为字段会迁入 `config/behaviors/*.yml`，`social-v1` / `social-v2` / `access` 页面会删除。本文只描述**当前版本**的字段，实施后同步改写。
 
 原版字段（`dsh.*`、`snowluma.*`、`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
 本文只列 v0.3.0 起新增的配置段、工具开关和状态文件。所有字段都可省略，省略即取下表默认值；**默认值都是安全的**。
@@ -41,7 +41,7 @@
 | `maxPendingRequests` | `3` | 同时待确认的申请上限 |
 | `idleTimeoutMs` | `1800000` | 高权限闲置自动回落；`0` = 关闭（不建议） |
 | `maxElevatedMs` | `{ "L1": 14400000, "L2": 7200000, "L3": 3600000 }` | 各级别最长持续时间 |
-| `hibernateChatSessions` | `true` | 进 agent 时聊天会话休眠、回落后原样复用（v1.0.3）；`false` = 切换即归档（旧行为） |
+| `hibernateChatSessions` | `true` | 进 agent 时聊天会话休眠、回落后原样复用；`false` = 切换即归档（旧行为） |
 | `dormantMaxMs` | `86400000` | 休眠会话最长保留多久，超过归档 |
 | `handover` | `true` | 记录 owner 私聊往来，并在 owner 会话因切换换新 / 恢复时注入交接（只含 owner 私聊、已脱敏）；`false` = 不记录不注入 |
 | `totpMaxFailures` | `5` | TOTP 连续失败多少次锁定 |
@@ -70,11 +70,11 @@ TOTP 秘密**不在** `config.json` 里：用 `npm run admin:totp-setup` 写入 
 | `personProfile` | `qq_get_person` / `qq_note_person` | 按 QQ 号查看/记录人物（按可见范围过滤；只能写当前会话作用域） |
 | `requestMode` | `qq_request_mode_change` | 只在 owner 私聊会话里登记申请；不能执行、不能确认 |
 | `crossGroup` | `qq_cross_group_query` | 还需要 `crossGroup.enabled` 与链接授权 |
-| `schedule`（v1.1.0） | `qq_schedule_create / list / update / delete` | AI 在管理员私聊里登记定时任务（定时任务的总开关在控制台「定时任务」页面，和这个工具开关是两回事）。见 [SCHEDULER.md](SCHEDULER.md) |
-| `webImage`（v1.1.1，**默认 `false`**） | `qq_search_images` / `qq_preview_image` / `qq_send_web_image` | 管理员私聊里搜图并发送：只能发搜到且看过的候选，图片由桥接安全下载；搜索词会发给 Bing。必须显式设为 `true`，改后重启 DSH |
-| `handoverMemory`（v1.1.0） | —（不是工具） | 切到 agent 时，把二代仿真里 AI 在管理员私聊记下的长期记忆（最多 1500 字，只取管理员私聊）一起交接；`false` = 只交接最近的私聊往来 |
+| `schedule` | `qq_schedule_create / list / update / delete` | AI 在管理员私聊里登记定时任务（定时任务的总开关在控制台「定时任务」页面，和这个工具开关是两回事）。见 [SCHEDULER.md](SCHEDULER.md) |
+| `webImage`（**默认 `false`**） | `qq_search_images` / `qq_preview_image` / `qq_send_web_image` | 管理员私聊里搜图并发送：只能发搜到且看过的候选，图片由桥接安全下载；搜索词会发给 Bing。必须显式设为 `true`，改后重启 DSH |
+| `handoverMemory` | —（不是工具） | 切到 agent 时，把二代仿真里 AI 在管理员私聊记下的长期记忆（最多 1500 字，只取管理员私聊）一起交接；`false` = 只交接最近的私聊往来 |
 
-## `socialV2.compact` —— 会话太长时自动压缩（v1.1.1）
+## `socialV2.compact` —— 会话太长时自动压缩
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -86,7 +86,7 @@ TOTP 秘密**不在** `config.json` 里：用 `npm run admin:totp-setup` 写入 
 
 压缩只把较早的历史换成摘要，桥接自己的记忆（群规则、话题、印象）不受影响；压缩后下一次唤醒会重新完整给黑话表、表情块和角色卡。
 
-## 定时任务与定时静默（v1.1.0）
+## 定时任务与定时静默
 
 这两项的设置**不在 `config.json` 里**，在桥接控制台改（「定时任务」页面；「运行总览 → 静默开关」），保存在 `state/scheduler.json` 与 `state/silence-schedule.json`，改完立即生效、不用重启。
 说明见 [SCHEDULER.md](SCHEDULER.md)、[SILENCE.md](SILENCE.md)。
@@ -138,7 +138,7 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 只在网关是 NapCat 时用到：NapCat 的 `add_custom_face` 只接受本地文件路径，桥接会把已校验的表情字节写成一个随机名、权限 0600 的临时文件交给它，调用结束立即删除。
 留空时：macOS 用 QQ 沙盒容器里的 `~/Library/Containers/com.tencent.qq/Data/tmp`（App Store 版 QQ 读不到系统临时目录），其它系统用系统临时目录。SnowLuma 不用这个目录。
 
-## `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` / `dsh.vision` —— 模型选择（v1.0.2 起可在控制台改）
+## `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` / `dsh.vision` —— 模型选择
 
 推荐在桥接控制台「运行总览 → DSH 模型与思考强度」里选：提供方、模型、思考强度三个下拉联动，选项全部来自 DSH 的模型目录（`session.modelCatalog`），
 保存后对已有会话的下一条消息生效，不用重启桥接。手改 `config.json` 也可以，重启桥接后生效。
@@ -170,7 +170,7 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 
 一般不用手改：在控制中心「接口平台 → 设置」点「接入桥接」，会写好这几个字段并把原值备份到 `state/platform-link-backup.json`，「恢复直连」可还原。「接入桥接」时数据令牌和地址由平台经管理接口交给控制中心，控制中心不读平台的文件，所以平台必须正在运行。详见同级目录的 `interface-platform/README.md`。
 
-## `snowluma.backfill` —— 断线期间错过的消息，恢复后补收（v1.1.2）
+## `snowluma.backfill` —— 断线期间错过的消息，恢复后补收
 
 电脑睡眠（比如 Mac 合盖）、NapCat 重启、桥接停过的时候，这段时间群里和私聊的消息不会作为事件推给桥接，AI 也就不知道有人 @ 过它。
 桥接发现两次事件包隔得太久，就在连接恢复后用 `get_group_msg_history` / `get_friend_msg_history` 把这段时间的消息补收进未读。
@@ -198,12 +198,12 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 | `state/admin/audit.jsonl`（滚动 `.1`~`.5`） | 管理审计（哈希链） |
 | `state/admin/totp.json` | TOTP 秘密（如果用文件方式） |
 | `state/mode.json` | 原版的模式兜底文件，v0.3.0 额外写入 `level` |
-| `state/admin/owner-transcript.json` | （v1.0.3）owner 私聊往来记录，切换模式时交接用；脱敏、限长，0600 |
-| `state/scheduler.json` | （v1.1.0）定时任务：总开关、默认时区、安全限制、任务列表、执行记录；0600 |
-| `state/silence-schedule.json` | （v1.1.0）定时静默：时间段、时区、静默期间的行为选项；0600 |
-| `state/sticker-describe-session.json` | （v1.1.1）一键补表情说明用的专用看图会话 ID 与 preset；删掉会在下次使用时重建 |
-| `state/prompt-blocks.json` | （v1.1.1）各会话上次完整拿到的黑话表 / 表情块指纹（只存指纹）；删掉只会让下一次唤醒重新完整给 |
-| `state/role-backups/` | （v1.1.1）「恢复默认人格」时，改过的那份角色卡先备份到这里（每个人格最多 10 份，0600）；可以随时删 |
-| `state/upstream-seen.json` | （v1.1.2）最后一次收到 QQ 事件包的时间（每分钟最多写一次），桥接停过之后用来发现断档、补收错过的消息；可以随时删 |
-| `state/current-role.json` | 当前人格与手动静默：`{ role, mode }`；（v1.1.2）可选的 `byKey` 按会话单独设置人格卡，值为人格名或 `null`（这个会话不挂卡），不在里面的会话用全局 `role`。读的时候人格名和会话 key 都重新校验；建议在控制台「人格与角色 → 按会话设置人格」里改 |
-| `state/role-seen.json` | （v1.1.0）每个会话读到的角色卡版本（只存会话 ID 与指纹，不存内容）；删掉只会让各会话下一次唤醒再收到一次当前角色卡；0600 |
+| `state/admin/owner-transcript.json` |owner 私聊往来记录，切换模式时交接用；脱敏、限长，0600 |
+| `state/scheduler.json` |定时任务：总开关、默认时区、安全限制、任务列表、执行记录；0600 |
+| `state/silence-schedule.json` |定时静默：时间段、时区、静默期间的行为选项；0600 |
+| `state/sticker-describe-session.json` |一键补表情说明用的专用看图会话 ID 与 preset；删掉会在下次使用时重建 |
+| `state/prompt-blocks.json` |各会话上次完整拿到的黑话表 / 表情块指纹（只存指纹）；删掉只会让下一次唤醒重新完整给 |
+| `state/role-backups/` |「恢复默认人格」时，改过的那份角色卡先备份到这里（每个人格最多 10 份，0600）；可以随时删 |
+| `state/upstream-seen.json` |最后一次收到 QQ 事件包的时间（每分钟最多写一次），桥接停过之后用来发现断档、补收错过的消息；可以随时删 |
+| `state/current-role.json` | 当前人格与手动静默：`{ role, mode }`；可选的 `byKey` 按会话单独设置人格卡，值为人格名或 `null`（这个会话不挂卡），不在里面的会话用全局 `role`。读的时候人格名和会话 key 都重新校验；建议在控制台「人格与角色 → 按会话设置人格」里改 |
+| `state/role-seen.json` |每个会话读到的角色卡版本（只存会话 ID 与指纹，不存内容）；删掉只会让各会话下一次唤醒再收到一次当前角色卡；0600 |

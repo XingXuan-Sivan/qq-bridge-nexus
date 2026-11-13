@@ -3,25 +3,27 @@
 > 一句话说明每个顶层目录干什么、`scripts/` 里的命名约定是什么、哪些脚本像是过期的一次性产物。
 > 本文**只描述现状**，不构成改动指令。文档索引见 [README.md](README.md)。
 >
-> 最后核对：2026-09-29（v0.2.0 / DSH 0.2.0-rc.2 适配）。新增目录/脚本时请顺手补一行。
+> 最后核对：2026-11-13（v0.1.0 发布基线 / 四层配置模型）。新增目录/脚本时请顺手补一行。
 
 ---
 
 ## 一、顶层布局
 
 ```
-DSH/                         ← 工作区根（不是仓库根）
-├── qq-bridge/               ← 本仓库（QQ ↔ DSH 桥接）
-├── voice-tool/              ← 独立「发语音」工具（从 qq-bridge 拆出；不依赖桥接运行）
-├── 发语音-图形界面.cmd      ← 工作区根的双击启动器 → 进 voice-tool/ 起图形界面
-└── 重启DSH-加载语音工具.cmd  ← 工作区根的运维启动器（重启 DSH 让 MCP 工具重新挂载）
+qq-bridge-nexus/             ← 仓库根 = 项目根（QQ ↔ DSH 桥接）
+├── start.bat / restart.bat / control-center*.{bat,vbs,command}
+├── package.json / config.example.json / plugins.example.json
+├── README.md / RULES.md / CHANGELOG.md / NOTICE.md / LICENSE
+└── <下列目录>
 ```
 
-`qq-bridge/` 内部：
+> 「发语音」独立工具 `voice-tool/` 与本仓库**平级**、不属于本仓库，发布后 clone 不会带上它（见第五节）。
+
+仓库内部：
 
 | 目录 | 作用 | 能不能删/动 |
 | --- | --- | --- |
-| `src/` | **桥接内核**：主程序、DSH 客户端、三个 MCP server、黑话/表情/语音共享库 | 不能动。`bridge.js` 是主程序（约 10,400 行，QSH 计划拆分）；`voice-core.js` 与 `snowluma-conn.js` 是**独立工具也在用的单一实现**。**目录里只应有 `.js`**：曾经的 `bridge.js.bak-*` 会污染全局搜索并看起来像 module，2026-09-20 已移出（见下） |
+| `src/` | **桥接内核**：主程序、DSH 客户端、MCP server、黑话/表情/语音共享库，以及 `session/` `runtime/` `capabilities/` `behaviors/` `platforms/` 等按职责拆出的模块 | 不能动。`bridge.js` 是主程序（约 16,200 行，仍待拆分）；`voice-core.js` 与 `snowluma-conn.js` 是**独立工具也在用的单一实现**。**目录里只应有 `.js`**：曾经的 `bridge.js.bak-*` 会污染全局搜索并看起来像 module，2026-09-20 已移出（见下） |
 | `src/social/` `src/admin/` `src/lib/` `src/bridge-extensions.js` | **v0.3.0 新增**：人物库与入群事件、管理通道（模式控制器/TOTP/审批/审计/命令解析）、版本化 JSON 存储；`bridge.js` 只接线 | 新功能的业务规则都在这里，配套离线测试 `scripts/test-continuity.mjs` / `test-admin-control.mjs` / `test-integration-v030.mjs` |
 | `src/session/` | **P7 第三步 + 会话子系统**。`reset.mjs`——`/reset` 的完整清理序列（删挂账 → 清 30 项内存态 → 落盘 → 停 DSH → 归档 → 回执）；`access.mjs`——两态全局准入（每轴 `{mode,entries}`，白名单/黑名单唯一真相）；`directory.mjs`——会话档案目录；`mode.mjs`——按会话有效运行模式；`store.mjs`——`sessions.json` 读写与「读失败/损坏后绝不回写」不变量；`registry.mjs`——会话映射与策略指纹的唯一入口（`bindSession` 两格一起写、`unbind` 两格一起删、`isCurrent` 三条件）；`policy.mjs`——策略指纹怎么拼（级别只在 closed-agent 进指纹）+「当前会话」三条件判定；`bridge.js` 只留薄包装 | 四者都是「纯函数 + 注入依赖」，不读全局；新增按会话记账的缓存必须同步登记进 `reset.mjs` 的 deps，否则 `scripts/test-session-reset.mjs` 会红；准入规则改这里后跑 `scripts/test-session-access.mjs`；持久化语义改这里后跑 `scripts/test-session-store.mjs`；映射/指纹规则改这里后跑 `scripts/test-session-registry.mjs` 与 `scripts/test-session-policy.mjs` |
 | `src/upstream/` | **P7 第四步：上游适配**。`snowluma-health.mjs`——SnowLuma 接收链路健康度：区分「自报 good=false（[Hook] 收不到 QQ 数据）」与「长时间没有事件包（OneBot 服务/进程卡住）」两个故障面，边沿触发告警，`get_status` 兜底轮询；`dsh-probe.mjs`——DSH 探活 + 自动识别地址的节流重试（`dsh.baseUrl` 留空时 DSH 换随机端口要能重识别，但不能每 5 秒扫一次端口）；`snowluma-conn-update.mjs`——连接参数自愈的决策表（HTTP/WS 两个 token 各修哪个、发现到的端点该不该跟随、`followDiscoveredEndpoint=false` 时绝不写回 URL）；`bridge.js` 只喂事件、应用结果与写盘 | `scripts/test-upstream-snowluma-health.mjs`（10 条）、`test-upstream-dsh-probe.mjs`（8 条）、`test-upstream-conn-update.mjs`（8 条）；改健康判定同时要跑 `test-snowluma-upstream-health`（它在模块与 bridge 两侧断言「good 只能来自 get_status/心跳」） |
@@ -29,7 +31,7 @@ DSH/                         ← 工作区根（不是仓库根）
 | `src/launcher/` `public/control-center/` `control-center.bat` `control-center-hidden.vbs` | **v0.4.0 控制中心**：托管桥接与 SnowLuma 子进程的本地网页（见 guides/CONTROL_CENTER.md） | 配套测试 `scripts/test-control-center.mjs` |
 | `src/plugins/` | **v1.2.0 插件内核**：清单校验（`manifest.mjs`）、配置（`config.mjs`）、审计轮转（`audit.mjs`）、人格 provider 注册表（`persona.mjs`）、按权限收口的 host-api（`host-api.mjs`）与加载/分发（`kernel.mjs`）；`bridge.js` 只接三处钩子与两处人格注入点 | 设计见 `PLUGIN_KERNEL.md`；改这里必须跑 `scripts/test-plugin-kernel.mjs` |
 | `src/skills/` | **技能清单（路线图 §9.2）**：`index.mjs` 只读扫描技能根目录（`SKILL.md` 前 600 字，认 `name` / `description`），产出「可用技能」注入块 `core-skills`——标题 1 行 + 最多 `skills.maxEntries` 行 + 溢出提示 1 行，全文由 AI 需要时自己读；同名技能按根顺序去重；扫描结果缓存 60s。`/api/extensions` 的技能列表与提示词注入同源 | `scripts/test-skills-index.mjs`（解析/去重/行数/字数预算/缓存）；改行数或预算后跑 `scripts/test-core-prompt-blocks.mjs` 的 `core-skills` 用例 |
-| `src/extensions/` | **扩展平台后端（P1/P2）**：`catalog.mjs` 汇总内置/外部条目，`mcp-inventory.mjs` 真实 `tools/list`，`mcp-store.mjs`/`secrets.mjs` 外部 MCP 配置与秘密，`mcp-runtime.mjs` 连接/超时/日志，`preset-policy.mjs` 读 `extensions.yml`，`hub.mjs` 过滤与调用，`hub-token.mjs` 本机 Hub 凭据；`src/mcp-bridge-ext.js` 是对 DSH 暴露的 MCP server | 改目录/API 后跑 `test-extension-*` 与 `test-console-static/UI`；Hub 三工具只做外部 MCP + 技能，边界见 `EXTENSION_PLATFORM_DEVIATIONS.md` E7–E11 |
+| `src/extensions/` | **扩展平台后端（P1/P2）**：`catalog.mjs` 汇总内置/外部条目，`mcp-inventory.mjs` 真实 `tools/list`，`mcp-store.mjs`/`secrets.mjs` 外部 MCP 配置与秘密，`mcp-runtime.mjs` 连接/超时/日志，`preset-policy.mjs` 读 `extensions.yml`，`hub.mjs` 过滤与调用，`hub-token.mjs` 本机 Hub 凭据；`src/mcp-bridge-ext.js` 是对 DSH 暴露的 MCP server | 改目录/API 后跑 `test-extension-*` 与 `test-console-static/UI`；Hub 三工具只做外部 MCP + 技能 |
 | `src/presets/` | **预设编辑器（P3）**：`store.mjs` 以 `profiles/agent-platforms/dsh/agents/<id>/` 为权威源，读取/写入 `preset.yml`、`extensions.yml`、`agent.cordis.yml`，写前备份到 `state/preset-editor-backups/`，`apply` 执行 build + setup-dsh，失败恢复；不按 preset 放行原生工具（共用 guard，见 E15） | `test-preset-store.mjs`；改写入格式必须检查注释/引号是否被 YAML dump 重排 |
 | `extensions/` | **数据型扩展目录**：外部 MCP 配置在 `extensions/mcp/<id>/server.json`；后续技能/市场源也落这里；秘密值不写这里，只存 `secret:<name>` 引用 | 用户配置，别手删；增删改走控制台，写入原子化、保留 createdAt |
 | `src/persona-resolve.mjs` | **v1.2.0 人格三层解析**：会话覆盖（`current-role.json` 的 `byKey`）→ 外部 provider（soulkit）→ 全局本地卡；`off` 硬覆盖 provider，缺卡告警后继续往下 | 设计见 `PERSONA_PROVIDER.md`；配套 `scripts/test-persona-resolve.mjs` |
@@ -51,7 +53,7 @@ DSH/                         ← 工作区根（不是仓库根）
 
 ## 二、`scripts/` 命名约定
 
-脚本共 87 个文件（83 个 `.mjs` + 4 个 JSON 基线，另有 `fixtures/` 目录）。按前缀区分用途：
+脚本共 189 个跟踪文件（183 个 `.mjs` + 4 个 JSON 基线，另有 `fixtures/` 目录）。按前缀区分用途：
 
 | 前缀 / 形态 | 含义 | 归宿 |
 | --- | --- | --- |
@@ -88,27 +90,33 @@ DSH/                         ← 工作区根（不是仓库根）
 
 ```
 docs/
-├── README.md     # 文档索引（每篇一句话 + 是否仍然有效）  ← 先看这个
-├── FOLDER_MAP.md # 本文件
-├── guides/       # 面向使用者/运维：DSH_SETUP / DSH_020_ADAPTATION / SECURITY_BASELINE / CONFIGURATION / ADMIN_CHANNEL / CONTINUITY / CONTROL_CENTER / SCHEDULER / SILENCE / TESTING / TOKEN_USAGE_CONSOLE / CONSOLE-UI-TESTING / PRIVACY / VOICE
-├── release/      # 发布说明（RELEASE_NOTES_v*.md）与发布流程 PUBLISHING.md
-├── design/       # 设计与规划：GEN2_SIMULATION_PLAN / SOCIAL_MODE_PLAN / DSH_QQ_TOOLS_PLAN / 真人语感策略
-├── research/     # 调研：SnowLuma功能调研 / 免打扰 / 表情包 / 本地模型选型
-├── audits/       # 审查与优化报告（最新的全项目体检是 AUDIT_REPORT_2026-09-20）
-└── legacy/       # 历史归档（已被取代 / 问题已全部修复的旧报告）
+├── README.md              # 文档索引（每篇一句话 + 现行/过时）  ← 先看这个
+├── FOLDER_MAP.md          # 本文件
+├── PROFILES_MODEL.md      # 四层配置模型（现行权威）
+├── SESSION_SUBSYSTEM.md   # 会话子系统
+├── MEMORY_SUBSYSTEM.md    # 记忆子系统
+├── INJECTION_PROFILE_CONFIG.md  # 注入块与提示词拼接
+├── EXTENSION_PLATFORM.md  # 扩展平台方案
+├── PLUGIN_KERNEL.md       # 插件内核
+├── PERSONA_PROVIDER.md    # 人格三层解析
+├── COMMAND_REGISTRY.md    # 命令注册表
+├── HTTP_BOUNDARY.md       # HTTP 边界约定
+├── CONSOLE.md             # 控制台结构、组件与门禁
+├── CONSOLE_FORMS.md       # 表单系统规格
+├── CONSOLE_FORM_LESSONS.md# 表单迁移踩坑
+├── DSH_DEPLOYMENT.md      # 从零部署
+├── guides/                # 面向使用者/运维（见 README 索引）
+├── release/               # PUBLISHING.md + RELEASE_NOTES_v0.1.0.md
+│   └── legacy/            # 上游时期的发布说明（v0.3.0–v1.1.2，只作存档）
+└── archive/               # 历史设计稿：models/ console/ capability/
 ```
 
-> ⚠️ **哪些文档真的会进公开仓库**：`.gitignore` 第 52–64 行把
-> `docs/audits/`、`docs/design/`、`docs/legacy/`、`docs/research/` 以及
-> `docs/guides/PROJECT_GUIDE.md`、`docs/guides/VOICE.md` **整体排除**了
-> （原因写在那里：这批文档里扫出过多份含本机真实路径的内容）。
-> 也就是说：**只有 `docs/README.md`、`docs/FOLDER_MAP.md` 与 `docs/guides/` 下的其余几篇会出现在 GitHub 上**，
-> 上面那份索引里指向 `audits/` `design/` `legacy/` `research/` 的链接**对公开读者是死链**，只在本机有效。
-> 因此：**要公开的新文档请放 `docs/guides/`**（新写的 `DSH_020_ADAPTATION.md` 就放这里）；
-> 放进那四个目录 = 只在本机可见，`git add` 会直接被 .gitignore 挡下。
+**什么会进公开仓库**：`docs/` 下除 `docs/_internal/` 外全部入库。`docs/_internal/` 是开发台账、阶段计划、
+实施报告与人格/提示词快照，被 `.gitignore` 整体排除，只在本机可见。
 
-规则：**根目录只留 `README.md` / `README.en.md` / `RULES.md` 三个文档**（v0.3.0 起另有发布类的 `CHANGELOG.md` / `NOTICE.md`），其余一律进 `docs/` 对应子目录，
-并在 [README.md](README.md) 索引里登记一行（含「仍然有效 / 被谁取代」）。
+**文档规则**：根目录只留 `README.md` / `README.en.md` / `RULES.md` 与发布类 `CHANGELOG.md` / `NOTICE.md`；
+其余进 `docs/` 并在 README 索引登记一行。新写的对外文档放 `docs/` 根或 `docs/guides/`；
+要留在本地的台账放 `docs/_internal/`。
 
 ---
 
@@ -145,7 +153,7 @@ docs/
 
 ---
 
-## 五、独立工具 `voice-tool/`（不在本仓库内）
+## 五、独立工具 `voice-tool/`（与本仓库平级，不随仓库发布）
 
 | 路径 | 作用 |
 | --- | --- |

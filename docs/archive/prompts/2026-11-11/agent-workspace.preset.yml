@@ -1,4 +1,0 @@
-# 本文件由 scripts/build-capability-artifacts.mjs 从 capability.yml 生成，请勿手工编辑。
-name: Agent · 工作区读写
-description: 在工作区内读写与执行，越界触发审批
-order: 30

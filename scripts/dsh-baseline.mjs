@@ -8,6 +8,7 @@
 // 用法：--check（与基线比对）/ --update（复核后刷新）/ --json（机器可读）。
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectDshToolNames } from './dsh-tool-names.mjs';
@@ -28,6 +29,13 @@ export function readBaseline() {
   }
 }
 
+/** 把本机家目录替换为 `<HOME>`：基线文件要入库，不能带个人路径。 */
+function redactHome(text) {
+  const home = os.homedir();
+  if (!home) return text;
+  return String(text).split(home).join('<HOME>').split(home.replace(/\\/g, '/')).join('<HOME>');
+}
+
 /** 采集当前快照。工具名只取宿主自身包，不含用户插件目录。 */
 export async function currentSnapshot() {
   const { names, packages, source } = collectDshToolNames({ pluginDirs: [] });
@@ -35,7 +43,7 @@ export async function currentSnapshot() {
   const tools = [...names.keys()].sort();
   return {
     dshVersion: dshVersion(),
-    source,
+    source: redactHome(source),
     packageCount: packages.length,
     toolCount: tools.length,
     tools,

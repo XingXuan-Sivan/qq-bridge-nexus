@@ -1,14 +1,14 @@
-# QQ ↔ DeepSeek Harness Bridge (qq-bridge-enhanced)
+# QQ ↔ DeepSeek Harness Bridge
 
-**Supported systems: Windows · macOS · Linux** (qq-bridge-enhanced v1.1.2 · repository <https://github.com/h-D-ACE/dsh-qq>)
+**Supported systems: Windows · macOS · Linux** (qq-bridge-nexus v0.1.0 · repository <https://github.com/XingXuan-Sivan/qq-bridge-nexus>)
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
-> **qq-bridge-enhanced v1.1.2** ([h-D-ACE/dsh-qq](https://github.com/h-D-ACE/dsh-qq)) — a fork of [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 (with the upstream r4 fixes merged in; origin and licensing in [NOTICE.md](NOTICE.md)).
+> **qq-bridge-nexus v0.1.0** ([XingXuan-Sivan/qq-bridge-nexus](https://github.com/XingXuan-Sivan/qq-bridge-nexus)) — started from [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 and now a full rewrite (origin and licensing in [NOTICE.md](NOTICE.md)).
 > It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and runs on **Windows, macOS and Linux**.
 > Most documentation is in Chinese: the step-by-step deployment guide is [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md), the changelog is [CHANGELOG.md](CHANGELOG.md),
 > and the documentation index is [docs/README.md](docs/README.md).
-> Issues and release downloads: [Issues](https://github.com/h-D-ACE/dsh-qq/issues) · [Releases](https://github.com/h-D-ACE/dsh-qq/releases).
+> Issues and release downloads: this repository's Issues / Releases.
 
 QQ friends/groups become DSH conversations, and agent replies (including questions and tool approvals) are sent back to QQ.
 
@@ -25,18 +25,18 @@ QQ friends/groups become DSH conversations, and agent replies (including questio
 | Owner admin channel | Private chat `/mode agent L1~L3` → confirmation code → (TOTP for L3) → switch; `/panic` falls back at once | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
 | Permission tiers | L0 group member / L1 read-only agent / L2 workspace read-write / L3 full access with per-action approval; there is no approval-free mode | same |
 | Approvals, fallback, audit | Numbered approvals `#n` with the real command arguments; idle high-privilege sessions fall back after 30 minutes; every change is reported to the owner; hash-chained audit log | same |
-| Mode switches keep memory (v1.0.3) | Entering agent mode puts the group / private chat sessions to sleep instead of archiving them; after fallback they resume as-is. The new agent session gets a handover of the recent private chat (owner private only, redacted; since v1.1.0 it can also include the AI's long-term notes from that chat). High-privilege sessions are still archived | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
-| Scheduled tasks (v1.1.0) | Send a fixed message, or have the AI say something, at set times in a chosen time zone: daily / weekly / workdays / monthly / random N times / cron and more, with a live preview of the next 5 runs. Also from the owner's private chat via `/remind` or by asking the AI; group targets need the owner's confirmation | [SCHEDULER.md](docs/guides/SCHEDULER.md) |
-| Scheduled silence (v1.1.0) | Time ranges (several, each with its own switch, chosen days and time zone) during which the AI is not woken at all, to save tokens; messages are still recorded, and conversations that addressed the AI get one wake when the range ends. One click fills in DeepSeek's peak hours | [SILENCE.md](docs/guides/SILENCE.md) |
-| Persona changes take effect (v1.1.0) | In simulation mode (`reserved2`), switching or editing the persona now reaches running conversations at their next wake (or immediately, if you choose), without recreating sessions; memory and group rules are untouched | [roles/README.md](roles/README.md) |
-| Long-session compaction (v1.1.1) | When a simulation conversation's last step read more than a threshold (300k tokens by default; adjustable from 50k to 800k in the console, or leave it to DSH at about 800k), the bridge compacts it once while idle. The slang table and sticker block are only injected in full when they change. Measured: group A went from 679k to 33k tokens per step | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| Token mis-copy recovery (v1.1.1) | When the AI mis-copies its session token by one or two characters it gets a clear hint; after 3 misses the bridge issues a fresh token (session and memory untouched). Audited internal output in simulation mode no longer posts an interception notice to the group | [CHANGELOG.md](CHANGELOG.md) |
-| Usability (v1.1.1) | Scheduled silence can wake only on @ / private messages; "Restore default persona" in the console (the edited copy is backed up first); edit the send limits on the overview page and see how often they were hit; one click to have the AI describe stickers | [SILENCE.md](docs/guides/SILENCE.md) |
-| Per-conversation persona (v1.1.2) | Each group / private chat can use its own persona card or none; the rest follow the global one. The owner's `/role <name>` / `/role off` / `/role default` in QQ now changes only the current conversation; a change only wakes conversations whose card actually changed | [roles/README.md](roles/README.md) |
-| Backfill after disconnects (v1.1.2) | After the link to QQ drops (computer sleep, NapCat restart…), the bridge fetches the messages it missed through the history API, keeping their original time so the AI knows they are late; commands and confirmation codes in backfilled messages are never executed; failed fetches are retried | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| Quoted merged forwards (v1.0.3) | Quoting an older merged forward no longer stalls the message for 30 s; the AI can open the quoted forward (nested ones too), results are cached | [CHANGELOG.md](CHANGELOG.md) |
+| Mode switches keep memory | Entering agent mode puts the group / private chat sessions to sleep instead of archiving them; after fallback they resume as-is. The new agent session gets a handover of the recent private chat (owner private only, redacted; since v1.1.0 it can also include the AI's long-term notes from that chat). High-privilege sessions are still archived | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
+| Scheduled tasks | Send a fixed message, or have the AI say something, at set times in a chosen time zone: daily / weekly / workdays / monthly / random N times / cron and more, with a live preview of the next 5 runs. Also from the owner's private chat via `/remind` or by asking the AI; group targets need the owner's confirmation | [SCHEDULER.md](docs/guides/SCHEDULER.md) |
+| Scheduled silence | Time ranges (several, each with its own switch, chosen days and time zone) during which the AI is not woken at all, to save tokens; messages are still recorded, and conversations that addressed the AI get one wake when the range ends. One click fills in DeepSeek's peak hours | [SILENCE.md](docs/guides/SILENCE.md) |
+| Persona changes take effect | In simulation mode (`reserved2`), switching or editing the persona now reaches running conversations at their next wake (or immediately, if you choose), without recreating sessions; memory and group rules are untouched | [roles/README.md](roles/README.md) |
+| Long-session compaction | When a simulation conversation's last step read more than a threshold (300k tokens by default; adjustable from 50k to 800k in the console, or leave it to DSH at about 800k), the bridge compacts it once while idle. The slang table and sticker block are only injected in full when they change. Measured: group A went from 679k to 33k tokens per step | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| Token mis-copy recovery | When the AI mis-copies its session token by one or two characters it gets a clear hint; after 3 misses the bridge issues a fresh token (session and memory untouched). Audited internal output in simulation mode no longer posts an interception notice to the group | [CHANGELOG.md](CHANGELOG.md) |
+| Usability | Scheduled silence can wake only on @ / private messages; "Restore default persona" in the console (the edited copy is backed up first); edit the send limits on the overview page and see how often they were hit; one click to have the AI describe stickers | [SILENCE.md](docs/guides/SILENCE.md) |
+| Per-conversation persona | Each group / private chat can use its own persona card or none; the rest follow the global one. The owner's `/role <name>` / `/role off` / `/role default` in QQ now changes only the current conversation; a change only wakes conversations whose card actually changed | [roles/README.md](roles/README.md) |
+| Backfill after disconnects | After the link to QQ drops (computer sleep, NapCat restart…), the bridge fetches the messages it missed through the history API, keeping their original time so the AI knows they are late; commands and confirmation codes in backfilled messages are never executed; failed fetches are retried | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| Quoted merged forwards | Quoting an older merged forward no longer stalls the message for 30 s; the AI can open the quoted forward (nested ones too), results are cached | [CHANGELOG.md](CHANGELOG.md) |
 | DSH model picker | Provider / model / reasoning effort as three linked selects fed by DSH's own model catalog, applied from the next message without a restart; warns about third-party providers (chat content leaves DeepSeek), turns images into text for models that can't see images, and marks unpriced models as estimated | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| DSH 0.2.1 | Works with DSH 0.2.0-rc.2 and 0.2.1 (v1.1.2 was tested on the 0.2.1-rc.2 desktop app and re-checked on 0.2.1-rc.3); the 0.2.1 desktop app's random port is detected automatically, and the bridge follows it after DSH restarts | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
+| DSH 0.2.x | Works with DSH 0.2.0-rc.2 through 0.2.2-rc.2 (adaptation baseline in `dsh-baseline.json`); the random port is detected automatically and the bridge follows it after DSH restarts | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
 
 ## Deployment (no-window launchers)
 
@@ -119,7 +119,7 @@ Control center 127.0.0.1:3099 manages the bridge, the interface platform and the
 ## Repository layout
 
 ```
-qq-bridge-enhanced/            # the cloned folder is named dsh-qq
+qq-bridge-nexus/            # the cloned folder is named dsh-qq
   config.example.json        # sanitized config template (the real config.json is never in the repo)
   control-center-hidden.vbs  # Windows no-window launcher (control-center.bat = with a small window)
   control-center.command     # macOS launcher in Terminal; `npm run mac-app` builds the no-window app
@@ -133,7 +133,7 @@ qq-bridge-enhanced/            # the cloned folder is named dsh-qq
   state/                     # runtime data (not in repo)
 ```
 
-The standalone **voice sender tool** lives outside this repository (sibling folder `../voice-tool/`); its tests are skipped when it is absent.
+The standalone **voice sender tool** (`voice-tool/`) is an optional sibling project, not part of this repository; its tests are skipped when it is absent.
 
 ## Testing
 

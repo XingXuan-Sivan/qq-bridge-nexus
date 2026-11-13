@@ -54,9 +54,9 @@ state/sessions/
   defaults.json                     # 全局默认（version / defaults / migratedAt）
   qq/
     group/
-      903621673.json                # 一个会话一个文件
+      100000003.json                # 一个会话一个文件
     private/
-      2897715886.json
+      1000000002.json
 ```
 
 `defaults.json`：
@@ -66,7 +66,7 @@ state/sessions/
   "version": 2,
   "defaults": {
     "version": 2,
-    "passive": { "mode": "allow", "entries": ["qq:group:903621673"] },
+    "passive": { "mode": "allow", "entries": ["qq:group:100000003"] },
     "proactive": { "mode": "deny", "entries": ["qq:group:100003"] }
   },
   "migratedAt": 0
@@ -80,7 +80,7 @@ state/sessions/
 ```json
 {
   "version": 2,
-  "key": "qq:group:903621673",
+  "key": "qq:group:100000003",
   "displayName": "技术闲聊群",
   "mode": "inherit",
   "persona": { "mode": "inherit", "name": null },
@@ -384,7 +384,7 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 配置：
 
 ```json
-"ownerQQ": "2897715886",
+"ownerQQ": "1000000002",
 "admins": [
   { "qq": "123456789", "name": "副管理员", "caps": ["approve", "sessions", "scheduler", "memory"], "maxLevel": "L2", "notify": true, "exemptPassive": true }
 ]

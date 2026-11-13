@@ -365,7 +365,7 @@ span.time-field
 
 | 阶段 | 内容 | 工时 | 产出判据 |
 | --- | --- | --- | --- |
-| 1 | 令牌语义层 + `grid.css` + input 选择器改元素级（`CONSOLE_UI_REWORK.md` §3） | 0.5 天 | 三档截图无视觉变化；`test-console-static`/`test-console-ui` 全过 |
+| 1 | 令牌语义层 + `grid.css` + input 选择器改元素级（见 `CONSOLE.md` §3） | 0.5 天 | 三档截图无视觉变化；`test-console-static`/`test-console-ui` 全过 |
 | 2 | `components/form/` 内核（取值/校验/依赖/提交态）+ 16 个控件工厂 + 字段注解（说明/警告/危险/文档）+ 静态断言 | 2 天 | 临时演示页能把 16 种控件、日期与时间区间、字段注解、条件显示、跨字段校验全部跑通 |
 | 3 | `social-v2` 试点：第一步只换壳（请求体逐字节一致） | 1.5 天 | 25 条契约不变；`social-v2` 页三档截图一致；保存后 `/api/socialV2/config` 请求体与改前 diff 为空 |
 | 4 | `social-v2` 第二步：条件显示 + 字段校验 + 脏值提示 | 1 天 | 关掉条件字段后不参与提交；错误文案人话；离开前有提示 |

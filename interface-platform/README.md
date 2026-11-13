@@ -18,7 +18,7 @@ node src/index.mjs                # 默认 127.0.0.1:3120，数据目录 ./state
 node src/index.mjs --port 3121 --data-dir D:\platform-data
 ```
 
-通常不用手动运行：qq-bridge 控制中心的「接口平台」标签里点「启动接口平台」即可。本目录是 qq-bridge-enhanced 仓库里的独立子程序（零运行时依赖，自己的 `package.json` / 测试 / `state/`），控制中心默认按 `<仓库>/interface-platform` 找它，与平台只经 HTTP 接口通信；平台代码不导入桥接的任何模块，桥接也不导入平台的模块（`scripts/test-platform.mjs` ⑥ 检查）。
+通常不用手动运行：qq-bridge 控制中心的「接口平台」标签里点「启动接口平台」即可。本目录是 qq-bridge-nexus 仓库里的独立子程序（零运行时依赖，自己的 `package.json` / 测试 / `state/`），控制中心默认按 `<仓库>/interface-platform` 找它，与平台只经 HTTP 接口通信；平台代码不导入桥接的任何模块，桥接也不导入平台的模块（`scripts/test-platform.mjs` ⑥ 检查）。
 
 首次启动会在数据目录生成：
 

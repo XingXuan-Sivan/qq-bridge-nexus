@@ -1,6 +1,6 @@
 # 桥接插件内核（PLUGIN_KERNEL）
 
-> 状态：目标设计（v1.1.2 基线）· 实施阶段 P1
+> 状态：目标设计（0.1.0 基线）· 实施阶段 P1
 > 本文是插件机制的**唯一生效设计**。代码实现与本文不一致时，以本文为准并修正代码；新增能力先改本文再写代码。
 
 ---
@@ -13,20 +13,20 @@
 | `plugins/` | **桥接运行时插件**：本内核加载，进程内运行，只能通过 host-api 触碰桥接 | 桥接（`src/plugins/kernel.mjs`） | `soulkit-persona` |
 | `src/plugins/` | 内核自身（发现、校验、钩子、权限、审计） | 桥接 | —— |
 
-命名边界的原因：`plugins/` 是产品语义上的词，用户会以为「桥接的插件」在这里。v1.1.2 之前它装的是两个 DSH bundle，认知成本高；现在 bundle 归 `dsh-bundles/`，`plugins/` 留给本内核。
+命名边界的原因：`plugins/` 是产品语义上的词，用户会以为「桥接的插件」在这里。重构前它装的是两个 DSH bundle，认知成本高；现在 bundle 归 `dsh-bundles/`，`plugins/` 留给本内核。
 
 ---
 
 ## 1. 为什么需要（接缝）
 
-v1.1.2 的桥接把「入站 → 组 prompt → 调 DSH → 发 QQ」写在 `src/bridge.js` 一条主链上。要加一类横切能力（人格来源、消息过滤、发送后处理），只有两条路：
+重构前的桥接把「入站 → 组 prompt → 调 DSH → 发 QQ」写在 `src/bridge.js` 一条主链上。要加一类横切能力（人格来源、消息过滤、发送后处理），只有两条路：
 
 - 直接改 `bridge.js` 的对应位置 —— 每加一个能力就改一次主链，互相耦合；
 - 或者在内核里定义**少量稳定钩子**，能力做成插件挂上去。
 
-选后者。内核只承诺四个接缝，全部在 v1.1.2 里已收敛成单点：
+选后者。内核只承诺四个接缝，已全部收敛成单点：
 
-| 钩子 | 挂载点（v1.1.2 行号） | 说明 |
+| 钩子 | 挂载点 | 说明 |
 | --- | --- | --- |
 | `onInbound` | `handleIncoming()`（`src/bridge.js:12694`）入口 | 私聊/群聊/断线补收都经过这里；默认只观察，`filters.inbound=true` 且插件有 `inbound:filter` 时可丢/改 |
 | `onPromptBuild` | `deliverPromptNow()` 的 `modelText` 组装处（`src/bridge.js:10918`） | 可向本轮 prompt 前/后追加文本 |
@@ -224,7 +224,7 @@ ctx.prompt.registerBlock({
 
 ### 5.5 统一注入块来源（计划，未实现）
 
-> 本节描述**目标形态**，当前代码只有「插件注册 + 三个写死的内置块」。落地顺序与判据见 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) §8.10。写在这里是为了先把契约定死，避免上线时又分成两套。
+> 本节描述**目标形态**，当前代码只有「插件注册 + 三个写死的内置块」。落地顺序与判据见 ](./_internal/PLUGIN_ROADMAP.md) §8.10。写在这里是为了先把契约定死，避免上线时又分成两套。
 
 **要解决的问题**：现在加一个新的注入块（例如长期记忆、群规、天气）必须改 `src/bridge.js`——加一行 `registerCoreBlock(...)`、加一份配置白名单、再改控制台目录。希望做到「声明一个块」或「插件注册一个块」即可，源码不动。
 
@@ -378,7 +378,7 @@ undefined                      // 不干预
 | `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.scheduler.registerTaskType(def)` | `task-type:provide` | 注册一种定时任务类型（见 §8.1）；任务存在 `state/scheduler.json`，重启后仍在 |
-| `ctx.adapters.register(kind, adapter)` | `adapters:provide` | 注册两端适配器（`kind: 'platform' \| 'agent'`，见 [RESOURCE_MODEL.md](RESOURCE_MODEL.md) §3.1）；只登记描述，不接管收发；卸载时按 pluginId 自动注销 |
+| `ctx.adapters.register(kind, adapter)` | `adapters:provide` | 注册两端适配器（`kind: 'platform' \| 'agent'`，见 ](./archive/models/RESOURCE_MODEL.md) §3.1）；只登记描述，不接管收发；卸载时按 pluginId 自动注销 |
 | `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
@@ -571,7 +571,7 @@ ctx.persona.register({
 - 多 provider 竞争（同一时刻只有一个 `persona:provide` 生效，后注册者覆盖并告警）。
 - 事件总线式的任意钩子（只认 §6 五个名字）。
 
-> P2 及以后的规划（启停/重载、安装卸载、命令注册、注入块、MCP/Skills 门槛）见 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md)。本文件只描述**已经实现**的能力；路线图里的条目在落地前不会写进这里。
+> P2 及以后的规划（启停/重载、安装卸载、命令注册、注入块、MCP/Skills 门槛）见 ](./_internal/PLUGIN_ROADMAP.md)。本文件只描述**已经实现**的能力；路线图里的条目在落地前不会写进这里。
 
 ---
 

@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-**支持系统：Windows · macOS · Linux**（qq-bridge-enhanced v1.1.2 · 仓库 <https://github.com/h-D-ACE/dsh-qq>）
+**支持系统：Windows · macOS · Linux**（qq-bridge-nexus v0.1.0 · 仓库 <https://github.com/XingXuan-Sivan/qq-bridge-nexus>）
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
@@ -8,18 +8,18 @@
 >
 > 🔒 QQ 会话的权限边界与安全承诺见 **[RULES.md](RULES.md)**。
 >
-> 🎤 独立的「发语音」工具已拆到仓库上一级的 **`../voice-tool/`**（命令行 `voice-cli.mjs` / 图形界面 `voice-gui.mjs`），不再依赖 qq-bridge 运行。
+> 🎤 语音发送已内置在桥接里；独立拆出的「发语音」工具 `voice-tool/` 与本仓库平级、**不属于本仓库**，clone 后不会带上，也不影响主流程。
 
 把 QQ 消息接入 DSH agent：QQ 好友/群发来的消息会变成 DSH 会话里的用户消息，agent 的回复（含提问、工具审批）会发回 QQ。
 
 ---
 
-## 🆕 增强版（qq-bridge-enhanced v1.1.2）—— 支持 Windows、macOS、Linux
+## 🆕 qq-bridge-nexus v0.1.0（首个发布基线）
 
-> 本仓库（<https://github.com/h-D-ACE/dsh-qq>）是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 的二次开发版本（来源与授权见 [NOTICE.md](NOTICE.md)），已合并上游 r4 的修复。
-> 原版的全部功能（消息桥接、多群白名单、reserved2 二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查）保持不变；
-> 下文「架构」之后的内容沿用上游文档并按本仓库现状更新过，仍然适用（部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准）。
-> 问题反馈与 Release 下载请到本仓库：[Issues](https://github.com/h-D-ACE/dsh-qq/issues) · [Releases](https://github.com/h-D-ACE/dsh-qq/releases)。
+> 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四层配置模型、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
+> 原版的消息桥接、多群白名单、二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查等能力全部保留并继续演进。
+> 下表括号里的版本号指上游 qq-bridge-nexus 的历史版本，**相关能力均已包含在 0.1.0 中**；部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准。
+> 问题反馈与 Release 下载：本仓库的 Issues / Releases。
 
 | 新功能 | 一句话 | 文档 |
 | --- | --- | --- |
@@ -34,18 +34,18 @@
 | 权限分级 | L0 群友 / L1 只读 Agent / L2 工作区读写 / L3 完全访问但每次审批；不存在免审批模式 | 同上 |
 | 审批增强 | 编号 `#n`、展示真实命令参数、并发不覆盖、超时自动拒绝 | 同上 |
 | 自动回落与审计 | 高权限闲置 30 分钟回落；每次变更私聊通知；哈希链审计日志 | 同上 |
-| 切换不失忆（v1.0.3） | 切到 agent 时群和私聊原来的会话休眠、回落后原样接着用；agent 会话能接上私聊话题（桥接注入交接，只含私聊、已脱敏；v1.1.0 起可选带上私聊长期记忆）；高权限会话照常归档 | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
+| 切换不失忆 | 切到 agent 时群和私聊原来的会话休眠、回落后原样接着用；agent 会话能接上私聊话题（桥接注入交接，只含私聊、已脱敏；v1.1.0 起可选带上私聊长期记忆）；高权限会话照常归档 | [ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) |
 | 控制台选模型 | 提供方 / 模型 / 思考强度三个联动下拉，选项来自 DSH 模型目录，保存即生效；第三方提供方提示隐私、不能看图的模型自动把图片转文字 | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| 定时任务（v1.1.0） | 按时区到点发消息或叫 AI 来说；每天 / 每周 / 工作日 / 每月 / 随机几次 / cron 等重复方式，实时预览接下来 5 次；也能在管理员私聊里用 `/remind` 或让 AI 登记，发往群的要你确认 | [SCHEDULER.md](docs/guides/SCHEDULER.md) |
-| 定时静默（v1.1.0） | 按时间段（可多段、可选哪些天和时区）让 AI 停止一切唤醒省 token；消息照记，结束后给被直接找过的会话补一次唤醒；一键填入 DeepSeek 高峰时段 | [SILENCE.md](docs/guides/SILENCE.md) |
-| 人格切换即时生效（v1.1.0） | 二代仿真里切换 / 修改人格后，下一次唤醒（或选「立即」马上）把新卡交给各会话，不用等会话重建；记忆和群规则不动 | [roles/README.md](roles/README.md) |
-| 长会话自动压缩（v1.1.1） | 二代会话上一步读的上下文超过阈值（默认 30 万 token，控制台可调 5～80 万，或交给 DSH 自己约 80 万时压）就在空闲时压缩一次；黑话表、表情块只在变化时完整注入。实测群 A 每步从 679k 降到 33k | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| 令牌抄错自动恢复（v1.1.1） | AI 把会话令牌抄错一两位时给出明确提示，连错 3 次自动换新令牌（不动会话和记忆）；二代里被拦的内部输出不再往群里发拦截通知 | [CHANGELOG.md](CHANGELOG.md) |
-| 易用性（v1.1.1） | 定时静默可选「只在被 @ 或私聊时唤醒」；控制台「恢复默认人格」（改过的先备份）；总览页直接改发言上限、看被拦了几次；一键让 AI 看图补表情说明 | [SILENCE.md](docs/guides/SILENCE.md) |
-| 按会话设置人格卡（v1.1.2） | 每个群 / 私聊可以单独用一张卡或不挂卡，没单独设置的跟随全局；管理员在 QQ 里发 `/role 名字` / `/role off` / `/role default` 只改当前会话；换卡只唤醒卡真的变了的会话 | [roles/README.md](roles/README.md) |
-| 断线补收（v1.1.2） | 电脑睡眠、NapCat 重启等导致和 QQ 断开过，恢复后用历史消息接口补收错过的消息（带原始时间，AI 知道是迟到的）；补收到的命令和确认码一律不执行；拉取失败会重试 | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
-| 引用合并转发（v1.0.3） | 引用一条较早的合并转发时不再卡住整条消息；AI 能打开引用里的转发（含嵌套），读取结果缓存 | [CHANGELOG.md](CHANGELOG.md) |
-| DSH 0.2.1 | 兼容 DSH 0.2.0-rc.2 与 0.2.1（v1.1.2 在 0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核）；0.2.1 桌面版的随机端口自动识别、DSH 重启后自动跟上 | [DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
+| 定时任务 | 按时区到点发消息或叫 AI 来说；每天 / 每周 / 工作日 / 每月 / 随机几次 / cron 等重复方式，实时预览接下来 5 次；也能在管理员私聊里用 `/remind` 或让 AI 登记，发往群的要你确认 | [SCHEDULER.md](docs/guides/SCHEDULER.md) |
+| 定时静默 | 按时间段（可多段、可选哪些天和时区）让 AI 停止一切唤醒省 token；消息照记，结束后给被直接找过的会话补一次唤醒；一键填入 DeepSeek 高峰时段 | [SILENCE.md](docs/guides/SILENCE.md) |
+| 人格切换即时生效 | 二代仿真里切换 / 修改人格后，下一次唤醒（或选「立即」马上）把新卡交给各会话，不用等会话重建；记忆和群规则不动 | [roles/README.md](roles/README.md) |
+| 长会话自动压缩 | 二代会话上一步读的上下文超过阈值（默认 30 万 token，控制台可调 5～80 万，或交给 DSH 自己约 80 万时压）就在空闲时压缩一次；黑话表、表情块只在变化时完整注入。实测群 A 每步从 679k 降到 33k | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| 令牌抄错自动恢复 | AI 把会话令牌抄错一两位时给出明确提示，连错 3 次自动换新令牌（不动会话和记忆）；二代里被拦的内部输出不再往群里发拦截通知 | [CHANGELOG.md](CHANGELOG.md) |
+| 易用性 | 定时静默可选「只在被 @ 或私聊时唤醒」；控制台「恢复默认人格」（改过的先备份）；总览页直接改发言上限、看被拦了几次；一键让 AI 看图补表情说明 | [SILENCE.md](docs/guides/SILENCE.md) |
+| 按会话设置人格卡 | 每个群 / 私聊可以单独用一张卡或不挂卡，没单独设置的跟随全局；管理员在 QQ 里发 `/role 名字` / `/role off` / `/role default` 只改当前会话；换卡只唤醒卡真的变了的会话 | [roles/README.md](roles/README.md) |
+| 断线补收 | 电脑睡眠、NapCat 重启等导致和 QQ 断开过，恢复后用历史消息接口补收错过的消息（带原始时间，AI 知道是迟到的）；补收到的命令和确认码一律不执行；拉取失败会重试 | [CONFIGURATION.md](docs/guides/CONFIGURATION.md) |
+| 引用合并转发 | 引用一条较早的合并转发时不再卡住整条消息；AI 能打开引用里的转发（含嵌套），读取结果缓存 | [CHANGELOG.md](CHANGELOG.md) |
+| DSH 0.2.x 适配 | 兼容 DSH 0.2.0-rc.2 至 0.2.2-rc.2（适配基线见 `dsh-baseline.json`）；随机端口自动识别、DSH 重启后自动跟上 | [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md) |
 
 ### 部署（无窗口版）
 
@@ -91,7 +91,7 @@ NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。�
 
 ---
 
-> ⚠️ **当前版本 `v1.1.2`，适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
+> ⚠️ **当前版本 `v0.1.0`，适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
 > 鉴权用 `~/.dsh` 里持久化的浏览器会话签名密钥**离线铸造 Cookie**（DSH 0.1.7 起进程启动 token 只存在于内存、不再落盘）；
 > agent preset 是 `@deepseek-ai/dsh-agent-preset` Cordis 行（由 `setup-dsh.mjs` 写入，旧的 `~/.dsh/.agent-presets/` 目录机制已废）。
 > DSH 0.2.0 时的适配改动（会话待处理队列解析、QQ 安全守卫的工具名单对账等）见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md)。
@@ -101,7 +101,7 @@ NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。�
 > [`v0.1.5`](https://github.com/Derpyu520/qq-bridge/releases/tag/v0.1.5)；**DSH 0.1.7-rc.2** 用
 > [`v0.1.7`](https://github.com/Derpyu520/qq-bridge/releases/tag/v0.1.7)（这些是原版仓库的旧版本，本仓库不再维护）。
 >
-> 本仓库默认分支 `main` **就是**最新版本，`git clone https://github.com/h-D-ACE/dsh-qq.git` 直接拿到，无需切换分支；也可以下载 [Release ZIP](https://github.com/h-D-ACE/dsh-qq/releases)。
+> 本仓库默认分支 `main` **就是**最新版本，`git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git` 直接拿到，无需切换分支；也可以下载 [Release ZIP](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases)。
 
 ```
 QQ 消息 ──► SnowLuma / NapCat（OneBot v11 WS，可经接口平台）──► 本桥接进程 ──► DSH Web API（命令行版 127.0.0.1:3080 / 桌面版自动识别）
@@ -213,7 +213,7 @@ node scripts/setup-dsh.mjs
 
 2. **装桥接并复制配置**
    ```bash
-   git clone https://github.com/h-D-ACE/dsh-qq.git
+   git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git
    cd dsh-qq
    npm ci
    ```
@@ -340,17 +340,9 @@ qq-bridge-nexus/       # fork 后的仓库目录名（上游仓库名为 dsh-qq�
   state/                # 运行时数据（不入库）
 ```
 
-> 🎤 **独立的「发语音」工具不在这里**：它是仓库上一级的 [`../voice-tool/`](../voice-tool/)（`voice-cli.mjs` /
-> `voice-gui.mjs` / `public/voice.html` / `发语音.cmd`）。图形界面双击上一级的「发语音-图形界面.cmd」。
-> 它只依赖 SnowLuma，共享内核仍由本仓库 `src/voice-core.js` / `src/snowluma-conn.js` 提供（单一实现）。
->
-> ```bash
-> cd ../voice-tool
-> node voice-cli.mjs status     # 账号/token 自动发现 + 连通性
-> node voice-cli.mjs list       # 可发的群聊/私聊 + 语音库
-> node voice-cli.mjs            # 交互菜单
-> node voice-gui.mjs            # 图形界面（本地小服务 + 浏览器 UI）
-> ```
+> 🎤 **独立的「发语音」工具不在这里**：`voice-tool/` 与本仓库平级（`voice-cli.mjs` / `voice-gui.mjs` /`public/voice.html`），
+> 只依赖 SnowLuma，共享内核仍由本仓库 `src/voice-core.js` / `src/snowluma-conn.js` 提供（单一实现）。
+> 它是可选工具，发布仓库不包含它；桥接自身的语音发送能力不受影响（见 [docs/guides/VOICE.md](docs/guides/VOICE.md)）。
 
 ## SnowLuma 版本与上游健康（「连上了但收不到消息」）
 

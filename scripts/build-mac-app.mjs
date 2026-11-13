@@ -22,7 +22,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const APP_NAME = 'QQ Bridge 控制中心';
-export const BUNDLE_ID = 'io.github.qq-bridge-enhanced.control-center';
+export const BUNDLE_ID = 'io.github.qq-bridge-nexus.control-center';
 
 /** App 的 AppleScript 源码（纯函数，便于测试）。App 必须放在仓库根目录：用自己的位置找到仓库。 */
 export function appleScriptSource() {

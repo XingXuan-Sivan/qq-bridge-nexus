@@ -191,7 +191,7 @@ export function migrationWarning({ oldDir, newDir }) {
 /** 查询最新 Release（只读）。 */
 export async function checkSnowLumaUpdate(currentVersion, { fetchImpl = globalThis.fetch, timeoutMs = 10000, platform = process.platform, arch = process.arch } = {}) {
   const res = await fetchImpl(SNOWLUMA_RELEASES_API, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'qq-bridge-enhanced-control-center' },
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'qq-bridge-nexus-control-center' },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`GitHub API 返回 HTTP ${res.status}`);

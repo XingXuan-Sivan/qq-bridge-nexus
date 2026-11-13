@@ -91,9 +91,9 @@ test('新形态 key：发给 soulkit 时剥掉平台前缀', async () => {
     },
   });
   await activate(ctx);
-  await registered[0].get('qq:private:2897715886');
+  await registered[0].get('qq:private:1000000002');
   await registered[0].get('qq:group:1047096216');
-  assert.equal(new URL(seen[0].url).searchParams.get('key'), 'private:2897715886');
+  assert.equal(new URL(seen[0].url).searchParams.get('key'), 'private:1000000002');
   assert.equal(new URL(seen[1].url).searchParams.get('key'), 'group:1047096216');
   assert.equal(new URL(seen[0].url).searchParams.get('platform'), 'qq');
 });

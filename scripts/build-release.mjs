@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 生成 GitHub Release 用的 ZIP：qq-bridge-enhanced-v<版本>.zip（+ .sha256）。
+// 生成 GitHub Release 用的 ZIP：<package.name>-v<版本>.zip（+ .sha256），当前为 qq-bridge-nexus-v<版本>.zip。
 // 默认放在**仓库外**、与仓库同级的 release/ 文件夹（<仓库>/../release/），不占仓库目录；`--out <目录>` 可改（相对仓库根目录）。
 //
 // 打包范围：git 仓库里 `git ls-files` 列出的已跟踪文件（天然遵守 .gitignore）；不在 git 仓库里时
@@ -18,13 +18,13 @@ import { createZip } from './zip-utf8.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const version = pkg.version;
-const name = `qq-bridge-enhanced-v${version}`;
+const name = `${pkg.name}-v${version}`;
 const outIdx = process.argv.indexOf('--out');
 const outDir = path.resolve(root, outIdx > 0 ? process.argv[outIdx + 1] : path.join('..', 'release'));
 fs.mkdirSync(outDir, { recursive: true });
 
 const EXCLUDE_DIRS = new Set(['node_modules', 'state', 'audio', 'dist', '.git', '.npm-cache', '.claude']);
-const EXCLUDE_PREFIXES = ['docs/audits/', 'docs/design/', 'docs/legacy/', 'docs/research/'];
+const EXCLUDE_PREFIXES = ['docs/_internal/', 'docs/audits/', 'docs/design/', 'docs/legacy/', 'docs/research/'];
 const FORBIDDEN = [
   /^config\.json$/,
   /^state\//,

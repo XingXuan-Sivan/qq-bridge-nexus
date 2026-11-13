@@ -140,7 +140,7 @@ export function napcatRuntimeVersion(overview) {
 /** 检查 NapCat 新版本（GitHub 最新 Release）。只返回信息，不下载。 */
 export async function checkNapCatUpdate(currentVersion, { fetchImpl = globalThis.fetch, timeoutMs = 10000, platform = process.platform } = {}) {
   const res = await fetchImpl(NAPCAT_RELEASES_API, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'qq-bridge-enhanced-control-center' },
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'qq-bridge-nexus-control-center' },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`GitHub API 返回 HTTP ${res.status}`);

@@ -19,14 +19,14 @@ async function until(fn, ms = 3000, what = '条件') {
   throw new Error(`等待超时：${what}`);
 }
 
-// 真实 SDK（桥接用的同一个客户端）。先按常规解析；平台与桥接是平行目录，再到同级的 qq-bridge-enhanced 里找
+// 真实 SDK（桥接用的同一个客户端）。先按常规解析；平台与桥接是平行目录，再到同级的 qq-bridge-nexus 里找
 // （或用 SNOWLUMA_SDK_DIR 指定）。都没有时跳过相关测试 —— 那是「跳过」，不是「通过」。
 let SDK = null;
 try { SDK = await import('@snowluma/sdk'); } catch {}
 if (!SDK) {
   const here = path.dirname(fileURLToPath(import.meta.url));
   // 平台在仓库里（interface-platform/）：SDK 在仓库根目录的 node_modules；旧布局（与仓库平行的目录）也认
-  const dirs = [process.env.SNOWLUMA_SDK_DIR, path.resolve(here, '..', '..', 'node_modules', '@snowluma', 'sdk'), path.resolve(here, '..', '..', 'qq-bridge-enhanced', 'node_modules', '@snowluma', 'sdk')].filter(Boolean);
+  const dirs = [process.env.SNOWLUMA_SDK_DIR, path.resolve(here, '..', '..', 'node_modules', '@snowluma', 'sdk'), path.resolve(here, '..', '..', 'qq-bridge-nexus', 'node_modules', '@snowluma', 'sdk')].filter(Boolean);
   for (const d of dirs) {
     try {
       const main = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')).main ?? 'dist/index.js';

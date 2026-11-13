@@ -1,7 +1,7 @@
 # 桥接扩展平台（MCP / 技能 / 插件 / 预设）设计方案
 
 > 状态：**方案评审中（2026-11-08），未动工**。
-> 关系：本文修订 [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) §9/§10 中「MCP 清单管理、skills、插件市场、平台适配器不做/暂缓」的旧结论；实施顺序以本文为准。
+> 关系：本文修订 ](./_internal/PLUGIN_ROADMAP.md) §9/§10 中「MCP 清单管理、skills、插件市场、平台适配器不做/暂缓」的旧结论；实施顺序以本文为准。
 > 读者：负责扩展页、DSH 预设、MCP 接入与插件市场的实现者。
 
 ---
@@ -594,7 +594,7 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设的 MCP allowlist 与工具级 allow/deny；Hub 执行期校验。
 - 验收：新增外部 server 不需要重启 DSH；未授权 preset 调用被拒；断线/超时/日志可见；`compress` 正常。
 
-**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
+**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
 
 ### P3 技能 / 插件配置 / 预设编辑器
 
@@ -676,12 +676,12 @@ AstrBot 的现状是「索引 JSON + GitHub 安装源」，不是逐仓库扫描
 
 ## 15. 变更记录
 
-> 实施过程中与本文档不一致的临时改动、分期调整、验收缺口，登记在 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md)；阶段收尾必须回写本文档或明确不做。
+> 实施过程中与本文档不一致的临时改动、分期调整、验收缺口，登记在 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md)；阶段收尾必须回写本文档或明确不做。
 
 - 2026-11-08：初稿。基于当前控制台只读页、`qq-tool-restrict.mjs` 的 `compress` 事故、AstrBot 插件/MCP/技能/预设调研；提出桥接聚合、统一 catalog、元工具 + 提升工具、预设 YAML 与 GitHub source adapter。
 - 2026-11-08：按评审意见修订。能力模型从「永久 deny」改为「默认 preset 安全 + 能力档位显式解锁」，允许高权限 preset 绑定群；`arm` 后续收敛为进程内临时授权，重启解除；外部 MCP 启用状态由创建者决定；`stdio` 增加 `allowArbitraryCommand`、HTTP 增加 `allowPrivateNetwork`；预设编辑明确 YAML 原文优先、结构化保存会重写并警告；技能改为 `core-skills` 发现 + `ext_describe` 按需读正文。
 - 2026-11-08：补「内置/外置」统一规则（§3.5）与 `arm`/预设切换边界（§4.7、§8.4）。依据 DSH `agentPresets.select()` 的实现，已开始过第一轮的会话会返回 `agent-preset/locked`，没有 rebind；`arm` 只做 Hub 层授权，不承诺给已运行会话补原生工具。
 - 2026-11-08：按最新决策收敛：`arm` 仅本次进程有效、重启自动解除；`/preset` 未开始会话直接切，已开始的提示需重开会话，确认后按新 preset 新建会话；内置可启停/配置/测试，但不可删除/改名/覆盖/卸载/单独更新。
-- 2026-11-08：P0 启动。`compress` 加入 `qq-tool-restrict.mjs` 的 `SAFE_EXACT` 并补回归断言；偏差台账见 [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md)。
+- 2026-11-08：P0 启动。`compress` 加入 `qq-tool-restrict.mjs` 的 `SAFE_EXACT` 并补回归断言；偏差台账见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md)。
 - 2026-11-09：P3 技能、插件 configSchema、预设编辑器三子批完成。技能/插件配置见 `STATUS` 6.9/6.10；预设编辑器以 `dsh/agent-presets/` 为源，提供元数据/扩展授权/YAML 编辑、校验、备份、apply/rollback，控制台新增预设页；偏差 E13–E15。P0 `compress` 仍 Partial，P4/P5 未动工。
 

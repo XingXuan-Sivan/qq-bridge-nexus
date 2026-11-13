@@ -1,7 +1,7 @@
 {
   "$comment": "适配基线：记录本套脚本验证过的宿主版本与其工具集。不要手改——用 npm run baseline:update 生成。 宿主升级后先跑 npm run baseline:check 看增删差异，复核守卫再刷新。",
   "dshVersion": "0.2.2-rc.2",
-  "source": "asar:C:\\Users\\starl\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar|dsh/node_modules/@deepseek-ai",
+  "source": "asar:<HOME>\\AppData\\Local\\Programs\\DeepSeek Harness\\resources\\app.asar|dsh/node_modules/@deepseek-ai",
   "packageCount": 326,
   "toolCount": 65,
   "tools": [

@@ -9,11 +9,11 @@ import {
 {
   const admins = normalizeAdmins([
     { qq: '100001', caps: ['approve', 'approve', 'nope'], maxLevel: 'l2' },
-    { qq: '2897715886', name: '  ', caps: [], maxLevel: 'L9', notify: false, exemptPassive: false },
+    { qq: '1000000002', name: '  ', caps: [], maxLevel: 'L9', notify: false, exemptPassive: false },
   ], { ownerQQ: '100001' });
   assert.equal(admins.length, 1, 'owner 不应出现在管理员名单里');
-  assert.equal(admins[0].qq, '2897715886');
-  assert.equal(admins[0].name, '管理员 5886');
+  assert.equal(admins[0].qq, '1000000002');
+  assert.equal(admins[0].name, '管理员 0002');
   assert.equal(admins[0].maxLevel, 'L2', '非法级别回退 L2');
   assert.equal(admins[0].notify, false);
   assert.equal(admins[0].exemptPassive, false);
@@ -31,12 +31,12 @@ assert.deepEqual(normalizeCaps('approve'), []);
 
 // ④ actor：owner 全能力、admin 只认 caps、user 全拒绝。
 {
-  const admins = normalizeAdmins([{ qq: '2897715886', caps: ['approve', 'memory'], maxLevel: 'L2' }], { ownerQQ: '100001' });
+  const admins = normalizeAdmins([{ qq: '1000000002', caps: ['approve', 'memory'], maxLevel: 'L2' }], { ownerQQ: '100001' });
   const owner = actorForQQ({ ownerQQ: '100001', admins, qq: '100001' });
   assert.equal(owner.role, 'owner');
   assert.equal(owner.maxLevel, 'L3');
   for (const cap of ADMIN_CAPS) assert.equal(owner.can(cap), true);
-  const admin = actorForQQ({ ownerQQ: '100001', admins, qq: '2897715886' });
+  const admin = actorForQQ({ ownerQQ: '100001', admins, qq: '1000000002' });
   assert.equal(admin.role, 'admin');
   assert.equal(admin.can('approve'), true);
   assert.equal(admin.can('sessions'), false);
@@ -44,12 +44,12 @@ assert.deepEqual(normalizeCaps('approve'), []);
   assert.equal(user.role, 'user');
   assert.equal(user.can('approve'), false);
   assert.equal(isAdminQQ({ ownerQQ: '100001', admins, qq: '55555' }), false);
-  assert.equal(findAdmin(admins, '2897715886')?.name, '管理员 5886');
+  assert.equal(findAdmin(admins, '1000000002')?.name, '管理员 0002');
 }
 
 // ⑤ closed-agent 级别：admin 不超过 maxLevel，owner 永远 L3。
 {
-  const admin = actorForQQ({ ownerQQ: '100001', admins: [{ qq: '2897715886', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true }], qq: '2897715886' });
+  const admin = actorForQQ({ ownerQQ: '100001', admins: [{ qq: '1000000002', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true }], qq: '1000000002' });
   const owner = actorForQQ({ ownerQQ: '100001', admins: [], qq: '100001' });
   assert.equal(closedAgentMaxLevel(admin), 'L2');
   assert.equal(canOpenLevel(admin, 'L1'), true);
@@ -64,13 +64,13 @@ assert.deepEqual(normalizeCaps('approve'), []);
 {
   const ownerQQ = '100001';
   const admins = [
-    { qq: '2897715886', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true },
+    { qq: '1000000002', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true },
     { qq: '2897715887', name: 'B', caps: [], maxLevel: 'L2', notify: true, exemptPassive: false },
   ];
   assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: ownerQQ, kind: 'private', id: ownerQQ }), true);
-  assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '2897715886', kind: 'private', id: '2897715886' }), true);
+  assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '1000000002', kind: 'private', id: '1000000002' }), true);
   assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '2897715887', kind: 'private', id: '2897715887' }), false);
-  assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '2897715886', kind: 'group', id: '2897715886' }), false);
+  assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '1000000002', kind: 'group', id: '1000000002' }), false);
 }
 
 console.log('test-admins: 6/6 通过');

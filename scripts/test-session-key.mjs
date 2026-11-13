@@ -20,8 +20,8 @@ import {
 } from '../src/session/key.mjs';
 
 test('formatKey：正常组装，id 支持数字与数字字符串', () => {
-  assert.equal(formatKey('qq', 'group', 903621673), 'qq:group:903621673');
-  assert.equal(formatKey('tg', 'private', '2897715886'), 'tg:private:2897715886');
+  assert.equal(formatKey('qq', 'group', 100000003), 'qq:group:100000003');
+  assert.equal(formatKey('tg', 'private', '1000000002'), 'tg:private:1000000002');
 });
 
 test('formatKey：平台/类型/id 不合法时抛错，不产出半成品 key', () => {
@@ -33,9 +33,9 @@ test('formatKey：平台/类型/id 不合法时抛错，不产出半成品 key',
 });
 
 test('parseKey：新旧形态都能解析，旧形态按默认平台算', () => {
-  assert.deepEqual(parseKey('qq:group:903621673'), { platform: 'qq', kind: 'group', id: 903621673 });
-  assert.deepEqual(parseKey('group:903621673'), { platform: DEFAULT_PLATFORM, kind: 'group', id: 903621673 });
-  assert.deepEqual(parseKey('private:2897715886'), { platform: DEFAULT_PLATFORM, kind: 'private', id: 2897715886 });
+  assert.deepEqual(parseKey('qq:group:100000003'), { platform: 'qq', kind: 'group', id: 100000003 });
+  assert.deepEqual(parseKey('group:100000003'), { platform: DEFAULT_PLATFORM, kind: 'group', id: 100000003 });
+  assert.deepEqual(parseKey('private:1000000002'), { platform: DEFAULT_PLATFORM, kind: 'private', id: 1000000002 });
 });
 
 test('parseKey：乱七八糟的输入返回 null（不抛错）', () => {
@@ -50,7 +50,7 @@ test('isSessionKey：只认新形态', () => {
 });
 
 test('legacyToKey：旧的加平台前缀，新的原样，坏的返回 null', () => {
-  assert.equal(legacyToKey('group:903621673'), 'qq:group:903621673');
+  assert.equal(legacyToKey('group:100000003'), 'qq:group:100000003');
   assert.equal(legacyToKey('private:1', 'tg'), 'tg:private:1');
   assert.equal(legacyToKey('qq:group:1'), 'qq:group:1');
   assert.equal(legacyToKey('nonsense'), null);
@@ -95,6 +95,6 @@ test('key()：一律带平台前缀，平台非法回落 qq，参数非法抛错
 
 test('读取侧兼容：旧形态的缓存键仍能被 parseKey / sameSession 认出', () => {
   // 磁盘上还有迁移前写下的 `group:<id>`（prompt-blocks / role-seen 等），读取时不能当垃圾丢掉。
-  assert.deepEqual(parseKey('group:903621673'), { platform: 'qq', kind: 'group', id: 903621673 });
-  assert.equal(sameSession('qq:group:903621673', 'group:903621673'), true);
+  assert.deepEqual(parseKey('group:100000003'), { platform: 'qq', kind: 'group', id: 100000003 });
+  assert.equal(sameSession('qq:group:100000003', 'group:100000003'), true);
 });

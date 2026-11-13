@@ -1,109 +1,120 @@
 # 文档索引（docs/README.md）
 
-> 根目录只留 `README.md` / `README.en.md` / `RULES.md`，以及 v0.3.0 起的发布类文档 `CHANGELOG.md` / `NOTICE.md`；其余全部在本目录下。
->
-> **v0.3.0 增强版新增**：[DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)（给部署 agent 的完整部署说明）· [guides/CONTINUITY.md](guides/CONTINUITY.md) · [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) · [guides/CONFIGURATION.md](guides/CONFIGURATION.md) · [guides/TESTING.md](guides/TESTING.md) · [release/RELEASE_NOTES_v0.3.0.md](release/RELEASE_NOTES_v0.3.0.md) · [release/PUBLISHING.md](release/PUBLISHING.md) · **v0.4.0**：[guides/CONTROL_CENTER.md](guides/CONTROL_CENTER.md) · [release/RELEASE_NOTES_v0.4.0.md](release/RELEASE_NOTES_v0.4.0.md) · **v1.0.0**：[release/RELEASE_NOTES_v1.0.0.md](release/RELEASE_NOTES_v1.0.0.md)（Windows + macOS、接口平台、NapCat） · **v1.0.1**：[release/RELEASE_NOTES_v1.0.1.md](release/RELEASE_NOTES_v1.0.1.md)（新增 Linux、SnowLuma 2.x）· **v1.0.2**：[release/RELEASE_NOTES_v1.0.2.md](release/RELEASE_NOTES_v1.0.2.md)（换 SnowLuma 目录前提醒迁移） · [release/RELEASE_NOTES_v1.0.3.md](release/RELEASE_NOTES_v1.0.3.md)（切换不失忆、引用合并转发修复） · **v1.1.0**：[release/RELEASE_NOTES_v1.1.0.md](release/RELEASE_NOTES_v1.1.0.md)（定时任务、定时静默、人格切换即时生效） · **v1.1.1**：[release/RELEASE_NOTES_v1.1.1.md](release/RELEASE_NOTES_v1.1.1.md)（长会话自动压缩、令牌抄错恢复、恢复默认人格） · [release/RELEASE_NOTES_v1.1.2.md](release/RELEASE_NOTES_v1.1.2.md)（按会话设置人格卡、断线补收） · [guides/SCHEDULER.md](guides/SCHEDULER.md) · [guides/SILENCE.md](guides/SILENCE.md)
-> 仓库目录结构与 `scripts/` 命名约定见 **[FOLDER_MAP.md](FOLDER_MAP.md)**。
->
-> **状态标记**：✅ 仍然有效（按它做就对） · ⚠️ 部分过时（见备注） · 🗄️ 已被取代（保留作背景）
+本文是 `docs/` 的**唯一索引**。新增、改名、归档文档时同步改这里；索引里不出现的文档视为未登记。
+
+- 根目录只留 `README.md` / `README.en.md` / `RULES.md` 与发布类 `CHANGELOG.md` / `NOTICE.md`。
+- `docs/_internal/` 是本地开发台账、计划、阶段报告与提示词快照，**被 `.gitignore` 排除，不随仓库发布**。
+- `docs/archive/` 是历史设计稿，只用于追溯「当时为什么这么想」，**不要照着做**。
 
 ---
 
-## 根目录 —— 全局约定与设计
+## 一、现行文档
 
-| 文档 | 一句话说明 | 状态 |
+### 配置与模型
+
+| 文档 | 内容 | 状态 |
 | --- | --- | --- |
-| [FOLDER_MAP.md](FOLDER_MAP.md) | 目录结构、`scripts/` 命名约定，以及 `dsh-bundles/`（给 DSH）与 `plugins/`（桥接插件）的命名边界 | ✅ |
-| [PROFILES_MODEL.md](PROFILES_MODEL.md) | **四层配置模型**：平台 / 行为档案 / Agent 平台 / 能力预设 / 运行方案 / 会话权限级别，`profiles/` 目录与 schema、旧结构迁移、代码接口与自检 | ✅ 现行（2026-11-12 起，改配置存储前先看） |
-| [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) | 桥接插件内核（v1.2.0）：四个钩子、manifest、`plugins.json`、host-api 权限、人格 provider 契约、审计、控制台接口与 P1 验收 | ✅ 与当前实现同步（2026-11-02） |
-| [PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) | 人格三层解析（会话覆盖 → 外部 provider → 全局本地卡）、`persona-provider/1` 契约、缓存与降级、控制台只读来源页 | ✅ 与当前实现同步（2026-11-02） |
-| [PLUGIN_ROADMAP.md](PLUGIN_ROADMAP.md) | 插件与扩展的后续路线（P2a 启停/重载、P2b 安装、P2c 监听、命令注册与注入块、MCP/Skills 门槛、明确不做） | 🚧 进行中（P2a–P2c 已完成，2026-11-03） |
-| [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) | **扩展平台方案**：MCP/技能/插件/预设统一 catalog、桥接 Hub（元工具 + 提升工具）、外部 MCP 生命周期、预设 YAML 编辑、GitHub 扫描式市场与分期；修订旧路线图「不做 MCP/技能/市场」的结论 | 🚧 P0 白名单已接、P1/P2 完成、P3 技能/插件配置/预设编辑器完成（2026-11-09），P4/P5 未动 |
-| [EXTENSION_PLATFORM_DEVIATIONS.md](EXTENSION_PLATFORM_DEVIATIONS.md) | **扩展平台实施偏差台账**：只记与 `EXTENSION_PLATFORM.md` 不一致的临时改动、分期调整、验收缺口与回写设计检查 | ✅ 现行（2026-11-08 起，实施前先读） |
-| [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表（P3a）：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands`、管理行为页与 P3b 预留 | ✅ 与当前实现同步（2026-11-03） |
-| [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界约定**：静态资源路径穿越守卫、未启用=404 与先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复顺序、插件 UI 沙箱与样式隔离、验收清单 | ✅ 现行约定（2026-11-04 起，改路由/静态资源/插件 UI 前必读） |
-| [CONSOLE_COMPONENTS.md](CONSOLE_COMPONENTS.md) | **控制台通用组件库**：`tag` / `alert` / `message` / `collapse` / `card` / `tile` / `message-box` 的 API、迁移规则（卡片全 JS 生成、`.pill` 已改 `.tag`）与门禁断言 | ✅ 现行（2026-11-12 起，改控制台组件前先看） |
-| [CONSOLE_UI.md](CONSOLE_UI.md) | **控制台前端结构与组件约定**：零构建下的目录分层、`components/<name>/{js,css}` 规范、组件 css 自包含、页面专属组件何时上提，以及搜索框「漏写 `type` 导致退回浏览器默认外观」的根因与修法 | 🚧 约定已定、迁移进行中（2026-11-06 起，改 `public/console/` 前先看） |
-| [CONSOLE_UI_REWORK.md](CONSOLE_UI_REWORK.md) | **基础层与组件层改造清单**：主题映射（163 令牌 → 语义别名 + 间距/断点）、`grid.css` 与 input 选择器根因改造、`field`/`button`/`select`/`badge`/`empty-state`/`tabs`/`collapse` 的 API 与首批迁移页、**必须不变的 225 个 DOM id 与 25 条接口契约**、需要重录的门禁与截图 | 📋 清单已定、未动工（2026-11-06） |
-| [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂（文本/数字/密码/多行/下拉/单选组/多选组/复选/开关/文件/**日期/时间/日期时间/时间区间**/只读/动作区）、`createForm()` 内核（类型化取值、字段与跨字段校验、条件显示、提交态、脏值守卫）、**字段注解（说明/警告/危险/文档）与块级提示**、a11y 约定、以 `social-v2`（130 控件）为试点的两步迁移法 | 📋 规格已定、未动工（2026-11-06）；优先于其余组件 |
-| [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 控制台表单迁移踩坑与检查清单（迁页面前先读） | ✅ 现行 |
-| [STATUS.md](STATUS.md) | **未完项清单**：每项写是什么 / 完成判据 / 依赖 / 优先级，状态为 Done、Partial（差什么）、Todo（已立项未开工）、Blocked（等什么）；阶段收尾先对这张表，防止把半成品说成已完成 | ✅ 现行（2026-11-05 起，每阶段收尾复核） |
-| [PARITY.md](PARITY.md) | **迁移评估**：nexus / enhanced 手改版 / enhanced 上游三条基线逐维度对照（按会话人格卡、切换入口、换人格是否换会话、注入位置与 token、可扩展性、soulkit 联动、会话管理页、标题、messages、切换与数据迁移），含待核实项与 4 个待拍板决策 | 🚧 评估中（2026-11-06 起，决定「保持/补齐/重设计」前先看这里） |
-| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：会话档案目录 `state/sessions/`（默认文件 + 每会话文件；准入、运行模式、人格、提示词、唤醒、模型）、被动/主动每轴一条全局名单（白名单/黑名单二选一，单源）、DSH 自愈/对账/命名、详情弹窗、owner+管理员、P0–P3 判据与防偏离清单 | 🚧 P0–P3 已实现，两态单源准入已完成；剩迁移/详情 UI 专项单测（2026-11-08） |
-| [GLOBAL_CONFIG.md](GLOBAL_CONFIG.md) | **全局配置三层模型（方案稿）**：系统层 / 预设层 / 会话层、现有配置文件与状态文件清单、行为档案 `config/behaviors/*.yml`、旧 social/access 页面与键的删除迁移（方案 2）、动态扩展授权 picker、通用代码编辑器与 YAML 保注释、G1–G5 分批 | 📋 方案待拍板（编辑器方案未定；未改代码） |
+| [PROFILES_MODEL.md](PROFILES_MODEL.md) | **四层配置模型**：用户侧平台 → 行为档案 / Agent 平台 → 能力预设 / 运行方案 → 会话权限级别；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
+| [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md) | **注入块与提示词拼接**：块模型（slot / timing / profiles / scope）、注入块页、预算与上限迁移 | ✅ §2、§7 现行；§3–§5 已由 PROFILES_MODEL 取代 |
+| [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界**：静态资源穿越守卫、未启用=404、先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复、插件 UI 沙箱 | ✅ 改路由/静态资源前必读 |
+| [FOLDER_MAP.md](FOLDER_MAP.md) | 目录地图：每个顶层目录的作用、`scripts/` 命名约定、疑似过期的一次性脚本清单 | ✅ 现状描述 |
+
+### 会话与记忆
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：`state/sessions/` 档案目录、准入、运行方案、人格、提示词、唤醒、模型；被动/主动每轴一条全局名单；DSH 自愈/对账/命名 | ✅ 现行 |
+| [MEMORY_SUBSYSTEM.md](MEMORY_SUBSYSTEM.md) | **记忆子系统**：采集、写入、召回与注入的边界，与 soulkit 的联动 | ✅ 现行 |
+
+### 控制台
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [CONSOLE.md](CONSOLE.md) | **控制台单一入口**：零构建结构、目录六条规则、设计令牌与栅格、组件 API（card / collapse / tag / alert / message / message-box / tile / table / search-box）、必须不变的契约、门禁、长页重排实测 | ✅ 现行（改 `public/console/` 前先读） |
+| [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂、`createForm()` 内核（类型化取值、校验、条件显示、脏值守卫）、字段注解、两步迁移法 | ✅ 规格已定 |
+| [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 表单迁移踩坑与检查清单 | ✅ 迁页面前先读 |
+
+### 扩展与插件
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) | **扩展平台方案**：MCP / 技能 / 插件 / 预设统一 catalog、桥接 Hub、外部 MCP 生命周期、GitHub 扫描式市场与分期 | ✅ 方案（P0–P3 已实现，P4/P5 未动） |
+| [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) | 桥接插件内核：四个钩子、manifest、`plugins.json`、host-api 权限、人格 provider 契约、审计、控制台接口 | ✅ 与实现同步 |
+| [PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) | 人格三层解析（会话覆盖 → 外部 provider → 全局本地卡）、`persona-provider/1` 契约、缓存与降级 | ✅ 与实现同步 |
+| [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) | 命令注册表：三个执行来源的能力边界、entry 形状、匹配/权限规则、`GET /api/commands` | ✅ 与实现同步 |
+
+### 运维与部署
+
+| 文档 | 内容 | 状态 |
+| --- | --- | --- |
+| [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md) | **从零部署（Windows / macOS / Linux）**：版本要求、QQ 后端准备、配置字段、setup-dsh、TOTP、控制中心、状态检查、真实 QQ 验证、更新/备份/回滚、常见错误 | ✅ 部署首选 |
 
 ---
 
-## guides/ —— 面向使用者 / 运维
+## 二、指南（`guides/`）
 
-| 文档 | 一句话说明 | 状态 |
-| --- | --- | --- |
-| [guides/PROJECT_GUIDE.md](guides/PROJECT_GUIDE.md) | **权威项目说明书**（113 KB / 1450+ 行）：架构、内外核划分、数据流、配置全解、安全机制、调试与改进指南，含 2026-08-20 ~ 2026-09-11 的逐轮更新记录 | ✅ **唯一权威版本**（另一份同名精简版已归档到 legacy，见下） |
-| [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md) | **从零部署（Windows / macOS / Linux）**：版本要求、QQ 后端（SnowLuma / NapCat）准备、配置字段、setup-dsh、TOTP、无窗口启动控制中心 → 开启后端 → 接入桥接、状态检查、真实 QQ 验证清单、更新/备份/回滚、常见错误 | ✅ 部署首选 |
-| [guides/CONTINUITY.md](guides/CONTINUITY.md) | v0.3.0 人际连续性：QQ 号认人、人物库结构、共享策略与可见性、入群事件、跨群协作、迁移、存储可靠性 | ✅ |
-| [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) | v0.3.0 owner 管理通道：权限分级、DSH rc.2 核实事实、命令、确认流程、TOTP 威胁边界、审批、自动回落、外部变更检测、审计 | ✅ 改动权限相关代码前必读 |
-| [guides/SCHEDULER.md](guides/SCHEDULER.md) | 定时任务（v1.1.0）：控制台页面、`/remind` 命令、AI 登记、重复方式、时区、安全限制与边界 | ✅ |
-| [guides/SILENCE.md](guides/SILENCE.md) | 定时静默（v1.1.0）：按时间段停掉 AI 省 token、和手动静默的区别、哪些天、DeepSeek 高峰预设、和定时任务的关系 | ✅ |
-| [guides/CONFIGURATION.md](guides/CONFIGURATION.md) | v0.3.0 新增配置字段与状态文件 | ✅ |
-| [guides/TESTING.md](guides/TESTING.md) | 离线回归清单与需要部署后验证的事项 | ✅ |
-| [guides/DSH_SETUP.md](guides/DSH_SETUP.md) | DSH 端安装说明：`qq-chat` / `qq-chat-v2` preset 与三个 MCP server 怎么挂到目标设备的 DSH 上 | ✅ |
-| [guides/VOICE.md](guides/VOICE.md) | 语音发送全解：独立工具（`voice-tool/` 的图形界面与命令行）、桥接 CLI、AI 工具、控制台面板，以及**工具拆出后的配置解析顺序** | ✅ 2026 整理时已更新（工具移到上一级 `voice-tool/`） |
-| [guides/TOKEN_USAGE_CONSOLE.md](guides/TOKEN_USAGE_CONSOLE.md) | 控制台「令牌与花费」看板：数据来源、计价口径（峰谷分时）、API、配置 | ✅ |
-| [guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) | 控制台离线预览（`npm run preview:console`）与离线浏览器回归（`npm run test:console-ui`）怎么用 | ✅ 2026 整理时自 `scripts/` 移入 |
-| [guides/SECURITY_BASELINE.md](guides/SECURITY_BASELINE.md) | **安全基线与威胁模型**：威胁主体、已实现的边界（准入/工具面/出站/控制台/落盘/网络）、已知残余风险、发布前回归清单、改动检查单 | ✅ **改动安全相关代码前必读**（2026-09-20 新增） |
-
-## design/ —— 设计与规划（读设计意图用）
-
-| 文档 | 一句话说明 | 状态 |
-| --- | --- | --- |
-| [design/GEN2_SIMULATION_PLAN.md](design/GEN2_SIMULATION_PLAN.md) | 二代仿真（`reserved2`）「一切皆工具」实施计划：WakeConfig 唤醒调度、MCP 工具集、控制台参数、`qq-chat-v2` preset | ⚠️ 骨架/API/调度/MCP/UI 均已落地，文中「状态：实施中」与残留 TODO 以当前代码为准 |
-| [design/SOCIAL_MODE_PLAN.md](design/SOCIAL_MODE_PLAN.md) | 一代仿真模式（`reserved`）的头脑风暴定案：规则引擎管「何时说」、LLM 管「说什么」 | ⚠️ 描述的一代状态机已实现；`reserved2` 已是默认模式，设计背景仍有效 |
-| [design/DSH_QQ_TOOLS_PLAN.md](design/DSH_QQ_TOOLS_PLAN.md) | 「一切皆工具」总路线与交接文档：当前能力盘点、安全性设计、分阶段计划 | ⚠️ 阶段计划大部分已完成，作为路线/安全设计参考仍有效 |
-| [design/真人语感策略.md](design/真人语感策略.md) | 拟人化策略：短句碎片、接梗、错别字、话题漂移、选择性沉默、括号用法 | ⚠️ 文首已自注：部分「现状」写于旧版随机分句时期，最新行为以 PROJECT_GUIDE / 代码为准 |
-
-## research/ —— 调研记录（结论可直接引用，过程可能过时）
-
-| 文档 | 一句话说明 | 状态 |
-| --- | --- | --- |
-| [research/SnowLuma功能调研.md](research/SnowLuma功能调研.md) | SnowLuma 除「OneBot WS + 基础收发」之外还有哪些 QQ 相关功能与机制（API 面、可扩展点） | ✅ 调研对象 v1.14.9；换 SnowLuma 大版本后需复核 |
-| [research/RESEARCH_QQ_MESSAGE_DND.md](research/RESEARCH_QQ_MESSAGE_DND.md) | QQ 群「消息免打扰」到底影响不影响 SnowLuma 收发消息 —— 结论：不影响，只是不提醒 | ✅ |
-| [research/RESEARCH_SNOWLUMA_EMOJI_STICKER.md](research/RESEARCH_SNOWLUMA_EMOJI_STICKER.md) | SnowLuma 的表情包/收藏表情能力（`fetch_custom_face*` 等），本仓库收藏表情功能的依据 | ✅ |
-| [research/LOCAL_MODEL_SIZING.md](research/LOCAL_MODEL_SIZING.md) | 若要本地复刻：本项目对模型的真实负载、显存门槛、27–35B 起步、双 3090 是性价比拐点 | ✅ 调研日期 2026-09-17 |
-
-## audits/ —— 审查 / 体检 / 优化报告（按时间读，越新越权威）
-
-| 文档 | 一句话说明 | 状态 |
-| --- | --- | --- |
-| [guides/DSH_020_ADAPTATION.md](guides/DSH_020_ADAPTATION.md) | **DSH 0.2.0 适配改动记录**（v0.1.7 → v0.2.0）：逐条列出为适配 0.2.0-rc.2 做的改动（现象/为什么必须改/证据/怎么验证），并单独列出「复核后判定兼容、因此没改」的部分与「同批但不属于适配」的改动 | ✅ **最新**；升级 DSH 前先读 §10 的操作清单。放在 `guides/` 是因为 `audits/`、`design/`、`legacy/`、`research/` 都在 `.gitignore` 里（见该文件第 52–64 行），放进那几处的文档**不会进公开仓库** |
-| [audits/AUDIT_FIXES_2026-09-20.md](audits/AUDIT_FIXES_2026-09-20.md) | **那一轮（第二轮）三路并行审计与修复记录**：桥接内核 / 控制台与打包 / 文档基线；逐条列出已修、已确认无问题、列为规划 | ✅（取代下面那份的结论；`CODE_AUDIT` 中当时未修完的项已在此结清）⚠️ **本文件不在公开仓库里**（`docs/audits/` 被 `.gitignore` 排除），只在本地可见 |
-| [audits/CODE_AUDIT_2026-09-20.md](audits/CODE_AUDIT_2026-09-20.md) | 同日较早的代码体检（P0/P1/P2/P3 清单与实现细节、指标统计：monolith 度量、重复代码盘点） | ⚠️ **多数已修**：修复状态以 AUDIT_FIXES 为准；本文的实现细节与度量仍有参考价值（2026-09-20 补登进索引） |
-| [audits/AUDIT_REPORT_2026-09-20.md](audits/AUDIT_REPORT_2026-09-20.md) | 全项目体检：四条独立审计线（状态机与重连、安全边界、健壮性与资源、配置/脚本/文档一致性）+ 按影响排序的修复 | ✅ 结论仍有效（取代 2026-09-18 那份） |
-| [audits/CONSOLE_FEATURES_REPORT.md](audits/CONSOLE_FEATURES_REPORT.md) | 控制台功能增强：人格管理、两层提示词（仿真层/人格层）、DSH 思考强度 | ✅ |
-| [audits/CONSOLE_UI_REDESIGN_REPORT.md](audits/CONSOLE_UI_REDESIGN_REPORT.md) | 控制台改版报告：九页导航 + 全局搜索 + 浅色/深色主题，纯前端改造 | ⚠️ 页数已增至 10（新增「令牌与花费」），其余仍有效 |
-| [audits/TOKEN_OPTIMIZATION.md](audits/TOKEN_OPTIMIZATION.md) | `reserved2` 的 token 开销优化与消息水位协议、升级与回退说明（README 直接引用它） | ✅ |
-| [audits/TOKEN_COST_ANALYSIS.md](audits/TOKEN_COST_ANALYSIS.md) | token 成本实测档案与优化清单（含本文档形成时的个人用量数据） | ⚠️ 数据是当时的实测快照；结论方向仍被 TOKEN_OPTIMIZATION 引用，具体数字别当现值 |
-
-## legacy/ —— 历史归档（**不要照着做**，留作背景与追溯）
-
-| 文档 | 一句话说明 | 为什么归档 |
-| --- | --- | --- |
-| [legacy/PROJECT_GUIDE.public-condensed.md](legacy/PROJECT_GUIDE.public-condensed.md) | 面向公开仓库的**精简版**项目说明书（约 375 行、10 节，末行自述「公开版文档，不包含本地开发历史与个人配置」） | 🗄️ **被 `guides/PROJECT_GUIDE.md` 取代**：内容更全的那份一直持续更新到 2026-09-11（新增「近期更新」章节到第 25 节），精简版只覆盖到早期的 10 节；两份同名文档并存正是「界面叫法不同步」的来源（见 CONSOLE_UI_REDESIGN_REPORT 第 6 条）。**未删除**，保留以便需要对外发布脱敏版时取用 |
-| [legacy/AUDIT_REPORT_2026-09-18.md](legacy/AUDIT_REPORT_2026-09-18.md) | 2026-09-18 的架构审查与修复报告（基线 `3c54e6b`，P0~P3 清单） | 🗄️ **被 `audits/AUDIT_REPORT_2026-09-20.md` 取代**：后者是对同一代码库的更新一轮体检，并已覆盖前者的待办 |
-| [legacy/ARCH_REVIEW.md](legacy/ARCH_REVIEW.md) | 2026-08-18 的架构审查：严重 #1~#6、中等 #7~#15、轻微 #16~#20、新增 #21~#30 | 🗄️ **问题已全部修复**：文首两份「修复状态」清单逐条标 ✅（含复查残留项），属已结案的历史记录 |
+| 文档 | 内容 |
+| --- | --- |
+| [guides/DSH_SETUP.md](guides/DSH_SETUP.md) | 把 preset 与 MCP server 挂到目标设备的 DSH |
+| [guides/DSH_020_ADAPTATION.md](guides/DSH_020_ADAPTATION.md) | DSH 0.2.0 适配改动逐条记录（升级 DSH 前先读操作清单） |
+| [guides/CONFIGURATION.md](guides/CONFIGURATION.md) | 配置字段与状态文件 |
+| [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) | owner 管理通道：权限分级、命令、确认流程、TOTP 边界、审批与审计（改权限代码前必读） |
+| [guides/SECURITY_BASELINE.md](guides/SECURITY_BASELINE.md) | 安全基线与威胁模型、发布前回归清单（改安全相关代码前必读） |
+| [guides/CONTINUITY.md](guides/CONTINUITY.md) | 人际连续性：QQ 号认人、人物库、共享策略、入群事件、跨群协作 |
+| [guides/CONTROL_CENTER.md](guides/CONTROL_CENTER.md) | 控制中心：托管桥接与 QQ 后端子进程的本地网页 |
+| [guides/SCHEDULER.md](guides/SCHEDULER.md) | 定时任务：控制台页面、`/remind`、AI 登记、重复方式、时区与安全限制 |
+| [guides/SILENCE.md](guides/SILENCE.md) | 定时静默：按时间段停掉 AI 省 token，与手动静默的区别 |
+| [guides/TESTING.md](guides/TESTING.md) | 离线回归清单与需要部署后验证的事项 |
+| [guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) | 控制台离线预览与离线浏览器回归怎么用 |
+| [guides/TOKEN_USAGE_CONSOLE.md](guides/TOKEN_USAGE_CONSOLE.md) | 「令牌与花费」看板：数据来源、计价口径、API、配置 |
+| [guides/PRIVACY.md](guides/PRIVACY.md) | 隐私边界：哪些数据留在本机、哪些会出站 |
+| [guides/VOICE.md](guides/VOICE.md) | 语音发送全解：独立工具、桥接 CLI、AI 工具、控制台面板与配置解析顺序 |
 
 ---
 
-## 想找什么 → 去哪看
+## 三、发布（`release/`）
+
+| 文档 | 内容 |
+| --- | --- |
+| [release/PUBLISHING.md](release/PUBLISHING.md) | 发布流程：发布前检查、推送与打标签、生成 Release ZIP、创建 GitHub Release |
+| [release/RELEASE_NOTES_v0.1.0.md](release/RELEASE_NOTES_v0.1.0.md) | 本仓库首个发布基线的说明 |
+
+`release/legacy/` 是上游 fork 时期的发布说明（v0.3.0 – v1.1.2），**只作存档**，版本号与本仓库无关。
+
+---
+
+## 四、归档（`archive/`）
+
+| 位置 | 内容 |
+| --- | --- |
+| [archive/models/](archive/models/) | 早期配置与资源模型：`GLOBAL_CONFIG.md`（三层配置）、`RESOURCE_MODEL.md`（资源与权限）、`RUNTIME_PROFILE_MODEL.md`（运行方案 v3）——均以 PROFILES_MODEL 为准 |
+| [archive/capability/](archive/capability/) | `CAPABILITY_UNIFY_SPEC.md`：能力/行为/工具归一 SPEC（产物链已废弃） |
+| [archive/console/](archive/console/) | 控制台历史稿：`CONSOLE_UI.md`、`CONSOLE_COMPONENTS.md`、`CONSOLE_UI_REWORK.md`（已合并进 CONSOLE.md） |
+| [archive/PROMPT_MIGRATION.md](archive/PROMPT_MIGRATION.md) | 2026-11-11 提示词逐段迁移记录 |
+
+---
+
+## 五、本地内部文档（`docs/_internal/`，不入库）
+
+开发台账与阶段材料，保留在本机供追溯，不随仓库发布：
+
+- 未完项与偏差台账：`STATUS.md`、`PARITY.md`、`PLAN_DEVIATIONS.md`、`EXTENSION_PLATFORM_DEVIATIONS.md`、`migration-report.md`
+- 执行计划：`UNIFY_PLAN.md`、`PLUGIN_ROADMAP.md`
+- 人格与提示词快照：`prompts/2026-11-11/`
+
+---
+
+## 六、想找什么 → 去哪看
 
 | 我想…… | 看这个 |
 | --- | --- |
-| 搞懂整体架构 / 全部配置项 | [guides/PROJECT_GUIDE.md](guides/PROJECT_GUIDE.md) |
-| 在新设备上把 qq-bridge 接进 DSH | [guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
-| 发语音 / 换 QQ 账号后语音工具 401 | [guides/VOICE.md](guides/VOICE.md)（独立工具在仓库上一级 `../voice-tool/`） |
-| 看 AI 烧了多少钱 / 计价口径 | [guides/TOKEN_USAGE_CONSOLE.md](guides/TOKEN_USAGE_CONSOLE.md)、[audits/TOKEN_COST_ANALYSIS.md](audits/TOKEN_COST_ANALYSIS.md) |
-| 改控制台界面并做离线回归 | [guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md)、[audits/CONSOLE_UI_REDESIGN_REPORT.md](audits/CONSOLE_UI_REDESIGN_REPORT.md) |
-| 改代码前先知道有哪些坑 | [guides/DSH_020_ADAPTATION.md](guides/DSH_020_ADAPTATION.md)（最新，DSH 适配）、[audits/AUDIT_FIXES_2026-09-20.md](audits/AUDIT_FIXES_2026-09-20.md)、[audits/AUDIT_REPORT_2026-09-20.md](audits/AUDIT_REPORT_2026-09-20.md) |
-| 动安全相关代码 / 做发布前检查 | [guides/SECURITY_BASELINE.md](guides/SECURITY_BASELINE.md) |
+| 搞清楚「配置存在哪、四层各管什么」 | [PROFILES_MODEL.md](PROFILES_MODEL.md) |
+| 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
+| 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
+| 改会话准入、方案、人格 | [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md)、[PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) |
+| 写 / 改插件 | [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) |
+| 接 MCP、技能、外部扩展 | [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) |
+| 动权限、鉴权、发布前安全检查 | [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md)、[guides/SECURITY_BASELINE.md](guides/SECURITY_BASELINE.md) |
 | 知道某个目录/脚本是干什么的 | [FOLDER_MAP.md](FOLDER_MAP.md) |
-| 权限边界与安全承诺 | [../RULES.md](../RULES.md) |
-| 这个项目要往哪走（QSH） | 上位目录的 `../../QSH-plan/`（总索引 `README.md`；另有工具面/技能/云部署/新仓库与官网四份专项） |
+| 权限边界与安全承诺（对外） | [../RULES.md](../RULES.md) |
+| 发版、打 tag、写 Release Notes | [release/PUBLISHING.md](release/PUBLISHING.md) |

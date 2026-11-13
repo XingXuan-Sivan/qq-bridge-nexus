@@ -10,7 +10,7 @@ import { ERR, PlatformError, parseAccountId, SEGMENT_TYPES } from './model.mjs';
 import { PROVIDERS, createConnector } from '../connectors/registry.mjs';
 import fs from 'node:fs';
 
-// 版本号只在一处维护：本目录的 package.json（与 qq-bridge-enhanced 项目版本保持一致，test-platform ⑦ 检查）
+// 版本号只在一处维护：本目录的 package.json（与 qq-bridge-nexus 项目版本保持一致，test-platform ⑦ 检查）
 export const PLATFORM_VERSION = String(JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version);
 
 export function createPlatform({ dataDir = defaultDataDir(), config = null, adminToken = extraAdminToken(), logger = null, stdoutLogs = true, WebSocketImpl = globalThis.WebSocket, now = Date.now, persist = true } = {}) {

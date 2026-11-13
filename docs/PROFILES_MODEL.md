@@ -161,7 +161,7 @@ note: …
 ## 六、相关文档
 
 - [FOLDER_MAP.md](FOLDER_MAP.md)：目录地图
-- [CAPABILITY_UNIFY_SPEC.md](CAPABILITY_UNIFY_SPEC.md)：能力统一（历史设计，产物链已废弃）
 - [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md)：注入块与提示词拼接
-- [RUNTIME_PROFILE_MODEL.md](RUNTIME_PROFILE_MODEL.md)：运行方案/权限（部分章节历史）
-- [GLOBAL_CONFIG.md](GLOBAL_CONFIG.md)：`config.json` 键表
+- [archive/capability/CAPABILITY_UNIFY_SPEC.md](archive/capability/CAPABILITY_UNIFY_SPEC.md)：能力统一（历史设计，产物链已废弃）
+- [archive/models/RUNTIME_PROFILE_MODEL.md](archive/models/RUNTIME_PROFILE_MODEL.md)：运行方案/权限（历史设计稿）
+- [archive/models/GLOBAL_CONFIG.md](archive/models/GLOBAL_CONFIG.md)：三层配置与 `config.json` 键表（历史对照）

@@ -2,19 +2,19 @@
 
 ## 本项目
 
-qq-bridge-enhanced 是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge)（MIT 许可，
+qq-bridge-nexus 是 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge)（MIT 许可，
 Copyright (c) 2026 Derpyu520 and qq-bridge / QSH contributors）的二次开发版本，基线为上游 `v0.2.0-r3`
 （源码包 `qq-bridge-0.2.0-r3.zip`，与上游 `main` 分支一致）。
 
 - 上游的全部代码、文档与资源仍按上游 [LICENSE](LICENSE)（MIT）授权；本仓库保留上游的版权声明与 LICENSE 全文。
-- v0.3.0 新增与修改的部分同样以 MIT 许可发布。新增文件主要位于 `src/social/`、`src/admin/`、`src/lib/`、
-  `src/bridge-extensions.js`、`dsh/agent-presets/qq-agent-readonly/`、`scripts/test-continuity.mjs` 等，
-  完整变更清单见 [CHANGELOG.md](CHANGELOG.md) 与 [docs/release/RELEASE_NOTES_v0.3.0.md](docs/release/RELEASE_NOTES_v0.3.0.md)。
+- 本仓库自 `cd3b267` 起的重构部分（即 `v0.1.0` 发布基线）同样以 MIT 许可发布。新增与重写的主要目录为 `src/`、
+  `public/console/`、`profiles/`、`scripts/`、`interface-platform/`、`docs/`，完整变更清单见 [CHANGELOG.md](CHANGELOG.md)
+  与 [docs/release/RELEASE_NOTES_v0.1.0.md](docs/release/RELEASE_NOTES_v0.1.0.md)（上游时期的版本记录存档在 `docs/release/legacy/`）。
 - 本项目与上游作者、DeepSeek、SnowLuma 项目及腾讯公司均无隶属关系。
 
 ## 第三方组件（不随本项目分发，适用各自许可）
 
-上游 [LICENSE](LICENSE) 后半部分「第三方组件与合规边界」一节仍然有效，以下为 v0.3.0 开发时重新核对的要点：
+上游 [LICENSE](LICENSE) 后半部分「第三方组件与合规边界」一节仍然有效，以下为 `v0.1.0` 发布前重新核对的要点：
 
 | 组件 | 本项目如何使用 | 许可要点 |
 | --- | --- | --- |
@@ -24,11 +24,11 @@ Copyright (c) 2026 Derpyu520 and qq-bridge / QSH contributors）的二次开发�
 | 其它 npm 依赖 | `npm ci` 安装 | 见各包 LICENSE |
 
 Release ZIP **不包含** `node_modules`、SnowLuma 的任何文件、DSH 的任何文件，也不包含上游仓库曾附带的
-`@snowluma/mcp` 工具目录快照 `_snowluma-catalog.json`（v0.3.0 起移除并加入 .gitignore；没有任何代码引用它）。
+`@snowluma/mcp` 工具目录快照 `_snowluma-catalog.json`（本仓库重构后已移除并加入 .gitignore；没有任何代码引用它）。
 
 ## 使用风险（上游已声明，重申）
 
 - SnowLuma 是非官方 QQ 协议实现，使用可能违反腾讯服务条款并导致账号受限，风险由使用者承担。
 - 群友的消息会发送给 LLM 提供方（DeepSeek 等）；黑话学习会把群聊词条作为关键词发给搜索引擎。数据出机清单见上游 LICENSE。
-- v0.3.0 的人物库会在本机长期保存群友的 QQ 号、各群名片与 AI 记下的印象。请告知群友，并善用 `sharePolicy`、`recordable`、
+- 本项目的人物库会在本机长期保存群友的 QQ 号、各群名片与 AI 记下的印象。请告知群友，并善用 `sharePolicy`、`recordable`、
   `/person <QQ> forget` 与保留策略。

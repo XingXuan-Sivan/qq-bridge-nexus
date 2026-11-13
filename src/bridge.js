@@ -98,8 +98,9 @@ import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, plat
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
 // 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
-// 内核只经 src/user-side/user-platform.mjs 这一道门面问；四处发送入口共用。
-import { buildSendCall, describeBackend, readBackendInfo } from './user-side/user-platform.mjs';
+// 内核只经 src/user-side/user-platform.mjs 这一道门面问；统一出口是 sendAction
+// （段校验 → 能力降级 → 平台 transport/适配器），四处发送入口全部经它发出。
+import { sendAction as dispatchSend, configureUserPlatformBackend, transportRegistry, describeBackend, readBackendInfo } from './user-side/user-platform.mjs';
 import { listPlatforms, loadPlatform } from './platforms/index.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
@@ -252,6 +253,34 @@ const BRIDGE_VERSION = (() => {
 // 插件内核实例：main() 里创建；初始化失败保持 null，主链按「没有插件」继续跑。
 // 放在模块级是为了让 SIGINT/SIGTERM 的退出钩子也能拿到它做 dispose。
 let plugins = null;
+
+/**
+ * 统一出站（B6）：会话 key + 中立段 → 插件 onOutbound → 降级 → 平台实现。
+ *
+ * 顺序不能反：插件改的是中立段，降级必须看到插件改后的结果；而插件拿不到
+ * 「已降级」的段，才能保证它无法用「改造」的名义绕过能力声明（§5.3）。
+ *
+ * @param {string} key            会话 key（platform[@account]:type:id）
+ * @param {unknown[]} segments    中立段（兼容 OneBot 历史写法 at / record）
+ * @param {{timeoutMs?: number}} [opts]
+ * @returns {Promise<{messageId: string|null, raw: any, degraded: unknown[]}>}
+ */
+async function sendAction(key, segments, opts = {}) {
+  const parsed = parseKey(key);
+  if (!parsed) throw new Error(`无法解析会话 key：${key}`);
+  const address = { platform: parsed.platform, account: parsed.account, conversation: { type: parsed.type, id: parsed.id } };
+  let outbound = segments;
+  if (plugins) {
+    const decorated = await plugins.decorateOutbound({ key, address, segments });
+    if (decorated?.dropped) {
+      const error = new Error('出站消息被插件丢弃');
+      error.code = 'outbound_dropped';
+      throw error;
+    }
+    if (Array.isArray(decorated?.segments)) outbound = decorated.segments;
+  }
+  return dispatchSend(address, outbound, opts);
+}
 const ROLE_STATE_FILE = path.join(STATE_DIR, 'current-role.json');
 const SLANG_FILE = path.join(STATE_DIR, 'slang.json');
 const SLANG_SESSION_FILE = path.join(STATE_DIR, 'slang-session.json');
@@ -2527,6 +2556,13 @@ async function main() {
       }
     }
   }
+  // 内置平台（QQ）的后端配置来源：每次发送现取，config 热改后不必重启。
+  // 地址与 token 属于平台实现，所以它们只经过适配器；内核不知道 httpUrl 长什么样。
+  configureUserPlatformBackend(() => ({
+    httpUrl: cfg.snowluma?.httpUrl,
+    accessToken: cfg.snowluma?.accessToken,
+    fetch: globalThis.fetch,
+  }));
   // 两端适配器：平台（QQ）与 Agent（DSH）各一份内置描述，插件可再注册。
   const adapterRegistry = createAdapterRegistry({ log });
   for (const adapter of builtinAdapters()) {
@@ -2548,7 +2584,9 @@ async function main() {
         commandRegistry,
         memoryRegistry,
         adapterRegistry,
-        sendToQQ: (key, msg) => sendToQQ(key, msg),
+        transportRegistry,
+        // 插件出站只给中立段；准入、段校验、降级、onOutbound 都在 sendAction 里。
+        sendMessage: (key, segments, opts) => sendPluginMessage(key, segments, opts),
         hasSession: (key) => sessions.has(key),
         fetch: globalThis.fetch,
       },
@@ -2894,7 +2932,6 @@ async function main() {
     const sendPath = processed.path;
 
     const assertSendAllowed = guard ? captureSendGuard(key) : null;
-    const { kind, id } = parseKey(key) ?? {};
     const recordSegment = { type: 'record', data: { file: sendPath } };
     let resolveSend;
     let rejectSend;
@@ -2904,23 +2941,8 @@ async function main() {
         if (assertSendAllowed) assertSendAllowed();
         // 语音条比图片大、要过一次 SILK 转码，给 60s 预算（文本/图片共用同一 sendChain，
         // 所以这条语音发完之前后面的文本会自然排队，不会插队到语音前面）。
-        const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-        const { action, params } = buildSendCall(kind, id, [recordSegment]);
-        const res = await fetch(`${httpUrl}/${action}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-          },
-          body: JSON.stringify(params),
-          signal: AbortSignal.timeout(60000)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-          const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口）' : '';
-          throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-        }
-        resolveSend(body.data);
+        const sent = await sendAction(key, [recordSegment], { timeoutMs: 60000 });
+        resolveSend(sent.raw);
       } catch (error) {
         rejectSend(error);
       }
@@ -3059,7 +3081,6 @@ async function main() {
     if (!entry) throw new Error(`找不到表情 ${stickerRef}，请先用 qq_list_stickers 获取有效 id`);
     const url = entry.url;
     if (!url) throw new Error(`表情 ${entry.id} 没有可发送的图片地址`);
-    const { kind, id } = parseKey(key) ?? {};
     const segments = [];
     const replyToMessageId = options.replyToMessageId;
     const atUserId = options.atUserId;
@@ -3085,8 +3106,6 @@ async function main() {
       throw new Error(`表情 ${entry.id} 的图片下载失败（QQ CDN 网络异常或地址已失效）：${error?.message ?? error}`);
     }
     segments.push({ type: 'image', data: { file: 'base64://' + image.buffer.toString('base64') } });
-    const { action, params } = buildSendCall(kind, id, segments);
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     // 与文本发送共用 sendChain，保证“先文字后表情”的真人顺序不被并发工具调用打乱。
     let sendResolve;
     let sendReject;
@@ -3099,21 +3118,8 @@ async function main() {
         // 真人发表情前通常会有短暂停顿，避免“文字刚发完表情立刻跟上”的机械感。
         await sleep(randInt(800, 2000));
         assertSendAllowed();
-        const res = await fetch(`${httpUrl}/${action}`, {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-          },
-          body: JSON.stringify(params),
-          signal: AbortSignal.timeout(15000)
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-          const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
-          throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-        }
-        sendResolve(body.data);
+        const sent = await sendAction(key, segments, { timeoutMs: 15000 });
+        sendResolve(sent.raw);
       } catch (error) {
         sendReject(error);
       }
@@ -3145,25 +3151,16 @@ async function main() {
   /** 把一张已经校验过的图片按图片消息发出（与文字、表情共用 sendChain，保证顺序）。 */
   async function sendImageBufferV2(key, buffer) {
     const assertSendAllowed = captureSendGuard(key);
-    const { kind, id } = parseKey(key) ?? {};
     const segments = [{ type: 'image', data: { file: 'base64://' + buffer.toString('base64') } }];
-    const { action, params } = buildSendCall(kind, id, segments);
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
     let done;
     let fail;
     const result = new Promise((resolve, reject) => { done = resolve; fail = reject; });
     sendChain = sendChain.then(async () => {
       try {
         assertSendAllowed();
-        const res = await fetch(`${httpUrl}/${action}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {}) },
-          body: JSON.stringify(params),
-          signal: AbortSignal.timeout(20000),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body.status !== 'ok' || body.retcode !== 0) throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}`);
-        done(body.data);
+        const sent = await sendAction(key, segments, { timeoutMs: 20000 });
+        // 回执原样传下去：调用方按平台字段（OneBot 的 message_id）读消息 id。
+        done(sent.raw);
       } catch (error) {
         fail(error);
       }
@@ -12558,23 +12555,10 @@ async function main() {
       throw new Error('发送内容包含会话令牌，已阻止发送');
     }
     segments.push({ type: 'text', data: { text: escapeCqText(rawMessage) } });
-    const { action, params } = buildSendCall(kind, id, segments);
-    const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-    const res = await fetch(`${httpUrl}/${action}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
-      },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(15000)
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
-      const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
-      throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
-    }
-    return body.data;
+    // 入口仍按 (kind, id) 传参（调用方在多个旧路径上），这里现拼会话 key：
+    // 地址的规范化只发生在 key 一处，发送只需 key。
+    const sent = await sendAction(buildKey(kind, id), segments, { timeoutMs: 15000 });
+    return sent.raw;
   }
 
   // ── 图片/表情字节解析（供一代自动内联与二代按需工具） ────────────────────
@@ -13115,6 +13099,24 @@ async function main() {
     await sendToQQ(key, text, opts);
     recordOwnerTranscript(key, 'ai', text);
     return true;
+  }
+
+  // 插件出站（ctx.message.send / ctx.qq.send）的入口：
+  // 先过与 sendToQQ 同一套准入（模式/白名单/发送守卫）与敏感信息拦截，再由 sendAction
+  // 做段校验、能力降级与 onOutbound。插件因此**拿不到**绕过准入的发送通道。
+  async function sendPluginMessage(key, segments, opts = {}) {
+    captureSendGuard(key)();
+    const textual = (Array.isArray(segments) ? segments : [])
+      .filter((segment) => segment?.type === 'text')
+      .map((segment) => String(segment?.data?.text ?? ''))
+      .join('\n');
+    const hasKnownToken = [...KNOWN_AGENT_TOKENS].some((t) => t && textual.includes(t));
+    if (hasKnownToken) throw new Error('发送内容包含会话令牌，已阻止发送');
+    if (textual && shouldAuditKey(key) && SENSITIVE_RE.test(textual)) {
+      log(`⚠️ 插件出站被安全策略拦截 (${key})`);
+      throw new Error('插件出站内容疑似包含敏感信息，已被安全策略拦截');
+    }
+    return sendAction(key, segments, opts);
   }
 
   // 会话模型应用去重：每个 DSH 会话在本进程内只 selectModel 一次；

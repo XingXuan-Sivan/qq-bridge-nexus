@@ -18,4 +18,15 @@ export function registerBuiltinUserPlatforms() {
   return BUILTIN_USER_PLATFORMS.map((impl) => impl.id);
 }
 
+/**
+ * 注入内置平台的后端配置来源（bridge 启动时调一次）。
+ *
+ * 为什么这样绕一圈：bridge 不得 import adapters/（verify:repo 的不变式），
+ * 而「httpUrl / token 从哪来」是适配器自己的事。装配点负责把两边接上，
+ * 于是内核只看到一个中立函数，适配器只看到一个提供者函数。
+ */
+export function configureBuiltinUserPlatformBackend(provider) {
+  qq.setOneBotBackend(provider);
+}
+
 registerBuiltinUserPlatforms();

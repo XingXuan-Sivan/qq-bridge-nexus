@@ -7,7 +7,7 @@
 ## 0.2.0（未发布）—— 用户侧 / Agent 侧平台解耦
 
 目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
-B0–B5 已落地，B6（插件接管连接）/ B7（控制台元数据化）/ B8（社交模型 `group→conversation`）未开始。
+B0–B6 已落地，B7（控制台元数据化）/ B8（社交模型 `group→conversation`）未开始。
 
 ### 重构：两侧适配器（B0–B5）
 - **B0 常量去 QQ**：`RUNTIME_PLATFORM`、`DEFAULT_PROMPT_VARS`、`catalog.mjs` 的 `provider` 参数化、
@@ -29,6 +29,22 @@ B0–B5 已落地，B6（插件接管连接）/ B7（控制台元数据化）/ B
   [docs/guides/ADD_USER_PLATFORM.md](docs/guides/ADD_USER_PLATFORM.md)。
 - **两条保留的外部契约**（见 §2.5）：`src/snowluma-conn.js` 不得移动（仓库外 `voice-tool/` 按固定路径引用）；
   `bridge-extensions.js` 保留对 `qq-backend-label.js` 的一处直连（0.1.x 公开导出名与文件名均被测试钉住）。
+
+### 重构：插件接管连接（B6）
+- **中立消息段**：新增 `src/user-side/segments.mjs`（11 种段 + `degradeSegments`）。OneBot 的历史写法
+  `at` / `record` 在边界处归一到 `mention` / `voice`，出口统一成 `{ type, data }`；`poke` / `ext`
+  缺能力时**报错**而不是静默变成文本。
+- **出站收口到底**：新增 `src/user-side/outbound.mjs`（`sendAction`）与 `src/user-side/transport.mjs`
+  （插件平台注册表，带 owner）。顺序固定为「插件 `onOutbound` 改中立段 → 内核降级 → transport」，
+  bridge 四处发送点（语音 / 表情 / 搜图 / 文本）各剩一行，OneBot 的动作名、参数、HTTP 与 426 提示
+  全部下沉到 `src/user-side/adapters/qq/`。
+- **统一事件**：新增 `src/user-side/event.mjs`（`validateUnifiedEvent`），`platform` / `account` 只取
+  内核给的 origin，插件伪造会被覆盖。
+- **插件内核**：`send:qq` → `send:message`（旧名按别名接受 + 加载时提示一次）、新增 `transport:provide`
+  与 `onOutbound`、`ctx.message`（`ctx.qq` 为同一对象）、`ctx.userPlatforms.register`；插件平台 id
+  与内置或别的插件冲突时拒绝（审计 `transport-denied`），卸载时按 2s 上限调 `close()`。
+- **新增回归**：`scripts/test-unified-segments.mjs`（10）、`test-unified-event.mjs`（8）、
+  `test-transport-plugin.mjs`（12）、`test-plugin-kernel.mjs` +3 条（共 20）。
 
 ### 修复
 - 审计夹具的 Agent 地址发现改为离线桩（旧名 `resolveDshBaseUrl` 改名后未同步，导致 bridge 落到真实现、

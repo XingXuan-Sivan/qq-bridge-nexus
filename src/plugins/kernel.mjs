@@ -16,6 +16,9 @@ import { createPersonaRegistry } from './persona.mjs';
 import { createPromptBlockRegistry } from './prompt-blocks.mjs';
 import { createHostApi } from './host-api.mjs';
 import { stageFromDirectory, stageFromZip, discardStaging, moveDirToTrash } from './install.mjs';
+// 段形状校验用中立段模块：插件 onOutbound 返回的段必须过同一道校验，
+// 否则插件可以用「改造出站」的名义把发不出去的段塞给适配器。
+import { normalizeSegments } from '../user-side/segments.mjs';
 
 const DISPOSE_TIMEOUT_MS = 2000;
 const AUDIT_TAIL_BYTES = 64 * 1024;
@@ -187,6 +190,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       hooks: [],
       commands: [],
       dispose: null,
+      transports: [],
       config: config.plugins[id]?.config ?? {},
       updatedAt: null,
       stats: {
@@ -290,10 +294,22 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     deps.memoryRegistry?.unregisterPlugin?.(entry.id);
     unregisterTaskTypes(entry.id);
     deps.adapterRegistry?.unregisterPlugin?.(entry.id);
+    // 插件提供的平台：先注销再 close。注销后新建的事件不会再路由到它，
+    // 而 close() 有 2s 上限——一个写坏的 socket 不能把整个进程的退出拖住。
+    const transports = deps.transportRegistry?.unregisterTransportsByOwner?.(entry.id) ?? [];
+    for (const transport of transports) {
+      if (typeof transport.close !== 'function') continue;
+      try {
+        await withTimeout(Promise.resolve().then(() => transport.close()), DISPOSE_TIMEOUT_MS, `${entry.id}.${transport.id}.close`);
+      } catch (error) {
+        logLine(`⚠️ [plugins] ${entry.id} 的平台 ${transport.id} 关闭失败：${error?.message ?? error}`);
+      }
+    }
     entry.commands = [];
     entry.blocks = [];
     entry.memories = [];
     entry.taskTypes = [];
+    entry.transports = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
     entry.updatedAt = isoNow();
@@ -318,6 +334,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     const checked = validateManifest(raw, dirName);
     if (!checked.ok) return { ok: false, error: checked.errors.join('；') };
     const manifest = checked.manifest;
+    // 旧权限名（send:qq）已被归一成正式名，但插件作者应当改：只在加载时打一次日志，不阻断加载。
+    for (const note of checked.deprecations ?? []) logLine(`⚠️ [plugins] ${dirName}：${note}`);
 
     const runtime = runtimeEnabled.get(dirName);
     const enabled = runtime !== undefined ? runtime : config.plugins[dirName]?.enabled !== false;
@@ -349,7 +367,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [], adapters: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [], adapters: [], transports: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -382,7 +400,13 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
           return true;
         },
         unregisterAdapters: (pluginId) => deps.adapterRegistry?.unregisterPlugin?.(pluginId),
+        registerTransport: (definition, pluginId) => {
+          pending.transports.push({ definition, pluginId });
+          return true;
+        },
+        listTransports: () => deps.transportRegistry?.list?.() ?? [],
         sendToQQ: deps.sendToQQ,
+        sendMessage: deps.sendMessage,
         hasSession: deps.hasSession,
         fetch: deps.fetch,
         now: deps.now,
@@ -416,7 +440,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, adapters: pending.adapters, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, adapters: pending.adapters, transports: pending.transports, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -432,6 +456,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     entry.memories = [];
     entry.taskTypes = [];
     entry.adapters = [];
+    entry.transports = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -481,6 +506,25 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
           logLine(`⚠️ [plugins] ${entry.id} 注册适配器 ${kind}/${adapter?.id ?? '?'} 失败：${error?.message ?? error}`);
         }
       }
+      for (const { definition, pluginId } of desc.transports ?? []) {
+        // create(config) 在这里调而不是在插件 activate 里：平台实例应当拿到插件自己的
+        // 配置（控制台可改），而 activate 阶段拿到的还是启动时的快照。
+        let instance = null;
+        try {
+          instance = typeof definition?.create === 'function' ? definition.create(config.plugins[pluginId]?.config ?? {}) : null;
+        } catch (error) {
+          logLine(`⚠️ [plugins] ${pluginId} 创建平台 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
+          continue;
+        }
+        try {
+          const registered = deps.transportRegistry?.register?.({ ...definition, instance }, pluginId);
+          if (registered) entry.transports.push(registered.id);
+        } catch (error) {
+          // id 与内置平台或别的插件冲突时到这里：拒绝注册并留审计，插件其余部分照常跑。
+          audit.append('transport-denied', { plugin: pluginId, platform: definition?.id ?? null, reason: String(error?.message ?? error) });
+          logLine(`⚠️ [plugins] ${entry.id} 注册平台 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
+        }
+      }
       audit.append('activate', { plugin: entry.id, version: entry.version });
       logLine(`[plugins] 已加载 ${entry.id}@${entry.version}${entry.hooks.length ? `（${entry.hooks.join('/')}）` : ''}`);
     } else {
@@ -520,6 +564,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       commands: [...entry.commands],
       blocks: [...(entry.blocks ?? [])],
       taskTypes: [...(entry.taskTypes ?? [])],
+      transports: [...(entry.transports ?? [])],
       updatedAt: entry.updatedAt,
       counters: { ...entry.stats },
     };
@@ -689,6 +734,50 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       changedBy = id;
     }
     return { dropped: false, text: changedBy ? text : null, changedBy };
+  }
+
+  /**
+   * 出站改造：在降级与发送之前，让插件按注册顺序改中立段。
+   *
+   * 与 onReplyDecorate 的区别：那边只能改**文本**，这边能改**段**（比如把图片换成本地
+   * 缓存地址）。两者都不能绕过能力判断 —— 返回的段会在这里重新过一遍形状校验，
+   * 而降级与发送在内核完成（见 src/user-side/outbound.mjs）。
+   *
+   * 返回值 `{ segments, dropped, changedBy }`；`dropped` 表示这条不发。
+   * 插件抛错/超时/返回非法段一律忽略并保留上一步结果 —— 改造失败不能让消息发不出去。
+   */
+  async function decorateOutbound(payload) {
+    const list = [...(hookIndex.get('onOutbound') ?? [])];
+    let segments;
+    try {
+      segments = normalizeSegments(payload?.segments ?? []);
+    } catch (error) {
+      throw new Error(`出站消息段不合法：${error?.message ?? error}`);
+    }
+    if (!list.length) return { segments, dropped: false, changedBy: null };
+
+    let changedBy = null;
+    for (const { id, handler } of list) {
+      // onOutbound 不需要额外权限：能返回段就能改，能力边界由降级（内核）与准入把关；
+      // 所以这里不查 manifest.permissions（不像 onInbound 那样要 inbound:filter）。
+      const result = await invokeHook('onOutbound', id, handler, { ...payload, segments });
+      if (!result.ok || result.value === undefined || result.value === null) continue;
+      const value = result.value;
+      if (value === false || (typeof value === 'object' && value.drop === true)) {
+        return { segments: [], dropped: true, changedBy: id };
+      }
+      // 只接 `{ segments }` 或裸数组：其它返回形状无法判定意图，忽略比猜安全。
+      const candidate = Array.isArray(value) ? value : (Array.isArray(value?.segments) ? value.segments : null);
+      if (!candidate) continue;
+      try {
+        segments = normalizeSegments(candidate);
+        changedBy = id;
+      } catch (error) {
+        audit.append('outbound-denied', { plugin: id, reason: String(error?.message ?? error) });
+        logLine(`⚠️ [plugins] ${id} 改造的出站段不合法，已忽略：${error?.message ?? error}`);
+      }
+    }
+    return { segments, dropped: false, changedBy };
   }
 
   /** 观察型钩子：不等待、不向主链抛错。 */
@@ -973,6 +1062,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     promptAdditions,
     promptBlocks,
     decorateReply,
+    decorateOutbound,
     filterInbound,
     personaResolve,
     personaProvider,

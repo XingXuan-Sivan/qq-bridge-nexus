@@ -207,6 +207,11 @@ export function describe() { return { label, conversationTypes, accountLabel, co
 
 **降级策略必须由 `capabilities` 决定，不由平台名决定**。这是 A 阶段（发送收口）的核心验收点。
 
+实装（B6）：段类型与降级表在 `src/user-side/segments.mjs`（`SEGMENT_TYPES` / `degradeSegments`），
+OneBot 的历史写法 `at` / `record` 在边界处归一到 `mention` / `voice`，出口统一成 `{ type, data }`。
+QQ 侧的还原在 `src/user-side/adapters/qq/segments.mjs`，报文逐字段不变由
+`scripts/test-transport-plugin.mjs` 钉住。
+
 ### 3.5 AgentPlatform（Agent 侧）
 
 ```js
@@ -286,6 +291,12 @@ ctx.userPlatforms.register({
 ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 ```
 
+`send` 可以写在 `register` 的定义上，也可以只写在 `create(config)` 的产物上——后者才是「一个连接」的
+形态，注册表会取实例上的那个并绑定 `this`；`capabilities` 同理（定义优先，其次实例）。
+
+出站对插件侧的入口是 `ctx.message.send(key, payload, opts)`：`payload` 只接受字符串、单个段或段数组，
+准入、段校验、降级、`onOutbound` 全在内核里做完才到达 transport。旧名 `ctx.qq` 指向同一个对象。
+
 ### 5.3 安全边界（关键）
 
 插件只替换**网络与协议**，不替换**策略**：
@@ -305,6 +316,20 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 3. 插件注册的平台 id 与内置平台冲突时拒绝。
 4. 插件卸载时 `close()` 必须完成或在 2s 后被强制丢弃（沿用现有 `DISPOSE_TIMEOUT_MS`）。
 
+### 5.4 实装（B6）
+
+| 环节 | 落点 | 行为 |
+| --- | --- | --- |
+| 段与降级 | `src/user-side/segments.mjs` | 11 种中立段 + `degradeSegments`；`poke` / `ext` 缺能力抛错，不静默变文本 |
+| 出站收口 | `src/user-side/outbound.mjs` | `sendAction(address, segments, opts)`：**先降级**，再选插件 transport，否则内置 `send` |
+| 插件平台表 | `src/user-side/transport.mjs` | 带 owner 的注册表：内置 id 冲突拒绝、换 owner 拒绝、按 owner 批量注销 |
+| 统一事件 | `src/user-side/event.mjs` | `validateUnifiedEvent(raw, origin)`：`platform` / `account` 只取内核给的 origin |
+| QQ 出站 | `src/user-side/adapters/qq/{segments,transport}.mjs` | OneBot 动作名、参数、HTTP、426 提示全在适配器内；bridge 四处发送点各剩一行 |
+| 插件内核 | `src/plugins/{manifest,host-api,kernel}.mjs` | `send:message` 别名、`transport:provide`、`onOutbound`、`close()` 2s 上限、`transport-denied` / `outbound-denied` 审计 |
+
+出站顺序不可颠倒：**插件 `onOutbound` 改中立段 → 内核降级 → transport**。反过来的话，插件就能用
+「改造」的名义发出本平台发不了的东西。
+
 ---
 
 ## 6. 迁移批次
@@ -321,7 +346,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B3** ✅ | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址；`admins` 项新增 `platform`/`account`/`id`（`qq` 保留为别名）；`QQ_RE` 移除、`cfg.ownerQQ` 降为派生视图 | bridge + 控制台 + 6 个测试 | 中 |
 | **B4** ✅ | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名（`chat / chat-v2 / readonly / workspace / full`，旧名经 `AGENT_PRESET_ALIASES` 归一；见 §2.5） | 2 个文件 + preset 名迁移 | 中 |
 | **B5** ✅ | 运行期适配器：新建 `src/user-side/`（`runtime-registry` / `builtin` / `user-platform` + `adapters/qq/`）与 `src/agent-side/`（已有 registry/builtin + `adapters/dsh/` + `agent-client` 门面）；`dsh-client.js` → `agent-side/adapters/dsh/client.mjs`，`lib/dsh-endpoint` 与 `lib/dsh-health` → 同目录，`platform/onebot` + `lib/qq-backend-label` → `user-side/adapters/qq/`，`platform/prompt` → `user-side/prompt.mjs`；bridge / self-test / control-center 只依赖门面；边界与例外见 §2.5 | 大（bridge 18 处 + 18 个 importer + 夹具） | 高 |
-| **B6** | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归 | kernel/host-api/manifest | 中高 |
+| **B6** ✅ | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归（实装见 §5.4） | kernel/host-api/manifest + `src/user-side/` 四个新模块 | 中高 |
 | **B7** | 控制台元数据化：品牌与文案、`/api/platforms` 与 `/api/agent-platforms` 驱动表单、列名与筛选读元数据、`/api/send/*` 收敛 | console 全站 | 中 |
 | **B8** | 社交模型 `group→conversation`、`成员→participant`（`/api/socialV2/*` 46 端点） | social 7 文件 1195 行 | 高 |
 
@@ -340,10 +365,11 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | 用例 | 断言 | 状态 |
 | --- | --- | --- |
 | `scripts/test-platform-adapters.mjs` | 两侧注册表 fail-closed、门面只出中立名、内核不直连 `adapters/`、平台专属文件不回 `src/` 根；夹具的平台桩用中立名且地址发现强制离线（14 条） | ✅ B5 |
-| `test:user-platform-pipeline` | mock 平台（内存 transport）走通：建会话 → 收消息 → 准入 → 唤醒 → 发消息 → 撤回 → 断线重连；`src/` 中无该平台字面量 | 待 B6 |
-| `test:cross-platform-isolation` | 同一进程 qq + mock 并活跃；A 平台上下文里产 B 平台 key 会抛错；`sessions.json` 无覆盖 | 待 B6 |
-| `test:transport-plugin` | 插件注册 transport：入站仍过准入（未准入会话插件拿不到正文）；出站走 `buildSendCall`；卸载后连接关闭 | 待 B6 |
-| `test:capability-degrade` | 缺 `sticker`/`forward` 能力时降级为文本占位；缺 `poke` 时**报错**而非静默 | 待 B6 |
+| `scripts/test-unified-segments.mjs` | 11 种段与顺序、`at`/`record` 归一、扁平写法、缺能力降级、`poke`/`ext` 抛错、能力判定不看平台名（10 条） | ✅ B6 |
+| `scripts/test-unified-event.mjs` | 5 种 kind、`platform`/`account` 只取内核来源（插件伪造被覆盖）、形状错误逐条报错、id 单调（8 条） | ✅ B6 |
+| `scripts/test-transport-plugin.mjs` | 插件 transport 注册/冲突/注销/`create` 产物、**降级先于 transport**、QQ 报文逐字段不变（`send_group_msg` / `send_private_msg` / at/record/reply）、426 提示、同进程多平台不串号（12 条） | ✅ B6 |
+| `test-plugin-kernel` 新增三条 | `transport:provide` + `create(config)` 产物 + 停用后 `close()`、`onOutbound` 链式/丢弃/非法段、`send:qq` 别名与 `ctx.qq === ctx.message`（20 条） | ✅ B6 |
+| `test:user-platform-pipeline` | 整桥 + mock 平台的端到端流水（建会话 → 收消息 → 准入 → 唤醒 → 发消息） | 待 B7（届时与 `/api/platforms` 一起做） |
 
 ### 7.2 静态验收（可机械化）
 

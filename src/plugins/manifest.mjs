@@ -7,9 +7,17 @@ import { normalizeConfigSchema } from './config-schema.mjs';
 
 export const API_VERSION = 1;
 
-export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'prompt:provide', 'memory:provide', 'task-type:provide', 'send:qq', 'net:http', 'commands', 'inbound:filter', 'adapters:provide']);
+export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'prompt:provide', 'memory:provide', 'task-type:provide', 'send:message', 'net:http', 'commands', 'inbound:filter', 'adapters:provide', 'transport:provide']);
 
-export const KNOWN_HOOKS = Object.freeze(['onInbound', 'onPromptBuild', 'onReplyDecorate', 'onAfterSend', 'onShutdown']);
+/**
+ * 旧权限名 → 正式名。
+ *
+ * `send:qq` 是 0.1.x 的名字：插件是外部产物，硬切会让已装的插件在升级后直接
+ * 变成「未申请权限、ctx.qq 不存在」。所以旧名按别名接受，只在日志里提示改一次。
+ */
+export const PERMISSION_ALIASES = Object.freeze({ 'send:qq': 'send:message' });
+
+export const KNOWN_HOOKS = Object.freeze(['onInbound', 'onPromptBuild', 'onReplyDecorate', 'onAfterSend', 'onOutbound', 'onShutdown']);
 
 // id 同时是目录名与审计里的标识，限制得窄一点：避免大小写不敏感文件系统上的歧义。
 export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
@@ -19,10 +27,12 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 /**
  * @param {unknown} raw    plugin.json 解析后的对象
  * @param {string} dirName 插件目录名（必须与 id 一致）
- * @returns {{ ok: true, errors: string[], manifest: object } | { ok: false, errors: string[], manifest: null }}
+ * @returns {{ ok: true, errors: string[], deprecations: string[], manifest: object } | { ok: false, errors: string[], deprecations: string[], manifest: null }}
  */
 export function validateManifest(raw, dirName) {
   const errors = [];
+  // 被别名接受、但应当改写的声明。调用方（内核）负责打一次日志。
+  const deprecations = [];
   const fail = (message) => errors.push(message);
 
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -58,7 +68,12 @@ export function validateManifest(raw, dirName) {
     fail('permissions 必须是数组');
   } else {
     for (const permission of permissions) {
-      if (!KNOWN_PERMISSIONS.includes(permission)) fail(`未知权限 "${permission}"`);
+      const mapped = PERMISSION_ALIASES[permission] ?? permission;
+      if (!KNOWN_PERMISSIONS.includes(mapped)) {
+        fail(`未知权限 "${permission}"`);
+      } else if (mapped !== permission) {
+        deprecations.push(`权限 "${permission}" 已改名为 "${mapped}"（旧名仍被接受，请更新 plugin.json）`);
+      }
     }
   }
 
@@ -81,18 +96,20 @@ export function validateManifest(raw, dirName) {
     for (const error of schemaResult.errors) fail(`configSchema.${error}`);
   }
 
-  if (errors.length) return { ok: false, errors, manifest: null };
+  if (errors.length) return { ok: false, errors, manifest: null, deprecations };
 
   return {
     ok: true,
     errors: [],
+    deprecations,
     manifest: Object.freeze({
       id,
       name,
       version,
       main,
       apiVersion: API_VERSION,
-      permissions: Object.freeze([...new Set(permissions)]),
+      // 存正式名：内核后面只认正式名，别名在清单边界处就归一掉。
+      permissions: Object.freeze([...new Set(permissions.map((item) => PERMISSION_ALIASES[item] ?? item))]),
       hooks: Object.freeze([...new Set(hooks)]),
       description,
       configSchema: schemaResult.schema,

@@ -1,7 +1,7 @@
 # 新增用户平台（微信 / B 站 / Telegram …）
 
-> 对称于 Agent 侧（`profiles/agent-platforms/<id>/` + `src/agent-side/`）。本文描述 **0.2.0（平台解耦 B5）**
-> 之后的实际做法；规格与取舍见 [PLATFORM_DECOUPLING.md](../PLATFORM_DECOUPLING.md) §2.5 / §3.2。
+> 对称于 Agent 侧（`profiles/agent-platforms/<id>/` + `src/agent-side/`）。本文描述 **0.2.0（平台解耦 B5 / B6）**
+> 之后的实际做法；规格与取舍见 [PLATFORM_DECOUPLING.md](../PLATFORM_DECOUPLING.md) §2.5 / §3.2 / §5.4。
 
 ---
 
@@ -9,7 +9,7 @@
 
 | 层 | 回答的问题 | 落在哪 |
 | --- | --- | --- |
-| **传输**（怎么连上平台） | 用什么协议收发、鉴权、重连 | `src/user-side/adapters/<id>/`，插件侧入口在 B6 的 `transport:provide` |
+| **传输**（怎么连上平台） | 用什么协议收发、鉴权、重连 | `src/user-side/adapters/<id>/`；插件侧入口是 B6 的 `transport:provide` |
 | **业务**（连上之后拿它做什么） | 会话、准入、唤醒、人格、表情、语音… | 内核模块（`session/` `social/` `runtime/` …），**不需要为新平台改** |
 
 新增平台只碰第一层。如果发现要改第二层，先确认是不是把「平台的实现细节」泄漏成了内核逻辑。
@@ -26,14 +26,17 @@ export const capabilities = ['group', 'direct', 'mention', 'reply', 'recall', 'p
   'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'];
 export const limits = { chunkChars: 4000, markdown: false };
 
-export function buildSendCall(kind, id, message) {}       // → { action, params }
+export function buildSendCall(kind, id, message) {}       // → { action, params }（报文拆分用，可选）
+export async function send({ address, segments, opts }) {} // 真正发出去：中立段 → 本平台报文 → 网络
 export function describeBackend(opts) {}                   // 日志里的「经 X 后端」称呼
 export function readBackendInfo(versionInfo) {}            // get_version_info → { name, version }
 ```
 
 - `capabilities` 是**能力声明**而不是能力检查：内核按它决定降级（缺 `sticker` 发文字占位）还是报错（缺 `poke`）。
 - `limits` 参与分条与格式转换，缺省时内核用默认值。
-- `buildSendCall` 只返回 `{ action, params }`，**由桥接自己发 HTTP**：传输实现（SnowLuma / NapCat / 将来别的网关）可以换，动作名与参数形状不换。
+- `send` 是唯一发送出口，收到的是**已校验、已降级的中立段**（`{ type, data }`），不是原始文本。本平台的
+  动作名、参数形状、HTTP/鉴权都只该出现在适配器目录里（QQ 的实现见 `adapters/qq/transport.mjs`）。
+- `buildSendCall` 仍保留：报文是数据时（例如需要把「动作 + 参数」交给外部网关）用它，不要两边各写一份三元式。
 
 ### 2. 装配：`src/user-side/builtin.mjs`
 
@@ -47,8 +50,12 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
 ### 3. 内核侧：不用改
 
 `bridge.js` / `self-test.js` / `launcher` 只经 `src/user-side/user-platform.mjs` 门面调用
-（`buildSendCall` / `describeBackend` / `readBackendInfo` / `supportsUserCapability` / `userPlatformLimits`）。
+（`buildSendCall` / `sendAction` / `previewSegments` / `describeBackend` / `readBackendInfo` /
+`supportsUserCapability` / `userPlatformLimits`）。
 门面导出的是**转发函数**而不是常量绑定，所以运行期切平台能立刻生效。
+
+后端配置（地址、token、fetch）也在这里注入：`configureUserPlatformBackend(provider)` 只传
+「怎么取配置」的函数，适配器每次发送现取，config 热改后不必重启。
 
 ## 三、必须守住的不变式
 
@@ -67,14 +74,18 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
 
 ```powershell
 npm run verify:repo        # 目录不变式、语法、门面导出（含 §7.2 静态验收）
-npm run test:audit         # 含 test-platform-adapters 的 14 条平台契约
+npm run test:audit         # 含 test-platform-adapters / test-transport-plugin 等契约
+node scripts/test-unified-segments.mjs   # 段类型或降级表改动后
+node scripts/test-transport-plugin.mjs   # 出站报文/transport 路由改动后
 node scripts/test-prompt-layers.mjs      # 平台话术（prompt.mjs）改动后
 node scripts/test-onebot-send-call.mjs   # 发送调用构造改动后
 ```
 
-## 五、还没做的部分（B6）
+## 五、还没做的部分（B7 / B8）
 
-「插件接管连接」（`transport:provide` + `onOutbound`）尚未实现。在那之前，新平台的入站消息仍由
-`bridge.js` 里 QQ 的 WebSocket 分支投递；接入第二个平台**能发不能收**。
-B6 落地后，插件可以自带连接器注册为一个 transport，入站事件须先过统一的
-`validateUnifiedEvent` 与准入闸门（未准入会话拿不到正文）。
+出站已通：插件可以用 `transport:provide` 自带连接器注册为一个 transport，出站经内核 `sendAction`
+（顺序是 `onOutbound` 改中立段 → 降级 → `transport.send`）。
+
+入站尚未接通：`validateUnifiedEvent`（`src/user-side/event.mjs`）已实现并有回归，但 `bridge.js` 的入站仍是
+QQ 的 WebSocket 分支，还没有「插件 transport 上报原始事件 → 内核校验并补全 `platform/account` → 准入」
+这条路。因此第二个平台**能发不能收**，待 B7（控制台元数据化）后接入。

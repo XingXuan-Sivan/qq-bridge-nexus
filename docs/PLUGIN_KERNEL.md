@@ -354,7 +354,26 @@ undefined                      // 不干预
 
 只读观察。用途：记账、失败告警、触发后续动作（后续动作也要走 host-api）。
 
-### 6.5 `onShutdown()`
+### 6.5 `onOutbound(payload)`
+
+```js
+{ key, address: { platform, account, conversation }, segments }
+```
+
+出站改造。`segments` 是中立段（[PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) §3.4），返回：
+
+- 段数组，或 `{ segments }`：替换整份消息（前一步的结果是后一步的输入）；
+- `false` / `{ drop: true }`：取消这条出站消息；
+- `undefined` / `null` / 其它形状：不改（例如只返回 `{ text }` 会被忽略，而不是猜意图）。
+
+约束（顺序不能反）：
+
+- 钩子在**降级之前**执行，插件看到的是中立段而不是本平台报文；能力降级与准入仍在它之后由内核完成。
+- 返回的段过同一道 `normalizeSegments` 校验；非法段记审计 `outbound-denied` 并保留上一步结果，消息照发。
+- 不需要额外权限：能改的只是段，能力边界由 `capabilities` 与降级把关。
+- 钩子抛错或超时：保留上一步结果。
+
+### 6.6 `onShutdown()`
 
 无参数，同步或异步均可，超时 2s。
 
@@ -379,7 +398,10 @@ undefined                      // 不干预
 | `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.scheduler.registerTaskType(def)` | `task-type:provide` | 注册一种定时任务类型（见 §8.1）；任务存在 `state/scheduler.json`，重启后仍在 |
 | `ctx.adapters.register(kind, adapter)` | `adapters:provide` | 注册两端适配器（`kind: 'platform' \| 'agent'`，见 ](./archive/models/RESOURCE_MODEL.md) §3.1）；只登记描述，不接管收发；卸载时按 pluginId 自动注销 |
-| `ctx.qq.send(key, text)` | `send:qq` | 走桥接的 `sendToQQ`，受现有发送限流与白名单约束 |
+| `ctx.message.send(key, payload, opts)` | `send:message` | 主动发消息。`payload` 是字符串、单个段或段数组；段校验、能力降级、`onOutbound` 都由内核完成后才到平台实现 |
+| `ctx.qq.send(key, payload, opts)` | `send:message` | 同上的旧名（0.1.x 的 `send:qq` 申请的就是这段能力），两者是**同一个对象** |
+| `ctx.userPlatforms.register(def)` | `transport:provide` | 注册一个 UserPlatform（`{ id, capabilities, create(config) }`）。id 不得与内置或其它插件平台冲突；卸载/停用时按 pluginId 注销并调用实例的 `close()`（上限 2s） |
+| `ctx.userPlatforms.list()` | `transport:provide` | 当前已注册的平台（内置 + 插件） |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
 | `ctx.now()` / `ctx.random()` | —— | 便于测试注入 |
@@ -387,7 +409,8 @@ undefined                      // 不干预
 约束：
 
 - `ctx.state` 的文件名只允许 `^[a-z0-9][a-z0-9-]{0,40}$`，禁止 `..`。
-- `ctx.qq.send` 的目标 `key` 必须已存在于桥接的会话表；不存在直接拒绝（防止插件凭空造会话）。
+- `ctx.message.send` 的目标 `key` 必须已存在于桥接的会话表；不存在直接拒绝（防止插件凭空造会话）。
+- 出站内容仍会过令牌与敏感信息拦截；插件没有「绕过准入直接发」的入口（它就是经桥接的 `sendAction`）。
 - `ctx.http.fetchJson` 不允许访问环回地址以外的内网段（与 `safe-fetch.js` 的策略一致），供 soulkit 这类本机服务例外放行需在配置里显式声明 `allowLoopback: true`。
 
 ---
@@ -398,13 +421,14 @@ undefined                      // 不干预
 | --- | --- | --- |
 | `state` | 读写自己的状态目录 | 低（隔离在 `state/plugins/<id>/`） |
 | `persona:provide` | 提供人格卡 | 中（影响 AI 说话方式） |
-| `send:qq` | 主动发 QQ 消息 | 高（可能骚扰） |
+| `send:message` | 主动发消息（0.1.x 的 `send:qq` 按别名接受，加载时提示改名） | 高（可能骚扰） |
 | `net:http` | 出站 HTTP | 中（数据外发） |
 | `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
 | `prompt:provide` | 注册具名注入块 | 中（影响 AI 每轮看到的内容；有块级与总预算上限） |
 | `adapters:provide` | 注册平台/Agent 适配器描述 | 低（只登记能力与提示词变量，不改收发路径） |
 | `task-type:provide` | 注册定时任务类型 | 中（到点会真的发消息；走现有白名单、限额、免打扰与模式判定） |
 | `inbound:filter` | 入站丢消息/改文字 | 高（丢消息不留痕、改文字会影响命令判定；默认 `filters.inbound=false` 时不生效） |
+| `transport:provide` | 提供 UserPlatform 实现（连接与发送） | 高（接管一个平台的网络与协议；不得顶替内置平台 id） |
 
 规则：
 
@@ -581,7 +605,7 @@ ctx.persona.register({
 2. 非法清单（坏 JSON / id 与目录不符 / 越界 `main`）→ 该插件 `invalid`，其它插件正常。
 3. 钩子抛错或卡死 → 消息照常处理，审计有 `error`/`timeout` 记录。
 4. 启用 `soulkit-persona` 且 soulkit 在线 → 唤醒 prompt 里的人格来自 soulkit，`【当前角色】` 名字一致；soulkit 离线 → 回落 `roles/*.md`，不报错。
-5. 未申请 `send:qq` 的插件拿不到 `ctx.qq`。
+5. 未申请 `send:message`（或旧名 `send:qq`）的插件拿不到 `ctx.message` / `ctx.qq`；未申请 `transport:provide` 的插件拿不到 `ctx.userPlatforms`。
 6. P2a：停用后钩子不再被调用、provider 不再解析；启用后恢复；重载读到新代码与新版本；重载一个 `activate` 抛错的插件 → 旧实例仍在、错误可见。
 7. P2b：目录安装成功即激活、重复安装被拒；坏清单不残留目录与暂存；zip 里 `../`、超限、多个根都被拒；卸载把目录移进 `state/_trash` 且运行实例先被 dispose。
 8. P2c：默认 `watch:false`；设 `true` 后改 `plugins/<id>/index.mjs` 会在 5 秒内重载该插件（`counters.reloads` 增长），改 `plugins.json` 本身不会触发热生效；监听不可用时桥接照常启动。

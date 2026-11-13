@@ -15,8 +15,11 @@
 // test-qq-backend-label）。
 import { oneBotSendCall, ONEBOT_CONVERSATIONS } from './onebot.mjs';
 import { qqBackendLabel, qqBackendFromVersionInfo } from './qq-backend-label.js';
+import { sendOneBotAction, setOneBotBackend, resetOneBotBackend } from './transport.mjs';
+import { toOneBotSegments } from './segments.mjs';
 
 export { oneBotSendCall, ONEBOT_CONVERSATIONS, qqBackendLabel, qqBackendFromVersionInfo };
+export { sendOneBotAction, setOneBotBackend, resetOneBotBackend, toOneBotSegments };
 
 export const id = 'qq';
 export const label = 'QQ';
@@ -45,6 +48,14 @@ export const limits = Object.freeze({ chunkChars: 4000, markdown: false });
 
 /** 中立的发送调用构造（内核侧的名字）。实现见 onebot.mjs。 */
 export const buildSendCall = oneBotSendCall;
+
+/**
+ * 中立的发送实现：`send({ address, segments, opts })`。
+ *
+ * 内核的 sendAction 在没有插件 transport 时落到这里。实现见 transport.mjs——
+ * OneBot 的动作名、参数名、HTTP 细节全部留在适配器目录内，内核只给中立段。
+ */
+export const send = sendOneBotAction;
 
 /** 中立的「后端该怎么称呼」。实现见 qq-backend-label.js。 */
 export const describeBackend = qqBackendLabel;

@@ -17,6 +17,8 @@ import { validateManifest, resolveMainPath } from '../src/plugins/manifest.mjs';
 import { normalizeConfig, defaultConfig } from '../src/plugins/config.mjs';
 import { createAuditLog } from '../src/plugins/audit.mjs';
 import { createPluginKernel, pluginIdFromPath } from '../src/plugins/kernel.mjs';
+import { transportRegistry } from '../src/user-side/user-platform.mjs';
+import { getTransport, listTransports, resetTransports } from '../src/user-side/transport.mjs';
 
 const DEMO_INDEX = `
 export function activate(ctx) {
@@ -659,6 +661,196 @@ test('定时任务类型（P8）：注册、校验、执行、停用后消失，
 
     await kernel.enable('taskcopy');
     assert.equal(kernel.hasTaskType('pig-latin'), true);
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const TRANSPORT_INDEX = `
+export function activate(ctx) {
+  ctx.userPlatforms.register({
+    id: 'demo-plat',
+    label: '演示平台',
+    capabilities: ['text'],
+    create(config) {
+      return {
+        config,
+        close() { ctx.state.write('closed', { ok: true }); },
+        send: async ({ segments }) => ({ messageId: 'plat-' + segments.length }),
+      };
+    },
+  });
+  ctx.userPlatforms.register({ id: 'qq', send: async () => ({}) });
+  return {};
+}
+`;
+
+test('插件平台（B6）：transport:provide 注册、create(config) 产物、冲突拒绝、停用后 close', async () => {
+  resetTransports();
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'plat', TRANSPORT_INDEX, { permissions: ['state', 'transport:provide'], hooks: [] });
+  fs.writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({
+    plugins: { plat: { config: { token: 'abc' } } },
+  }, null, 2));
+  const kernel = await createPluginKernel({
+    rootDir: root,
+    stateDir,
+    log: () => {},
+    deps: { transportRegistry },
+  });
+  await kernel.init();
+  try {
+    const entry = kernel.status().plugins.find((item) => item.id === 'plat');
+    // qq 与内置平台冲突被拒绝，同一次 activate 里合法的那个照常入表。
+    assert.deepEqual(entry.transports, ['demo-plat']);
+    assert.equal(entry.status, 'active');
+
+    const registered = getTransport('demo-plat');
+    assert.equal(registered.owner, 'plat');
+    assert.deepEqual(registered.capabilities, ['text']);
+    assert.deepEqual(registered.instance.config, { token: 'abc' }, 'create 拿到插件自己的配置');
+    assert.deepEqual(
+      await registered.send({ segments: [{ type: 'text', data: { text: 'x' } }] }),
+      { messageId: 'plat-1' },
+      'send 从 create() 的产物上取',
+    );
+
+    const auditText = fs.readFileSync(path.join(stateDir, 'plugin-audit.jsonl'), 'utf8');
+    assert.match(auditText, /"transport-denied"/);
+    assert.equal(listTransports().length, 1, '内置平台 qq 没有被插件顶替');
+
+    // 停用：注册表清空 + close() 被调用（上限 2s 由内核上）。
+    assert.equal((await kernel.disable('plat')).ok, true);
+    assert.equal(getTransport('demo-plat'), null);
+    assert.ok(fs.existsSync(path.join(stateDir, 'plugins', 'plat', 'closed.json')));
+
+    assert.equal((await kernel.enable('plat')).ok, true);
+    assert.equal(getTransport('demo-plat')?.owner, 'plat', '启用后重新注册');
+  } finally {
+    await kernel.shutdown();
+    resetTransports();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const OUTBOUND_APPEND = `
+export function activate() {
+  return {
+    hooks: {
+      onOutbound: ({ segments }) => ({ segments: [...segments, { type: 'text', data: { text: '尾巴' } }] }),
+    },
+  };
+}
+`;
+
+const OUTBOUND_DROP = `
+export function activate() {
+  return {
+    hooks: {
+      onOutbound: ({ segments }) =>
+        segments.some((segment) => segment.type === 'text' && segment.data.text.includes('删'))
+          ? { drop: true }
+          : undefined,
+    },
+  };
+}
+`;
+
+const OUTBOUND_BAD = `
+export function activate() {
+  return {
+    hooks: {
+      // image 缺 file/url：非法段。内核应忽略这一步并保留上一步的结果。
+      onOutbound: () => [{ type: 'image', data: {} }],
+    },
+  };
+}
+`;
+
+test('出站改造（B6）：onOutbound 链式改段、drop 丢弃、非法段被忽略且留审计', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  // 按 id 字典序执行：ob-a 追加 → ob-b 判丢 → ob-bad 给出非法段。
+  const hooks = { permissions: [], hooks: ['onOutbound'] };
+  writePlugin(pluginsDir, 'ob-a', OUTBOUND_APPEND, hooks);
+  writePlugin(pluginsDir, 'ob-b', OUTBOUND_DROP, hooks);
+  writePlugin(pluginsDir, 'ob-bad', OUTBOUND_BAD, hooks);
+  const kernel = await createPluginKernel({ rootDir: root, stateDir, log: () => {} });
+  await kernel.init();
+  try {
+    const normal = await kernel.decorateOutbound({
+      key: 'group:1',
+      address: { platform: 'qq', conversation: { type: 'group', id: '1' } },
+      segments: [{ type: 'text', data: { text: 'hi' } }],
+    });
+    assert.equal(normal.dropped, false);
+    assert.deepEqual(normal.segments.map((segment) => segment.data.text), ['hi', '尾巴']);
+    assert.equal(normal.changedBy, 'ob-a', 'ob-bad 的非法段不回退 ob-a 的结果');
+
+    const dropped = await kernel.decorateOutbound({ key: 'group:1', segments: [{ type: 'text', data: { text: '删掉我' } }] });
+    assert.equal(dropped.dropped, true);
+    assert.equal(dropped.changedBy, 'ob-b');
+
+    const auditText = fs.readFileSync(path.join(stateDir, 'plugin-audit.jsonl'), 'utf8');
+    assert.match(auditText, /"outbound-denied"/);
+
+    // 入站段不合法：直接抛错，不把半截消息交给平台。
+    await assert.rejects(
+      kernel.decorateOutbound({ key: 'group:1', segments: [{ type: 'image', data: {} }] }),
+      /出站消息段不合法/,
+    );
+  } finally {
+    await kernel.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const ALIAS_INDEX = `
+export function activate(ctx) {
+  return {
+    hooks: {
+      onInbound: async () => {
+        ctx.state.write('alias', { same: ctx.qq === ctx.message, kind: typeof ctx.message?.send });
+        ctx.state.write('sent', { id: await ctx.qq.send('group:1', 'hello') });
+      },
+    },
+  };
+}
+`;
+
+test('出站权限（B6）：send:qq 按别名归一为 send:message，ctx.qq 与 ctx.message 同一对象', async () => {
+  const { root, pluginsDir, stateDir } = makeTempRoot();
+  writePlugin(pluginsDir, 'alias', ALIAS_INDEX, { permissions: ['state', 'send:qq'], hooks: ['onInbound'] });
+  const logs = [];
+  const calls = [];
+  const kernel = await createPluginKernel({
+    rootDir: root,
+    stateDir,
+    log: (line) => logs.push(line),
+    deps: {
+      hasSession: (key) => key === 'group:1',
+      sendMessage: async (key, segments, opts) => {
+        calls.push({ key, segments, opts });
+        return { messageId: 'mid-1' };
+      },
+    },
+  });
+  await kernel.init();
+  try {
+    // 清单存正式名，旧名只在加载时提示一次，不阻断。
+    assert.deepEqual(kernel.detail('alias').permissions, ['state', 'send:message']);
+    assert.ok(logs.some((line) => line.includes('send:qq') && line.includes('send:message')));
+
+    kernel.notify('onInbound', { key: 'group:1', text: 'x' });
+    await sleep(150);
+    const alias = JSON.parse(fs.readFileSync(path.join(stateDir, 'plugins', 'alias', 'alias.json'), 'utf8'));
+    assert.deepEqual(alias, { same: true, kind: 'function' });
+
+    const sent = JSON.parse(fs.readFileSync(path.join(stateDir, 'plugins', 'alias', 'sent.json'), 'utf8'));
+    assert.equal(sent.id, 'mid-1');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].key, 'group:1');
+    assert.deepEqual(calls[0].segments, [{ type: 'text', data: { text: 'hello' } }], '字符串被包成文本段');
   } finally {
     await kernel.shutdown();
     fs.rmSync(root, { recursive: true, force: true });

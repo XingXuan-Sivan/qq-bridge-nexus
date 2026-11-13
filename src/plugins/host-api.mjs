@@ -6,8 +6,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { normalizeSegments } from '../user-side/segments.mjs';
+
 const STATE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const MAX_HTTP_BYTES = 256 * 1024;
+
+/** 出参只收「字符串 / 单个段 / 段数组」，出口统一成中立段数组。 */
+function toSegments(payload) {
+  if (typeof payload === 'string') return normalizeSegments([{ type: 'text', data: { text: payload } }]);
+  if (Array.isArray(payload)) return normalizeSegments(payload);
+  if (payload && typeof payload === 'object' && typeof payload.type === 'string') return normalizeSegments([payload]);
+  if (payload === null || payload === undefined) return [];
+  throw new Error('send 只接受字符串、单个消息段或消息段数组');
+}
 
 export function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -121,15 +132,31 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
     };
   }
 
-  if (granted.has('send:qq')) {
-    ctx.qq = {
-      async send(key, text) {
-        const target = String(key ?? '');
+  if (granted.has('transport:provide')) {
+    // 插件提供 UserPlatform 实现（连接/发送）。内核只把**已校验、已降级**的段
+    // 交给它的 send；能力声明由它自己报，内核不允许它扩大已声明能力（§5.3）。
+    ctx.userPlatforms = {
+      register: (definition) => deps.registerTransport?.(definition, id),
+      list: () => deps.listTransports?.() ?? [],
+    };
+  }
+
+  if (granted.has('send:message')) {
+    // 出站：插件只能给「文本或中立段」，准入、段校验、能力降级全在内核里。
+    // 旧名 ctx.qq 指向同一对象：0.1.x 插件按 send:qq 申请的就是这段能力。
+    const message = {
+      async send(key, payload, options = {}) {
+        const target = String(key ?? '').trim();
+        if (!target) throw new Error('send: 会话 key 不能为空');
         if (!deps.hasSession?.(target)) throw new Error(`未知会话: ${target}`);
-        if (!text) return;
-        await deps.sendToQQ(target, String(text));
+        const segments = toSegments(payload);
+        if (!segments.length) return null;
+        const result = await deps.sendMessage(target, segments, options);
+        return result?.messageId ?? null;
       },
     };
+    ctx.message = message;
+    ctx.qq = message;
   }
 
   if (granted.has('net:http')) {

@@ -207,6 +207,12 @@ const tests = [
   // B5 运行期适配器：两侧注册表的 fail-closed、门面委托（buildSendCall / AgentApiClient），
   // 以及「平台专属实现不得回流 src/ 根与 src/lib/」。
   'test-platform-adapters.mjs',
+  // B6 中立段与统一出站：11 种段的形状校验、按 capabilities 降级、段降级不得扩大能力。
+  'test-unified-segments.mjs',
+  // B6 统一事件：形状校验 + platform/account 由内核补全（插件伪造的平台必须被覆盖）。
+  'test-unified-event.mjs',
+  // B6 插件 transport：id 冲突拒绝、sendAction 路由、降级先于 transport、QQ 报文不变。
+  'test-transport-plugin.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

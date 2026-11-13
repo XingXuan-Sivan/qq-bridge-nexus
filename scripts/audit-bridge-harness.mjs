@@ -77,7 +77,15 @@ import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, plat
 import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 // 发送调用构造与后端称呼（B5）：bridge.js 只经 src/user-side/user-platform.mjs 门面调用，
 // 夹具剥 import 后必须按门面的名字补回。实现本身在 adapters/qq/ 里。
-import { buildSendCall, describeBackend, readBackendInfo } from '../src/user-side/user-platform.mjs';
+// B6 又从这里进了三个名字：统一出站、后端配置注入、插件平台注册表。
+import {
+  buildSendCall,
+  describeBackend,
+  readBackendInfo,
+  sendAction as dispatchSend,
+  configureUserPlatformBackend,
+  transportRegistry,
+} from '../src/user-side/user-platform.mjs';
 // Agent 侧的探活走门面（B5）：health 是真实现（纯状态机、不联网），能验证「连续 2 次失败才判不可用」。
 // 地址发现 **不能** 用真实现：它会查本机进程（lsof/netstat），装了 DSH 的机器上会摸到真 DSH，
 // 所以按下面的 resolveAgentBaseUrl 离线桩注入（见 context 定义处）。
@@ -330,6 +338,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 发送调用构造与后端称呼（B5）：bridge.js 只经门面调用，夹具剥 import 后按门面名补回。
     buildSendCall, describeBackend, readBackendInfo,
+    // 统一出站与插件平台（B6）：sendAction 在 bridge 里改名 dispatchSend，
+    // 因为 bridge 自己有个同名包装（先过 onOutbound 再落到这里）。
+    dispatchSend, configureUserPlatformBackend, transportRegistry,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',
@@ -442,6 +453,10 @@ createExtensionCatalog,
       init: async () => {},
       notify: () => {},
       promptAdditions: async () => ({ prependText: '', appendText: '' }),
+      // B6：出站两道改造钩子的默认行为是「什么都不改」。夹具默认没有插件，
+      // 返回原段才能保证收口前后的报文逐字节一致。
+      decorateOutbound: async ({ segments }) => ({ segments, dropped: false, changedBy: null }),
+      decorateReply: async ({ text }) => ({ text, dropped: false, changedBy: null }),
       personaResolve: () => null,
       personaWarm: async () => null,
       // 默认没有任何插件任务类型：bridge 的调度器适配层要能容忍这一点。

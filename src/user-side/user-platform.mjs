@@ -9,7 +9,7 @@
 // 转发函数而不是 const 绑定：当前平台可以在运行期被 useUserPlatform() 切换
 // （B6 的多平台在线），const 绑定会在切换后指向旧平台。一次 Map.get 可忽略。
 
-import './builtin.mjs';
+import { configureBuiltinUserPlatformBackend } from './builtin.mjs';
 import {
   buildSendCall as registryBuildSendCall,
   readBackendInfo as registryReadBackendInfo,
@@ -19,8 +19,51 @@ import {
   activeUserPlatformId,
   listUserPlatforms,
 } from './runtime-registry.mjs';
+import { sendAction as registrySendAction, previewSegments as registryPreviewSegments } from './outbound.mjs';
+import { getTransport, listTransports, registerTransport, unregisterTransportsByOwner } from './transport.mjs';
 
-export { activeUserPlatformId, listUserPlatforms };
+export { activeUserPlatformId, listUserPlatforms, listTransports, getTransport };
+
+/**
+ * 插件平台注册表（内核透传给插件内核的 deps）。
+ *
+ * 收成一个对象而不是四个函数：插件内核只需要一个依赖，
+ * 将来加「枚举/健康检查」也不用再改 bridge 的注入点。
+ */
+export const transportRegistry = Object.freeze({
+  register: (definition, owner) => registerTransport(definition, owner),
+  unregisterTransportsByOwner: (owner) => unregisterTransportsByOwner(owner),
+  list: () => listTransports(),
+  get: (id) => getTransport(id),
+});
+
+/** 插件注册的用户平台（transport:provide）与控制台列表。 */
+export function pluginTransports() {
+  return listTransports();
+}
+
+/**
+ * 注入内置平台的后端配置来源（bridge 启动时调一次）。
+ * 返回 { httpUrl, accessToken, fetch }，每次发送时重新取值（config 可热改）。
+ */
+export function configureUserPlatformBackend(provider) {
+  configureBuiltinUserPlatformBackend(provider);
+}
+
+/**
+ * 统一出站：校验 → 按能力降级 → transport / 适配器 send。
+ * @param {{platform?: string, account?: string, conversation: {type: string, id: string}}} address
+ * @param {unknown[]} segments 中立段
+ * @param {{timeoutMs?: number}} [opts]
+ */
+export async function sendAction(address, segments, opts = {}) {
+  return registrySendAction(address, segments, opts);
+}
+
+/** 只降级不发送（控制台预览用）。 */
+export function previewSegments(platformId, segments) {
+  return registryPreviewSegments(platformId, segments);
+}
 
 /** 当前用户平台 id（qq / …）。 */
 export function userPlatformId() {

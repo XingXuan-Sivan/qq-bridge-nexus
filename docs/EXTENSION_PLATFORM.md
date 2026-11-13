@@ -13,7 +13,7 @@
 核心决定：
 
 1. **桥接聚合**：对 DSH 暴露一个稳定的扩展入口，不让每次增删 MCP / 技能都重启 DSH。
-2. **统一目录**：`extensions/` 放数据型扩展，`src/extensions/` 放实现，`state/extensions/` 放运行态；现有 `plugins/`、`skills/`、`dsh/agent-presets/` 继续作为内置来源，由 catalog 合并，不立刻大搬迁。
+2. **统一目录**：`extensions/` 放数据型扩展，`src/extensions/` 放实现，`state/extensions/` 放运行态；现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/` 继续作为内置来源，由 catalog 合并，不立刻大搬迁。
 3. **预设是授权中心**：MCP 工具、技能、插件注入、工具清单都按 DSH preset 配置；预设可结构化编辑，也允许直接改 YAML 高级编辑。
 4. **默认保守、能力可显式解锁**：默认 preset 是安全集；开发者可以定义/选择 `workspace`、`operator` 甚至绑定到群。系统给警告与审计；临时 `arm` 只活在本次进程，长期权限靠建会话时的 preset。
 5. **两档暴露**：默认用 `ext_list` / `ext_describe` / `ext_call` 元工具吸收长尾与动态扩展；高频且稳定的工具再「提升」为带命名空间的直连工具。纯元工具会把参数校验退化成字符串 JSON，纯直连会把所有工具塞进所有预设的 schema，两者都不够好。
@@ -32,15 +32,15 @@
 | MCP | 内置 server 真实工具清单；外部 MCP 新增/编辑/测试/刷新/日志/删除；Hub 元工具 | 技能尚未接入 Hub；预设策略目前只有 `qq-chat-v2` 的 `extensions.yml`，编辑器在 P3 |
 | 技能 | 只读扫描 `SKILL.md` | 不能安装、编辑、启停、删除；不能分配 preset |
 | 工具参考 | 已并入 MCP 页（server 概览 + 工具参考） | 独立页面与导航已移除，旧 `#reference` 重定向到 `#mcp` |
-| 预设 | 只能改 `qq-chat` / `qq-chat-v2` 的提示词正文 | 五个 preset 写死在 `dsh/agent-presets/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
+| 预设 | 只能改 `qq-chat` / `qq-chat-v2` 的提示词正文 | 五个 preset 写死在 `profiles/agent-platforms/dsh/agents/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
 
 关键代码位置：
 
 - `src/bridge.js:5309-5319` 的 `GET /api/extensions`：MCP 是 3 条字面量；`snowluma-safe` 的 `tools` 为空，但 `src/mcp-snowluma-safe.js:383-1463` 实际注册 36 个 `qq_*` 工具。
 - `public/console/pages/reference/fields.js:5-15`：9 条硬编码工具说明，页面不发请求。
 - `src/bridge.js:5321-5329`：`GET /api/presets` 只回 `{id, trust}`。
-- `dsh/agent-presets/<id>/agent.cordis.yml` 是 preset 权威源；`dsh-bundles/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
-- `dsh-bundles/qq-agent-presets/qq-tool-restrict.mjs:244-252`：执行期 guard 只放行 `SAFE_EXACT`（`ask_user_question`、`todo_write`）、三个 MCP 前缀与 L1 只读工具；`compress` 被拒。
+- `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` 是 preset 权威源；`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
+- `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs:244-252`：执行期 guard 只放行 `SAFE_EXACT`（`ask_user_question`、`todo_write`）、三个 MCP 前缀与 L1 只读工具；`compress` 被拒。
 
 ### 1.2 三个结构性问题
 
@@ -81,7 +81,7 @@
 | `mcp` | 一个 MCP server（stdio / SSE / Streamable HTTP）及其工具 | `extensions/mcp/<id>/server.json`，内置 server 仍由 `src/mcp-*.js` 提供 | 连接、工具清单、健康、错误 |
 | `skill` | 一份 `SKILL.md`，只注入 name/description，正文按需读 | `extensions/skills/<id>/SKILL.md`，内置来源 `DSH_HOME/skills`、仓库 `skills/`、插件自带 skills | 扫描结果、启用状态 |
 | `plugin` | 桥接进程内插件（钩子 / 人格 provider / 命令 / 注入块） | `plugins/<id>/plugin.json` + `plugins.json` | 加载状态、钩子、调用计数 |
-| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `dsh/agent-presets/<id>/agent.cordis.yml` | 安装后的 patch / 当前会话绑定 |
+| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` | 安装后的 patch / 当前会话绑定 |
 
 说明：`preset` 不是「扩展」本身，但它是扩展授权的中心，所以放进同一个 catalog 视图；不把 preset 伪装成可安装插件。
 
@@ -124,7 +124,7 @@ state/extensions/               # 运行态（不提交）
   staging/                      # 安装临时目录
 ```
 
-现有 `plugins/`、`skills/`、`dsh/agent-presets/` **不搬**：catalog 通过 source adapter 合并；等 P4 市场稳定后再评估是否把第三方数据迁到 `extensions/`。
+现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/` **不搬**：catalog 通过 source adapter 合并；等 P4 市场稳定后再评估是否把第三方数据迁到 `extensions/`。
 
 ### 3.4 Catalog 条目
 
@@ -165,7 +165,7 @@ state/extensions/               # 运行态（不提交）
 | 启停 / 配置 / 测试 / 刷新 | 允许（按类型能力） | 允许 |
 | 删除 / 卸载 / 改名 / 覆盖 | 禁止 | 允许 |
 | 更新 | 随桥接发布，不单独更新 | 允许按 source 更新，失败回滚 |
-| 物理位置 | 保持现有目录（`src/mcp-*.js`、`plugins/`、`skills/`、`dsh/agent-presets/`） | 统一 `extensions/<kind>/<id>/` |
+| 物理位置 | 保持现有目录（`src/mcp-*.js`、`plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/`） | 统一 `extensions/<kind>/<id>/` |
 
 - 内置项由 source adapter 提供 manifest，catalog 标记 `source: "builtin"`；不要求把现有内置搬进 `extensions/`。
 - 内置项也必须有稳定 id、可显示的工具/技能/配置 schema；不能因为“内置”就只给一行只读摘要。
@@ -452,10 +452,10 @@ resolve source → preview manifest → staging download
 ### 8.1 权威源与生成链
 
 ```text
-dsh/agent-presets/<id>/agent.cordis.yml   # 权威源（人可读，可 review）
-  → scripts/build-agent-preset-patches.mjs
-  → dsh-bundles/qq-agent-presets/presets/<id>.patch.yml
-  → setup-dsh.mjs 安装到 DSH profile
+profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml   # 权威源（人可读，可 review）
+  → profiles/agent-platforms/dsh/adapters/build.mjs（planArtifacts，调度器 scripts/build-artifacts.mjs）
+  → artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml
+  → profiles/agent-platforms/dsh/adapters/install.mjs（scripts/install-agent-platform.mjs）安装到 DSH profile
 ```
 
 预设编辑器只写权威源，再走生成/安装；不直接改生成物，否则下次 build 会覆盖。
@@ -594,7 +594,7 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设的 MCP allowlist 与工具级 allow/deny；Hub 执行期校验。
 - 验收：新增外部 server 不需要重启 DSH；未授权 preset 调用被拒；断线/超时/日志可见；`compress` 正常。
 
-**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`dsh/agent-presets/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
+**2026-11-09 状态：P2 已实现、验收并提交（`de95c4a`）。** 新增 `src/mcp-bridge-ext.js`（`ext_list/ext_describe/ext_call`）、`src/extensions/{mcp-store,secrets,mcp-runtime,preset-policy,hub,hub-token}.mjs`；bridge 接 4 条管理 API、Hub 内部 API 与 `state/extensions/hub-token`；MCP 页支持外部 MCP 新增/编辑/测试/刷新/日志/删除；`profiles/agent-platforms/dsh/agents/qq-chat-v2/extensions.yml` 允许外部 MCP 与技能，其他预设无文件即拒绝。真机已验证外部 `test-ext` 的 CRUD/测试/日志，以及 Hub `list/describe/call` 与 401/403。2026-11-09 后续把 MCP 页重构为统一表格/四段弹窗：来源与状态用 `.pill`、失败提示进工具栏、工具栏筛选/刷新、操作列最多编辑/测试/删除、配置按连接方式自动套模板、footer 测试连接，并新增 `POST /api/extensions/mcp/test` 草稿测试（不落盘）；无 body DELETE 走通用 CSRF 例外。范围边界见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md) E7–E12（内置 MCP/插件工具暂不提升、tools/list_changed 先显式 refresh、ext_list 不自动连接、Hub 本身需一次 DSH 重启、外部 MCP 安全默认值、草稿测试 API 与无 body DELETE）。
 
 ### P3 技能 / 插件配置 / 预设编辑器
 
@@ -603,7 +603,7 @@ P0 验收：`compress` 可被调用；`test-preset-local-tools.mjs` 把 `compres
 - 预设结构化编辑 + YAML 高级编辑 + 校验/备份/apply/rollback；能力档位（safe/workspace/operator/custom）、危险工具声明与警告、绑定到群的确认流程；`compress` 开关归入 compaction 区块。
 - 验收：改预设不手工 build；保存失败可回滚；危险工具必须显式声明并给出警告；未知工具被拒绝。
 
-**2026-11-09 状态：P3 技能管理与插件 configSchema 子批已实现并验收。** 技能：外部技能存 `extensions/skills/<id>/SKILL.md`，状态 `state/extensions/skills-state.json`，备份 `state/extensions/skill-backups/`；支持新增、ZIP 导入（根目录或单层目录、无路径穿越、≤4MB/200 文件）、编辑、启停、删除，只读来源（DSH_HOME、仓库、额外目录）只能查看。`GET/POST /api/extensions/skills`、`POST /api/extensions/skills/import`、`GET/PATCH/DELETE /api/extensions/skills/<id>`；Hub `ext_describe` 支持 `skill` 读正文；`core-skills` 注入按当前 preset 的 `skills.allow` 过滤（未配置时保持全量，兼容无 extensions.yml 的内置 preset）。插件：`plugin.json` 可选 `configSchema`（受支持的 JSON Schema 子集），`PATCH /api/plugins/<id>/config` 写 `plugins.json` 并重载，`POST /api/plugins/<id>/test` 只校验；插件详情用 schema 动态表单 + 测试/日志，无 schema 显示原始 config。验收：`test-skill-store` 3/3、`test-plugin-config-schema` 4/4、技能/catalog/hub 相关 14/14、插件内核/清单 21/21、static 全过、UI 31/31、audit 101/101；真机 API 往返、ZIP 导入、启停/删除、Hub 技能正文、插件 config PATCH/test 与详情表单均通过。偏差见 E13/E14。预设编辑器随后完成：`src/presets/store.mjs` 以 `dsh/agent-presets/<id>/` 为源，提供元数据/扩展授权/YAML 读取写入、备份与 apply/rollback；`/api/extensions/presets` 系列 API；控制台新增预设页（列表 + 内联三段编辑器），保存前校验 YAML，应用执行 build + setup-dsh，失败回滚。`test-preset-store` 5/5、static 全过、UI 32/32、audit 102/102，真机 GET/PUT/validate/apply/rollback 均通过；共用 guard 无法按 preset 放行原生工具，见 E15。
+**2026-11-09 状态：P3 技能管理与插件 configSchema 子批已实现并验收。** 技能：外部技能存 `extensions/skills/<id>/SKILL.md`，状态 `state/extensions/skills-state.json`，备份 `state/extensions/skill-backups/`；支持新增、ZIP 导入（根目录或单层目录、无路径穿越、≤4MB/200 文件）、编辑、启停、删除，只读来源（DSH_HOME、仓库、额外目录）只能查看。`GET/POST /api/extensions/skills`、`POST /api/extensions/skills/import`、`GET/PATCH/DELETE /api/extensions/skills/<id>`；Hub `ext_describe` 支持 `skill` 读正文；`core-skills` 注入按当前 preset 的 `skills.allow` 过滤（未配置时保持全量，兼容无 extensions.yml 的内置 preset）。插件：`plugin.json` 可选 `configSchema`（受支持的 JSON Schema 子集），`PATCH /api/plugins/<id>/config` 写 `plugins.json` 并重载，`POST /api/plugins/<id>/test` 只校验；插件详情用 schema 动态表单 + 测试/日志，无 schema 显示原始 config。验收：`test-skill-store` 3/3、`test-plugin-config-schema` 4/4、技能/catalog/hub 相关 14/14、插件内核/清单 21/21、static 全过、UI 31/31、audit 101/101；真机 API 往返、ZIP 导入、启停/删除、Hub 技能正文、插件 config PATCH/test 与详情表单均通过。偏差见 E13/E14。预设编辑器随后完成：`src/presets/store.mjs` 以 `profiles/agent-platforms/dsh/agents/<id>/` 为源，提供元数据/扩展授权/YAML 读取写入、备份与 apply/rollback；`/api/extensions/presets` 系列 API；控制台新增预设页（列表 + 内联三段编辑器），保存前校验 YAML，应用执行 build + setup-dsh，失败回滚。`test-preset-store` 5/5、static 全过、UI 32/32、audit 102/102，真机 GET/PUT/validate/apply/rollback 均通过；共用 guard 无法按 preset 放行原生工具，见 E15。
 
 ### P4 市场与 GitHub source
 
@@ -683,5 +683,5 @@ AstrBot 的现状是「索引 JSON + GitHub 安装源」，不是逐仓库扫描
 - 2026-11-08：补「内置/外置」统一规则（§3.5）与 `arm`/预设切换边界（§4.7、§8.4）。依据 DSH `agentPresets.select()` 的实现，已开始过第一轮的会话会返回 `agent-preset/locked`，没有 rebind；`arm` 只做 Hub 层授权，不承诺给已运行会话补原生工具。
 - 2026-11-08：按最新决策收敛：`arm` 仅本次进程有效、重启自动解除；`/preset` 未开始会话直接切，已开始的提示需重开会话，确认后按新 preset 新建会话；内置可启停/配置/测试，但不可删除/改名/覆盖/卸载/单独更新。
 - 2026-11-08：P0 启动。`compress` 加入 `qq-tool-restrict.mjs` 的 `SAFE_EXACT` 并补回归断言；偏差台账见 ](./_internal/EXTENSION_PLATFORM_DEVIATIONS.md)。
-- 2026-11-09：P3 技能、插件 configSchema、预设编辑器三子批完成。技能/插件配置见 `STATUS` 6.9/6.10；预设编辑器以 `dsh/agent-presets/` 为源，提供元数据/扩展授权/YAML 编辑、校验、备份、apply/rollback，控制台新增预设页；偏差 E13–E15。P0 `compress` 仍 Partial，P4/P5 未动工。
+- 2026-11-09：P3 技能、插件 configSchema、预设编辑器三子批完成。技能/插件配置见 `STATUS` 6.9/6.10；预设编辑器以 `profiles/agent-platforms/dsh/agents/` 为源，提供元数据/扩展授权/YAML 编辑、校验、备份、apply/rollback，控制台新增预设页；偏差 E13–E15。P0 `compress` 仍 Partial，P4/P5 未动工。
 

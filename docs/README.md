@@ -15,6 +15,7 @@
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
 | [PROFILES_MODEL.md](PROFILES_MODEL.md) | **四层配置模型**：用户侧平台 → 行为档案 / Agent 平台 → 能力预设 / 运行方案 → 会话权限级别；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
+| [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | **Agent 平台适配层**：P0 目录迁移 / P1 build-install 分离 / P3 模式持久化的现状与不变式；P2 中立 Agent IR 的规划、触发条件与反模式 | ✅ P0/P1/P3 已落地；P2 仅规划（未实现） |
 | [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md) | **注入块与提示词拼接**：块模型（slot / timing / profiles / scope）、注入块页、预算与上限迁移 | ✅ §2、§7 现行；§3–§5 已由 PROFILES_MODEL 取代 |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界**：静态资源穿越守卫、未启用=404、先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复、插件 UI 沙箱 | ✅ 改路由/静态资源前必读 |
 | [FOLDER_MAP.md](FOLDER_MAP.md) | 目录地图：每个顶层目录的作用、`scripts/` 命名约定、疑似过期的一次性脚本清单 | ✅ 现状描述 |
@@ -109,6 +110,7 @@
 | 我想…… | 看这个 |
 | --- | --- |
 | 搞清楚「配置存在哪、四层各管什么」 | [PROFILES_MODEL.md](PROFILES_MODEL.md) |
+| 加一个 Agent 平台 / 改产物链路 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) |
 | 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
 | 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
 | 改会话准入、方案、人格 | [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md)、[PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) |

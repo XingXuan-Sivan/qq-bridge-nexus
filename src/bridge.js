@@ -23,6 +23,7 @@ import { looksLikeUnfinished } from './v2-wait.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import YAML from 'yaml';
 import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
+import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from './runtime/mode-store.mjs';
 import {
   listBehaviorFiles,
   readBehaviorDocument,
@@ -3936,6 +3937,22 @@ async function main() {
   let dshCheckStarted = false;
   let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
+  // 模式持久化（P3）：本地 state/mode.json 始终写（降级必须能生效），DSH settings 是
+  // best-effort 的远端权威。存储细节（命名空间名、settings.describe/update 的形状、
+  // user 层优先）全在 src/runtime/mode-store.mjs；模式语义（别名归一、级别、提权判定）
+  // 仍留在本文件——那是安全边界，不该被存储抽象带走。
+  const modeStore = createModeStore({
+    local: createLocalModeFileBackend({
+      file: path.join(STATE_DIR, 'mode.json'),
+      readJson: readJsonSafe,
+      writeJson: atomicWriteJson,
+    }),
+    remote: createDshModeBackend({
+      readSetting: settingFromDshNamespace,
+      normalizeMode: normalizeModeInput,
+    }),
+    log,
+  });
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
   // 运行方案（P4）：定义来自 profiles/plans/*.yml，全局默认来自 config.runtime.defaultPlan。
   let runtimePlans = [];
@@ -4406,16 +4423,18 @@ async function main() {
       const plan = resolveLevelPlan(level, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
       if (!plan.ok) throw new Error(plan.error);
     }
-    const existing = readJsonSafe(path.join(STATE_DIR, 'mode.json'), {});
-    atomicWriteJson(path.join(STATE_DIR, 'mode.json'), { ...existing, mode, level, closedAgentPreset: String(existing.closedAgentPreset ?? closedAgentPreset ?? '') });
-    let dshSynced = false;
-    try {
-      unwrap(await api.settings.update({ ns: 'qq-mode', patch: { mode } }), 'settings.update');
-      dshSynced = true;
-    } catch (error) {
-      if (escalating) throw new Error(`写入 DSH 设置失败（${error?.message ?? error}），未切换`);
-      log(`⚠️ 模式写穿 DSH 设置失败（${error?.message ?? error}）；降级已在本地生效`);
-    }
+    // 本地文件必写：远端（DSH）挂掉时降级/关闭仍要生效，重启后也不会回到旧模式。
+    const existing = modeStore.readLocal() ?? {};
+    modeStore.writeLocal({ mode, level, closedAgentPreset: String(existing.closedAgentPreset ?? closedAgentPreset ?? '') });
+    // 远端 best-effort：升级（closed-agent / 提级）必须写穿，否则下一轮轮询会把模式改回去；
+    // 降级只要求本地生效（紧急关闭不能被 DSH 挂掉拖住）。
+    const remote = await modeStore.writeRemote({
+      mode,
+      update: async (payload) => unwrap(await api.settings.update(payload), 'settings.update'),
+    });
+    const dshSynced = remote.synced || remote.skipped === true;
+    if (!dshSynced && escalating) throw new Error(`写入 DSH 设置失败（${remote.error?.message ?? remote.error}），未切换`);
+    if (!dshSynced) log(`⚠️ 模式写穿 DSH 设置失败（${remote.error?.message ?? remote.error}）；降级已在本地生效`);
     const fromMode = currentMode;
     const fromLevel = currentLevel;
     applyRuntimeModeTransition(fromMode, mode);
@@ -4796,7 +4815,8 @@ async function main() {
     setTimeout(() => { flushQueue(); }, 3000);
   };
 
-  // 从 DSH settings 读取桥接模式；命名空间未注册时回退本地 state/mode.json
+  // 从远端（DSH settings）读取桥接模式；命名空间未注册/不可用时回退本地 state/mode.json。
+  // 远端细节在 src/runtime/mode-store.mjs；本函数只保留「读到了谁、交给控制器判定」。
   async function refreshMode() {
     try {
       const s = unwrap(await api.settings.describe({}), 'settings.describe');
@@ -4806,19 +4826,17 @@ async function main() {
       if (typeof defaultPreset === 'string' && defaultPreset) {
         dshDefaultPreset = defaultPreset;
       }
-      const ns = s.namespaces.find((n) => n.ns === 'qq-mode');
-      // 规范化后再比较：`simulation` 也走这里（见 MODE_INPUT_ALIASES）。
-      // r4：读取必须 user 层优先：DSH 0.2.0-rc.2 写完 settings 后同进程内 value 不更新，
-      // 只读 value 会让控制台切的模式被 5 秒轮询改回去（上游 issue #22）。
-      const fromDsh = normalizeModeInput(settingFromDshNamespace(ns, 'mode'));
-      if (fromDsh) {
-        noteObservedMode(fromDsh, 'dsh-settings');
-        // DSH 设置页也可配置管理员 QQ；**留空表示不覆盖 config.json**（r4 修复：
+      // 规范化（`simulation` → 内部名）与「user 层优先」都在后端里做：
+      // DSH 0.2.0-rc.2 写完 settings 后同进程内 value 不更新，只读 value 会让控制台切的
+      // 模式被 5 秒轮询改回去（上游 issue #22）。
+      const observed = modeStore.readRemote(s);
+      if (observed) {
+        noteObservedMode(observed.mode, modeStore.remoteId ?? 'remote');
+        // 设置页也可配置管理员 QQ；**留空表示不覆盖 config.json**（r4 修复：
         // normalizeOwnerQQ('') 返回 null，照旧 `!== undefined` 就赋值，会被 5 秒轮询抹成 null，
         // 导致 closed-agent 谁都不放行、审批等不到管理员）。
-        const rawOwnerValue = settingFromDshNamespace(ns, 'ownerQQ');
-        if (rawOwnerValue !== undefined) {
-          const rawOwner = String(rawOwnerValue ?? '').trim();
+        if (observed.ownerQQ !== undefined) {
+          const rawOwner = String(observed.ownerQQ ?? '').trim();
           if (rawOwner) {
             try {
               noteOwnerChange(normalizeOwnerQQ(rawOwner), 'dsh-settings');
@@ -4827,17 +4845,17 @@ async function main() {
             }
           }
         }
-        // DSH 的 qq-mode schema 只有 mode / ownerQQ 两个字段，没有 closedAgentPreset；
-        // 该值仍以本地 state/mode.json 为准（用 typeof 判断，允许用空串显式清空），
+        // 远端命名空间只有 mode / ownerQQ，没有 closedAgentPreset；
+        // 该值仍以本地 mode.json 为准（用 typeof 判断，允许用空串显式清空），
         // 否则这里提前 return 会让控制台的 preset 下拉变成永远不生效的死设置。
-        const localPreset = readJsonSafe(path.join(STATE_DIR, 'mode.json'), null);
+        const localPreset = modeStore.readLocal();
         if (typeof localPreset?.closedAgentPreset === 'string') {
           closedAgentPreset = localPreset.closedAgentPreset;
         }
         return;
       }
     } catch {}
-    const local = readJsonSafe(path.join(STATE_DIR, 'mode.json'), null);
+    const local = modeStore.readLocal();
     const fromLocal = local ? normalizeModeInput(local.mode) : null;
     if (fromLocal) noteObservedMode(fromLocal, 'local-file');
     if (typeof local?.closedAgentPreset === 'string' && local.closedAgentPreset) {
@@ -5475,7 +5493,7 @@ async function main() {
   }
 
   async function refreshModeLocalOnly() {
-    const local = readJsonSafe(path.join(STATE_DIR, 'mode.json'), null);
+    const local = modeStore.readLocal();
     const fromLocal = local ? normalizeModeInput(local.mode) : null;
     if (fromLocal) currentMode = fromLocal;
   }
@@ -7293,9 +7311,9 @@ async function main() {
           }
           // closedAgentPreset 只影响 L2/L3 使用的 agent preset；它本身不改变权限级别。
           if (body.closedAgentPreset !== undefined) {
-            const existing = readJsonSafe(path.join(STATE_DIR, 'mode.json'), {});
             closedAgentPreset = String(body.closedAgentPreset ?? '');
-            atomicWriteJson(path.join(STATE_DIR, 'mode.json'), { ...existing, closedAgentPreset });
+            // 只写本地兜底文件：closedAgentPreset 是桥接侧的预设选择，不属于远端命名空间的 schema。
+            modeStore.writeLocal({ closedAgentPreset });
           }
           // v0.3.0：所有模式变更都经过管理控制器（统一审计 + 通知 owner）。
           // 控制台持有管理令牌：L1/L2 直接生效；L3 仍要求 body.totp（验证器动态码）。

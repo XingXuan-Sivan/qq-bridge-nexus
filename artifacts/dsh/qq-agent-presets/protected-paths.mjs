@@ -16,9 +16,25 @@ function real(p) {
   try { return fs.realpathSync(p) } catch { return path.resolve(p) }
 }
 
-// 本文件在 <仓库>/dsh-bundles/qq-agent-presets/ 下（DSH 通过 junction 引用，realpath 还原到仓库）。
+// 本文件在 <仓库>/artifacts/<agent 平台>/qq-agent-presets/ 下（DSH 通过 junction 引用，realpath 还原到仓库）。
+//
+// 仓库根**不能靠数 ../ 算**：产物目录搬过一次（dsh-bundles/ → artifacts/dsh/），
+// 数层级会把 state/ 与 config.json 悄悄指到 artifacts/ 下 —— 而这里的失效方式是**静默放行**，
+// 不报错、不告警，唯一的表现是运维 Agent 能读到控制台令牌。所以改成向上找仓库标志文件。
 const bundleDir = real(path.dirname(fileURLToPath(import.meta.url)))
-const repoRoot = path.resolve(bundleDir, '..', '..')
+const REPO_MARKERS = ['config.example.json', 'package.json']
+function findRepoRoot(start) {
+  let dir = start
+  for (let i = 0; i < 8; i += 1) {
+    if (REPO_MARKERS.every((name) => fs.existsSync(path.join(dir, name)))) return dir
+    const up = path.resolve(dir, '..')
+    if (up === dir) break
+    dir = up
+  }
+  // 找不到标志文件（例如被人手工拷出仓库）时回到当前布局的默认层级，宁严不宽。
+  return path.resolve(start, '..', '..', '..')
+}
+const repoRoot = findRepoRoot(bundleDir)
 const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
 
 const norm = (p) => (process.platform === 'win32' ? String(p).replace(/\//g, '\\').toLowerCase() : String(p))

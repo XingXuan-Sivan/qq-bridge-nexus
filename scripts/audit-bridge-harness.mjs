@@ -106,6 +106,9 @@ import * as memoryIngest from '../src/memory/ingest.mjs';
 import * as memoryLocalStore from '../src/memory/local-store.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { unwrap, createTurnCollector } from '../src/dsh-client.js';
+// P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
+// createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
+import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, plans = [] } = {}) {
@@ -407,6 +410,9 @@ createExtensionCatalog,
     createPresetStore,
     PRESET_IDS,
     validateAgentYaml,
+    createModeStore,
+    createLocalModeFileBackend,
+    createDshModeBackend,
     ensureHubToken,
     hubTokenMatches,
     formatKey,

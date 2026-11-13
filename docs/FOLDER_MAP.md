@@ -3,7 +3,7 @@
 > 一句话说明每个顶层目录干什么、`scripts/` 里的命名约定是什么、哪些脚本像是过期的一次性产物。
 > 本文**只描述现状**，不构成改动指令。文档索引见 [README.md](README.md)。
 >
-> 最后核对：2026-11-13（v0.1.0 发布基线 / 四层配置模型）。新增目录/脚本时请顺手补一行。
+> 最后核对：2026-11-13（v0.1.0 发布基线 / 四层配置模型 / Agent 平台适配层 P1+P3）。新增目录/脚本时请顺手补一行。
 
 ---
 
@@ -37,8 +37,9 @@ qq-bridge-nexus/             ← 仓库根 = 项目根（QQ ↔ DSH 桥接）
 | `src/persona-resolve.mjs` | **v1.2.0 人格三层解析**：会话覆盖（`current-role.json` 的 `byKey`）→ 外部 provider（soulkit）→ 全局本地卡；`off` 硬覆盖 provider，缺卡告警后继续往下 | 设计见 `PERSONA_PROVIDER.md`；配套 `scripts/test-persona-resolve.mjs` |
 | `interface-platform/`（独立子程序：自己的 `package.json`、测试和 `state/`） | **接口平台**（M1）：统一接入实例/账号/事件/发送，QQ 经 SnowLuma / NapCat 连接器；OneBot v11 兼容入口供桥接过渡使用。本仓库只经 HTTP 接口与它通信（见它的 README.md、docs/CONTRACT.md、docs/MILESTONES.md） | 自带测试 `interface-platform/test/`；`scripts/test-platform.mjs` 一并跑（缺失即失败）；它的 `state/`（令牌、实例配置）不入库 |
 | `scripts/` | 调试 / 测试 / 一次性运维脚本（见第二节命名约定） | 测试脚本不能删；`cleanup-*` / `fix-*` / `patch-*` / `diag-*` 多为历史遗留 |
-| `profiles/` | **四层配置的唯一存储**（2026-11-12 起）：`platforms/<id>/`（平台 + 工具目录 + 话术 + `behaviors/`）、`agent-platforms/<id>/`（Agent 平台 + 工具目录 + `capabilities/` + `agents/`）、`plans/`（内置与自定义运行方案）、`schemas/`（五份 JSON Schema）。模型见 `PROFILES_MODEL.md` | 用户数据；改完跑 `node scripts/check-profiles.mjs`；旧目录 `config/behaviors`、`config/platform`、`dsh/agent-presets` 不得再出现 |
-| `dsh-bundles/` | 给 DSH 加载的 bundle：`qq-mode-console`（暴露 `qq-mode` 设置命名空间；**只有 host 半**）、`qq-agent-presets`（生成 preset 行 + 携带唯一的 `qq-tool-restrict` 权威实现）。preset 的权威源在 `profiles/agent-platforms/dsh/agents/`，patch 由 `scripts/build-agent-preset-patches.mjs` 生成 | 改了要重装/重启 DSH |
+| `profiles/` | **四层配置的唯一存储**（2026-11-12 起）：`platforms/<id>/`（平台 + 工具目录 + 话术 + `behaviors/`）、`agent-platforms/<id>/`（Agent 平台 + 工具目录 + `capabilities/` + `agents/` + `adapters/`）、`plans/`（内置与自定义运行方案）、`schemas/`（五份 JSON Schema）。模型见 `PROFILES_MODEL.md` | 用户数据；改完跑 `node scripts/check-profiles.mjs`；旧目录 `config/behaviors`、`config/platform`、`dsh/agent-presets`、**`dsh-bundles`** 不得再出现 |
+| `profiles/agent-platforms/<id>/adapters/` | **P1：每个 Agent 平台的构建/安装适配器**。`build.mjs` 导出 `agentPlatform` + `planArtifacts({repoRoot})`（纯函数，返回 `{files:[{path,content}]}`）；`install.mjs` 导出 `agentPlatform` + `install(ctx)`（失败抛错，不 process.exit）。目前只有 `dsh/` 一份 | 新增 Agent 平台 = 加一个目录 + 两个文件，调度器零改动；改契约要同步 `scripts/agent-platform-adapters.mjs` 的校验与 `test-artifact-pipeline` |
+| `artifacts/dsh/` | **DSH 的产物目录**（目录名 = agent 平台 id）：`qq-mode-console`（暴露 `qq-mode` 设置命名空间；**只有 host 半**）、`qq-agent-presets`（`presets/*.patch.yml` 由 build 适配器**生成**，另带手写的 `qq-tool-restrict.mjs` 唯一权威实现 + `qq-approval-gate.mjs` + `protected-paths.mjs`）。preset 的权威源在 `profiles/agent-platforms/dsh/agents/` | 生成的 patch 不要手改（`npm run verify:artifacts` 会红）；手写守卫可以直接改；改了要重装/重启 DSH |
 | `plugins/` | 桥接运行时插件目录：每个插件一个子目录（`plugin.json` + 入口），内核在 `src/plugins/`；示例 `plugins/soulkit-persona`（人格 provider，默认加载、soulkit 不在线时回落 `roles/*.md`）。本机启停与参数在根目录 `plugins.json`（不入库，模板 `plugins.example.json`） | 内核设计见 `PLUGIN_KERNEL.md`；配套测试 `scripts/test-plugin-kernel.mjs`、`scripts/test-soulkit-persona.mjs` |
 | `public/` | 浏览器静态资源：`console/`（桥接自带控制台）下分 `index.html`（骨架）、`css/`（设计令牌 `tokens.css` + 三层样式 `base.css`/`layout.css`/`components.css` + 工具类 `utilities.css`，按序加载）、`js/`（公用模块：`app.js` 装配 + `api/ui/router/timezone`）、`pages/<id>/`（页面自包含目录：`page.html` 片段 + `page.css` 私有样式 + `page.js` 页面模块，`init()` 由路由器调用）、`img/favicon.svg`；另有 `control-center/`（v0.4.0 控制中心：`index.html` + `app.css` + `app.js`，见 `guides/CONTROL_CENTER.md`） | 页面/样式/逻辑分文件维护，静态资源由 `src/http/static.mjs` 统一守卫；新增或搬迁页面要同步 `scripts/console-source.mjs` 与 `scripts/test-console-static.mjs`；页面里不要再写内联 `style`，需要新的宽度/间距就加到 `utilities.css` |
 | `roles/` | 人格卡（`小鲸鱼.md` / `傲娇助手.md` / `README.md`）：控制台「人格与角色」页可编辑，保存即生效（二代仿真里是下一次唤醒或选「立即」时生效） | 用户内容，别乱动 |
@@ -53,7 +54,7 @@ qq-bridge-nexus/             ← 仓库根 = 项目根（QQ ↔ DSH 桥接）
 
 ## 二、`scripts/` 命名约定
 
-脚本共 189 个跟踪文件（183 个 `.mjs` + 4 个 JSON 基线，另有 `fixtures/` 目录）。按前缀区分用途：
+脚本共 193 个跟踪文件（187 个 `.mjs` + 5 个 JSON 基线 + 1 个 HTML 夹具，另有 `fixtures/` 目录）。按前缀区分用途：
 
 | 前缀 / 形态 | 含义 | 归宿 |
 | --- | --- | --- |
@@ -62,7 +63,9 @@ qq-bridge-nexus/             ← 仓库根 = 项目根（QQ ↔ DSH 桥接）
 | `test-audit-*.mjs` | test-audit 的子模块（`test-audit-bridge` / `-protocol` / `-security` / `-setup` 及其 `-helpers`/`-guards`），被上一个直接运行 | 保留 |
 | `test-console-ui.mjs` + `console-ui-*.json` / `console-ui-fixture.mjs` / `fixtures/` | 控制台**离线浏览器回归**与基线（`npm run test:console-ui` / `npm run preview:console`），说明见 [guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) | 保留（基线只在后端契约真变时才重录） |
 | `send-*.mjs` | 面向 SnowLuma/QQ 的**真发送**小工具（`send-voice.mjs` 走桥接；`send-test-group.mjs` 发测试群） | 保留，但注意会真的发消息 |
-| `setup-*.mjs` | **安装/初始化**：把 preset、MCP 挂载写进目标设备的 DSH（`setup-dsh.mjs`，幂等） | 保留 |
+| `setup-*.mjs` | **安装/初始化**：`setup-dsh.mjs` 现在是**兼容薄壳**，转发到 `scripts/install-agent-platform.mjs dsh`（幂等） | 保留（旧文档/快捷方式仍在用） |
+| `build-artifacts.mjs` + `install-agent-platform.mjs` + `agent-platform-adapters.mjs` | **产物链路调度层**（P1）：`agent-platform-adapters.mjs` 负责发现/校验 `profiles/agent-platforms/<id>/adapters/*.mjs`；`build-artifacts.mjs` 跑 `planArtifacts()` 并写盘（`--check` 只比对）；`install-agent-platform.mjs` **先 build 再 install**。三者**刻意不 import `src/`**（只依赖 Node 内置模块），离线夹具只需拷 `scripts/` 子集 + `profiles/` 整棵 | 保留；配套 `npm run build:artifacts` / `verify:artifacts` / `test:artifact-pipeline` |
+| `build-agent-preset-patches.mjs` | **兼容薄壳**：re-export 旧 API（`buildPatches` / `patchFileFor` / `renderPatch`…），实现委托给 DSH build 适配器 | 保留（不改行为）；新代码直接用 `npm run build:artifacts` |
 | `verify-*.mjs` | **一致性校验**，按判据性质分三层：`verify-adaptation.mjs`（`--layer repo` / `deploy` / `live`，`npm run verify:repo` / `verify:deploy` / `verify:live`，升级验收跑 `verify:adaptation` = all）、`verify-persona-config.mjs`（人格配置；拿不到 DSH 模块时降级为结构断言并打印原因） | 保留 |
 | `probe-*.mjs` | **探针**：用来问 DSH/SnowLuma「实际支持什么」（RPC 形状、工具清单、事件流、工作区、模型、协议帧、settings 命名空间）。鉴权统一走 `probe-auth.mjs` | 保留，按需重跑 |
 | `probe-020-protocol.mjs` / `probe-020-settings.mjs` | 0.2.0 版探针：前者采样 `session/control` baseline、`session/projections`、`session/follow`、`$events`、`session/cancel` 的**原始帧结构**；后者列 settings 命名空间并**幂等写回**验证 `qq-mode` 可写。控制台「改模式不生效」时的第一手诊断 | 保留（`npm run probe:protocol` / `probe:settings`） |
@@ -93,6 +96,7 @@ docs/
 ├── README.md              # 文档索引（每篇一句话 + 现行/过时）  ← 先看这个
 ├── FOLDER_MAP.md          # 本文件
 ├── PROFILES_MODEL.md      # 四层配置模型（现行权威）
+├── AGENT_PLATFORM_EVOLUTION.md  # Agent 平台适配层：P1/P3 现状 + P2 中立 IR 规划
 ├── SESSION_SUBSYSTEM.md   # 会话子系统
 ├── MEMORY_SUBSYSTEM.md    # 记忆子系统
 ├── INJECTION_PROFILE_CONFIG.md  # 注入块与提示词拼接

@@ -4,4 +4,5 @@ label: DeepSeek Harness
 tools: tools.yml
 capabilities: capabilities
 agents: agents
-artifacts: dsh/agent-presets
+# 产物目录不在这里声明：约定为 <仓库根>/artifacts/<id>/，
+# 由同目录的 adapters/build.mjs（planArtifacts）与 adapters/install.mjs 决定。

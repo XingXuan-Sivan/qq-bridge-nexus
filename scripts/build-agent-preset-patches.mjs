@@ -1,166 +1,46 @@
 #!/usr/bin/env node
-// build-agent-preset-patches.mjs — 把 profiles/agent-platforms/dsh/agents/<preset>/ 的 preset 源文件
-// 渲染成 DSH 0.1.7 的 bundle patch 文件（dsh-bundles/qq-agent-presets/presets/<preset>.patch.yml）。
+// build-agent-preset-patches.mjs — **兼容入口**（P1 起）。
 //
-// 背景（为什么需要「生成」这一步）：
-//   0.1.5：preset = ~/.dsh/.agent-presets/<preset>/{preset.yml,agent.cordis.yml} 目录，DSH 扫目录。
-//   0.1.7：注册表既不扫目录也不接受 preset 路径，preset 变成一条普通 loader 行
-//          （@deepseek-ai/dsh-agent-preset），它的 config.plugins 必须是**内联的行列表**，
-//          只能由 bundle 的 patch 文件插入。于是同一份行列表必然存在两种表示：
-//            源（人写/控制台改）：profiles/agent-platforms/dsh/agents/<preset>/{preset.yml,agent.cordis.yml}
-//            装（DSH 读）：      dsh-bundles/qq-agent-presets/presets/<preset>.patch.yml
-//          本脚本是两者之间**唯一**的转换器：源是唯一权威，产物是纯生成物（文件头写明「请勿手工编辑」）。
-//          setup-dsh.mjs 在安装时会重新生成；test-agent-preset-patches.mjs 用 --check 钉住不漂移。
+// 真正的实现在 profiles/agent-platforms/dsh/adapters/build.mjs（DSH 平台适配器），
+// 通用调度在 scripts/build-artifacts.mjs。本文件只保留旧的导出与 CLI 行为，
+// 因为仓库里仍有一批脚本/测试按这个名字 import（test-agent-preset-patches、
+// test-prompt-compose、verify-adaptation）。
 //
-// 用法：
-//   node scripts/build-agent-preset-patches.mjs           # 生成/刷新 patch 文件
-//   node scripts/build-agent-preset-patches.mjs --check    # 只校验产物与源一致（不一致 exit 1）
+// 新代码请直接用：
+//   node scripts/build-artifacts.mjs [dsh] [--check]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { composeRows, readPlatformPromptFromConfig } from '../src/runtime/prompt-compose.mjs';
+import * as dsh from '../profiles/agent-platforms/dsh/adapters/build.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = path.resolve(__dirname, '..');
+export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** 由桥接托管的 preset（顺序即 patch 层顺序）。qq-agent-readonly 是 v0.3.0 管理通道的 L1 只读 Agent。 */
-export const PRESETS = ['qq-chat', 'qq-chat-v2', 'qq-agent-readonly', 'qq-agent-workspace', 'qq-agent-full'];
+export const PRESETS = dsh.PRESETS;
+export const GUARD_SPECIFIER = dsh.GUARD_SPECIFIER;
+export const RELATIVE_ROW_REWRITES = dsh.RELATIVE_ROW_REWRITES;
+export const presetRowId = dsh.presetRowId;
+export const BUNDLE_DIR = dsh.bundleDir(REPO_ROOT);
 
-/** preset 行 id：与 config.id（桥接解析的 preset 名）区分开，方便在 profile patch 里按行定位。 */
-export function presetRowId(name) {
-  return `preset-${name}`;
-}
-
-/**
- * 守卫行的引用方式：从 profile 目录可解析的裸说明符。
- *
- * 子行 name 按声明它的 loader 上下文解析（profile 目录），不是按 patch 文件或 preset 目录；
- * bundle patch 的「相对路径锚定」只作用于 insert 行自身（见 dsh-app-boot 的
- * anchorInsertedPluginNames），走不进 preset 行的 config.plugins。因此这里用
- * `<bundle 包名>/<子路径>`：profile package.json 以 link: 依赖声明该包，
- * node_modules junction 由 setup-dsh.mjs 或 dev_heal_links 维护。
- */
-export const GUARD_SPECIFIER = 'qq-agent-presets/qq-tool-restrict.mjs';
-
-/** 源里允许出现的相对行名 → 新机制下的等价引用。其它相对名一律报错（避免静默装不上）。 */
-export const RELATIVE_ROW_REWRITES = new Map([
-  ['./qq-tool-restrict.mjs', GUARD_SPECIFIER],
-  // v0.3.0：L2/L3 运维 preset 的审批闸门（同一个 bundle 内的唯一实现）。
-  ['./qq-approval-gate.mjs', 'qq-agent-presets/qq-approval-gate.mjs'],
-]);
-
-export const BUNDLE_DIR = path.join(REPO_ROOT, 'dsh-bundles', 'qq-agent-presets');
+/** 旧签名 patchFileFor(name) —— 新代码用 adapter 的 patchFileFor(repoRoot, name)。 */
 export function patchFileFor(name) {
-  return path.join(BUNDLE_DIR, 'presets', `${name}.patch.yml`);
-}
-function sourceDirFor(name) {
-  return path.join(REPO_ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name);
+  return dsh.patchFileFor(REPO_ROOT, name);
 }
 
-/** 能力预设里的平台提示词（config.json > capabilities[id].prompt.personaPrefix）。 */
-function capabilityPlatformPrompt(name) {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'config.json'), 'utf8'));
-    return readPlatformPromptFromConfig(config, name);
-  } catch {
-    return '';
-  }
-}
-
-function readYaml(file) {
-  let text;
-  try {
-    text = fs.readFileSync(file, 'utf8');
-  } catch (error) {
-    throw new Error(`读取失败 ${file}：${error?.message ?? error}`);
-  }
-  try {
-    return parseYaml(text);
-  } catch (error) {
-    throw new Error(`${file} 不是合法 YAML：${error?.message ?? error}`);
-  }
+/** 旧签名 renderPatch(name) —— 新代码用 adapter 的 renderPatch(repoRoot, name)。 */
+export function renderPatch(name) {
+  return dsh.renderPatch(REPO_ROOT, name);
 }
 
 /**
- * 校验并改写行列表：只允许已知的相对行名（守卫），其余相对名视为错误。
- * @param {unknown} rows agent.cordis.yml 解析出的行列表
- * @param {string} preset preset 名（诊断用）
- * @returns {object[]} 可写进 patch 的行列表（深拷贝后的新对象）
+ * 旧签名 buildPatches({check, log}) —— 同步返回 [{file, changed}]。
+ *
+ * 直接调纯函数 planArtifacts 而不是 scripts/build-artifacts.mjs（那个是 async 的），
+ * 这样老调用方不用改成 await。写盘/比对语义与通用调度器一致。
  */
-function normalizeRows(rows, preset) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    throw new Error(`${preset}: agent.cordis.yml 必须是「非空的插件行列表」（顶层数组）`);
-  }
-  const seen = new Set();
-  const walk = (list, at) => list.map((row, index) => {
-    const label = `${preset}: ${at} 第 ${index + 1} 行`;
-    if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error(`${label} 不是插件行（应为带 name 的映射）`);
-    if (typeof row.name !== 'string' || row.name === '') throw new Error(`${label} 缺少 name`);
-    if (typeof row.id !== 'string' || row.id === '') throw new Error(`${label} 缺少 id`);
-    if (seen.has(row.id)) throw new Error(`${preset}: 行 id 重复：${row.id}`);
-    seen.add(row.id);
-    const next = { ...row };
-    if (next.name.startsWith('.') || path.isAbsolute(next.name)) {
-      const rewrite = RELATIVE_ROW_REWRITES.get(next.name);
-      if (rewrite === undefined) {
-        throw new Error(`${label}: 相对/绝对插件名 ${JSON.stringify(next.name)} 在 0.1.7 下会按 profile 目录解析，`
-          + '必须改写为「bundle 包名/子路径」或去掉；请在 build-agent-preset-patches.mjs 里显式登记改写规则');
-      }
-      next.name = rewrite;
-    }
-    if (row.group === true) {
-      if (!Array.isArray(row.config)) throw new Error(`${label} 是 group 行但 config 不是行列表`);
-      next.config = walk(row.config, `${at}/${row.id}`);
-    }
-    return next;
-  });
-  const normalized = walk(rows, 'plugins');
-  for (const required of ['persona', 'qq-tool-restrict']) {
-    if (!seen.has(required)) throw new Error(`${preset}: 行列表缺少 ${required} 行（安全/人格边界不允许缺失）`);
-  }
-  return normalized;
-}
-
-/** 渲染一个 preset 的 patch 文件内容。 */
-export function renderPatch(name) {
-  const dir = sourceDirFor(name);
-  const meta = readYaml(path.join(dir, 'preset.yml'));
-  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error(`${name}: preset.yml 必须是映射`);
-  for (const field of ['name', 'description', 'order']) {
-    if (meta[field] === undefined) throw new Error(`${name}: preset.yml 缺少 ${field}`);
-  }
-  const plugins = composeRows(normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name), { platformText: capabilityPlatformPrompt(name) });
-  const row = {
-    id: presetRowId(name),
-    name: '@deepseek-ai/dsh-agent-preset',
-    config: {
-      id: name,
-      name: meta.name,
-      description: meta.description,
-      order: meta.order,
-      plugins,
-    },
-  };
-  const header = [
-    `# 本文件由 scripts/build-agent-preset-patches.mjs 生成，请勿手工编辑。`,
-    `# 源：profiles/agent-platforms/dsh/agents/${name}/preset.yml + agent.cordis.yml（人格正文与工具面都在那里改）。`,
-    `# 作用：把 ${name} 作为一条 @deepseek-ai/dsh-agent-preset 行插入 profile（DSH 0.1.7+ 的 preset 机制）。`,
-    `# 守卫行 qq-tool-restrict 用裸说明符 ${GUARD_SPECIFIER}：子行 name 按 profile 目录解析，`,
-    `# 该包以 link: 依赖注册在 profile package.json（node_modules junction 由 setup-dsh.mjs 维护）。`,
-    '',
-  ].join('\n');
-  // lineWidth: 0 —— 长行不折行；aliasDuplicateObjects: false —— 不生成锚点/别名（等价 js-yaml 的 noRefs）；
-  // singleQuote: true —— 尽量用单引号，保持与旧产出（js-yaml）逐字一致，diff 只反映真实改动。
-  return `${header}${stringifyYaml([{ insert: [row] }], { lineWidth: 0, aliasDuplicateObjects: false, singleQuote: true })}`;
-}
-
-/** 生成（或校验）全部 patch 文件。@returns {{file:string,changed:boolean}[]} */
 export function buildPatches({ check = false, log = () => {} } = {}) {
+  const { files } = dsh.planArtifacts({ repoRoot: REPO_ROOT });
   const results = [];
-  for (const name of PRESETS) {
-    const file = patchFileFor(name);
-    const content = renderPatch(name);
+  for (const { path: file, content } of files) {
     const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
     const changed = current !== content;
     if (changed && !check) {
@@ -179,7 +59,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const results = buildPatches({ check, log: (line) => console.log(`[preset-patches] ${line}`) });
   const stale = results.filter((r) => r.changed);
   if (check && stale.length > 0) {
-    console.error(`[preset-patches] ERROR: ${stale.length} 个 patch 文件与源不一致；请运行 node scripts/build-agent-preset-patches.mjs`);
+    console.error(`[preset-patches] ERROR: ${stale.length} 个 patch 文件与源不一致；请运行 node scripts/build-artifacts.mjs dsh`);
     process.exit(1);
   }
   console.log('[preset-patches] Done');

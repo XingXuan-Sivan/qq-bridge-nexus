@@ -9,11 +9,11 @@
 
 | 路径 | 是什么 | 由谁加载 | 例子 |
 | --- | --- | --- | --- |
-| `dsh-bundles/` | **给 DSH 加载的 npm bundle**（preset 行、`qq-mode` 设置命名空间） | DSH profile 的 `bundles` + `link:` | `qq-agent-presets`、`qq-mode-console` |
+| `artifacts/dsh/` | **给 DSH 加载的 npm bundle**（preset 行、`qq-mode` 设置命名空间） | DSH profile 的 `bundles` + `link:` | `qq-agent-presets`、`qq-mode-console` |
 | `plugins/` | **桥接运行时插件**：本内核加载，进程内运行，只能通过 host-api 触碰桥接 | 桥接（`src/plugins/kernel.mjs`） | `soulkit-persona` |
 | `src/plugins/` | 内核自身（发现、校验、钩子、权限、审计） | 桥接 | —— |
 
-命名边界的原因：`plugins/` 是产品语义上的词，用户会以为「桥接的插件」在这里。重构前它装的是两个 DSH bundle，认知成本高；现在 bundle 归 `dsh-bundles/`，`plugins/` 留给本内核。
+命名边界的原因：`plugins/` 是产品语义上的词，用户会以为「桥接的插件」在这里。重构前它装的是两个 DSH bundle，认知成本高；现在 bundle 归 `artifacts/dsh/`，`plugins/` 留给本内核。
 
 ---
 

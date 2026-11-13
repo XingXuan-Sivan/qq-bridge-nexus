@@ -22,15 +22,20 @@ function fixture(name, patch = '') {
   const repo = path.join(base, 'repo');
   const home = path.join(base, 'home');
   fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
-  fs.copyFileSync(path.join(root, 'scripts/setup-dsh.mjs'), path.join(repo, 'scripts/setup-dsh.mjs'));
-  // setup-dsh.mjs 直接从仓库源生成 bundle patch，生成器必须一起进夹具。
-  fs.copyFileSync(path.join(root, 'scripts/build-agent-preset-patches.mjs'), path.join(repo, 'scripts/build-agent-preset-patches.mjs'));
+  // P1 起 setup-dsh.mjs 只是转发壳，真正的构建/安装调度与平台适配器必须一起进夹具：
+  //   setup-dsh → install-agent-platform → build-artifacts + agent-platform-adapters
+  //   平台细节在 profiles/agent-platforms/dsh/adapters/（随下面的 profiles 整棵拷贝）
+  for (const name of [
+    'setup-dsh.mjs', 'install-agent-platform.mjs', 'build-artifacts.mjs', 'agent-platform-adapters.mjs',
+  ]) {
+    fs.copyFileSync(path.join(root, 'scripts', name), path.join(repo, 'scripts', name));
+  }
   // 生成器依赖 src/runtime 的提示词组装（P9.2 起）；夹具只拷这一份，避免整棵 src 进来。
   fs.mkdirSync(path.join(repo, 'src/runtime'), { recursive: true });
   fs.copyFileSync(path.join(root, 'src/runtime/prompt-compose.mjs'), path.join(repo, 'src/runtime/prompt-compose.mjs'));
-  // 权威源：profiles/（平台、Agent 平台、能力、方案）+ dsh-bundles（生成 patch 的产物）。
+  // 权威源：profiles/（平台、Agent 平台、能力、方案）+ artifacts/dsh（生成 patch 的产物）。
   fs.cpSync(path.join(root, 'profiles'), path.join(repo, 'profiles'), { recursive: true });
-  fs.cpSync(path.join(root, 'dsh-bundles'), path.join(repo, 'dsh-bundles'), { recursive: true });
+  fs.cpSync(path.join(root, 'artifacts/dsh'), path.join(repo, 'artifacts/dsh'), { recursive: true });
   fs.cpSync(parserRoot, path.join(repo, 'node_modules/yaml'), { recursive: true });
   fs.mkdirSync(path.join(home, 'profiles/web'), { recursive: true });
   const patchFile = path.join(home, 'profiles/web/cordis.patch.yml');

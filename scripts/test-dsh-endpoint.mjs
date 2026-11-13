@@ -128,7 +128,7 @@ test('preset：不再使用 DSH 0.2.1 不认的提示词变量（cwd）', () => 
     if (!fs.existsSync(f)) continue;
     assert.ok(!fs.readFileSync(f, 'utf8').includes('{{cwd}}'), `${dir} 不得使用 {{cwd}}`);
   }
-  for (const f of fs.readdirSync(new URL('../dsh-bundles/qq-agent-presets/presets/', import.meta.url))) {
-    assert.ok(!fs.readFileSync(new URL(`../dsh-bundles/qq-agent-presets/presets/${f}`, import.meta.url), 'utf8').includes('{{cwd}}'), `${f} 不得使用 {{cwd}}`);
+  for (const f of fs.readdirSync(new URL('../artifacts/dsh/qq-agent-presets/presets/', import.meta.url))) {
+    assert.ok(!fs.readFileSync(new URL(`../artifacts/dsh/qq-agent-presets/presets/${f}`, import.meta.url), 'utf8').includes('{{cwd}}'), `${f} 不得使用 {{cwd}}`);
   }
 });

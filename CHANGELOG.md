@@ -6,6 +6,34 @@
 
 ## 0.1.0 —— 2026-11-13
 
+### 重构：Agent 平台适配层（产物目录迁移 + build/install 分离 + 模式存取抽象）
+- **产物目录**：`dsh-bundles/` → `artifacts/dsh/`（`git mv` 保留历史），全仓 34 个文件的引用一并替换；旧目录已不存在（代码/脚本里不再有任何引用，只剩文档里的迁移记录）。产物根约定为 `artifacts/<agent平台 id>/`。
+- **build/install 分离**：平台相关的实现全部内聚到 `profiles/agent-platforms/dsh/adapters/`
+  —— `build.mjs`（`planArtifacts({repoRoot})` 纯函数：源 → `{files:[{path,content}]}`）、
+  `install.mjs`（`install(ctx)`：产物 → DSH profile，失败抛错、幂等）。
+- **通用调度层**（零平台知识，只依赖 Node 内置模块）：新增 `scripts/agent-platform-adapters.mjs`（按
+  `adapters/<kind>.mjs` 的存在发现与校验，不读 `agent-platform.yml`）、`scripts/build-artifacts.mjs`
+  （`--check` 只比对不写）、`scripts/install-agent-platform.mjs`（先 build 再 install）。
+  新命令：`npm run build:artifacts` / `verify:artifacts` / `test:artifact-pipeline`。
+- **兼容入口**：`scripts/setup-dsh.mjs`（448 行 → 薄壳）、`scripts/build-agent-preset-patches.mjs`
+  （re-export 旧 API）行为不变，旧文档与快捷方式继续可用。
+- **模式持久化（P3）**：新增 `src/runtime/mode-store.mjs`（`local-file` + `dsh-settings` 两个 backend），
+  `bridge.js` 不再自己拼 `state/mode.json` 的读写；模式语义（别名归一、级别、提权 TOTP）仍在桥接侧。
+- **清理**：删除 `agent-platform.yml` 里没有读者的死字段 `artifacts:`（值指向已删除路径）。
+- **修了两个被目录迁移暴露的隐形问题**：
+  - `artifacts/dsh/qq-agent-presets/protected-paths.mjs` 原来用「向上数两层」算仓库根，迁移后变成
+    `artifacts/` —— 会让 `state/` 与 `config.json` 的保护**静默失效**。改为向上找仓库标志文件
+    （`config.example.json` + `package.json`），失败时才回退到当前层级。
+  - `test-console-static.mjs` 的样式分层断言用了带 `\n` 的锚点正则，而 `.gitattributes` 没有覆盖 `.css`，
+    在 `core.autocrlf=true` 的 Windows 上 base.css 是 CRLF，断言必失败；改为读入后归一换行（断言看内容，不看行尾）。
+- **新增回归**：`scripts/test-artifact-pipeline.mjs`（发现/路径校验/幂等/相对路径拒绝/重复路径拒绝/
+  mock 平台隔离 —— 临时仓库里只放一个 `profiles/agent-platforms/mock/adapters/build.mjs` 即可被发现与构建，
+  且真实仓库的 dsh 产物零 diff）。
+- 文档：新增 [docs/AGENT_PLATFORM_EVOLUTION.md](docs/AGENT_PLATFORM_EVOLUTION.md)（P1/P3 现状与维护不变式 +
+  P2「中立 Agent IR」的规划、触发条件、验收与反模式）；同步 `PROFILES_MODEL.md`、`FOLDER_MAP.md`、
+  `guides/DSH_SETUP.md`、`EXTENSION_PLATFORM.md` 与两份 README 的目录说明。
+- 门禁：`verify:repo` 62 通过 0 失败；`test:audit` 116/116；`test:artifact-pipeline`、`test:setup-idempotent` 全过。
+
 ### 变更：控件标尺统一与四类非字段控件（social-v2 表单零手写）
 - 新增控件标尺令牌 `--control-h`(40px) / `--control-h-sm`(32px) / `--badge-h` / `--field-label-w`：输入框、下拉框、按钮、开关、状态徽标同源高度，不再靠 padding 撑出约 36–41px 的偏差；`button.small` 走 32px 次级高度。
 - 新增 `.control-row` 行原语（`align-items:center` + `min-height:var(--control-h)`）与角色类 `.control-grow`/`.control-fixed`/`.control-label`/`.control-note`，按钮与输入框混排不再手写 `.row` 平行结构。
@@ -292,7 +320,7 @@
 - `docs/PLUGIN_ROADMAP.md` §8.7 追加第三阶段「3.5 启动器控制中心（B 档）」：`public/control-center.html` 拆为 `public/control-center/{index.html,app.css,app.js}`，仍由 launcher 独立托管（默认 3099），与 console 共享 `app/styles/tokens.css`；列出四条不并入 console 的理由、launcher 静态服务改法、3 个打包脚本 + 5 个测试的影响面与验收。
 
 ### 新增：桥接插件内核与人格 provider（v1.2.0）
-- `plugins/` 成为桥接运行时插件目录，内核在 `src/plugins/`（`manifest` / `config` / `audit` / `persona` / `host-api` / `kernel`）；原先给 DSH 加载的两个 bundle 改名到 `dsh-bundles/`，避免「插件」一词指两样东西。
+- `plugins/` 成为桥接运行时插件目录，内核在 `src/plugins/`（`manifest` / `config` / `audit` / `persona` / `host-api` / `kernel`）；原先给 DSH 加载的两个 bundle 改名到 `artifacts/dsh/`，避免「插件」一词指两样东西。
 - 四个钩子：`onInbound` / `onPromptBuild` / `onAfterSend` / `onShutdown`；钩子超时（默认 2s）与异常只记审计，不阻断消息主链；`plugins.json` 独立配置（不入库，模板 `plugins.example.json`）。
 - 人格 provider 契约 `persona-provider/1`：按会话取卡、ETag/304、未绑定返回 `none`；缓存与降级（TTL 5 分钟、最小刷新 30 秒、旧卡最多用 24 小时、单飞、持久化 `state/persona-cache.json`）由内核统一负责。
 - 三层解析 `src/persona-resolve.mjs`：会话覆盖（`/role`、控制台按会话设置；`off` 硬覆盖）→ 外部 provider → 全局本地卡；`currentRoleHintV2` / `currentRoleFingerprintV2` / 唤醒提示词 / `qq_get_prompt` 都改走这一处。

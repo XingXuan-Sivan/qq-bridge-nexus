@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SCAN_DIRS = ['scripts', 'src', 'dsh-bundles'];
+const SCAN_DIRS = ['scripts', 'src', 'artifacts/dsh'];
 const dryRun = process.argv.includes('--dry-run');
 
 /** 只有测试/探针/审计类文件才被当成「夹具的持有者」。 */

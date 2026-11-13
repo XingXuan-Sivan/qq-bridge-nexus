@@ -104,7 +104,7 @@ config/behaviors/
   qq-social-v1.yml       # params + prompt(平台提示词) + platform: qq
   qq-social-v2.yml
 
-dsh-bundles/qq-agent-presets/presets/
+artifacts/dsh/qq-agent-presets/presets/
   <id>.patch.yml         # 生成物（build-agent-preset-patches.mjs 产出）
 ```
 
@@ -214,7 +214,7 @@ safety:
 
 ```
 capability.yml  --build-capability-artifacts-->  preset.yml / agent.cordis.yml / extensions.yml
-                                                  --build-agent-preset-patches-->  dsh-bundles/qq-agent-presets/presets/<id>.patch.yml
+                                                  --build-agent-preset-patches-->  artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml
                                                                                     --setup-dsh-->  ~/.dsh profile
 ```
 
@@ -254,7 +254,7 @@ capability.yml  --build-capability-artifacts-->  preset.yml / agent.cordis.yml /
 
 | 层 | 文件 | 作用域 | 数据来源 |
 |---|---|---|---|
-| 注册期隐藏 + 执行期白名单 | `dsh-bundles/qq-agent-presets/qq-tool-restrict.mjs`（权威唯一实现） | 仅 `local_tools:false` 的仿真能力 | 行配置 `allow`（生成）；缺省用现有硬编码名单 |
+| 注册期隐藏 + 执行期白名单 | `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs`（权威唯一实现） | 仅 `local_tools:false` 的仿真能力 | 行配置 `allow`（生成）；缺省用现有硬编码名单 |
 | MCP / 技能可见性 | `dsh/agent-presets/<id>/extensions.yml` | 所有能力 | 生成自 `tools.mcp`/`tools.skills` |
 
 两者不是二选一：restrict 保证「本地执行工具根本不在清单里」，extensions 保证「外部 MCP/技能按能力裁剪」。

@@ -181,7 +181,7 @@ if (want('repo')) {
   // **代码的样子**，一重构就红：0.2.x 把只读白名单提成导出的 READONLY_AGENT_TOOLS 后，
   // 它立刻误报"守卫放行了 web_search"。现在改成**喂假 tools 服务跑真实 apply()**，
   // 断言的是行为。
-  const canonicalGuardPath = path.join(ROOT, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs');
+  const canonicalGuardPath = path.join(ROOT, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs');
   const guardMod = await import(pathToFileURL(canonicalGuardPath).href);
   const runGuard = (config) => {
     const fakeTools = { restrict() {}, guard(fn) { this._guard = fn; } };
@@ -248,11 +248,17 @@ if (want('repo')) {
   check('repo', 'config.json dsh.model = deepseek-flash', cfg.dsh?.model === 'deepseek-flash', `当前 ${cfg.dsh?.model}`);
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src/bridge.js'), 'utf8');
   const bridgeCode = stripComments(bridgeSrc);
-  const setupCode = stripComments(fs.readFileSync(path.join(ROOT, 'scripts/setup-dsh.mjs'), 'utf8'));
+  // P1 起安装逻辑在 DSH 平台适配器里，setup-dsh.mjs 只是转发壳；断言必须盯真实现。
+  const installAdapterCode = stripComments(fs.readFileSync(path.join(ROOT, 'profiles/agent-platforms/dsh/adapters/install.mjs'), 'utf8'));
   check('repo', 'bridge.js 可执行代码无 deepseek-v4-flash-vision-exp 残留', !bridgeCode.includes('deepseek-v4-flash-vision-exp'));
   check('repo', 'bridge.js 可执行代码无 router-standard 残留', !bridgeCode.includes('router-standard'));
-  check('repo', 'setup-dsh.mjs 可执行代码无 router-standard 残留', !setupCode.includes('router-standard'));
-  check('repo', 'setup-dsh.mjs 新装默认 closedAgentPreset 留空（交给 DSH 默认 preset）', /closedAgentPreset:\s*''/.test(setupCode));
+  check('repo', 'DSH install 适配器可执行代码无 router-standard 残留', !installAdapterCode.includes('router-standard'));
+  check('repo', 'DSH install 适配器新装默认 closedAgentPreset 留空（交给 DSH 默认 preset）', /closedAgentPreset:\s*''/.test(installAdapterCode));
+  // P3：模式持久化走 src/runtime/mode-store.mjs，读/写不再各自拼 state/mode.json。
+  check('repo', 'bridge.js 的模式持久化走 src/runtime/mode-store.mjs（P3）',
+    bridgeCode.includes('./runtime/mode-store.mjs') && bridgeCode.includes('modeStore.readRemote') && bridgeCode.includes('modeStore.writeRemote'));
+  check('repo', 'bridge.js 不再直接用 readJsonSafe 读 state/mode.json 做模式判定',
+    !/readJsonSafe\(path\.join\(STATE_DIR, 'mode\.json'\)/.test(bridgeCode));
   check('repo', 'bridge.js 默认模型为 deepseek-flash', /model:\s*'deepseek-flash'/.test(bridgeCode));
   check('repo', 'bridge.js 不再有「无参创建会话」兜底', !/sessions\.create\(\{\}\)/.test(bridgeCode));
   check('repo', 'bridge.js 含 preset 清单/默认 preset 解析', bridgeSrc.includes('resolvePresetName') && bridgeSrc.includes('refreshPresetList'));
@@ -276,7 +282,7 @@ if (want('repo')) {
   // 复发，这里把「所有对外自称的版本号必须等于 package.json」固定下来。
   const pkgJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const lockJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-  const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'dsh-bundles/qq-mode-console/package.json'), 'utf8'));
+  const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'artifacts/dsh/qq-mode-console/package.json'), 'utf8'));
   check('repo', 'package-lock.json 顶层 version 与 package.json 一致', lockJson.version === pkgJson.version, `lock=${lockJson.version} pkg=${pkgJson.version}`);
   check('repo', 'package-lock.json packages[""] version 与 package.json 一致', lockJson.packages?.['']?.version === pkgJson.version, `lock=${lockJson.packages?.['']?.version}`);
   check('repo', 'qq-mode-console 插件版本与主包一致', pluginPkg.version === pkgJson.version, `plugin=${pluginPkg.version}`);
@@ -288,7 +294,15 @@ if (want('repo')) {
   // ── 1f. 语法检查 ────────────────────────────────────────────────────────
   // spawnSync 在受限环境（DSH 沙箱的 workspace-write）会以 EPERM 失败——那是**环境**
   // 不允许起子进程，不是文件有语法错。显式记为跳过，否则会输出一串假失败。
-  const SYNTAX_FILES = ['src/bridge.js', 'src/dsh-client.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js', 'scripts/setup-dsh.mjs'];
+  const SYNTAX_FILES = [
+    'src/bridge.js', 'src/dsh-client.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
+    'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js',
+    'src/runtime/mode-store.mjs',
+    'scripts/setup-dsh.mjs', 'scripts/install-agent-platform.mjs', 'scripts/build-artifacts.mjs',
+    'scripts/agent-platform-adapters.mjs',
+    'profiles/agent-platforms/dsh/adapters/build.mjs',
+    'profiles/agent-platforms/dsh/adapters/install.mjs',
+  ];
   const probe = spawnSync(process.execPath, ['--check', path.join(ROOT, 'src/dsh-client.js')], { encoding: 'utf8' });
   if (probe.error?.code === 'EPERM') {
     skip('repo', `${SYNTAX_FILES.length} 个文件的语法检查`, '本环境不允许 spawn 子进程（EPERM）；请在普通终端重跑');

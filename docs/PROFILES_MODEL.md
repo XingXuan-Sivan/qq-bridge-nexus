@@ -3,6 +3,9 @@
 > 从 2026-11-12 起，桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力预设 / 运行方案 → 会话权限级别**。
 > 旧的 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/` 三处存储已删除，没有兼容层。
 > 本文只描述现状；历史设计文档见文末“相关文档”。
+>
+> **源码 vs 产物**：`profiles/` 是**权威源**（人写的 yml / md / mjs），`artifacts/<agent平台>/` 是**生成或打包产物**（DSH 加载用）。
+> 产物一律由该平台的适配器生成，不手改；二者的关系见 [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md)。
 
 ---
 
@@ -47,15 +50,31 @@ profiles/
 │       │   ├── agent-workspace.yml
 │       │   └── agent-full.yml
 │       ├── templates/rows.yml    # 安装/生成产物用的行模板
-│       └── agents/               # 要装进 DSH 的 preset（qq-chat、qq-chat-v2、qq-agent-*）
+│       ├── agents/               # 要装进 DSH 的 preset（qq-chat、qq-chat-v2、qq-agent-*）
+│       └── adapters/             # 该平台的构建/安装适配器（P1 起）
+│           ├── build.mjs         # planArtifacts()：源码 → 产物文件清单（纯函数）
+│           └── install.mjs       # install()：产物装进运行时（写 profile patch / junction）
 ├── plans/
 │   ├── chat.yml                  # 内置六条：chat / social-v1 / social-v2 / agent-readonly / agent-workspace / agent-full
 │   └── …
 └── schemas/                      # 五份 JSON Schema（platform / agent-platform / behavior / capability / plan）
+
+artifacts/                        # 各 Agent 平台的产物根（目录名 = agent 平台 id）
+└── dsh/
+    ├── qq-agent-presets/         # DSH bundle：生成出来的 presets/*.patch.yml + 手写守卫 mjs
+    └── qq-mode-console/          # DSH bundle：qq-mode 设置命名空间插件（只有 host 半）
 ```
 
-`dsh-bundles/qq-agent-presets/presets/*.patch.yml` 仍由 `scripts/build-agent-preset-patches.mjs`
-从 `profiles/agent-platforms/dsh/agents/` 生成；改 agent 目录后要重新生成并重启 DSH。
+`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 由 **DSH 平台的 build 适配器**
+（`profiles/agent-platforms/dsh/adapters/build.mjs`）从 `profiles/agent-platforms/dsh/agents/` 生成，
+入口是 `node scripts/build-artifacts.mjs dsh`（`npm run build:artifacts`）；改 agent 目录后要重新生成并重启 DSH。
+
+同一目录里**手写**的文件（`qq-tool-restrict.mjs`、`qq-approval-gate.mjs`、`protected-paths.mjs`、`package.json`）
+不是产物，构建不会覆盖它们 —— 生成器只写 `presets/*.patch.yml`。
+
+安装（把产物接进 DSH 运行时：profile patch、bundle 注册、两层 junction）走
+`profiles/agent-platforms/dsh/adapters/install.mjs`，入口是 `node scripts/install-agent-platform.mjs dsh <profile>`；
+`node scripts/setup-dsh.mjs` 保留为兼容入口，等价于后者。
 
 ---
 
@@ -135,9 +154,37 @@ note: …
 | 平台话术 | `src/platform/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
 | 能力预设 | `src/capabilities/store.mjs`：`createCapabilityStore` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
 | 运行方案 | `src/runtime/plans.mjs`：`createPlanStore`（list/get/save/remove/clone）/ `normalizePlan` / `findPlan` / `legacyModeOfPlan` |
-| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` |
+| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
+| 模式持久化 | `src/runtime/mode-store.mjs`：`createModeStore` / `createLocalModeFileBackend`（`state/mode.json`）/ `createDshModeBackend`（DSH `qq-mode` 命名空间）。只负责存取，模式语义（别名归一、级别、提权判定）仍在 `bridge.js` |
+| 平台适配器发现 | `scripts/agent-platform-adapters.mjs`：`ADAPTER_KINDS` / `adapterFile` / `listAgentPlatforms` / `loadAdapter` / `normalizeArtifactFiles`。**约定优于声明**：只看 `profiles/agent-platforms/<id>/adapters/<kind>.mjs` 存不存在，不读 `agent-platform.yml` |
+| 产物构建调度 | `scripts/build-artifacts.mjs`：`buildArtifacts({targets, check})`。遍历平台 → 调 `planArtifacts()` → 校验路径/去重 → 写盘；`--check` 只比对不写（漂移即非零退出） |
+| 产物安装调度 | `scripts/install-agent-platform.mjs`：`installAgentPlatform({agentPlatform, profile})`。**先 build 再 install**，避免装到旧产物 |
 
 自检：`node scripts/check-profiles.mjs`（校验目录四件套、工具风险值、内置能力/方案、引用闭合、旧目录不得存在）。
+产物链路自检：`npm run verify:artifacts`（产物未漂移）、`npm run test:artifact-pipeline`（发现/校验/幂等/mock 平台隔离）。
+
+### 适配器契约（P1）
+
+`profiles/agent-platforms/<id>/adapters/build.mjs`：
+
+```js
+export const agentPlatform = 'dsh';                                   // 必须等于所在目录名
+export function planArtifacts({ repoRoot }) {                         // 纯函数：不读环境、不写盘
+  return { files: [{ path: path.join(repoRoot, 'artifacts/dsh/…'), content: '…' }] };
+}
+```
+
+`profiles/agent-platforms/<id>/adapters/install.mjs`：
+
+```js
+export const agentPlatform = 'dsh';
+export async function install({ repoRoot, profile, env, log }) {     // 失败抛错，不 process.exit
+  return { profile, runtimeHome, bundles: ['qq-agent-presets', 'qq-mode-console'] };
+}
+```
+
+新增一个 Agent 平台 = 加一个 `profiles/agent-platforms/<id>/` 目录并实现这两个文件；
+调度器无需改动。调度器刻意**不 import `src/`**（只依赖 Node 内置模块），这样离线夹具只要拷 `scripts/` 子集 + `profiles/` 整棵就能跑。
 
 ---
 
@@ -160,6 +207,7 @@ note: …
 
 ## 六、相关文档
 
+- [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md)：Agent 平台适配层的 P1/P3 现状与 P2（中立 IR）规划
 - [FOLDER_MAP.md](FOLDER_MAP.md)：目录地图
 - [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md)：注入块与提示词拼接
 - [archive/capability/CAPABILITY_UNIFY_SPEC.md](archive/capability/CAPABILITY_UNIFY_SPEC.md)：能力统一（历史设计，产物链已废弃）

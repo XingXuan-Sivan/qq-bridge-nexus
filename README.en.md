@@ -126,7 +126,8 @@ qq-bridge-nexus/            # the cloned folder is named dsh-qq
   interface-platform/        # the interface platform (own package.json, tests and state/)
   src/                       # bridge core, MCP servers, control center (src/launcher/), feature modules (scheduler/, silence-schedule.js, role-refresh.js, …)
   public/                    # control center and bridge console web pages
-  dsh/agent-presets/         # DSH agent preset templates; dsh-bundles/ holds the generated DSH bundles
+  profiles/                  # the single source for the four-layer config (platforms, agent-platforms, plans, schemas)
+  artifacts/<agent-platform>/ # build outputs of that platform's adapters (currently only dsh/)
   roles/                     # persona cards
   scripts/                   # setup, tests and helper scripts
   docs/                      # documentation (index: docs/README.md; folder map: docs/FOLDER_MAP.md)

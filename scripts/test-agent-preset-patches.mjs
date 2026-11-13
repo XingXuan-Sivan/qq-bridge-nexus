@@ -1,5 +1,5 @@
 // 钉住 DSH 0.1.7 preset 装配的「防漂移」契约（纯离线，不需要 DSH 在跑）：
-//   1. bundle patch（dsh-bundles/qq-agent-presets/presets/*.patch.yml）与仓库权威源
+//   1. bundle patch（artifacts/dsh/qq-agent-presets/presets/*.patch.yml）与仓库权威源
 //      （profiles/agent-platforms/dsh/agents/<preset>/{preset.yml,agent.cordis.yml}）逐字一致；
 //   2. patch 的形状符合新机制：insert 一条 @deepseek-ai/dsh-agent-preset 行，
 //      config 里带 id/name/description/order/plugins；

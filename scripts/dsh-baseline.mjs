@@ -17,7 +17,7 @@ import { dshVersion } from './dsh-package-source.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 export const BASELINE_FILE = path.join(ROOT, 'dsh-baseline.json');
-const GUARD_FILE = path.join(ROOT, 'dsh-bundles', 'qq-agent-presets', 'qq-tool-restrict.mjs');
+const GUARD_FILE = path.join(ROOT, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs');
 
 /** 读基线；不存在返回 null。 */
 export function readBaseline() {

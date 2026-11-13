@@ -135,7 +135,10 @@ const layerText = {};
 for (const name of layers) {
   const file = path.join(cssDir, name);
   ok(fs.existsSync(file), `样式分层文件存在：css/${name}`);
-  layerText[name] = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  // 归一换行：`.gitattributes` 只按扩展名钉了 .js/.mjs/.json/.md/.yml/.html，
+  // .css 在 core.autocrlf=true 的 Windows 上会以 CRLF 检出，而下面有几条断言用了
+  // 带 `\n` 的锚点正则（如 `/^\* \{\n/`）。断言看的是**内容**，不是行尾。
+  layerText[name] = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : '';
 }
 ok(!fs.existsSync(path.join(cssDir, 'app.css')), 'app.css 已删除（拆成 base/layout/components 三件）');
 // 组件样式与 js 同住在 components/<name>/，从 components.css 拆出（docs/CONSOLE_UI.md）。

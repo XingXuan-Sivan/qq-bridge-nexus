@@ -90,6 +90,41 @@ function readYaml(file) {
 }
 
 /**
+ * 平台提示词变量：config.json 的 platform.id → profiles/platforms/<id>/platform.yml 的 label。
+ * 没有 config.json（干净克隆）时，若仓库里只有一个平台目录就用它；都没有则返回空。
+ * 空对象不是错误：{platform} 占位符会原样留在产物里，比写成错的平台名安全。
+ */
+function platformPromptVars(repoRoot) {
+  const root = path.join(repoRoot, 'profiles', 'platforms');
+  let id = '';
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config.json'), 'utf8'));
+    id = String(config?.platform?.id ?? '').trim();
+  } catch {
+    id = '';
+  }
+  if (!id) {
+    try {
+      const dirs = fs.readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort();
+      if (dirs.length === 1) id = dirs[0];
+    } catch {
+      return {};
+    }
+  }
+  if (!id) return {};
+  try {
+    const meta = readYaml(path.join(root, id, 'platform.yml'));
+    const label = String(meta?.label ?? meta?.id ?? id).trim();
+    return label ? { platform: label, displayName: label } : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
  * 校验并改写行列表：只允许已知的相对行名（守卫），其余相对名视为错误。
  * @param {unknown} rows agent.cordis.yml 解析出的行列表
  * @param {string} preset preset 名（诊断用）
@@ -139,7 +174,7 @@ export function renderPatch(repoRoot, name) {
   }
   const plugins = composeRows(
     normalizeRows(readYaml(path.join(dir, 'agent.cordis.yml')), name),
-    { platformText: capabilityPlatformPrompt(repoRoot, name) },
+    { platformText: capabilityPlatformPrompt(repoRoot, name), vars: platformPromptVars(repoRoot) },
   );
   const row = {
     id: presetRowId(name),

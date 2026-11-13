@@ -11,10 +11,14 @@ import {
 import { PRESETS, buildPatches } from '../scripts/build-agent-preset-patches.mjs';
 
 test('占位符：认识的替换、不认识的保留', () => {
-  assert.equal(renderPlatformPrompt('你在 {platform} 上叫 {displayName}。'), '你在 QQ 上叫 QQ。');
+  assert.equal(renderPlatformPrompt('你在 {platform} 上叫 {displayName}。', { platform: 'QQ', displayName: 'QQ' }), '你在 QQ 上叫 QQ。');
   assert.equal(renderPlatformPrompt('{platform}/{qq?}', { platform: 'B站' }), 'B站/{qq?}');
   assert.equal(renderPlatformPrompt('', {}), '');
   assert.equal(renderPlatformPrompt(null), '');
+  // 平台名没有代码级默认值：缺 vars 时占位符原样保留，免得被悄悄写成某一个平台。
+  assert.equal(renderPlatformPrompt('你在 {platform} 上。'), '你在 {platform} 上。');
+  // 与平台无关的默认值仍然保留。
+  assert.equal(renderPlatformPrompt('{owner}', {}), '管理员');
 });
 
 test('拼接：空值不接入、正文尾部空白被清掉', () => {
@@ -32,7 +36,7 @@ test('composeRows：只改 persona 行，其余行与顺序不动', () => {
   ];
   const same = composeRows(rows, { platformText: '' });
   assert.equal(same, rows, '空补充应原样返回（保证生成物逐字节不变）');
-  const next = composeRows(rows, { platformText: '你在 {platform} 上。' });
+  const next = composeRows(rows, { platformText: '你在 {platform} 上。', vars: { platform: 'QQ' } });
   assert.equal(next[0].config.prefix, '原始人格\n\n你在 QQ 上。');
   assert.equal(next[1], rows[1]);
   assert.equal(rows[0].config.prefix, '原始人格', '不能改到原数组');

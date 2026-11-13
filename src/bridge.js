@@ -17,7 +17,7 @@ import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport,
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken, resolveDshHome } from './dsh-client.js';
-import { mdToPlain, splitForQQ, truncateText, truncateTextTail } from './md-to-plain.js';
+import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -90,7 +90,7 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
-import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan, RUNTIME_PLATFORM } from './runtime/plans.mjs';
+import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
 import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, CAPABILITIES_ROOT } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
@@ -1038,7 +1038,7 @@ async function refreshPersonaCardCache(providerId, id, provider = null) {
 // 运行方案文件仓库（profiles/plans/*.yml）：方案的唯一定义处，config.json 只留指针。
 let planFileStore = null;
 function planStore() {
-  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), log });
+  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), defaultPlatform: bridgeCfg?.platform?.id ?? '', log });
   return planFileStore;
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
@@ -7336,7 +7336,7 @@ async function main() {
           const plan = activePlan();
           sendJson({
             ok: true,
-            platform: cfg.platform?.id ?? RUNTIME_PLATFORM,
+            platform: cfg.platform?.id ?? plan?.platform ?? '',
             plans,
             active: plan?.id ?? null,
             activePlan: plan,
@@ -12202,7 +12202,7 @@ async function main() {
     const target = parseKey(key);
     const kind = target?.kind ?? '';
     const id = target?.id ?? null;
-    const parts = splitForQQ(safeMsg);
+    const parts = splitForPlatform(safeMsg);
     lastSendFailed.delete(key);
     parts.forEach((part, index) => {
       sendChain = sendChain
@@ -12261,7 +12261,7 @@ async function main() {
   function sendOwnerDirect(msg) {
     const owner = String(cfg.ownerQQ ?? '').trim();
     if (!/^[1-9]\d{0,11}$/.test(owner) || !msg) return Promise.resolve();
-    const parts = splitForQQ(redactKnownTokensOnly(String(msg)));
+    const parts = splitForPlatform(redactKnownTokensOnly(String(msg)));
     for (const part of parts) {
       sendChain = sendChain
         .then(() => withTimeout(bot.sendPrivateMessage(Number(owner), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 owner:${owner}`))
@@ -15704,11 +15704,14 @@ async function main() {
     const id = String(selfUserId || '').trim();
     if (!name && !id) return '';
     const label = name ? `「${name}」` : '（昵称未取到）';
-    const idText = id ? `（QQ ${id}）` : '';
+    // 平台名取自适应器的提示词变量（QQ / 将来的其他平台），缺失时用中性说法；
+    // 不写死平台名，否则新增平台时身份句会把机器人本体说成 QQ。
+    const platformLabel = String(adapterRegistry.platformVars().platform || '当前平台').trim();
+    const idText = id ? `（${platformLabel} ${id}）` : '';
     const callBits = name
       ? `消息里出现「@${name}」、有人叫「${name}」、或引用你的消息，指的都是你 —— 不要当成别人`
       : '被 @、被叫到你的昵称、或引用你的消息，指的都是你 —— 不要当成别人';
-    return `【你的身份】你在 QQ 上的昵称是${label}${idText}。${callBits}；群名片可能与昵称不同，at/引用段里带${id ? ` ${id} ` : '你的 QQ 号'}就是在叫你。\n\n`;
+    return `【你的身份】你在 ${platformLabel} 上的昵称是${label}${idText}。${callBits}；群名片可能与昵称不同，at/引用段里带${id ? ` ${id} ` : `你的 ${platformLabel} 号`}就是在叫你。\n\n`;
   }
 
   // 记忆检索的 query：本轮最后一条「不是自己发的」消息文本（最多 300 字）。

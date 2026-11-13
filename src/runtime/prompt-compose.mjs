@@ -5,9 +5,11 @@
 // 值为空时等价于没接这一层（逐字节不改变生成结果）。
 const VAR_RE = /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g;
 
+// 变量来源：运行期由平台适配器提供（runtime/adapters.mjs 的 builtinAdapters 或插件注册的
+// adapters:provide）；构建期由 profiles/platforms/<id>/platform.yml 的 label 提供。
+// 这里只留与平台无关的默认值：缺 {platform}/{displayName} 时占位符原样保留，
+// 作者能一眼看到，而不是被悄悄渲染成某一个具体平台名。
 export const DEFAULT_PROMPT_VARS = Object.freeze({
-  platform: 'QQ',
-  displayName: 'QQ',
   owner: '管理员',
 });
 

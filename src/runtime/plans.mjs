@@ -7,7 +7,9 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { PLANS_ROOT } from '../profiles/paths.mjs';
 
-export const RUNTIME_PLATFORM = 'qq';
+// 方案里的 platform 是用户侧平台 id。它不再有内置默认值：由 createPlanStore 从
+// 配置（config.json 的 platform.id）传入，缺失时保持空串 —— 猜一个平台会把会话写到
+// 错误的主键上，比留空更贵。
 export const PLAN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 export const PLAN_AUDIENCES = ['owner', 'access'];
 export const BUILTIN_PLAN_ORDER = ['chat', 'social-v1', 'social-v2', 'agent-readonly', 'agent-workspace', 'agent-full'];
@@ -26,11 +28,11 @@ function plain(value, label) {
 }
 
 /** 归一并校验一份方案；字段缺失或引用非法直接报错（不做静默兜底）。 */
-export function normalizePlan(raw, { source = 'plan' } = {}) {
+export function normalizePlan(raw, { source = 'plan', defaultPlatform = '' } = {}) {
   const value = plain(raw, source);
   const id = text(value.id, 40);
   if (!PLAN_ID_RE.test(id)) throw new Error(`${source}.id 不合法：${id || '(空)'}`);
-  const platform = text(value.platform, 40) || RUNTIME_PLATFORM;
+  const platform = text(value.platform, 40) || text(defaultPlatform, 40);
   const agentPlatform = text(value.agentPlatform, 40) || 'dsh';
   const agent = text(value.agent, 80);
   if (!agent) throw new Error(`${source}.agent 不能为空`);
@@ -78,7 +80,7 @@ function orderOf(plan) {
 /**
  * 方案文件仓库。`root` 默认 profiles/plans，测试可注入临时目录。
  */
-export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
+export function createPlanStore({ root = PLANS_ROOT, defaultPlatform = '', log = () => {} } = {}) {
   function files() {
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root, { withFileTypes: true })
@@ -96,7 +98,7 @@ export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
     } catch (error) {
       throw new Error(`方案 ${file} YAML 解析失败：${error?.message ?? error}`);
     }
-    return normalizePlan({ ...raw, id: raw?.id ?? id }, { source: `plans/${file}` });
+    return normalizePlan({ ...raw, id: raw?.id ?? id }, { source: `plans/${file}`, defaultPlatform });
   }
 
   function list() {
@@ -111,7 +113,7 @@ export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
   }
 
   function save(input) {
-    const plan = normalizePlan(input);
+    const plan = normalizePlan(input, { defaultPlatform });
     const existing = get(plan.id);
     if (existing?.builtin) throw new Error('内置方案是只读的，请先克隆一份再改');
     fs.mkdirSync(root, { recursive: true });

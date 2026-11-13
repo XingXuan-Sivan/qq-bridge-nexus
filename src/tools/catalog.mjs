@@ -171,7 +171,7 @@ export function catalogEntry(id) {
  * 由两端适配器声明的工具合并出目录条目（适配器只声明 id/label/risk）。
  * 内置条目优先；重复 id 时以适配器声明覆盖 label/risk，但保留 source。
  */
-export function catalogFromAdapters({ platform = [], agent = [] } = {}) {
+export function catalogFromAdapters({ platform = [], agent = [], platformProvider = 'platform', agentProvider = 'agent' } = {}) {
   const merged = new Map(CATALOG_ENTRIES.map((entry) => [entry.id, entry]));
   const add = (side, provider, items) => {
     for (const item of Array.isArray(items) ? items : []) {
@@ -194,8 +194,8 @@ export function catalogFromAdapters({ platform = [], agent = [] } = {}) {
       }));
     }
   };
-  add('platform', 'qq', platform);
-  add('agent', 'dsh', agent);
+  add('platform', platformProvider, platform);
+  add('agent', agentProvider, agent);
   return [...merged.values()];
 }
 

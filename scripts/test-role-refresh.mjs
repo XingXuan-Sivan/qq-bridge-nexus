@@ -52,7 +52,7 @@ test('① 模块：指纹、读卡记录、持久化、提示块', () => {
     assert.equal(tr.needsRefresh(GROUP_KEY, 's1', fp2), true, '指纹变了');
     assert.equal(tr.needsRefresh(GROUP_KEY, 's2', fp1), true, '会话换了');
     assert.deepEqual(tr.stale({ [GROUP_KEY]: 's1', [OWNER_KEY]: 's9' }, fp1), [OWNER_KEY]);
-    tr.markSeen('group:abc', 's1', fp1);
+    tr.markSeen('group:', 's1', fp1);
     tr.markSeen(OWNER_KEY, 's9', 'not-a-fp');
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600, '记录文件 0600');
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));

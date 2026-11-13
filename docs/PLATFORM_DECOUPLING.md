@@ -65,7 +65,9 @@
 | `direct` | 一对一（私聊/私信/DM） | 同上 |
 | `temp` | 群内临时会话（QQ 专有，保留但不新增使用方） | 同上 |
 
-`private` 继续作为 `direct` 的别名被读取接受（数据里大量存在），但**新写入一律 `direct`**。平台自有类型（如 `thread`、`live`）写进 key 的 `type` 段时，内核等价于 `group`（多方）处理；需要区别时由平台能力声明表达，不靠 key 变形。
+`parseKey()` 返回的 `type` **保留原文**（写 `private` 读回来还是 `private`），另有一个归一层 `shape`：`private` / `direct` / `dm` / `chat` 都归一成 `direct`，`group` / `temp` 各自归一。内核判"是不是群"只看 `shape`，判断两个 key 是不是同一会话（`sameSession`）也比 `shape` 而不是 `type`。
+
+平台自有类型（如 `thread`、`live`）写进 key 的 `type` 段时，`shape` 回落到该类型本身（既不是 `group` 也不是 `direct`）；接入方如果需要它被当多方会话处理，就在自己的适配器里映射成 `group`，不靠内核猜。
 
 ### 2.4 平台上下文（防串号）
 
@@ -76,11 +78,22 @@
 
 落地规则：
 
-1. `key()` 的签名改为 `key(type, id)` → 从上下文取地址；**没有上下文时抛错**（不再回落到 `qq`）。
-2. 新增 `keyFor(platform, type, id, account?)` 供无法使用上下文的场景。
-3. 测试加"跨平台串号"用例：在 `withAddress(qq)` 内调用 `keyFor(telegram, ...)` 必须被显式允许（说明调用方知情），而 `key()` 与事件地址不一致时抛错。
+1. `key()` 的地址优先级：显式地址参数 > `withAddress()` 上下文 > 进程默认（`configureKeys()` 注册的平台/账号）。**`strict: true`** 时（多平台部署启用）没有显式地址或上下文就直接抛错。
+2. 新增 `keyFor(platform, type, id, account?)` 供无法使用上下文的场景（如 MCP 独立进程）。
+3. 测试加"跨平台串号"用例：在 `withAddress(qq)` 内调用 `keyFor(telegram, ...)` 必须被显式允许（说明调用方知情），而 `withAddress()` 上下文不能泄漏到外层。
 
 **这一步不做"读旧数据自动猜平台"**：猜错比报错贵得多。
+
+---
+
+### 2.5 实施偏差（B2 落地时相对上述设计的取舍）
+
+| 项 | 设计 | 实施 | 理由 |
+| --- | --- | --- | --- |
+| `private` 改写 | 新写入一律 `direct` | **不改写**，`type` 保留原文，另给归一后的 `shape` | 改写等于把 `sessions.json`、`people`、`roles`、`memory` 全部重键；风险极高、收益为零。`shape` 已经满足"内核只认语义"的目标 |
+| `key()` 无上下文 | 直接抛错 | 回落到进程默认，另有 `strict` 开关 | 单平台部署下启动、定时 tick 等离线路径没有事件上下文，强制抛错会让整条链断掉。多平台部署（B5）打开 `strict` |
+| 数据迁移脚本 | `sessions.json` 迁移脚本 | **不做** | 新文法是旧文法的超集，`qq:group:123` 原样可读、`group:123` 由 `legacyToKey` 读出，没有数据需要改写 |
+| id 数值归一 | 不做数字校验 | 纯数字 id 去前导零（`0456` → `456`），仍不做 `Number()` 转换 | 旧实现用 `Number()` 归一，去掉会破坏"限频/定时按 key 相等判同一会话"；但保留 `Number()` 又会截断超 2^53 的群号 |
 
 ---
 
@@ -282,13 +295,15 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 
 ## 6. 迁移批次
 
-每批独立可提交、均可通过 `verify:repo`（62 项）+ `test:audit`（116 项）+ `test:artifact-pipeline`。批次之间有依赖，不可乱序。
+每批独立可提交、均可通过 `verify:repo`（62 项）+ `test:audit`（118 项）+ `test:artifact-pipeline`。批次之间有依赖，不可乱序。
+
+状态：`✅` 已提交 / `—` 未开始。
 
 | 批次 | 内容 | 触及 | 风险 |
 | --- | --- | --- | --- |
-| **B0** | 常量去 QQ：`RUNTIME_PLATFORM`（plans.mjs:8）、`DEFAULT_PROMPT_VARS`（prompt-compose.mjs:6）、`runtime.json` 键名、`catalog.mjs` 的 `provider` 参数化；`selfIdentityTextV2` 改 prompt 变量；`splitForQQ`/`mdToPlain` 中性命名 | 5 个文件 | 极低 |
-| **B1** | 发送收口：4 处 `send_*_msg` 三元式 → `sendAction(address, segments)`；v1 管线退化为 v2 薄封装；段类型与降级策略接线 | bridge.js + md-to-plain + 3 个媒体函数 | 低（收益最高） |
-| **B2** | 地址模型：`key.mjs` 支持 `@account` 与开放 type、id 字符串化；`withAddress()` 上下文 + 15 个 import 点改造；`sessions.json` 迁移脚本 | key.mjs + 15 模块 + bridge | 中高（主键） |
+| **B0** ✅ | 常量去 QQ：`RUNTIME_PLATFORM`（plans.mjs:8）、`DEFAULT_PROMPT_VARS`（prompt-compose.mjs:6）、`runtime.json` 键名、`catalog.mjs` 的 `provider` 参数化；`selfIdentityTextV2` 改 prompt 变量；`splitForQQ`/`mdToPlain` 中性命名 | 5 个文件 | 极低 |
+| **B1** ✅ | 发送收口：4 处 `send_*_msg` 三元式 → `sendAction(address, segments)`；v1 管线退化为 v2 薄封装；段类型与降级策略接线 | bridge.js + md-to-plain + 3 个媒体函数 | 低（收益最高） |
+| **B2** ✅ | 地址模型：`key.mjs` 支持 `@account` 与开放 type、id 字符串化；`withAddress()` 上下文 + 15 个 import 点改造；`sessions.json` 迁移脚本（见 §2.5：实际未做，旧文法已是新文法子集） | key.mjs + 15 模块 + bridge | 中高（主键） |
 | **B3** | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址 | bridge + 控制台 + 迁移 | 中 |
 | **B4** | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名 | 2 个文件 + preset 名迁移 | 中 |
 | **B5** | 运行期适配器：新建 `src/user-side/` 与 `src/agent-side/`，`dsh-client.js` 与 SDK 直连下沉为两个 runtime 实现，bridge 只依赖接口 | 大（bridge 1618 行相关段） | 高 |

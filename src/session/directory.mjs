@@ -24,12 +24,17 @@ export const DEFAULT_ACCESS = { passive: 'deny', proactive: 'deny' };
 const MODE_VALUES = new Set(['inherit', 'chat', 'reserved', 'reserved2']);
 const AXES = ['passive', 'proactive'];
 
-/** 会话 key → 相对路径（`qq/group/123.json`）；不合法返回 null。 */
+/**
+ * 会话 key → 相对路径（`qq/group/123.json`、`qq@napcat/group/123.json`）；不合法返回 null。
+ *
+ * 用 `parsed.key`（规范写法）而不是就地拼：账号维度必须进路径，否则同一平台上
+ * 两个账号的同号群会写进同一个档案文件。key 里已排除了 `/ \ : <>"|?*` 与空白，
+ * 所以 `:` 换成 `/` 之后一定是安全路径。
+ */
 export function keyPath(key) {
   const parsed = parseKey(key);
   if (!parsed) return null;
-  const canonical = formatKey(parsed.platform, parsed.kind, parsed.id);
-  return `${canonical.split(':').join('/')}.json`;
+  return `${parsed.key.split(':').join('/')}.json`;
 }
 
 /**
@@ -55,7 +60,8 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const parsed = parseKey(key);
   if (!parsed) return null;
-  const canonical = formatKey(parsed.platform, parsed.kind, parsed.id);
+  // 用规范写法比对：账号维度必须参与，否则 `qq@a:group:1` 会被当成 `qq:group:1` 的档案。
+  const canonical = parsed.key;
   if (raw.key !== canonical) return null;
 
   // 旧三态字段只在升级当次保留成 legacyAccess 供迁移读取；迁移完成后 writer 不再写它。
@@ -123,7 +129,7 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
 export function createProfile(key, patch = {}, now = Date.now) {
   const parsed = parseKey(key);
   if (!parsed) throw new Error('会话 key 不合法');
-  const canonical = formatKey(parsed.platform, parsed.kind, parsed.id);
+  const canonical = parsed.key;
   const base = {
     version: SESSION_DIR_VERSION,
     key: canonical,
@@ -243,10 +249,12 @@ export function loadSessionDirectory({ dir, fs, path, log = () => {}, now = Date
   // 否则只带着会话档案、没有 defaults 的目录会被当成空目录，档案被静默忽略。
   if (fs.existsSync(dir)) {
     for (const { file, parts } of listSessionFiles(fs, path, dir, log)) {
-      const [platform, kind, id] = parts;
+      const [scope, kind, id] = parts;
       let key = null;
       try {
-        key = formatKey(platform, kind, id);
+        // 目录名里的平台段可能带账号（`qq@napcat/group/123.json`），拆开后重新组装。
+        const [platform, account = ''] = String(scope).split('@');
+        key = formatKey(platform, kind, id, account);
       } catch {
         log(`⚠️ 忽略无法识别层级的会话文件：${file}`);
         continue;

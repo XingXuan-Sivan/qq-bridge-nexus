@@ -201,7 +201,7 @@ import { createMcpRuntime } from './extensions/mcp-runtime.mjs';
 import { createPresetPolicy } from './extensions/preset-policy.mjs';
 import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
-import { configureKeys, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey } from './session/key.mjs';
+import { accountOfConfig, configureKeys, defaultAddress, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -1158,16 +1158,17 @@ function normalizeRuntimePlanId(value) {
 }
 
 /**
- * 平台段：`platform.id`（默认 qq）。
+ * 平台段：`platform.id`（默认 qq）+ 可选的 `platform.account`（默认空 = 该平台的默认账号）。
  *
- * key 形态只有一种：`<platform>:<group|private>:<id>`。老的 `group:<id>` 只在**读取侧**
- * 兼容（`parseKey()` 两种都认），写入侧一律带平台前缀——这样加平台不用再改内核，
- * 也不需要「迁移开关」这种两步走的东西。
+ * 地址形态：`<platform>[@<account>]:<type>:<id>`。账号维度只在「同一平台上同时跑两个号」
+ * （SnowLuma + NapCat）时才需要填；老配置没这一项，读出来就是空（默认账号），行为不变。
+ * 老的 `group:<id>` 只在**读取侧**兼容（`parseKey()` 两种都认），写入侧一律带地址前缀。
  */
 function normalizePlatform(raw) {
-  const out = { id: 'qq' };
+  const out = { id: 'qq', account: '' };
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
   if (typeof raw.id === 'string' && /^[a-z][a-z0-9-]{0,15}$/.test(raw.id.trim().toLowerCase())) out.id = raw.id.trim().toLowerCase();
+  if (typeof raw.account === 'string' && /^[a-z0-9][a-z0-9._-]{0,31}$/i.test(raw.account.trim())) out.account = raw.account.trim().toLowerCase();
   return out;
 }
 
@@ -1789,7 +1790,7 @@ function saveState() {
 function ensureSessionProfile(rawKey, patch = {}) {
   const parsed = parseKey(rawKey);
   if (!parsed) return null;
-  const canonical = buildKey(parsed.kind, parsed.id);
+  const canonical = parsed.key;
   if (!state.profiles) state.profiles = {};
   if (!state.profiles[canonical]) {
     state.profiles[canonical] = createProfile(canonical, patch);
@@ -2126,9 +2127,9 @@ let stateDirHardened = null;
 
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 /**
- * 会话 key 的唯一构造出口：`<platform>:<group|private>:<id>`（平台名来自 `platform.id`）。
+ * 会话 key 的唯一构造出口：`<platform>[@<account>]:<type>:<id>`（地址来自 `platform.*`）。
  *
- * 平台在进程启动时由 `configureKeys()` 固化一次；读取侧统一走 `parseKey()`，
+ * 地址在进程启动时由 `configureKeys()` 固化一次；读取侧统一走 `parseKey()`，
  * 老的 `group:<id>` 形态仍然认得，但不再产出。
  */
 function sessionKey(kind, id) {
@@ -2136,13 +2137,16 @@ function sessionKey(kind, id) {
 }
 
 /**
- * 读取接口里的会话 key：旧形态 `group:1` 自动归一成当前平台的 `qq:group:1`。
+ * 读取接口里的会话 key：旧形态 `group:1` 自动归一成 `qq:group:1`。
  * 认不出来就原样返回，让调用方自己决定（通常是 404/400），不要在这里吞掉异常输入。
+ *
+ * 用 `parsed.key` 而不是重新拼：多平台并存时，`tg:group:1` 必须保持 `tg`，
+ * 拼成 `qq:group:1` 就是静默串号。
  */
 function apiKey(raw) {
   const text = String(raw ?? '').trim();
   const parsed = parseKey(text);
-  return parsed ? buildKey(parsed.kind, parsed.id) : text;
+  return parsed ? parsed.key : text;
 }
 
 // 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
@@ -2151,7 +2155,7 @@ let bridgeCfg = null;
 async function main() {
   const cfg = loadConfig();
   bridgeCfg = cfg;
-  configureKeys({ platform: platformOfConfig(cfg) });
+  configureKeys({ platform: platformOfConfig(cfg), account: accountOfConfig(cfg) });
   // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
   const ownerRelayStore = createOwnerRelayStore();
   const ownerRelayLimiter = createOwnerRelayLimiter();
@@ -4117,8 +4121,10 @@ async function main() {
    */
   const PLATFORM_PROMPT_ROOT = PLATFORMS_ROOT;
   function platformIdOf(key) {
-    const platform = String(key ?? '').split(':')[0];
-    return /^[a-z][a-z0-9-]{0,39}$/.test(platform) ? platform : 'qq';
+    // 用 parseKey 取平台段：`qq@napcat:group:1` 的平台是 `qq`，不是 `qq@napcat`。
+    const parsed = parseKey(String(key ?? ''));
+    if (parsed) return parsed.platform;
+    return platformOfConfig(bridgeCfg ?? {});
   }
   function platformPromptFor(key) {
     if (!capabilityOf(key)) return '';
@@ -4338,9 +4344,11 @@ async function main() {
     return [...known].filter((key) => !entries.includes(key));
   }
   function accessIds(axis, kind) {
+    // kind 是内核语义（多方 / 一对一）；`temp`（群内临时会话）不参与白名单枚举。
+    const want = kind === 'group' ? 'group' : 'direct';
     return accessKeys(axis)
       .map((key) => parseKey(key))
-      .filter((parsed) => parsed && parsed.kind === kind)
+      .filter((parsed) => parsed && parsed.shape === want)
       .map((parsed) => parsed.id);
   }
   function proactiveAllowed(key) {
@@ -8976,12 +8984,7 @@ async function main() {
             sendJson({ ok: false, error: 'key 格式应为 group:群号 或 private:QQ号' }, 400);
             return;
           }
-          const kind = keyMatch.kind;
-          const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0) {
-            sendJson({ ok: false, error: 'id 无效' }, 400);
-            return;
-          }
+          // id 的合法性已由 parseKey 保证，不再要求是数字：非数字 id 的平台要能走到这里。
           if (!passiveAllowed(key)) {
             sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
             return;
@@ -16673,9 +16676,14 @@ async function main() {
   for (const definition of createBuiltinCommands(builtinCommandDeps)) commandRegistry.register(definition);
 
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
-    const key = convKey(kind, id);
-    return withBehavior(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts), {
-      optional: looksLikeAdminChannelText(event),
+    // 地址上下文：从这条消息进入内核开始，直到处理结束，下游所有模块（社交、记忆、
+    // 定时、语音、审批）产出的 key 都跟着同一个地址走。单平台部署下它就是配置里的
+    // 默认地址（行为不变）；多平台并存时，这里是唯一的「这次该用哪个账号」来源。
+    return withAddress(defaultAddress(), () => {
+      const key = convKey(kind, id);
+      return withBehavior(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts), {
+        optional: looksLikeAdminChannelText(event),
+      });
     });
   }
 

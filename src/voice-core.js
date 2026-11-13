@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { key as buildKey, parseKey } from './session/key.mjs';
+import { parseKey } from './session/key.mjs';
 
 /** 网关能直接吃进去的音频扩展名（SnowLuma 会自动转 SILK）。 */
 export const AUDIO_EXTS = [
@@ -257,7 +257,7 @@ export function parseTargetKey(raw) {
   if (!parsed) return null;
   // parseKey 允许前导零（它只校验数字），这里再收一道
   if (!/^[1-9]\d*$/.test(String(parsed.id))) return null;
-  return { kind: parsed.kind, id: String(parsed.id), key: buildKey(parsed.kind, parsed.id) };
+  return { kind: parsed.kind, id: parsed.id, key: parsed.key };
 }
 
 /** 上传文件名净化：去掉路径、控制字符、Windows 保留字符，保留中文。 */

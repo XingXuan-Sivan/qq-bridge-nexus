@@ -7,7 +7,7 @@
 //   allow.groups / allow.private，否则拒绝 —— agent 只能往被允许的地方发消息。
 // - 所有调用走 OneBot HTTP API（httpUrl + accessToken）。
 import fs from 'node:fs';
-import { key as skillKey } from './session/key.mjs';
+import { configureKeys, key as skillKey, platformOfConfig } from './session/key.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,6 @@ import { z } from 'zod';
 // 在 MCP 里拦会连「安全拒绝理由」都拿不到，反而让模型无法把话说清楚。
 import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
-import { formatKey } from './session/key.mjs';
 import { accessState, normalizeAccessConfig } from './session/access.mjs';
 import { platformFlags } from './capabilities/store.mjs';
 
@@ -38,6 +37,9 @@ function loadConfig() {
 }
 
 const cfg = loadConfig();
+// 本文件是 DSH 拉起的独立进程，拿不到桥接进程的 configureKeys 状态：
+// 平台要自己从 config.json 读一次，否则这里会静默退回内置的 qq。
+configureKeys({ platform: platformOfConfig(cfg) });
 // 平台工具的注册开关只认能力预设（capabilities/*.yml 的平台工具表并集），config.json 不再保存这份开关。
 // 注册发生在模块加载期，因此改能力预设后要重启 DSH 才会刷新工具清单。
 cfg.tools = platformFlags({
@@ -65,7 +67,8 @@ function loadAccessDefaults() {
 function isPassiveAllowed(kind, id) {
   const defaults = loadAccessDefaults();
   if (!defaults) return false;
-  return accessState('passive', formatKey('qq', kind, String(id)), { defaults }).value === 'allow';
+  // skillKey 用的是上面 configureKeys 固化的平台，不再写死 'qq'。
+  return accessState('passive', skillKey(kind, String(id)), { defaults }).value === 'allow';
 }
 
 function getOneBotConfig() {

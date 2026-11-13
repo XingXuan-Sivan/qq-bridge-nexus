@@ -14,18 +14,23 @@
 // - 只有桥接代码（控制台、管理员的 /role 命令）写这个文件，AI 没有任何能改人格的工具。
 
 import path from 'node:path';
-import { key as buildKey, parseKey } from './session/key.mjs';
+import { keyFormat, parseKey } from './session/key.mjs';
 import { normalizeManualSilence } from './manual-silence.mjs';
 
 /** byKey 最多记这么多会话，防止被手改的文件撑爆。 */
 export const ROLE_BY_KEY_MAX = 500;
 
-/** 会话 key 规范化：接受新旧两种形态，统一成当前平台的 key，去掉前导零。不合法返回 null。 */
+/** 会话 key 规范化：接受新旧两种形态，统一成规范写法。不合法返回 null。 */
 export function canonicalConversationKey(raw) {
   const parsed = parseKey(String(raw ?? '').trim());
   if (!parsed) return null;
-  if (!Number.isSafeInteger(parsed.id) || parsed.id <= 0) return null;
-  return buildKey(parsed.kind, parsed.id);
+  // 只认「本进程绑定的平台」的会话：手改文件、旧版本残留里的别的平台 key 应该丢弃，
+  // 而不是建出一条永远打不到的记录。（多平台并存后改成「已注册平台」集合，见 B5。）
+  if (parsed.platform !== keyFormat().platform) return null;
+  // QQ 的 id 是数字：0 号会话不存在。非数字 id（别的平台）不做数值校验 ——
+  // id 的合法性归平台适配器，内核只校验语法。
+  if (parsed.idNum !== null && parsed.idNum <= 0) return null;
+  return parsed.key;
 }
 
 /** 人格名清洗：只留中文 / 字母 / 数字 / 下划线 / 横线；清洗后为空返回 null。 */

@@ -13,7 +13,7 @@
 // 同一会话里）消费。模型没有任何能调用 decide() 的工具或接口 —— AI 说「已经批准了」没有任何效果。
 
 // 会话 key 有两种历史形态（`group:1` 与 `qq:group:1`），审批登记表按当前平台形态归一后再比较。
-import { key as buildKey, parseKey } from '../session/key.mjs';
+import { parseKey } from '../session/key.mjs';
 
 const APPROVE_RE = /^(通过|批准|同意|允许|approve|yes|y|ok)$/i;
 const REJECT_RE = /^(拒绝|否决|不同意|不允许|deny|reject|no|n)$/i;
@@ -97,10 +97,10 @@ export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, s
     return dropped;
   }
 
-  /** 把会话 key 统一成当前平台的形态；无法解析时原样返回（不吞掉异常输入）。 */
+  /** 把会话 key 统一成规范形态；无法解析时原样返回（不吞掉异常输入）。 */
   function normKey(raw) {
     const parsed = parseKey(String(raw ?? ''));
-    return parsed ? buildKey(parsed.kind, parsed.id) : raw;
+    return parsed ? parsed.key : raw;
   }
 
   /** 登记一个新审批，返回带编号的条目。同一 eventId 重复登记返回原条目（事件流重连重放）。 */

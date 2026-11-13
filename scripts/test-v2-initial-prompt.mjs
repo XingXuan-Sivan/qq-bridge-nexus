@@ -173,10 +173,14 @@ await test('非法 key / 超长 / 缺 text 都被拒，且不会误删已有内�
     assert.equal(h.getInitialPrompt('qq:group:456').text.length, 100, '被拒的写入不得覆盖原有内容');
 
     await withServer(h, async (port) => {
-      for (const key of ['', 'group:', 'group:abc', 'qq:private:0', 'group:-1', 'wechat:123', 'qq:group:9007199254740993']) {
+      // 结构非法 / 别的平台 / 0 号会话被拒；id 本身不再要求是数字（B2 地址模型）。
+      for (const key of ['', 'group:', 'qq:private:0', 'wechat:123', 'group:a b']) {
         const res = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key, text: 'x' } });
         assert.equal(res.status, 400, `非法 key「${key}」必须 400，实际 ${res.status}`);
       }
+      // 超 2^53 的 int64 不再被当成非法：旧实现用 Number() 校验，会把合法群号截断后拒掉。
+      const bigId = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:9007199254740993', text: 'x' } });
+      assert.equal(bigId.status, 200, `大整数 key 必须被接受，实际 ${bigId.status}`);
       const badType = await call(port, '/api/socialV2/initial-prompt', { method: 'POST', headers: ADMIN, body: { key: 'qq:group:456', text: { a: 1 } } });
       assert.equal(badType.status, 400, 'text 非字符串必须 400');
 

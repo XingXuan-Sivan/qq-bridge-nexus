@@ -38,7 +38,7 @@ test('① 模块：休眠判定、休眠表清洗、交接文本', () => {
   const now = 1_000_000;
   const clean = normalizeDormant({
     [GROUP_KEY]: { sessionId: 's1', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
-    'group:abc': { sessionId: 's2', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
+    'group:': { sessionId: 's2', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
     [OWNER_KEY]: { sessionId: 's3', policy: pol('closed-agent', 'x', '1', 'L2', 'y'), dormantAt: now },
     'qq:group:789': { sessionId: '', policy: pol('reserved2', 'qq-chat-v2', null), dormantAt: now },
   });

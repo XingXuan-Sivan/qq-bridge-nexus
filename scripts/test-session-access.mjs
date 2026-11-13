@@ -26,7 +26,10 @@ await test('名单条目：补平台前缀、拒绝裸 ID、去重保序', () =>
   assert.equal(parseAccessEntry('private:456'), 'qq:private:456');
   assert.equal(parseAccessEntry('qq:group:9'), 'qq:group:9');
   assert.equal(parseAccessEntry('123'), null);
-  assert.equal(parseAccessEntry('group:abc'), null);
+  // id 不再要求是数字（Telegram username / B 站直播间号都不是数字），但结构必须合法。
+  assert.equal(parseAccessEntry('group:abc'), 'qq:group:abc');
+  assert.equal(parseAccessEntry('group:'), null);
+  assert.equal(parseAccessEntry('group:a b'), null);
   const got = normalizeAccessEntries(['group:1', 'qq:group:1', 'private:2', 'bad', '  ']);
   assert.deepEqual(got.entries, ['qq:group:1', 'qq:private:2']);
   assert.deepEqual(got.invalid, ['bad']);

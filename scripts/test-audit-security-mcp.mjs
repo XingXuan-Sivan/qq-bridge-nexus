@@ -5,6 +5,9 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import { z } from 'zod';
+// mcp-snowluma-safe.js 会剥掉 import：它现在自己 configureKeys，这两个符号得注入 VM。
+import { configureKeys, key as skillKey, platformOfConfig } from '../src/session/key.mjs';
+import { accessState, normalizeAccessConfig } from '../src/session/access.mjs';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -115,6 +118,12 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     serializeModelData: (value) => JSON.stringify(value),
     // 真实模块从能力预设推导注册面；vm 里剥掉了 import，用夹具的工具表代替。
     platformFlags: () => (fixtureConfig?.tools ?? {}),
+    // 会话 key 与准入：模块加载期就会跑 configureKeys，白名单判定用同一个 key 构造出口。
+    configureKeys,
+    platformOfConfig,
+    skillKey,
+    accessState,
+    normalizeAccessConfig,
   });
   return async (name, arguments_ = {}) => {
     const tool = tools.get(name);

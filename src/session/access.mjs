@@ -9,7 +9,7 @@
  * 不再有 per-profile 的 inherit/allow/deny，也没有 owner/管理员豁免（管理命令走独立通道）。
  */
 
-import { formatKey, parseKey } from './key.mjs';
+import { parseKey } from './key.mjs';
 
 export const ACCESS_AXES = ['passive', 'proactive'];
 export const ACCESS_MODES = ['allow', 'deny'];
@@ -25,18 +25,20 @@ export function normalizeAccessMode(value) {
 }
 
 /**
- * 一条名单项 → 规范 key（`qq:group:123` / `qq:private:456`）。
+ * 一条名单项 → 规范 key（`qq:group:123` / `qq:private:456` / `telegram:channel:@x`）。
  * 接受 `qq:` 前缀、`group:123` / `private:456`，也接受完整 key；其余一律视为非法。
+ *
+ * 只对**地址段**（平台、账号、类型）小写化，id 原样保留：QQ 号不区分大小写，
+ * 但别的平台 id 可能区分（Telegram username、B 站直播间号）。
  */
 export function parseAccessEntry(raw, platform = 'qq') {
   if (typeof raw !== 'string') return null;
-  let text = raw.trim().toLowerCase();
-  if (!text) return null;
-  if (!text.includes(':')) return null;
-  if (/^(group|private):/.test(text)) text = `${platform}:${text}`;
-  const parsed = parseKey(text);
+  const text = raw.trim();
+  if (!text || !text.includes(':')) return null;
+  const withPlatform = /^(group|private):/i.test(text) ? `${platform}:${text}` : text;
+  const parsed = parseKey(withPlatform);
   if (!parsed) return null;
-  return formatKey(parsed.platform, parsed.kind, parsed.id);
+  return parsed.key;
 }
 
 /** 名单数组 → `{entries, invalid}`；去重并保持首次出现顺序。 */

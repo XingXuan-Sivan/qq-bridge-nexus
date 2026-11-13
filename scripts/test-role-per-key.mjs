@@ -56,12 +56,12 @@ test('① 模块：回落规则、非法 key、路径穿越、改名删除', () 
   assert.equal(roleSourceFor(s, OWNER), 'off');
   assert.equal(roleNameFor(s, undefined), '甲鱼', '不传 key 用全局');
 
-  // 非法 key 忽略、别名归一
-  const bad = normalizeRoleState({ role: null, byKey: { 'group:abc': '乙鱼', 'qq:group:0': '乙鱼', 'channel:1': '乙鱼', 'group:-5': '乙鱼', 'qq:group:0789': '乙鱼', [GROUP]: 42 } });
-  assert.deepEqual(Object.keys(bad.byKey).join(','), 'qq:group:789', '只留合法 key，前导零去掉；值不是字符串的丢掉');
+  // 非法 key 忽略、别名归一。id 不再要求是数字（别的平台的 id 不是数字），但结构必须合法。
+  const bad = normalizeRoleState({ role: null, byKey: { 'group:abc': '乙鱼', 'qq:group:0': '乙鱼', 'channel:1': '乙鱼', 'group:': '乙鱼', 'qq:group:0789': '乙鱼', [GROUP]: 42 } });
+  assert.deepEqual(Object.keys(bad.byKey).join(','), 'qq:group:abc,qq:group:789', '只留结构合法的 key，前导零去掉；值不是字符串的丢掉');
   assert.equal(roleNameFor(bad, 'qq:group:0789'), '乙鱼', '查询时别名也归一');
   assert.equal(canonicalConversationKey(' private:00123 '), OWNER);
-  assert.equal(canonicalConversationKey('group:1.5'), null);
+  assert.equal(canonicalConversationKey('group:'), null);
   assert.equal(canonicalConversationKey('__proto__'), null);
   assert.equal(Object.keys(normalizeRoleState({ byKey: JSON.parse('{"__proto__": "乙鱼", "constructor": "乙鱼"}') }).byKey).length, 0, '原型污染键不进来');
 
@@ -84,7 +84,7 @@ test('① 模块：回落规则、非法 key、路径穿越、改名删除', () 
   assert.equal(roleNameFor(t, GROUP), null);
   t = withRoleForKey(t, 'qq:group:0456', 'default');
   assert.equal(roleSourceFor(t, GROUP), 'global', '回到全局（别名也能定位）');
-  assert.throws(() => withRoleForKey(old, 'group:x', 'off'), /会话格式/);
+  assert.throws(() => withRoleForKey(old, 'qq:group:', 'off'), /会话格式/);
   assert.throws(() => withRoleForKey(old, GROUP, 'role', '../'), /不合法/);
   assert.throws(() => withRoleForKey(old, GROUP, 'xx'), /use/);
 
@@ -200,7 +200,8 @@ test('③ 刷新只针对卡变了的会话；控制台接口；AI 调不了', a
       assert.equal(readRoleFile(h).byKey, undefined, '那次没写进去');
 
       // 非法输入
-      for (const body of [{ key: 'group:abc', use: 'off' }, { key: GROUP, use: '乱写' }, { key: GROUP, use: 'role', role: '不存在的鱼' }]) {
+      // key 只校验结构（B2 之后 id 不再要求是数字），所以用缺 id / 坏类型来试非法。
+      for (const body of [{ key: 'group:', use: 'off' }, { key: GROUP, use: '乱写' }, { key: GROUP, use: 'role', role: '不存在的鱼' }]) {
         const r = await call(port, '/api/roles/assign', { method: 'POST', body });
         assert.equal(r.status, 400, JSON.stringify(body));
       }

@@ -68,7 +68,8 @@
     "dirs": []
   },
   "platform": {
-    "id": "qq"
+    "id": "qq",
+    "account": ""
   },
   "runtime": {
     "defaultPlan": "social-v2"

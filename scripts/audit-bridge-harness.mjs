@@ -61,7 +61,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { engineOfKind, loadBehaviorProfiles, resolveBehavior } from '../src/behaviors/index.mjs';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
-import { configureKeys, key as buildKey, isGroupKey, isPrivateKey, idOfKey } from '../src/session/key.mjs';
+import { accountOfConfig, configureKeys, key as buildKey, defaultAddress, isGroupKey, isPrivateKey, idOfKey, withAddress } from '../src/session/key.mjs';
 import { createCommandRegistry } from '../src/commands/registry.mjs';
 // 内置命令的壳与 /api/commands 组装：夹具剥掉 import，所以要在 sandbox 里补这两项（P7 抽层后新增）。
 import { createBuiltinCommands } from '../src/commands/builtin.mjs';
@@ -421,6 +421,9 @@ createExtensionCatalog,
     parseKey,
     platformOfConfig,
     configureKeys,
+    accountOfConfig,
+    defaultAddress,
+    withAddress,
     buildKey,
     isGroupKey,
     isPrivateKey,

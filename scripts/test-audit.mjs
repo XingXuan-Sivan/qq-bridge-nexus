@@ -213,6 +213,9 @@ const tests = [
   'test-unified-event.mjs',
   // B6 插件 transport：id 冲突拒绝、sendAction 路由、降级先于 transport、QQ 报文不变。
   'test-transport-plugin.mjs',
+  // B7 平台元数据：内置 + 插件合成一张表、只含常量、resolveSendTarget 的校验顺序
+  // （未注册平台与未声明的会话类型在这里就被挡住，而不是到发送时才报超时）。
+  'test-platform-metadata.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

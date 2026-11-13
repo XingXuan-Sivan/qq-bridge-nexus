@@ -60,7 +60,9 @@ test('内置用户平台已注册，且描述里没有平台实现细节', () =>
   assert.ok(qq.capabilities.includes('sticker'), '声明了 sticker 才能按能力降级');
   assert.ok(qq.capabilities.includes('forward'));
   // 描述里只允许静态元数据：任何函数都说明实现泄漏进了控制台可见的部分。
-  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'label']);
+  // limits 自 B7 起也在这里（控制台按它画表单，不再自己写死 4000）。
+  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'label', 'limits']);
+  assert.equal(qq.limits.chunkChars, 4000);
 });
 
 test('buildSendCall 委托到 QQ 适配器（group / private 两种动作）', () => {

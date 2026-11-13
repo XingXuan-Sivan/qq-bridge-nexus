@@ -221,7 +221,7 @@ function renderUsageConversations(r) {
   usageConversationsCache = list;
   if (!list.length) {
     box.dataset.usageSig = 'empty';
-    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>QQ 会话产生一次 LLM 调用后，这里会按群 / 好友列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
+    box.innerHTML = '<div class="empty-state"><strong>还没有用量记录</strong><p>会话产生一次 LLM 调用后，这里会按会话列出 token 与花费。新账本从桥接重启后开始记账。</p></div>';
     return;
   }
   const maxCost = Math.max(...list.map((x) => Number(x.cost) || 0), 0);

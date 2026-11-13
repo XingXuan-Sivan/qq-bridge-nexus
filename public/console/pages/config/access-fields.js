@@ -8,7 +8,7 @@ const STATE_WARN = alertHtml({
   title: 'state/ 目录权限未收紧',
   hidden: true,
   html: `
-  <div class="meta u-my-4">Windows 上改文件权限需要管理员身份，本次启动没能收紧 <code id="stateDirPath"></code>。它里面的控制台令牌、SnowLuma 令牌、各会话令牌与 QQ 聊天记录，本机任何已登录用户都可能读到。</div>
+  <div class="meta u-my-4">Windows 上改文件权限需要管理员身份，本次启动没能收紧 <code id="stateDirPath"></code>。它里面的控制台令牌、SnowLuma 令牌、各会话令牌与全部会话聊天记录，本机任何已登录用户都可能读到。</div>
   <div class="meta">两种做法：① 用<b>管理员身份</b>打开终端执行下面这条命令（一次即可，可复制）；② 或者<b>用管理员身份重启桥接</b>，让它自己收紧。做完点下面的按钮复检。</div>
   <pre id="stateDirCmd" class="u-code-block"></pre>
   <div class="control-row">

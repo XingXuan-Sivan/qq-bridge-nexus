@@ -4,8 +4,12 @@ import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
 import { setMsg } from '../components/message/message.js';
+import { loadPlatforms } from './platforms.js';
 
 bootstrapConsoleToken();
+// 平台元数据（B7）预热：页面渲染不等网络，先把注册表里的平台名、会话类型与上限拉回本地。
+// 失败时静默（后半启动阶段端点可能还不在），页面本身有「只显示会话里出现过的平台」的降级。
+void loadPlatforms();
 
 // 上游静默时长的人话渲染：只用于 SnowLuma 健康提示（秒 / 分钟 / 小时）。
 function fmtAgoMs(ms) {

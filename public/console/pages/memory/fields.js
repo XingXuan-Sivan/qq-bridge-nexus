@@ -94,7 +94,7 @@ export const MEMORY_FIELDS = {
   ingest: [
     {
       name: 'memIngestEnabled', type: 'switch', label: '写回记忆服务', onLabel: '开', offLabel: '关',
-      hint: '开启后，QQ 会话里的用户消息与 AI 回复会批量发给记忆服务（soulkit 的 /api/ingest）；关闭时一行都不发。',
+      hint: '开启后，会话里的用户消息与 AI 回复会批量发给记忆服务（soulkit 的 /api/ingest）；关闭时一行都不发。',
     },
     {
       name: 'memIngestUrl', type: 'text', label: '记忆服务地址', span: 2,

@@ -23,8 +23,8 @@ export const SESSIONS_FIELDS = {
         <span class="field-switch-track" aria-hidden="true"></span><span>白名单</span>
       </button>
     </div>
-    <textarea id="accessPassiveEntries" rows="6" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001&#10;也可以写完整的 qq:group:… / qq:private:…"></textarea>
-    <p class="field-hint">控制「别人发消息、@、私聊」是否唤醒并回复。每行一个会话，支持 <code>group:群号</code>、<code>private:QQ号</code>；<b>白名单为空 = 全部拒绝，黑名单为空 = 全部允许</b>。owner 私聊始终放行。</p>
+    <textarea id="accessPassiveEntries" rows="6" class="access-textarea" spellcheck="false" placeholder="group:123456789&#10;private:100001&#10;也可以写完整的 平台:类型:id，例如 qq:group:123456789"></textarea>
+    <p class="field-hint">控制「别人发消息、@、私聊」是否唤醒并回复。每行一个会话，支持 <code>类型:id</code>（跟随当前平台）或 <code>平台:类型:id</code>；<b>白名单为空 = 全部拒绝，黑名单为空 = 全部允许</b>。owner 私聊始终放行。</p>
   </section>
   <section class="access-field">
     <div class="access-head">

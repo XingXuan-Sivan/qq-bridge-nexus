@@ -17,7 +17,7 @@ import { userPlatform } from './runtime-registry.mjs';
 
 const ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
-/** @type {Map<string, {id: string, owner: string, label: string, capabilities: string[], send: Function, close: Function|null, instance: object|null}>} */
+/** @type {Map<string, {id: string, owner: string, label: string, conversationTypes: string[], capabilities: string[], limits: object, send: Function, close: Function|null, instance: object|null}>} */
 const transports = new Map();
 
 /**
@@ -26,6 +26,9 @@ const transports = new Map();
  * @param {object} definition
  * @param {string} definition.id           平台 id（会成为会话 key 里的平台段）
  * @param {string[]} [definition.capabilities]
+ * @param {string[]} [definition.conversationTypes] 本平台真正有的会话类型（控制台据此限制
+ *        表单选项；不声明时控制台不限制，但发送能不能成仍由实现决定）
+ * @param {object} [definition.limits]    分条与格式限制（chunkChars / markdown …）
  * @param {object} [definition.instance]   create(config) 的产物；`close()` 由内核在卸载时调用
  * @param {Function} [definition.send]     async ({ address, segments, opts }) => { messageId }
  *                                         —— 不给时取 instance.send（docs §5.2 的写法）
@@ -58,11 +61,21 @@ export function registerTransport(definition, owner) {
   const capabilities = Array.isArray(definition?.capabilities)
     ? [...new Set(definition.capabilities.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean))]
     : (Array.isArray(instance?.capabilities) ? [...new Set(instance.capabilities.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean))] : []);
+  // 会话类型与限制同理：定义上没写就看 create() 的产物。这两项只影响控制台的表单与
+  // 提示，不参与发送判定，所以缺省是空而不是报错（插件不必为了能被列出而声明它们）。
+  const conversationTypes = [...new Set(
+    (Array.isArray(definition?.conversationTypes) ? definition.conversationTypes : instance?.conversationTypes ?? [])
+      .map((item) => String(item ?? '').trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  const limits = { ...(definition?.limits ?? instance?.limits ?? {}) };
   const entry = {
     id,
     owner: ownerName,
     label: String(definition?.label ?? '').trim() || id,
+    conversationTypes,
     capabilities,
+    limits,
     send,
     instance,
     close: typeof instance?.close === 'function' ? () => instance.close() : null,
@@ -103,8 +116,13 @@ export function unregisterTransportsByOwner(owner) {
 
 /** 控制台 / 健康检查用：插件注册的平台清单。 */
 export function listTransports() {
-  return [...transports.values()].map(({ id, owner, label, capabilities }) => ({
-    id, owner, label, capabilities: [...capabilities],
+  return [...transports.values()].map(({ id, owner, label, conversationTypes, capabilities, limits }) => ({
+    id,
+    owner,
+    label,
+    conversationTypes: [...conversationTypes],
+    capabilities: [...capabilities],
+    limits: { ...limits },
   }));
 }
 

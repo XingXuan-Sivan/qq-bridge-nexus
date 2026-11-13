@@ -9,6 +9,8 @@ import { closeModal, openModal, wireModal } from '../../components/modal/modal.j
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { MEMORY_FIELDS } from './fields.js';
 import { cardHtml } from '../../components/card/card.js';
+// 平台名与会话类型统一查表（B7）；这里只负责把会话 key 拆成两段，不写死任何平台。
+import { conversationTypeLabel, platformFilterOptions, platformLabel } from '../../js/platforms.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
 const STATUS_TEXT = { injected: '已注入', truncated: '已截断', empty: '空', error: '失败', off: '已关闭', idle: '未调用' };
@@ -171,12 +173,12 @@ function localKey() {
 }
 
 function platformOf(key = '') {
-  const [platform = 'qq', kind = ''] = String(key).split(':');
+  const [platform = '', kind = ''] = String(key).split(':');
   return { platform, kind };
 }
 
 function kindText(kind) {
-  return kind === 'group' ? '群' : kind === 'private' ? '私聊' : kind || '—';
+  return conversationTypeLabel(kind) || '—';
 }
 
 async function sessionMemoryCounts(key) {
@@ -206,7 +208,7 @@ async function renderSessionTable() {
       const action = `<button type="button" class="btn small" data-mem-open="${esc(s.key)}">管理</button> <button type="button" class="btn small danger" data-mem-clear="${esc(s.key)}">清空</button> <button type="button" class="btn small danger" data-mem-session-del="${esc(s.key)}">删除</button>`;
       const cells = [
         `<span class="mono">${esc(s.key)}</span>`,
-        esc(platform),
+        `<span title="${esc(platform)}">${esc(platformLabel(platform))}</span>`,
         esc(kindText(kind)),
         String(Number(c.topics) || 0),
         String(Number(c.thoughts) || 0),
@@ -223,7 +225,7 @@ async function renderSessionTable() {
         { label: '操作', width: 210 },
       ],
       rows,
-      empty: '还没有会话记忆；点「新增会话」填一个 key，或在 QQ 里先聊一句。',
+      empty: '还没有会话记忆；点「新增会话」填一个 key，或先在会话里聊一句。',
       pageSize: 20,
       sizes: [10, 20, 50],
       search: { placeholder: '搜索会话…' },
@@ -233,7 +235,7 @@ async function renderSessionTable() {
           id: 'platform',
           label: '平台',
           value: 'all',
-          options: [{ value: 'all', label: '全部平台' }, ...[...platformSet].map((p) => ({ value: p, label: p }))],
+          options: platformFilterOptions([...platformSet]),
         },
         {
           id: 'kind',
@@ -401,8 +403,8 @@ function openSessionAdd() {
     type: 'text',
     label: '会话 key',
     span: 2,
-    placeholder: 'qq:group:123456789 或 private:…',
-    hint: '支持 qq:group:… / group:… / qq:private:… / private:…；建好后在「管理」里加条目。',
+    placeholder: '平台:类型:id，例如 qq:group:123456789 或 private:…',
+    hint: '支持 类型:id（跟随当前平台）或 平台:类型:id；建好后在「管理」里加条目。',
   }], { columns: 1 });
   openModal(document.getElementById('memSessionAddModal'));
 }
@@ -677,7 +679,7 @@ const MEMORY_CARDS = [
   {
     id: 'section-memory-ingest',
     title: '写回记忆服务',
-    description: '把 QQ 会话里的用户消息与 AI 回复批量写给记忆服务；队列落盘在 <code>state/memory-ingest-pending.json</code>，服务不可用时保留重试，不阻塞消息处理。',
+    description: '把会话里的用户消息与 AI 回复批量写给记忆服务；队列落盘在 <code>state/memory-ingest-pending.json</code>，服务不可用时保留重试，不阻塞消息处理。',
     body: '<div data-memory-fields="ingest"></div>',
   },
   {

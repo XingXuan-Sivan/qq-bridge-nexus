@@ -78,6 +78,7 @@ import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } f
 // 发送调用构造与后端称呼（B5）：bridge.js 只经 src/user-side/user-platform.mjs 门面调用，
 // 夹具剥 import 后必须按门面的名字补回。实现本身在 adapters/qq/ 里。
 // B6 又从这里进了三个名字：统一出站、后端配置注入、插件平台注册表。
+// B7 再加两个：控制台的平台元数据与 HTTP 发送端点的目标解析。
 import {
   buildSendCall,
   describeBackend,
@@ -85,11 +86,14 @@ import {
   sendAction as dispatchSend,
   configureUserPlatformBackend,
   transportRegistry,
+  userPlatformMetadata,
+  resolveSendTarget,
 } from '../src/user-side/user-platform.mjs';
 // Agent 侧的探活走门面（B5）：health 是真实现（纯状态机、不联网），能验证「连续 2 次失败才判不可用」。
 // 地址发现 **不能** 用真实现：它会查本机进程（lsof/netstat），装了 DSH 的机器上会摸到真 DSH，
 // 所以按下面的 resolveAgentBaseUrl 离线桩注入（见 context 定义处）。
-import { createAgentHealth } from '../src/agent-side/agent-client.mjs';
+// agentPlatformMetadata（B7）是纯注册表查询，用真实现。
+import { createAgentHealth, agentPlatformMetadata } from '../src/agent-side/agent-client.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry, builtinAdapters } from '../src/runtime/adapters.mjs';
@@ -341,6 +345,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 统一出站与插件平台（B6）：sendAction 在 bridge 里改名 dispatchSend，
     // 因为 bridge 自己有个同名包装（先过 onOutbound 再落到这里）。
     dispatchSend, configureUserPlatformBackend, transportRegistry,
+    // 平台元数据与发送目标解析（B7）：都是纯注册表查询，真实现即可。
+    userPlatformMetadata, resolveSendTarget, agentPlatformMetadata,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',

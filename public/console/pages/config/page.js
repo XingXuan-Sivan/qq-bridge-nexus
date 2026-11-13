@@ -52,7 +52,7 @@ const dshModelSection = {
     if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
       && !(await confirmBox({
         title: '切换第三方提供方',
-        message: `${payload.provider} 不是 DeepSeek 自家的提供方。保存后，QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`,
+        message: `${payload.provider} 不是 DeepSeek 自家的提供方。保存后，会话里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`,
         confirmText: '切换',
       }))) {
       return { ok: true, skipped: true, message: '已取消（未切换提供方）' };
@@ -194,11 +194,11 @@ function dshPreviewNotices() {
   const effort = $('dshEffortSelect').value;
   const vision = $('dshVisionSelect').value;
   const notices = [];
-  if (provider && !DSH_FIRST_PARTY.includes(provider)) notices.push({ level: 'warn', text: `${provider} 不是 DeepSeek 自家的提供方：QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理，请先确认它的隐私政策。` });
+  if (provider && !DSH_FIRST_PARTY.includes(provider)) notices.push({ level: 'warn', text: `${provider} 不是 DeepSeek 自家的提供方：会话里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理，请先确认它的隐私政策。` });
   if (effort === 'off') notices.push({ level: 'warn', text: '思考已关闭：回复更快，但二代仿真里的工具调用、读群判断和人格一致性可能变差。' });
   const sees = vision === 'yes' || (vision === 'auto' && entry?.vision === 'yes') || (vision === 'auto' && !entry && dshModelState?.visionKnown === 'yes');
   if (!sees) notices.push({ level: 'info', text: vision === 'no'
-    ? '已设为不能看图：QQ 里的图片、表情会改成文字占位（例如「[图片1：当前模型不能看图，已省略]」）。'
+    ? '已设为不能看图：会话里的图片、表情会改成文字占位（例如「[图片1：当前模型不能看图，已省略]」）。'
     : '这个模型能不能看图未知：按不能看图处理，图片、表情会改成文字占位；确认它能看图的话，把「看图能力」改成「能看图」。' });
   const priced = entry ? entry.priced : dshModelState?.priced;
   if (priced === false) notices.push({ level: 'info', text: '价格表没有覆盖这个模型：令牌与花费页的金额按 DeepSeek-V4.1-Flash 估算，并标「估算」。' });

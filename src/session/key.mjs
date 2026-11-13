@@ -233,6 +233,18 @@ export function sameSession(a, b) {
     && canonicalType(pa.type) === canonicalType(pb.type) && pa.id === pb.id;
 }
 
+/**
+ * 两个会话类型是否指同一件事：`private` / `direct` / `chat` / `dm` 同义。
+ *
+ * 只归一**已知别名**，未知类型只与自身相等 —— 平台自有类型（`channel` / `thread`）
+ * 之间不得互相“折算”，否则「平台声明了 group」会变成「什么类型都放行」。
+ */
+export function sameConversationType(a, b) {
+  const ta = canonicalType(a);
+  const tb = canonicalType(b);
+  return Boolean(ta) && ta === tb;
+}
+
 /** 是否多方会话 key（新旧形态、平台自有类型都认） */
 export function isGroupKey(key) {
   return shapeOfKey(key) === 'group';

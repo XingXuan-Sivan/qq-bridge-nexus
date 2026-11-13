@@ -334,7 +334,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 
 ## 6. 迁移批次
 
-每批独立可提交、均可通过 `verify:repo`（73 项）+ `test:audit`（119 项）+ `test:artifact-pipeline` + `test:console-ui`（34 项）。批次之间有依赖，不可乱序。
+每批独立可提交、均可通过 `verify:repo`（73 项）+ `test:audit`（123 项）+ `test:artifact-pipeline` + `test:console-ui`（34 项）。批次之间有依赖，不可乱序。
 
 状态：`✅` 已提交 / `—` 未开始。
 
@@ -347,7 +347,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B4** ✅ | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名（`chat / chat-v2 / readonly / workspace / full`，旧名经 `AGENT_PRESET_ALIASES` 归一；见 §2.5） | 2 个文件 + preset 名迁移 | 中 |
 | **B5** ✅ | 运行期适配器：新建 `src/user-side/`（`runtime-registry` / `builtin` / `user-platform` + `adapters/qq/`）与 `src/agent-side/`（已有 registry/builtin + `adapters/dsh/` + `agent-client` 门面）；`dsh-client.js` → `agent-side/adapters/dsh/client.mjs`，`lib/dsh-endpoint` 与 `lib/dsh-health` → 同目录，`platform/onebot` + `lib/qq-backend-label` → `user-side/adapters/qq/`，`platform/prompt` → `user-side/prompt.mjs`；bridge / self-test / control-center 只依赖门面；边界与例外见 §2.5 | 大（bridge 18 处 + 18 个 importer + 夹具） | 高 |
 | **B6** ✅ | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归（实装见 §5.4） | kernel/host-api/manifest + `src/user-side/` 四个新模块 | 中高 |
-| **B7** | 控制台元数据化：品牌与文案、`/api/platforms` 与 `/api/agent-platforms` 驱动表单、列名与筛选读元数据、`/api/send/*` 收敛 | console 全站 | 中 |
+| **B7** ✅ | 控制台元数据化：`/api/runtime/platforms` + `/api/runtime/agent-platforms` 驱动列名/筛选/表单，文案去 QQ，`/api/send/*` 收敛到 `resolveSendTarget` + `sendAction`（端点命名见 §6.1） | bridge + `src/*-side/metadata.mjs` + console 全站 | 中 |
 | **B8** | 社交模型 `group→conversation`、`成员→participant`（`/api/socialV2/*` 46 端点） | social 7 文件 1195 行 | 高 |
 
 反向约束（写进提交说明）：
@@ -355,6 +355,26 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 - **B2 之前不动 B8**。社交模型是最广的语义面，在大迁移未稳时再叠一次全量重命名会失控。
 - 每批都要保证"旧 key 可读"；任何需要放宽断言的地方在 commit message 里点出。
 - B5 期间禁止同时改行为（模式/权限/提示词），否则回归无法归因。
+
+### 6.1 B7 实装：端点命名与元数据来源
+
+规划里写的 `/api/platforms` 已被占用：bridge 从 `profiles/platforms/<id>/` 读「平台 + 工具目录 + 话术」，
+那是**配置面**。两个新端点因此挂在 `/api/runtime/` 下，与既有的 `capabilities` / `plans` / `adapters` 同族：
+
+| 端点 | 回答什么 | 数据源 |
+| --- | --- | --- |
+| `/api/platforms` / `/api/platforms/<id>` | 有哪些平台配置、各带哪些工具与行为 | `profiles/platforms/` |
+| `/api/runtime/platforms` | **谁能发消息**：会话类型、能力、上限、内置还是插件、当前是哪个 | 用户侧两张注册表（内置 + 插件） |
+| `/api/runtime/agent-platforms` | 有哪些 Agent 平台、声明了什么能力、当前是哪个 | Agent 侧注册表（不经门面，未装协议也列得出空态） |
+
+"两张注册表合成一张表"的拼装在 `src/user-side/metadata.mjs`，Agent 侧在 `src/agent-side/metadata.mjs`；
+bridge 只调这两个模块，控制台只有 `public/console/js/platforms.js` 读这条响应（列名、筛选、标签、上限全查表）。
+例外的只有**行为档案页的平台下拉**：档案本身就存在 `profiles/platforms/<id>/behaviors/` 下，
+所以它读配置面的 `/api/platforms` —— 运行期注册表里有平台不等于有档案目录，混用会让新建档案写到不存在的目录里。
+
+`resolveSendTarget()` 的校验顺序不可调换：平台已注册 → 会话类型被该平台声明（声明为空则不校验）→ 才拼 key。
+类型等价只认**已知别名**（`private` / `direct` / `chat` / `dm`），未知类型只与自身相等 —— 用 `shapeOfType()`
+兜底会把「平台声明了 `group`」变成「`channel` / `thread` 也放行」，等于取消校验。
 
 ---
 
@@ -369,7 +389,8 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | `scripts/test-unified-event.mjs` | 5 种 kind、`platform`/`account` 只取内核来源（插件伪造被覆盖）、形状错误逐条报错、id 单调（8 条） | ✅ B6 |
 | `scripts/test-transport-plugin.mjs` | 插件 transport 注册/冲突/注销/`create` 产物、**降级先于 transport**、QQ 报文逐字段不变（`send_group_msg` / `send_private_msg` / at/record/reply）、426 提示、同进程多平台不串号（12 条） | ✅ B6 |
 | `test-plugin-kernel` 新增三条 | `transport:provide` + `create(config)` 产物 + 停用后 `close()`、`onOutbound` 链式/丢弃/非法段、`send:qq` 别名与 `ctx.qq === ctx.message`（20 条） | ✅ B6 |
-| `test:user-platform-pipeline` | 整桥 + mock 平台的端到端流水（建会话 → 收消息 → 准入 → 唤醒 → 发消息） | 待 B7（届时与 `/api/platforms` 一起做） |
+| `scripts/test-platform-metadata.mjs` | 元数据形状（含 `limits`）、插件平台并入同表且小写归一、`create()` 产物的 `conversationTypes`/`limits`、`resolveSendTarget` 的校验顺序与别名等价（`direct`↔`private` 放行、未知类型被拒）、Agent 侧不泄漏 `protocol`（11 条） | ✅ B7 |
+| `test:user-platform-pipeline` | 整桥 + mock 平台的端到端流水（建会话 → 收消息 → 准入 → 唤醒 → 发消息） | 待补（B7 已收敛发送入口，缺的是流水本身） |
 
 ### 7.2 静态验收（可机械化）
 
@@ -378,13 +399,14 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 git grep -nE '\bqq\b|\bdsh\b|snowluma|napcat' -- src/ ':!src/*/adapters/*' ':!src/user-side/adapters/*' ':!src/agent-side/adapters/*'
 ```
 
-目标：从当前的 127 个文件降到 ≤ 20 个（允许保留：`session/key.mjs` 的旧形态兼容、`profiles/paths.mjs`、迁移脚本、注释里的历史说明）。
+目标：从 B0 前的 127 个文件降到 **71 个**（B7 后实测），最终目标 ≤ 20 个（允许保留：`session/key.mjs` 的旧形态兼容、`profiles/paths.mjs`、迁移脚本、注释里的历史说明）。
 
 ### 7.3 文档
 
 - ✅ 新增 [`guides/ADD_USER_PLATFORM.md`](guides/ADD_USER_PLATFORM.md)（对称于 Agent 平台的接入指南）。
 - ✅ `docs/PROFILES_MODEL.md` 增补 `adapters/runtime.mjs` 契约（声明面不得 import `src/`，协议面由 `builtin.mjs` 拼装）。
 - ✅ `docs/FOLDER_MAP.md` 增补 `src/user-side/`、`src/agent-side/` 的职责与边界。
+- ✅ B7 增补 §6.1：`/api/runtime/platforms` 与 `/api/platforms` 的分工，避免下一个人再把两个端点当成重复实现。
 
 ---
 

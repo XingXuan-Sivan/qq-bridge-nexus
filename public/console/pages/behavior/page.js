@@ -1,5 +1,5 @@
 // 行为档案页：三个标签 —— 运行方案（组合层）、行为档案（配置 + 提示词）、能力预设。
-// 权威存储：profiles/platforms/qq/behaviors/<id>.yml、profiles/agent-platforms/dsh/capabilities/<id>.yml、
+// 权威存储：profiles/platforms/<平台>/behaviors/<id>.yml、profiles/agent-platforms/<id>/capabilities/<id>.yml、
 // profiles/plans/<id>.yml。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
@@ -15,6 +15,8 @@ import { BEHAVIOR_FIELDS } from './fields.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
 import { init as initPlansPanel } from '../runtime/page.js';
 import { initPlatformPanel } from '../../components/platform-panel/platform-panel.js';
+// 平台显示名统一查表（B7）：运行期元数据里有就用它的 label，没有就原样回 id。
+import { platformLabel } from '../../js/platforms.js';
 
 let behaviorDoc = null;
 let behaviorItems = [];
@@ -26,6 +28,23 @@ let capabilityPanel = null;
 let promptCard = null;
 let plansReady = false;
 let platformReady = false;
+// 行为档案存在 profiles/platforms/<id>/ 里，所以这里的平台清单用**配置面**的 /api/platforms，
+// 不是运行期注册表（/api/runtime/platforms）—— 后者回答「谁能发消息」，不保证有档案目录。
+let platformItems = [];
+let platformsPromise = null;
+
+function ensurePlatforms() {
+  if (platformsPromise) return platformsPromise;
+  platformsPromise = api('/api/platforms')
+    .then((r) => {
+      platformItems = Array.isArray(r?.platforms) ? r.platforms : [];
+    })
+    .catch(() => {
+      platformsPromise = null;
+      platformItems = [];
+    });
+  return platformsPromise;
+}
 
 /** 字段规格由后端 kind 注册表下发，页面不再自带一份（避免两处漂移）。 */
 async function ensureKinds() {
@@ -53,20 +72,20 @@ function setMsg(text, tone = 'info', id = 'behaviorFormMsg') {
   el.className = `meta ${tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : ''}`.trim();
 }
 
-/** 平台 id 显示名：当前只有 QQ，其余按大写 id 兜底。 */
-function platformLabel(id) {
+/** 平台 id 显示名：查运行期元数据（B7），未登记的平台原样显示。 */
+function platformLabelOf(id) {
   if (!id) return '—';
-  return id === 'qq' ? 'QQ' : String(id).toUpperCase();
+  return platformLabel(id);
 }
 
 function renderBehaviorTable(items) {
   const host = document.getElementById('behaviorTable');
   if (!host) return;
   const rows = items.map((item) => ({
-    attrs: { 'data-filter-kind': item.kind || '', 'data-filter-platform': item.platform || 'qq' },
+    attrs: { 'data-filter-kind': item.kind || '', 'data-filter-platform': item.platform || platformItems[0]?.id || '' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
-      `<span class="tag">${esc(platformLabel(item.platform || kindMetas.get(item.kind)?.platform || 'qq'))}</span>`,
+      `<span class="tag">${esc(platformLabelOf(item.platform || kindMetas.get(item.kind)?.platform))}</span>`,
       `<span class="meta">${esc(kindMetas.get(item.kind)?.label || item.kind || '?')}</span>`,
       Array.isArray(item.usedBy) && item.usedBy.length
         ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
@@ -94,6 +113,7 @@ function renderBehaviorTable(items) {
 
 async function refreshList(preferred) {
   await ensureKinds();
+  await ensurePlatforms();
   const list = await api('/api/config/behaviors');
   const items = Array.isArray(list?.behaviors) ? list.behaviors : [];
   behaviorItems = items;
@@ -209,12 +229,15 @@ function openArchiveModal({ mode, source = null }) {
       { name: 'behaviorArchiveLabel', type: 'text', label: '备注', value: `${source?.label ?? source?.id ?? ''}（副本）` },
     ], { columns: 1, layout: 'inline' });
   } else {
-    // 平台固定 QQ（当前只有一个用户侧平台）；类型显示类型 yml 的 label，不暴露引擎名。
+    // 平台下拉读配置面的平台目录；类型显示类型 yml 的 label，不暴露引擎名。
     const typeOptions = [...kindMetas.values()].map((meta) => ({ value: meta.kind, label: meta.label || meta.kind }));
+    const platformOptions = platformItems.length
+      ? platformItems.map((item) => ({ value: item.id, label: item.label || item.id }))
+      : [{ value: '', label: '（还没有平台目录）' }];
     const templateOptions = [{ value: '', label: '空白（按类型默认值）' }, ...behaviorItems.map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.id}）` }))];
     renderFields(host, [
       { name: 'behaviorArchiveId', type: 'text', label: '档案 id', placeholder: '小写字母、数字、连字符', hint: '创建后不可改名' },
-      { name: 'behaviorArchivePlatform', type: 'select', label: '平台', options: [{ value: 'qq', label: 'QQ' }], value: 'qq' },
+      { name: 'behaviorArchivePlatform', type: 'select', label: '平台', options: platformOptions, value: platformOptions[0]?.value ?? '' },
       { name: 'behaviorArchiveKind', type: 'select', label: '类型', options: typeOptions, value: typeOptions[0]?.value ?? 'social-v2' },
       { name: 'behaviorArchiveLabel', type: 'text', label: '备注', placeholder: '一句话说明' },
       { name: 'behaviorArchiveFrom', type: 'select', label: '以现有档案为模板', options: templateOptions, value: '' },

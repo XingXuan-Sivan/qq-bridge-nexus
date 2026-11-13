@@ -22,6 +22,7 @@
 | `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
+| `public/console/js/platforms.js` | **运行期平台元数据**（0.2.0 B7）：`loadPlatforms()` 读 `GET /api/runtime/platforms`，对外给 `platformLabel` / `conversationTypeLabel` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**，列名、筛选、标签、上限都从这里取 |
 | `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住 |
 | `public/console/css/*.css` | `tokens` → `base` → `layout` → `grid` → `components` → `utilities`，**顺序即层叠顺序** |
 | `public/console/pages/<name>/` | 页面片段：`page.html` + `page.js` + `page.css`，由路由按需加载 |

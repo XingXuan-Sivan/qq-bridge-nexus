@@ -51,7 +51,7 @@ export const OPERATIONS_FIELDS = {
         name: 'notifyNote',
         type: 'custom',
         span: 2,
-        html: '<div class="meta">直接向指定 QQ 会话的 DSH agent 投递一条「后台控制端提醒」，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>',
+        html: '<div class="meta">直接向指定会话的 DSH agent 投递一条「后台控制端提醒」，用于给 AI 引导/提醒；该消息不是群友消息。二代模式（reserved2）下会自动附带会话令牌和二代工具协议说明，AI 的文本输出不会自动转发，发言需通过发送工具。</div>',
       },
       {
         name: 'notifyTarget',

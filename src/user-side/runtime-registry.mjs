@@ -63,13 +63,20 @@ export function requireUserPlatform(id = '') {
   return impl;
 }
 
-/** 控制台 / 健康检查用：所有已注册平台的静态描述。 */
+/**
+ * 控制台 / 健康检查用：所有已注册平台的静态描述。
+ *
+ * 只放**常量**：函数、Socket、配置一律不进返回值 —— 这个对象会原样进 `/api/platforms`，
+ * 泄漏一个函数就等于把实现细节暴露给了控制台（test-platform-adapters 钉着这一点）。
+ * limits（分条上限、是否渲染 Markdown）是控制台画表单要用的，B7 起一并暴露。
+ */
 export function listUserPlatforms() {
   return [...platforms.values()].map((impl) => ({
     id: impl.id,
     label: impl.label ?? impl.id,
     conversationTypes: [...(impl.conversationTypes ?? [])],
     capabilities: [...(impl.capabilities ?? [])],
+    limits: { ...(impl.limits ?? {}) },
   }));
 }
 

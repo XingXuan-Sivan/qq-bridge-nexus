@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 // Agent 侧协议（RPC 客户端、凭据发现、返回包解包）只经这道门面；具体实现是
 // src/agent-side/adapters/<id>/，由 builtin.mjs 装配。
-import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth } from './agent-side/agent-client.mjs';
+import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth, agentPlatformMetadata } from './agent-side/agent-client.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -100,7 +100,9 @@ import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePl
 // 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
 // 内核只经 src/user-side/user-platform.mjs 这一道门面问；统一出口是 sendAction
 // （段校验 → 能力降级 → 平台 transport/适配器），四处发送入口全部经它发出。
-import { sendAction as dispatchSend, configureUserPlatformBackend, transportRegistry, describeBackend, readBackendInfo } from './user-side/user-platform.mjs';
+// B7 又从这里进了两样：控制台的平台元数据（userPlatformMetadata）与 HTTP 发送端点的
+// 目标解析（resolveSendTarget）。两者都是纯查询，不触网。
+import { sendAction as dispatchSend, configureUserPlatformBackend, transportRegistry, describeBackend, readBackendInfo, userPlatformMetadata, resolveSendTarget } from './user-side/user-platform.mjs';
 import { listPlatforms, loadPlatform } from './platforms/index.mjs';
 import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
 import {
@@ -6282,6 +6284,9 @@ async function main() {
             // 上游健康只给操作者看：它包含网关诊断信息（good/hint），
             // 属于管理侧观测，不该进 QQ 会话里那个受限的智能体视图。
             snowluma: snowlumaHealthSnapshot(),
+            // 当前用户平台 id（B7）：控制台据此把「平台」列显示成实际在用的那个，
+            // 而不是写死的标签。往会话里发的受限视图不带它（与 mode/role 同理，属于运行态）。
+            platform: userPlatformMetadata().active,
             activity: readActivityTail(100)
           });
           return;
@@ -7496,6 +7501,19 @@ async function main() {
         }
         if (req.method === 'GET' && url.pathname === '/api/runtime/adapters') {
           sendJson({ ok: true, ...adapterRegistry.snapshot() });
+          return;
+        }
+        // 运行期的用户侧平台清单（B7）：这个进程实际能往哪些平台发、每个平台有什么
+        // 会话类型/能力/限制。与 /api/platforms 分工：那边读 profiles/platforms/（话术与
+        // 工具表的目录），这里读两侧注册表（内置 + 插件），回答的是「谁能发消息」。
+        // 不触网、不读配置：平台没连上时控制台也要能画出表单并解释为什么发不出去。
+        if (req.method === 'GET' && url.pathname === '/api/runtime/platforms') {
+          sendJson({ ok: true, ...userPlatformMetadata() });
+          return;
+        }
+        // Agent 侧平台清单（B7）：同理，读注册表而不是读 protocol。
+        if (req.method === 'GET' && url.pathname === '/api/runtime/agent-platforms') {
+          sendJson({ ok: true, ...agentPlatformMetadata() });
           return;
         }
         if (req.method === 'POST' && /^\/api\/runtime\/capabilities\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
@@ -11910,14 +11928,39 @@ async function main() {
           const token = String(body.token ?? '').trim();
           const isPrivate = url.pathname === '/api/send/private';
           const isReply = url.pathname === '/api/send/reply';
-          const targetId = isPrivate ? String(body.userId ?? '').trim() : String(body.groupId ?? '').trim();
+          // 目标地址（B7）：能带完整会话 key（body.key）时以它为准；否则按端点语义
+          // （group / private）+ platform/account + 旧字段 groupId/userId 组装。
+          // platform 缺省 = 当前平台，所以既有的 QQ 调用方一行都不用改；
+          // 而新平台只需多传一个 platform，不用等这里再加一个端点。
+          // 平台未注册 / 平台没声明的会话类型 / id 为空或被拒字符集，全部在这一步变成 400：
+          // 让它在拼 key 时炸掉，比让消息带着一个没人负责的平台名进队列便宜得多。
+          let target;
+          try {
+            const rawKey = String(body.key ?? '').trim();
+            if (rawKey) {
+              const parsedTarget = parseKey(rawKey);
+              if (!parsedTarget) throw new Error(`会话 key 格式无效：${rawKey}`);
+              target = resolveSendTarget({ platform: parsedTarget.platform, account: parsedTarget.account, type: parsedTarget.type, id: parsedTarget.id });
+            } else {
+              target = resolveSendTarget({
+                platform: body.platform,
+                account: body.account,
+                type: isPrivate ? 'private' : 'group',
+                id: isPrivate ? body.userId : body.groupId,
+              });
+            }
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? String(error) }, 400);
+            return;
+          }
+          const targetId = target.id;
           const message = unquoteJsonString(String(body.message ?? '').trim());
           // 引用 id 与端点无关：/api/send/reply 与另两个端点都允许带（是否真的引用由下游按 id 判断）。
           // 旧写法 `isReply ? body.replyToMessageId : body.replyToMessageId` 两个分支一模一样，
           // 保留 isReply 变量只是为了下面的端点语义判断，别再让人以为这里有过分支逻辑。
           const replyToMessageId = body.replyToMessageId;
           const atUserId = body.atUserId ?? null;
-          const key = isPrivate ? sessionKey('private', targetId) : sessionKey('group', targetId);
+          const key = target.key;
           // 安全边界：发送工具只允许在 closed-agent（管理员私聊）或 reserved2（二代 AI 带会话令牌）下使用；
           // chat/reserved 的自动转发已覆盖正常回复，MCP 发送工具不应成为 prompt injection 的越权出口。
           if (currentMode === 'chat' || currentMode === 'reserved') {
@@ -11928,7 +11971,7 @@ async function main() {
             sendJson({ ok: false, error: 'AI 已暂停，当前不允许执行发送工具' }, 403);
             return;
           }
-          if (!targetId || !message) { sendJson({ ok: false, error: '目标 id 和 message 不能为空' }, 400); return; }
+          if (!message) { sendJson({ ok: false, error: 'message 不能为空' }, 400); return; }
           if (isPrivate && atUserId) { sendJson({ ok: false, error: '私聊不需要 @' }, 400); return; }
           if (isReply && (replyToMessageId === undefined || replyToMessageId === null || String(replyToMessageId).trim() === '')) {
             sendJson({ ok: false, error: 'replyToMessageId 不能为空' }, 400);
@@ -11945,8 +11988,11 @@ async function main() {
           const keyMatch = parseKey(key);
           if (!keyMatch) { sendJson({ ok: false, error: 'key 格式无效' }, 400); return; }
           const kind = keyMatch.kind;
-          const id = Number(keyMatch.id);
-          if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
+          // id 的数字形态只对数字型平台存在（QQ 群号）。没有它不代表 id 非法——
+          // 非数字 id 的平台（频道 / 帖子）照样能发，判定交给平台适配器。
+          // 这里仍然拦住「数字但非正数」：`0` / `-1` 在任何平台上都不是会话。
+          const id = keyMatch.idNum;
+          if ((id !== null && id <= 0) || !passiveAllowed(key)) {
             sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
             return;
           }
@@ -11957,6 +12003,12 @@ async function main() {
           let quotedInfo = null;
           let actualReplyToMessageId = replyToMessageId;
           if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {
+            // 引用解析走的是「按消息 id 查详情」，目前只有数字会话 id 的平台有实现。
+            // 非数字 id 时明说做不到，不要静默发一条没有引用的消息（模型会以为引用生效了）。
+            if (id === null) {
+              sendJson({ ok: false, error: `平台 ${keyMatch.platform} 的会话 id 不是数字，无法按消息 id 解析引用` }, 400);
+              return;
+            }
             const stForReply = getSocialV2State(key);
             const resolved = await resolveReplyTargetV2(stForReply, kind, id, String(replyToMessageId).trim());
             if (!resolved) {
@@ -12535,29 +12587,37 @@ async function main() {
   }
 
 
-  async function onebotSend(kind, id, message, replyToMessageId, atUserId = null) {
+  /**
+   * 会话 key + 一段文本 → 一条消息（可选引用与 @）。
+   *
+   * 入参从 (kind, id) 改成 key（B7）：`buildKey(kind, id)` 会用**当前默认平台**重建 key，
+   * 于是 `tg:group:1` 的消息会落到 `qq:group:1` —— 多平台并存时这是静默串号。
+   * 地址只在这里拼一次，下游（插件 onOutbound / 能力降级 / 适配器）只认 key。
+   */
+  async function sendTextByKey(key, message, replyToMessageId, atUserId = null) {
     const segments = [];
     if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {
       const rid = String(replyToMessageId).trim();
       if (!/^-?[1-9]\d*$/.test(rid)) throw new Error('replyToMessageId 必须是非零整数（消息 id 可能为负数）');
-      segments.push({ type: 'reply', data: { id: rid } });
+      segments.push({ type: 'reply', data: { messageId: rid } });
     }
     if (atUserId !== undefined && atUserId !== null && String(atUserId).trim() !== '') {
       const at = String(atUserId).trim();
-      // 只允许正整数 QQ 号，禁止 @all，避免被滥用成 @全体成员
-      if (!/^\d+$/.test(at)) throw new Error('atUserId 必须是正整数 QQ 号，且不能为 all');
-      segments.push({ type: 'at', data: { qq: at } });
+      // @全体 是跨平台的滥用面：任何平台都不该由模型自主触发全员提醒。
+      // id 的具体格式（数字范围、保留字）由平台适配器判定 —— 内核不认识具体平台的 id 规则。
+      if (at.toLowerCase() === 'all') throw new Error('atUserId 不能为 all（@全体成员）');
+      segments.push({ type: 'mention', data: { target: at } });
     }
     const rawMessage = String(message ?? '');
     const hasKnownToken = [...KNOWN_AGENT_TOKENS].some((t) => t && rawMessage.includes(t));
     if (hasKnownToken) {
-      log(`发送内容包含会话令牌，已阻止发送 (${kind}:${id})`);
+      log(`发送内容包含会话令牌，已阻止发送 (${key})`);
       throw new Error('发送内容包含会话令牌，已阻止发送');
     }
+    // escapeCqText 是 OneBot 的 CQ 码转义，而 WS 路（sendToQQ）也用同一份；
+    // 它留在内核是因为它同时服务两条通道，不是这里独有的平台细节（B6 只收了 HTTP 路）。
     segments.push({ type: 'text', data: { text: escapeCqText(rawMessage) } });
-    // 入口仍按 (kind, id) 传参（调用方在多个旧路径上），这里现拼会话 key：
-    // 地址的规范化只发生在 key 一处，发送只需 key。
-    const sent = await sendAction(buildKey(kind, id), segments, { timeoutMs: 15000 });
+    const sent = await sendAction(key, segments, { timeoutMs: 15000 });
     return sent.raw;
   }
 
@@ -13022,7 +13082,7 @@ async function main() {
 
   function sendMessagesV2(key, messages, delays, replyToMessageId, atUserId = null) {
     const assertSendAllowed = captureSendGuard(key);
-    const { kind, id } = parseKey(key) ?? {};
+    if (!parseKey(key)) throw new Error(`无法解析会话 key：${key}`);
     const sent = [];
     const failed = [];
     for (let i = 0; i < messages.length; i++) {
@@ -13032,11 +13092,11 @@ async function main() {
       sendChain = sendChain
         .then(async () => {
           assertSendAllowed();
-          await onebotSend(kind, id, msg, useReply, useAt);
+          await sendTextByKey(key, msg, useReply, useAt);
           sent.push(msg);
         })
         .catch((error) => {
-          log(`QQ 发送失败 (${key}):`, error?.message ?? error);
+          log(`发送失败 (${key}):`, error?.message ?? error);
           failed.push(error);
         });
       if (i < delays.length) {
@@ -13046,7 +13106,7 @@ async function main() {
     }
     return sendChain.then(() => {
       if (failed.length > 0) {
-        const err = new Error(`QQ 发送失败 ${failed.length}/${messages.length} 条：${failed[0]?.message ?? '未知错误'}`);
+        const err = new Error(`发送失败 ${failed.length}/${messages.length} 条：${failed[0]?.message ?? '未知错误'}`);
         err.sent = sent.slice();
         throw err;
       }

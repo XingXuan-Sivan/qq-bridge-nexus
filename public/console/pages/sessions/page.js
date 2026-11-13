@@ -13,6 +13,15 @@ import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { permissionLevelLabel, permissionLevelOptions } from '../../js/permission-levels.js';
 import { SESSIONS_FIELDS } from './fields.js';
 import { cardHtml } from '../../components/card/card.js';
+// 平台名、会话类型与上限都从运行期元数据读（B7）：这里是唯一一处「页面认识平台」的地方，
+// 而且认识的方式是查表，不是写死 qq。
+import {
+  conversationTypeLabel,
+  conversationTypeTone,
+  listPlatforms,
+  platformFilterOptions,
+  platformLabel,
+} from '../../js/platforms.js';
 
 const MODE_LABEL = {
   chat: '聊天模式',
@@ -30,7 +39,9 @@ function platformOf(entry) {
 }
 
 function kindPill(entry) {
-  return entry.kind === 'group' ? '<span class="tag tag--success">群</span>' : '<span class="tag tag--primary">私聊</span>';
+  const tone = conversationTypeTone(entry.kind);
+  const cls = tone ? `tag ${tone}` : 'tag';
+  return `<span class="${cls}">${esc(conversationTypeLabel(entry.kind))}</span>`;
 }
 
 function modeCell(entry) {
@@ -70,7 +81,8 @@ function accessCell(entry) {
 
 function nameCell(entry) {
   const ownerTag = entry.owner ? ' <span class="tag tag--danger">管理员</span>' : '';
-  const platformTag = `<span class="tag">${esc(platformOf(entry))}</span>`;
+  const platform = platformOf(entry);
+  const platformTag = `<span class="tag" title="${esc(platform)}">${esc(platformLabel(platform))}</span>`;
   const name = `<strong>${esc(entry.displayName || entry.key)}</strong>`;
   const keyLine = entry.displayName ? `<span class="meta">${esc(entry.key)}</span>` : '';
   return `<div class="session-name">${name}</div>`
@@ -86,10 +98,24 @@ function dshCell(entry) {
 }
 
 
-// 平台下拉按数据现算：出现哪些平台就列哪些，不写死 qq。筛选本身交给 dataTableHtml 的 filters。
+// 平台下拉：登记过的平台 + 会话里出现过的（加载前的降级），名字用平台自己的 label。
+// 筛选本身交给 dataTableHtml 的 filters。
 function platformOptions() {
-  const platforms = [...new Set(sessionsCache.map(platformOf))].sort();
-  return [{ value: 'all', label: '全部平台' }, ...platforms.map((p) => ({ value: p, label: p }))];
+  return platformFilterOptions(sessionsCache.map(platformOf));
+}
+
+// 类型下拉同理：平台声明的会话类型 ∪ 会话里出现的类型。
+// 插件平台声明了 channel / thread，这里就会自动多出「仅频道 / 仅帖子」。
+function kindFilterOptions() {
+  const types = new Set();
+  for (const platform of listPlatforms()) {
+    for (const type of platform.conversationTypes ?? []) types.add(String(type).toLowerCase());
+  }
+  for (const entry of sessionsCache) if (entry.kind) types.add(String(entry.kind).toLowerCase());
+  return [
+    { value: 'all', label: '全部类型' },
+    ...[...types].sort().map((type) => ({ value: type, label: `仅${conversationTypeLabel(type)}` })),
+  ];
 }
 
 // ── 全局准入：两态单源名单 ──────────────────────────────────────────────────
@@ -116,8 +142,14 @@ function accessLines(text) {
   return String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 }
 
+// 粗校验：`<平台>[@账号]:<类型>:<id>` 或旧形态 `<类型>:<id>`。
+// 具体合法性（这个平台有没有这种会话、id 字符集）由后端 resolveAccessEntries 判定 ——
+// 它读的是平台声明的会话类型。前端不再写死 qq / group / private 与「必须是正整数」，
+// 否则插件新增的平台连填都填不进去。
+const ACCESS_KEY_RE = /^(?:[a-z][a-z0-9-]{0,15}(?:@[a-z0-9][a-z0-9._-]{0,31})?:)?[a-z][a-z0-9_-]{0,23}:[^\s:]+$/;
+
 function accessInvalidLines(lines) {
-  return lines.filter((line) => !/^(?:qq:)?(?:group|private):[1-9]\d*$/.test(line));
+  return lines.filter((line) => !ACCESS_KEY_RE.test(line));
 }
 
 /** 从表单读回草稿；mode 用开关的 aria-checked，开=白名单，关=黑名单。 */
@@ -292,11 +324,7 @@ function renderSessions() {
       {
         id: 'kind',
         label: '类型',
-        options: [
-          { value: 'all', label: '全部类型' },
-          { value: 'group', label: '仅群聊' },
-          { value: 'private', label: '仅私聊' },
-        ],
+        options: kindFilterOptions(),
       },
     ],
     actions: '<button class="btn small danger" type="button" id="sessionsClearWorkspace">清空所有会话</button>',
@@ -306,7 +334,7 @@ function renderSessions() {
 
   const clearButton = box.querySelector('#sessionsClearWorkspace');
   clearButton?.addEventListener('click', async () => {
-    if (!window.confirm('确定清空所有会话？\n将归档全部 QQ 会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
+    if (!window.confirm('确定清空所有会话？\n将归档全部会话、清除所有上下文映射、清空活动日志。\n此操作不可撤销。')) return;
     clearButton.disabled = true;
     try {
       const r = await api('/api/workspace/reset', 'POST', {});
@@ -370,7 +398,7 @@ function renderPending(rows) {
     rows: body,
     pageSize: 20,
     refresh: true,
-    empty: '暂时没有待处理请求：AI 的提问或工具审批会出现在这里，请前往对应 QQ 会话回复。',
+    empty: '暂时没有待处理请求：AI 的提问或工具审批会出现在这里，请前往对应会话回复。',
   });
   initDataTables(box, { onRefresh: refreshPending });
 }
@@ -589,7 +617,7 @@ function renderDetail(data) {
       <span class="meta">${data.sessionId ? esc(data.sessionId) : '还没有 DSH 会话，下一条消息到达时会自动创建'}</span>
     </div>
     <div class="session-detail-grid">
-      ${card('显示名', '自定义名会同步写 DSH 侧栏标题；留空则用默认的「QQ·群 / QQ·私聊 + ID」。', 'displayName')}
+      ${card('显示名', '自定义名会同步写 DSH 侧栏标题；留空则用默认的「平台·类型 + ID」。', 'displayName')}
       ${card('准入', '这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', 'access', '<div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
       ${card('运行', '默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。', 'run')}
       ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
@@ -1002,7 +1030,7 @@ export function mountGlobalAccess(host) {
 const SESSIONS_CARDS = [
   {
     title: '会话与审批',
-    description: '「会话映射」是桥接当前握着的全部会话：只显示平台侧身份与状态，改名会写回 DSH 侧栏标题；单独指定人格、仿真模式等配置不在这一页改。「审批 / 提问」只读，批准或回答都要去对应 QQ 会话里回复。',
+    description: '「会话映射」是桥接当前握着的全部会话：只显示平台侧身份与状态，改名会写回 DSH 侧栏标题；单独指定人格、仿真模式等配置不在这一页改。「审批 / 提问」只读，批准或回答都要去对应会话里回复。',
     body: '<div data-sessions-fields="tabs"></div>'
       + '<div class="page-panel" data-sessions-panel="sessions">'
       + '<div data-sessions-fields="sessionsPanel"></div>'

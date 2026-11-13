@@ -21,8 +21,11 @@ import {
 } from './runtime-registry.mjs';
 import { sendAction as registrySendAction, previewSegments as registryPreviewSegments } from './outbound.mjs';
 import { getTransport, listTransports, registerTransport, unregisterTransportsByOwner } from './transport.mjs';
+import { resolveSendTarget as registryResolveSendTarget } from './metadata.mjs';
 
 export { activeUserPlatformId, listUserPlatforms, listTransports, getTransport };
+// 控制台与 HTTP 发送端点的元数据（B7）：
+export { userPlatformMetadata, userPlatformDescriptor } from './metadata.mjs';
 
 /**
  * 插件平台注册表（内核透传给插件内核的 deps）。
@@ -63,6 +66,14 @@ export async function sendAction(address, segments, opts = {}) {
 /** 只降级不发送（控制台预览用）。 */
 export function previewSegments(platformId, segments) {
   return registryPreviewSegments(platformId, segments);
+}
+
+/**
+ * 「平台 + 会话类型 + id」→ 规范地址与会话 key（HTTP 发送端点用）。
+ * 校验规则见 metadata.mjs：未注册的平台、平台没声明的会话类型都在这里被挡住。
+ */
+export function resolveSendTarget(target) {
+  return registryResolveSendTarget(target);
 }
 
 /** 当前用户平台 id（qq / …）。 */

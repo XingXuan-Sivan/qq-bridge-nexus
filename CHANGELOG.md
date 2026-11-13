@@ -7,7 +7,7 @@
 ## 0.2.0（未发布）—— 用户侧 / Agent 侧平台解耦
 
 目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
-B0–B6 已落地，B7（控制台元数据化）/ B8（社交模型 `group→conversation`）未开始。
+B0–B7 已落地，B8（社交模型 `group→conversation`）未开始。
 
 ### 重构：两侧适配器（B0–B5）
 - **B0 常量去 QQ**：`RUNTIME_PLATFORM`、`DEFAULT_PROMPT_VARS`、`catalog.mjs` 的 `provider` 参数化、
@@ -45,6 +45,32 @@ B0–B6 已落地，B7（控制台元数据化）/ B8（社交模型 `group→co
   与内置或别的插件冲突时拒绝（审计 `transport-denied`），卸载时按 2s 上限调 `close()`。
 - **新增回归**：`scripts/test-unified-segments.mjs`（10）、`test-unified-event.mjs`（8）、
   `test-transport-plugin.mjs`（12）、`test-plugin-kernel.mjs` +3 条（共 20）。
+
+### 重构：控制台元数据化（B7）
+- **运行期元数据端点**：新增 `GET /api/runtime/platforms` 与 `GET /api/runtime/agent-platforms`。
+  前者把**内置注册表与插件注册表合成一张表**（会话类型、能力、上限、`source`/`owner`/`active`），
+  后者只读 Agent 侧注册表、不经门面（平台未装协议也能列出清单与空态）。
+  与已有的 `/api/platforms` 分工不同：那条读 `profiles/platforms/`（工具目录与话术），是配置面。
+- **元数据拼装点**：新增 `src/user-side/metadata.mjs`（`userPlatformMetadata` / `userPlatformDescriptor` /
+  `resolveSendTarget`）与 `src/agent-side/metadata.mjs`；`runtime-registry.mjs` 与 `transport.mjs`
+  开始在描述对象里带 `limits`（插件平台还可自报 `conversationTypes` / `limits`）。
+- **发送地址化**：`/api/send/*` 的目标改由 `resolveSendTarget()` 产出（支持完整会话 `key`，或
+  `platform` + `account` + `groupId`/`userId`）；内部 `onebotSend(kind,id,…)` 重写为
+  `sendTextByKey(key,…)` 并改走 `sendAction`，修掉「按当前默认平台重建 key」的静默串号
+  （`tg:group:1` 曾被发到 `qq:group:1`）。`@` 目标的数字号校验下沉到 `adapters/qq/segments.mjs`。
+- **控制台**：新增 `public/console/js/platforms.js`（前端唯一读元数据的地方，含中文标签表），
+  `app.js` 顶层预热；会话页的平台下拉、类型下拉、平台/类型标签全部查表，类型筛选改为
+  「平台声明类型 ∪ 会话出现类型」（插件平台声明 `channel`/`thread` 就自动多出对应项）；
+  记忆页的平台列/筛选/类型文案也改为查表；准入名单正则放宽为可带 `平台@账号:类型:id`；
+  概览/配置/会话/记忆/运维页的「QQ」文案改为「会话」。
+  唯一例外是**行为档案页的平台下拉**：档案存在 `profiles/platforms/<id>/behaviors/`，所以它读配置面的
+  `/api/platforms` —— 运行期注册表里有平台不等于有档案目录。
+- **新增回归**：`scripts/test-platform-metadata.mjs`（11 条，含插件并入同表、类型别名校验、
+  Agent 元数据不泄露 `protocol`）；`test-platform-adapters` 的键集断言同步加 `limits`。
+
+> B7 的两个设计取舍（详见规格 §6.1）：端点改名是为避开 `profiles/platforms/` 的配置面；
+> `resolveSendTarget()` 的类型校验只认**已知别名**，不用 `shapeOfType()` 兜底 ——
+> 否则「平台声明了 `group`」会变成「`channel` / `thread` 也放行」。
 
 ### 修复
 - 审计夹具的 Agent 地址发现改为离线桩（旧名 `resolveDshBaseUrl` 改名后未同步，导致 bridge 落到真实现、

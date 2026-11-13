@@ -16,8 +16,15 @@ export function toOneBotSegments(segments) {
     switch (segment?.type) {
       case 'text':
         return { type: 'text', data: { text: String(data.text ?? '') } };
-      case 'mention':
-        return { type: 'at', data: { qq: String(data.target ?? '') } };
+      case 'mention': {
+        // OneBot 的 @ 目标只能是数字 QQ 号；`all` 在 OneBot 里代表 @全体成员。
+        // 内核只拦空值与 all（那是跨平台的滥用面），具体的 id 规则属于平台事实，所以校验住在这里。
+        const target = String(data.target ?? '').trim();
+        if (!/^[1-9]\d*$/.test(target)) {
+          throw segmentError('invalid_segment', `QQ 的 @ 目标必须是正整数 QQ 号：${target || '(空)'}`);
+        }
+        return { type: 'at', data: { qq: target } };
+      }
       case 'reply':
         return { type: 'reply', data: { id: String(data.messageId ?? '') } };
       case 'image':

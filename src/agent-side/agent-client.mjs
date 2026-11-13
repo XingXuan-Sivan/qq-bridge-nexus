@@ -68,3 +68,8 @@ export const createTurnCollector = protocol.createTurnCollector;
 
 /** 消息段数组 → 纯文本。 */
 export const blocksToText = protocol.blocksToText;
+
+// ── 平台元数据（B7）───────────────────────────────────────────────────────────
+// 与上面的 protocol 绑定不同，这一项与「平台连没连上」无关：控制台在平台不可用时
+// 也要能把列表画出来。所以它的实现读注册表而不是读 protocol。
+export { agentPlatformMetadata } from './metadata.mjs';

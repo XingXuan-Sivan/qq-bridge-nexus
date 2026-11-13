@@ -174,7 +174,7 @@ function editorFields(plan) {
     {
       name: 'runtimeEditBehavior', type: 'select', label: '行为档案', value: plan?.behavior || 'none',
       options: behaviorOptions,
-      hint: '行为档案描述「在 QQ 里怎么说话、怎么等」；在「行为档案」页维护。',
+      hint: '行为档案描述「在会话里怎么说话、怎么等」；在「行为档案」页维护。',
     },
     {
       name: 'runtimeEditAudience', type: 'select', label: '受众', value: plan?.audience || 'access',

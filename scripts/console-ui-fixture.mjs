@@ -889,6 +889,33 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             platform: { id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2, behaviors: ['social-v1', 'social-v2'] },
           });
+          // B7：运行期平台元数据（「谁能发消息」）。与上面的 /api/platforms 分工不同 ——
+          // 那条读 profiles/platforms/（话术与工具表的目录），这条合成内置注册表与插件传输层，
+          // 控制台的列名、筛选与表单都从这条响应里读，不再写死 qq。
+          case '/api/runtime/platforms': return json({
+            ok: true,
+            active: 'qq',
+            platforms: [{
+              id: 'qq',
+              label: 'QQ',
+              conversationTypes: ['group', 'private'],
+              capabilities: ['group', 'direct', 'mention', 'reply', 'recall', 'poke', 'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'],
+              limits: { chunkChars: 4000, markdown: false },
+              source: 'builtin',
+              owner: null,
+              active: true,
+            }],
+          });
+          case '/api/runtime/agent-platforms': return json({
+            ok: true,
+            active: 'dsh',
+            platforms: [{
+              id: 'dsh',
+              label: 'DeepSeek Harness',
+              capabilities: ['session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact'],
+              active: true,
+            }],
+          });
           case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
           // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。

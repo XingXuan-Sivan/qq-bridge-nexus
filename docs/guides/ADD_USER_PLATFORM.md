@@ -69,23 +69,27 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
    进程找 DSH，单次启动多花约 0.8 秒，把 `test-backfill` 的 2 秒容差断言顶成随机失败）。
 5. **外部契约不动**：`src/snowluma-conn.js` 被仓库外独立工具按固定路径引用，
    `src/user-side/adapters/qq/qq-backend-label.js` 的文件名被测试钉住 —— 两者都不得移动或改名。
+6. **控制台自动跟随（B7）**：声明面写全 `label` / `conversationTypes` / `capabilities` / `limits`，
+   新平台就会出现在 `GET /api/runtime/platforms` 里，控制台的平台下拉、类型筛选、标签与上限全从这条
+   响应读 —— **不要为此改前端代码**，更不要在 `public/console/` 里写新平台名。
 
 ## 四、自检
 
 ```powershell
 npm run verify:repo        # 目录不变式、语法、门面导出（含 §7.2 静态验收）
 npm run test:audit         # 含 test-platform-adapters / test-transport-plugin 等契约
+node scripts/test-platform-metadata.mjs  # 声明面字段（label/会话类型/limits）改动后
 node scripts/test-unified-segments.mjs   # 段类型或降级表改动后
 node scripts/test-transport-plugin.mjs   # 出站报文/transport 路由改动后
 node scripts/test-prompt-layers.mjs      # 平台话术（prompt.mjs）改动后
 node scripts/test-onebot-send-call.mjs   # 发送调用构造改动后
 ```
 
-## 五、还没做的部分（B7 / B8）
+## 五、还没做的部分（入站与 B8）
 
 出站已通：插件可以用 `transport:provide` 自带连接器注册为一个 transport，出站经内核 `sendAction`
 （顺序是 `onOutbound` 改中立段 → 降级 → `transport.send`）。
 
 入站尚未接通：`validateUnifiedEvent`（`src/user-side/event.mjs`）已实现并有回归，但 `bridge.js` 的入站仍是
 QQ 的 WebSocket 分支，还没有「插件 transport 上报原始事件 → 内核校验并补全 `platform/account` → 准入」
-这条路。因此第二个平台**能发不能收**，待 B7（控制台元数据化）后接入。
+这条路。因此第二个平台**能发不能收**，待后续批次接入（B7 只做了控制台元数据化与出站地址化）。

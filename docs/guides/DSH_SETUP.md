@@ -13,7 +13,7 @@
    cd dsh-qq
    ```
 
-   > 默认分支 `main` 即当前版本 **v0.1.1**（适配 DSH 0.2.0-rc.2 与 0.2.1），clone 下来无需切换分支；也可以从 [Releases](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases) 下载 ZIP。完整部署以 [../DSH_DEPLOYMENT.md](../DSH_DEPLOYMENT.md) 为准。
+   > 默认分支 `main` 当前是已发布的 **v0.1.1**（适配 DSH 0.2.0-rc.2 与 0.2.1）；`0.2.0`（平台解耦）已在 `feat/platform-decoupling` 分支定版，合入后 main 即为 v0.2.0。clone 默认拿 main，无需切换分支；也可以从 [Releases](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases) 下载 ZIP。完整部署以 [../DSH_DEPLOYMENT.md](../DSH_DEPLOYMENT.md) 为准。
 
 2. **安装依赖**：
 

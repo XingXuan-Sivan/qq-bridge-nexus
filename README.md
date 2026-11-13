@@ -1,6 +1,6 @@
 # QQ ↔ DeepSeek Harness 桥接
 
-**支持系统：Windows · macOS · Linux**（qq-bridge-nexus v0.1.1 · 仓库 <https://github.com/XingXuan-Sivan/qq-bridge-nexus>）
+**支持系统：Windows · macOS · Linux**（qq-bridge-nexus v0.2.0 · 仓库 <https://github.com/XingXuan-Sivan/qq-bridge-nexus>）
 
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
@@ -14,7 +14,10 @@
 
 ---
 
-## 🆕 qq-bridge-nexus v0.1.1
+## 🆕 qq-bridge-nexus v0.2.0
+
+> 版本状态：**0.2.0 已在 `feat/platform-decoupling` 分支定版**（用户侧/Agent 侧平台解耦 B0–B8），尚未合入 `main`；
+> `main` 当前仍是 0.1.1。合入后本节即默认版本，无需切换分支。
 
 > 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四层配置模型、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
 > 原版的消息桥接、多群白名单、二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查等能力全部保留并继续演进。
@@ -23,6 +26,7 @@
 
 | 新功能 | 一句话 | 文档 |
 | --- | --- | --- |
+| **平台解耦（0.2.0）** | 内核不认识具体平台：用户侧/Agent 侧适配器、中立消息段与统一事件、插件接管连接、控制台元数据化、社交模型容器词统一为「会话」 | [PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md) |
 | **Windows + macOS + Linux** | Windows / Linux 用 SnowLuma 2.x 或 NapCat，macOS 用 NapCat；三个系统都有无窗口启动方式 | [DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) |
 | **接口平台** | 仓库里的 `interface-platform/`：桥接和 QQ 后端之间的统一接入层，按后端目录自动发现账号，可同时接 SnowLuma 与 NapCat；为以后接微信 / Discord / KOOK 留好接口 | [interface-platform/README.md](interface-platform/README.md) |
 | **控制中心** | 一个本地网页管理桥接、接口平台和 QQ 后端：按钮启停（QQ 后端只由你点击启动）、版本与更新检查、NapCat 扫码二维码直接显示、整体状态栏 | [CONTROL_CENTER.md](docs/guides/CONTROL_CENTER.md) |
@@ -91,7 +95,7 @@ NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。�
 
 ---
 
-> ⚠️ **当前版本 `v0.1.1`，适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
+> ⚠️ **当前版本 `v0.2.0`（分支定版，待合入 main；main 仍为 v0.1.1），适配 DSH 0.2.0-rc.2 与 0.2.1**（0.2.1-rc.2 桌面版上实测，0.2.1-rc.3 桌面版已复核；协议面逐项核对：`npm run verify:adaptation`）。
 > 鉴权用 `~/.dsh` 里持久化的浏览器会话签名密钥**离线铸造 Cookie**（DSH 0.1.7 起进程启动 token 只存在于内存、不再落盘）；
 > agent preset 是 `@deepseek-ai/dsh-agent-preset` Cordis 行（由 `setup-dsh.mjs` 写入，旧的 `~/.dsh/.agent-presets/` 目录机制已废）。
 > DSH 0.2.0 时的适配改动（会话待处理队列解析、QQ 安全守卫的工具名单对账等）见 [docs/guides/DSH_020_ADAPTATION.md](docs/guides/DSH_020_ADAPTATION.md)。
@@ -101,7 +105,7 @@ NapCat 要在它的 WebUI 里开启 WebSocket 服务端 `127.0.0.1:3001`）。�
 > [`v0.1.5`](https://github.com/Derpyu520/qq-bridge/releases/tag/v0.1.5)；**DSH 0.1.7-rc.2** 用
 > [`v0.1.7`](https://github.com/Derpyu520/qq-bridge/releases/tag/v0.1.7)（这些是原版仓库的旧版本，本仓库不再维护）。
 >
-> 本仓库默认分支 `main` **就是**最新版本，`git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git` 直接拿到，无需切换分支；也可以下载 [Release ZIP](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases)。
+> 本仓库默认分支 `main` 是**已发布**的最新版本（当前 `0.1.1`）；`0.2.0`（平台解耦）定版在 `feat/platform-decoupling` 分支，合入后 main 即位 `0.2.0`。`git clone https://github.com/XingXuan-Sivan/qq-bridge-nexus.git` 直接拿到 main，无需切换分支；也可以下载 [Release ZIP](https://github.com/XingXuan-Sivan/qq-bridge-nexus/releases)。
 
 ```
 QQ 消息 ──► SnowLuma / NapCat（OneBot v11 WS，可经接口平台）──► 本桥接进程 ──► DSH Web API（命令行版 127.0.0.1:3080 / 桌面版自动识别）

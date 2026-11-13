@@ -4,10 +4,11 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
-## 0.2.0（未发布）—— 用户侧 / Agent 侧平台解耦
+## 0.2.0（已定版，未发布；分支 `feat/platform-decoupling`）—— 用户侧 / Agent 侧平台解耦
 
 目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
-B0–B8 已落地。
+B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子包 / 4 个 MCP serverInfo），
+合入 `main` 后再作为默认发布版本（`main` 当前仍是 0.1.1）。
 
 ### 重构：两侧适配器（B0–B5）
 - **B0 常量去 QQ**：`RUNTIME_PLATFORM`、`DEFAULT_PROMPT_VARS`、`catalog.mjs` 的 `provider` 参数化、

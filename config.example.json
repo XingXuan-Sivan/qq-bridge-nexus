@@ -84,7 +84,7 @@
     "launcherPath": "",
     "homeDir": ""
   },
-  "ownerQQ": null,
+  "owner": null,
   "sessionCwd": "",
   "agentPreset": "qq-chat",
   "workspaceTitle": "QQ 聊天",

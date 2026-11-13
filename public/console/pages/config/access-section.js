@@ -10,6 +10,12 @@ import { alertBox, confirmBox } from '../../components/message-box/message-box.j
 
 const $ = (id) => document.getElementById(id);
 
+/** 结构化地址 → 输入框文本。总是写完整地址：省得用户分不清"裸 id 属于哪个号"。 */
+function addressText(address) {
+  if (!address?.id) return '';
+  return `${address.platform}${address.account ? `@${address.account}` : ''}:private:${address.id}`;
+}
+
 // 静态控件按字段规格渲染：页面只留卡片与宿主，渲染之后再取 id。
 function renderAccessFieldGroups() {
   document.querySelectorAll('[data-access-fields]').forEach((host) => {
@@ -75,7 +81,7 @@ function adminRowCells(admin, index) {
     .map((value) => `<option value="${value}"${(admin.maxLevel ?? 'L2') === value ? ' selected' : ''}>${value}</option>`)
     .join('');
   return [
-    `<input type="text" data-admin-field="qq" data-admin-index="${index}" value="${esc(admin.qq ?? '')}" placeholder="QQ 号" aria-label="管理员 QQ">`,
+    `<input type="text" data-admin-field="qq" data-admin-index="${index}" value="${esc(admin.qq ?? admin.id ?? '')}" placeholder="123456 或 telegram:456" aria-label="管理员地址">`,
     `<input type="text" data-admin-field="name" data-admin-index="${index}" value="${esc(admin.name ?? '')}" placeholder="可留空" aria-label="称呼">`,
     `<button type="button" class="btn small" data-admin-caps="${index}" title="编辑权限">${esc(capsSummary(admin.caps))}</button>`,
     `<select data-admin-field="maxLevel" data-admin-index="${index}" aria-label="最高级别">${level}</select>`,
@@ -92,7 +98,7 @@ function renderAdminRows() {
   if (!host) return;
   host.innerHTML = dataTableHtml({
     columns: [
-      { label: 'QQ', width: '160' },
+      { label: '地址', width: '160' },
       { label: '称呼', width: '140' },
       { label: '权限', width: '150' },
       { label: '最高级别', width: '100' },
@@ -102,7 +108,7 @@ function renderAdminRows() {
     ],
     rows: adminsDraft.map(adminRowCells),
     pageSize: 10,
-    search: { placeholder: '搜索 QQ / 称呼' },
+    search: { placeholder: '搜索地址 / 称呼' },
     meta: `共 ${adminsDraft.length} 位管理员`,
     actions: '<button type="button" id="adminAdd" class="btn small">+ 添加管理员</button>'
       + '<button type="button" id="wlSave" class="btn small primary">保存管理员</button>',
@@ -131,7 +137,8 @@ function readAdminsFromDom() {
 export async function refreshWhitelist() {
   try {
     const w = await api('/api/whitelist');
-    $('ownerQQ').value = w.ownerQQ != null ? String(w.ownerQQ) : '';
+    // 后端同时给结构化 `owner` 与派生 `ownerQQ`；新页面只读前者。
+    $('owner').value = w.owner ? addressText(w.owner) : '';
     adminsDraft = Array.isArray(w.admins) ? w.admins : [];
     renderAdminRows();
   } catch {}
@@ -218,7 +225,7 @@ export function init() {
     }
     if (event.target.closest('#wlSave')) {
       const r = await api('/api/whitelist', 'POST', {
-        ownerQQ: $('ownerQQ').value.trim(),
+        owner: $('owner').value.trim(),
         admins: readAdminsFromDom(),
       });
       if (r.ok) { refreshWhitelist(); await alertBox({ title: '已保存', message: '管理员已保存并生效', type: 'success' }); }

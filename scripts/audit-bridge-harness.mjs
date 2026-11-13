@@ -85,7 +85,7 @@ import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
 import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
 // 多管理员（P3）：bridge 直接 import，夹具按同名补回。
-import { actorForQQ, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from '../src/admin/admins.mjs';
+import { actorForQQ, actorForAddress, addressKey, normalizeOwner, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from '../src/admin/admins.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
@@ -390,6 +390,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     resolveEffectiveMode,
     isUsableMode,
     actorForQQ,
+    actorForAddress,
+    addressKey,
+    normalizeOwner,
     normalizeAdmins,
     closedAgentMaxLevel,
     canOpenLevel,

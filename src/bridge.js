@@ -180,7 +180,7 @@ import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, reso
 import { migrateAccessModel, summarizeAccessConfig } from './session/access-migrate.mjs';
 import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
 // 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
-import { actorForQQ, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
+import { actorForAddress, addressKey, normalizeAdmins, normalizeOwner, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
 import { migrateSessionProfiles } from './session/migrate.mjs';
@@ -201,7 +201,7 @@ import { createMcpRuntime } from './extensions/mcp-runtime.mjs';
 import { createPresetPolicy } from './extensions/preset-policy.mjs';
 import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
-import { accountOfConfig, configureKeys, defaultAddress, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
+import { accountOfConfig, configureKeys, defaultAddress, formatKey, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -1092,15 +1092,11 @@ function sanitizeRoleName(name) {
   return String(name ?? '').replace(/[^\w\u4e00-\u9fff-]/g, '');
 }
 
-// 管理员 QQ（ownerQQ）规范化：空值=未设置；必须是正整数 QQ 号。
-function normalizeOwnerQQ(value) {
-  if (value === undefined || value === null) return null;
-  const s = String(value).trim();
-  if (!s) return null;
-  if (!/^\d+$/.test(s)) throw new Error('ownerQQ 必须是 QQ 号（正整数）');
-  const n = Number(s);
-  if (!Number.isSafeInteger(n) || n <= 0) throw new Error('ownerQQ 必须是 QQ 号（正整数）');
-  return n;
+// 所有者地址（owner）规范化：空值 = 未设置。
+// 接受裸 id（`123456`）、完整 key（`qq:private:123456`）或 `{ platform, account, id }`。
+// 旧配置里的 `ownerQQ` 直接走这里 —— 裸数字按当前平台/账号解释，行为不变。
+function normalizeOwnerAddress(value, platform) {
+  return normalizeOwner(value, { platform: platform?.id, account: platform?.account ?? '' });
 }
 
 // 白名单/黑名单值规范化：只接受字符串或数字数组，非数组按空列表处理（fail-closed 语义由调用方决定）。
@@ -1193,7 +1189,12 @@ function loadConfig() {
   const p = path.join(ROOT, 'config.json');
   const file = readJsonSafe(p, null, true);
   if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error(`配置格式错误：${p}`);
-  const ownerQQ = normalizeOwnerQQ(file.ownerQQ);
+  const platform = normalizePlatform(file.platform);
+  // owner 优先读结构化 `owner`，回落旧的 `ownerQQ`（裸数字按当前平台解释）。
+  const owner = normalizeOwnerAddress(file.owner ?? file.ownerQQ, platform);
+  // 旧字段派生：控制台与既有接口仍读 ownerQQ。非当前平台 / 带账号的 owner 不压成数字。
+  const ownerQQ = owner && owner.platform === platform.id && !owner.account && /^\d+$/.test(owner.id)
+    ? Number(owner.id) : null;
   const cfg = {
     dsh: {
       // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/lib/dsh-endpoint.mjs）
@@ -1218,7 +1219,9 @@ function loadConfig() {
     agentPreset: file.agentPreset ?? 'qq-chat',
     workspaceTitle: file.workspaceTitle ?? 'QQ 聊天',
     ownerQQ,
-    admins: normalizeAdmins(file.admins, { ownerQQ }),
+    // 结构化 owner：`{ platform, account, id }`。权限判定只认它；ownerQQ 只是旧字段视图。
+    owner,
+    admins: normalizeAdmins(file.admins, { owner, platform: platform.id, account: platform.account }),
     allow: {
       private: normalizeIdList(file.allow?.private ?? file.allow?.privates ?? []),
       groups: normalizeIdList(file.allow?.groups ?? file.allow?.group ?? [])
@@ -1298,7 +1301,7 @@ function loadConfig() {
     memory: normalizeMemoryConfig(file.memory),
     // 技能清单（§9.2）：唤醒时注入固定行数的可用技能索引，全文由 AI 需要时自己读。
     skills: normalizeSkills(file.skills),
-  platform: normalizePlatform(file.platform),
+    platform,
     socialV2: {
       enabled: true,
       autoReplyCheckMs: 30000,
@@ -2151,6 +2154,41 @@ function apiKey(raw) {
 
 // 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
 let bridgeCfg = null;
+
+/**
+ * owner 的私聊 key（按 owner 自己的地址拼，不用进程默认地址）。
+ * owner 可能配到另一个账号下 —— 那种情况下发到本进程默认地址就是发给另一个人。
+ */
+function ownerPrivateKey() {
+  const owner = bridgeCfg?.owner;
+  if (!owner) return null;
+  return formatKey(owner.platform, 'private', owner.id, owner.account);
+}
+
+/**
+ * 裸 id 是否就是 owner。
+ *
+ * 当前进程收到的每条消息都属于 `platform.*` 这个地址，所以“是不是 owner”
+ * 只需比 id，并额外确认 owner 与本进程是同一个平台/账号。
+ */
+function isOwnerAuthor(id) {
+  const owner = bridgeCfg?.owner;
+  if (!owner || id === null || id === undefined) return false;
+  if (String(id) !== owner.id) return false;
+  const platform = platformOfConfig(bridgeCfg ?? {});
+  return owner.platform === platform && (owner.account ?? '') === (accountOfConfig(bridgeCfg ?? {}) ?? '');
+}
+
+/**
+ * OneBot 的 `user_id` / `group_id` 是数字。
+ * 纯数字且落在安全整数内才转 Number，否则按字符串透传 —— `Number('9007199254740993')`
+ * 会静默截成另一个 id，发错人比发不出去严重。
+ */
+function oneBotId(id) {
+  const text = String(id ?? '');
+  const n = Number(text);
+  return /^\d+$/.test(text) && Number.isSafeInteger(n) ? n : text;
+}
 
 async function main() {
   const cfg = loadConfig();
@@ -3691,8 +3729,8 @@ async function main() {
   }
   // 未配置管理员 QQ 时，一串功能会「静默失灵」：审批永远无法被回答（agent 一直等到超时）、
   // 管理命令全部被拒、封闭 agent 模式实际不可达。这里在启动日志里说清楚，避免排查时误判。
-  if (!cfg.ownerQQ) {
-    log('⚠️  未配置 ownerQQ：审批/管理命令/封闭 agent 模式将全部不可用。请在 config.json 或控制台「访问与安全」页填写管理员 QQ');
+  if (!cfg.owner) {
+    log('⚠️  未配置 owner（所有者地址）：审批/管理命令/封闭 agent 模式将全部不可用。请在 config.json 或控制台「访问与安全」页填写 owner 的会话地址');
   }
   if (cfg.socialV2?.voice?.allowAbsolutePath === true) {
     // 该开关曾经允许 AI 发送语音库之外的任意本机音频文件（prompt injection 可用来外发文件）。
@@ -3972,19 +4010,26 @@ async function main() {
   let currentLevel = 'L0';
   // 有效运行模式：全局模式是默认值，档案里的 mode 可以覆盖（closed-agent 全局排他）。
   // closed-agent 开启时只保留管理员私聊，其余会话是 inactive——不参与任何发送/唤醒。
-  const ownerPrivateKeyOf = () => (cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null);
+  // owner 的私聊 key：结构化后必须带平台（与账号），否则多账号部署下会把别人的私聊当成 owner。
+  const ownerPrivateKeyOf = () => (cfg.owner
+    ? buildKey('private', cfg.owner.id, { platform: cfg.owner.platform, account: cfg.owner.account })
+    : null);
   function isOwnerPrivate(key) {
     return Boolean(key) && key === ownerPrivateKeyOf();
   }
-  function privateQQOf(key) {
-    const m = /:private:(\d+)$/.exec(String(key ?? ''));
-    return m ? m[1] : '';
+  /** 会话 key → 直达地址；非直达（群 / 临时 / 第三方类型）返回 null。 */
+  function directAddressOf(key) {
+    const parsed = parseKey(String(key ?? ''));
+    if (!parsed || parsed.shape !== 'direct') return null;
+    return { platform: parsed.platform, account: parsed.account, id: parsed.id };
   }
   function actorForKey(key) {
-    return actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: privateQQOf(key) });
+    return actorForAddress({ owner: cfg.owner, admins: cfg.admins, address: directAddressOf(key) });
   }
   function isAdminPrivate(key) {
-    return Boolean(privateQQOf(key)) && actorForKey(key).role === 'admin';
+    const address = directAddressOf(key);
+    if (!address) return false;
+    return actorForAddress({ owner: cfg.owner, admins: cfg.admins, address }).role === 'admin';
   }
   // ── 手动静默（src/manual-silence.mjs）：所有自动活动/出站发送的唯一门禁 ───────────────────
   // 发送通行证：full 模式下，某个被允许的唤醒/消息回合在短时间内可发送；
@@ -3995,7 +4040,7 @@ async function main() {
     return manualSilenceOfState(readRoleState());
   }
   function manualSilenceAudience(key) {
-    return audienceRole(key, { ownerQQ: cfg.ownerQQ, admins: cfg.admins });
+    return audienceRole(key, { owner: cfg.owner, admins: cfg.admins });
   }
   function manualSilenceStatus() {
     return manualSilenceSummary(manualSilenceOfState(readRoleState()));
@@ -4087,11 +4132,11 @@ async function main() {
   function approvalNotifyTargets(requester) {
     const keys = [];
     if (requester) keys.push(requester);
-    if (cfg.ownerQQ) keys.push(ownerPrivateKeyOf());
+    if (cfg.owner) keys.push(ownerPrivateKeyOf());
     for (const admin of cfg.admins ?? []) {
       if (admin.notify !== true) continue;
       if (!admin.caps?.includes('approve')) continue;
-      const key = buildKey('private', admin.qq);
+      const key = buildKey('private', admin.id, { platform: admin.platform, account: admin.account });
       if (!keys.includes(key)) keys.push(key);
     }
     return keys.filter(Boolean);
@@ -4421,7 +4466,7 @@ async function main() {
     }
     if (level === 'L3' && cfg.admin?.allowL3 === false) throw new Error('配置禁止开启 L3（admin.allowL3=false）');
     if (mode === 'closed-agent') {
-      if (!cfg.ownerQQ) throw new Error('未配置 ownerQQ，closed-agent 无人可用');
+      if (!cfg.owner) throw new Error('未配置 owner（所有者地址），closed-agent 无人可用');
       if (dshPresetIds.length === 0) await refreshPresetList();
       if (level === 'L3' || permissionCatalog === null) await refreshPermissionCatalog();
       if (level === 'L3' && permissionCatalog === null) throw new Error('无法确认 DSH 是否提供 qq-full-ask 预设（权限目录读取失败），按安全策略拒绝开启 L3');
@@ -4455,7 +4500,7 @@ async function main() {
     // 不能只靠 reconcileSessionPolicies —— 它在 DSH preset 清单未知时会跳过判定（见其注释），
     // 那样 /panic 之后旧的高权限回合可能还在跑，审批也还能被「通过」。
     if (fromMode === 'closed-agent' && (mode !== 'closed-agent' || rank(currentLevel) < rank(fromLevel))) {
-      const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
+      const ownerKey = ownerPrivateKey();
       for (const e of ext.approvals.removeKey(ownerKey)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
       if (sessions.get(ownerKey)) retireSession(ownerKey);
     }
@@ -4486,7 +4531,7 @@ async function main() {
   });
   // ── 定时任务（逻辑在 src/scheduler/，这里只接线：校验目标、怎么发） ──────────────────
   const scheduledNotes = createScheduledNoteStore();
-  const schedulerOwnerKey = () => sessionKey('private', String(cfg.ownerQQ ?? ''));
+  const schedulerOwnerKey = () => ownerPrivateKey();
   /** 定时任务的发送对象：管理员私聊、白名单好友、白名单群。 */
   function schedulerTargetError(key) {
     const m = parseKey(String(key));
@@ -4722,7 +4767,7 @@ async function main() {
   function scheduledSilenceFor(key) {
     const w = silence.current();
     if (!w) return null;
-    if (key === sessionKey('private', String(cfg.ownerQQ ?? '')) && !silence.config().options.includeOwnerPrivate) return null;
+    if (key === ownerPrivateKey() && !silence.config().options.includeOwnerPrivate) return null;
     if ((silenceBypass.get(key) ?? 0) > Date.now()) return null;
     return w;
   }
@@ -4837,14 +4882,14 @@ async function main() {
       const observed = modeStore.readRemote(s);
       if (observed) {
         noteObservedMode(observed.mode, modeStore.remoteId ?? 'remote');
-        // 设置页也可配置管理员 QQ；**留空表示不覆盖 config.json**（r4 修复：
-        // normalizeOwnerQQ('') 返回 null，照旧 `!== undefined` 就赋值，会被 5 秒轮询抹成 null，
+        // 设置页也可配置所有者；**留空表示不覆盖 config.json**（r4 修复：
+        // 归一化空值返回 null，照旧 `!== undefined` 就赋值，会被 5 秒轮询抹成 null，
         // 导致 closed-agent 谁都不放行、审批等不到管理员）。
         if (observed.ownerQQ !== undefined) {
           const rawOwner = String(observed.ownerQQ ?? '').trim();
           if (rawOwner) {
             try {
-              noteOwnerChange(normalizeOwnerQQ(rawOwner), 'dsh-settings');
+              noteOwnerChange(normalizeOwnerAddress(rawOwner, cfg.platform), 'dsh-settings');
             } catch (error) {
               log(`DSH settings ownerQQ 无效，已忽略: ${error?.message ?? error}`);
             }
@@ -4888,22 +4933,24 @@ async function main() {
   }
 
   /**
-   * ownerQQ 变化（DSH 设置页 / 控制台）。这等于改变「谁能操作管理通道」，属于权限变更：
+   * owner 变化（DSH 设置页 / 控制台）。这等于改变「谁能操作管理通道」，属于权限变更：
    * 记审计、通知新旧 owner，并在高权限期间立即紧急关闭（避免新 owner 直接继承 Agent 会话）。
+   *
+   * `next` 是结构化地址（`{ platform, account, id }`）或 null；`ownerQQ` 只是派生视图，
+   * 供 DSH 侧仍以裸号传 owner 的旧路径读取。
    */
   function noteOwnerChange(next, origin) {
-    const prev = cfg.ownerQQ == null ? null : String(cfg.ownerQQ);
-    const nextStr = next == null ? null : String(next);
-    if (prev === nextStr) return;
-    cfg.ownerQQ = next;
+    const prevKey = ownerPrivateKey();
+    const nextKey = next ? formatKey(next.platform, 'private', next.id, next.account) : null;
+    if (prevKey === nextKey) return;
+    cfg.owner = next;
+    cfg.ownerQQ = next && next.platform === cfg.platform?.id && !next.account && /^\d+$/.test(next.id)
+      ? Number(next.id) : null;
     if (!controllerReady) return;
-    ext.audit.append('owner.changed', { from: prev, to: nextStr, origin });
-    log(`⚠️ ownerQQ 已变更（${origin}）：${prev ?? '无'} → ${nextStr ?? '无'}`);
-    const notice = `🚨 管理员 QQ（ownerQQ）已变更：${prev ?? '无'} → ${nextStr ?? '无'}（来源：${origin}）。如果不是你本人操作，请立刻检查 DSH 与桥接控制台。`;
-    if (prev && /^[1-9]\d{0,11}$/.test(prev)) {
-      void Promise.resolve(bot.sendPrivateMessage(Number(prev), text(notice))).catch(() => {});
-    }
-    void sendOwnerDirect(notice);
+    ext.audit.append('owner.changed', { from: prevKey, to: nextKey, origin });
+    log(`⚠️ owner 已变更（${origin}）：${prevKey ?? '无'} → ${nextKey ?? '无'}`);
+    const notice = `🚨 所有者（owner）已变更：${prevKey ?? '无'} → ${nextKey ?? '无'}（来源：${origin}）。如果不是你本人操作，请立刻检查 DSH 与桥接控制台。`;
+    if (prevKey) void sendToQQ(prevKey, notice).catch(() => {});
     void ext.controller.cancelAll('owner-changed');
     if (currentLevel !== 'L0') void ext.controller.panic('external-revert');
   }
@@ -5047,6 +5094,7 @@ async function main() {
     modePreset: (key, mode) => modePreset(key, mode, cfg),
     getModel: (key) => profileModelSignature(key),
     getOwnerQQ: () => cfg.ownerQQ,
+    getOwner: () => cfg.owner,
     getLevel: () => currentLevel,
     getClosedAgentPlan: () => closedAgentPlan(),
   });
@@ -5185,9 +5233,9 @@ async function main() {
 
   // ── 模式切换不失忆：休眠表 + owner 私聊交接（逻辑在 src/mode-handover.js） ────────────
   const parsePolicyMode = (policy) => { try { return String(JSON.parse(policy)[0] ?? ''); } catch { return ''; } };
-  const ownerKeyOf = () => sessionKey('private', String(cfg.ownerQQ ?? ''));
+  const ownerKeyOf = () => ownerPrivateKey();
   const hibernateEnabled = () => cfg.admin?.hibernateChatSessions !== false;
-  const handoverEnabled = () => cfg.admin?.handover !== false && /^[1-9]\d{0,11}$/.test(String(cfg.ownerQQ ?? ''));
+  const handoverEnabled = () => cfg.admin?.handover !== false && Boolean(cfg.owner);
   const dormantMaxMs = () => Math.max(60_000, Number(cfg.admin?.dormantMaxMs) || DORMANT_MAX_MS);
   // owner 私聊往来（只记 owner 私聊；管理通道命令 / 确认码 / TOTP 在交给模型前已被拦截，不会进来）
   const ownerTranscript = createOwnerTranscript({
@@ -5589,7 +5637,7 @@ async function main() {
   /** 补收的对象：当前模式允许的群和私聊（有会话或有二代状态的），管理员私聊总在里面。 */
   function backfillTargets() {
     const keys = new Set([...sessions.keys(), ...socialV2.conversations.keys()]);
-    if (cfg.ownerQQ) keys.add(sessionKey('private', String(cfg.ownerQQ)));
+    if (cfg.owner) keys.add(ownerPrivateKey());
     return [...keys].filter((k) => Boolean(parseKey(k)) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
   }
   async function runBackfill({ since, gapMs }) {
@@ -5624,7 +5672,7 @@ async function main() {
       }
       backfillUnfinished.delete(key);
       const { items, skippedCommands } = selectBackfill(res.data?.messages, { key, since: keySince, seen: seenMsgIds, config: c });
-      if (kind === 'private' && String(id) === String(cfg.ownerQQ ?? '')) ownerCommands.push(...skippedCommands);
+      if (kind === 'private' && isOwnerAuthor(id)) ownerCommands.push(...skippedCommands);
       else if (skippedCommands.length) log(`[backfill] ${key} 有 ${skippedCommands.length} 条命令类消息，补收时不执行`);
       let fresh = 0;
       for (const item of items) {
@@ -6220,6 +6268,7 @@ async function main() {
             })(),
             dshReady,
             ownerQQ: cfg.ownerQQ ?? null,
+            owner: cfg.owner ?? null,
             allowGroups: accessIds('passive', 'group'),
             allowPrivate: accessIds('passive', 'private'),
             socialV2Paused: socialV2.paused,
@@ -8209,7 +8258,7 @@ async function main() {
           // P1：数据源是「档案目录 ∪ 现有绑定」。只建了档案、还没有 DSH 会话的群/私聊
           // 也要出现在列表里（sessionId=null，页面显示「未建」），否则在详情页改完准入
           // 就找不到这个会话了。
-          const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
+          const ownerKey = ownerPrivateKey();
           const keys = new Set([...sessions.keys(), ...Object.keys(state.profiles ?? {})]);
           const list = [];
           for (const key of [...keys].sort()) {
@@ -8317,7 +8366,7 @@ async function main() {
           let key;
           try { key = apiKey(decodeURIComponent(profileSessionMatch[1])); }
           catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
-          const ownerKey = sessionKey('private', String(cfg.ownerQQ ?? ''));
+          const ownerKey = ownerPrivateKey();
           const profile = state.profiles?.[key] ?? null;
           const sessionId = sessions.get(key) ?? null;
           if (req.method === 'GET') {
@@ -8578,28 +8627,33 @@ async function main() {
         }
         // ── 白名单可视化编辑（写 config.json + 热更新内存） ───────────────────
         if (req.method === 'GET' && url.pathname === '/api/whitelist') {
-          sendJson({ ownerQQ: cfg.ownerQQ ?? null, admins: cfg.admins ?? [] });
+          // `owner` 是唯一真相（结构化地址）；`ownerQQ` 是旧页面仍在读的派生字段。
+          sendJson({ owner: cfg.owner ?? null, ownerQQ: cfg.ownerQQ ?? null, admins: cfg.admins ?? [] });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/whitelist') {
           const body = await readBody();
           const configFile = path.join(ROOT, 'config.json');
-          // fail-fast：配置文件损坏时直接 500，绝不回写，避免把整个配置清成只剩 ownerQQ/admins
+          // fail-fast：配置文件损坏时直接 500，绝不回写，避免把整个配置清成只剩 owner/admins
           const file = readConfigObject(configFile);
-          // 管理员 QQ 可在控制台输入；空值=清除管理员（fail-closed），非法值拒绝写入。
-          let ownerQQ = cfg.ownerQQ ?? null;
-          if (body.ownerQQ !== undefined) {
-            try {
-              ownerQQ = normalizeOwnerQQ(body.ownerQQ);
-            } catch (error) {
-              sendJson({ ok: false, error: error?.message ?? 'ownerQQ 无效' }, 400);
-              return;
-            }
+          // owner 地址可在控制台输入；空值=清除（fail-closed），非法值拒绝写入。
+          // `owner` 优先：UI 新版本传完整地址；`ownerQQ` 是旧页面的裸号写法。
+          const rawOwner = body.owner !== undefined ? body.owner : body.ownerQQ;
+          const owner = rawOwner === undefined
+            ? (cfg.owner ?? null)
+            : normalizeOwnerAddress(rawOwner, cfg.platform);
+          if (owner) {
+            file.owner = owner;
+            delete file.ownerQQ; // 只留一份真相，否则两份写法会慢慢分歧
+          } else {
+            delete file.owner;
+            delete file.ownerQQ;
           }
-          file.ownerQQ = ownerQQ;
           let admins;
           try {
-            admins = normalizeAdmins(body.admins !== undefined ? body.admins : (file.admins ?? []), { ownerQQ });
+            admins = normalizeAdmins(body.admins !== undefined ? body.admins : (file.admins ?? []), {
+              owner, platform: cfg.platform?.id, account: cfg.platform?.account ?? '',
+            });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? 'admins 无效' }, 400);
             return;
@@ -8611,13 +8665,15 @@ async function main() {
           delete file.allowAllWhenEmpty;
           atomicWriteJson(configFile, file);
           cfg.admins = admins;
-          cfg.ownerQQ = ownerQQ;
+          cfg.owner = owner;
+          cfg.ownerQQ = owner && owner.platform === cfg.platform?.id && !owner.account && /^\d+$/.test(owner.id)
+            ? Number(owner.id) : null;
           delete cfg.allow;
           delete cfg.deny;
           delete cfg.allowAllWhenEmpty;
           reconcileSessionPolicies();
-          log(`控制台：管理员已更新（管理员: ${ownerQQ ?? '未设置'}，子管理员: ${admins.length}）`);
-          sendJson({ ok: true, ownerQQ, admins });
+          log(`控制台：管理员已更新（所有者: ${owner ? addressKey(owner) : '未设置'}，子管理员: ${admins.length}）`);
+          sendJson({ ok: true, owner, ownerQQ: cfg.ownerQQ, admins });
           return;
         }
 
@@ -10989,8 +11045,8 @@ async function main() {
           appendFeedbackEntry({ id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8), key, level, message, time: new Date().toISOString() });
           log(`[reserved2] AI 反馈 (${key}) [${level}]: ${message.slice(0, 80)}`);
           appendActivity(`${key} [reserved2] AI 反馈 [${level}]：${message.slice(0, 80)}`);
-          if (cfg.socialV2?.feedback?.notifyOwnerOnError && level === 'error' && cfg.ownerQQ) {
-            log(`[reserved2] 错误级反馈，可通知 owner ${cfg.ownerQQ}（当前仅记录日志）`);
+          if (cfg.socialV2?.feedback?.notifyOwnerOnError && level === 'error' && cfg.owner) {
+            log(`[reserved2] 错误级反馈，可通知 owner ${cfg.owner.id}（当前仅记录日志）`);
           }
           sendJson({ ok: true, key, level, message });
           return;
@@ -12256,15 +12312,15 @@ async function main() {
    *
    * 为什么不走 sendToQQ：sendToQQ 会按「当前模式 + 白名单」校验目标，而管理通道必须在
    * 任何模式下都能通知 owner（例如 owner 不在 allow.private 里、或正处于模式切换的瞬间）。
-   * 目标只能是配置里的 ownerQQ，文本由桥接生成（不含模型输出），仍做令牌脱敏。
+   * 目标只能是配置里的 owner 地址，文本由桥接生成（不含模型输出），仍做令牌脱敏。
    */
   function sendOwnerDirect(msg) {
-    const owner = String(cfg.ownerQQ ?? '').trim();
-    if (!/^[1-9]\d{0,11}$/.test(owner) || !msg) return Promise.resolve();
+    const owner = cfg.owner;
+    if (!owner || !msg) return Promise.resolve();
     const parts = splitForPlatform(redactKnownTokensOnly(String(msg)));
     for (const part of parts) {
       sendChain = sendChain
-        .then(() => withTimeout(bot.sendPrivateMessage(Number(owner), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 owner:${owner}`))
+        .then(() => withTimeout(bot.sendPrivateMessage(oneBotId(owner.id), text(escapeCqText(part))), SEND_TIMEOUT_MS, `QQ发送 owner:${owner.id}`))
         .catch((error) => log(`管理通道发送失败 (owner):`, error?.message ?? error))
         .then(() => sleep(cfg.sendDelayMs));
     }
@@ -13007,7 +13063,7 @@ async function main() {
   // 审计范围：closed-agent 仅对 owner 私聊跳过；其余模式/会话一律审计
   function shouldAuditKey(key) {
     if (currentMode === 'closed-agent') {
-      return !(key === sessionKey('private', String(cfg.ownerQQ ?? '')));
+      return key !== ownerPrivateKey();
     }
     return true;
   }
@@ -13826,10 +13882,10 @@ async function main() {
 
     const adminPassiveKeys = (cfg.admins ?? [])
       .filter((admin) => admin?.exemptPassive === true)
-      .map((admin) => buildKey('private', String(admin.qq)));
+      .map((admin) => buildKey('private', admin.id, { platform: admin.platform, account: admin.account }));
     const applyAccessMigration = () => {
       const result = migrateAccessModel(state, {
-        ownerKey: cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null,
+        ownerKey: ownerPrivateKey(),
         adminPassiveKeys,
       });
       if (!result.changed) return false;
@@ -13923,7 +13979,7 @@ async function main() {
       state.migratedAt = Date.now();
       state.defaults = migrated.defaults;
       const accessResult = migrateAccessModel(state, {
-        ownerKey: cfg.ownerQQ ? buildKey('private', String(cfg.ownerQQ)) : null,
+        ownerKey: ownerPrivateKey(),
         adminPassiveKeys,
       });
       if (accessResult.changed) {
@@ -14071,7 +14127,7 @@ async function main() {
     const t = setInterval(() => {
       void (async () => {
         if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !api.commands?.execute) return;
-        const key = sessionKey('private', String(cfg.ownerQQ ?? ''));
+        const key = ownerPrivateKey();
         const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
         if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
@@ -15310,7 +15366,7 @@ async function main() {
       sender,
       senderId: userId != null ? String(userId) : null,
       userId: userId != null ? String(userId) : null,
-      botRole: actorForQQ({ ownerQQ: cfg.ownerQQ, admins: cfg.admins, qq: userId != null ? String(userId) : null }),
+      botRole: actorForAddress({ owner: cfg.owner, admins: cfg.admins, address: userId != null ? String(userId) : null }),
       // 群身份只对群消息有意义；私聊不写这个字段（模型视图会把空值剥掉）。
       groupRole: extra.groupRole ?? null,
       text: truncateText(String(textContent), 200),
@@ -16825,7 +16881,7 @@ async function main() {
         id: messageRef,
       });
     }
-    const isOwner = String(event.user_id) === String(cfg.ownerQQ ?? '');
+    const isOwner = isOwnerAuthor(event.user_id);
     // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截
     if (kind === 'private' && isOwner && plainContent && !plainContent.startsWith('/')) recordOwnerTranscript(key, 'owner', plainContent);
     const roleState = readRoleState();
@@ -17225,7 +17281,7 @@ async function main() {
       } catch {}
     }
     const targetIsSelf = !!targetId && selfId != null && String(targetId) === String(selfId);
-    const isOwner = String(senderId) === String(cfg.ownerQQ ?? '');
+    const isOwner = isOwnerAuthor(senderId);
     const msg = appendSocialV2Poke(key, {
       sender,
       userId: senderId || null,

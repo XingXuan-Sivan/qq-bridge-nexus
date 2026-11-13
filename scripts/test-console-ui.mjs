@@ -450,18 +450,18 @@ try {
   await test('Admin list save contract', async () => {
     await navigate('config');
     await page.locator('[data-config-section="security"]').click();
-    // 字段语义：这是全局唯一的所有者（ownerQQ），不是管理员列表里的管理员。
-    assert.equal((await page.locator('[data-field-wrap="ownerQQ"] .field-label').innerText()).trim(), '所有者 QQ');
+    // 字段语义：这是全局唯一的所有者（owner），不是管理员列表里的管理员。
+    assert.equal((await page.locator('[data-field-wrap="owner"] .field-label').innerText()).trim(), '所有者地址');
     // 点「添加管理员」必须真的出现一行：表格 rows 只吃单元格数组，直接塞 <tr> 字符串会在有行时抛错。
     await page.locator('#adminAdd').click();
     await page.waitForTimeout(150);
     assert.equal(await page.locator('#adminTableHost tbody tr').count(), 1, '点「添加管理员」应出现一行');
-    assert.equal(await page.locator('[data-admin-field="qq"]').count(), 1, '新行应带 QQ 输入框');
+    assert.equal(await page.locator('[data-admin-field="qq"]').count(), 1, '新行应带管理员地址输入框');
     await page.locator('[data-admin-remove]').click();
     await page.waitForTimeout(150);
     assert.equal(await page.locator('#adminTableHost tbody tr').count(), 0, '移除后应回到空表');
-    await fill('ownerQQ', '100001');
-    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { ownerQQ: '100001', admins: [] });
+    await fill('owner', '100001');
+    assert.deepEqual(await clickWrite('#wlSave', '/api/whitelist'), { owner: '100001', admins: [] });
     await check('secInterceptNotify', false);
     assert.deepEqual(await saveBarWrite('/api/security'), { interceptNotify: false });
   });

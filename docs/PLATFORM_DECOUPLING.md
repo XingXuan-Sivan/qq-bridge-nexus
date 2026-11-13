@@ -86,7 +86,7 @@
 
 ---
 
-### 2.5 实施偏差（B2 落地时相对上述设计的取舍）
+### 2.5 实施偏差（B2 / B3 落地时相对上述设计的取舍）
 
 | 项 | 设计 | 实施 | 理由 |
 | --- | --- | --- | --- |
@@ -94,6 +94,10 @@
 | `key()` 无上下文 | 直接抛错 | 回落到进程默认，另有 `strict` 开关 | 单平台部署下启动、定时 tick 等离线路径没有事件上下文，强制抛错会让整条链断掉。多平台部署（B5）打开 `strict` |
 | 数据迁移脚本 | `sessions.json` 迁移脚本 | **不做** | 新文法是旧文法的超集，`qq:group:123` 原样可读、`group:123` 由 `legacyToKey` 读出，没有数据需要改写 |
 | id 数值归一 | 不做数字校验 | 纯数字 id 去前导零（`0456` → `456`），仍不做 `Number()` 转换 | 旧实现用 `Number()` 归一，去掉会破坏"限频/定时按 key 相等判同一会话"；但保留 `Number()` 又会截断超 2^53 的群号 |
+| owner 形态校验（B3） | 沿用 `QQ_RE = /^[1-9]\d{4,11}$/` | **移除**，只校验地址结构（非空、分离出 platform/account/id、必须 direct） | 该正则隐式绑定 QQ 号段；微信 / Telegram 的 id 形态各不相同。平台 id 的形态规则应由 B5 的平台能力声明提供 |
+| `cfg.ownerQQ` 去留（B3） | 直接删除 | 保留为**派生视图**（仅当 owner 落在本进程平台、无 account、纯数字时回落为 number） | 旧控制台、插件、日志仍有读 `ownerQQ` 的调用；唯一的真相是 `cfg.owner`，派生值在 `loadConfig` / `noteOwnerChange` / `/api/whitelist` 三处统一计算 |
+| 裸 id 的归属（B3） | 全局唯一裸 id | 裸 id 只在**本进程平台且同账号**下解释；换平台或换账号的同号是不同人 | 多账号下 `qq@napcat:10001` 与 `qq@snowluma:10001` 是两个账号，不按 id 混同 |
+| `ownerQQ` DOM id（B3） | —— | 控制台字段与 `/api/whitelist` 的键改为 `owner`；`ownerQQ` 移入 `console-ui-retired-ids.json` | 接口仍接受 `ownerQQ` 作为回退（旧脚本、旧前端不炸），但新前端只发 `owner` |
 
 ---
 
@@ -304,7 +308,7 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | **B0** ✅ | 常量去 QQ：`RUNTIME_PLATFORM`（plans.mjs:8）、`DEFAULT_PROMPT_VARS`（prompt-compose.mjs:6）、`runtime.json` 键名、`catalog.mjs` 的 `provider` 参数化；`selfIdentityTextV2` 改 prompt 变量；`splitForQQ`/`mdToPlain` 中性命名 | 5 个文件 | 极低 |
 | **B1** ✅ | 发送收口：4 处 `send_*_msg` 三元式 → `sendAction(address, segments)`；v1 管线退化为 v2 薄封装；段类型与降级策略接线 | bridge.js + md-to-plain + 3 个媒体函数 | 低（收益最高） |
 | **B2** ✅ | 地址模型：`key.mjs` 支持 `@account` 与开放 type、id 字符串化；`withAddress()` 上下文 + 15 个 import 点改造；`sessions.json` 迁移脚本（见 §2.5：实际未做，旧文法已是新文法子集） | key.mjs + 15 模块 + bridge | 中高（主键） |
-| **B3** | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址 | bridge + 控制台 + 迁移 | 中 |
+| **B3** ✅ | owner 结构化（`owner: {platform, account, id}`）、准入白名单按地址；`admins` 项新增 `platform`/`account`/`id`（`qq` 保留为别名）；`QQ_RE` 移除、`cfg.ownerQQ` 降为派生视图 | bridge + 控制台 + 6 个测试 | 中 |
 | **B4** | 权限映射下沉：`DSH_PERMISSION_PRESET` / `LEVEL_PERMISSION_PRESET` / `qq-agent-*` → `adapters/dsh/runtime.mjs` + 能力档名 | 2 个文件 + preset 名迁移 | 中 |
 | **B5** | 运行期适配器：新建 `src/user-side/` 与 `src/agent-side/`，`dsh-client.js` 与 SDK 直连下沉为两个 runtime 实现，bridge 只依赖接口 | 大（bridge 1618 行相关段） | 高 |
 | **B6** | 插件：`onOutbound` + `transport:provide` + `ctx.userPlatforms` + `validateUnifiedEvent` + 安全边界回归 | kernel/host-api/manifest | 中高 |

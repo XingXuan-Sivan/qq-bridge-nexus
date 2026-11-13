@@ -341,7 +341,7 @@ function ensureSchedTargetModal() {
   const overlay = wrap.firstElementChild;
   document.body.appendChild(overlay);
   renderFields(overlay.querySelector('#schedTargetSwitch'), [
-    { name: 'schedTargetOwner', type: 'switch', label: '发送到管理员私聊', hint: '只发给 ownerQQ；和其它对象可以同时选。' },
+    { name: 'schedTargetOwner', type: 'switch', label: '发送到管理员私聊', hint: '只发给 owner；和其他对象可以同时选。' },
   ], { layout: 'inline', columns: 1 });
   bindSwitches(overlay);
   wireModal(overlay, {});
@@ -382,7 +382,7 @@ function openSchedTargetPicker() {
   ownerSwitch.disabled = !owner;
   setSwitch(ownerSwitch, !!owner && schedTargetKeys.has(owner.key));
   renderSchedTargetTable();
-  schedMsg('schedTargetMsg', owner ? '' : '没有配置 ownerQQ，只能发给好友或群。');
+  schedMsg('schedTargetMsg', owner ? '' : '没有配置所有者（owner），只能发给好友或群。');
   openModal(overlay);
 }
 

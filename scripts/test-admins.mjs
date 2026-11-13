@@ -1,8 +1,8 @@
 // P3 多管理员：纯函数契约（名单归一化、actor、capability、closed-agent 级别、私聊被动豁免）。
 import assert from 'node:assert/strict';
 import {
-  ADMIN_CAPS, normalizeCaps, normalizeAdmins, findAdmin, actorForQQ,
-  isAdminQQ, isPrivilegedPrivate, closedAgentMaxLevel, canOpenLevel, levelRank,
+  ADMIN_CAPS, normalizeCaps, normalizeAdmins, findAdmin, actorForQQ, actorForAddress,
+  normalizeOwner, isAdminQQ, isPrivilegedPrivate, closedAgentMaxLevel, canOpenLevel, levelRank,
 } from '../src/admin/admins.mjs';
 
 // ① 名单归一化：默认值、owner 不入表、非法 cap 丢弃、缺名兜底。
@@ -22,7 +22,10 @@ import {
 
 // ② 非法配置 fail-fast，不静默丢人。
 assert.throws(() => normalizeAdmins('nope'), /admins 必须是数组/);
-assert.throws(() => normalizeAdmins([{ qq: 'abc' }]), /qq 必须是 QQ 号/);
+// id 不再要求是 QQ 号（B2 地址模型），但地址结构必须合法：空 id、群地址、含空白都不行。
+assert.throws(() => normalizeAdmins([{ qq: '' }]), /地址不合法/);
+assert.throws(() => normalizeAdmins([{ address: 'qq:group:100' }]), /地址不合法/);
+assert.throws(() => normalizeAdmins([{ qq: 'a b' }]), /地址不合法/);
 assert.throws(() => normalizeAdmins([{ qq: '100001' }, { qq: '100001' }]), /重复/);
 
 // ③ caps 归一化。
@@ -73,4 +76,49 @@ assert.deepEqual(normalizeCaps('approve'), []);
   assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '1000000002', kind: 'group', id: '1000000002' }), false);
 }
 
-console.log('test-admins: 6/6 通过');
+// ⑦ 地址维度：同名 id 在不同账号/平台下是两个人（B3）。
+{
+  const ctx = { platform: 'qq', account: 'napcat' };
+  // 裸 id 默认挂在当前平台 + 当前账号下。
+  const [a] = normalizeAdmins([{ qq: '1000000002', caps: ['approve'] }], ctx);
+  assert.equal(a.platform, 'qq');
+  assert.equal(a.account, 'napcat');
+  assert.equal(a.id, '1000000002');
+  assert.equal(a.qq, '1000000002', '旧字段名继续可用');
+
+  // 显式写地址可以跨账号 / 跨平台。
+  const list = normalizeAdmins([
+    { qq: '1000000002' },
+    { address: 'qq@snowluma:private:1000000002' },
+    { address: 'telegram:private:1000000002' },
+  ], ctx);
+  assert.equal(list.length, 3, '同一个 id 在不同地址下是三个人，不应被判重复');
+  assert.deepEqual(list.map((x) => `${x.platform}@${x.account}:${x.id}`), [
+    'qq@napcat:1000000002', 'qq@snowluma:1000000002', 'telegram@:1000000002',
+  ]);
+
+  // owner 只在同一个地址下才算本人；换账号就不是了。
+  const owner = normalizeOwner('qq@napcat:private:1000000002', ctx);
+  assert.equal(actorForAddress({ owner, admins: [], address: '1000000002', ...ctx }).role, 'owner');
+  assert.equal(actorForAddress({ owner, admins: [], address: 'qq@snowluma:private:1000000002', ...ctx }).role, 'user', '换账号就不该继承 owner');
+  assert.equal(actorForAddress({ owner, admins: list, address: '1000000002', ...ctx }).role, 'owner', 'owner 同时出现在名单里时仍算 owner');
+
+  // 群地址不能当人：既不能当管理员，也不会产生私聊豁免。
+  assert.equal(actorForAddress({ owner, admins: [], address: 'qq:group:1000000002', ...ctx }).role, 'user');
+  assert.equal(isPrivilegedPrivate({ owner, admins: [], address: 'qq:group:1000000002', ...ctx }), false);
+}
+
+// ⑧ owner 归一化：裸 id / 完整 key / 对象三种写法等价。
+{
+  const ctx = { platform: 'qq', account: '' };
+  const shapes = ['100001', 'qq:private:100001', 'qq:direct:100001', { id: '100001' }, { qq: 100001 }, { platform: 'qq', account: '', id: '100001' }];
+  for (const raw of shapes) {
+    assert.deepEqual(normalizeOwner(raw, ctx), { platform: 'qq', account: '', id: '100001' }, JSON.stringify(raw));
+  }
+  assert.equal(normalizeOwner('', ctx), null);
+  assert.equal(normalizeOwner(null, ctx), null);
+  assert.throws(() => normalizeOwner('qq:group:100001', ctx), /直达地址/);
+  assert.throws(() => normalizeOwner({ id: '' }, ctx), /直达地址/);
+}
+
+console.log('test-admins: 8/8 通过');

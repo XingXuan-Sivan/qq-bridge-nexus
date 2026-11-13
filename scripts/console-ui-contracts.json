@@ -189,7 +189,7 @@
     "method": "POST",
     "path": "/api/whitelist",
     "body": {
-      "ownerQQ": "100001",
+      "owner": "100001",
       "admins": []
     }
   },

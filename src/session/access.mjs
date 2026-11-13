@@ -9,7 +9,7 @@
  * 不再有 per-profile 的 inherit/allow/deny，也没有 owner/管理员豁免（管理命令走独立通道）。
  */
 
-import { parseKey } from './key.mjs';
+import { keyFormat, parseKey } from './key.mjs';
 
 export const ACCESS_AXES = ['passive', 'proactive'];
 export const ACCESS_MODES = ['allow', 'deny'];
@@ -25,24 +25,25 @@ export function normalizeAccessMode(value) {
 }
 
 /**
- * 一条名单项 → 规范 key（`qq:group:123` / `qq:private:456` / `telegram:channel:@x`）。
- * 接受 `qq:` 前缀、`group:123` / `private:456`，也接受完整 key；其余一律视为非法。
+ * 一条名单项 → 规范 key（`qq:group:123` / `qq@napcat:private:456` / `telegram:channel:@x`）。
+ * 接受裸 `group:123` / `private:456`（按当前进程平台补前缀）、带平台的完整 key；
+ * 其余一律视为非法。
  *
  * 只对**地址段**（平台、账号、类型）小写化，id 原样保留：QQ 号不区分大小写，
  * 但别的平台 id 可能区分（Telegram username、B 站直播间号）。
  */
-export function parseAccessEntry(raw, platform = 'qq') {
+export function parseAccessEntry(raw, platform = keyFormat().platform) {
   if (typeof raw !== 'string') return null;
   const text = raw.trim();
   if (!text || !text.includes(':')) return null;
-  const withPlatform = /^(group|private):/i.test(text) ? `${platform}:${text}` : text;
+  const withPlatform = /^(group|private|direct|dm|chat|temp):/i.test(text) ? `${platform}:${text}` : text;
   const parsed = parseKey(withPlatform);
   if (!parsed) return null;
   return parsed.key;
 }
 
 /** 名单数组 → `{entries, invalid}`；去重并保持首次出现顺序。 */
-export function normalizeAccessEntries(raw, platform = 'qq') {
+export function normalizeAccessEntries(raw, platform = keyFormat().platform) {
   const list = Array.isArray(raw) ? raw : [];
   const entries = [];
   const invalid = [];
@@ -68,13 +69,13 @@ export function createAccessConfig(mode = 'allow') {
 }
 
 /** 已迁移到 v2 的 defaults 才返回配置，否则返回 null（调用方负责迁移）。 */
-export function normalizeAccessConfig(raw) {
+export function normalizeAccessConfig(raw, platform = keyFormat().platform) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   if (Number(raw.version) !== ACCESS_VERSION) return null;
   const config = { version: ACCESS_VERSION };
   for (const axis of ACCESS_AXES) {
     const src = raw[axis] && typeof raw[axis] === 'object' && !Array.isArray(raw[axis]) ? raw[axis] : {};
-    const { entries } = normalizeAccessEntries(src.entries);
+    const { entries } = normalizeAccessEntries(src.entries, platform);
     config[axis] = { mode: normalizeAccessMode(src.mode), entries };
   }
   return config;

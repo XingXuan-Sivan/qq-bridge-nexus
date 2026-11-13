@@ -19,6 +19,8 @@
 // owner 私聊始终例外；管理员私聊在 adminApplies=false 时例外。
 // 群聊里的 owner / 管理员不单独豁免（按群会话处理）。
 
+import { actorForAddress } from './admin/admins.mjs';
+
 export const MANUAL_SILENCE_STAGES = Object.freeze([
   'passive',
   'proactive',
@@ -105,12 +107,16 @@ export function stageSuppressed(silent, stage) {
   return silent.stages?.[stage] !== false;
 }
 
-/** 目标会话是否属于 owner / 管理员 / 普通会话。 */
-export function audienceRole(key, { ownerQQ = null, admins = [] } = {}) {
-  const m = /:private:(\d+)$/.exec(String(key ?? ''));
-  const qq = m ? m[1] : '';
-  if (qq && ownerQQ != null && qq === String(ownerQQ)) return 'owner';
-  if (qq && Array.isArray(admins) && admins.some((a) => String(a?.qq ?? a) === qq)) return 'admin';
+/**
+ * 目标会话是否属于 owner / 管理员 / 普通会话。
+ *
+ * 按**地址**比对（平台 + 账号 + id），群会话一律 'other'：群里的 owner 发言不产生豁免。
+ * 旧写法 `{ ownerQQ, admins }` 仍然可用（裸 id 按当前平台解释）。
+ */
+export function audienceRole(key, { owner = null, ownerQQ = null, admins = [] } = {}) {
+  const actor = actorForAddress({ owner, ownerQQ, admins, address: String(key ?? '') });
+  if (actor.role === 'owner') return 'owner';
+  if (actor.role === 'admin') return 'admin';
   return 'other';
 }
 

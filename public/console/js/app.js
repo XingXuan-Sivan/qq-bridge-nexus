@@ -127,7 +127,7 @@ function updateOverview(status, modeLabel) {
   const role = document.getElementById('metricRole');
   if (role) role.textContent = '角色 · ' + (status.role || '默认人格');
   const access = document.getElementById('accessSummary');
-  if (access) access.textContent = '管理员 ' + (status.ownerQQ || '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
+  if (access) access.textContent = '所有者 ' + (status.owner?.id ?? status.ownerQQ ?? '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
   const updated = document.getElementById('lastUpdated');
   if (updated) updated.textContent = '状态同步于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
   const alert = document.getElementById('connectionAlert');

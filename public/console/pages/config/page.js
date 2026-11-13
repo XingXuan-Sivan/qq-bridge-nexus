@@ -564,7 +564,7 @@ const CONFIG_CARDS = {
     {
       title: '所有者与管理员',
       description: '按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里保留所有者与管理员列表。'
-        + '<strong>所有者</strong>（ownerQQ）全局唯一、拥有最高权限，可在自己的私聊里审批、进入 closed-agent；'
+        + '<strong>所有者</strong>（owner）按地址识别（平台 + 账号 + id），全局唯一、拥有最高权限，可在自己的私聊里审批、进入 closed-agent；'
         + '<strong>管理员</strong>是另一组按人配置的权限，只在各自私聊生效。',
       body: '<div data-access-fields="whitelist"></div>',
     },

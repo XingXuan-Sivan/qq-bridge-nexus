@@ -19,7 +19,7 @@ import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 // Agent 侧连接层（地址/凭据/客户端/事件/端口/收集器/健康度/探活/401 提示）只经
 // src/agent-side/runtime.mjs 的 agentRuntime()；具体实现见 src/agent-side/adapters/<id>/，
 // 由 builtin.mjs 装配。本文件不出现执行体专属的动词与连接细节。
-import { agentRuntime } from './agent-side/runtime.mjs';
+import { agentRuntime, agentRuntimeId } from './agent-side/runtime.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -3608,7 +3608,7 @@ async function main() {
   function stickerDescribeBlocker() {
     if (!stickerEnabled()) return '表情包体系已关闭';
     if (!stickerStoreWritable) return '表情库处于只读降级状态，写不进去';
-    if (!dshReady) return 'DSH 还没就绪';
+    if (!agentReady) return `${agentRuntime().label} 还没就绪`;
     if (currentMode === 'closed-agent') return 'agent 模式下不运行（切回聊天或二代仿真后再点）';
     if (!modelCanSeeImages()) return `当前模型 ${currentModelLabel()} 不能看图，请先在「DSH 模型与思考强度」里换一个能看图的模型`;
     return '';
@@ -3704,7 +3704,7 @@ async function main() {
 
   async function runSlangExtraction(key) {
     if (cfg.slang?.enabled === false) return;
-    if (!dshReady) return;
+    if (!agentReady) return;
     const messages = slangWindows.get(key) ?? [];
     const min = Math.max(1, Number(cfg.slang?.extractMinMessages ?? 10));
     if (messages.length < min) return;
@@ -3767,7 +3767,7 @@ async function main() {
   async function runSlangResearch(candidates) {
     if (!candidates || !candidates.length) return;
     if (cfg.slang?.enabled === false) return;
-    if (!dshReady) return;
+    if (!agentReady) return;
     // 过滤掉已经在研究队列里的候选，避免同一批被重复排队研究。
     const targets = candidates.filter((e) => e && !slangResearchingIds.has(e.id));
     if (!targets.length) return;
@@ -3837,7 +3837,7 @@ async function main() {
 
   function maybeQueueSlangExtraction(key) {
     if (cfg.slang?.enabled === false) return;
-    if (!dshReady) return;
+    if (!agentReady) return;
     const cooldown = Number(cfg.slang?.extractCooldownMs ?? 300000);
     const last = slangExtractionCooldowns.get(key) ?? 0;
     if (Date.now() - last < cooldown) return;
@@ -4167,9 +4167,23 @@ async function main() {
     pendingWakeLeaseTimers.clear();
   }
 
-  // DSH 可用性探活 + 重启容错队列：
-  // DSH 重启期间收到的 QQ 消息先入队（不丢），DSH 恢复后按序补投。
-  let dshReady = false;
+  // 执行体可用性探活 + 重启容错队列：
+  // 执行体重启期间收到的 QQ 消息先入队（不丢），恢复后按序补投。
+  let agentReady = false;
+
+  /**
+   * 概览指标卡要的「执行体是谁、怎么连、通没通」：一份中性投影。
+   * 控制台不认平台名，也不需要自己从注册表拼第二张表。
+   */
+  function agentStatusSummary() {
+    try {
+      const runtime = agentRuntime();
+      return { id: runtime.id, label: runtime.label, mode: runtime.mode, ready: agentReady };
+    } catch {
+      // 连接层装配失败时状态端点仍要能答：少两个字段，也好过整页 500。
+      return { id: agentRuntimeId(), label: '', mode: '', ready: false };
+    }
+  }
   let dshCheckStarted = false;
   let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
@@ -5630,31 +5644,31 @@ async function main() {
     const r = await agentProbe.check();
     const ok = r.ok;
     const lastErr = r.error;
-    if (r.rediscovered && ok) log(`DSH 地址已变化，重新识别为 ${r.url}`);
+    if (r.rediscovered && ok) log(`执行体地址已变化，重新识别为 ${r.url}`);
     if (ok) {
       agentRuntime().resetAuthHint();
       const rec = agentHealth.ok();
-      if (dshReady && rec.recoveredFrom > 0) log(`DSH 探活偶发失败 ${rec.recoveredFrom} 次（${rec.reason?.label ?? '原因未知'}），已恢复，未判定为不可用`);
+      if (agentReady && rec.recoveredFrom > 0) log(`${agentRuntime().label} 探活偶发失败 ${rec.recoveredFrom} 次（${rec.reason?.label ?? '原因未知'}），已恢复，未判定为不可用`);
       await refreshMode();
-      // DSH 起来后拉一次 preset 清单；DSH 重启（dshReady 由 false 变 true）时再拉一次。
-      if (!dshReady || dshPresetIds.length === 0) {
+      // 执行体就绪后拉一次 preset 清单；执行体重启（agentReady 由 false 变 true）时再拉一次。
+      if (!agentReady || dshPresetIds.length === 0) {
         try { await refreshPresetList(); } catch {}
         try { await refreshPermissionCatalog(); } catch {}
       }
       // 管理控制器的启动校验（只做一次）：高权限状态不跨重启继承，遗留的 closed-agent 回落并告警。
       await initControllerOnce(currentMode);
       reconcileSessionPolicies();
-      if (!dshReady) {
-        dshReady = true;
+      if (!agentReady) {
+        agentReady = true;
         lastMode = currentMode;
-        log(`DSH 已就绪（模式: ${currentMode}）`);
-        // 启动/DSH 重启后对账一次：把 DSH 侧已经不存在的绑定标成 missing，
+        log(`${agentRuntime().label} 已就绪（模式: ${currentMode}）`);
+        // 启动/执行体重启后对账一次：把对端已经不存在的绑定标成 missing，
         // 详情页能看到、也能点重建；真正重建仍由下一条消息或用户触发。
-        void reconcileDshSessions().catch((error) => log(`⚠️ DSH 会话对账异常：${error?.message ?? error}`));
-        // 运行中也定期对账：用户在 DSH 控制台手动删/归档会话后，不必等投递失败才发现。
+        void reconcileDshSessions().catch((error) => log(`⚠️ 会话对账异常：${error?.message ?? error}`));
+        // 运行中也定期对账：用户在对端控制台手动删/归档会话后，不必等投递失败才发现。
         if (!dshReconcileTimer) {
           dshReconcileTimer = setInterval(() => {
-            if (!dshReady) return;
+            if (!agentReady) return;
             void reconcileDshSessions().catch((error) => log(`⚠️ 周期对账异常：${error?.message ?? error}`));
           }, 5 * 60 * 1000);
           dshReconcileTimer.unref?.();
@@ -5696,9 +5710,9 @@ async function main() {
       // 从没就绪过（启动时就 401）也要提示：否则日志里只有「事件流 0 帧」，看不出是凭据的问题。
       const hint = agentRuntime().authHint(lastErr);
       if (hint) log(hint);
-      if (dshReady && v.unavailable) {
-        dshReady = false;
-        log(`⚠️ DSH 不可用（连续 ${v.failures} 次探活失败，原因：${v.reason.label}），QQ 消息将入队等待`);
+      if (agentReady && v.unavailable) {
+        agentReady = false;
+        log(`⚠️ ${agentRuntime().label} 不可用（连续 ${v.failures} 次探活失败，原因：${v.reason.label}），QQ 消息将入队等待`);
       }
     }
   };
@@ -6435,7 +6449,7 @@ async function main() {
               mode: currentMode,
               role: rs.role ?? null,
               roleMode: rs.mode ?? 'active',
-              dshReady,
+              agent: agentStatusSummary(),
               socialV2Paused: socialV2.paused,
             });
             return;
@@ -6459,7 +6473,7 @@ async function main() {
               const w = silence.current();
               return w ? { source: 'schedule', name: w.range.name, untilText: describeInstant(w.endMs, silence.config().timezone) } : null;
             })(),
-            dshReady,
+            agent: agentStatusSummary(),
             ownerQQ: cfg.ownerQQ ?? null,
             owner: cfg.owner ?? null,
             allowGroups: accessIds('passive', 'group'),
@@ -9226,8 +9240,8 @@ async function main() {
             sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
             return;
           }
-          if (!dshReady) {
-            sendJson({ ok: false, error: 'DSH 当前不可用，请稍后再试' }, 503);
+          if (!agentReady) {
+            sendJson({ ok: false, error: `${agentRuntime().label} 当前不可用，请稍后再试` }, 503);
             return;
           }
           const isV2 = effectiveMode(key) === 'reserved2';
@@ -14323,7 +14337,7 @@ async function main() {
   {
     const t = setInterval(() => {
       void (async () => {
-        if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !agentPort.supports('permission')) return;
+        if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !agentReady || !agentPort.supports('permission')) return;
         const key = ownerPrivateKey();
         const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
@@ -14677,7 +14691,7 @@ async function main() {
       return { ok: true, skipped: true };
     };
     if (wakeBlocked()) return skipWake();
-    if (!dshReady) {
+    if (!agentReady) {
       const items = queued.get(key) ?? [];
       if (items.length >= QUEUE_MAX) {
         items.shift();
@@ -17355,9 +17369,9 @@ async function main() {
       return;
     }
 
-    // DSH 重启容错：DSH 不可用时消息入队（不丢），恢复后自动补投
+    // 执行体重启容错：执行体不可用时消息入队（不丢），恢复后自动补投
     // 这批投递由入站消息触发（一代仿真的活跃回复），补投时按被动轴判：主动被关不影响回消息。
-    if (!dshReady) {
+    if (!agentReady) {
       const items = queued.get(key) ?? [];
       if (items.length >= QUEUE_MAX) {
         items.shift();

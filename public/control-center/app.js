@@ -748,10 +748,10 @@
     setDot($('sbQQDot'), !st ? '' : qqOk ? 'on' : (sh?.connected ? 'warn' : 'off'));
     const acct = st?.botAccount ? `${st.botAccount.nickname || ''}（${st.botAccount.userId || '?'}）` : '';
     $('sbQQ').textContent = !st ? '—' : !sh?.connected ? '未连接' : sh.good === false ? `接收异常 ${acct}` : sh.accountOnline === false ? `账号离线 ${acct}` : `在线 ${acct}`;
-    // DSH：以桥接自己的连通结论为准（它跟随 DSH 的随机端口）；桥接不在时才看控制中心的端口探测
-    const dshOk = st ? !!st.dshReady : !!h.dsh?.reachable;
+    // 执行体：以桥接自己的连通结论为准（连接层跟随对端的随机端口）；桥接不在时才看控制中心的端口探测
+    const dshOk = st ? !!st.agent?.ready : !!h.dsh?.reachable;
     setDot($('sbDshDot'), dshOk ? 'on' : h.dsh?.reachable ? 'warn' : 'off');
-    $('sbDsh').textContent = st ? (st.dshReady ? '已就绪' : h.dsh?.reachable ? '可达，桥接未就绪' : '不可达') : (h.dsh?.reachable ? '可达' : '不可达');
+    $('sbDsh').textContent = st ? (st.agent?.ready ? '已就绪' : h.dsh?.reachable ? '可达，桥接未就绪' : '不可达') : (h.dsh?.reachable ? '可达' : '不可达');
     const level = st?.level || 'L0';
     $('sbMode').textContent = st ? `${st.mode} / ${level}` : '—';
     $('sbVers').textContent = `控制中心 ${S.version} · 桥接 ${st?.version ?? '—'} · 接口平台 ${pl.overview?.version ?? '—'}${hasDir ? ` · SnowLuma ${sl.info.version}` : ''} · DSH ${h.dsh?.version ?? '—'} · Node ${S.node}`;

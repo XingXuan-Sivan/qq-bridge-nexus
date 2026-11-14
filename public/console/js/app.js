@@ -4,7 +4,7 @@ import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
 import { setMsg } from '../components/message/message.js';
-import { loadPlatforms } from './registry.js';
+import { loadPlatforms, platformLabel } from './registry.js';
 
 bootstrapConsoleToken();
 // 平台注册表（B7 / C7）预热：页面渲染不等网络，先把两侧平台的平台名、会话类型与上限拉回本地。
@@ -22,56 +22,56 @@ function fmtAgoMs(ms) {
   if (n < 86_400_000) return Math.round(n / 3_600_000) + ' 小时';
   return Math.round(n / 86_400_000) + ' 天';
 }
-// SnowLuma 上游健康：控制台是唯一的可视化出口（桥接侧只有日志）。
-// 旧版桥接的 /api/status 没有 snowluma 字段，一律当「未知」处理，不抛错。
-function renderSnowlumaHealth(sl) {
-  // 这三个节点分属不同的页面片段：#snowlumaWarn 在 access，两个指标卡在 overview。
-  // 谁在就更新谁，不能因为另一个页面没打开就整体早退（否则指标卡永远停在「读取中」）。
+// 上游健康：控制台是唯一的可视化出口（桥接侧只有日志）。
+// 指标卡里它只占「用户平台」格的副行：格子标题不依赖具体平台，
+// 换成没有上游健康的用户平台时这一行自然变成「未上报」。
+function renderUpstreamHealth(sl) {
+  // 这两个节点分属不同的页面片段：#snowlumaWarn 在 access，指标卡副行在 overview。
+  // 谁在就更新谁，不能因为另一个页面没打开就整体早退。
   const el = document.getElementById('snowlumaWarn');
-  const strong = document.getElementById('metricSnowluma');
-  const hint = document.getElementById('metricSnowlumaHint');
-  if (!strong && !hint && !el) return;
-  let strongText;
-  let strongClass = '';
-  let hintText;
+  const note = document.getElementById('metricUpstream');
+  if (!note && !el) return;
+  let noteText;
+  let tone = '';
   if (!sl || typeof sl !== 'object') {
-    strongText = '未知';
-    hintText = '桥接未上报上游健康（旧版桥接）';
+    noteText = '上游健康未上报';
   } else {
     const degraded = sl.degraded === true;
     const connected = sl.connected === true;
     const ago = sl.lastPacketAgoMs;
     const receiving = Number.isFinite(ago);
     if (degraded) {
-      strongText = '已连接 · 未接收';
-      strongClass = 'err';
-      hintText = '网关连着，但 QQ 侧数据没到';
+      noteText = '上游连着但收不到数据';
+      tone = 'err';
     } else if (!connected) {
-      strongText = '未连接';
-      strongClass = 'err';
-      hintText = '连不上 QQ 网关，请先启动 SnowLuma';
+      noteText = '连不上 QQ 网关，请先启动 SnowLuma';
+      tone = 'err';
     } else {
-      strongText = '正常 · 接收中';
-      strongClass = 'ok';
-      hintText = (receiving ? '最近一份上游事件包在 ' + fmtAgoMs(ago) + '前 · ' : '')
-        + (sl.good === false ? 'good=false' : sl.good === true ? 'good=true' : 'good 未上报');
+      noteText = '上游正常 · ' + (receiving ? fmtAgoMs(ago) + '前' : '未收到包')
+        + ' · ' + (sl.good === false ? 'good=false' : sl.good === true ? 'good=true' : 'good 未上报');
+      tone = 'ok';
     }
-    if (strong) { strong.textContent = strongText; strong.className = strongClass; }
-    if (hint) hint.textContent = hintText;
-    if (!el) return;
-    if (!degraded) { el.hidden = true; return; }
-    el.hidden = false;
-    const warnHint = document.getElementById('snowlumaWarnHint');
-    if (warnHint) warnHint.textContent = sl.hint || '桥接与 QQ 网关的 WebSocket 连着，但一直收不到 QQ 侧的数据。';
-    const warnPkt = document.getElementById('snowlumaWarnPkt');
-    if (warnPkt) warnPkt.textContent = (receiving ? fmtAgoMs(ago) + '前' : '从未收到') + (sl.lastPacketKind ? '（' + sl.lastPacketKind + '）' : '');
-    const warnGood = document.getElementById('snowlumaWarnGood');
-    if (warnGood) warnGood.textContent = sl.good === true ? 'good=true' : sl.good === false ? 'good=false' : 'good 未知';
-    return;
   }
-  if (strong) { strong.textContent = strongText; strong.className = strongClass; }
-  if (hint) hint.textContent = hintText;
-  if (el) el.hidden = true;
+  if (note) { note.textContent = noteText; note.className = tone; }
+  if (!el) return;
+  if (!sl || typeof sl !== 'object' || sl.degraded !== true) { el.hidden = true; return; }
+  el.hidden = false;
+  const warnHint = document.getElementById('snowlumaWarnHint');
+  if (warnHint) warnHint.textContent = sl.hint || '桥接与 QQ 网关的 WebSocket 连着，但一直收不到 QQ 侧的数据。';
+  const warnPkt = document.getElementById('snowlumaWarnPkt');
+  if (warnPkt) {
+    const ago = sl.lastPacketAgoMs;
+    warnPkt.textContent = (Number.isFinite(ago) ? fmtAgoMs(ago) + '前' : '从未收到') + (sl.lastPacketKind ? '（' + sl.lastPacketKind + '）' : '');
+  }
+  const warnGood = document.getElementById('snowlumaWarnGood');
+  if (warnGood) warnGood.textContent = sl.good === true ? 'good=true' : sl.good === false ? 'good=false' : 'good 未知';
+}
+
+/** 连接方式的人话：适配器声明的 mode，控制台不猜。 */
+function connectModeText(agent) {
+  if (agent.mode === 'http') return 'HTTP';
+  if (agent.mode === 'stdio') return '子进程（stdio）';
+  return '连接方式未知';
 }
 
 async function refresh() {
@@ -113,19 +113,24 @@ async function refreshSessionMetrics() {
 
 function updateOverview(status, modeLabel) {
   // 这里写的节点有的常驻 index.html，有的只在 overview 片段里；逐个判空。
+  // 执行体与用户平台都由状态投影给出（`agent` / `platform`），控制台不认识具体平台名。
+  const agent = status.agent ?? {};
+  const agentLabel = agent.label || '执行体';
   const connection = document.getElementById('statusText');
   if (connection) {
-    connection.textContent = status.dshReady ? 'DSH 已连接' : 'DSH 未连接';
-    connection.className = 'status-badge ' + (status.dshReady ? 'online' : 'offline');
+    connection.textContent = `${agentLabel} ${agent.ready ? '已连接' : '未连接'}`;
+    connection.className = 'status-badge ' + (agent.ready ? 'online' : 'offline');
   }
-  const dsh = document.getElementById('metricDsh');
-  if (dsh) {
-    dsh.textContent = status.dshReady ? '已连接' : '未连接';
-    dsh.className = status.dshReady ? 'ok' : 'err';
+  const agentEl = document.getElementById('metricAgent');
+  if (agentEl) {
+    agentEl.textContent = agentLabel;
+    agentEl.classList.toggle('err', !agent.ready);
   }
-  const dshHint = document.getElementById('metricDshHint');
-  if (dshHint) dshHint.textContent = status.dshReady ? '桥接状态已同步' : '请检查 DSH 是否运行';
-  renderSnowlumaHealth(status.snowluma);
+  const agentHint = document.getElementById('metricAgentHint');
+  if (agentHint) agentHint.textContent = connectModeText(agent) + ' · ' + (agent.ready ? '已连接' : '未连接');
+  const platformEl = document.getElementById('metricPlatform');
+  if (platformEl) platformEl.textContent = status.platform ? platformLabel(status.platform, 'user') : '—';
+  renderUpstreamHealth(status.snowluma);
   const mode = document.getElementById('metricMode');
   if (mode) mode.textContent = modeLabel.replace('模式', '');
   const role = document.getElementById('metricRole');
@@ -146,15 +151,13 @@ function updateOverview(status, modeLabel) {
 function setConnectionError(error) {
   const status = document.getElementById('statusText');
   if (status) status.className = 'status-badge offline';
-  const dsh = document.getElementById('metricDsh');
-  if (dsh) { dsh.textContent = '连接中断'; dsh.className = 'err'; }
-  const dshHint = document.getElementById('metricDshHint');
-  if (dshHint) dshHint.textContent = '当前状态可能已过期';
-  // 上游健康也一起过期：桥接都联系不上时，别让上一次的 SnowLuma 结论继续挂着。
-  const snow = document.getElementById('metricSnowluma');
-  if (snow) { snow.textContent = '未知'; snow.className = ''; }
-  const snowHint = document.getElementById('metricSnowlumaHint');
-  if (snowHint) snowHint.textContent = '当前状态可能已过期';
+  const agent = document.getElementById('metricAgent');
+  if (agent) { agent.textContent = '连接中断'; agent.classList.add('err'); }
+  const agentHint = document.getElementById('metricAgentHint');
+  if (agentHint) agentHint.textContent = '当前状态可能已过期';
+  // 上游健康也一起过期：桥接都联系不上时，别让上一次的结论继续挂着。
+  const upstream = document.getElementById('metricUpstream');
+  if (upstream) { upstream.textContent = '当前状态可能已过期'; upstream.className = ''; }
   const warn = document.getElementById('snowlumaWarn');
   if (warn) warn.hidden = true;
   const alert = document.getElementById('connectionAlert');

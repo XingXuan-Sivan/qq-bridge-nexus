@@ -1,6 +1,6 @@
 # 执行体通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**实施中**——P0 的连接层下沉已落地（§4.1），P0 剩余的 ACP `events` 与 TCK（§4.2）以及 P1 起各批未做。
+> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）；P1 起各批未做。
 > 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
 > 也是「可换执行体」在运行时第一次成立的地方。
 > 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
@@ -159,27 +159,30 @@ export function createRuntime({ config, log, onBaseUrlChange }) {
 
 - **fail-closed 在装配期**：`RUNTIME_MEMBERS` 缺任一成员，或未声明 `id` / `label` / `mode`，`agentRuntime()` 直接抛错：
   不允许「少一个方法先跑起来」，也不允许内核按 `undefined` 分支猜行为。
-- **ACP 的缺口只剩 `events`**：`stdio` 子进程没有地址、没有凭据猜测、没有重识别，这些差异都在 ACP 自己的
-  `createRuntime` 里；`events()` 尚未实现，因此它仍不能当主平台，报错从「缺 14 个成员」变成「缺少 events」。
+- **ACP 的差异只有形态**：`stdio` 子进程没有地址、没有凭据猜测、没有重识别，这些都由 ACP 自己的 `createRuntime`
+  返回同样的成员名；`events()` 由子进程 stdout 自建事件面（`onEvent` → 异步 `mux`），不继承任何 HTTP 客户端。
 - **DSH 专有符号不出 `adapters/dsh/`**：地址发现（`endpoint.mjs`）、Cookie 与客户端（`client.mjs`）、
   探活重识别（`probe.mjs`）、401 诊断与限频（`auth-hint.mjs`）、失败分类（`health.mjs`）都在该目录内，
   内核只认成员名。
 
 ### 4.2 一致性测试包（TCK）
 
-P0 剩余项，依赖 §4.4 的事件面归一。新增 `scripts/test-agent-port-tck.mjs`，对每个已注册 Agent 平台跑同一组离线用例：
+`scripts/test-agent-port-tck.mjs`（`npm run test:tck`）对每个已注册 Agent 平台跑同一组离线用例。
+它测的是**跨平台契约**，不是某家的实现细节：
 
 | 用例 | 断言 |
 | --- | --- |
-| 能力自证 | `describe().capabilities` 里每一项，port 上都有对应方法；缺则报 `capability_overclaimed` |
-| 能力函数形态 | `capabilities` 为函数时，`declaredNow()` 每次现算、不缓存 |
-| fail-closed | 未声明的能力被调用 → `AgentCapabilityError('capability_unsupported')`，不是 undefined 崩溃 |
-| 会话引用 | `ensureSession` 只接受 `{ instance, sessionId }`，不接受裸平台 id |
-| 事件归一 | 事件 kind 落在 `AGENT_EVENT_KINDS` 内 |
-| 连接生命周期 | `createRuntime` 不连（懒）→ `probe` 后 `port` 可用 → `close` 后 `port` 报错 |
-| 权限只读不改 | `readPermission` 调用前后，`applyPermission` 的调用计数为 0 |
+| 事件 kind 契约 | 两家翻译出的每个 `kind` 都落在 `AGENT_EVENT_KINDS` 内，且事件带 `sessionId` |
+| 收集器同源 | 同一串中立事件喂进 `src/agent-side/collector.mjs`，收出同一份文本与结束原因 |
+| 回合分组 | 两个会话的回合交错到达，各自收口，不串文本 |
+| 无回合号的事件 | 只有 `turn-start` / `turn-end` 带编号时，文本仍归到该会话唯一打开的回合；多个在途则丢弃而不是猜 |
+| 孤儿事件 | 没有 `turn-start` 的文本不建收集器、不产生回复 |
+| 审批引用 | `respondPermission` 只接受 `{ instance, sessionId, requestId }`；平台键只在适配器挂起表里 |
+| 快照隔离 | 会话开场快照走独立 `kind: 'snapshot'`，`records` 里的历史 `turn-start` / `turn-end` 不会被当成新回合 |
+| 连接层成员 | 两家 `createRuntime()` 给出 `RUNTIME_MEMBERS` 全集与 `id` / `label` / `mode` |
 
 ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台同样要过。
+能力自证与 fail-closed 的实时校验留在各自的 port 单测（`test-agent-port.mjs` / `test-acp-port.mjs`）。
 
 ### 4.3 Agent 侧插件化
 
@@ -195,11 +198,12 @@ ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台
 | 安全边界 | 插件**不能自证能力**：`capabilities` 先跑 TCK 再进注册表；权限决策权只在内核；`readPermission` 用于发现漂移 |
 | 诊断 | `capability_overclaimed` / `agent_provider_invalid` / `agent_instance_offline` |
 
-### 4.4 事件面 / 审批引用 / 用量账本三处归一（P0 剩余）
+### 4.4 事件面 / 审批引用 / 用量账本三处归一
 
-P0 的两项遗留（ACP 当主平台、TCK）卡在同一处：`events()` 还不是中立面。现状证据都在 `src/bridge.js` 里：
+P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` 必须是中立面。
+下面三处是内核里仅剩平台形状的地方：
 
-| 位置 | 依赖 | 后果 |
+| 位置 | 归一前的依赖 | 为什么必须归一 |
 | --- | --- | --- |
 | `pumpMux()`（约 17667 起，700 余行） | `frame.type` 取 `session/snapshot` / `session/event` / `question/requested` / `approval/requested`；`frame.event.type` 取 `turn/start` / `tool/call` / `tool/result` | 换执行体 = 重写这 700 行；ACP 的归一事件在这套判别值上一格都对不上 |
 | `recordSessionUsage()` / `recordSessionSnapshot()` / `rebuildInFlightCollector()` | 事件体是 DSH wire 形状（`data.usage`、`turn`、`assistant/message`）与快照的 `projections.tokenUsage` / `records` | 用量账本与「断线重建进行中回合」都绑在 DSH 上 |
@@ -207,32 +211,34 @@ P0 的两项遗留（ACP 当主平台、TCK）卡在同一处：`events()` 还�
 
 三项归一，缺一不算完成：
 
-1. **事件面**：`events().mux()` 产出 `{ sessionId, kind, ... }`，`kind` ∈ `AGENT_EVENT_KINDS`（补 `turn-start` 与 `snapshot`）。
+1. **事件面**：`events().mux()` 产出 `{ kind, sessionId, turn? }`，`kind` ∈ `AGENT_EVENT_KINDS`（含 `turn-start` 与 `snapshot`）。
    wire 形状的翻译全部在适配器内，内核不再出现 `turn/start` / `tool/call` 这类名字；历史快照与用量作为**载荷**
-   由适配器提供（`snapshot` / `usage` 字段），内核只透传给账本，不解析平台字段。
+   由适配器提供，内核只透传给账本，不解析平台字段。`snapshot` 是独立 kind，绝不混进事件流 ——
+   它含**历史** `turn-end`，混进去就会被当成新回合去发 QQ 回复。
 2. **审批引用**：`respondPermission(ref)` 归一成 `{ instance, sessionId, requestId }`；
-   DSH 的 `clientId` / `eventId`、ACP 的 `requestId` 都在适配器内部映射，内核只认中性引用。
-3. **用量账本**：`createTokenLedger.ingestEvent()` 的入参从「DSH 事件」改为中立用量记录
-   （`{ sessionId, turn, step, retry, model, provider, usage, at }`）；投影基线与 `records` 由适配器转成同一形状。
+   平台键（DSH `clientId` / `eventId`、ACP RPC `id`）只留在适配器挂起表 `Map<requestId, {...}>` 里，
+   内核与审批表只认 `requestId`。
+3. **用量账本**：`createTokenLedger.ingestSample()` 吃中立用量样本
+   （`{ sessionId, seq, turn, step, retry, model, provider, usage, at }`），`ingestBaseline()` 吃 `{ tokenUsage, asOfSeq }`；
+   重试轴由适配器按平台事件算好后随样本来，账本不认识任何平台事件名。
 
-顺序：先 1 + 3（同一张事件表上的两件事，缺 3 则账本在 ACP 下记不到数），再 2，最后 TCK。
-TCK 排在最后的原因：它的「事件归一」用例要求每家都产出 `AGENT_EVENT_KINDS`；在 DSH 事件面归一之前先写 TCK，
-只能把这条用例降级成「已知缺口」——那是一条写进合同里的假绿。
+落地位置（按依赖顺序，逐项可独立验证）：
 
-落地清单（按依赖顺序，逐项可独立验证）：
-
-1. `src/agent-side/port.mjs`：`AGENT_EVENT_KINDS` 补 `turn-start` / `snapshot`；定义中立事件形状。
-2. `src/agent-side/collector.mjs`（新增）：中立收集器（`turn-start` 开回合、`text` 追加、`turn-end` 收口），两家共用。
-3. `src/agent-side/adapters/dsh/events-plane.mjs`（新增）：wire 事件 / snapshot / `$events` 提问审批 → 中立事件；
-   DSH 的 `events()` 与 `collector()` 改用它，`client.mjs` 的 `createTurnCollector` 删除。
-4. `src/token-ledger.js`：`ingestEvent()` 改吃中立用量记录，`ingestBaseline()` 吃 `{ tokenUsage, asOfSeq }`；
-   重试轴随样本传入（不再靠 `llm/retry-started` 事件）。
+1. `src/agent-side/port.mjs`：`AGENT_EVENT_KINDS` 含 `turn-start` / `snapshot`；中立事件形状与 `normalizePermissionRef` 在这里定义。
+2. `src/agent-side/collector.mjs`：中立收集器（`turn-start` 开回合、`text` 追加、`turn-end` 收口），两家共用。
+   只有 `turn-start` 才建收集器；没有回合号的后续事件归到该会话**唯一**打开的回合（`groupKeyOf`），
+   同时开着多个回合就丢弃，宁可丢也不混进另一轮回复。
+3. `src/agent-side/adapters/dsh/events-plane.mjs`：wire 事件 / snapshot / `$events` 提问审批 → 中立事件；
+   DSH 的 `events()` 与 `collector()` 用它。
+4. `src/token-ledger.js`：`ingestSample` / `ingestBaseline` 取代吃平台事件的入口，重试轴随样本传入。
 5. `src/bridge.js`：`pumpMux` 按 `kind` 分发，`recordSessionUsage` / `recordSessionSnapshot` /
-   `rebuildInFlightCollector` / `trackTurnEvent` 改吃中立事件；删除所有 `turn/start` / `tool/call` 等判别值。
-6. `src/agent-side/port.mjs` + 两家 `port.mjs` + bridge：`respondPermission` 的引用归一成 `{ instance, sessionId, requestId }`。
-7. `src/agent-side/adapters/acp/runtime.mjs`：用 `onEvent` 建事件总线，实现 `events()` 的 `mux` / `follow` / `forget`。
-8. `scripts/test-agent-port-tck.mjs`（新增）：逐家跑能力自证 / fail-closed / 会话引用 / 事件归一 / 生命周期 / 权限只读，
-   接入 `package.json` 的 `test:tck`。
+   `rebuildInFlightCollector` / `trackTurnEvent` 吃中立事件。
+6. `src/agent-side/port.mjs` + 两家 `port.mjs` + `src/admin/approvals.js` + bridge：审批引用统一成 `requestId`。
+7. `src/agent-side/adapters/acp/runtime.mjs`：`onEvent` 建事件总线并实现 `events()` 的 `mux` / `follow` / `forget`，
+   `close()` 走 `client.stop()`；ACP 本身没有回合号，由 port 层 `beginTurn()` 给在途回合打戳并发出 `turn-start`。
+8. `scripts/test-agent-port-tck.mjs`：见 §4.2，接入 `npm run test:tck`。
+
+验证：`npm run verify:repo` 101 通过 0 失败；`npm run test:audit` 全绿；`npm run test:tck` 8/8。
 
 ---
 
@@ -493,22 +499,21 @@ POST /api/sessions/:key/permission  { preset }
 
 ### 8.6 概览与诊断
 
-概览顶部五格指标卡的语义按「执行体 / 用户平台 / 默认方案 / 会话 / 待处理」重排（现状第 1、2 格写死 DSH 与
-SnowLuma，换执行体后第一格名字就是错的；SnowLuma 是 QQ 侧上游，不该占据固定席位）：
+概览顶部五格指标卡按「执行体 / 用户平台 / 当前运行方案 / 会话 / 待处理」定义语义：前两格读 `/api/status` 的
+平台身份投影（`agent` / `platform`），标题写死的是「位置」而不是平台名，换执行体或换用户平台时格子仍成立。
 
-| 格 | 标题 | 值 | 副行 | 点击 |
-| --- | --- | --- | --- | --- |
-| 1 | 执行体 | `label`（如 DeepSeek Harness）+ 连接态 | 模式徽标（http / stdio）+ 最近探活结果 | 平台配置 › Agent 侧 |
-| 2 | 用户平台 | 在线实例数 `N / M` | 当前实例 label + 上游摘要（QQ 类平台显示 SnowLuma 的 good 与最近消息时间） | 平台配置 › 用户侧 |
-| 3 | 默认方案 | `runtime.defaultPlan` 的 label | 角色（`state/profiles/<key>.role`） | 运行方案 |
-| 4 | 已建立会话 | 会话数 | 查看会话映射 | 会话与审批 |
-| 5 | 待处理请求 | 提问 + 审批数 | 提问与工具审批 | 会话与审批 › 待处理 |
+| 格 | 标题 | 值 | 副行 |
+| --- | --- | --- | --- |
+| 1 | 执行体 | `agent.label` + 连接态（未就绪标红） | 连接方式（`http` / `stdio`）+ 连接态 |
+| 2 | 用户平台 | `platform` 的显示名 | 上游摘要（该平台上报了 `snowluma` 才有：正常 / 连不上网关 / 连着但收不到数据） |
+| 3 | 当前运行方案 | 模式名 | 角色（`state/profiles/<key>.role`） |
+| 4 | 已建立会话 | 会话数（可点） | 查看会话映射 |
+| 5 | 待处理请求 | 提问 + 审批数（可点） | 提问与工具审批 |
 
-- 第 2 格的上游摘要按平台声明面的能力位出现，不是按平台名判断：执行体换成 ACP 或用户侧换成非 QQ 平台时该行自然消失，
-  格子标题仍成立。
-- 数据仍由 `js/app.js` 的 `refreshStatus()` 统一写入，DOM 仍由 `OVERVIEW_FIELDS.metrics` 的 bare HTML 产出；
-  不新增组件、不在页面里写样式。现有按 id 写死的字号特例（`#metricMode` / `#metricSnowluma`）改为 `.metric`
-  内的通用选择器，新格子不再需要新的样式分支。
+- 数据由 `js/app.js` 的 `refresh()` 写入，DOM 由 `pages/overview/fields.js` 的 `METRICS_HTML` 产出；
+  不新增组件、不在页面里写样式。文本格用 `.metric strong.is-text` 修饰字号，新增指示格不会再需要按 id 加样式分支。
+- 第 2 格的上游摘要按平台上报的事实出现，不按平台名判断：用户侧换成没有上游健康的平台时，副行自然变成
+  「未上报」，格子标题仍成立。告警条与这行副行由同一次 `snowluma` 快照渲染，两处不会说出不同结论。
 - 新诊断码：`capability_overclaimed`、`agent_provider_invalid`、`agent_instance_offline`、
   `passthrough_degraded`、`permission_unreadable`、`permission_write_failed`、`plan_warn`。
   全部走既有 `diagnostics` 通道（`/api/platforms/registry` 携带），不新开接口。
@@ -521,7 +526,7 @@ SnowLuma，换执行体后第一格名字就是错的；SnowLuma 是 QQ 侧上�
 
 | 批 | 目标 | 主要文件 | 门禁 |
 | --- | --- | --- | --- |
-| **P0** | 执行体可换（分三段）：**P0a ✅** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` 与账本）、`scripts/test-agent-port-tck.mjs` | P0a：`verify:repo`、`test:audit`；P0c：TCK 两家全绿 |
+| **P0** ✅ | 执行体可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
 | **P1** | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + overclaim 诊断 | `src/plugins/host-api.mjs`、`src/agent-side/runtime-registry.mjs`、`PLUGIN_KERNEL.md` | TCK + `test:audit` |
 | **P2** | 配置 v3：`platforms.agents.<id>` 多实例、`runtime.defaultAgent`、agent 侧 probe/config 端点 | `src/config/platforms.mjs`、`scripts/*router*`（`/api/platforms/registry` 写口）、`guides/CONFIGURATION.md` | `verify:repo`、`test:console-ui` |
 | **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |

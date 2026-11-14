@@ -371,7 +371,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     voiceCfg, voiceLibrary, resolveVoicePathForV2, resolveVoicePathForOperator,
     voiceBudgetCheck, sendVoiceV2, sendVoiceForV2, assertOutboundAuditOk,
     setMode(value) { currentMode = value; },
-    setReady(value) { dshReady = value; },
+    setReady(value) { agentReady = value; },
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
   };

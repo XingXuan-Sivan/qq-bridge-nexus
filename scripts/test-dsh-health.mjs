@@ -65,8 +65,9 @@ test('桥接接线：健康度与探活都取自连接层，桥接只拿结果�
   assert.match(src, /const agentHealth = agentRuntime\(\)\.health\(\{ threshold: 2 \}\);/);
   assert.match(src, /const agentProbe = agentRuntime\(\)\.probe\(\);/);
   assert.match(fn, /const r = await agentProbe\.check\(\);/);
-  assert.match(fn, /连续 \$\{v\.failures\} 次探活失败，原因：\$\{v\.reason\.label\}/);
-  assert.match(fn, /DSH 探活偶发失败 \$\{rec\.recoveredFrom\} 次/);
+  assert.match(fn, /不可用（连续 \$\{v\.failures\} 次探活失败，原因：\$\{v\.reason\.label\}/);
+  // 日志里的主体名跟着当前执行体走，不写死任何一个平台的简称。
+  assert.match(fn, /\$\{agentRuntime\(\)\.label\} 探活偶发失败 \$\{rec\.recoveredFrom\} 次/);
   assert.ok(!fn.includes("log('⚠️ DSH 不可用（重启中？）"), '不再失败一次就报不可用');
   assert.ok(!/createAgentHealth|createDshProbe|dshBaseUrlAuto|resolveAgentBaseUrl/.test(src),
     '桥接不再自己拼装健康度、地址重识别与提示限频：这些都归连接层');

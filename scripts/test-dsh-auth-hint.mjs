@@ -82,8 +82,8 @@ test('⑤ 接线：诊断与限频归连接层，桥接不直连提示模块', (
   const fail = bridge.indexOf('const v = agentHealth.fail(lastErr);');
   assert.ok(fail > 0);
   const after = bridge.slice(fail, fail + 400);
-  // 提示不能放在 `if (dshReady && v.unavailable)` 里面：启动时就 401 的情况 dshReady 从来不是 true
-  assert.ok(after.indexOf('agentRuntime().authHint(lastErr)') < after.indexOf('if (dshReady && v.unavailable)'));
+  // 提示不能放在 `if (agentReady && v.unavailable)` 里面：启动时就 401 的情况 agentReady 从来不是 true
+  assert.ok(after.indexOf('agentRuntime().authHint(lastErr)') < after.indexOf('if (agentReady && v.unavailable)'));
   assert.match(after, /if \(hint\) log\(hint\);/);
   assert.match(bridge, /if \(ok\) \{\n\s+agentRuntime\(\)\.resetAuthHint\(\);/);
   assert.match(bridge, /agentRuntime\(\)\.authRecentlyFailed\(\)/);

@@ -284,7 +284,7 @@ async function cmdStatus() {
   }
   try {
     const st = await bridgeApi('/api/status');
-    console.log(`✅ 桥接在线：mode=${st.mode ?? '?'} role=${st.role ?? '?'} dshReady=${st.dshReady ?? '?'} paused=${st.socialV2Paused ?? '?'}`);
+    console.log(`✅ 桥接在线：mode=${st.mode ?? '?'} role=${st.role ?? '?'} agent=${st.agent?.label ?? '?'}(${st.agent?.ready ? '已连接' : '未连接'}) paused=${st.socialV2Paused ?? '?'}`);
   } catch (error) {
     console.log(`⚠️ 桥接不可达（http://127.0.0.1:${consolePort}）：${error?.message ?? error}`);
     console.log('   → 发送语音需要桥接在线（它负责白名单/限流/审计）。应急可用 --direct 直连网关（无闸门）。');

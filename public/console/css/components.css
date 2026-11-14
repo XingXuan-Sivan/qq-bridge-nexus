@@ -1002,11 +1002,8 @@ tr:last-child td {
   .metric strong {
     font-size:23px
   }
-  #metricMode {
-    font-size:18px
-  }
-  #metricSnowluma {
-    font-size:16px
+  .metric strong.is-text {
+    font-size:17px
   }
   .card {
     padding:22px
@@ -1131,11 +1128,8 @@ tr:last-child td {
     font-size:24px;
     margin:5px 0 2px
   }
-  #metricMode {
-    font-size:20px
-  }
-  #metricSnowluma {
-    font-size:17px
+  .metric strong.is-text {
+    font-size:18px
   }
   .metric small {
     font-size:10px

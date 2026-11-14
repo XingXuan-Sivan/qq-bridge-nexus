@@ -480,11 +480,11 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   地址发现与 401 诊断限频都在 `adapters/dsh/` 内，`client.setBaseUrl` 只在适配器里调用，新地址经
   `onBaseUrlChange` 交给调用方决定是否落盘。
 - **ACP 连接层建立**：`adapters/acp/runtime.mjs` 按 `command` / `args` / `cwd` spawn 子进程、懒建客户端与 port、
-  按归一事件收成一轮，没有地址与凭据猜测。它**仍不能当主平台**，缺口从「协议面缺 14 个成员」缩到「没有 `events()`」。
+  按归一事件收成一轮，没有地址与凭据猜测。它唯一缺的成员是 `events()`，已在本批 P0c 补齐（见下一小节）。
 - **调用方迁移**：`src/self-test.js`、`src/launcher/control-center.mjs` 改走 `agentRuntime()`；
   `src/bridge-extensions.js` 删掉两组 DSH 直导出（仓内已无消费者）；`scripts/audit-bridge-harness.mjs` 夹具
   改为注入连接层离线桩 + 真 `AgentPort`，不再注入旧符号。
-- **测试**：连接层契约用例新增（成员齐备、单例与 reset、ACP 只缺 `events` 因此 fail-closed）；
+- **测试**：连接层契约用例新增（成员齐备、单例与 reset、成员不齐即 fail-closed）；
   `test-dsh-{health,auth-hint,endpoint}`、`test-upstream-dsh-probe`、`test-platform-adapters`、`test-agent-port`、
   `verify-adaptation` 的断言同步到新契约（`bridge` 里不再出现 `createAgentHealth` / `createDshProbe` / `resolveAgentBaseUrl`）。
 - **门禁**：`verify:repo` 81 通过 0 失败；`test:audit` 128/129（唯一失败是本地未纳入版本管理的
@@ -493,6 +493,53 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   §4.4 拆出剩余的「事件面 / 审批引用 / 用量账本」三处归一并把 P0 分成 P0a/P0b/P0c、§8.6 给出概览指标卡的目标语义；
   `PLATFORM_UNIFICATION.md` §4.3/§4.4 与 ACP 接线段、删除清单表的「门面保留」改为已删除；
   `PROFILES_MODEL.md`、`guides/TESTING.md` 同步。
+
+### 重构：事件面 / 审批引用 / 用量账本三处归一（P0b）
+- **事件面下沉**：`events().mux()` 改为产出中立事件 `{ kind, sessionId, turn? }`，`kind` ∈ `AGENT_EVENT_KINDS`
+  （新增 `turn-start` / `snapshot`）。新增 `src/agent-side/adapters/dsh/events-plane.mjs` 承担 wire → 中立翻译
+  （`session/event`、`session/snapshot`、`$events` 的提问与审批），bridge 的 `pumpMux` 按 `kind` 分发，
+  内核不再出现 `turn/start` / `tool/call` 这类判别值。`snapshot` 是**独立 kind**，绝不混进事件流：
+  它含历史 `turn-end`，混进去就会被当成新回合去发 QQ 回复。
+- **收集器共用**：新增 `src/agent-side/collector.mjs`（`turn-start` 开回合、`text` 追加、`turn-end` 收口），
+  DSH/ACP 不再各自维护一份；`adapters/dsh/client.mjs` 的 `createTurnCollector` 删除。只有 `turn-start` 建收集器；
+  没有回合号的后续事件归到该会话**唯一**打开的回合（`groupKeyOf`），多个在途则丢弃——宁可丢也不混进另一轮回复。
+- **用量账本中立化**：`createTokenLedger.ingestEvent()` → `ingestSample()`（吃
+  `{ sessionId, seq, turn, step, retry, model, provider, usage, at }`），`ingestBaseline()` 吃 `{ tokenUsage, asOfSeq }`；
+  重试轴由适配器按平台事件算好随样本来，账本与 `usageOfEvent` / `usageFromStream` 一并删除。
+- **审批引用归一**：`respondPermission` 只收 `{ instance, sessionId, requestId }`；
+  平台键（DSH `clientId` + `eventId`、ACP JSON-RPC `id`）只在适配器挂起表 `Map<requestId, {...}>` 里，
+  `src/admin/approvals.js`、审批回执与 `/api/sessions` 透出全部改用 `requestId`。新增 `normalizePermissionRef`
+  负责缺字段与跨会话不一致的 fail-closed 报错。
+
+### 重构：ACP 当主平台 + 一致性测试包（P0c）
+- **ACP 事件流出口**：`adapters/acp/runtime.mjs` 新增 `createEventPlane()`（`onEvent` → queue + wake 的异步 generator），
+  实现 `events()` 的 `mux` / `follow` / `forget`，abort 监听在循环外注册、finally 解绑；`close()` 改走 `client.stop()`。
+  ACP 自身没有回合号，由 port 层 `beginTurn()` / `activeTurns` / `turnCounters` 给在途回合打戳并发出 `turn-start`，
+  `emitTurnEnd` 带显式回合号并在同号时清理。至此两家的 `RUNTIME_MEMBERS` 均齐备，ACP 可以配成 `platforms.active.agent`。
+- **TCK**：新增 `scripts/test-agent-port-tck.mjs`（`npm run test:tck`，同时接入 `test:agents`），8 条跨平台契约：
+  事件 kind 集合、收集器同源、回合分组交错不混、无回合号按会话累加、孤儿事件不建回复、审批引用、
+  快照独立 kind、连接层成员齐备。它直接抓出了 ACP 文本不带回合号的问题，修法是把「唯一在途回合回退」写进收集器
+  而不是在测试里手工打戳。
+- **门禁**：`verify:repo` 101 通过 0 失败；`test:audit` 全绿；`test-agent-port` 30/30、`test-acp-port` 14/14、
+  `test:tck` 8/8。顺带修了两条与本次无关的脆弱断言：「内置方案六条」不再把用户克隆到同一目录的方案算进去，
+  `test-sticker-describe` 的源码断言不再钉变量名。
+- **文档**：`EXECUTION_BODY_GENERALIZATION.md` 状态改为 P0 全部落地，§4.1.1 的 ACP 缺口改为「差异只有形态」、
+  §4.2 改为实际 TCK 用例、§4.4 改为落地位置与三条归一口径；`PLATFORM_UNIFICATION.md` §4.3/§4.4 与 ACP 接线段、
+  §9.2 后的「仍不能当主平台」全部按事实改写。
+
+### 重构：概览指标卡按「执行体 / 用户平台」定义（P0d）
+- **`/api/status` 给中性投影**：`dshReady` 换成 `agent: { id, label, mode, ready }`（由 `agentStatusSummary()`
+  从连接层取），并补上 `platform`（当前用户平台 id）。连接层装配失败时这两个字段退化为空 + `ready:false`，
+  状态端点不会整页 500。
+- **五格指标改按位置命名**：执行体 / 用户平台 / 当前运行方案 / 已建立会话 / 待处理请求。前两格读状态投影，
+  标题写死的是「位置」而不是平台名；SnowLuma 上游健康从独立卡片收进「用户平台」格副行，与「访问与安全」
+  的告警条由同一份快照渲染（`renderUpstreamHealth`），两处不会说出不同结论。
+- **样式去特例**：删揉掉按格子 id 写死的字号（`#metricMode` / `#metricSnowluma` 三处媒体查询），改为
+  `.metric strong.is-text` 文本格修饰；新增指示格不再需要新的样式分支。
+- **日志与提示跟着执行体自报的 label 走**（就绪 / 探活偶发失败 / 不可用入队），控制中心与 `send-voice`
+  改读 `agent.ready`，`docs/DSH_DEPLOYMENT.md` 的验证命令同步。
+- **门禁**：`verify:repo` 101 通过 0 失败；`test:audit` 全绿（含同步重写的 `test-dsh-health`、
+  `test-snowluma-upstream-health` 两条断言）；`test-console-static` / `test-console-ui` 通过。
 
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删

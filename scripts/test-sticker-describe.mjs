@@ -180,7 +180,7 @@ test('③ 闸门：agent token 拒绝；agent 模式 / 不能看图 / DSH 未就
 
     h.setReady(false);
     const notReady = await call(port, '/api/stickers/describe', { method: 'POST', body: {} });
-    assert.match(notReady.json.error, /DSH 还没就绪/);
+    assert.match(notReady.json.error, /还没就绪/);
     h.setReady(true);
     assert.equal(h.calls.prompts.length, 0, '一次都没发给模型');
   });

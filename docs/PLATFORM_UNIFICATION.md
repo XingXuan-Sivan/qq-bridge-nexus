@@ -185,12 +185,11 @@ public/console/components/platform-panel/ （C7 已删，内容拆入平台页�
 
 五项已清零：`src/agent-side/agent-client.mjs` 在 C6.5 删除。它原来承担的两件事各有了归口——「怎么连上平台」
 （客户端、地址发现、凭据、探活分类）进 `src/agent-side/adapters/<id>/runtime.mjs` 的 `createRuntime`，
-装配期守卫进 `src/agent-side/runtime.mjs` 的 `RUNTIME_MEMBERS`（缺成员 fail-closed，守卫没丢）。ACP 仍不能
-当主平台，但缺口从「协议面缺 14 个成员」缩到「没有 `events()`」。
+装配期守卫进 `src/agent-side/runtime.mjs` 的 `RUNTIME_MEMBERS`（缺成员 fail-closed，守卫没丢）。ACP 的成员表现已齐备，可当主平台。
 
 > C6.5 的落地方案见 **[EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md)** §4：
 > 连接层下沉为适配器契约 `createRuntime({config,log,onBaseUrlChange})`，成员表与 fail-closed 口径见 §4.1.1；
-> `REQUIRED_PROTOCOL_MEMBERS` 已随门面删除，注册门槛将改为 `scripts/test-agent-port-tck.mjs`（P0 剩余项）。
+> `REQUIRED_PROTOCOL_MEMBERS` 已随门面删除，注册门槛改由 `scripts/test-agent-port-tck.mjs` 承担（`npm run test:tck`）。
 
 ### 4.5 声明面字段（C2b 落地）
 
@@ -592,11 +591,11 @@ acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `com
 懒建客户端与 port，按归一事件收成一轮）。它声明 `mode: 'stdio'`，没有地址发现与凭据猜测——这些差异
 不再需要内核假设。因此：
 
-- `builtin.mjs` 注册了 acp（控制台能看见它的能力位与配置表），但**仍不能把它配成 `platforms.active.agent`**；
-- 拒绝发生在 `agentRuntime()` 的成员表校验上，错误明确为「缺少 events」，而不是让 bridge 撞上
+- `builtin.mjs` 注册了 acp（控制台能看见它的能力位与配置表），可以配成 `platforms.active.agent`；
+- 成员不齐时拒绝发生在 `agentRuntime()` 的成员表校验上，错误明确指出缺哪一项，而不是让 bridge 撞上
   `AgentApiClient is not a constructor`；
-- 剩下要做的两件事：给 ACP 补 `events()`（把 `onEvent` 归一后接进事件管线）、把 ACP 纳入
-  `scripts/test-agent-port-tck.mjs`（P0 剩余项）。两者都不改变本批已交付的契约。
+- `events()` 由子进程 stdout 自建（`onEvent` → 异步 `mux`），`turn-start` 由 port 层为在途回合打戳；
+  同一套契约由 `scripts/test-agent-port-tck.mjs` 对两家一起验。
 
 **测试**
 

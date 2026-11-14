@@ -2,10 +2,13 @@
 // 动态部分（模型目录等）仍由 page.js 渲染；活动日志已移到「调试与运维」首张卡。
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
+// 五格指标：「执行体 / 用户平台 / 默认方案 / 会话 / 待处理」。
+// 前两格读状态投影里的平台身份与上游健康，标题写死的是「位置」而不是某个平台名——
+// 换执行体或换用户平台时格子仍成立。`.is-text` 是文本格的字号修饰（数值格保持大字号）。
 const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
-  <div class="metric"><span>DSH 连接</span><strong id="metricDsh">连接中</strong><small id="metricDshHint">等待服务响应</small></div>
-  <div class="metric"><span>SnowLuma 上游</span><strong id="metricSnowluma">读取中</strong><small id="metricSnowlumaHint">等待网关健康上报</small></div>
-  <div class="metric"><span>当前运行方案</span><strong id="metricMode">—</strong><small id="metricRole">正在读取角色</small></div>
+  <div class="metric"><span>执行体</span><strong id="metricAgent" class="is-text">读取中</strong><small id="metricAgentHint">等待连接层响应</small></div>
+  <div class="metric"><span>用户平台</span><strong id="metricPlatform" class="is-text">读取中</strong><small id="metricUpstream">等待上游健康上报</small></div>
+  <div class="metric"><span>当前运行方案</span><strong id="metricMode" class="is-text">—</strong><small id="metricRole">正在读取角色</small></div>
   <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
   <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
 </div>`;

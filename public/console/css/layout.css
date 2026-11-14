@@ -321,9 +321,8 @@ button.metric {
   float:right;
   color:var(--accent)
 }
-#metricMode {
-  font-size:22px
-}
-#metricSnowluma {
+/* 文本格（平台名 / 方案名）：比数值格小一号，长名字才放得下。
+   只按内容形态给修饰，不按格子 id 写特例 —— 新增指标格不需要再加样式分支。 */
+.metric strong.is-text {
   font-size:19px
 }

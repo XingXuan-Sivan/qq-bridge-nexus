@@ -411,18 +411,18 @@ node scripts/admin-totp-setup.mjs --verify <验证器上显示的6位数>
 ```powershell
 # Windows
 $token = Get-Content .\state\console-token
-Invoke-RestMethod -Uri "http://127.0.0.1:3100/api/status" -Headers @{ "x-console-token" = $token } | Select-Object mode, level, dshReady
+Invoke-RestMethod -Uri "http://127.0.0.1:3100/api/status" -Headers @{ "x-console-token" = $token } | Select-Object mode, level, agent
 Invoke-RestMethod -Uri "http://127.0.0.1:3100/api/admin/status" -Headers @{ "x-console-token" = $token } | Select-Object -ExpandProperty text
 ```
 
 ```bash
 # macOS
 T=$(cat state/console-token)
-curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/status | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['mode'],d['level'],d['dshReady'])"
+curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/status | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['mode'],d['level'],d['agent'])"
 curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/admin/status | python3 -c "import json,sys;print(json.load(sys.stdin)['text'])"
 ```
 
-预期：`mode = reserved2`、`level = L0`、`dshReady = True`；admin status 文本里有「TOTP：已配置/未配置」「人物库：N 人」，
+预期：`mode = reserved2`、`level = L0`、`agent.ready = True`（`agent.label` 是当前执行体的显示名）；admin status 文本里有「TOTP：已配置/未配置」「人物库：N 人」，
 `auditChain.ok = True`。桥接控制台：控制中心「桥接」卡片里点「打开桥接控制台 ↗」（自动带令牌）。
 
 ## 12. 功能验证（在真实 QQ 环境，由用户配合）

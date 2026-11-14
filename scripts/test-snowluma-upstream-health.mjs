@@ -176,7 +176,9 @@ test('/api/status 暴露 snowluma 健康快照，且只给操作者', () => {
 
 test('控制台有对应的告警条与卡片', () => {
   assert.match(consoleHtml, /snowlumaWarn/, '控制台应有 SnowLuma 告警条');
-  assert.match(consoleHtml, /renderSnowlumaHealth\(/, '告警条必须被接线到 /api/status 的渲染路径');
+  assert.match(consoleHtml, /renderUpstreamHealth\(/, '告警条必须被接线到 /api/status 的渲染路径');
+  // 指标卡上游格与告警条同源：一次 status 渲染同时喂两处，省得各写一份判断。
+  assert.match(consoleHtml, /metricUpstream/, '运行总览的「用户平台」格要带上游健康副行');
   assert.match(consoleHtml, /\[Hook\]/, '告警文案必须把排查方向指向 SnowLuma 的 [Hook] 日志');
 });
 

@@ -837,7 +837,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/status': {
             const allowed = state.access.passive.entries;
             const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
-            return json({ ok: true, dshReady: true, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
+            return json({ ok: true, agent: { id: 'dsh', label: 'DeepSeek Harness', mode: 'http', ready: true }, platform: 'qq', planLabel: '聊天', snowluma: { connected: true, good: true, lastPacketAgoMs: 12000 }, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
           }
           case '/api/behaviors/kinds': return json({ ok: true, kinds: listKinds() });
           case '/api/runtime/capabilities': return json({

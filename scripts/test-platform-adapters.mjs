@@ -55,9 +55,11 @@ test('内置用户平台已注册，且描述里没有平台实现细节', () =>
   assert.ok(qq.capabilities.includes('forward'));
   // 描述里只允许静态元数据：任何函数都说明实现泄漏进了控制台可见的部分。
   // limits 自 B7 起也在这里（控制台按它画表单，不再自己写死 4000）；
-  // inbound 自 C3 起也是布尔值（有没有 connect()，函数本身不出口）。
-  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'inbound', 'label', 'limits']);
+  // inbound 自 C3 起也是布尔值（有没有 connect()，函数本身不出口）；
+  // rawEvent 是正文契约：声明了才有业务体入口（见 src/user-side/inbound.mjs 的 deliver 契约）。
+  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'inbound', 'label', 'limits', 'rawEvent']);
   assert.equal(typeof qq.inbound, 'boolean');
+  assert.equal(qq.rawEvent, true, 'QQ 的业务体吃 OneBot 报文：rawEvent 必须是静态布尔');
   assert.equal(qq.limits.chunkChars, 4000);
 });
 

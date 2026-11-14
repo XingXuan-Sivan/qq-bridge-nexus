@@ -580,6 +580,36 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   非法 id、切默认补空壳、`configured` 与 `active_pending_restart`、探活入快照、写口与诊断同一套校验）；
   `test-console-ui` 新增可写/探活/设为默认三条用例，`console-ui-contracts.json` 按新写口重录（只新增 3 条）。
 
+### 重构：多入站实例与用户侧配置写口（P3）
+- **一条条目一个实例**：`platforms.users.<id>` 现在是**可装配的东西**——`userInstances()` 把表摊成清单，
+  桥接启动时按清单逐条装管线，来源地址、准入与会话映射都按该实例的 `platform + account` 算 key。
+  以前只有「当前平台」一条管线，第二条平台的消息无处可去。
+- **`enabled` 是条目级开关**：`normalizeUserEntry` 恒把它归成布尔（缺省即启用），不进 `transport` / `options`
+  —— 否则适配器会收到一个与它无关的键。停用的实例装配时直接跳过并入站结论 `disabled`；
+  翻这个开关不参与 schema 校验：配置本身不合规时，停用它恰恰是最该做的事。
+- **正文契约 `rawEvent`**：`describePlatform()` 与注册表条目新增静态布尔，只有声明了它的平台才把 `ext.raw`
+  交给业务体，没声明的由管线按 `body_unsupported` 丢弃并写明原因。对应的 `createInboundPipeline({ deliver })`
+  允许 `deliver` 返回 `{ reason, errors }` 拒绝一条事件。
+- **用户侧写口**：`PATCH /api/platforms/registry/{agent,user}/:id/config` 两侧共用一套路径文法；
+  `enabled` 从补丁里剥出来单独落盘，其余字段合并后照旧校 schema。用户侧没有主动探活，
+  `probe` 固定 400（连接结论只看注册表的 `inboundState`）；`requiresRestart` 按「该实例是否已装配」算。
+- **默认实例**：`/api/config/runtime` 增 `defaultUser`（读的就是 `platforms.active.user`，不另存一份），
+  切换只改指针并回 `requiresRestart`，审计记 `runtime.defaultUser`；响应里 `runningUser` 与它并列返回。
+- **注册表三个读视图**：条目新增 `enabled` / `inboundState` / `outbound` 与 `rawEvent`。`outbound` 按与
+  `src/user-side/outbound.mjs` 相同的顺序解析（插件 transport 优先，其次内置适配器），写明
+  `via: transport|adapter|none` 与 `owner`；`inboundState` 是桥接记的装配结论，没装配过为 `null`。
+  只在配置里存在的条目（`config-only`）同样列出并报 `config_only`（warn）——否则那条实例无处可改。
+- **`entry.config` 剥掉 `enabled`**：控制台拿它与补丁合并后校严格 schema，多一个平台不认识的键会拒掉整次保存；
+  条目开关只从 `entry.enabled` 读。
+- **控制台**：用户侧配置改为可写表单（与 Agent 侧同一组件），首位一枚条目开关；实例卡新增「设为默认实例」；
+  概览把「条目开关 / 入站结论 / 出站实现」三件事分开写；清单里停用的实例一枚「已停用」，
+  入站有结论时一枚状态徽标（停用不再叠同名徽标）。
+- **门禁**：新增 `scripts/test-user-instances.mjs`（10 条：条目开关归位、实例清单顺序、扁平投影、按 id 写、
+  切默认补空壳、注册表三视图、插件 transport、config-only、默认指向未注册、停用不产诊断）；
+  `test-unified-inbound` 补 `deliver` 拒绝与空结果两条用例；`test-console-ui` 新增「设为默认实例」，
+  `console-ui-contracts.json` 按新写口重录（只新增 2 条）。`test-config-v2` 的期望值随 `enabled`
+  进扁平投影更新——它是条目级显式字段，与 `account` 同层；缺条目时不编造 `enabled`。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

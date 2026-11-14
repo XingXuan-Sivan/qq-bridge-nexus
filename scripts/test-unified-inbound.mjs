@@ -150,6 +150,27 @@ test('唤醒抛错：报 deliver_failed，不把异常抛给 WS 回调', async (
   assert.equal(drops.length, 1);
 });
 
+test('唤醒可以拒绝：业务体不认这个平台的正文时按该原因记丢弃', async () => {
+  const { pipeline, calls, drops } = harness({
+    // 平台没声明正文契约（rawEvent）：事件已过校验与准入，但唤醒侧没有它的入口。
+    deliver: () => ({ reason: INBOUND_DROP.BODY_UNSUPPORTED, errors: ['wx 未声明 rawEvent'] }),
+  });
+  const result = await pipeline.emit(validEvent());
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, INBOUND_DROP.BODY_UNSUPPORTED, '拒绝的原因码要原样透出，不能被归成 deliver_failed');
+  assert.deepEqual(result.errors, ['wx 未声明 rawEvent']);
+  assert.deepEqual(calls, [['admit', 'message.group'], ['resolve', '20001'], ['deliver', 'qq:group:20001']]);
+  assert.equal(drops.length, 1);
+  assert.equal(drops[0].reason, INBOUND_DROP.BODY_UNSUPPORTED);
+});
+
+test('唤醒返回空对象（普通成功）不算拒绝', async () => {
+  const { pipeline } = harness({ deliver: () => ({ messageId: '1' }) });
+  const result = await pipeline.emit(validEvent());
+  assert.equal(result.ok, true);
+});
+
 test('审计自己抛错不影响结论：事件该丢还是丢、该过还是过', async () => {
   const pipeline = createInboundPipeline({
     origin: ORIGIN,

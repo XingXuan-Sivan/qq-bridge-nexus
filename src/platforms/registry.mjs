@@ -39,6 +39,8 @@ export const DIAGNOSTIC_CODES = Object.freeze({
   ACTIVE_PENDING_RESTART: 'active_pending_restart',
   INBOUND_UNSUPPORTED: 'inbound_unsupported',
   PROFILE_ONLY: 'profile_only',
+  // `profile_only` 的镜像：配置里有这条实例，但既没有声明目录也没有运行期实现。
+  CONFIG_ONLY: 'config_only',
   PROBE_FAILED: 'probe_failed',
   ID_CONFLICT: 'id_conflict',
   // Agent 侧的三条装配结论，由 src/agent-side/runtime-registry.mjs 记账：
@@ -57,6 +59,7 @@ const DIAGNOSTIC_LEVELS = Object.freeze({
   [DIAGNOSTIC_CODES.AGENT_PROVIDER_INVALID]: 'error',
   [DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED]: 'warn',
   [DIAGNOSTIC_CODES.PROFILE_ONLY]: 'warn',
+  [DIAGNOSTIC_CODES.CONFIG_ONLY]: 'warn',
   [DIAGNOSTIC_CODES.PROBE_FAILED]: 'warn',
   [DIAGNOSTIC_CODES.AGENT_INSTANCE_OFFLINE]: 'warn',
   [DIAGNOSTIC_CODES.ACTIVE_PENDING_RESTART]: 'warn',
@@ -90,12 +93,30 @@ export function vetPlatformConfig(rawSchema, value) {
  * 合成用户侧平台。
  *
  * 顺序：配置面先出（磁盘上有什么就是什么），运行期里多出来的（插件注册、没有配置
- * 目录的平台）追加在后。这样控制台的列表在平台没启用时也不会空，且顺序稳定。
+ * 目录的平台）追加在后，最后是「只在 platforms.users 里」的条目。这样控制台的列表在
+ * 平台没启用时也不会空，且顺序稳定。
+ *
+ * 用户侧每一条 = 一个**实例**（平台 + 账号）：`enabled` / `inboundState` / `outbound`
+ * 都按条目算，于是「这条连上没有」「这条发消息会走谁」在同一个位置就能回答。
  */
-function buildUserEntries({ profilePlatforms, runtime, config }) {
+function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
   const entries = [];
   const diagnostics = [];
   const live = new Map();
+  const stateOf = (id) => inbound?.[id] ?? null;
+  const enabledOf = (id) => config?.users?.[id]?.enabled !== false;
+  // 条目开关已经单独给 `entry.enabled`，配置面（`entry.config`）只留平台选项面：
+  // 写口拿它与补丁合并后校 schema，多一个平台不认识的键会让严格 schema 拒掉整次保存。
+  const configOf = (id) => {
+    const flat = clone(config?.users?.[id] ?? {}) ?? {};
+    delete flat.enabled;
+    return flat;
+  };
+  // 出站解析与 src/user-side/outbound.mjs 同序：插件 transport 优先，其次适配器。
+  // 两者不会同 id（注册那一刻就拒绝了冲突），所以来源就等于「谁在发」。
+  const outboundOf = (impl) => (impl
+    ? { via: String(impl.source ?? '') === 'plugin' ? 'transport' : 'adapter', owner: impl.owner ?? null }
+    : { via: 'none', owner: null });
   for (const item of runtime.platforms ?? []) {
     const id = String(item?.id ?? '').trim();
     if (!id) continue;
@@ -142,12 +163,20 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
       // 配置面选的默认平台 = 重启后会装配的那个；`active` 是**本进程实际装配的**。
       // 两者不一致就是「刚改过、还没重启」，控制台据此显示这一状态。
       configured: String(config?.active?.user ?? '') === id,
+      // 条目级开关：停用的实例照样在这里列出（能改回去），但不会装配。
+      enabled: enabledOf(id),
       capabilities: [...(impl?.capabilities ?? [])],
       conversationTypes: [...(impl?.conversationTypes ?? [])],
       limits: { ...(impl?.limits ?? {}) },
       inbound: impl ? impl.inbound === true : false,
+      // 入站事件里能不能带业务体认识的报文（见 src/user-side/inbound.mjs 的 deliver 契约）。
+      rawEvent: impl?.rawEvent === true,
+      // 这条实例此刻的入站结论：`open` / `closed` / `error` / `disabled` / `send-only` /
+      // `unregistered`，null = 没装配过（进程刚起来还没走到装配那一步）。
+      inboundState: stateOf(id),
+      outbound: outboundOf(impl),
       configSchema: schema,
-      config: clone(config?.users?.[id] ?? {}),
+      config: configOf(id),
       assets: {
         prompt: {
           active: Boolean(profile?.prompt?.active),
@@ -163,6 +192,7 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
   // 运行期注册了、但没有配置目录的平台（插件 transport 的常态）。
   for (const [id, impl] of live) {
     if (seen.has(id)) continue;
+    seen.add(id);
     if (impl.inbound !== true) {
       diagnostics.push(diagnostic(
         DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED,
@@ -180,12 +210,49 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
       owner: impl.owner ?? null,
       active: String(runtime.active ?? '') === id,
       configured: String(config?.active?.user ?? '') === id,
+      enabled: enabledOf(id),
       capabilities: [...(impl.capabilities ?? [])],
       conversationTypes: [...(impl.conversationTypes ?? [])],
       limits: { ...(impl.limits ?? {}) },
       inbound: impl.inbound === true,
+      rawEvent: impl.rawEvent === true,
+      inboundState: stateOf(id),
+      outbound: outboundOf(impl),
       configSchema: null,
       config: {},
+      assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
+    });
+  }
+
+  // 只在配置里存在的实例（手写 config.json、或插件卸了而条目还在）：必须仍然可见，
+  // 否则控制台既看不到它、也改不了它，而启动时它会被装配并报一句“未注册”。
+  for (const id of Object.keys(config?.users ?? {}).sort()) {
+    if (seen.has(id)) continue;
+    diagnostics.push(diagnostic(
+      DIAGNOSTIC_CODES.CONFIG_ONLY,
+      'user',
+      id,
+      '配置里有这条实例，但没有声明目录也没有运行期实现：这条不会被装配（装好它或删掉这条）',
+    ));
+    entries.push({
+      side: 'user',
+      id,
+      label: id,
+      note: '',
+      source: 'config-only',
+      owner: null,
+      active: String(runtime.active ?? '') === id,
+      configured: String(config?.active?.user ?? '') === id,
+      enabled: enabledOf(id),
+      capabilities: [],
+      conversationTypes: [],
+      limits: {},
+      inbound: false,
+      rawEvent: false,
+      inboundState: stateOf(id),
+      outbound: outboundOf(null),
+      configSchema: null,
+      config: configOf(id),
       assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
     });
   }
@@ -313,6 +380,7 @@ function summarize(entries, diagnostics) {
  * @param {{active: string, platforms: Array}} [input.userRuntime]  `userPlatformMetadata()`
  * @param {{active: string, platforms: Array}} [input.agentRuntime] `agentPlatformMetadata()`
  * @param {{users?: object, agents?: object}} [input.config]        配置面（C2 起为配置 v2 的 platforms 段）
+ * @param {object} [input.userInbound]                              各用户实例的入站结论（按实例 id 索引）
  * @param {boolean|null} [input.agentConnected]                     当前执行体的探活结论；null = 还不知道
  * @param {object} [input.agentProbes]                              各 Agent 平台最近一次显式探活的结果（按 id 索引）
  */
@@ -322,20 +390,22 @@ export function buildPlatformRegistry({
   userRuntime = { active: '', platforms: [] },
   agentRuntime = { active: '', platforms: [] },
   config = {},
+  userInbound = {},
   agentConnected = null,
   agentProbes = {},
 } = {}) {
-  const user = buildUserEntries({ profilePlatforms, runtime: userRuntime, config });
+  const user = buildUserEntries({ profilePlatforms, runtime: userRuntime, config, inbound: userInbound });
   const agent = buildAgentEntries({ profilePlatforms: profileAgentPlatforms, runtime: agentRuntime, config, probes: agentProbes });
   const entries = [...user.entries, ...agent.entries];
   const diagnostics = [...user.diagnostics, ...agent.diagnostics];
 
   // 「当前平台」指向一个谁都不认识的名字：启动时 useUserPlatform 就会抛错，
   // 但配置文件被手改时进程可能还没走到那一步，所以这里补一条能看见的错。
+  // 只有配置、没有实现的条目不算「认识」：它确实装不上，不该把这条错降成警告。
   for (const side of PLATFORM_SIDES) {
     const active = String((side === 'user' ? userRuntime : agentRuntime).active ?? '').trim();
     if (!active) continue;
-    if (entries.some((entry) => entry.side === side && entry.id === active)) continue;
+    if (entries.some((entry) => entry.side === side && entry.id === active && entry.source !== 'config-only')) continue;
     diagnostics.push(diagnostic(
       DIAGNOSTIC_CODES.ACTIVE_UNREGISTERED,
       side,
@@ -395,6 +465,7 @@ export function platformRegistrySnapshot({
   profilesRoot = PLATFORMS_ROOT,
   agentPlatformsRoot = AGENT_PLATFORMS_ROOT,
   config = {},
+  userInbound = {},
   agentConnected = null,
   agentProbes = {},
 } = {}) {
@@ -408,6 +479,7 @@ export function platformRegistrySnapshot({
     userRuntime: userPlatformMetadata(),
     agentRuntime: agentPlatformMetadata(),
     config: flatPlatforms(config),
+    userInbound,
     agentConnected,
     agentProbes,
   });

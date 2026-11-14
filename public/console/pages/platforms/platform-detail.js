@@ -6,30 +6,35 @@
 // 数据来自统一注册表的那一份快照（page.js 传进来的条目），只有需要正文的面板
 // （平台提示词、行为档案、能力预设）才各自去请求自己的接口。
 //
-// 两处有意留白，界面上写明原因而不是造数据：
-//   · 用户侧「配置」只读：连接参数由活着的传输手柄持有，热写的语义与 Agent 侧不同，
-//     这一版只给 Agent 侧开写口；
-//   · Agent 侧没有「健康」标签：探活结论显示在概览的「执行体」里（按钮 + 上次结果），
-//     不开一块和后台轮询重复展示的面板。
+// 两侧的「运行期」语义不同，界面上分开说：
+//   · 用户侧每一条条目就是一个实例（平台 + 账号），各有自己的入站管线：`enabled`
+//     决定它装配不装配，`inboundState` 是它此刻的连接结论，`outbound` 是它发消息
+//     会走的实现；`active` 只是默认实例（出站没有地址上下文时的兜底）；
+//   · Agent 侧装配的是同一个单例，`active` 就是「执行体」本身。
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { bindSwitches, inlineActions, renderFields } from '../../components/form/form.js';
+import { bindSwitches, getSwitch, inlineActions, renderFields } from '../../components/form/form.js';
 import { hasSchemaFields, readSchemaPatch, schemaFields } from '../../components/form/schema.js';
 import { mountPromptCard } from '../../components/prompt-card/prompt-card.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
-import { capabilityLabel, conversationTypeLabel, conversationTypeTone } from '../../js/registry.js';
+import { capabilityLabel, conversationTypeLabel, conversationTypeTone, inboundStateLabel, inboundStateTone, outboundViaLabel } from '../../js/registry.js';
 import { mountBehaviorsPanel } from './behaviors-panel.js';
 
 const SIDE_LABEL = { user: '用户侧', agent: 'Agent 侧' };
-const SOURCE_LABEL = { builtin: '内置', plugin: '插件', 'profile-only': '只有配置目录' };
+const SOURCE_LABEL = { builtin: '内置', plugin: '插件', 'profile-only': '只有配置目录', 'config-only': '只有配置条目' };
 const SOURCE_HINT = {
   builtin: '随桥接一起装配的平台适配器。',
   plugin: '由插件在运行期注册的平台，没有配置目录。',
   'profile-only': '磁盘上有配置目录，但运行期没装配：在这里改的配置不会生效。',
+  'config-only': '配置里有这条实例，但没有声明目录也没有实现：它不会被装配。',
 };
 const LEVEL_LABEL = { error: '错误', warn: '警告' };
 const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
+/** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
+const ENABLED_FIELD = 'platformEnabled';
+/** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
+const CONFIG_MOUNT = '<div id="platformConfigMount"></div>';
 
 let root = null; // 详情根节点（[data-split-detail]）
 let entry = null; // 当前平台条目（注册表快照里的一份）
@@ -59,23 +64,49 @@ function tagsOf(list, render) {
   return items.length ? items.join(' ') : '<span class="meta">—</span>';
 }
 
-function formatValue(value) {
-  if (value === undefined || value === null || value === '') return '（未设置）';
-  if (typeof value === 'boolean') return value ? '开' : '关';
-  if (Array.isArray(value) || typeof value === 'object') return JSON.stringify(value);
-  return String(value);
-}
-
 // ── 概览 ────────────────────────────────────────────────────────────────────
 
 /** 运行期状态：「装配的是哪个」（active）与「配置面选的是哪个」（configured）是两件事。 */
 function runtimeStateCell(item) {
-  if (item.active) return '<span class="tag tag--success">当前启用</span>';
+  if (item.active) {
+    return item.side === 'user'
+      ? '<span class="tag tag--success">默认实例</span>'
+      : '<span class="tag tag--success">当前启用</span>';
+  }
   if (item.configured) return '<span class="tag tag--warning">已设为默认，重启后生效</span>';
   const where = item.side === 'user'
-    ? '改 <code>config.json</code> 的 <code>platforms.active.user</code>'
+    ? '在下面的「实例」里设为默认'
     : '在下面的「执行体」里设为默认';
-  return `<span class="tag">未启用</span><div class="meta">${where}</div>`;
+  return `<span class="tag">非默认</span><div class="meta">${where}</div>`;
+}
+
+/** 入站结论：结论本身、它的细节，以及平台能不能把事件交给业务体。 */
+function inboundCell(item) {
+  const state = item.inboundState ?? null;
+  const tone = inboundStateTone(state?.state);
+  const tag = `<span class="tag ${tone}">${esc(inboundStateLabel(state?.state))}</span>`;
+  const detail = state?.detail ? `<div class="meta">${esc(state.detail)}</div>` : '';
+  // 正文契约：没声明 rawEvent 的平台只能进到准入与会话映射，管线会把事件按
+  // `body_unsupported` 丢弃 —— 与其让人猜「为什么收到了却没回应」，不如写出来。
+  const body = item.rawEvent
+    ? ''
+    : '<div class="meta">未声明正文契约（rawEvent）：入站事件会在唤醒前被丢弃</div>';
+  return `${tag}${detail}${body}`;
+}
+
+/** 用户侧「实例」：条目开关与设为默认都在这里（入站 / 出站事实放在「属性」表里）。 */
+function instanceHtml(item) {
+  return `
+    <section class="platform-section">
+      <h3>实例</h3>
+      <p class="meta">一条条目 = 一个实例（平台 + 账号），各有自己的入站管线。默认实例只决定
+        没有地址上下文时出站用哪个账号（<code>config.json</code> 的 <code>platforms.active.user</code>）。</p>
+      <div class="row">${runtimeStateCell(item)}${item.enabled === false ? '<span class="tag tag--warning">条目已停用</span>' : ''}</div>
+      ${inlineActions({
+    items: item.configured ? [] : [{ id: 'platformSetUserDefault', label: '设为默认实例', variant: 'primary' }],
+    status: 'platformUserMsg',
+  })}
+    </section>`;
 }
 
 /** Agent 侧「执行体」：探活与设为默认都在这里，不新开数据源（写口就是注册表那个）。 */
@@ -111,7 +142,12 @@ function overviewHtml(item) {
   ];
   if (item.owner) rows.push(['所有者', `<code>${esc(item.owner)}</code>`]);
   if (item.side === 'user') {
-    rows.push(['入站', item.inbound ? '可收可发' : '<span class="tag tag--warning">只出不进</span><div class="meta">平台没提供 connect()：入站消息不会进入准入与唤醒</div>']);
+    rows.push(['条目开关', item.enabled === false
+      ? '<span class="tag tag--warning">已停用</span><div class="meta">不会装配：这条不再收消息</div>'
+      : '<span class="tag tag--success">已启用</span>']);
+    rows.push(['入站', item.inbound ? inboundCell(item) : '<span class="tag tag--warning">只出不进</span><div class="meta">平台没提供 connect()：入站消息不会进入准入与唤醒</div>']);
+    const out = item.outbound ?? {};
+    rows.push(['出站', `${esc(outboundViaLabel(out.via))}${out.owner ? `<div class="meta">插件 ${esc(out.owner)}</div>` : ''}`]);
   }
   if ((item.conversationTypes ?? []).length) {
     rows.push(['会话类型', tagsOf(item.conversationTypes, (type) => `<span class="tag ${conversationTypeTone(type)}">${esc(conversationTypeLabel(type))}</span>`)]);
@@ -156,7 +192,7 @@ function overviewHtml(item) {
     pageSize: 20,
   })}
     </section>
-    ${item.side === 'agent' ? executorHtml(item) : ''}
+    ${item.side === 'agent' ? executorHtml(item) : instanceHtml(item)}
     <section class="platform-section">
       <h3>这个平台有什么</h3>
       <p class="meta">资产都在 ${item.side === 'user' ? 'profiles/platforms' : 'profiles/agent-platforms'}/<code>${esc(item.id)}</code> 下，改完重启桥接生效。</p>
@@ -174,42 +210,17 @@ function overviewHtml(item) {
 }
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
-function configValueCell(spec, value) {
-  const shown = value === undefined ? spec?.default : value;
-  const isArray = Array.isArray(shown);
-  const code = formatValue(shown);
-  return `<code class="${isArray ? 'platform-config-code' : ''}">${esc(code)}</code>`;
-}
-
-/** 用户侧：连接参数由活着的传输手柄持有，这一版只读。 */
-function userConfigHtml(item, where) {
-  const schema = item.configSchema;
-  const config = item.config ?? {};
-  const required = new Set(schema.required ?? []);
-  const rows = Object.entries(schema.properties).map(([key, spec]) => ({
-    cells: [
-      `<code>${esc(key)}</code>${required.has(key) ? ' <span class="tag tag--sm">必填</span>' : ''}`,
-      `<span class="meta">${esc(spec?.title || key)}</span>`,
-      configValueCell(spec, config[key]),
-      `<span class="meta">${esc(spec?.description || '')}</span>`,
-    ],
-  }));
-  return `
-    <section class="platform-section">
-      <h3>配置</h3>
-      <p class="meta">这一页只读：参数改在 ${where}，重启桥接生效。</p>
-      ${dataTableHtml({
-    columns: [{ label: '字段', width: '180px' }, { label: '名称', width: '160px' }, { label: '当前值', width: '200px' }, { label: '说明' }],
-    rows,
-    pageSize: 20,
-  })}
-    </section>`;
-}
-
+/**
+ * 两侧的配置页：字段都是 `configSchema` 生成的，保存只发给写口。
+ *
+ * 用户侧多一个「启用」开关：`enabled` 是**条目级**字段（这条实例装配不装配），不在
+ * `configSchema` 里，由页面自己渲染与读取；即使平台没声明 schema，这个开关照样能改。
+ */
 function configHtml(item) {
   const file = item.side === 'user' ? 'profiles/platforms' : 'profiles/agent-platforms';
   const where = `<code>${file}/${esc(item.id)}/${item.side === 'user' ? 'platform.yml' : 'agent-platform.yml'}</code>`;
-  if (!hasSchemaFields(item.configSchema)) {
+  const hasFields = hasSchemaFields(item.configSchema);
+  if (item.side === 'agent' && !hasFields) {
     return `
       <section class="platform-section">
         <h3>配置</h3>
@@ -217,22 +228,44 @@ function configHtml(item) {
         <p class="meta">平台参数写在 ${where}，改完重启桥接生效。</p>
       </section>`;
   }
-  if (item.side === 'user') return userConfigHtml(item, where);
+  if (!hasFields) {
+    return `
+      <section class="platform-section">
+        <h3>配置</h3>
+        <p class="meta">这个平台没有声明 <code>configSchema</code>：只能改「启用」与条目字段（账号）。</p>
+        <p class="meta">平台参数写在 ${where}，改完重启桥接生效。</p>
+        ${CONFIG_MOUNT}
+      </section>`;
+  }
   return `
     <section class="platform-section">
       <h3>配置</h3>
-      <p class="meta">表单字段就是 <code>config.json</code> 里 <code>platforms.agents.${esc(item.id)}</code> 那一份：
-        端点（地址、令牌、鉴权头）改完要重启桥接才重新连接，其余选项下一次调用就生效。
+      <p class="meta">表单字段就是 <code>config.json</code> 里 <code>platforms.${item.side === 'user' ? 'users' : 'agents'}.${esc(item.id)}</code> 那一份：
+        连接参数（地址、令牌…）改完要重启桥接才重新连接，其余选项下一次调用就生效。
         配置文件 ${where} 只声明字段，不再存值。</p>
-      <div id="platformConfigMount"></div>
+      ${CONFIG_MOUNT}
     </section>`;
 }
 
-/** 挂载 Agent 侧可写表单：字段由 configSchema 生成，保存只发给写口。 */
+/** 挂载可写表单：字段由 configSchema 生成，保存只发给写口。 */
 function mountConfig(item) {
   const host = root?.querySelector('#platformConfigMount');
   if (!host) return;
-  renderFields(host, schemaFields(item.configSchema, item.config ?? {}), { columns: 1 });
+  const fields = [];
+  if (item.side === 'user') {
+    // 停用只是「下次启动不装配它」：已经跑着的连接不会因此断开，界面上要写清楚。
+    fields.push({
+      type: 'switch',
+      name: ENABLED_FIELD,
+      label: '启用这条实例',
+      hint: '停用后重启桥接就不再装配它（不再收消息）；已在运行的连接不会即时断开。',
+      checked: item.enabled !== false,
+      onLabel: '开',
+      offLabel: '关',
+    });
+  }
+  fields.push(...schemaFields(item.configSchema, item.config ?? {}));
+  renderFields(host, fields, { columns: 1 });
   bindSwitches(host);
   // 动作条不参与取值：保存按钮与状态位跟在最后一个字段后面（与插件详情同构）。
   host.insertAdjacentHTML('beforeend', inlineActions({
@@ -329,7 +362,7 @@ function mountCapabilities() {
   void capabilityPanel.load();
 }
 
-// ── 写口（Agent 侧） ─────────────────────────────────────────────────────────
+// ── 写口（两侧共用） ───────────────────────────────────────────────────────
 
 /** 状态位文字就写在该面板的动作条里；面板已重画时什么也不做。 */
 function setStatus(id, text) {
@@ -372,7 +405,24 @@ async function setDefaultCurrent() {
   onChanged?.();
 }
 
-/** 保存配置：只发给写口，不直写 config.json。 */
+/** 设为默认用户实例：只改 `platforms.active.user`，两侧的条目都能改，不存在「探不过不放行」。 */
+async function setDefaultUserCurrent() {
+  if (!entry) return;
+  const id = entry.id;
+  setStatus('platformUserMsg', '保存中…');
+  try {
+    const r = await api('/api/config/runtime', 'POST', { defaultUser: id });
+    if (!r?.ok) throw new Error(r?.error || '未知错误');
+    setStatus('platformUserMsg', r.requiresRestart ? '已设为默认，重启桥接后装配' : '已经是默认实例');
+    showConsoleToast(`默认实例已改为 ${id}${r.requiresRestart ? '，重启桥接后生效' : ''}`);
+  } catch (error) {
+    setStatus('platformUserMsg', `设定失败：${error?.message ?? error}`);
+    return;
+  }
+  onChanged?.();
+}
+
+/** 保存配置：只发给写口，不直写 config.json。用户侧多一个条目级「启用」开关。 */
 async function saveCurrentConfig() {
   if (!entry) return;
   const host = root?.querySelector('#platformConfigMount');
@@ -383,9 +433,13 @@ async function saveCurrentConfig() {
     setStatus('platformConfigMsg', `配置不是合法 JSON：${error?.message ?? '解析失败'}`);
     return;
   }
+  if (entry.side === 'user') {
+    const el = host?.querySelector(`[data-field="${ENABLED_FIELD}"]`);
+    if (el) patch.enabled = getSwitch(el);
+  }
   setStatus('platformConfigMsg', '保存中…');
   try {
-    const r = await api(`/api/platforms/registry/agent/${encodeURIComponent(entry.id)}/config`, 'PATCH', patch);
+    const r = await api(`/api/platforms/registry/${entry.side}/${encodeURIComponent(entry.id)}/config`, 'PATCH', patch);
     if (!r?.ok) throw new Error(r?.error || '未知错误');
     setStatus('platformConfigMsg', r.requiresRestart ? '已保存，重启桥接后重连' : '已保存');
     showConsoleToast(r.requiresRestart ? '已保存，重启桥接后生效' : '平台配置已保存');
@@ -401,6 +455,7 @@ function onActionClick(event) {
   if (!(event.target instanceof Element)) return;
   if (event.target.closest('#platformProbe')) { void probeCurrent(); return; }
   if (event.target.closest('#platformSetDefault')) { void setDefaultCurrent(); return; }
+  if (event.target.closest('#platformSetUserDefault')) { void setDefaultUserCurrent(); return; }
   if (event.target.closest('#platformConfigSave')) void saveCurrentConfig();
 }
 
@@ -409,20 +464,30 @@ function shell(item) {
   const tabs = tabsOf(item);
   if (!tabs.some((t) => t.id === tab)) tab = 'overview';
   // 三态与列表徽标、概览里的「运行期」行同源：配置面已改但本进程没装配，不能显示成「未启用」。
+  const runningLabel = item.side === 'user' ? '默认实例' : '运行期';
   const stateTag = item.active
-    ? '<span class="tag tag--success">运行期</span>'
+    ? `<span class="tag tag--success">${runningLabel}</span>`
     : item.configured
       ? '<span class="tag tag--warning">待重启</span>'
-      : '<span class="tag">未启用</span>';
+      : '<span class="tag">非默认</span>';
+  // 停用是「这条不装配」，与默认实例是两回事：两个徽标可以同时出现（默认但停用）。
+  const enabledTag = item.side === 'user' && item.enabled === false
+    ? '<span class="tag tag--warning">已停用</span>'
+    : '';
   const sourceTag = `<span class="tag">${esc(SOURCE_LABEL[item.source] ?? item.source)}</span>`;
+  const headMeta = [
+    esc(SIDE_LABEL[item.side] ?? item.side),
+    esc(item.source),
+    item.active ? (item.side === 'user' ? '默认实例' : '运行期平台') : '',
+  ].filter(Boolean).join(' · ');
   return `
     <div class="platform-detail">
       <header class="platform-head">
         <div class="platform-head-main">
           <h3>${esc(item.label || item.id)} <code>${esc(item.id)}</code></h3>
-          <p class="meta">${esc(SIDE_LABEL[item.side] ?? item.side)} · ${esc(item.source)}${item.active ? ' · 运行期平台' : ''}</p>
+          <p class="meta">${headMeta}</p>
         </div>
-        <div class="row">${stateTag}${sourceTag}</div>
+        <div class="row">${stateTag}${enabledTag}${sourceTag}</div>
       </header>
       <div class="page-tabs" role="tablist">
         ${tabs.map((t) => `<button class="page-tab${t.id === tab ? ' active' : ''}" type="button" role="tab" aria-selected="${t.id === tab}" data-platform-tab="${t.id}">${esc(t.label)}</button>`).join('')}

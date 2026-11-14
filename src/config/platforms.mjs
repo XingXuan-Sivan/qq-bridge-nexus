@@ -58,7 +58,7 @@ export const AGENT_ENDPOINT_KEYS = Object.freeze([
 const PLATFORM_ID_RE = /^[a-z][a-z0-9-]{0,15}$/;
 const ACCOUNT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 /** 平台目录里每个平台自己的几个键；其余键视为「想写 transport/options 但写散了」。 */
-const ENTRY_KEYS = Object.freeze(['account', 'transport', 'options', 'endpoint']);
+const ENTRY_KEYS = Object.freeze(['account', 'enabled', 'transport', 'options', 'endpoint']);
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -111,8 +111,12 @@ function normalizeUserEntry(entry) {
     ...(isPlainObject(src.options) ? src.options : {}),
     ...looseKeys(src),
   };
+  // `enabled` 是**条目级开关**（这条实例装配不装配），不是发给平台的选项：
+  // 写进 options 里会让适配器收到一个与它无关的键。缺省即启用。
+  const wanted = src.enabled !== undefined ? src.enabled : merged.enabled;
+  delete merged.enabled;
   const { connection, options } = splitByKeys(merged, USER_TRANSPORT_KEYS);
-  return { account: accountName(src.account), transport: connection, options };
+  return { account: accountName(src.account), enabled: wanted !== false, transport: connection, options };
 }
 
 function normalizeAgentEntry(entry) {
@@ -206,7 +210,7 @@ export function readPlatforms(raw) {
   };
 }
 
-/** 当前用户侧平台的配置：`{ id, account, transport, options }`（缺条目给空段）。 */
+/** 当前用户侧平台的配置：`{ id, account, enabled, transport, options }`（缺条目给空段）。 */
 export function userPlatformConfig(platforms) {
   const id = platformId(platforms?.active?.user, DEFAULT_USER_PLATFORM);
   const entry = normalizeUserEntry(platforms?.users?.[id]);
@@ -262,8 +266,23 @@ export function flatPlatformEntry(platforms, side, id) {
     const entry = normalizeAgentEntry(platforms?.agents?.[wanted]);
     return { ...entry.endpoint, ...entry.options };
   }
-  const entry = normalizeUserEntry(platforms?.users?.[wanted]);
-  return { account: entry.account, ...entry.transport, ...entry.options };
+  const raw = platforms?.users?.[wanted];
+  const entry = normalizeUserEntry(raw);
+  // `account` / `enabled` 都是条目级字段，但它们只对**存在的条目**有意义：
+  // 缺条目时给空段，不编一个「已启用」让调用方以为这条实例在用。
+  const own = raw === undefined ? { account: entry.account } : { account: entry.account, enabled: entry.enabled };
+  return { ...own, ...entry.transport, ...entry.options };
+}
+
+/**
+ * 用户实例清单：`users` 里每个条目就是一个可装配的实例（平台 + 账号 + 连接参数）。
+ *
+ * 停用的条目照样返回，`enabled: false` 由装配方自己跳过 —— 这里只回答「表里有什么」，
+ * 不替调用方做「该不该连」的决定。按 id 排序，控制台与日志的列表顺序因此稳定。
+ */
+export function userInstances(platforms) {
+  const base = readPlatforms({ platforms });
+  return Object.keys(base.users).sort().map((id) => ({ id, ...base.users[id] }));
 }
 
 /**

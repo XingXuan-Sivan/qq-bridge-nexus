@@ -63,14 +63,16 @@ export function configureUserPlatformInbound(provider) {
 }
 
 /**
- * 启动当前平台的入站（C3）。`context` 原样交给平台的 `connect()`：
+ * 启动某个用户实例的入站（C3）。`context` 原样交给平台的 `connect()`：
  * `{signal, onEvent, onStatus}`；返回 `{close}`。
  *
- * 只实现发送的平台（没有 connect）**不是错误**：返回 null，由调用方决定
- * 要不要在诊断里报「只出不进」（统一注册表的 inbound_unsupported）。
+ * 挑选顺序与出站一致（先 transport 后适配器，见 outbound.mjs）：谁接管这个平台的
+ * 连接，谁就负责收。只实现发送的平台（没有 connect）**不是错误**：返回 null，
+ * 由调用方决定要不要在诊断里报「只出不进」（统一注册表的 inbound_unsupported）。
  */
 export async function startUserPlatformInbound(context = {}, ctx = {}) {
-  const impl = requireUserPlatform(ctx.platform);
+  const id = String(ctx.platform ?? '').trim();
+  const impl = (id ? getTransport(id) : null) ?? requireUserPlatform(id);
   if (typeof impl.connect !== 'function') return null;
   return impl.connect(context);
 }

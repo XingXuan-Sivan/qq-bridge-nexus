@@ -479,7 +479,7 @@ POST /api/sessions/:key/permission  { preset }
 | --- | --- |
 | 新增动作 | 「设为默认执行体」（同一端点）+ 当前是否 active 的徽标（「当前启用」/「已设为默认，重启后生效」/「未启用」） |
 | 能力位矩阵 | 补两行：提示注入通道（system / prefix / tool）、权限权威支持面（bridge / agent）（P5） |
-| 配置编辑 | Agent 侧端点与选项可写（`PATCH /api/platforms/registry/agent/:id/config`，字段由 `configSchema` 生成）；用户侧仍只读——连接参数由活着的传输手柄持有，随 P3 多入站一起做 |
+| 配置编辑 | 两侧同一个写口（`PATCH /api/platforms/registry/{agent,user}/:id/config`），字段由该条目的 `configSchema` 生成。用户侧多一个条目级开关 `enabled`：它不在 schema 里、不参与校验，翻它一律回 `requiresRestart: true` |
 | 探活 | `POST /api/platforms/registry/agent/:id/probe`，结论写进注册表快照（`entry.probe`）供详情与切换预检复用 |
 
 ### 8.3 会话与审批 › 会话详情
@@ -505,9 +505,18 @@ POST /api/sessions/:key/permission  { preset }
 
 方案列表补两列：应用方式、权限权威；直通方案行显示「不做工具级限制」标记。
 
-### 8.5 平台配置 › 用户侧（P3 同批）
+### 8.5 平台配置 › 用户侧
 
-多实例（`enabled` + `defaultUser`）、每实例一条入站管线、出站解析可见。
+| 变更 | 内容 |
+| --- | --- |
+| 配置可写 | 与 Agent 侧同一张表单：字段来自 `configSchema`，初值来自注册表条目的 `config`。注册表给控制台的这一份**剥掉了 `enabled`** —— 写口拿它与补丁合并后校严格 schema，多一个平台不认识的键会拒掉整次保存 |
+| 条目开关 | 表单首位一枚开关（`enabled`），保存时与平台字段一起提交。停用的实例启动时不装配，控制台概览标「条目已停用」 |
+| 设为默认实例 | 实例卡上的动作，打 `POST /api/config/runtime { defaultUser }`；已经是默认的不再显示按钮 |
+| 三件事分开写 | 概览并列「条目开关」「入站结论（`inboundState`）」「出站实现（适配器 / 插件 transport + owner）」——「谁在收」「谁在发」不合并成一句话 |
+| 清单徽标 | 停用的实例一枚「已停用」；入站有结论时一枚状态徽标（停用不再叠同名的入站徽标）；配置面与运行期不一致的默认实例一枚「待重启」 |
+| 探活 | 用户侧没有主动探活：`POST .../user/:id/probe` 固定 400，连接结论只看 `inboundState` |
+
+多实例（`enabled` + `defaultUser`）、每实例一条入站管线、出站解析可见在这一批落地。
 这一块与执行体切换无耦合，放同一批只是为了「多平台并发」一次收口。
 
 ### 8.6 概览与诊断
@@ -542,7 +551,7 @@ POST /api/sessions/:key/permission  { preset }
 | **P0** ✅ | 执行体可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
 | **P1** ✅ | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + 三条装配诊断（§4.3） | `src/agent-side/runtime-registry.mjs`、`src/agent-side/runtime.mjs`、`src/plugins/{manifest,host-api,kernel}.mjs`、`src/platforms/registry.mjs`、`PLUGIN_KERNEL.md` | `test-agent-provider` 新增、`test:audit` / `verify:repo` 全绿 |
 | **P2** ✅ | 配置：`platforms.agents.<id>` 多实例可写、默认执行体（`platforms.active.agent`）、agent 侧 probe/config 端点与注册表的 `configured`/`probe` 读视图 | `src/config/platforms.mjs`、`src/platforms/registry.mjs`、`src/bridge.js`（注册表写口与 `/api/config/runtime`）、`public/console/pages/platforms/`、`public/console/components/form/schema.js`、`guides/CONFIGURATION.md` | `verify:repo`、`test:audit`（含新增 `test-platform-config`）、`test-console-{static,ui}` |
-| **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |
+| **P3** ✅ | 多入站：每实例一条管线、`enabled` 条目开关、出站解析、用户侧实例 UI（§8.5） | `src/bridge.js`（逐实例装配 `startUserPlatformInbound` + 平台写口）、`src/user-side/{inbound,metadata,user-platform,runtime-registry}.mjs`、`src/config/platforms.mjs`（`userInstances`）、`src/platforms/registry.mjs`、`public/console/pages/platforms/`、`guides/CONFIGURATION.md` | `test:audit`（含新增 `test-user-instances`）、`test-console-{static,ui}`、`test-unified-inbound`、`verify:repo` |
 | **P4** | 方案解绑 + 能力档 `runtime` 段 + 方言上移 + `direct` 方案 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt` |
 | **P5** | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`prompt` 能力位）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-console-ui`、新增 `test-passthrough-plan.mjs`、`verify:persona` |
 | **P6** | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销 | `docs/**` | `verify:repo` 全绿 |
@@ -571,7 +580,7 @@ P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 
 | # | 点 | 默认 |
 | --- | --- | --- |
-| 1 | 用户侧多实例的实例键 | `platform[@account]`（与 `src/session/key.mjs` 文法一致，不新增规则） |
+| 1 | 用户侧多实例的实例键 | `platforms.users.<id>` 的 `id` 就是实例键（= 平台 id），账号是同一条目上的 `account` 字段；两者拼起来才是会话 key 里的 `<platform>[@<account>]`。同一平台的两个账号要占两个 `id`，本批不做 |
 | 2 | `runtime.defaultAgent` 与方案 `agentPlatform` 的优先级 | 方案显式 > 全局默认；内置方案全部 `auto` |
 | 3 | 群聊直通 | 不内置，从 `direct` 克隆；克隆时 `plan_warn` 提示风险 |
 | 4 | `allowForbiddenPreset` | 默认 `false`；仅 owner + 二次确认可开 |

@@ -76,6 +76,15 @@ export const send = sendOneBotAction;
  */
 export const connect = connectOneBot;
 
+/**
+ * 入站事件里带 `ext.raw`（OneBot 原始报文）。
+ *
+ * 桥接的业务体（引用解析、合并转发、媒体下载）仍按这个形状读，所以只有声明了
+ * 这一位的平台，它的消息才能直接进唤醒 —— 没声明的平台只能进到准入与会话映射，
+ * 管线会把「业务体没有入口」作为丢弃原因公开出来，不假装已处理。
+ */
+export const rawEvent = true;
+
 /** 中立的「后端该怎么称呼」。实现见 qq-backend-label.js。 */
 export const describeBackend = qqBackendLabel;
 

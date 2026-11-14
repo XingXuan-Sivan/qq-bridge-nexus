@@ -107,7 +107,7 @@ import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePl
 // 目标解析（resolveSendTarget）。两者都是纯查询，不触网。
 // C3 进来的是入站：把 WS 客户端交给适配器（configureUserPlatformInbound）、
 // 启动平台的 connect（startUserPlatformInbound），以及下面的统一入站管线。
-import { sendAction as dispatchSend, configureUserPlatformBackend, configureUserPlatformInbound, startUserPlatformInbound, transportRegistry, describeBackend, readBackendInfo, userPlatformMetadata, resolveSendTarget } from './user-side/user-platform.mjs';
+import { sendAction as dispatchSend, configureUserPlatformBackend, configureUserPlatformInbound, startUserPlatformInbound, transportRegistry, describeBackend, readBackendInfo, userPlatformMetadata, resolveSendTarget, activeUserPlatformId } from './user-side/user-platform.mjs';
 // 入站管线（C3）：收消息只有这一条路 —— 校验 → 准入 → 会话映射 → 唤醒。
 // 顺序写死在管线里（见 docs/PLATFORM_UNIFICATION.md §六），桥接只提供四步的策略。
 import { INBOUND_DROP, createInboundPipeline } from './user-side/inbound.mjs';
@@ -221,7 +221,7 @@ import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
 import { accountOfConfig, configureKeys, defaultAddress, formatKey, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
 // 配置 v2（`platforms` 段）：平台配置的唯一真源。迁移与派生视图都在这里，见 docs/PLATFORM_UNIFICATION.md §八。
-import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform } from './config/platforms.mjs';
+import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances } from './config/platforms.mjs';
 // `platforms.active` 的落地（启动期切换运行期平台，两侧 fail-closed）。
 import { activatePlatforms } from './platforms/activate.mjs';
 
@@ -1124,6 +1124,31 @@ function saveActiveAgentPlatform(id) {
     bridgeCfg.platforms = nextPlatforms;
     // 换了默认执行体：Agent 视图整份换成另一条平台，运行期地址不再适用。
     syncPlatformViews(bridgeCfg, nextPlatforms, false);
+  }
+  return nextPlatforms;
+}
+
+/**
+ * 切换默认用户实例：只改 `platforms.active.user`，条目原样保留。
+ *
+ * 「默认实例」有两层作用：出站没有地址上下文时的兜底（`defaultAddress()` 读它），
+ * 以及控制台/日志里「哪个账号是主账号」的答案。每个实例的入站管线在启动时按目录
+ * 逐条装配，不因这里改动而增减 —— 所以切换后必须重启才生效，写口如实回这句话。
+ */
+function saveActiveUserPlatform(id) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  const nextPlatforms = setActivePlatform(readPlatforms(file), 'user', id);
+  atomicWriteJson(configFile, {
+    ...file,
+    configVersion: CONFIG_VERSION,
+    platforms: platformsForWrite(nextPlatforms),
+  });
+  if (bridgeCfg) {
+    bridgeCfg.configVersion = CONFIG_VERSION;
+    bridgeCfg.platforms = nextPlatforms;
+    // 用户视图跟着换：平台 id 与账号都来自被选中的那条条目。
+    syncPlatformViews(bridgeCfg, nextPlatforms, true);
   }
   return nextPlatforms;
 }
@@ -5703,11 +5728,28 @@ async function main() {
   // 那个是后台轮询持续维护的「现在能不能用」，这里只回答「刚才有人点过一次，结果是什么」。
   const agentProbes = new Map();
 
+  /**
+   * 各用户实例的入站结论（按实例 id 索引）：`open` / `closed` / `error` / `disabled` /
+   * `send-only` / `unregistered`。声明得早于装配是为了注册表快照能在任何时刻读它 ——
+   * 装配发生在启动后段，控制台不能因此看不到「还没开始装配」。
+   */
+  const userInbound = new Map();
+  const userInboundResults = () => Object.fromEntries(userInbound);
+
   /** 注册表快照要的那一份探活结果（Map → 普通对象）。 */
   const agentProbeResults = () => Object.fromEntries(agentProbes);
 
   /** 本进程当前真正装配的执行体 id；还没装配时回落到配置里的默认。 */
   const runningAgentPlatformId = () => agentRuntimeId() || String(cfg.platforms?.active?.agent ?? '');
+
+  /**
+   * 本进程当前装配的用户**默认**实例。与 Agent 侧不同名同构：运行期的 active 在启动时
+   * 由 `activatePlatforms()` 定下来，之后改配置只改盘上的值，下次启动才换。
+   *
+   * 注意它只回答「默认出站地址是哪条」：入站管线是按 `platforms.users` 逐条装配的，
+   * 其它实例照样在收 —— 「谁在跑」看注册表里的 `inboundState`。
+   */
+  const runningUserPlatformId = () => activeUserPlatformId() || String(cfg.platforms?.active?.user ?? '');
 
   /**
    * 当前注册表快照（含探活结果）。写口与快照端点共用一个拼装函数：
@@ -5717,6 +5759,7 @@ async function main() {
     config: bridgeCfg?.platforms ?? {},
     agentConnected: agentProbeSettled ? agentReady : null,
     agentProbes: agentProbeResults(),
+    userInbound: userInboundResults(),
   });
 
   /**
@@ -7449,16 +7492,17 @@ async function main() {
           }
           return;
         }
-        // Agent 平台的写口与探活（P2）：两个动作用同一条路径前缀，因为它们都以「注册表里的
-        // 这个平台」为对象 —— id 不在表里就 404，写一个没人读的 id 等于制造死数据。
-        const agentPlatformRoute = url.pathname.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
-        if (agentPlatformRoute) {
-          const agentId = agentPlatformRoute[1];
-          const action = agentPlatformRoute[2];
+        // 平台配置写口：两侧共用一条路径（P2 Agent 侧 / P3 用户侧）。id 不在表里就 404 ——
+        // 写一个没人读的 id 等于制造死数据。`probe` 只有 Agent 侧有：用户侧要看的是入站连接状态。
+        const platformWriteRoute = url.pathname.match(/^\/api\/platforms\/registry\/(user|agent)\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
+        if (platformWriteRoute) {
+          const side = platformWriteRoute[1];
+          const platformId = platformWriteRoute[2];
+          const action = platformWriteRoute[3];
           try {
-            const known = findRegistryPlatform(currentPlatformRegistry(), 'agent', agentId);
+            const known = findRegistryPlatform(currentPlatformRegistry(), side, platformId);
             if (!known) {
-              sendJson({ ok: false, error: `没有这个 Agent 平台：${agentId}` }, 404);
+              sendJson({ ok: false, error: `没有这个${side === 'agent' ? ' Agent ' : '用户侧 '}平台：${platformId}` }, 404);
               return;
             }
             if (action === 'config') {
@@ -7470,23 +7514,42 @@ async function main() {
               }
               // 校验与诊断共用一个函数（`vetPlatformConfig`）：控制台接受的值不能比诊断宽。
               // 校的是「合完的整份」：补丁只带改动的字段，必填项得靠旧值补齐。
-              const vet = vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...body });
+              // `enabled` 是条目级开关（装配不装配），不是平台选项，所以不进校验：
+              // 否则「配置本身不合规」时反而无法停用它 —— 而那正是最想停用的时候。
+              const { enabled: _enabled, ...fields } = body;
+              const vet = Object.keys(fields).length
+                ? vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...fields })
+                : { error: '' };
               if (vet.error) { sendJson({ ok: false, error: vet.error }, 400); return; }
               // 只落盘用户给的补丁：校验结果里带着 schema 默认值，写进去等于把默认值固化成设置。
-              savePlatformPatch('agent', body, agentId);
-              // 端点字段决定「下一次连接去哪」，正在跑的那条改了要重启才生效；
-              // 选项（provider / model / 思考强度）由调用面每次现读，改完即生效。
-              const requiresRestart = agentId === runningAgentPlatformId()
-                && Object.keys(body).some((key) => AGENT_ENDPOINT_KEYS.includes(key));
-              ext.audit.append('platform.agent.config', { platform: agentId, keys: Object.keys(body).sort(), requiresRestart });
+              savePlatformPatch(side, body, platformId);
+              // 连接参数决定「下一次连接去哪」，正在跑的那条改了要重启才生效；选项由调用面
+              // 每次现读，改完即生效。两侧白名单不同（endpoint vs transport），判据是同一条。
+              // 用户侧「正在跑」是按实例算的：每条条目都有自己的入站管线，改哪条就影响哪条。
+              // 停用 / 只出不进 / 没有实现的条目还没建连接，改完下次装配才生效。
+              const endpointKeys = side === 'agent' ? AGENT_ENDPOINT_KEYS : USER_TRANSPORT_KEYS;
+              const state = userInbound.get(platformId)?.state ?? '';
+              const live = side === 'agent'
+                ? platformId === runningAgentPlatformId()
+                : state === 'open' || state === 'closed' || state === 'error';
+              // 开关也只在装配时才读：翻它一定得重启，如实说。
+              const requiresRestart = (live
+                && Object.keys(body).some((key) => endpointKeys.includes(key)))
+                || (side === 'user' && 'enabled' in body);
+              ext.audit.append(`platform.${side}.config`, { platform: platformId, keys: Object.keys(body).sort(), requiresRestart });
               const registry = currentPlatformRegistry();
-              sendJson({ ok: true, requiresRestart, platform: findRegistryPlatform(registry, 'agent', agentId), registry });
+              sendJson({ ok: true, requiresRestart, platform: findRegistryPlatform(registry, side, platformId), registry });
+              return;
+            }
+            // 用户侧的「探活」就是它的入站连接状态：由启动时装配的管线维护，没有主动探测。
+            if (side === 'user') {
+              sendJson({ ok: false, error: '用户侧没有主动探活：连接状态看注册表里的 inboundState' }, 400);
               return;
             }
             if (req.method !== 'POST') { sendJson({ ok: false, error: '不支持的方法' }, 405); return; }
             // 探活失败是**有效结论**，不是请求错误：照样 200，让控制台把结论画出来。
-            const probe = await probeAgentPlatform(agentId);
-            ext.audit.append('platform.agent.probe', { platform: agentId, ok: probe.ok });
+            const probe = await probeAgentPlatform(platformId);
+            ext.audit.append('platform.agent.probe', { platform: platformId, ok: probe.ok });
             sendJson({ ok: true, probe, registry: currentPlatformRegistry() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '平台操作失败' }, 400);
@@ -7783,13 +7846,16 @@ async function main() {
         // 全局默认（P4 / P2）：默认运行方案与默认执行体。两者都是「开工时的默认值」，
         // 会话自己的 planId 与平台侧的 `platforms.active` 优先。
         if (url.pathname === '/api/config/runtime') {
-          // 默认执行体没有单独一份配置：它读的就是 `platforms.active.agent`，与注册表同源。
+          // 默认执行体与默认用户实例都没有单独一份配置：它们读的就是 `platforms.active`，
+          // 与注册表同源。
           const defaultAgent = String(cfg.platforms?.active?.agent ?? '');
+          const defaultUser = String(cfg.platforms?.active?.user ?? '');
           if (req.method === 'GET') {
             sendJson({
               ok: true,
-              runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '', defaultAgent },
+              runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '', defaultAgent, defaultUser },
               runningAgent: runningAgentPlatformId(),
+              runningUser: runningUserPlatformId(),
               plans: ensureRuntime(),
             });
             return;
@@ -7797,6 +7863,25 @@ async function main() {
           if (req.method === 'POST') {
             const body = await readBody();
             // 一个请求只改一项：同时改方案与执行体时，「预检没过」到底哪项没落盘说不清楚。
+            // 用户实例同理：它没有主动探活可做，能给人看的是注册表里的 `inboundState`。
+            if (body?.defaultUser !== undefined) {
+              const wanted = String(body.defaultUser ?? '').trim().toLowerCase();
+              // 可设的默认实例 = 注册表用户侧能看到的条目（配置面与运行期实现的并集），
+              // 与写口的 404 判据同一份，避免「写口能改、这里设不了」。
+              if (!wanted || !findRegistryPlatform(currentPlatformRegistry(), 'user', wanted)) {
+                sendJson({ ok: false, error: `没有这个用户实例：${wanted || '(空)'}` }, 400);
+                return;
+              }
+              const running = runningUserPlatformId();
+              if (wanted === running) {
+                sendJson({ ok: true, requiresRestart: false, runtime: { defaultUser: wanted }, runningUser: running });
+                return;
+              }
+              saveActiveUserPlatform(wanted);
+              ext.audit.append('runtime.defaultUser', { from: running, to: wanted });
+              sendJson({ ok: true, requiresRestart: true, runtime: { defaultUser: wanted }, runningUser: running });
+              return;
+            }
             if (body?.defaultAgent !== undefined) {
               const wanted = String(body.defaultAgent ?? '').trim().toLowerCase();
               if (!wanted || !agentPlatform(wanted)) {
@@ -17186,9 +17271,10 @@ async function main() {
 
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
     // 地址上下文：从这条消息进入内核开始，直到处理结束，下游所有模块（社交、记忆、
-    // 定时、语音、审批）产出的 key 都跟着同一个地址走。单平台部署下它就是配置里的
-    // 默认地址（行为不变）；多平台并存时，这里是唯一的「这次该用哪个账号」来源。
-    return withAddress(defaultAddress(), () => {
+    // 定时、语音、审批）产出的 key 都跟着同一个地址走。
+    // `opts.address` 由入站管线按「这条事件的实例」给出；没有它（补收、命令直调）
+    // 才用进程默认地址 —— 多平台并存时它就是唯一正确的「这次该用哪个账号」来源。
+    return withAddress(opts.address ?? defaultAddress(), () => {
       const key = convKey(kind, id);
       return withBehavior(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts), {
         optional: looksLikeAdminChannelText(event),
@@ -18378,70 +18464,99 @@ async function main() {
     reconnect: true
   });
 
-  // ── 入站（C3）：收消息只有一条路 ────────────────────────────────────
-  // 适配器把厂商报文翻译成统一事件 → 校验 → 准入 → 会话映射 → 唤醒。以前这里的
-  // 两个订阅直接调 handleIncoming，准入与会话映射长在它内部；插件 transport 想
-  // 接进来只能再抄一份，两套口径迟早会在「谁先判、判什么」上分叉。
+  // ── 入站（C3 / P3）：一条实例一条管线 ──────────────────────────────
+  // 一个实例 = 「平台 + 账号」，即 `platforms.users.<id>` 里的每一条。以前这里只有
+  // 一条管线（当前平台），多实例并存时第二条平台的消息无处可去；现在按条目录入：
+  // 来源由每条管线自己定死，准入与会话映射都按该实例的地址算 key，不会串号。
+  //
+  // 业务体仍只认 OneBot 报文（`ext.raw`）：没声明 `rawEvent` 的平台，消息走到唤醒
+  // 这一步会被管线按 `body_unsupported` 记丢弃 —— 不假装处理过。
   configureUserPlatformInbound(() => bot);
-  const inbound = createInboundPipeline({
-    origin: { platform: platformOfConfig(cfg), account: accountOfConfig(cfg) },
-    // 准入：管理通道（owner / 管理员的本人私聊）先于白名单 —— 与
-    // handleIncomingImpl 里的顺序一致，否则 owner 在未授权会话里发命令会被丢掉。
-    admit(event) {
-      const { type, id } = event.conversation;
-      const key = convKey(type, id);
-      if (type === 'private' && String(event.sender?.id ?? '') === String(id)
-          && ext.adminEnabled() && actorForKey(key)?.role !== 'user') return true;
-      if (passiveAllowed(key)) return true;
-      // 措辞与收口前保持一致：排障时还是搜这句话。
-      log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.sender?.id ?? ''}）`);
-      return false;
-    },
-    // 会话映射：拿不到 key 就没有「哪个会话」可言，后面全是按 key 记账。
-    resolve(event) {
-      const { type, id } = event.conversation;
-      return { key: convKey(type, id), type, id };
-    },
-    // 唤醒：QQ 的业务体仍然吃 OneBot 原始报文（`ext.raw`）。统一的只是**入口**
-    // （校验、准入、会话映射），现在这份正文能被搬进中立形状的时机是 C5 的
-    // 会话事件面 —— 早搬只会把引用解析、合并转发、媒体下载一起担风险。
-    deliver: ({ event }) => handleIncoming(
-      event.conversation.type,
-      event.conversation.id,
-      event.ext?.raw ?? {},
-      cfg,
-    ),
-    onDrop: (drop) => {
-      // 未准入已经在 admit 里按原措辞记过（带 key 与来源），这里不重复刷屏。
-      if (drop.reason === INBOUND_DROP.NOT_ADMITTED) return;
-      const detail = Array.isArray(drop.errors) && drop.errors.length ? `：${drop.errors.join('；')}` : '';
-      log(`⚠️ 入站事件已丢弃（${drop.reason}）${detail}`);
-    },
-  });
-  let inboundHandle = null;
-  // 退出时先摘订阅：插件收尾期间再来一条消息，唤醒会撞上已经 dispose 的插件。
-  inboundStop = async () => {
-    const handle = inboundHandle;
-    inboundHandle = null;
-    try { await handle?.close(); } catch (error) { log(`入站连接关闭失败：${error?.message ?? error}`); }
+  const userMeta = new Map(userPlatformMetadata().platforms.map((item) => [item.id, item]));
+  /** 装配结论写进启动早期就存在的 `userInbound`：注册表与详情页读同一份。 */
+  const noteInbound = (id, state, detail = '') => {
+    userInbound.set(id, { state, detail: String(detail ?? ''), at: new Date().toISOString() });
   };
-  try {
-    inboundHandle = await startUserPlatformInbound({
-      signal: null,
-      onEvent: (event) => inbound.emit(event),
-      onStatus: ({ state, detail }) => {
-        if (state === 'open') log('入站已接管：消息走统一管线（校验 → 准入 → 会话映射 → 唤醒）');
-        else log(`入站连接：${state}${detail ? `（${detail}）` : ''}`);
+  const inboundHandles = [];
+  for (const instance of userInstances(cfg.platforms)) {
+    const id = instance.id;
+    if (!instance.enabled) {
+      noteInbound(id, 'disabled', '配置里停用了这条实例');
+      continue;
+    }
+    const meta = userMeta.get(id);
+    if (!meta) {
+      noteInbound(id, 'unregistered', '没有运行期实现，等它的插件装上并重启');
+      continue;
+    }
+    if (!meta.inbound) {
+      // 只实现发送的平台合法（插件平台常见），但得说清楚不是故障。
+      noteInbound(id, 'send-only', '平台未提供 connect()：只能发不能收');
+      continue;
+    }
+    const origin = { platform: id, account: instance.account };
+    const inbound = createInboundPipeline({
+      origin,
+      // 准入：管理通道（owner / 管理员的本人私聊）先于白名单 —— 与
+      // handleIncomingImpl 里的顺序一致，否则 owner 在未授权会话里发命令会被丢掉。
+      admit(event) {
+        const { type, id: convId } = event.conversation;
+        const key = formatKey(origin.platform, type, convId, origin.account);
+        if (type === 'private' && String(event.sender?.id ?? '') === String(convId)
+            && ext.adminEnabled() && actorForKey(key)?.role !== 'user') return true;
+        if (passiveAllowed(key)) return true;
+        // 措辞与收口前保持一致：排障时还是搜这句话。
+        log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.sender?.id ?? ''}）`);
+        return false;
+      },
+      // 会话映射：拿不到 key 就没有「哪个会话」可言，后面全是按 key 记账。
+      resolve(event) {
+        const { type, id: convId } = event.conversation;
+        return { key: formatKey(origin.platform, type, convId, origin.account), type, id: convId };
+      },
+      // 唤醒：QQ 的业务体仍吃 OneBot 原始报文（`ext.raw`），统一的只是**入口**。
+      // 地址随 payload 一起下去，handleIncoming 用它开地址上下文。
+      deliver({ event, address }) {
+        if (meta.rawEvent !== true) {
+          return { reason: INBOUND_DROP.BODY_UNSUPPORTED, errors: [`${id} 未声明 rawEvent：业务体没有该平台的正文入口`] };
+        }
+        return handleIncoming(address.conversation.type, address.conversation.id, event.ext?.raw ?? {}, cfg, { address });
+      },
+      onDrop: (drop) => {
+        // 未准入已经在 admit 里按原措辞记过（带 key 与来源），这里不重复刷屏。
+        if (drop.reason === INBOUND_DROP.NOT_ADMITTED) return;
+        const detail = Array.isArray(drop.errors) && drop.errors.length ? `：${drop.errors.join('；')}` : '';
+        log(`⚠️ 入站事件已丢弃（${drop.reason}）${detail}`);
       },
     });
-    if (!inboundHandle) {
-      // 只实现发送的平台合法（插件平台常见），但得说清楚不是故障。
-      log(`当前平台 ${platformOfConfig(cfg)} 未提供 connect()：只能发不能收`);
+    try {
+      const handle = await startUserPlatformInbound({
+        signal: null,
+        onEvent: (event) => inbound.emit(event),
+        onStatus: ({ state, detail }) => {
+          noteInbound(id, state, detail ?? '');
+          if (state === 'open') log(`入站已接管（${id}）：消息走统一管线（校验 → 准入 → 会话映射 → 唤醒）`);
+          else log(`入站连接（${id}）：${state}${detail ? `（${detail}）` : ''}`);
+        },
+      }, { platform: id });
+      if (!handle) {
+        noteInbound(id, 'send-only', '平台未提供 connect()：只能发不能收');
+        continue;
+      }
+      inboundHandles.push(handle);
+    } catch (error) {
+      noteInbound(id, 'error', error?.message ?? String(error));
+      // 入站起不来不等于不能用：出站、命令、定时任务都还在，只是收不到新消息。
+      log(`⚠️ 入站未能启动（${id}）：${error?.message ?? error}`);
     }
-  } catch (error) {
-    // 入站起不来不等于不能用：出站、命令、定时任务都还在，只是收不到新消息。
-    log(`⚠️ 入站未能启动：${error?.message ?? error}`);
   }
+  // 退出时先摘订阅：插件收尾期间再来一条消息，唤醒会撞上已经 dispose 的插件。
+  inboundStop = async () => {
+    const handles = inboundHandles.splice(0);
+    for (const handle of handles) {
+      try { await handle?.close(); } catch (error) { log(`入站连接关闭失败：${error?.message ?? error}`); }
+    }
+  };
   bot.onNotice('notify', async (event) => {
     try { await handlePokeNotice(event); } catch (error) { log('处理拍一拍事件出错:', error?.message ?? error); }
   });

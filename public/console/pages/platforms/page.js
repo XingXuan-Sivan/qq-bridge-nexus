@@ -11,12 +11,12 @@ import { onPageRefresh } from '../../js/router.js';
 import { cardHtml } from '../../components/card/card.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { initSplitView, setSplitActive, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
-import { loadPlatforms, registryMeta } from '../../js/registry.js';
+import { loadPlatforms, registryMeta, inboundStateLabel, inboundStateTone } from '../../js/registry.js';
 import { mountPlatformDetail, unmountPlatformDetail } from './platform-detail.js';
 
 const SIDE_ORDER = ['user', 'agent'];
 const SIDE_LABEL = { user: '用户侧', agent: 'Agent 侧' };
-const SOURCE_LABEL = { builtin: '内置', plugin: '插件', 'profile-only': '仅配置' };
+const SOURCE_LABEL = { builtin: '内置', plugin: '插件', 'profile-only': '仅配置', 'config-only': '仅条目' };
 const LEVEL_LABEL = { error: '错误', warn: '警告' };
 const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
 
@@ -57,6 +57,12 @@ function listItemHtml(meta, item) {
     item.active ? '<span class="tag tag--success tag--sm">运行期</span>' : '',
     // 配置面已改为默认、本进程还没装配：重启后才会变成「运行期」。
     item.configured && !item.active ? '<span class="tag tag--warning tag--sm">待重启</span>' : '',
+    // 用户侧多两态：停用的实例不会装配；入站结论是这个实例此刻的真实状态
+    // （停用的实例已经有了「已停用」徽标，不再叠一枚同名的入站徽标）。
+    item.side === 'user' && item.enabled === false ? '<span class="tag tag--warning tag--sm">已停用</span>' : '',
+    item.side === 'user' && item.enabled !== false && item.inboundState?.state
+      ? `<span class="tag ${inboundStateTone(item.inboundState.state)} tag--sm">${esc(inboundStateLabel(item.inboundState.state))}</span>`
+      : '',
     hasError ? '<span class="tag tag--danger tag--sm">错误</span>' : '',
     !hasError && diags.length ? '<span class="tag tag--warning tag--sm">警告</span>' : '',
   ].filter(Boolean).join('');

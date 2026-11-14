@@ -135,6 +135,43 @@ export function conversationTypesOf(platformId, side = 'user') {
   return platformOfId(platformId, side)?.conversationTypes ?? [];
 }
 
+/**
+ * 用户实例的入站结论 → 中文。
+ *
+ * 这些结论由桥接在装配时写进注册表（见 src/bridge.js 的 `userInbound`）：它们是「这条实例
+ * 此刻到底怎么样」的唯一事实，前端不再自己推。空值 = 本次运行还没走到装配那一步。
+ */
+const INBOUND_STATE_LABEL = Object.freeze({
+  open: '已接管',
+  closed: '连接已断开',
+  error: '装配失败',
+  disabled: '已停用',
+  'send-only': '只出不进',
+  unregistered: '没有实现',
+});
+
+export function inboundStateLabel(state) {
+  const key = String(state ?? '').trim().toLowerCase();
+  return key ? (INBOUND_STATE_LABEL[key] || key) : '待装配';
+}
+
+/** 入站状态标签的色调：接管成功绿、装不起来红、断开黄，其余中性。 */
+export function inboundStateTone(state) {
+  const key = String(state ?? '').trim().toLowerCase();
+  if (key === 'open') return 'tag--success';
+  if (key === 'error') return 'tag--danger';
+  if (key === 'closed') return 'tag--warning';
+  return '';
+}
+
+/** 出站实现的中文名（`adapter` = 平台适配器，`transport` = 插件接管）。 */
+export function outboundViaLabel(via) {
+  const key = String(via ?? '').trim().toLowerCase();
+  if (key === 'transport') return '插件 transport';
+  if (key === 'adapter') return '平台适配器';
+  return '没有发送实现';
+}
+
 /** 某平台的分条与格式上限（`chunkChars` / `markdown`）；未声明返回空对象。 */
 export function platformLimits(platformId, side = 'user') {
   return platformOfId(platformId, side)?.limits ?? {};

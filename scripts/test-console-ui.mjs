@@ -354,22 +354,33 @@ try {
     await navigate('platforms');
     // 两侧平台都列在主从清单里；诊断为空时汇总卡不占地方（fixture 的 diagnostics: []）。
     assert.equal(await page.locator('#platformSplit [data-split-key="user:qq"]').count(), 1, '用户侧平台在清单里');
+    assert.equal(await page.locator('#platformSplit [data-split-key="user:wx"]').count(), 1, '第二条用户实例也在清单里');
     assert.equal(await page.locator('#platformSplit [data-split-key="agent:dsh"]').count(), 1, 'Agent 侧平台在清单里');
     assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"]').count(), 1, '第二个 Agent 平台也在清单里');
     assert.equal(await page.locator('#platformDiagnosticsCard').count(), 0, '没有诊断时不渲染诊断卡');
-    assert.equal(await page.locator('#platformSplit button.split-item').count(), 3, '每条注册的平台都走主从组件的条目');
+    assert.equal(await page.locator('#platformSplit button.split-item').count(), 4, '每条注册的平台都走主从组件的条目');
+    // 条目开关与入站结论都挂在清单条目上：停用的实例不该看起来像在跑。
+    const wx = page.locator('#platformSplit [data-split-key="user:wx"]');
+    assert.equal(await wx.locator('.tag').filter({ hasText: '已停用' }).count(), 1, '停用的实例在清单里标出');
+    assert.equal(await page.locator('#platformSplit [data-split-key="user:qq"] .tag').filter({ hasText: '已接管' }).count(), 1, '在跑的实例标出入站结论');
   });
 
-  await test('Platform detail config tab keeps the user side read-only', async () => {
+  await test('User platform config is writable and carries the entry switch', async () => {
     await navigate('platforms');
     await page.click('[data-split-key="user:qq"]');
     await page.click('[data-platform-tab="config"]');
-    await page.waitForSelector('[data-platform-panel-body] code', { timeout: 5000 });
-    const body = page.locator('[data-platform-panel-body]');
-    assert.ok(await body.locator('text=httpUrl').count() > 0, '配置表列出 platform.yml 声明的字段');
-    // 用户侧仍然只读：连接参数由活着的传输手柄持有，值以 <code> 文本呈现，也没有保存按钮。
-    assert.ok(await body.locator('td code').count() >= 3, '配置值以只读文本呈现');
-    assert.equal(await body.locator('[data-platform-config-save], #platformConfigSave').count(), 0, '用户侧配置标签里没有保存按钮');
+    await page.waitForSelector('#platformConfigMount [data-field="cfg__wsUrl"]', { timeout: 5000 });
+    // 与 Agent 侧同一张表单：字段来自 configSchema，值来自注册表条目的那一份 config。
+    assert.equal(await page.locator('#cfg__wsUrl').inputValue(), 'ws://127.0.0.1:3001');
+    // 用户侧多一个条目级开关（不在 schema 里）：它决定这条实例装配不装配。
+    assert.equal(await page.locator('[role="switch"][data-field="platformEnabled"]').count(), 1, '条目开关排在表单首位');
+    assert.equal(await page.locator('#platformEnabled').getAttribute('aria-checked'), 'true', '启用的实例开关是开的');
+    await page.locator('#cfg__wsUrl').fill('ws://127.0.0.1:3002');
+    const patch = await clickWrite('#platformConfigSave', '/api/platforms/registry/user/qq/config', 'PATCH');
+    assert.equal(patch.wsUrl, 'ws://127.0.0.1:3002', '保存提交改过的连接地址');
+    assert.equal(patch.enabled, true, '条目开关随表单一起提交');
+    // 保存成功后重新拉快照：标签留在配置页，字段显示刚写进去的值。
+    await page.waitForFunction(() => document.getElementById('cfg__wsUrl')?.value === 'ws://127.0.0.1:3002', null, { timeout: 5000 });
   });
 
   await test('Agent platform config form saves through the registry write endpoint', async () => {
@@ -462,6 +473,21 @@ try {
     assert.equal(await page.locator('#platformSetDefault').count(), 0, '已设为默认的平台不再显示同一个按钮');
     assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"] .tag').filter({ hasText: '待重启' }).count(), 1, '清单里标出待重启');
     assert.match(await page.textContent('#platformDiagnosticsCard'), /active_pending_restart/, '配置面与运行期不一致时给一条诊断');
+  });
+
+  await test('User instance becomes the default one from the instance card', async () => {
+    await navigate('platforms');
+    await page.click('[data-split-key="user:wx"]');
+    // 概览把这三件事实分开写：条目开关、入站结论、出站实现。
+    const overview = await page.textContent('[data-platform-panel-body]');
+    assert.match(overview, /已停用/, '停用的实例在概览里写明不会装配');
+    assert.match(overview, /插件 transport/, '出站写清楚走的是插件 transport');
+    await page.waitForSelector('#platformSetUserDefault', { timeout: 5000 });
+    const body = await clickWrite('#platformSetUserDefault', '/api/config/runtime');
+    assert.deepEqual(body, { defaultUser: 'wx' }, '设为默认实例只提交实例 id');
+    await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
+    assert.equal(await page.locator('#platformSetUserDefault').count(), 0, '已设为默认的实例不再显示同一个按钮');
+    assert.match(await page.textContent('#platformDiagnosticsCard'), /active_pending_restart/, '用户侧的默认实例与运行期不一致时也给一条诊断');
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {

@@ -11,7 +11,7 @@
 ```jsonc
 "platforms": {
   "active": { "user": "qq", "agent": "dsh" },      // 用哪个平台；不可用时启动直接报错并列出已注册 id
-  "users":  { "qq":  { "account": "", "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
+  "users":  { "qq":  { "account": "", "enabled": true, "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
   "agents": { "dsh": { "endpoint":  { /* 地址与鉴权 */ }, "options": { /* 模型与行为选项 */ } } }
 }
 ```
@@ -36,6 +36,33 @@ Agent 侧可以同时存多条平台的配置：`agents` 里每条都有自己�
   在那之前注册表会给一条 `active_pending_restart`（warn），控制台同时显示「已设为默认，重启后生效」与列表里的「待重启」。
 - **默认执行体没有第二份配置**：控制台「默认执行体」与 `/api/config/runtime` 的 `runtime.defaultAgent` 读的都是
   `platforms.active.agent`。两处各存一份必然漂移 —— 一个由控制台写、一个由手改 `config.json` 写。
+
+## `platforms.users.<id>` —— 用户侧实例与启用开关
+
+`users` 里每条条目就是一个**实例**：一个平台 + 一个账号。每条实例在启动时各自装配一条入站管线
+（校验 → 准入 → 会话映射 → 唤醒），`id` 既是配置键也是实例键，`account` 是这条实例在该平台上的账号。
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | 条目级开关。`false` 的实例启动时直接跳过装配（不连接、不收消息），控制台标「已停用」 |
+| `account` | `""` | 账号名；空串 = 该平台的默认账号，会话 key 里也就不带 `@` 段 |
+
+- **`enabled` 不是平台的选项**：它不进 `transport` / `options`，也不在 `configSchema` 里 —— 控制台把它排在
+  配置表单首位，保存时与平台字段一起提交；校验只针对平台字段，所以配置本身不合规时也能先把实例停掉。
+- **翻开关要重启**：装配只发生在启动期，改 `enabled` 不会断开已经连上的实例，写口固定回 `requiresRestart: true`。
+  在那之前注册表里 `enabled` 与 `inboundState` 会不一致 —— 前者是配置面，后者是本进程装配的事实。
+- **入站结论按实例记**：`inboundState` 是 `open` / `closed` / `error` / `disabled` / `send-only` / `unregistered`
+  之一，`null` 表示本进程还没走到装配那一步。停用是有意关掉的，不产生诊断。
+- **出站与开关无关**：能不能发消息由「谁接管了这条平台的传输」决定，注册表的 `outbound` 写明走内置适配器
+  （`via: adapter`）还是插件 transport（`via: transport` + `owner`），`none` 表示没人接。
+
+| 入口 | 作用 |
+| --- | --- |
+| 平台 › 用户侧 › 详情 › 配置 | `PATCH /api/platforms/registry/user/:id/config`：字段由 `configSchema` 生成，外加条目开关 |
+| 平台 › 用户侧 › 详情 › 实例 | 「设为默认实例」只改 `active.user`，重启后装配；同一端点上的 `probe` 对用户侧固定 400 —— 没有主动探活，连接结论看 `inboundState` |
+
+`active.user` 只决定「默认用哪一个」：它是出站没有地址上下文时的兜底（`defaultAddress()` 读它），
+也是控制台与日志里「哪个账号是主账号」的答案，与 `/api/config/runtime` 的 `runtime.defaultUser` 是同一个值。
 
 本文只列 v0.3.0 起新增的配置段、工具开关和状态文件。所有字段都可省略，省略即取下表默认值；**默认值都是安全的**。
 修改 `config.json` 后需要重启桥接；修改 `socialV2.tools.*` 还需要重启 DSH（MCP 工具清单在 DSH 启动时读取）。

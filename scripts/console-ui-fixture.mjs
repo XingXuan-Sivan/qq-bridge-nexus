@@ -422,6 +422,17 @@ export function makeFixtureState() {
     },
     agentProbes: {},
     defaultAgent: 'dsh',
+    // 用户实例（一条 `platforms.users` 条目 = 一个实例）。qq 是默认且在用；wx 是插件注册的
+    // 第二条平台、条目被停用 —— 用来验条目开关、入站状态与「设为默认实例」。
+    userConfigs: {
+      qq: { account: '', httpUrl: 'http://127.0.0.1:3000', wsUrl: 'ws://127.0.0.1:3001', accessToken: '', followDiscoveredEndpoint: true, viaPlatform: false, silenceWarnMs: 600000 },
+    },
+    userEnabled: { qq: true, wx: false },
+    userInbound: {
+      qq: { state: 'open', detail: '', at: timestamp },
+      wx: { state: 'disabled', detail: '配置里停用了这条实例', at: timestamp },
+    },
+    defaultUser: 'qq',
     whitelist: { ownerQQ: '100001', admins: [] },
     access: {
       passive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003', 'qq:private:100001'] },
@@ -780,8 +791,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (method === 'GET') {
           return json({
             ok: true,
-            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2', defaultAgent: state.defaultAgent },
+            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2', defaultAgent: state.defaultAgent, defaultUser: state.defaultUser },
+            // 运行期恒为 dsh / qq：切换默认只落盘，本进程不换装配。
             runningAgent: 'dsh',
+            runningUser: 'qq',
             plans: [
               { id: 'chat', label: '聊天' },
               { id: 'social-v1', label: '一代仿真' },
@@ -790,7 +803,13 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ],
           });
         }
-        // 默认执行体：设置即落盘，重启后装配（与真实桥接同一语义：requiresRestart: true）。
+        // 默认执行体 / 默认用户实例：设置即落盘，重启后装配（与真实桥接同一语义：
+        // 选中的就是本进程在跑的那个时不要求重启）。
+        if (body?.defaultUser !== undefined) {
+          const wanted = String(body.defaultUser);
+          state.defaultUser = wanted;
+          return json({ ok: true, requiresRestart: wanted !== 'qq', runtime: { defaultUser: wanted }, runningUser: 'qq' });
+        }
         if (body?.defaultAgent !== undefined) {
           state.defaultAgent = String(body.defaultAgent);
           return json({ ok: true, requiresRestart: true, runtime: { defaultAgent: state.defaultAgent }, runningAgent: 'dsh' });
@@ -799,24 +818,41 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         state.defaultPlan = value || 'social-v2';
         return json({ ok: true, runtime: { defaultPlan: state.defaultPlan } });
       }
-      // P2：Agent 平台的写口与探活。保存改 state.agentConfigs（下一次拉注册表就能读回来），
-      // 探活结论记在 state.agentProbes —— 控制台要验的是「按钮发对了请求、结论画出来了」。
-      const agentPlatformMatch = path.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
-      if (agentPlatformMatch && (method === 'PATCH' || method === 'POST')) {
-        const agentId = agentPlatformMatch[1];
-        const action = agentPlatformMatch[2];
-        if (!state.agentConfigs[agentId]) return json({ ok: false, error: `没有这个 Agent 平台：${agentId}` }, 404);
-        if (action === 'config' && method === 'PATCH') {
-          const patch = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-          state.agentConfigs[agentId] = { ...state.agentConfigs[agentId], ...patch };
-          const endpointKeys = ['baseUrl', 'authToken', 'authTokenExplicit', 'authHeader', 'authPrefix', 'allowRemote'];
-          return json({ ok: true, requiresRestart: Object.keys(patch).some((key) => endpointKeys.includes(key)) });
+      // 平台写口与探活（两侧同一条路径文法）。保存改 state 里的那一份（下一次拉注册表就能
+      // 读回来），探活结论记在 state.agentProbes —— 控制台要验的是「按钮发对了请求、结论画出来了」。
+      const platformWrite = path.match(/^\/api\/platforms\/registry\/(user|agent)\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
+      if (platformWrite && (method === 'PATCH' || method === 'POST')) {
+        const [, side, platformId, action] = platformWrite;
+        const patch = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+        if (side === 'agent') {
+          if (!state.agentConfigs[platformId]) return json({ ok: false, error: `没有这个 Agent 平台：${platformId}` }, 404);
+          if (action === 'config' && method === 'PATCH') {
+            state.agentConfigs[platformId] = { ...state.agentConfigs[platformId], ...patch };
+            const endpointKeys = ['baseUrl', 'authToken', 'authTokenExplicit', 'authHeader', 'authPrefix', 'allowRemote'];
+            return json({ ok: true, requiresRestart: Object.keys(patch).some((key) => endpointKeys.includes(key)) });
+          }
+          if (action === 'probe' && method === 'POST') {
+            state.agentProbes[platformId] = { ok: true, error: '', url: `http://127.0.0.1:3080/${platformId}`, at: timestamp };
+            return json({ ok: true, probe: state.agentProbes[platformId] });
+          }
+          return json({ ok: false, error: '不支持的方法' }, 405);
         }
-        if (action === 'probe' && method === 'POST') {
-          state.agentProbes[agentId] = { ok: true, error: '', url: `http://127.0.0.1:3080/${agentId}`, at: timestamp };
-          return json({ ok: true, probe: state.agentProbes[agentId] });
+        if (!(platformId in state.userEnabled)) return json({ ok: false, error: `没有这个用户实例：${platformId}` }, 404);
+        // 用户实例没有主动探活：入站通不通由装配过程记录，只有连接本身知道。
+        if (action === 'probe') return json({ ok: false, error: '用户实例没有主动探活：入站结论见注册表的 inboundState' }, 400);
+        if (method !== 'PATCH') return json({ ok: false, error: '不支持的方法' }, 405);
+        const { enabled, ...fields } = patch;
+        state.userConfigs[platformId] = { ...(state.userConfigs[platformId] ?? {}), ...fields };
+        if (enabled !== undefined) {
+          state.userEnabled[platformId] = enabled !== false;
+          // 停用的实例不再装配：入站结论跟着改，注册表与详情页读到的就是这一份。
+          state.userInbound[platformId] = state.userEnabled[platformId]
+            ? { state: 'closed', detail: '已启用，重启桥接后重新连接', at: timestamp }
+            : { state: 'disabled', detail: '配置里停用了这条实例', at: timestamp };
         }
-        return json({ ok: false, error: '不支持的方法' }, 405);
+        const transportKeys = ['wsUrl', 'httpUrl', 'accessToken', 'followDiscoveredEndpoint', 'viaPlatform', 'silenceWarnMs', 'launcherPath', 'homeDir'];
+        const restart = enabled !== undefined || Object.keys(patch).some((key) => transportKeys.includes(key));
+        return json({ ok: true, requiresRestart: restart });
       }
       if (path === '/api/config/send-limit') {
         if (method === 'GET') return json({ ok: true, send: state.limits.send });
@@ -928,11 +964,17 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 source: 'builtin',
                 owner: null,
                 active: true,
-                configured: true,
+                configured: state.defaultUser === 'qq',
                 capabilities: ['group', 'direct', 'mention', 'reply', 'recall', 'poke', 'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'],
                 conversationTypes: ['group', 'private'],
                 limits: { chunkChars: 4000, markdown: false },
                 inbound: true,
+                rawEvent: true,
+                enabled: state.userEnabled.qq,
+                // 这条实例此刻的入站结论（open / closed / error / disabled / send-only / unregistered）。
+                inboundState: state.userInbound.qq ?? null,
+                // 插件 transport 优先、其次适配器：qq 只有内置适配器。
+                outbound: { via: 'adapter', owner: null },
                 // 配置面照抄 profiles/platforms/qq/platform.yml 的 configSchema：
                 // 「平台 › 配置」那一栏要能真占出一张表，而不是永远空着。
                 configSchema: {
@@ -949,21 +991,38 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                   },
                 },
                 // 配置 v2 把「怎么连上」放在 transport、其余放 options，注册表拍平后交给控制台。
-                config: {
-                  account: '',
-                  httpUrl: 'http://127.0.0.1:3000',
-                  wsUrl: 'ws://127.0.0.1:3001',
-                  accessToken: '',
-                  followDiscoveredEndpoint: true,
-                  viaPlatform: false,
-                  silenceWarnMs: 600000,
-                },
+                // 写口（PATCH .../user/qq/config）存的就是 state 里这一份：改完再拉快照能读回来。
+                config: { ...state.userConfigs.qq },
                 assets: {
                   prompt: { active: true, hasDefault: true },
                   tools: [{ flag: 'sendGroup', label: '发群消息', desc: '往群里发一条消息', risk: 'send', defaultOff: false }],
                   behaviors: ['social-v1', 'social-v2'],
                   capabilityProfiles: [],
                 },
+              },
+              {
+                // 第二条用户实例：插件注册的平台，没有配置目录也没有 configSchema。
+                // 条目被停用 —— 用来验「已停用」徽标、入站 disabled 与「设为默认实例」。
+                side: 'user',
+                id: 'wx',
+                label: '微信',
+                note: '',
+                source: 'plugin',
+                owner: 'wx-adapter',
+                active: false,
+                configured: state.defaultUser === 'wx',
+                enabled: state.userEnabled.wx,
+                capabilities: ['group', 'direct', 'reply'],
+                conversationTypes: ['group', 'private'],
+                limits: { chunkChars: 2000, markdown: false },
+                inbound: true,
+                rawEvent: true,
+                inboundState: state.userInbound.wx ?? null,
+                // 插件注册的平台出站走它自己的 transport，不是内置适配器。
+                outbound: { via: 'transport', owner: 'wx-adapter' },
+                configSchema: null,
+                config: {},
+                assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
               },
               {
                 side: 'agent',
@@ -1039,15 +1098,30 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 },
               },
             ],
-            // 配置面与运行期选的不一致 = 刚改过、还没重启：与真实桥接同一条诊断。
-            diagnostics: state.defaultAgent === 'dsh' ? [] : [{
-              code: 'active_pending_restart',
-              side: 'agent',
-              platformId: state.defaultAgent,
-              level: 'warn',
-              message: `配置已把默认平台改为 ${state.defaultAgent}，本进程仍装配 dsh：重启桥接后生效`,
-            }],
-            summary: { total: 3, user: 1, agent: 2, errors: 0, warnings: state.defaultAgent === 'dsh' ? 0 : 1 },
+            // 配置面与运行期选的不一致 = 刚改过、还没重启：与真实桥接同一条诊断（两侧各一条）。
+            diagnostics: [
+              ...(state.defaultAgent === 'dsh' ? [] : [{
+                code: 'active_pending_restart',
+                side: 'agent',
+                platformId: state.defaultAgent,
+                level: 'warn',
+                message: `配置已把默认平台改为 ${state.defaultAgent}，本进程仍装配 dsh：重启桥接后生效`,
+              }]),
+              ...(state.defaultUser === 'qq' ? [] : [{
+                code: 'active_pending_restart',
+                side: 'user',
+                platformId: state.defaultUser,
+                level: 'warn',
+                message: `配置已把默认实例改为 ${state.defaultUser}，本进程仍装配 qq：重启桥接后生效`,
+              }]),
+            ],
+            summary: {
+              total: 4,
+              user: 2,
+              agent: 2,
+              errors: 0,
+              warnings: (state.defaultAgent === 'dsh' ? 0 : 1) + (state.defaultUser === 'qq' ? 0 : 1),
+            },
           });
           case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，

@@ -80,6 +80,9 @@ export function listUserPlatforms() {
     // 能不能收消息 = 有没有 connect()（C3 的入站契约）。函数本身不进返回值：
     // 这份对象会原样进 /api/platforms/registry。
     inbound: typeof impl.connect === 'function',
+    // 入站事件里能不能带业务体认识的原始报文：只有声明了的平台，它的消息才能
+    // 直接进唤醒（社交、引用、媒体都是按那个形状写的）。
+    rawEvent: impl.rawEvent === true,
   }));
 }
 

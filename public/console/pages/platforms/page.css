@@ -75,9 +75,3 @@
   gap: 6px;
 }
 .platform-detail .cap-tool-names code { font-size: 11px; }
-
-/* schema 里的数组/对象值可能很长：允许在任意字符处折行，不撑破右栏。 */
-.platform-config-code {
-  white-space: pre-wrap;
-  word-break: break-all;
-}

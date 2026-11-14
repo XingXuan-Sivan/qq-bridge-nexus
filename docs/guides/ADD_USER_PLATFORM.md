@@ -133,13 +133,18 @@ raw event → validateUnifiedEvent(raw, origin) → 准入 → 会话映射 → 
 **顺序不可换**：校验必须在准入之前，否则插件（或任何一个适配器）能看到未准入会话的正文。四步里
 只有第一步（报文 → 统一事件）在适配器，后三步全在 `bridge.js`。
 
-- 管道 `emit` **永不抛错**：任何异常都变成 `{ ok: false, reason }` 交给 `onDrop`（`INBOUND_DROP` 四种：
-  `invalid` / `not_admitted` / `conversation_unresolved` / `deliver_failed`）。
+- 管道 `emit` **永不抛错**：任何异常都变成 `{ ok: false, reason }` 交给 `onDrop`（`INBOUND_DROP` 五种：
+  `invalid` / `not_admitted` / `conversation_unresolved` / `body_unsupported` / `deliver_failed`）。
+- **一条实例一条管线**：`platforms.users` 里每条启用的条目都会单独装配，`origin` 是那条条目的
+  `{ platform, account }` —— 会话 key 与准入白名单都按它算，多实例并存也不会串号。
+- **正文契约 `rawEvent`**：`describePlatform()` 里的静态布尔。声明的平台才拿得到 `ext.raw`；
+  没声明的由 `deliver` 返回 `body_unsupported` —— 不假装处理过。
 - 未实现 `connect` 的平台仍合法：统一注册表把它标成 `inbound: false` 并报 `inbound_unsupported`（warn），
   不再静默地“看起来能用”。QQ 在 C3 之后不再触发该诊断。
-- 启动与退出：`startUserPlatformInbound(...)` 返回 `{ close }`，`bridge.js` 在 `shutdownThenExit` 里先摘订阅。
-  同一进程只该有一条入站订阅（适配器内部守卫了重复 `connect`）。
+- 启动与退出：`startUserPlatformInbound(...)` 返回 `{ close }`，`bridge.js` 逐条收集并在 `shutdownThenExit`
+  里先摘订阅。适配器内部守卫了重复 `connect`，同一条实例不会装两条订阅。
 
 QQ 的参考实现：`src/user-side/adapters/qq/inbound.mjs`（报文 → 统一事件、剔自己发的消息、
 `onMessage` 优先于旧 SDK 的分类型订阅、未知段降级）；回归 `scripts/test-qq-inbound.mjs`（14 条）与
-`scripts/test-unified-inbound.mjs`（11 条），端到端见 `test-transport-plugin.mjs` 的 mock 平台用例。
+`scripts/test-unified-inbound.mjs`（13 条）、`scripts/test-user-instances.mjs`（10 条），
+端到端见 `test-transport-plugin.mjs` 的 mock 平台用例。

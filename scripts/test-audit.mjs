@@ -238,6 +238,9 @@ const tests = [
   // P2 平台配置写口：按 id 打补丁、端点/选项分界、切换默认执行体只改指针，
   // 以及注册表为控制台补的 configured / probe 读视图与 active_pending_restart。
   'test-platform-config.mjs',
+  // P3 多实例：一条 `platforms.users` 条目 = 一个实例（enabled 是条目级键、userInstances
+  // 派生）、注册表的 inboundState / outbound / rawEvent，以及只存在配置里的条目也可见（config_only）。
+  'test-user-instances.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

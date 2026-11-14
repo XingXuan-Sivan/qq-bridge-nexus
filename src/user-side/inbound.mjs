@@ -22,6 +22,8 @@ export const INBOUND_DROP = Object.freeze({
   INVALID: 'invalid',
   NOT_ADMITTED: 'not_admitted',
   UNRESOLVED: 'conversation_unresolved',
+  // 唤醒侧没有这个平台的正文入口（平台没声明 rawEvent）：消息进来了，但没人处理。
+  BODY_UNSUPPORTED: 'body_unsupported',
   DELIVER_FAILED: 'deliver_failed',
 });
 
@@ -36,7 +38,8 @@ function text(value, max = 64) {
  * @param {{platform: string, account?: string}} options.origin 内核认定的来源（必填）
  * @param {(event: object) => boolean|Promise<boolean>} options.admit 准入；抛错按拒绝处理（fail-closed）
  * @param {(event: object) => ({key: string, type: string, id: string}|null)} options.resolve 会话映射
- * @param {(payload: {event: object, address: object, key: string}) => unknown} options.deliver 唤醒
+ * @param {(payload: {event: object, address: object, key: string}) => unknown} options.deliver 唤醒；
+ *   返回 `{reason, errors}` 表示拒绝交给业务体（例如平台没声明正文契约），管线按该 reason 记丢弃。
  * @param {(drop: {reason: string, errors: string[]}) => void} [options.onDrop] 丢弃审计
  */
 export function createInboundPipeline({ origin, admit, resolve, deliver, onDrop } = {}) {
@@ -93,11 +96,15 @@ export function createInboundPipeline({ origin, admit, resolve, deliver, onDrop 
 
     // 4) 唤醒：地址由管线拼好，唤醒侧不再自己拼（少一处能拼错的平台名/账号）。
     const address = { platform, account, conversation: { type, id } };
+    let outcome;
     try {
-      await deliver({ event, address, key });
+      outcome = await deliver({ event, address, key });
     } catch (error) {
       return drop(INBOUND_DROP.DELIVER_FAILED, [String(error?.message ?? error)]);
     }
+    // 唤醒可以拒绝：业务体只认得声明过正文契约的平台，其余的到这里为止。
+    const refused = String(outcome?.reason ?? '').trim();
+    if (refused) return drop(refused, Array.isArray(outcome?.errors) ? outcome.errors : []);
 
     return { ok: true, key, address, event };
   }

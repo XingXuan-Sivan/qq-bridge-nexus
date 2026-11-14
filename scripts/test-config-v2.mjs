@@ -106,7 +106,7 @@ test('readPlatforms：非法平台 id 的条目被丢弃，不污染整份配置
 test('userPlatformConfig / agentPlatformConfig：缺条目给空段，account 归一', () => {
   const platforms = readPlatforms({ platforms: { active: { user: 'qq', agent: 'dsh' } } });
   const user = userPlatformConfig(platforms);
-  assert.deepEqual(user, { id: 'qq', account: '', transport: {}, options: {} });
+  assert.deepEqual(user, { id: 'qq', account: '', enabled: true, transport: {}, options: {} });
   const agent = agentPlatformConfig(platforms);
   assert.deepEqual(agent, { id: 'dsh', endpoint: {}, options: {} });
 
@@ -169,7 +169,8 @@ test('platformsForWrite：只回写三段结构，不把读时的推断带进文
   const platforms = readPlatforms({ platforms: { active: { user: 'qq' }, users: { qq: { wsUrl: 'w' } } } });
   assert.deepEqual(platformsForWrite(platforms), {
     active: { user: 'qq', agent: 'dsh' },
-    users: { qq: { account: '', transport: { wsUrl: 'w' }, options: {} } },
+    // `account` 与 `enabled` 是条目级的字段（与连接参数同层），归一化后都是显式值。
+    users: { qq: { account: '', enabled: true, transport: { wsUrl: 'w' }, options: {} } },
     agents: {},
   });
 });
@@ -186,6 +187,8 @@ test('flatPlatformEntry：段内三段（transport/options/endpoint）对调用�
   const platforms = readPlatforms(migrateConfigToV2(V1).config);
   assert.deepEqual(flatPlatformEntry(platforms, 'user', 'qq'), {
     account: 'napcat',
+    // 条目开关也在扁平投影里：控制台与注册表都按实例读它。
+    enabled: true,
     wsUrl: 'ws://127.0.0.1:3001',
     accessToken: 'tok',
     viaPlatform: true,

@@ -32,6 +32,8 @@ function describePlatform(impl, { source, owner = null, active = false }) {
     inbound: impl.inbound === true
       || typeof impl.connect === 'function'
       || typeof impl.instance?.connect === 'function',
+    // 入站事件里有没有业务体认识的原始报文（见 inbound.mjs 的 deliver 契约）。
+    rawEvent: impl.rawEvent === true,
     source,
     owner,
     active,

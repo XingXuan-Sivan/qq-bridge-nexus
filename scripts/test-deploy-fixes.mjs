@@ -1,7 +1,8 @@
 // Windows 实机部署（v1.0.1）反馈的问题的回归测试。全部离线、假数据。
 //   ① Release ZIP 的中文文件名必须带 UTF-8 标志（否则 Windows 解压乱码 / 失败），可执行脚本保留 0755；
 //   ② 黑话研究日志：「写入 / 解析 / 未确认」分开计数，未确认时把 AI 推测打进日志（仍然不写库）；
-//   ③ 会话重置要清掉 qq_wait_for_messages 的等待租约（三个重置入口都要），归一后的 key 也要清；
+//   ③ 会话重置要清掉 qq_wait_for_messages 的等待租约（归一后的 key 也要清）；
+//      序列只有一份（src/session/reset.mjs），/reset 命令与控制台按钮都委托它；
 //   ④ 生成 Linux 服务文件时路径一律用 POSIX 写法（Windows 上跑也不能变成反斜杠）；
 //   ⑤ 测试与脚本里不能用 URL.pathname 当文件路径（Windows 上是 /C:/…），要用 fileURLToPath。
 import test from 'node:test';
@@ -55,16 +56,24 @@ test('② 黑话研究日志：写入数与未确认数分开统计；未确认�
   assert.ok(!/entry\.(meaning|usage|example)\s*=/.test(skip), '未确认分支里不改词条');
 });
 
-test('③ 会话重置清掉等待租约：forgetConversationCaches 连归一后的 key 一起清；三个重置入口都调用它', () => {
+test('③ 会话重置清掉等待租约：forgetConversationCaches 连归一后的 key 一起清；重置入口共用一份序列', () => {
   const src = read('src/bridge.js');
   const fc = src.slice(src.indexOf('function forgetConversationCaches(key) {'), src.indexOf('function retireSession(key) {'));
   assert.match(fc, /activeWaits\.delete\(key\);/);
   assert.match(fc, /activeWaits\.delete\(canonicalV2Key\(key\) \?\? key\);/);
+  // 序列已收敛到 src/session/reset.mjs（逐桶断言在 scripts/test-session-reset.mjs），
+  // 但真实桥接必须把等待租约登记进 deps，否则序列里那一行拿到的是 undefined。
+  const deps = src.slice(src.indexOf('createSessionResetter({'), src.indexOf('return resetSessionImpl('));
+  assert.match(deps, /^\s+forgetConversationCaches,/m, '桥接要把等待租约清理登记进重置依赖');
+  assert.match(deps, /forgetRoleSeen:/, '重置要忘掉「已读人格卡」，下次唤醒重新注入');
+  assert.match(deps, /discardDormantForReset,/, '重置要丢掉休眠中的会话');
   const block = (marker, endMarker) => { const i = src.indexOf(marker); assert.ok(i > 0, marker); return src.slice(i, src.indexOf(endMarker, i)); };
-  assert.match(block("url.pathname === '/api/session/reset'", 'archiveSession'), /forgetConversationCaches\(key\);/, '控制台 / 控制中心的「重置会话」');
+  assert.match(block("url.pathname === '/api/session/reset'", 'archived: oldSessionId'), /resetSession\(key, \{ notify: false \}\)/, '控制台 / 控制中心的「重置会话」走同一份序列，且不发群回执');
   assert.match(block("url.pathname === '/api/socialV2/reset'", 'saveState();'), /forgetConversationCaches\(key\);/, '二代仿真全量重置');
-  const qqReset = src.slice(src.lastIndexOf('drainPromptQueue(key, \'会话已重置\');'));
-  assert.match(qqReset.slice(0, qqReset.indexOf('已重置会话，下次消息将开新上下文')), /forgetConversationCaches\(key\);/, 'QQ 里的 /reset');
+  // QQ 里的 /reset 也是同一个 resetSession（内置命令的 session.reset 由桥接注入），
+  // 所以等待租约清理只有一份实现，三个入口不会各自漂移。
+  const builtinDeps = src.slice(src.indexOf('const builtinCommandDeps = {'), src.indexOf('for (const definition of createBuiltinCommands('));
+  assert.match(builtinDeps, /reset: resetSession,/, 'QQ 里的 /reset 走同一份重置实现');
 });
 
 test('④ Linux 服务文件：路径按 POSIX 拼，不出现反斜杠（在 Windows 上生成也一样）', () => {

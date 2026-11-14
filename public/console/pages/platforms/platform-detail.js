@@ -33,7 +33,7 @@ let entry = null; // 当前平台条目（注册表快照里的一份）
 let tab = 'overview';
 let promptCard = null; // 平台提示词卡，只属于「话术与工具」
 let behaviorsPanel = null; // 行为档案面板，只属于「行为」
-let capabilityPanel = null; // 能力预设面板，只属于「能力」
+let capabilityPanel = null; // 能力档面板，只属于「能力」
 
 /** 这一侧该有哪些标签：判断依据是注册表条目里有没有对应资产，不是平台 id。 */
 function tabsOf(item) {
@@ -255,9 +255,8 @@ function capabilitiesHtml(item) {
         能力档的正文（工具可见集、MCP 与技能范围）在 <code>profiles/agent-platforms/${esc(item.id)}/capabilities/</code>。</p>
       <div id="platformCapabilityList"></div>
     </section>
-    <section class="platform-section">
-      <div id="platformCapabilityEditor"></div>
-    </section>`;
+    <!-- 编辑器自己带 .platform-stack，与行为档案面板那块同构；这里不再包一层 section。 -->
+    <div id="platformCapabilityEditor"></div>`;
 }
 
 function mountCapabilities() {

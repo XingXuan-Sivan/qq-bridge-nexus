@@ -1149,6 +1149,60 @@ async function refreshPersonaCardCache(providerId, id, provider = null) {
   return { ...card, text };
 }
 
+/**
+ * 把「用户写的一个卡名」解析成可写入会话/全局的人格值。
+ *
+ * 只有这一个入口，`/role` 与「默认人格下拉」行为一致：
+ *   - `roles/<名字>.md` 存在 → 本地卡，值就是名字；
+ *   - `provider:id` → 外部卡引用（顺手刷一次缓存，服务离线时允许沿用旧缓存）；
+ *   - 裸名字 → 在各 provider 的目录里找唯一匹配（同名多张卡要求写全 `provider:id`）。
+ * @returns {Promise<{ok:true, uid:string, label:string, source:'local'|'provider'}|{ok:false, error:string, candidates?:string[]}>}
+ */
+async function resolvePersonaTarget(raw) {
+  const arg = String(raw ?? '').trim();
+  if (!arg) return { ok: false, error: '没有指定人格' };
+  const local = sanitizeRoleName(arg);
+  const localFile = local ? resolveRoleFile(ROLES_DIR, local) : null;
+  if (localFile && fs.existsSync(localFile)) return { ok: true, uid: local, label: local, source: 'local' };
+  const ref = arg.includes(':') ? personaRef(arg) : null;
+  if (ref) return externalPersonaTarget(ref.providerId, ref.id, arg);
+  const hits = [];
+  for (const entry of plugins?.personaProviders?.() ?? []) {
+    const provider = plugins?.personaProviderById?.(entry.id) ?? null;
+    if (typeof provider?.list !== 'function') continue;
+    let cards = [];
+    try { cards = await provider.list(); } catch { continue; }
+    for (const card of Array.isArray(cards) ? cards : []) {
+      const id = String(card?.id ?? card?.name ?? '').trim();
+      if (!id) continue;
+      const name = String(card?.name ?? id);
+      if (id === arg || name === arg || String(card?.slug ?? '') === arg) hits.push({ providerId: entry.id, id });
+    }
+  }
+  if (hits.length === 1) return externalPersonaTarget(hits[0].providerId, hits[0].id, arg);
+  if (hits.length > 1) {
+    return {
+      ok: false,
+      error: `「${arg}」在多个人格 provider 里重名，请写全引用（provider:id）：`,
+      candidates: hits.map((hit) => `${hit.providerId}:${hit.id}`),
+    };
+  }
+  return { ok: false, error: `人格「${arg}」不存在（roles/${arg}.md 或外部 provider 目录里都没有）` };
+}
+
+/** 外部人格引用 → 可写入的值；provider 未注册或取不到正文（且无缓存）时给出可读的错误。 */
+async function externalPersonaTarget(providerId, id, rawLabel) {
+  const provider = plugins?.personaProviderById?.(providerId) ?? null;
+  if (!provider) return { ok: false, error: `外部人格服务「${providerId}」没启用，无法使用「${rawLabel}」` };
+  let fetchError = null;
+  try { await refreshPersonaCardCache(providerId, id, provider); } catch (error) { fetchError = error; }
+  const cached = readPersonaCardCache(providerId, id);
+  if (!cached?.text) {
+    return { ok: false, error: `外部人格「${rawLabel}」暂时取不到：${fetchError?.message ?? '没有缓存'}` };
+  }
+  return { ok: true, uid: `${providerId}:${id}`, label: cached.name || id, source: 'provider' };
+}
+
 // 运行方案文件仓库（profiles/plans/*.yml）：方案的唯一定义处，config.json 只留指针。
 let planFileStore = null;
 function planStore() {
@@ -7555,7 +7609,9 @@ async function main() {
           return;
         }
         // 运行方案（P4）：读定义与全局默认。控制台用它渲染方案页与会话下拉。
-        if (req.method === 'GET' && url.pathname === '/api/runtime/plans') {
+        // C8 起路径从 `/api/runtime/plans` 改成 `/api/plans`：方案不是运行期临时物，
+        // 它跟 `/api/platforms/registry` 一样是“配置面”，不该挤在 `runtime/` 下面。
+        if (req.method === 'GET' && url.pathname === '/api/plans') {
           const plans = ensureRuntime();
           const plan = activePlan();
           sendJson({
@@ -7672,7 +7728,7 @@ async function main() {
           return;
         }
         // 保存 / 更新一套自定义方案：写 profiles/plans/<id>.yml；内置方案只读，要改先克隆。
-        if (req.method === 'POST' && url.pathname === '/api/runtime/plans') {
+        if (req.method === 'POST' && url.pathname === '/api/plans') {
           const body = await readBody();
           try {
             const plan = planStore().save(body);
@@ -7697,8 +7753,8 @@ async function main() {
           return;
         }
         // 删除一套自定义方案；正在作为全局默认或内置的方案不允许删。
-        if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/plans/')) {
-          const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/runtime/plans/'.length)));
+        if (req.method === 'DELETE' && url.pathname.startsWith('/api/plans/')) {
+          const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/plans/'.length)));
           if (planId && activePlan()?.id === planId) {
             sendJson({ ok: false, error: '这套方案正作为全局默认，先换一个默认方案再删' }, 409);
             return;
@@ -7712,21 +7768,6 @@ async function main() {
           }
           return;
         }
-        // 切换 / 清除人格后的生效方式：nextWake = 各会话下一次唤醒时带上新卡；immediate = 现在就唤醒一次。
-        // 聊天模式 / 一代仿真每条消息都带角色卡，切换本来就立即生效。
-        // onlyKeys：只看这些会话（按会话设置人格时只管保存的那一个，不顺带叫醒别的还没读新卡的会话）
-        const applyRoleChange = (apply, onlyKeys = null) => {
-          const mode = normalizeApplyMode(apply);
-          const v2Active = currentMode === 'reserved2' || (onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session());
-          if (!v2Active) return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
-          if (mode !== 'immediate') {
-            const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k))).length;
-            return { apply: mode, mode: currentMode, woke: 0, pending };
-          }
-          const r = refreshRoleNowV2(onlyKeys);
-          log(`控制台：角色卡立即生效，唤醒 ${r.woke.length} 个会话重新读卡${r.pending ? `（${r.pending} 个在定时静默里，下次唤醒再读）` : ''}`);
-          return { apply: mode, mode: currentMode, woke: r.woke.length, pending: r.pending ?? 0 };
-        };
         if (req.method === 'POST' && url.pathname === '/api/role') {
           const body = await readBody();
           if (body.role && typeof body.role === 'string') {
@@ -7859,8 +7900,10 @@ async function main() {
             roles: summaries.map((role) => role.name),
             summaries,
             current: rs.role ?? null,
-            // 按会话设置：已知会话（有 DSH 会话的 + 单独设置过的）各用哪张卡；missing = 引用的人格文件不存在
-            assignments: roleAssignments(rs, sessions.keys(), (n) => { const f = resolveRoleFile(ROLES_DIR, n); return !!f && fs.existsSync(f); }),
+            // 按会话设置：已知会话（有 DSH 会话的 + 单独设置过的）各用哪张卡；
+            // missing = 引用的人格已不可用。判据走 roleCardFor：本地卡与外部引用（provider:id）同一个门，
+            // 以前只验证 roles/<名字>.md，外部人格会被误报成 missing。
+            assignments: roleAssignments(rs, sessions.keys(), (n) => Boolean(roleCardFor(n))),
             limits: { nameMax: ROLE_NAME_MAX, contentMaxBytes: ROLE_CONTENT_MAX_BYTES, injectMaxChars: roleInjectMaxChars },
           });
           return;
@@ -8558,7 +8601,8 @@ async function main() {
               // P5：会话级的运行方案下拉（跟随全局 = null）。presetId 仍保留供旧客户端读取。
               planId: profile?.planId ?? null,
               plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, tools: p.tools, audience: p.audience, builtin: p.builtin })),
-              activePlan: activePlan()?.id ?? null,
+              // 下拉里的「跟随全局（当前：…）」要显示全局方案的名字，所以给整份定义（与 `/api/plans` 的 activePlan 同形）。
+              activePlan: activePlan() ?? null,
               permission: permissionPayload(key),
               presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
@@ -8692,7 +8736,15 @@ async function main() {
               if (!pinned.ok) log(`⚠️ 会话 ${key} 的权限预设未能重钉：${pinned.error ?? '未知原因'}（重启桥接或重建会话后生效）`);
             }
             log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
-            sendJson({ ok: true, key, profile: next, permission: permissionPayload(key), accessPersisted: persisted });
+            // 人格卡是注入内容，不是普通字段：改完要和「默认人格下拉」一样走同一套生效时机，
+            // 否则二代会话会一直按旧卡说话（直到下一次有人说话才顺带换卡）。
+            const refresh = Object.hasOwn(patch, 'persona')
+              ? applyRoleChange(body.apply ?? roleSaveApplyDefault, [key])
+              : null;
+            sendJson({
+              ok: true, key, profile: next, permission: permissionPayload(key), accessPersisted: persisted,
+              ...(refresh ? { refresh } : {}),
+            });
             return;
           }
           if (req.method === 'DELETE') {
@@ -12258,64 +12310,16 @@ async function main() {
           }
           return;
         }
+        // 控制台「重置会话」：与 /reset 命令走**同一份**清理序列（src/session/reset.mjs），只差一个 notify。
+        // 以前这里是第二份手写清理，新增缓存要改两处，漏登一处就会出现
+        // 「重置后还按旧人格卡说话」这种只在控制台复现的问题。
         if (req.method === 'POST' && url.pathname === '/api/session/reset') {
           const body = await readBody();
           const key = apiKey(body.key);
-          if (!key || !sessions.get(key)) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
-          sessionEpoch++;
-          const oldSessionId = sessions.get(key);
-          sessions.drop(key);
-          modelAppliedSessions.delete(oldSessionId);
-          // 权限元数据必须与映射一起删除，否则会永久残留在 sessions.json 里。
-          sessions.dropPolicy(key);
-          reverse.delete(oldSessionId);
-          collectors.delete(oldSessionId);
-          sendToolSucceededSessions.delete(oldSessionId);
-          pendingSendToolCalls.delete(oldSessionId);
-          v2TurnStartAt.delete(oldSessionId);
-          turnLeaseNoted.delete(oldSessionId);
-          toolCallNames.delete(oldSessionId);
-          const pe = pending.get(key);
-          if (pe) {
-            clearTimeout(pe.timer);
-            cancelPendingEntry(pe).catch(() => {});
-          }
-          pending.delete(key);
-          for (const e of ext.approvals.removeKey(key)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
-          ext.approvals.forgetSession(oldSessionId);
-          queued.delete(key);
-          queuedHintAt.delete(key);
-          sessionPromises.delete(key);
-          drainPromptQueue(key, '会话已重置');
-          social.recentMessages.delete(key);
-          messageMediaStore.delete(key);
-          social.pendingSummaries.delete(key);
-          social.states.delete(key);
-          social.silentContext.delete(key);
-          social.silentTurns.delete(oldSessionId);
-          social.exitingSessions.delete(oldSessionId);
-          slangWindows.delete(key);
-          slangExtractionCooldowns.delete(key);
-          slangSubmitTimes.delete(key);
-          cancelSocialTimers(key);
-          clearSocialV2Timers(key);
-          pendingWakeKeys.delete(key);
-          wakeConfigUpdatedKeys.delete(key);
-          markReadCalledKeys.delete(key);
-          wakeConfigMissCount.delete(key);
-          forgetAgentToken(key);
-          socialV2.conversations.delete(key);
-          seenForwardIds.delete(key);
-          // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
-          // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
-          forgetConversationCaches(key);
-          discardDormantForReset(key);
-          saveSocialV2State();
-          saveState();
-          // 归档只隐藏会话，不终止 DSH 侧排队的工作；先清队列并取消当前回合。
-          try { await withTimeout(agentPort.cancel(oldSessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); }
-          catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-          try { await withTimeout(agentPort.archiveSession(oldSessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
+          const oldSessionId = key ? sessions.get(key) : null;
+          if (!key || !oldSessionId) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          const result = await resetSession(key, { notify: false });
+          if (result?.ok === false) { sendJson({ ok: false, error: result.note || '重置失败' }, 500); return; }
           log(`控制台：已清除会话上下文 ${key}（旧会话 ${oldSessionId} 已停止并归档）`);
           sendJson({ ok: true, key, archived: oldSessionId });
           return;
@@ -14733,7 +14737,9 @@ async function main() {
       // offline queue may have received more messages since this wake was queued.
       wakeState = getSocialV2State(key);
       wakeToken = wakeState.agentToken;
-      roleFpAtBuild = opts.wakeReason === 'bootstrap' ? null : currentRoleFingerprintV2(key);
+      // 指纹在每次唤醒都要算：连引导唤醒也算，这样刚刚投递过整张卡就被记为「已读」，
+      // 不会在下一次唤醒重复给一遍（以前引导唤醒记为 null，导致提前被当成未读）。
+      roleFpAtBuild = currentRoleFingerprintV2(key);
       // 引导唤醒总是完整给；其它唤醒按指纹决定黑话表 / 表情块给完整还是一行
       blockPlan = opts.wakeReason === 'bootstrap' ? null : {
         sticker: promptBlocks.decide(key, sessionId, 'sticker', stickerBlockTextV2()),
@@ -15936,9 +15942,14 @@ async function main() {
     return resolved.fingerprint ?? roleFingerprint(resolved.name, currentRoleHintV2(key));
   }
 
-  /** 这次唤醒要不要带「角色卡已更新」块；要的话返回块文字，否则 ''。 */
-  function roleRefreshBlockV2(key, reason) {
-    if (reason === 'bootstrap') return '';
+  /**
+   * 这次唤醒要不要带「角色卡已更新」块；要的话返回块文字，否则 ''。
+   *
+   * 统一口径：人格卡的全文只有这一个入口——按「会话 + 卡片指纹」判断还没读到这一版就整段给。
+   * 不区分唤醒原因：新建（引导）/ 重置 / 重建 / 压缩后都是「新上下文」，都该从头读一遍卡，
+   * 以前只靠引导唤醒里的 qq_get_prompt 兜底，一旦 AI 没调就整场没有卡。
+   */
+  function roleRefreshBlockV2(key) {
     const sid = sessions.get(key);
     if (!sid || !roleRefresh.needsRefresh(key, sid, currentRoleFingerprintV2(key))) return '';
     return buildRoleRefreshBlock({ name: currentRoleName(key), hint: currentRoleHintV2(key) });
@@ -15960,6 +15971,30 @@ async function main() {
       woke.push(k);
     }
     return { woke, pending: keys.length - woke.length };
+  }
+
+  // 人格变更后的生效时机（控制台 /api/role、/api/roles/assign、保存人格卡、会话档案 PATCH，
+  // 以及 QQ 里的 `/role` 命令都走这一条）：
+  //   nextWake  = 各会话下一次唤醒时带上新卡（默认）
+  //   immediate = 现在就唤醒还没读到新卡的会话一次
+  // 聊天模式 / 一代仿真每条消息都带角色卡，切换本来就立即生效。
+  // onlyKeys：只看这些会话（按会话设置人格时只管保存的那一个，不顺带叫醒别的还没读新卡的会话）。
+  //
+  // 它放在这里而不是 HTTP 处理函数里：命令层也要用同一个口径，
+  // 写在路由里的话 `/role` 只能另写一份（以前就因为两处不一致才出现「切了但没重新注入」）。
+  // 用函数声明而不是 const：HTTP 服务器在更早的代码里就已经 listen，
+  // 声明函数在作用域入口就初始化好，不会在中间那段时间里踩到 TDZ。
+  function applyRoleChange(apply, onlyKeys = null) {
+    const mode = normalizeApplyMode(apply);
+    const v2Active = currentMode === 'reserved2' || (onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session());
+    if (!v2Active) return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
+    if (mode !== 'immediate') {
+      const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k))).length;
+      return { apply: mode, mode: currentMode, woke: 0, pending };
+    }
+    const r = refreshRoleNowV2(onlyKeys);
+    log(`人格变更立即生效：唤醒 ${r.woke.length} 个会话重新读卡${r.pending ? `（${r.pending} 个在定时静默里，下次唤醒再读）` : ''}`);
+    return { apply: mode, mode: currentMode, woke: r.woke.length, pending: r.pending ?? 0 };
   }
 
   // 唤醒提示词的唯一入口。文本由注入块注册表按 slot + priority 拼出来，
@@ -16014,8 +16049,13 @@ async function main() {
    */
   function wakeTaskTextFor(key, reason, preSleepMs) {
     if (reason === 'bootstrap') {
+      // 人格卡已经由唤醒提示的 core-persona-refresh 块整段给出时，就不必再让 AI 去读一遍；
+      // 没挂卡时换成「去看角色」，不要凭空说「已给出」（两种写法都保留 qq_get_prompt 这个入口）。
+      const cardLine = currentRoleHintV2(key)
+        ? '角色卡已经在上文完整给出，不用再读；请调用 qq_get_prompt 看推荐值、可用工具和当前状态；'
+        : '请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；';
       return {
-        branch: `【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n请先调用 qq_get_prompt 查看角色、推荐值、可用工具和状态；有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`,
+        branch: `【引导唤醒】你已接入 QQ 会话 ${key}。\n当前是二代仿真模式：你的文本输出不会自动发送到 QQ，所有发言必须通过工具完成。\n${cardLine}有待回应的消息先按首回复节奏处理，最后才用 qq_set_wake_config 设置你希望如何被唤醒。`,
         fallback: ''
       };
     }
@@ -16147,7 +16187,7 @@ async function main() {
       preSleepText: `【沉睡前强制等待】这是决定潜水收尾时的步骤，不是首回复的前置条件。除非对方明确说“不聊了/晚安/下了/拜拜”等结束语，否则每次设置潜水/下一次唤醒前，必须先调用 qq_wait_for_messages(timeoutMs=${preSleepMs}) 完成一次沉睡前观察；回复前 purpose="reply" 的短静默不能代替这次完整观察。若 ${Math.round(preSleepMs / 60000)} 分钟内没人说话，返回 preSleepWaitSatisfied=true，可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看返回的 newMessages——判断不需要你参与就可以直接沉睡，若你选择参与回复，则下次想睡时需要重新等待观察窗口。如果返回里带 preSleepWaitRemainingMs，就按剩余时间继续等待。`,
       wakeTask: wakeTaskTextFor(key, reason, preSleepMs),
       // 前情提要：角色卡换了 / 令牌抄错过 / 断线期间补收了消息。
-      roleRefreshText: roleRefreshBlockV2(key, reason),
+      roleRefreshText: roleRefreshBlockV2(key),
       tokenNoticeText: tokenNotice ? tokenNoticeBlock(tokenNotice) : '',
       backfillNoticeText: bfNotice ? backfillNoticeBlock(bfNotice) : '',
       relays,
@@ -16824,7 +16864,12 @@ async function main() {
   // 清理序列在 src/session/reset.mjs（可脱离 bridge 单测，新增缓存要在这里登记）。
   // 惰性建 deps：首次重置时这些 Map / 函数早已初始化，避免模块顶部的 TDZ。
   let resetSessionImpl = null;
-  async function resetSession(key) {
+  /**
+   * 会话重置的唯一实现（/reset 命令与控制台按钮共用）。
+   * @param {string} key
+   * @param {{ notify?: boolean }} [options] notify=false 只清状态，不往群里发回执。
+   */
+  async function resetSession(key, options) {
     resetSessionImpl ??= createSessionResetter({
       state,
       bumpEpoch: () => { sessionEpoch++; },
@@ -16871,6 +16916,8 @@ async function main() {
       clearSocialV2Timers,
       forgetAgentToken,
       forgetConversationCaches,
+      // 人格卡「读到哪一版」的记录：重置 = 新上下文，下次唤醒要把卡重新整段给一遍。
+      forgetRoleSeen: (key) => { roleRefresh.forget(key); promptBlocks.forget(key); },
       discardDormantForReset,
       saveSocialV2State,
       saveState,
@@ -16885,7 +16932,7 @@ async function main() {
       dshControlTimeoutMs: DSH_CONTROL_TIMEOUT_MS,
       log,
     });
-    return resetSessionImpl(key);
+    return resetSessionImpl(key, options);
   }
 
   // 内置命令的「壳」在 src/commands/builtin.mjs（元数据 / 参数解析 / 回执文案），
@@ -16903,8 +16950,10 @@ async function main() {
       withKeyFor: withRoleForKey,
       nameFor: roleNameFor,
       sourceFor: roleSourceFor,
-      sanitize: sanitizeRoleName,
-      exists: (name) => Boolean(name) && fs.existsSync(resolveRoleFile(ROLES_DIR, name)),
+      // `/role 名字` 与「全局默认人格下拉」同一个解析入口：本地卡 + 外部 provider 卡（provider:id）。
+      resolve: resolvePersonaTarget,
+      // 换卡后的生效时机与默认人格下拉一致（config.role.saveApply），不再「存了但没重注入」。
+      refresh: (key) => applyRoleChange(roleSaveApplyDefault, [key]),
       setGlobalMode: (mode) => {
         if (mode === 'silent' || mode === 'active') {
           setManualSilenceMode(mode);

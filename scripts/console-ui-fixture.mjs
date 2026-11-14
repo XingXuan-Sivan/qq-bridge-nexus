@@ -675,7 +675,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
       }
       // 运行方案：删除自定义方案（前缀匹配，id 在路径里）。
-      if (method === 'DELETE' && path.startsWith('/api/runtime/plans/')) return json({ ok: true });
+      if (method === 'DELETE' && path.startsWith('/api/plans/')) return json({ ok: true });
       // 预设：新建 / 插件配置 / 还原出厂（表单化后控制台只走这三个写接口）。
       if (method === 'POST' && path === '/api/extensions/presets/create') {
         return json({ ok: true, id: body?.id ?? 'new-preset', from: body?.from ?? '', presets: [] });
@@ -804,7 +804,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       }
       if (method === 'POST' && /\/reset$/.test(path)) {
         if (path.startsWith('/api/runtime/capabilities/')) return json({ ok: true, requiresRestart: true });
-        if (path.startsWith('/api/runtime/plans/')) return json({ ok: true, requiresRestart: true });
+        if (path.startsWith('/api/plans/')) return json({ ok: true, requiresRestart: true });
         return json({ ok: true, requiresRestart: true });
       }
       if (method === 'GET') {
@@ -857,7 +857,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             configDefaultBehavior: 'social-v2',
             presetBehaviors: {},
           });
-          case '/api/runtime/plans': return json({
+          case '/api/plans': return json({
             ok: true,
             platform: 'qq',
             active: state.planId || 'social-v2',
@@ -1454,7 +1454,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             if (body.name === '小鲸鱼') { state.restoredWhale = true; return json({ ok: true, name: '小鲸鱼', created: false, unchanged: false, backup: '小鲸鱼-20261026-090000.md', refresh: { apply: body.apply || 'nextWake', woke: [], pending: 2 } }); }
             state.restoredTsundere = true; return json({ ok: true, name: body.name, created: true, unchanged: false, backup: null, refresh: { apply: body.apply || 'nextWake', notActive: true } });
           case '/api/stickers/describe': state.stickerDescribed = true; return json({ ok: true, started: true, total: 21, undescribed: 10, running: true, progress: { done: 0, total: 10 }, last: null, blocker: '', model: 'deepseek-flash', max: 20 });
-          case '/api/runtime/plans': {
+          case '/api/plans': {
             if (!body?.id) return json({ ok: false, error: '方案 id 或能力预设不合法' }, 400);
             state.customPlans = state.customPlans || {};
             state.customPlans[body.id] = { ...body };

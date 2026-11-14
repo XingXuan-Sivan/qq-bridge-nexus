@@ -1,7 +1,7 @@
 // 切换 / 修改人格后，二代仿真会话重新读卡。全部离线、假数据（夹具里的假号 123 / 456、假角色卡）。
 //   ① 模块：指纹、读卡记录（按会话 + 指纹，换会话也算没读过）、持久化 0600、坏数据丢弃、提示块文字；
 //   ② 端到端：会话读过卡后不重复给；换人格 / 改内容 / 清除人格 → 下一次唤醒把新卡放在最前面，投递后记下、之后不再给；
-//      引导唤醒不带（它自己会调用 qq_get_prompt）；
+//      引导唤醒也带（新建 / 重置后就是新上下文，不能靠 AI 自己去读）；
 //   ③「立即」：只唤醒还没读到新卡的会话，原因是 roleRefresh；已读到的跳过；非二代模式不唤醒。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,10 +83,14 @@ async function withHarness(run) {
 
 const lastPromptFor = (h, sid) => promptText(h.calls.prompts.filter((p) => p.sessionId === sid).at(-1));
 
-test('② 换卡后下一次唤醒带新卡，投递后记下、不再重复；引导唤醒不带', async () => {
+test('② 换卡后下一次唤醒带新卡，投递后记下、不再重复；引导唤醒也带', async () => {
   await withHarness(async (h) => {
     const sid = await h.ensureSession(GROUP_KEY);
-    assert.ok(!h.roleRefreshBlockV2(GROUP_KEY, 'bootstrap'), '引导唤醒不带（它自己调用 qq_get_prompt）');
+    // 引导唤醒也是「新上下文」：还没读过这一版就把卡整段给出（以前 bootstrap 豁免，
+    // 导致新建 / 重置后整场都没有卡，只能赌 AI 会调 qq_get_prompt）。
+    const boot = h.buildWakePromptV2(GROUP_KEY, 'bootstrap');
+    assert.ok(boot.startsWith('【角色卡已更新 · 桥接提供】'), '引导唤醒也带卡');
+    assert.match(boot, /角色卡已经在上文完整给出/, '引导文案要说卡已给出');
     // 模拟 AI 在引导时读过卡
     h.roleRefresh.markSeen(GROUP_KEY, sid, h.currentRoleFingerprintV2());
     assert.ok(!h.buildWakePromptV2(GROUP_KEY, 'atMention').includes('【角色卡已更新'), '读过的卡不重复给');

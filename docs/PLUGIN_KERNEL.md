@@ -505,7 +505,7 @@ ctx.persona.register({
 | `currentRoleFingerprintV2(key)` | 同一张卡的指纹，决定是否注入「角色卡已更新」；没卡时也给稳定指纹 |
 | `buildWakePromptV2Core` / `buildWakeReminderPromptV2` / `qq_get_prompt` | 角色名用同一解析结果，不再各自读 `roles/*.md` |
 | `deliverPromptNow(key)`（唤醒时） | 先 `personaWarm(key)`（异步、有超时、失败不阻塞），再组 prompt |
-| `/role` 命令与「人格与角色」页 | 仍管理 `roles/*.md` 与会话覆盖（L1/L3）；provider 不接管选择，`off` 对 provider 生效 |
+| `/role` 命令与「人格与角色」页 | **同一个解析入口**：`resolvePersonaTarget()` 先认本地 `roles/*.md`，再认外部 `provider:id`（裸名在各 provider 目录里唯一匹配，重名要求写全），所以命令与下拉看到的候选完全一致；`refresh(key)` 按 `config.role.saveApply` 决定「下次唤醒 / 立即」生效。provider 不接管「选哪张卡」，选择权仍在人或会话覆盖（L1/L3）；`off` 对 provider 生效 |
 
 ### 9.3 soulkit 适配器（第一个插件）
 

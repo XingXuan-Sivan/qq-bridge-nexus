@@ -98,12 +98,14 @@
 | 文件 | 职责 | 依赖 |
 | --- | --- | --- |
 | `src/commands/registry.mjs` | 注册表本体：校验、匹配、分发、权限/scope、冲突与注销 | 无（纯内存） |
-| `src/commands/builtin.mjs` | 五条内置命令的壳（`/reset` `/status` `/role` `/silent` `/active`）+ 文案 | 由 `deps` 注入 `send`/`session`/`acl`/`role`/`log` |
+| `src/commands/builtin.mjs` | 五条内置命令的壳（`/reset` `/status` `/role` `/silent` `/active`）+ 文案 | 由 `deps` 注入 `send`/`session`/`acl`/`role`/`log`；`role` 面是 `resolve`/`refresh`/`withKeyFor`/`writeFull`/`nameFor`/`sourceFor`/`setGlobalMode` |
 | `src/commands/payload.mjs` | `GET /api/commands` 的响应组装（bridge 内置/插件 + DSH 命令 + agent 工具） | 只读注册表，不碰会话 |
 | `src/session/reset.mjs` | `/reset` 的清理序列：删挂账 → 清内存态 → 落盘 → 停 DSH → 归档 → 回执 | 由 `deps` 注入约 30 项状态与 `api`/`withTimeout` |
 
 - 入口不变：`package.json` 的 `start` 仍是 `node src/bridge.js`，`bridge.js` 保留为组装根（建注册表、拼 `builtinCommandDeps`、注册、挂 `/api/commands`；`resetSession` 在这里惰性拼 `createSessionResetter` 的 deps）。
 - `/reset` 的清理序列在 `src/session/reset.mjs`（P7 第三步）：`deps` 显式登记每个要清的桶，新增缓存必须同步登记，漏了测试会红。`bridge.js` 只剩「把状态交给它」的登记段。
+- **重置会忘掉「已读人格卡」**（`forgetRoleSeen`）：重置等于新上下文，不清这条记录的话下次唤醒不会再注入角色卡。`resetSession(key, { notify })` 的 `notify:false` 供控制台用（只清状态、不往群里发回执），QQ 的 `/reset` 走默认值发回执。
+- **`/role` 的依赖是 `resolve` + `refresh`，不再是 `sanitize` + `exists`**：`resolve` 与「全局默认人格下拉」同一个解析入口（本地 `roles/*.md` 与外部 `provider:id` 都认），`refresh(key)` 按 `config.role.saveApply` 决定「下次唤醒 / 立即」生效。这样命令与界面不会各写一套、也不会出现「切了但没重新注入」。
 - `resetSession` 依赖 `sessionEpoch` 自增，`bridge.js` 有 9 处使用它，所以通过 `bumpEpoch` 回调传入，模块不直接改这个变量。
 - `deps` 是刻意的窄口：内置命令拿不到 `cfg`、`stateDir`、`sessions` Map，只能通过注入的能力做事——这样单测可以直接给假实现，不需要起桥接进程。
-- 回归：`scripts/test-command-registry.mjs` 17 条（12 条注册表 + 5 条内置命令/payload）、`scripts/test-session-reset.mjs` 4 条（no-session、全桶清理、顺序、停止失败容忍）、`scripts/test-audit-bridge.mjs` 全 PASS（含「console reset drops the session policy and stops the retired DSH session」）、`scripts/test-integration-v030.mjs` 31/31。
+- 回归：`scripts/test-command-registry.mjs` 17 条（12 条注册表 + 5 条内置命令/payload，含 `/role` 切外部人格与换卡后触发重新注入）、`scripts/test-session-reset.mjs` 5 条（no-session、全桶清理含 `forgetRoleSeen`、顺序、`notify:false` 不发群回执、停止失败容忍）、`scripts/test-audit-bridge.mjs` 全 PASS（含「console reset drops the session policy and stops the retired DSH session」）、`scripts/test-integration-v030.mjs` 31/31。

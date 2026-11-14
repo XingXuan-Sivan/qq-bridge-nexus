@@ -285,30 +285,30 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved, platformI
       return;
     }
     editorHost.hidden = false;
+    // 版面与「行为档案」面板同构：section + h3 + meta + 字段 + 左下动作条，
+    // 不再套 .card（详情面板本身就是一张卡，卡中卡会让间距变成两套）。
     editorHost.innerHTML = `
-      <section class="card span-all">
-        <div class="card-head">
-          <div>
-            <h2>基本信息 · <code>${esc(draft.id)}</code></h2>
-            <div class="meta">保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</div>
-          </div>
-          <div class="row-actions">
+      <div class="platform-stack">
+        <section class="platform-section">
+          <h3>基本信息 · <code>${esc(draft.id)}</code></h3>
+          <p class="meta">保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</p>
+          <div class="form-stack" id="capabilityEditorFields"></div>
+          <div class="form-actions">
             <button class="btn primary" type="button" id="capabilitySave">保存</button>
             <button class="btn" type="button" id="capabilityReset" ${draft.builtin ? '' : 'hidden'}>重置</button>
             <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
             <span class="meta" id="capabilitySaveMsg" role="status"></span>
           </div>
-        </div>
-        <div id="capabilityEditorFields"></div>
-      </section>
-      <section class="card span-all"><h2>平台工具</h2><p class="meta">「平台」是 QQ 桥接提供的工具，由这张表决定是否暴露；「Agent」模块由 Agent 预设决定，这里只读展示。</p><div id="capEditorPlatform"></div></section>
-      <section class="card span-all"><h2>MCP 服务器</h2><p class="meta">勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。</p><div id="capEditorServers"></div></section>
-      <section class="card span-all"><h2>MCP 工具</h2><p class="meta">只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。</p><div id="capEditorTools"></div></section>
-      <section class="card span-all"><h2>技能</h2><div id="capEditorSkills"></div></section>`;
+        </section>
+        <section class="platform-section"><h3>平台工具</h3><p class="meta">「平台」是 QQ 桥接提供的工具，由这张表决定是否暴露；「Agent」模块由 Agent 预设决定，这里只读展示。</p><div id="capEditorPlatform"></div></section>
+        <section class="platform-section"><h3>MCP 服务器</h3><p class="meta">勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。</p><div id="capEditorServers"></div></section>
+        <section class="platform-section"><h3>MCP 工具</h3><p class="meta">只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。</p><div id="capEditorTools"></div></section>
+        <section class="platform-section"><h3>技能</h3><div id="capEditorSkills"></div></section>
+      </div>`;
     renderFields(editorHost.querySelector('#capabilityEditorFields'), [
       { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },
       { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选方案的人看的说明，不进提示词。' },
-    ], { columns: 1 });
+    ], { columns: 1, layout: 'inline' });
     if (draft.builtin) {
       for (const id of ['capabilityLabel', 'capabilityNote']) {
         const input = editorHost.querySelector(`#${id}`);
@@ -386,7 +386,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved, platformI
       if (!result?.ok) throw new Error(result?.error || '保存失败');
       draft.label = payload.label;
       draft.note = payload.note;
-      showConsoleToast('能力预设已保存');
+      showConsoleToast('能力档已保存');
       if (msg) msg.textContent = '✅ 已保存';
       await load();
       onSaved?.();

@@ -253,7 +253,7 @@ async function savePlan() {
   }
   setEditorMsg('保存中…');
   try {
-    await api('/api/runtime/plans', 'POST', body);
+    await api('/api/plans', 'POST', body);
     el('planEditor')?.remove();
     showConsoleToast('运行方案已保存');
     await load();
@@ -271,7 +271,7 @@ async function deletePlan(planId) {
     danger: true,
   }))) return;
   try {
-    await api(`/api/runtime/plans/${encodeURIComponent(planId)}`, 'DELETE');
+    await api(`/api/plans/${encodeURIComponent(planId)}`, 'DELETE');
     showConsoleToast('运行方案已删除');
     await load();
   } catch (error) {
@@ -352,7 +352,7 @@ function importPlans() {
       const failed = [];
       for (const item of list) {
         try {
-          await api('/api/runtime/plans', 'POST', item);
+          await api('/api/plans', 'POST', item);
           done += 1;
         } catch (error) {
           failed.push(`${item?.id ?? '?'}：${error?.message || '失败'}`);
@@ -372,7 +372,7 @@ async function load() {
     // Agent 平台的能力档数量决定编辑器里有哪些选项。
     await loadPlatforms({ force: true });
     const [plans, caps, behs] = await Promise.allSettled([
-      api('/api/runtime/plans'),
+      api('/api/plans'),
       api('/api/runtime/capabilities'),
       api('/api/config/behaviors'),
     ]);

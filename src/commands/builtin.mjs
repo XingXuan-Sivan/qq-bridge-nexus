@@ -17,9 +17,12 @@
  *     withKeyFor: (state:object, key:string, mode:string, name?:string) => object,
  *     nameFor: (state:object, key:string) => string|null,
  *     sourceFor: (state:object, key:string) => string,
- *     sanitize: (name:string) => string,
- *     exists: (name:string) => boolean,
  *     setGlobalMode: (mode:'silent'|'active') => void,
+ *     // 卡名 → 可写入的人格值（本地卡名字或外部引用 provider:id）。
+ *     // 与「全局默认人格下拉」同源，所以 /role 能切外部人格。
+ *     resolve: (raw:string) => Promise<{ok:true,uid:string,label:string,source:'local'|'provider'}|{ok:false,error:string,candidates?:string[]}>,
+ *     // 换卡后的生效时机（与默认人格下拉同一套 config.role.saveApply）。
+ *     refresh?: (key:string) => unknown,
  *   },
  *   permission?: {
  *     describe: (key:string) => Promise<string>|string,
@@ -77,20 +80,28 @@ export function createBuiltinCommands(deps) {
       await send(key, `${nowText}。用法：/role 名字（本会话换卡）、/role off（本会话不挂卡）、/role default（回到全局默认）。全局默认在控制台改。`);
     } else if (arg === 'off' || arg === 'clear') {
       role.writeFull(role.withKeyFor(rs, key, 'off'));
+      // 换卡（含不挂卡）都是「人格变了」，生效时机与默认人格下拉一致。
+      role.refresh?.(key);
       log(`管理员命令：${key} 不挂角色卡`);
       await send(key, `已关闭本会话的角色卡，只影响这里（${globalText}）。`);
     } else if (arg === 'default') {
       role.writeFull(role.withKeyFor(rs, key, 'default'));
+      role.refresh?.(key);
       log(`管理员命令：${key} 回到全局默认人格`);
       await send(key, `本会话已回到全局默认（${globalText}）。`);
     } else {
-      const name = role.sanitize(arg);
-      if (!name || !role.exists(name)) {
-        await send(key, `角色「${name || arg}」不存在。角色文件放 qq-bridge/roles/ 目录。`);
+      // 解析交给桥接：本地 roles/*.md 与外部 provider 的卡在这里是同一个入口，
+      // 与「全局默认人格下拉」看到的候选项完全一致（以前只认本地文件，外部人格永远切不过去）。
+      const target = await role.resolve(arg);
+      if (!target?.ok) {
+        const extra = target?.candidates?.length ? `\n可选：${target.candidates.slice(0, 8).join('、')}` : '';
+        await send(key, `${target?.error ?? `角色「${arg}」不存在`}${extra}`);
       } else {
-        role.writeFull(role.withKeyFor(rs, key, 'role', name));
-        log(`管理员命令：${key} 切换角色为 ${name}`);
-        await send(key, `本会话已切换角色：${name}，只影响这里（${globalText}）。`);
+        role.writeFull(role.withKeyFor(rs, key, 'role', target.uid));
+        role.refresh?.(key);
+        log(`管理员命令：${key} 切换角色为 ${target.uid}`);
+        const source = target.source === 'provider' ? '（外部人格）' : '';
+        await send(key, `本会话已切换角色：${target.label || target.uid}${source}，只影响这里（${globalText}）。`);
       }
     }
     return { ok: true };

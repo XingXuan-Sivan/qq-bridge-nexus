@@ -1,6 +1,7 @@
 # 平台统一与 Agent 通用化（PLATFORM_UNIFICATION）
 
-> **状态**：C0–C6 已完成（C6 交付的是适配器本体与声明面；把它接成主平台属 C6.5），C7–C8 待实施。衔接并取代两份旧规划中"只做了一半"的部分：
+> **状态**：C0–C8 已完成（C8 收尾于 2026-11-14 完成，结果见 §9.4）；随后按用户反馈补了 C9「控制台文案与人格生效口径」（不新增批次，结果见 §9.5）。唯一未做的是 C6.5「把 ACP 接成主平台」——
+> 它要求 ACP 也具备「连一个常驻服务」的门面，属后续批次，不影响本方案的验收口径（原因见 §9.2 末节）。衔接并取代两份旧规划中"只做了一半"的部分：
 > [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) 的 B0–B8 已完成（本方案不推翻，只补齐 B8 之后的缺口）；
 > [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) 的 P2「中立 Agent IR」**触发条件已满足**（要接第二个 Agent 平台），纳入本方案 C4。
 >
@@ -168,19 +169,25 @@ profiles/
 | — | `src/platforms/adapter-registry.mjs` | 只留**插件注册通道**（`adapters:provide`）：内置平台描述在平台目录里 |
 | — | `src/platforms/registry.mjs` | 统一注册表：四个来源合成一张表 + `diagnostics` |
 | — | `src/agent-side/agent-port.mjs` | 中立契约 + `requireCapability()` |
-| `src/agent-side/agent-client.mjs` | 删除（门面） | 由 `AgentPort` 取代；bridge 改 `resolveAgentPort()` |
+| `src/agent-side/agent-client.mjs` | **保留**（有意偏离原计划） | 它只剩「连一个常驻服务」的装配门面（`NodeApiClient` / 地址发现 / 凭据 / 探活分类），调用面已全部改走 `AgentPort`（bridge 经 `createAgentPort` 拿到端口）。删掉会把装配期校验（协议面完整性）与连接职责一起丢掉 |
 | `src/capabilities/store.mjs` | 扩为 capability 真源 + 渲染接口 | 吸收 agents/ 语义 |
 | `src/behaviors/index.mjs` | 保留 | 行为档案仍是平台子资源 |
 
-### 4.4 删除清单（C8 收尾时必须为空）
+### 4.4 删除清单（C8 收尾时逐项核销）
 
 ```
 profiles/agent-platforms/dsh/agents/     （C4 已删）
 src/runtime/adapters.mjs          （C2b 已删）
-src/agent-side/agent-client.mjs
-public/console/pages/behavior/            （整页，四标签全部拆走）
-public/console/components/platform-panel/ （内容拆入平台页）
+src/agent-side/agent-client.mjs   （C8 核销：保留，见下）
+public/console/pages/behavior/            （C7 已删，整页，四标签全部拆走）
+public/console/components/platform-panel/ （C7 已删，内容拆入平台页）
 ```
+
+四项已清零，一项有意偏离：`src/agent-side/agent-client.mjs` **不删**。它的调用面（会话 / 回合 / 权限 / 模型 /
+设置 / 工作区 / 压缩）在 C5 已全部搬进 `AgentPort`，bridge 与 `self-test.js` 只经 `createAgentPort` 拿端口；
+剩下的是**怎么连上平台**——`AgentApiClient`、地址发现、凭据、探活分类，以及装配期「当前 Agent 平台的
+protocol 面缺少 …」那条校验。ACP 恰好没有这一层（连接是 spawn 子进程），所以把它当主平台被这条校验挡住；
+要删它，得先把这层职责迁到别处，否则等于用「删文件」换「装配期无守卫」。C6.5 接线时一并处理。
 
 ### 4.5 声明面字段（C2b 落地）
 
@@ -456,7 +463,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 | **C5** | `AgentPort` 契约 + DSH 适配器 + bridge 调用面迁移 + 会话引用去平台化（**已完成**三批：契约与适配器、`bridge.js` 55 处调用面、`state/sessions/*.json` 的 `binding.agentRef`） | `src/agent-side/{port,agent-client,builtin}.mjs`、`src/agent-side/adapters/dsh/port.mjs`、`src/session/{ref,registry,directory,reset,migrate}.mjs`、`bridge.js`、`self-test.js` | `test-agent-port.mjs` 21 条（能力位 fail-closed + 每个动词落到哪个 RPC + 返回值形状）；`test-session-registry.mjs` 11 条（归一、认领、跨平台归属、指纹不被 `undefined` 抹掉）；`verify:repo` 新增五条：内核不直接调平台 RPC（`\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callUnary|agentPresets|permissionPresets|commands)\b`）、`api.setBaseUrl` 只能在 `bridge.js` 出现一次、`state.sessions` 的直接读写只在会话归一层、档案里不再出现 `binding.sessionId`、`sessions.get()` 之后不再取字段；`test-session-lifecycle` 6 条（含裸 id 复用与跨平台判废） |
 | **C6** | ACP 适配器（第二实现）**（已完成）**：`client.mjs`（stdio + 双向分发）、`events.mjs`（归一映射）、`port.mjs`（`AgentPort` 实现）、声明面 `profiles/agent-platforms/acp/`、`builtin.mjs` 注册 | `src/agent-side/adapters/acp/`、`profiles/agent-platforms/acp/`、`src/agent-side/builtin.mjs`、`src/agent-side/agent-client.mjs`（仅装配期守卫）、`scripts/test-{acp-port,agent-port}.mjs` | **不改 `src/` 其余文件**跑通 session/prompt/permission/models：`test-acp-port.mjs` 14 条（离线夹具走真实 stdio）+ `test-agent-port.mjs` 30 条（含 5 条 ACP 契约一致性）；`check-profiles` 通过 |
 | **C7** | 界面 IA 重构（平台页 + 方案页，行为档案与能力预设并入平台详情）**（已完成）** | `public/console/**`、`scripts/console-source.mjs`、`test-console-*` | `test:console-static` 全过；`test:console-ui` 37/37（新增平台页、方案页、配置只读、两侧清单四条契约） |
-| **C8** | 收尾：文档改写（PROFILES_MODEL §一、FOLDER_MAP、CHANGELOG）、删除清单清零 | `docs/*` | 全套门禁 + `git grep` 删除清单为空 |
+| **C8** | 收尾**（已完成）**：文档改写（PROFILES_MODEL §一/§二、FOLDER_MAP、CONSOLE、README 索引、CHANGELOG）、删除清单逐项核销、方案端点按 §7.4 改名为 `/api/plans` | `docs/*`、`src/bridge.js`（三处路由）、`public/console/pages/plans/page.js`、`scripts/console-ui-{contracts.json,fixture.mjs}`、`scripts/test-console-ui.mjs` | 全套门禁 + `git grep` 删除清单为空（结果见 §9.4） |
 
 **依赖**：C1/C2 → C7；C4 → C5 → C6；C3 与 C4 可并行。
 **建议顺序**：C1 → C2 → C4 → C3 → C5 → C6 → C7 → C8。
@@ -628,13 +635,67 @@ v2 的判别值是另一套（`agent_message` / `state_update` / …），两者
 | `components/capability-panel/` 改数据源为统一注册表 | 注册表只回答「有哪些能力档」，档的正文仍在 `/api/runtime/capabilities`；组件只补了 `platformId` 参数（避免把资产正文塞进清单响应） |
 | `pages/platforms/fields.js` 放页面字段规格 | 只放行为面板的两处宿主（清单表 + 备注）；其余卡片由 `cardHtml` 生成，不需要字段规格 |
 | `pages/plans/` 由 `pages/runtime/` 改名 | 编辑器宿主从 `fields.js` 的 custom 字段改成 `cardHtml` + `renderFields`，所以不再需要 `fields.js` |
-| 方案端点改名为 `/api/plans`（§7.4） | 仍是 `/api/runtime/plans`：本批不动 `src/`，路由改名属 C8 收口 |
+| 方案端点改名为 `/api/plans`（§7.4） | 本批不动 `src/`，留给了 C8；**C8 已改名**（`bridge.js` 三处路由 + 方案页 + 写载荷基线 + 控制台夹具），`/api/runtime/plans` 在代码与测试里已无引用（只剩文档里作为“原路径”的历史说明） |
 
 **测试**
 
 - `scripts/test-console-static.mjs`：新增「## C7：界面 IA」整段 —— 三处删除已生效、页面源码里没有第二处 `/api/platforms/registry` 调用、标签按资产给、详情不按平台 id 分支、行为档案按平台过滤、方案页无 `'dsh'` 且 `agentPlatform` 取自下拉；`PAGE_FRAGMENTS` 断言改为「每页片段都从 `pages/<id>/page.html` 注入」；`BARE_CONTROL_BASELINE` 删 `behavior: 4`。
 - `scripts/test-console-ui.mjs` 37 条（+3）：行为档案改走「平台 › 行为」、平台提示词走「话术与工具」、方案编辑器全部 `#planEdit*` 且 Agent 平台下拉 = 注册表里的声明者、能力档走「Agent 平台 › 能力」、两侧清单与「没有诊断就不渲染诊断卡」、配置标签只读。
 - `scripts/console-ui-fixture.mjs`：qq / dsh 的注册表 mock 补上 `configSchema` 与 `config`（照抄两份声明面），预览里「配置」标签才有真表可看。
+
+---
+
+### 9.4 C8 实施结果（已完成，2026-11-14）
+
+**文档改写**
+
+| 文档 | 改了什么 |
+| --- | --- |
+| `PROFILES_MODEL.md` | 顶部横幅指向本方案；§一 层级表按 C2/C4/C7 的事实重写（能力预设 → 能力档，Agent 平台写「当前 DSH 与 ACP」，关系句写明方案不再有 `agent` 字段）；§二 目录树补 `behaviors/.defaults/`、`capabilities/.defaults/`、`plans/.defaults/`、`adapters/runtime.mjs`、`acp/` 平台 |
+| `FOLDER_MAP.md` | 新增 `src/platforms/` 与 `src/config/` 两行；`src/agent-side/` 补 `adapters/acp/`；`src/user-side/metadata.mjs` 的端点改注册表；adapters 行区分 dsh 三份 / acp 一份；scripts 计数改 208；docs 树补本文件 |
+| `CONSOLE.md` | §4 数据源改 `js/registry.js`；§6/§7 的过期数字改为事实（契约 22 条、导航 15 个、截图页 `sessions` / `platforms` / `plans` / `persona` / `overview`）；契约清单里的方案端点随改名更新 |
+| `PLATFORM_DECOUPLING.md` | §6.1 加「已收口为 `GET /api/platforms/registry`」横幅，该节保留作设计演进记录 |
+| `README.md` / `CHANGELOG.md` | 索引状态改「C0–C8 已完成」；CHANGELOG 新增 C8 段 |
+
+**端点收口**：`/api/runtime/plans` → `/api/plans`，涉及 `src/bridge.js` 三处路由（GET / POST / DELETE，含 `slice('/api/plans/'.length)`）、`public/console/pages/plans/page.js` 四处调用、`scripts/console-ui-fixture.mjs` 四条 mock 路由、`scripts/test-console-ui.mjs` 的写请求期望值、`scripts/console-ui-contracts.json` 的写载荷基线。测试的 `clickWrite` 用 `pathname === path` 精确比对，所以路由与期望值必须同批改。
+
+**删除清单核销**（§4.4）
+
+| 项 | 结论 |
+| --- | --- |
+| `profiles/agent-platforms/dsh/agents/` | C4 已删 |
+| `src/runtime/adapters.mjs` | C2b 已删 |
+| `public/console/pages/behavior/` | C7 已删 |
+| `public/console/components/platform-panel/` | C7 已删 |
+| `src/agent-side/agent-client.mjs` | **保留**（有意偏离，理由见 §4.4） |
+
+**门禁**：`verify:repo` 80 通过 0 失败 0 跳过；`test:audit` 129/129；`test-console-static` 全过；`test:console-ui` 37/37（41 条隔离 mock 写请求）；`test-artifact-pipeline` 全过；`build-artifacts --check` 全部最新；`test:v030` 9/9；`check-profiles` 通过。`git grep` 残留只出现在测试的「已删除」断言、平台页的 `data-platform-panel-body` 属性名与文档的历史说明里。
+
+---
+
+### 9.5 C9 补充（用户反馈，2026-11-14）
+
+C0–C8 验收后，用户报了三类「界面文案与人格生效时机」的问题。这一批不入批次表，只把口径收口：
+
+| 问题 | 根因 | 修法 |
+| --- | --- | --- |
+| 导航还叫「平台」「方案」 | C7 只改了页面内部标题 | `index.html` 与 `js/router.js` 的 `consolePages` 标题/副标题改「平台配置」「运行方案」；路由键不动 |
+| 能力档编辑页与行为档案页版式不一致 | 能力面板编辑器自画一套卡片层次，外层又套一层 `<section class="card">` | `renderEditor()` 改用 `.platform-stack/.platform-section/.form-stack/.form-actions` + `renderFields(..., { columns: 1, layout: 'inline' })`；删掉多余的 `<section>` 与 `.platform-detail .card{padding}` |
+| 新建角色卡后会话下拉不更新 | `ensurePersonaCatalog()` 做了模块级永久缓存 | 去掉缓存：每次打开会话详情重拉 `/api/personas`，失败沿用上次结果 |
+| `/role` 切不了外部人格 | 命令层只认 `roles/*.md`，与「默认人格下拉」两套解析 | 抽 `resolvePersonaTarget()` 作为唯一入口（本地卡 → `provider:id` → 裸名唯一匹配），命令层依赖从 `sanitize/exists` 改为 `resolve/refresh` |
+| 切换人格后不重新注入 | `applyRoleChange` 是 HTTP 处理函数内的 `const`，命令层调用会 `ReferenceError` 被吞 | 搬到 `main()` 作用域并写成函数声明（`server.listen` 更早执行，`const` 会踩 TDZ） |
+| 重置后不重新注入（`/new`、控制台重置） | 注入入口对 `bootstrap` 豁免；重置没清「已读哪一版卡」 | 去掉 `bootstrap` 豁免、`roleFpAtBuild` 无条件记录；重置序列新增 `forgetRoleSeen`；`resetSession(key,{notify})` 透传（顺手修掉控制台重置也往群里发回执） |
+| 会话详情「跟随全局（当前：—）」 | `/api/sessions` 的 `activePlan` 只给 id，前端直接拼进文案 | 后端返回整份定义（`activePlan() ?? null`），前端 `planLabelOf()` 兼容旧写法 |
+
+**口径**（以后改人格相关的地方照这个来）：
+
+1. **解析只有一个入口** — 本地卡与外部 `provider:id` 都走 `resolvePersonaTarget()`；不要在新地方再写一套「读 roles 目录判断存在」。
+2. **写入只有一个写法** — 全局 `role` 与会话 `byKey` 都过 `safeRoleValue()`（`safeRoleName` 会吃掉冒号，写外部卡会被静默改名）。
+3. **生效只有一个开关** — 换卡后一律调 `applyRoleChange(roleSaveApplyDefault, keys)`，命令层不另写「立即唤醒」。
+4. **注入只有一个判据** — 没读过这一版卡就整段给，不分唤醒原因（新建 / 重置 / 人工 / 定时）。重置与压缩都要 `roleRefresh.forget(key)`。
+5. **目录类数据不做永久缓存** — 人格 / 平台 / 能力档的下拉每次打开都重拉（失败沿用上次结果），否则「在人格页新建了卡，回会话详情看不到」；「跟随全局（当前：…）」必须能写出可读名字，不允许只剩破折号。
+
+**门禁**：`test:audit` 129/129、`test:console-ui` 38/38（43 条隔离 mock 写请求）、`verify:repo` 80 通过 0 失败 0 跳过、`test-console-static` 全过、`node --check` 全过。
 
 ---
 
@@ -669,7 +730,7 @@ Q1 / Q2 已随 C4 落地（按默认建议执行）；其余仍待定。
 | Q1 | `chat` 与 `chat-v2` 是否合并为一个 capability 档？ | **不合并（已落地）**：两者对应不同行为引擎，合并会让"档位"与"行为"耦合；实际采用 `capabilities/{chat,chat-v2,…}.yml` 平级 |
 | Q2 | 能力档目录保留 `capabilities/` 还是改 `tiers/`？ | **保留 `capabilities/`（已落地）**：少一个术语，`src/capabilities/store.mjs` 不用改名 |
 | Q3 | 平台页是否提供"新增平台向导"？ | **不提供**：新平台必然要写代码或装插件，向导只能造出"配置目录孤岛"（`profile_only` 诊断）；页面上提供"如何新增"的说明与跳转 |
-| Q4 | `interface-platform/` 是否下线？ | **暂留**（它自带测试与独立网关价值），待 C8 用 `git grep` 证明"只被文档引用"后再决定 |
+| Q4 | `interface-platform/` 是否下线？ | **不下线（C8 已核实）**：“只被文档引用”这个假设不成立——`src/launcher/control-center.mjs` 负责托管它的进程，`scripts/build-release.mjs` 的发布清单必须有它，`test-platform` / `test-linux-support` / `test-quote-forward` 直接 import 它。它是桥接与 QQ 后端之间的实际接入层 |
 | Q5 | ACP 的 stdio 子进程由谁托管？ | **由适配器自己**（进程生命周期是"怎么连上平台"的一部分）；桥接只传 `cwd`/`env`/`mcpServers` |
 
 ---

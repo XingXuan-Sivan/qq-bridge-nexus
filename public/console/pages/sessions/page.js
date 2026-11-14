@@ -491,8 +491,6 @@ function detailDshLabel(health, sessionId) {
 
 // 详情弹窗的 DSH 模型目录：打开时取一次，供运行卡的提供方/模型/思考强度下拉使用。
 let detailCatalog = null;
-// 会话详情「人格」下拉的数据源：与全局配置同一份 /api/personas（本地卡 + 外部 provider 卡）。
-let detailPersonas = null;
 async function ensureDetailCatalog() {
   if (detailCatalog) return detailCatalog;
   try {
@@ -504,15 +502,29 @@ async function ensureDetailCatalog() {
   return detailCatalog;
 }
 
+/**
+ * 会话详情「人格」下拉的数据源：与全局配置同一份 /api/personas（本地卡 + 外部 provider 卡）。
+ *
+ * 不做模块级缓存：人格页新建/改名/删除角色卡后回到这里必须立刻看到，
+ * 以前拿到一次就永不失效，只能刷新页面才有新卡。
+ */
+let detailPersonas = null;
 async function ensurePersonaCatalog() {
-  if (detailPersonas) return detailPersonas;
   try {
     const r = await api('/api/personas');
     detailPersonas = Array.isArray(r?.items) ? r.items : [];
   } catch {
-    detailPersonas = [];
+    // 读取失败沿用上一次结果，别让下拉突然空掉；从没读到过就是空数组。
+    detailPersonas ??= [];
   }
   return detailPersonas;
+}
+
+/** 「跟随全局（当前：…）」里的方案名：后端给整份定义，这里兼容只给 id 的旧写法。 */
+function planLabelOf(plan) {
+  if (!plan) return '';
+  if (typeof plan === 'string') return plan;
+  return plan.label || plan.id || '';
 }
 
 /** 人格卡在会话里的存储值：本地卡写名字，外部卡写 `provider:id`。 */
@@ -673,7 +685,7 @@ function renderDetail(data) {
     {
       name: 'detailPlan', type: 'select', label: '运行方案', value: data.planId || '',
       options: [
-        { value: '', label: `跟随全局（当前：${data.activePlan?.label || data.activePlan?.id || '—'}）` },
+        { value: '', label: `跟随全局（当前：${planLabelOf(data.activePlan) || '—'}）` },
         ...(Array.isArray(data.plans) ? data.plans : []).map((p) => ({ value: p.id, label: p.label || p.id })),
       ],
       hint: '方案决定能力预设、行为档案与受众；模型与人格在下面单独设置。',

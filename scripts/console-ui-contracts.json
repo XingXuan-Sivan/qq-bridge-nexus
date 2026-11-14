@@ -65,7 +65,7 @@
   },
   {
     "method": "POST",
-    "path": "/api/runtime/plans",
+    "path": "/api/plans",
     "body": {
       "id": "my-agent",
       "label": "我的 Agent",

@@ -385,7 +385,7 @@ try {
     await page.selectOption('#planEditBehavior', 'social-v2');
     await page.selectOption('#planEditAudience', 'owner');
     await page.fill('#planEditNote', '带人格进群');
-    assert.deepEqual(await clickWrite('#planEditSave', '/api/runtime/plans'), {
+    assert.deepEqual(await clickWrite('#planEditSave', '/api/plans'), {
       id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh',
       capability: 'chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
     });
@@ -640,6 +640,56 @@ try {
   } else await test('All submitted payloads exactly match the pre-redesign console baseline', async () => {
     const expected = JSON.parse(await readFile(baselinePath, 'utf8'));
     assert.deepEqual(fixture.requests, expected);
+  });
+
+  // 会话详情：“运行方案”要写出全局方案的名字（不能只有一个破折号）；
+  // “人格”下拉每次打开都重读目录——人格页新建卡后回来立刻能看到，不需要刷新页面。
+  // 这段带写请求，所以必须放在契约基线比对之后。
+  await test('Session detail shows the active plan label and re-reads the persona catalog', async () => {
+    const openDetail = async () => {
+      await navigate('sessions');
+      await page.waitForSelector('#sessionList [data-manage-key]');
+      await page.locator('#sessionList [data-manage-key]').first().click();
+      await page.waitForSelector('#detailPlan');
+    };
+    const closeDetail = () => page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+    const personaNames = () => page.locator('#detailPersonaName option').allTextContents();
+
+    await openDetail();
+    const planLabel = await page.locator('#detailPlan option').first().textContent();
+    assert.match(planLabel, /跟随全局（当前：聊天）/, '跟随全局要写出方案名，不能只显示一个破折号');
+    const before = await personaNames();
+    await closeDetail();
+
+    const created = '会话下拉回归卡';
+    await navigate('persona');
+    await page.waitForSelector('#roleNew');
+    await page.locator('#roleNew').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await page.locator('#personaName').fill(created);
+    await page.locator('#personaEditor .cm-content').first().click();
+    await page.keyboard.type('仅用于下拉刷新回归');
+    const [createRes] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/roles/create' && r.request().method() === 'POST'),
+      page.locator('#personaSave').click(),
+    ]);
+    assert.equal(createRes.status(), 200);
+    await page.waitForFunction((n) => [...document.querySelectorAll('#roleList .tile strong')].some((el) => el.textContent === n), created);
+
+    await openDetail();
+    const after = await personaNames();
+    assert.equal(before.some((label) => label.includes(created)), false, '新建前不应该已经在这张卡');
+    assert.ok(after.some((label) => label.includes(created)), '新建的人格卡不用刷新页面就该出现在会话下拉里');
+
+    // 收拾现场：回人格页删掉这张回归卡，不影响后面的用例。
+    await closeDetail();
+    await navigate('persona');
+    await page.locator('#roleList .tile').filter({ hasText: created }).locator('[data-act="edit"]').click();
+    await page.waitForSelector('#personaEditor.open', { timeout: 5000 });
+    await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/roles/delete'),
+      page.locator('#personaDelete').click(),
+    ]);
   });
 
   await test('Memory page: session modal with tabs, entry add/edit/delete and limits', async () => {

@@ -63,6 +63,12 @@ public/console/
 - 页面层：由 `router.hydratePage()` 动态插入 `pages/<name>/page.css`，天然最后生效。
 - 服务端：放行规则在 `src/bridge.js` 的 `GET /console/(css|components|js|img|fonts|pages|gate)/` 那一行（`src/http/static.mjs` 只校验前缀、穿越、符号链接与 MIME，没有目录白名单）。新增资源子目录时改这一处正则即可，安全边界不变。
 
+### 2.2 数据新鲜度
+
+- **下拉 / 候选列表不做模块级永久缓存**：人格、平台、能力档这类可在别处增删的目录，**每次打开弹窗都重拉**（如 `pages/sessions/page.js` 的 `ensurePersonaCatalog()`）；拉取失败沿用上一次结果，别让下拉突然空掉。拿到一次就永不失效，会表现为「在人格页新建了卡，回会话详情看不到，必须刷页面」。
+- **「跟随全局（当前：…）」必须写出可读名字**：后端直接给整份定义（如 `/api/sessions` 的 `activePlan`），页面侧再兜一层兼容（`planLabelOf()`：字符串就用它，对象取 `label || id`）——不允许出现只有一个破折号的选项。
+- 缓存只给「不常变且自己维护生命周期」的东西（参考组件里的单飞与 TTL 写法）；目录类数据一律现取。
+
 ---
 
 ## 3. 设计令牌与栅格
@@ -217,7 +223,7 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 改样式可以，这些不能动：
 
 - **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
-- **22 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`、`POST /api/runtime/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **22 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
 - 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
 契约确实变了才重录：`node scripts/test-console-ui.mjs --accept-contracts`，并在提交信息里写明原因。

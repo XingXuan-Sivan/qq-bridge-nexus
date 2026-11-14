@@ -152,7 +152,16 @@ function makeBuiltinHarness(overrides = {}) {
         return 'global';
       },
       sanitize: (name) => String(name ?? '').replace(/[^\w\u4e00-\u9fff-]/g, ''),
-      exists: (name) => name === '星苒' || name === '魅魔',
+      // 与生产同一个契约：卡名 → 可写入的人格值，本地卡与外部卡（provider:id）都走这里。
+      resolve: async (raw) => {
+        const name = String(raw ?? '').trim();
+        if (!name) return { ok: false, error: '没有指定人格' };
+        if (name === '星苒' || name === '魅魔') return { ok: true, uid: name, label: name, source: 'local' };
+        if (name === 'soulkit:saren') return { ok: true, uid: name, label: '萨伦', source: 'provider' };
+        return { ok: false, error: `人格「${name}」不存在（roles/${name}.md 或外部 provider 目录里都没有）` };
+      },
+      // 换卡后的生效时机（与默认人格下拉同一套），单测只记一笔看它有没有被调到。
+      refresh: (key) => { writes.push(['refresh', key]); },
       setGlobalMode: (mode) => { harness.roleState = { ...harness.roleState, mode }; writes.push(['mode', mode]); },
     },
     log: (line) => logs.push(line),
@@ -196,7 +205,7 @@ test('/reset：调用 session.reset，并把它的结果透传出去', async () 
   assert.deepEqual(result.result, { ok: true, note: 'no-session' });
 });
 
-test('/role：查看、切换、off、default 与不存在的角色', async () => {
+test('/role：查看、切换（含外部人格）、off、default 与不存在的人格', async () => {
   const { harness, run } = makeBuiltinHarness();
 
   await run('/role');
@@ -209,6 +218,11 @@ test('/role：查看、切换、off、default 与不存在的角色', async () =
   await run('/role');
   assert.match(harness.sent.at(-1).text, /本会话单独用「魅魔」/);
 
+  // 外部人格与本地卡走同一个入口：写入的是 provider:id，回执标「外部人格」。
+  await run('/role soulkit:saren');
+  assert.equal(harness.roleState.byKey['group:1'].role, 'soulkit:saren');
+  assert.match(harness.sent.at(-1).text, /已切换角色：萨伦（外部人格）/);
+
   await run('/role off');
   assert.equal(harness.roleState.byKey['group:1'].mode, 'off');
   assert.match(harness.sent.at(-1).text, /已关闭本会话的角色卡/);
@@ -218,7 +232,13 @@ test('/role：查看、切换、off、default 与不存在的角色', async () =
   assert.match(harness.sent.at(-1).text, /已回到全局默认/);
 
   await run('/role 不存在的角色');
-  assert.match(harness.sent.at(-1).text, /不存在。角色文件放 qq-bridge\/roles\/ 目录/);
+  assert.match(harness.sent.at(-1).text, /人格「不存在的角色」不存在/);
+
+  // 每次换卡都要顺手触发一次「重新注入人格提示词」，不能只写状态。
+  assert.deepEqual(
+    harness.writes.filter(([kind]) => kind === 'refresh').map(([, key]) => key),
+    ['group:1', 'group:1', 'group:1', 'group:1'],
+  );
 });
 
 test('/silent 与 /active：只改全局模式并回执', async () => {

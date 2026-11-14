@@ -10,6 +10,8 @@
 // 安全：
 // - 这个文件用户可以直接编辑，读的时候一律重新校验：人格名只留中文 / 字母 / 数字 / 下划线 / 横线，
 //   解析后的文件必须在 roles/ 目录里（防 {"role":"../.."} 这类路径穿越）；全局 role 和 byKey 的值走同一条校验；
+// - 外部 provider 的卡用同名写法 `provider:id`（与控制台会话下拉、config.json 的 role.default 一致）：
+//   这种值不过角色卡清洗（冒号会被吃掉），而是按引用格式单独校验，且不允许 `..`；
 // - 键只接受规范化的 group:<正整数> / private:<正整数>，去掉前导零，别名（group:0123）和非法键一律忽略；
 // - 只有桥接代码（控制台、管理员的 /role 命令）写这个文件，AI 没有任何能改人格的工具。
 
@@ -41,6 +43,26 @@ export function safeRoleName(name) {
   return s;
 }
 
+/** 外部人格引用 `provider:id`：与 PERSONA_REF_RE 同形（provider 只小写字母/数字/连字符）。 */
+const PERSONA_REF_RE = /^([a-z0-9][a-z0-9-]{0,31}):([\w\u4e00-\u9fff.@:-]{1,120})$/;
+
+/** `provider:id` → 规范化引用；不是引用或含路径穿越返回 null。 */
+export function safePersonaRef(value) {
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (!s || s.includes('..')) return null;
+  const m = PERSONA_REF_RE.exec(s);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
+/**
+ * 人格值（本地卡名字或外部引用）→ 可写入文件的安全写法；都不合法返回 null。
+ * 读盘与写入都过这里：`byKey` 的值过去只认本地名，写外部卡会被 `safeRoleName` 吃掉冒号并变成另一个名字。
+ */
+export function safeRoleValue(value) {
+  return safePersonaRef(value) ?? safeRoleName(value);
+}
+
 /** 人格名 → roles/ 目录里的文件路径；名字不合法或解析到目录外返回 null（不检查文件是否存在）。 */
 export function resolveRoleFile(rolesDir, name) {
   const safe = safeRoleName(name);
@@ -61,13 +83,13 @@ export function normalizeRoleState(raw) {
     const key = canonicalConversationKey(k);
     if (!key) continue;
     if (v === null) { byKey[key] = null; continue; }
-    const name = safeRoleName(v);
+    const name = safeRoleValue(v);
     if (name) byKey[key] = name;
   }
   const mode = r.mode === 'silent' ? 'silent' : 'active';
   // 旧文件只有 mode:'silent'：按无限期、锁定、默认策略处理；不丢 byKey。
   const silent = mode === 'silent' ? normalizeManualSilence(r.silent) : null;
-  return { role: safeRoleName(r.role), mode, silent, byKey };
+  return { role: safeRoleValue(r.role), mode, silent, byKey };
 }
 
 /** 写盘用：没有 byKey / silent 时不写这些字段，保持老格式。 */
@@ -107,7 +129,7 @@ export function withRoleForKey(state, key, use, name = null) {
   if (use === 'default') delete byKey[k];
   else if (use === 'off') byKey[k] = null;
   else if (use === 'role') {
-    const n = safeRoleName(name);
+    const n = safeRoleValue(name);
     if (!n) throw new Error('人格名不合法');
     byKey[k] = n;
   } else throw new Error('use 只能是 default / off / role');

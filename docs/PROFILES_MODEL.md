@@ -1,10 +1,11 @@
 # 四层配置模型（PROFILES_MODEL）
 
-> 从 2026-11-12 起，桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力预设 / 运行方案 → 会话权限级别**。
+> 从 2026-11-12 起，桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别**。
 > 旧的 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/` 三处存储已删除，没有兼容层。
 > 本文只描述现状；历史设计文档见文末“相关文档”。
 >
-> **后续结构以 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) 为准**：本文 §一 的层级表与 §二 的目录示例，在 C2 / C4 实施时由它改写。在此之前本文仍是各配置文件的**字段字典**，但“层怎么分、目录怎么摆”不要以本文为准。
+> **§一 / §二 已按 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) 改写**（C2 配置 v2、C4 能力归一、C5 `AgentPort`、
+> C7 控制台 IA 均已落地）：平台清单只有 `GET /api/platforms/registry` 一份，控制台的唯一调用点是 `js/registry.js`。
 >
 > **源码 vs 产物**：`profiles/` 是**权威源**（人写的 yml / md / mjs），`artifacts/<agent平台>/` 是**生成或打包产物**（DSH 加载用）。
 > 产物一律由该平台的适配器生成，不手改；二者的关系见 [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md)。
@@ -15,14 +16,16 @@
 
 | 层 | 回答的问题 | 存储 | 谁提供 |
 | --- | --- | --- | --- |
-| **用户侧平台**（platform） | AI 在哪个聊天平台上做事（QQ、微信、B 站……） | `profiles/platforms/<id>/` | 系统给接口与公共配置，平台特有的行为由该平台目录里的数据提供 |
-| **行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | `profiles/platforms/<id>/behaviors/*.yml` | 档案作者（内置两份，可增删） |
-| **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前只有 DSH） | `profiles/agent-platforms/<id>/` | 系统给接口，具体工具/模块由该平台目录提供 |
-| **能力预设**（capability） | 这个 Agent 平台里“能拿到什么”+“预设长什么样”：平台工具、Agent 模块、MCP、技能、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml` | 内置五条，可克隆/新建 |
-| **运行方案**（plan） | 把“行为档案 + 能力预设”组合成一个可切换的档位，并声明平台与 Agent | `profiles/plans/*.yml` | 内置六条（只读），可克隆成自定义方案 |
-| **权限级别** | 具体会话最终能用能力预设里的哪些工具 | 会话配置（`state/sessions.json`） | 会话级，不落在档案里 |
+| **用户侧平台**（user platform） | AI 在哪个聊天平台上做事（QQ、微信、B 站……）：怎么连、有哪些平台工具、怎么说话 | `profiles/platforms/<id>/`（`platform.yml` + `tools.yml` + `prompt.md` + `behavior-types/`） | 系统给接口与公共配置（`configSchema` / `vars`），具体工具、话术、档案类型由该平台目录提供 |
+| **行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | `profiles/platforms/<id>/behaviors/*.yml` | 档案作者（内置两份，可增删）；C7 起它是「平台 › 详情 › 行为」的子资源，不再有整页 |
+| **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前 DSH 与 ACP） | `profiles/agent-platforms/<id>/` | 系统给 `AgentPort` 契约，具体工具 / 能力档 / 产物由该平台目录提供 |
+| **能力档**（capability） | 这个 Agent 平台里“能拿到什么”+“预设长什么样”：平台工具、Agent 模块、MCP、技能、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（四段同居一文件） | 内置五条，可克隆 / 新建；`.defaults/` 留出厂副本供「还原」 |
+| **运行方案**（plan） | 把“用户侧平台 + Agent 平台 + 能力档 + 行为档案”组合成一个可切换的档位 | `profiles/plans/*.yml` | 内置六条，可克隆成自定义方案 |
+| **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话配置（`state/sessions.json`） | 会话级，不落在档案里 |
 
-关系一句话：**方案 = 平台 + Agent 平台 + Agent + 行为档案 + 能力预设**；方案决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
+关系一句话：**方案 = 用户侧平台 + Agent 平台 + 能力档 +（可选）行为档案 + 受众**。C4 起方案不再有 `agent` 字段
+（能力档 id 就是该平台的 preset id），所以“换能力档”不会再把“换 DSH 预设”忘在后面。
+方案决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
 
 ---
 
@@ -30,9 +33,9 @@
 
 ```
 profiles/
-├── platforms/
+├── platforms/                    # 用户侧：一层一个目录，新增平台不改内核
 │   └── qq/
-│       ├── platform.yml          # id / label / vars / configSchema（字段字典见 §三）
+│       ├── platform.yml          # id / label / note / vars / configSchema（字段字典见 §三）
 │       ├── tools.yml             # 平台工具目录（flag、宿主工具名、风险、defaultOff）
 │       ├── prompt.md             # 平台话术（可编辑）
 │       ├── prompt.default.md     # 出厂话术（「还原」从这里取）
@@ -40,25 +43,34 @@ profiles/
 │       │   ├── social-v1.yml     # 类型：label / engine / schema.fields
 │       │   └── social-v2.yml
 │       └── behaviors/
+│           ├── .defaults/        # 出厂副本，供「还原」
 │           ├── social-v1.yml     # 一代仿真（kind: social-v1）
 │           └── social-v2.yml     # 二代仿真（kind: social-v2）
-├── agent-platforms/
-│   └── dsh/
-│       ├── agent-platform.yml    # id / label / configSchema（字段字典见 §三）
-│       ├── tools.yml             # Agent 模块目录（文件读写、PowerShell、Web……）
-│       ├── capabilities/
-│       │   ├── chat.yml
-│       │   ├── chat-v2.yml
-│       │   ├── readonly.yml
-│       │   ├── workspace.yml
-│       │   └── full.yml
-│       ├── templates/rows.yml    # 安装/生成产物用的行模板
-│       └── adapters/             # 该平台的构建/安装适配器（P1 起）
-│           ├── build.mjs         # planArtifacts()：源码 → 产物文件清单（纯函数）
-│           └── install.mjs       # install()：产物装进运行时（写 profile patch / junction）
+├── agent-platforms/              # Agent 侧：一层一个目录（dsh 为默认 active）
+│   ├── dsh/
+│   │   ├── agent-platform.yml    # id / label / configSchema（字段字典见 §三）
+│   │   ├── tools.yml             # Agent 模块目录（文件读写、PowerShell、Web……）
+│   │   ├── capabilities/
+│   │   │   ├── .defaults/        # 出厂副本（还原用）
+│   │   │   ├── chat.yml
+│   │   │   ├── chat-v2.yml
+│   │   │   ├── readonly.yml
+│   │   │   ├── workspace.yml
+│   │   │   └── full.yml
+│   │   ├── templates/rows.yml    # 安装/生成产物用的行模板
+│   │   └── adapters/             # 该平台的构建 / 安装 / 运行期适配器
+│   │       ├── build.mjs         # planArtifacts()：源码 → 产物文件清单（纯函数）
+│   │       ├── install.mjs       # install()：产物装进运行时（写 profile patch / junction）
+│   │       └── runtime.mjs       # 声明面 + AgentPort 装配（能力位在这里声明）
+│   └── acp/                      # 第二实现（C6）：没有产物要渲染，只有协议适配器
+│       ├── agent-platform.yml    # command / args / cwd 等 configSchema
+│       ├── tools.yml             # 空（工具由 ACP 对端决定）
+│       ├── capabilities/README.md
+│       └── adapters/runtime.mjs
 ├── plans/
-│   ├── chat.yml                  # 内置六条：chat / social-v1 / social-v2 / agent-readonly / agent-workspace / agent-full
-│   └── …
+│   ├── .defaults/                # 出厂副本（还原用）
+│   ├── chat.yml                  # 内置六条：chat / social-v1 / social-v2 /
+│   └── …                         #   agent-readonly / agent-workspace / agent-full
 └── schemas/                      # 五份 JSON Schema（platform / agent-platform / behavior / capability / plan）
 
 artifacts/                        # 各 Agent 平台的产物根（目录名 = agent 平台 id）
@@ -155,7 +167,7 @@ note: …
 - 方案里**没有独立的 `agent` 字段**（C4 起）：能力档 id 就是预设 id，`capability` 一个字段说清「用哪套预设」。
 - `behavior` 只存档案名；引用的档案不存在时加载侧告警并退化为“无档案”，不阻断消息处理。
 - 方案解析：会话单独设置的方案优先，没设就用全局默认方案（`config.json` 的 `runtime.defaultPlan`，缺省 `social-v2`）；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
-- 内置方案、内置行为档案、内置能力预设的出厂副本放在各自目录的 `.defaults/<id>.yml`；控制台「重置」按钮复制回正式文件，改坏了可以一键还原。
+- 内置方案、内置行为档案、内置能力档的出厂副本放在各自目录的 `.defaults/<id>.yml`；控制台「重置」按钮复制回正式文件，改坏了可以一键还原。
 
 ### 平台 / Agent 平台
 
@@ -177,7 +189,7 @@ C2b 起两侧多了两个**声明面**字段（详见 [PLATFORM_UNIFICATION.md](
 | 读平台与工具目录 | `src/platforms/index.mjs`：`listPlatforms`（带 `label` / `vars` / `configSchema`）/ `loadPlatform` / `readPlatformTools` / `listAgentPlatformDirs` / `PLATFORM_TOOL_RISKS` |
 | 行为档案读写 | `src/behaviors/index.mjs`：`loadBehaviorProfiles` / `normalizeBehavior` / `resolveBehavior` / `readBehaviorDocument` / `writeBehaviorData` / `duplicateBehavior` / `removeBehaviorFile` |
 | 平台话术 | `src/user-side/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
-| 能力预设 | `src/capabilities/store.mjs`：`createCapabilityStore` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
+| 能力档 | `src/capabilities/store.mjs`：`createCapabilityStore` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
 | 运行方案 | `src/runtime/plans.mjs`：`createPlanStore`（list/get/save/remove/clone）/ `normalizePlan` / `findPlan` / `legacyModeOfPlan` |
 | 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
 | 模式持久化 | `src/runtime/mode-store.mjs`：`createModeStore` / `createLocalModeFileBackend`（`state/mode.json`）/ `createDshModeBackend`（DSH `qq-mode` 命名空间）。只负责存取，模式语义（别名归一、级别、提权判定）仍在 `bridge.js` |
@@ -247,7 +259,7 @@ export function normalizeAgentPreset(name) {}
 | `profiles/agent-platforms/dsh/agents/<id>/`（C4 前的预设目录） | 同上，能力档 id 就是预设 id；`assets/default-presets/**` 同时删除 |
 | `config.json` 的 `behavior.default` | `profiles/plans/chat.yml` 的 `behavior: none` |
 | `config.json` 的 `runtime.plans[]` | `profiles/plans/*.yml` |
-| `config.json` 的 `tools`（38 键） | 能力预设 `tools.platform` 并集 |
+| `config.json` 的 `tools`（38 键） | 能力档 `tools.platform` 并集 |
 | `config.json` 的 `role.maxInjectChars` / `limits.personaInjectChars` | `config.promptBlocks['core-persona'].maxChars`（注入块页） |
 
 启动时桥接会把 `behavior.default`、`runtime.plans`、`role.maxInjectChars`、`limits.personaInjectChars` 从 `config.json` 里清掉并写回（日志会说明）。

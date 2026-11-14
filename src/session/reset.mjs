@@ -34,6 +34,7 @@ import { sessionIdOf } from './ref.mjs';
  *   clearSocialV2Timers: (key: string) => void,
  *   forgetAgentToken: (key: string) => void,
  *   forgetConversationCaches: (key: string) => void,
+ *   forgetRoleSeen?: (key: string) => void,
  *   discardDormantForReset: (key: string) => void,
  *   saveSocialV2State: () => void,
  *   saveState: () => void,
@@ -50,12 +51,16 @@ export function createSessionResetter(deps) {
     state, bumpEpoch, pending, cancelPendingEntry, queued, queuedHintAt, sessionPromises,
     drainPromptQueue, approvals, social, socialV2, slang, wake, mediaStore, seenForwardIds,
     cancelSocialTimers, clearSocialV2Timers, forgetAgentToken, forgetConversationCaches,
-    discardDormantForReset, saveSocialV2State, saveState, send, api, withTimeout,
+    forgetRoleSeen, discardDormantForReset, saveSocialV2State, saveState, send, api, withTimeout,
     dshControlTimeoutMs, log,
   } = deps;
   const bySessionId = deps.bySessionId ?? {};
 
-  return async function resetSession(key) {
+  /**
+   * @param {string} key
+   * @param {{ notify?: boolean }} [options] notify=false 用于控制台按钮：只清状态，不往群里发回执。
+   */
+  return async function resetSession(key, options = {}) {
     // 落盘是 `{ instance, sessionId }`（C5 第三批）；这里只要 id。
     const old = sessionIdOf(state.sessions[key]);
     if (!old) return { ok: true, note: 'no-session' };
@@ -90,6 +95,9 @@ export function createSessionResetter(deps) {
     // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
     // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
     forgetConversationCaches(key);
+    // 「读到哪一版人格卡」也要忘：重置 = 新上下文，下一次唤醒必须重新把卡整段给一遍。
+    // 与压缩（compact）后的处理一致——两处都是「上下文没了，卡得重读」。
+    forgetRoleSeen?.(key);
     discardDormantForReset(key);
     saveSocialV2State();
     saveState();
@@ -98,7 +106,7 @@ export function createSessionResetter(deps) {
     try { await withTimeout(api.cancel(old), dshControlTimeoutMs, 'cancel'); }
     catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
     try { await withTimeout(api.archiveSession(old), dshControlTimeoutMs, 'archiveSession'); } catch {}
-    await send(key, '已重置会话，下次消息将开新上下文');
+    if (options.notify !== false) await send(key, '已重置会话，下次消息将开新上下文');
     return { ok: true };
   };
 }

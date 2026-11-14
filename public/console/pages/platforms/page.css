@@ -63,9 +63,6 @@
 }
 .platform-section > p.meta { margin: 0; }
 
-/* 能力预设编辑器自带整张卡片：在详情里收一点内距，避免卡中卡的厚重感。 */
-.platform-detail .card { padding: 18px 20px; }
-
 /* 行为档案的字段分组直接铺开（不额外套一层容器），分组本身仍是卡片式 fieldset。 */
 .platform-detail .behavior-groups { display: contents; }
 .platform-detail .behavior-groups .form-section--card { margin: 0; }

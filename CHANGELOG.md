@@ -432,6 +432,42 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   换成 `platforms` / `plans`）；`guides/ADD_USER_PLATFORM.md` 的平台数据源改为注册表，
   `PLATFORM_DECOUPLING.md` §6.1 加「已收口为 `/api/platforms/registry`」横幅（该节保留作设计演进记录）。
 
+### 重构：平台统一收尾（C8）
+- **文档按事实改写**：`PROFILES_MODEL.md` 顶部横幅指向本方案，§一 层级表重写（能力预设 → 能力档、Agent 平台写
+  「当前 DSH 与 ACP」、关系句写明方案不再有 `agent` 字段），§二 目录树补 `behaviors/.defaults/`、
+  `capabilities/.defaults/`、`plans/.defaults/`、`adapters/runtime.mjs` 与 `acp/` 平台；`FOLDER_MAP.md` 新增
+  `src/platforms/` 与 `src/config/` 两行、`src/agent-side/` 补 `adapters/acp/`、`src/user-side/metadata.mjs` 的
+  端点改注册表、脚本计数改 208；`CONSOLE.md` 的数据源、契约条数与导航数按 C7 后的事实落定；`docs/README.md`
+  索引状态改「C0–C8 已完成」。
+- **方案端点按 §7.4 改名为 `/api/plans`**（原 `/api/runtime/plans`）：`src/bridge.js` 三处路由（GET / POST /
+  DELETE，含 `slice('/api/plans/'.length)`）、`pages/plans/page.js` 四处调用、控制台夹具四条 mock 路由、
+  `test-console-ui` 的写请求期望值、`console-ui-contracts.json` 的写载荷基线同步改。理由是归属：方案是「配置面」，
+  跟 `GET /api/platforms/registry` 同类，不该挤在 `runtime/` 下面，也不该让人以为它是运行期临时物。
+- **删除清单逐项核销**：`profiles/agent-platforms/dsh/agents/`（C4）、`src/runtime/adapters.mjs`（C2b）、
+  `public/console/pages/behavior/` 与 `public/console/components/platform-panel/`（C7）已清零；唯一有意偏离是
+  `src/agent-side/agent-client.mjs` **保留** —— 它只剩「怎么连上平台」（`AgentApiClient` / 地址发现 / 凭据 /
+  探活分类 + 装配期协议面校验），调用面已全在 `AgentPort` 里，删掉等于把装配期守卫一起丢掉；偏离与理由写进
+  `PLATFORM_UNIFICATION.md` §4.3 / §4.4，C6.5 接线时一并处理。
+- **门禁**：`verify:repo` 80 通过 0 失败 0 跳过、`test:audit` 129/129、`test-console-static` 全过、
+  `test:console-ui` 37/37（41 条隔离 mock 写请求）、`test-artifact-pipeline` 全过、`build-artifacts --check`
+  全部最新、`test:v030` 9/9、`check-profiles` 通过。`git grep` 复核四项删除清单：目录/文件本体均已不存在，
+  残留字符串只出现在测试的「已删除」断言、平台页的 `data-platform-panel-body` 属性名与文档的历史说明里。
+
+### 重构：控制台文案与人格生效口径（C9）
+- **导航改名**：`index.html` 的「平台」→「平台配置」、「方案」→「运行方案」；`js/router.js` 的 `consolePages.platforms/plans` 标题与副标题同步。路由键不变，旧书签照旧可用。
+- **能力档编辑页对齐行为档案页**：`components/capability-panel/capability-panel.js` 的 `renderEditor()` 改用 `.platform-stack` / `.platform-section` / `.form-stack` / `.form-actions`，字段走 `renderFields(..., { columns: 1, layout: 'inline' })`；`pages/platforms/platform-detail.js` 去掉编辑器外层多余的 `<section>`；`pages/platforms/page.css` 删掉 `.platform-detail .card { padding }` —— 那是卡片套卡片、与「行为」标签间距不一致的来源。
+- **`/role` 与「默认人格下拉」同源**：新增 `resolvePersonaTarget(raw)` 作为「卡名 → 可写入的人格值」唯一入口（本地 `roles/<名字>.md` → `provider:id` → 裸名在各 provider 目录里唯一匹配，重名要求写全并返回 `candidates`），`externalPersonaTarget()` 负责刷缓存与离线沿用旧缓存。`builtinCommandDeps.role` 的 `sanitize` / `exists` 换成 `resolve` / `refresh`；`/role 名字` 因此能直接切外部人格，回执标「（外部人格）」。
+- **`applyRoleChange` 搬到 main 作用域**：它原本是 HTTP 处理函数里的 `const`，而 `builtinCommandDeps` 在 `main()` 作用域，`/role` 调它会抛 `ReferenceError` 且被命令层吞掉 —— 表现为「状态写进去了但没有任何回执」。现在放在 `refreshRoleNowV2` 之后并写成**函数声明**（`server.listen` 在更早的代码里已执行，`const` 会踩 TDZ）。
+- **人格卡注入口径统一**：`roleRefreshBlockV2(key)` 不再豁免 `bootstrap`，`roleFpAtBuild` 无条件记录指纹；新建会话、重置会话、人工唤醒一视同仁，**没读过这一版就整段给卡**。引导唤醒的文案改成两套：有卡时「角色卡已经在上文完整给出，不用再读」，无卡时仍让 AI 去 `qq_get_prompt` 看角色（golden 夹具逐字节不变）。
+- **重置 = 新上下文**：`src/session/reset.mjs` 的 `createSessionResetter` 新增 `forgetRoleSeen`，重置时忘掉「已读哪一版卡」，否则下次唤醒不会重新注入。`resetSession(key, { notify })` 透传 `notify` —— 修掉「控制台点重置也往群里发一条『已重置会话』回执」（旧实现 `return resetSessionImpl(key)` 把 options 丢了）。控制台 `/api/session/reset` 与 QQ 的 `/reset` 共用这一份序列。
+- **会话详情下拉现取现用**：`pages/sessions/page.js` 的 `ensurePersonaCatalog()` 去掉模块级永久缓存，每次打开详情都重拉 `/api/personas`（失败沿用上次结果），人格页新建/改名/删除角色卡后回来立刻能看到。
+- **「跟随全局（当前：…）」显示完整方案名**：`/api/sessions` 的 `activePlan` 由 `id` 改为整份定义（`activePlan() ?? null`），前端新增 `planLabelOf()` 兼容只给 id 的旧写法；下拉不再只剩一个破折号。
+- **`/api/roles` 的 `assignments.missing` 判据改走 `roleCardFor`**：本地卡与外部引用（`provider:id`）同一个门，外部人格不再被误报成「已失效」。
+- **`role-per-key.js` 认外部引用**：新增 `PERSONA_REF_RE` / `safePersonaRef` / `safeRoleValue`；`safeRoleName` 会吃掉冒号，写外部卡会被静默改成另一个名字，所以「全局 `role` 与按会话 `byKey`」的写入与读盘都改走 `safeRoleValue`。
+- **测试**：`test-command-registry` 补外部人格与 4 次 `refresh` 断言（17 条）；`test-session-reset` 补 `forgetRoleSeen` 与 `notify:false`（5 条）；`test-role-refresh` 改为断言引导唤醒也带卡；`test-deploy-fixes` 的重置断言改指 `createSessionResetter` 的登记项（序列已搬进模块）；`test-console-ui` 37 → 38 条（会话详情显示方案名 + 新建人格卡后下拉即时更新）。
+- **门禁**：`test:audit` 129/129、`test:console-ui` 38/38（43 条隔离 mock 写请求）、`verify:repo` 80 通过 0 失败 0 跳过、`test-console-static` 全过、`node --check` 全过。
+- **文档**：`COMMAND_REGISTRY.md` §9 补 `role` 注入契约；`guides/TESTING.md`、`guides/CONFIGURATION.md`、`guides/SECURITY_BASELINE.md`、`PLUGIN_KERNEL.md` §9.2 按新事实校正；`PLATFORM_UNIFICATION.md` 新增 §9.5。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

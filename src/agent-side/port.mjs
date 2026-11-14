@@ -52,6 +52,25 @@ export const AGENT_PORT_CORE_METHODS = Object.freeze([
 /** 能力位缺位时抛的错误码（诊断与控制台展示用同一个字符串）。 */
 export const CAPABILITY_UNSUPPORTED = 'capability_unsupported';
 
+/** 自证失败的错误码：声明的能力与实现对不上（诊断码，见 platforms/registry.mjs）。 */
+export const CAPABILITY_OVERCLAIMED = 'capability_overclaimed';
+
+/**
+ * 装配失败：平台声称的能力位与自己的实现不符。
+ *
+ * 与 `AgentCapabilityError` 的区别是「谁错了」：那个是**调用方**问了一件平台确实做不到的事
+ * （平台没错，只是没有这个能力位）；这个是**平台**声明了做不到的事（实现或声明有一边是错的，
+ * 必须修）。因此它是装配期错误，不该被当成一次普通的调用失败吞掉。
+ */
+export class AgentAssemblyError extends Error {
+  constructor(id, message) {
+    super(`Agent 平台 ${id || '(未知)'} 装配失败：${message}`);
+    this.name = 'AgentAssemblyError';
+    this.code = CAPABILITY_OVERCLAIMED;
+    this.agentPlatform = id || '';
+  }
+}
+
 /** 能力位缺位。刻意单独一个类：调用方可以按类型区分「平台做不到」与「调用失败」。 */
 export class AgentCapabilityError extends Error {
   constructor(id, capability, method) {
@@ -188,18 +207,18 @@ export function createAgentPort({ id, label = '', capabilities = AGENT_PORT_CAPA
     const raw = typeof capabilities === 'function' ? capabilities() : capabilities;
     const list = [...new Set((raw ?? []).map((name) => String(name).trim()).filter(Boolean))];
     const unknown = list.filter((name) => !AGENT_PORT_CAPABILITIES.includes(name));
-    if (unknown.length) throw new Error(`createAgentPort: ${platformId} 声明了未知能力 ${unknown.join(', ')}`);
+    if (unknown.length) throw new AgentAssemblyError(platformId, `声明了未知能力 ${unknown.join(', ')}`);
     // 「声明了某个位却漏实现方法」以前在构造时就炸；延迟求值后改在第一次求值炸。
     // 仍然是 fail-fast，只是时机晚到「平台真正连上之后」——那时才知道它声明了什么。
     const holes = list.flatMap((capability) => AGENT_PORT_GROUPS[capability]
       .filter((name) => typeof impl[name] !== 'function')
       .map((name) => `${capability}.${name}`));
-    if (holes.length) throw new Error(`createAgentPort: ${platformId} 声明了能力但没实现 ${holes.join(', ')}`);
+    if (holes.length) throw new AgentAssemblyError(platformId, `声明了能力但没实现 ${holes.join(', ')}`);
     return list;
   };
 
   const missingCore = AGENT_PORT_CORE_METHODS.filter((name) => typeof impl[name] !== 'function');
-  if (missingCore.length) throw new Error(`createAgentPort: ${platformId} 缺少核心方法 ${missingCore.join(', ')}`);
+  if (missingCore.length) throw new AgentAssemblyError(platformId, `缺少核心方法 ${missingCore.join(', ')}`);
 
   // 常量形态在构造时先跑一遍：装配错误（拼错能力名、声明了却没实现）必须在启动时就暴露，
   // 不能等到某个按钮被点下去才发现。函数形态没法在构造时求值（ACP 那时还没 initialize），

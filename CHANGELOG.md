@@ -534,12 +534,31 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **五格指标改按位置命名**：执行体 / 用户平台 / 当前运行方案 / 已建立会话 / 待处理请求。前两格读状态投影，
   标题写死的是「位置」而不是平台名；SnowLuma 上游健康从独立卡片收进「用户平台」格副行，与「访问与安全」
   的告警条由同一份快照渲染（`renderUpstreamHealth`），两处不会说出不同结论。
-- **样式去特例**：删揉掉按格子 id 写死的字号（`#metricMode` / `#metricSnowluma` 三处媒体查询），改为
+- **样式去特例**：删掉按格子 id 写死的字号（`#metricMode` / `#metricSnowluma` 三处媒体查询），改为
   `.metric strong.is-text` 文本格修饰；新增指示格不再需要新的样式分支。
 - **日志与提示跟着执行体自报的 label 走**（就绪 / 探活偶发失败 / 不可用入队），控制中心与 `send-voice`
   改读 `agent.ready`，`docs/DSH_DEPLOYMENT.md` 的验证命令同步。
 - **门禁**：`verify:repo` 101 通过 0 失败；`test:audit` 全绿（含同步重写的 `test-dsh-health`、
   `test-snowluma-upstream-health` 两条断言）；`test-console-static` / `test-console-ui` 通过。
+
+### 重构：Agent 侧插件化（P1）
+- **新权限 `agent-provider:provide`**：`ctx.agentPlatforms = { register(def), list() }`，注册形状为
+  `{ id, label, capabilities, configSchema?, resolveLevelPlan, createRuntime }`。id 文法、`resolveLevelPlan`
+  与 `createRuntime` 在注册时就判；同 owner 可覆盖（热重载），换 owner 一律拒绝 —— 内置平台不可被顶替。
+- **不另开第二张表**：`owner` 与装配结论（issues）都记在 `src/agent-side/runtime-registry.mjs`，
+  `listAgentPlatforms()` 直接带 `owner` / `source` / `configSchema` / `issues`，控制台与
+  `agentPlatformMetadata()` 读同一处；插件停用时内核按 owner 批量注销。
+- **装配失败留下结论**：`createRuntime` 抛错 → `agent_instance_offline`；返回句柄缺成员 →
+  `agent_provider_invalid`；`port()` 装配失败 → `capability_overclaimed`（新增 `AgentAssemblyError`，
+  与「能力位缺位」的 `AgentCapabilityError` 分开：后者是调用方问错了，前者是平台自己声明错了）。
+  失败照抛（fail-closed），装配成功即清账。
+- **统一注册表出三条诊断**：`capability_overclaimed` / `agent_provider_invalid`（error）、
+  `agent_instance_offline`（warn）。「当前执行体探活未通过」由桥接注入 `agentConnected` 判断，
+  `null`（还没探过）不判，避免启动瞬间报一条假的离线。
+- **运行期边界**：正在当执行体的平台不能随插件卸载（会话落盘的 `agentRef.instance` 指着它），
+  换执行体要改 `platforms.active.agent` 并重启桥接；插件平台的配置模型来自实现自报的 `configSchema`。
+- **门禁**：新增 `scripts/test-agent-provider.mjs`（9 条：owner 语义、三类装配结论、诊断码、内核接线），
+  `test-plugin-kernel` / `test-platform-registry` / `test-agent-port` / `test:tck` 全绿。
 
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删

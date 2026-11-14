@@ -7,7 +7,7 @@ import { normalizeConfigSchema } from './config-schema.mjs';
 
 export const API_VERSION = 1;
 
-export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'prompt:provide', 'memory:provide', 'task-type:provide', 'send:message', 'net:http', 'commands', 'inbound:filter', 'adapters:provide', 'transport:provide']);
+export const KNOWN_PERMISSIONS = Object.freeze(['state', 'persona:provide', 'prompt:provide', 'memory:provide', 'task-type:provide', 'send:message', 'net:http', 'commands', 'inbound:filter', 'adapters:provide', 'transport:provide', 'agent-provider:provide']);
 
 /**
  * 旧权限名 → 正式名。

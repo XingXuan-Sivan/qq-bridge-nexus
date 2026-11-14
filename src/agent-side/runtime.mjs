@@ -18,7 +18,12 @@
 // 两侧分开的原因：连上一个执行体与「连上之后能做什么」是两件事，前者是 HTTP 还是子进程
 // 完全不影响后者；混在同一个对象里会让第二个执行体必须假装拥有第一个的连接方式。
 import './builtin.mjs';
-import { requireAgentPlatform } from './runtime-registry.mjs';
+import {
+  clearAgentPlatformIssues,
+  noteAgentPlatformIssue,
+  requireAgentPlatform,
+} from './runtime-registry.mjs';
+import { CAPABILITY_OVERCLAIMED } from './port.mjs';
 
 /** createRuntime 必须给出的成员。缺任何一个都不允许当主平台（fail-closed）。 */
 export const RUNTIME_MEMBERS = Object.freeze([
@@ -40,6 +45,45 @@ let current = null;
 let currentImpl = null;
 let currentId = '';
 
+const messageOf = (error) => (error instanceof Error ? error.message : String(error ?? ''));
+
+/**
+ * 套一层门面，只为在 `port()` 装配失败时把结论记进注册表。
+ *
+ * 为什么要包：能力位是**平台自己声明**的，内核唯一的校验机会是 `createAgentPort` 的装配闸门
+ * （未知能力位 / 声明了却漏实现 / 缺核心方法）。把那三类结论写进注册表，控制台诊断与测试
+ * 都能看见「它自证失败」，而不是只在启动日志里留一行。
+ *
+ * 失败照抛（fail-closed）：一个声称能做却做不到的执行体，不能当主平台继续跑。
+ * 边界：常量形态的能力位在 `port()` 里就求值，这里拦得住；协商制平台（能力位是函数）要到
+ * 第一次查询才求值，那一层错误由调用方记日志 —— issues 是进程内的事实，进程在了才有控制台。
+ */
+function withAssemblyTracking(runtime, platformId) {
+  const handle = { id: runtime.id, label: runtime.label, mode: runtime.mode };
+  for (const name of RUNTIME_MEMBERS) {
+    const fn = runtime[name];
+    if (name !== 'port') {
+      // 绑定回原句柄：适配器实现里用 this 取自己闭包状态的写法照常工作。
+      handle[name] = (...args) => fn.apply(runtime, args);
+      continue;
+    }
+    handle.port = (...args) => {
+      try {
+        const port = fn.apply(runtime, args);
+        // 能装配起来就说明自证通过：旧结论不再成立（重建成功的平台不该继续背着旧账）。
+        clearAgentPlatformIssues(platformId);
+        return port;
+      } catch (error) {
+        if (error?.code === CAPABILITY_OVERCLAIMED) {
+          noteAgentPlatformIssue(platformId, { code: CAPABILITY_OVERCLAIMED, message: error.message });
+        }
+        throw error;
+      }
+    };
+  }
+  return handle;
+}
+
 /**
  * 取当前执行体的运行期句柄（进程内单例）。
  *
@@ -51,22 +95,32 @@ export function agentRuntime(options = {}) {
   const impl = requireAgentPlatform();
   // 按实现对象而不是 id 比对：注册表被重置后重新装配同 id 的平台时，旧句柄不能再被复用。
   if (current && currentImpl === impl) return current;
-  if (typeof impl.createRuntime !== 'function') {
-    throw new Error(`Agent 平台 ${impl.id} 未提供 createRuntime，不能当主平台；请把 platforms.active.agent 指回一个实现了连接层的平台`);
+  let runtime;
+  try {
+    runtime = impl.createRuntime({
+      config: options.config ?? {},
+      log: options.log ?? (() => {}),
+      onBaseUrlChange: options.onBaseUrlChange,
+    });
+  } catch (error) {
+    // 连句柄都建不起来：对端没起、凭据缺失、地址不对都可能，一律按「执行体不可用」记
+    // （与探活失败同一个结论：这一轮它跑不了）。原文照抛，调用方仍能拿到细节。
+    noteAgentPlatformIssue(impl.id, { code: 'agent_instance_offline', message: messageOf(error) });
+    throw error;
   }
-  const runtime = impl.createRuntime({
-    config: options.config ?? {},
-    log: options.log ?? (() => {}),
-    onBaseUrlChange: options.onBaseUrlChange,
-  });
+  // 形状不完整属于「平台不符合契约」，与「暂时连不上」分开：前者要改实现，后者等对端。
   const missing = RUNTIME_MEMBERS.filter((name) => typeof runtime?.[name] !== 'function');
   if (missing.length) {
-    throw new Error(`Agent 平台 ${impl.id} 的 createRuntime 缺少 ${missing.join(' / ')}`);
+    const message = `createRuntime 返回的句柄缺少 ${missing.join(' / ')}`;
+    noteAgentPlatformIssue(impl.id, { code: 'agent_provider_invalid', message });
+    throw new Error(`Agent 平台 ${impl.id} 的 ${message}`);
   }
   if (!runtime.id || !runtime.label || !runtime.mode) {
-    throw new Error(`Agent 平台 ${impl.id} 的 createRuntime 必须声明 id / label / mode`);
+    const message = 'createRuntime 必须声明 id / label / mode';
+    noteAgentPlatformIssue(impl.id, { code: 'agent_provider_invalid', message });
+    throw new Error(`Agent 平台 ${impl.id} 的 ${message}`);
   }
-  current = runtime;
+  current = withAssemblyTracking(runtime, impl.id);
   currentImpl = impl;
   currentId = impl.id;
   return current;

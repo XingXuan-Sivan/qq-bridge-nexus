@@ -20,6 +20,9 @@ import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 // src/agent-side/runtime.mjs 的 agentRuntime()；具体实现见 src/agent-side/adapters/<id>/，
 // 由 builtin.mjs 装配。本文件不出现执行体专属的动词与连接细节。
 import { agentRuntime, agentRuntimeId } from './agent-side/runtime.mjs';
+// 插件提供的 Agent 平台（`agent-provider:provide`）：注册表本身就是注入给插件内核的依赖，
+// 桥接不维护第二张表，也不在插件停用后再清另一份状态。
+import { agentProviderRegistry } from './agent-side/runtime-registry.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -2779,6 +2782,7 @@ async function main() {
         memoryRegistry,
         adapterRegistry,
         transportRegistry,
+        agentRegistry: agentProviderRegistry,
         // 插件出站只给中立段；准入、段校验、降级、onOutbound 都在 sendAction 里。
         sendMessage: (key, segments, opts) => sendPluginMessage(key, segments, opts),
         hasSession: (key) => sessions.has(key),
@@ -4170,6 +4174,9 @@ async function main() {
   // 执行体可用性探活 + 重启容错队列：
   // 执行体重启期间收到的 QQ 消息先入队（不丢），恢复后按序补投。
   let agentReady = false;
+  // 首次探活是否已经有结论：注册表快照的「当前执行体连没连上」要区分
+  // 「探过但失败了」与「还没探」（后者不判，否则启动瞬间会报一条假的离线）。
+  let agentProbeSettled = false;
 
   /**
    * 概览指标卡要的「执行体是谁、怎么连、通没通」：一份中性投影。
@@ -5642,6 +5649,7 @@ async function main() {
 
   const checkDsh = async () => {
     const r = await agentProbe.check();
+    agentProbeSettled = true;
     const ok = r.ok;
     const lastErr = r.error;
     if (r.rediscovered && ok) log(`执行体地址已变化，重新识别为 ${r.url}`);
@@ -7325,7 +7333,7 @@ async function main() {
           try {
             // 带上当前生效的平台配置：`config_invalid` 诊断要拿真实的 account/transport 去校，
             // 给空对象就只能校空值，等于这条诊断永不触发。
-            sendJson(platformRegistrySnapshot({ config: bridgeCfg?.platforms ?? {} }));
+            sendJson(platformRegistrySnapshot({ config: bridgeCfg?.platforms ?? {}, agentConnected: agentProbeSettled ? agentReady : null }));
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '读取平台注册表失败' }, 500);
           }

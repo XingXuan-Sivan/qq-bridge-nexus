@@ -232,6 +232,9 @@ const tests = [
   // C5 AgentPort：中立动词 + 能力位 fail-closed（capability_unsupported 而不是 TypeError），
   // 以及 DSH 适配器把每个动词落到正确的 RPC（策略判定留在桥接）。
   'test-agent-port.mjs',
+  // P1 Agent 侧插件化：owner 归属（同 owner 覆盖 / 换 owner 拒绝 / 按 owner 注销）、
+  // 装配结论（离线 / 契约不合规 / 自证失败）与三条诊断码、插件内核的 agent-provider:provide。
+  'test-agent-provider.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

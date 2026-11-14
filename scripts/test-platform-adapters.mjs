@@ -136,8 +136,12 @@ test('连接层契约：成员齐备，且不齐就 fail-closed', async () => {
 test('控制台可见的平台列表不泄漏连接层对象', () => {
   const json = JSON.stringify(listAgentPlatforms());
   assert.ok(!json.includes('NodeApiClient'), 'protocol 不该出现在 /api 响应里');
+  // 描述里只允许静态元数据：出现函数就说明实现漏进了控制台可见的部分。
+  // owner / source 是「谁注册的、来自内置还是插件」，configSchema / issues 是
+  // 插件平台要的配置模型与装配结论 —— 与用户侧描述对象同一口径（B7、P1）。
   for (const item of listAgentPlatforms()) {
-    assert.deepEqual(Object.keys(item).sort(), ['capabilities', 'id', 'label']);
+    assert.deepEqual(Object.keys(item).sort(),
+      ['capabilities', 'configSchema', 'id', 'issues', 'label', 'owner', 'source']);
   }
 });
 

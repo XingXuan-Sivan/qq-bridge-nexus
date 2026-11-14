@@ -191,6 +191,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       commands: [],
       dispose: null,
       transports: [],
+      agentProviders: [],
       config: config.plugins[id]?.config ?? {},
       updatedAt: null,
       stats: {
@@ -305,11 +306,20 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
         logLine(`⚠️ [plugins] ${entry.id} 的平台 ${transport.id} 关闭失败：${error?.message ?? error}`);
       }
     }
+    // 插件提供的 Agent 平台：按 owner 批量注销。没有 close 可等（连接层句柄归
+    // runtime.mjs 的进程单例，换执行体才重置），但有两条硬拒绝：内置平台不能按 owner 清，
+    // 正在当「当前执行体」的平台也不能随插件卸载 —— 这类拒绝只记日志，不阻断卸载。
+    try {
+      deps.agentRegistry?.unregisterByOwner?.(entry.id);
+    } catch (error) {
+      logLine(`⚠️ [plugins] ${entry.id} 的 Agent 平台未注销：${error?.message ?? error}`);
+    }
     entry.commands = [];
     entry.blocks = [];
     entry.memories = [];
     entry.taskTypes = [];
     entry.transports = [];
+    entry.agentProviders = [];
     entry.hooks = [];
     if (entry.status === 'active') entry.status = 'stopped';
     entry.updatedAt = isoNow();
@@ -367,7 +377,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       return { ok: false, error: '入口必须导出 activate(ctx)', manifest };
     }
 
-    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [], adapters: [], transports: [] };
+    const pending = { hooks: [], personas: [], commands: [], blocks: [], taskTypes: [], memories: [], adapters: [], transports: [], agentProviders: [] };
     const ctx = createHostApi({
       id: dirName,
       version: manifest.version,
@@ -405,6 +415,13 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
           return true;
         },
         listTransports: () => deps.transportRegistry?.list?.() ?? [],
+        // Agent 平台直接进注册表（不在这里建连接层）：`createRuntime` 只在它被选为
+        // 当前执行体时由 runtime.mjs 调一次，拿的是 `platforms.agents.<id>` 的活配置。
+        registerAgentProvider: (definition, pluginId) => {
+          pending.agentProviders.push({ definition, pluginId });
+          return true;
+        },
+        listAgentPlatforms: () => deps.agentRegistry?.list?.() ?? [],
         sendToQQ: deps.sendToQQ,
         sendMessage: deps.sendMessage,
         hasSession: deps.hasSession,
@@ -440,7 +457,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       }
     }
 
-    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, adapters: pending.adapters, transports: pending.transports, dispose };
+    return { ok: true, status: 'active', manifest, hooks: pending.hooks, personas: pending.personas, commands: pending.commands, blocks: pending.blocks, taskTypes: pending.taskTypes, memories: pending.memories, adapters: pending.adapters, transports: pending.transports, agentProviders: pending.agentProviders, dispose };
   }
 
   /** 提交实例：替换元数据、挂钩子、注册 provider。调用前必须已经 dispose 旧实例。 */
@@ -457,6 +474,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     entry.taskTypes = [];
     entry.adapters = [];
     entry.transports = [];
+    entry.agentProviders = [];
     entry.dispose = desc.dispose ?? null;
     entry.updatedAt = isoNow();
 
@@ -525,6 +543,17 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
           logLine(`⚠️ [plugins] ${entry.id} 注册平台 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
         }
       }
+      for (const { definition, pluginId } of desc.agentProviders ?? []) {
+        try {
+          // 注册表自己校三件事：id 文法、resolveLevelPlan、createRuntime；
+          // 被顶掉的 id（内置或别的插件）在这里抛，拒绝后插件其余部分照常跑。
+          const registered = deps.agentRegistry?.register?.(definition, pluginId);
+          if (registered) entry.agentProviders.push(registered.id);
+        } catch (error) {
+          audit.append('agent-provider-denied', { plugin: pluginId, platform: definition?.id ?? null, reason: String(error?.message ?? error) });
+          logLine(`⚠️ [plugins] ${entry.id} 注册 Agent 平台 ${definition?.id ?? '?'} 失败：${error?.message ?? error}`);
+        }
+      }
       audit.append('activate', { plugin: entry.id, version: entry.version });
       logLine(`[plugins] 已加载 ${entry.id}@${entry.version}${entry.hooks.length ? `（${entry.hooks.join('/')}）` : ''}`);
     } else {
@@ -565,6 +594,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       blocks: [...(entry.blocks ?? [])],
       taskTypes: [...(entry.taskTypes ?? [])],
       transports: [...(entry.transports ?? [])],
+      agentProviders: [...(entry.agentProviders ?? [])],
       updatedAt: entry.updatedAt,
       counters: { ...entry.stats },
     };

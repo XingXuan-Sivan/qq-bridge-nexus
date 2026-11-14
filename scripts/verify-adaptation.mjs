@@ -508,6 +508,7 @@ if (want('repo')) {
     ...srcFiles.map((file) => path.relative(ROOT, file).replace(/\\/g, '/'))
       .filter((rel) => rel.startsWith('src/agent-side/')),
     'scripts/test-agent-port.mjs', 'scripts/test-agent-port-tck.mjs', 'scripts/test-acp-port.mjs',
+    'scripts/test-agent-provider.mjs',
     'scripts/setup-dsh.mjs', 'scripts/install-agent-platform.mjs', 'scripts/build-artifacts.mjs',
     'scripts/agent-platform-adapters.mjs',
     'profiles/agent-platforms/dsh/adapters/build.mjs',

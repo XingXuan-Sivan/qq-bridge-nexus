@@ -402,6 +402,8 @@ undefined                      // 不干预
 | `ctx.qq.send(key, payload, opts)` | `send:message` | 同上的旧名（0.1.x 的 `send:qq` 申请的就是这段能力），两者是**同一个对象** |
 | `ctx.userPlatforms.register(def)` | `transport:provide` | 注册一个 UserPlatform（`{ id, capabilities, create(config) }`）。id 不得与内置或其它插件平台冲突；卸载/停用时按 pluginId 注销并调用实例的 `close()`（上限 2s） |
 | `ctx.userPlatforms.list()` | `transport:provide` | 当前已注册的平台（内置 + 插件） |
+| `ctx.agentPlatforms.register(def)` | `agent-provider:provide` | 注册一个 Agent 平台（`{ id, label, capabilities, configSchema?, resolveLevelPlan(level, ctx), createRuntime(opts) }`）。`resolveLevelPlan`（级别 → 权限档）与 `createRuntime`（连接层，成员表见 [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) §4.1）缺任一即拒；id 不得顶替内置或其它插件的平台；卸载/停用时按 pluginId 注销 |
+| `ctx.agentPlatforms.list()` | `agent-provider:provide` | 当前已注册的 Agent 平台（内置 + 插件，含 `owner` / `source` / `issues`） |
 | `ctx.http.requestJson(url, opts)` | `net:http` | 同上，但返回 `{ status, etag, json }`；`304` 时 `json: null`（条件请求用） |
 | `ctx.http.fetchJson(url, opts)` | `net:http` | 仅 `http/https`、超时、响应体上限 256KB；只返回 JSON |
 | `ctx.now()` / `ctx.random()` | —— | 便于测试注入 |
@@ -412,6 +414,7 @@ undefined                      // 不干预
 - `ctx.message.send` 的目标 `key` 必须已存在于桥接的会话表；不存在直接拒绝（防止插件凭空造会话）。
 - 出站内容仍会过令牌与敏感信息拦截；插件没有「绕过准入直接发」的入口（它就是经桥接的 `sendAction`）。
 - `ctx.http.fetchJson` 不允许访问环回地址以外的内网段（与 `safe-fetch.js` 的策略一致），供 soulkit 这类本机服务例外放行需在配置里显式声明 `allowLoopback: true`。
+- 插件注册的 Agent 平台要真正装配，还得把 `platforms.active.agent` 指向它并**重启桥接**：执行体句柄是进程内单例，运行期静默换掉会让「谁在跑这个会话」不可追溯。正在当执行体的平台也不能随插件卸载 —— 那次注销会被拒绝并记一条日志，插件其余部分照常卸载。
 
 ---
 
@@ -429,6 +432,7 @@ undefined                      // 不干预
 | `task-type:provide` | 注册定时任务类型 | 中（到点会真的发消息；走现有白名单、限额、免打扰与模式判定） |
 | `inbound:filter` | 入站丢消息/改文字 | 高（丢消息不留痕、改文字会影响命令判定；默认 `filters.inbound=false` 时不生效） |
 | `transport:provide` | 提供 UserPlatform 实现（连接与发送） | 高（接管一个平台的网络与协议；不得顶替内置平台 id） |
+| `agent-provider:provide` | 提供 Agent 平台实现（执行体的连接层） | 高（可被选为当前执行体，接管桥接与执行体之间的全部通信；不得顶替内置平台 id，也不能自证能力 —— 声明的能力位先过 `createAgentPort` 的装配闸门，过不了就是一条 `capability_overclaimed` 诊断） |
 
 规则：
 

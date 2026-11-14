@@ -39,6 +39,11 @@ export const DIAGNOSTIC_CODES = Object.freeze({
   PROFILE_ONLY: 'profile_only',
   PROBE_FAILED: 'probe_failed',
   ID_CONFLICT: 'id_conflict',
+  // Agent 侧的三条装配结论，由 src/agent-side/runtime-registry.mjs 记账：
+  // 声明的能力做不到（port 装配失败）、实现不符合契约、此刻连不上。
+  CAPABILITY_OVERCLAIMED: 'capability_overclaimed',
+  AGENT_PROVIDER_INVALID: 'agent_provider_invalid',
+  AGENT_INSTANCE_OFFLINE: 'agent_instance_offline',
 });
 
 const DIAGNOSTIC_LEVELS = Object.freeze({
@@ -46,9 +51,12 @@ const DIAGNOSTIC_LEVELS = Object.freeze({
   [DIAGNOSTIC_CODES.CONFIG_INVALID]: 'error',
   [DIAGNOSTIC_CODES.ACTIVE_UNREGISTERED]: 'error',
   [DIAGNOSTIC_CODES.ID_CONFLICT]: 'error',
+  [DIAGNOSTIC_CODES.CAPABILITY_OVERCLAIMED]: 'error',
+  [DIAGNOSTIC_CODES.AGENT_PROVIDER_INVALID]: 'error',
   [DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED]: 'warn',
   [DIAGNOSTIC_CODES.PROFILE_ONLY]: 'warn',
   [DIAGNOSTIC_CODES.PROBE_FAILED]: 'warn',
+  [DIAGNOSTIC_CODES.AGENT_INSTANCE_OFFLINE]: 'warn',
 });
 
 export const PLATFORM_SIDES = Object.freeze(['user', 'agent']);
@@ -186,6 +194,11 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
       continue;
     }
     live.set(id, item);
+    // 装配结论是注册表记的账（自证失败 / 契约不合规 / 实例建不起来），逐条转成诊断：
+    // 它们描述的是「这个平台本身有问题」，与下文的配置 / 目录类诊断互不影响。
+    for (const issue of item.issues ?? []) {
+      diagnostics.push(diagnostic(issue.code, 'agent', id, issue.message));
+    }
   }
 
   const seen = new Set();
@@ -203,7 +216,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
         DIAGNOSTIC_CODES.PROFILE_ONLY,
         'agent',
         id,
-        `有声明目录（${profile.source ?? `profiles/agent-platforms/${id}`}），但没有装配进内核：src/agent-side/builtin.mjs 未注册它`,
+        `有声明目录（${profile.source ?? `profiles/agent-platforms/${id}`}），但没有装配进内核：src/agent-side/builtin.mjs 与已启用的插件都没注册它`,
       ));
     }
     entries.push({
@@ -211,8 +224,8 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
       id,
       label: String(impl?.label ?? profile.label ?? id),
       note: '',
-      source: impl ? 'builtin' : 'profile-only',
-      owner: null,
+      source: impl ? String(impl.source ?? 'builtin') : 'profile-only',
+      owner: impl?.owner ?? null,
       active: String(runtime.active ?? '') === id,
       capabilities: [...(impl?.capabilities ?? [])],
       conversationTypes: [],
@@ -231,22 +244,28 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
     });
   }
 
+  // 运行期注册了、但没有声明目录的平台（插件 Agent 平台的常态）：配置模型来自实现本身，
+  // 校验规则与声明面同一套（同一个 `platforms.agents.<id>`）。
   for (const [id, impl] of live) {
     if (seen.has(id)) continue;
+    const { schema, error } = vetConfig(impl.configSchema, config?.agents?.[id] ?? {});
+    if (error) {
+      diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'agent', id, error));
+    }
     entries.push({
       side: 'agent',
       id,
       label: String(impl.label ?? id),
       note: '',
-      source: 'builtin',
-      owner: null,
+      source: String(impl.source ?? 'builtin'),
+      owner: impl.owner ?? null,
       active: String(runtime.active ?? '') === id,
       capabilities: [...(impl.capabilities ?? [])],
       conversationTypes: [],
       limits: {},
       inbound: false,
-      configSchema: null,
-      config: {},
+      configSchema: schema,
+      config: clone(config?.agents?.[id] ?? {}),
       assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
     });
   }
@@ -275,6 +294,7 @@ function summarize(entries, diagnostics) {
  * @param {{active: string, platforms: Array}} [input.userRuntime]  `userPlatformMetadata()`
  * @param {{active: string, platforms: Array}} [input.agentRuntime] `agentPlatformMetadata()`
  * @param {{users?: object, agents?: object}} [input.config]        配置面（C2 起为配置 v2 的 platforms 段）
+ * @param {boolean|null} [input.agentConnected]                     当前执行体的探活结论；null = 还不知道
  */
 export function buildPlatformRegistry({
   profilePlatforms = [],
@@ -282,6 +302,7 @@ export function buildPlatformRegistry({
   userRuntime = { active: '', platforms: [] },
   agentRuntime = { active: '', platforms: [] },
   config = {},
+  agentConnected = null,
 } = {}) {
   const user = buildUserEntries({ profilePlatforms, runtime: userRuntime, config });
   const agent = buildAgentEntries({ profilePlatforms: profileAgentPlatforms, runtime: agentRuntime, config });
@@ -300,6 +321,21 @@ export function buildPlatformRegistry({
       active,
       `当前平台指向未注册的 id：${active}（能用这一侧的平台：${entries.filter((entry) => entry.side === side).map((entry) => entry.id).join(' / ') || '无'}）`,
     ));
+  }
+
+  // 当前执行体在注册表里、但桥接报它没连上：进程在而连接不在，是最容易被误判成
+  // 「配置错了」的一类故障，所以单独给一条诊断。未知（null）不判 —— 启动早期的探活
+  // 结果还没出来时，把「还没探」报告成「不可用」只会制造噪音。
+  if (agentConnected === false) {
+    const active = String(agentRuntime.active ?? '').trim();
+    if (active && entries.some((entry) => entry.side === 'agent' && entry.id === active)) {
+      diagnostics.push(diagnostic(
+        DIAGNOSTIC_CODES.AGENT_INSTANCE_OFFLINE,
+        'agent',
+        active,
+        '当前执行体探活未通过：桥接进程还在，但对端没响应（消息会入队等待，不会丢）',
+      ));
+    }
   }
 
   return {
@@ -324,6 +360,7 @@ export function platformRegistrySnapshot({
   profilesRoot = PLATFORMS_ROOT,
   agentPlatformsRoot = AGENT_PLATFORMS_ROOT,
   config = {},
+  agentConnected = null,
 } = {}) {
   const profilePlatforms = listPlatforms({ root: profilesRoot }).map((item) => ({
     ...item,
@@ -335,6 +372,7 @@ export function platformRegistrySnapshot({
     userRuntime: userPlatformMetadata(),
     agentRuntime: agentPlatformMetadata(),
     config: flatPlatforms(config),
+    agentConnected,
   });
 }
 

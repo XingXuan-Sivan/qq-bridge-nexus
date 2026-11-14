@@ -1,6 +1,6 @@
 # 执行体通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）；P1 起各批未做。
+> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）；P2 起各批未做。
 > 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
 > 也是「可换执行体」在运行时第一次成立的地方。
 > 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
@@ -187,16 +187,28 @@ ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台
 ### 4.3 Agent 侧插件化
 
 照搬用户侧 `registerTransport()` 的形状（`src/user-side/transport.mjs` 已有同类校验：id 文法、
-同 owner 可覆盖、换 owner 拒绝、`create()` 可选）。
+同 owner 可覆盖、换 owner 拒绝）。差别是**不另开第二张表**：用户侧之所以有 `transport.mjs`，
+是因为那张表在 import 时就被内置平台填满且没有 owner；Agent 侧的 owner 与装配结论直接记在
+`src/agent-side/runtime-registry.mjs` 里，于是「这个平台是谁注册的、当时装配成了什么」只有一个答案。
 
-| 项 | 设计 |
+| 项 | 实现 |
 | --- | --- |
 | 新权限 | `agent-provider:provide`（与 `transport:provide` / `adapters:provide` 并列） |
-| host-api | `ctx.agentPlatforms = { register(def), list() }`；`unregisterAgentPlatformsByOwner(owner)` 在卸载时调用 |
-| 注册形状 | `register({ id, label, capabilities, configSchema, describe, createRuntime })`，连接层成员同 §4.1.1 |
-| 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active → `resetAgentRuntime()` 后再取新句柄 |
-| 安全边界 | 插件**不能自证能力**：`capabilities` 先跑 TCK 再进注册表；权限决策权只在内核；`readPermission` 用于发现漂移 |
-| 诊断 | `capability_overclaimed` / `agent_provider_invalid` / `agent_instance_offline` |
+| host-api | `ctx.agentPlatforms = { register(def), list() }`；内核在 `disposeEntry` 里调 `unregisterAgentPlatformsByOwner(owner)` |
+| 注册形状 | `{ id, label, capabilities, configSchema?, resolveLevelPlan(level, ctx), createRuntime(opts) }`，连接层成员同 §4.1。`resolveLevelPlan` 与 `createRuntime` 缺任一即拒：能被选为当前执行体是个承诺，注册时就验 |
+| 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active 要重启桥接 —— 正在当执行体的平台不允许随插件注销（会话落盘里的 `agentRef.instance` 指着它） |
+| 安全边界 | 插件**不能自证能力**：`capabilities` 只是描述，闸门在 `createAgentPort` 的装配校验（未知能力位 / 声明了却漏实现 / 缺核心方法）；权限决策权只在内核 |
+| 诊断 | `issue.code` 由注册表记，由统一注册表翻成诊断码：`capability_overclaimed`（自证失败，error）/ `agent_provider_invalid`（实现不合契约，error）/ `agent_instance_offline`（此刻没连上，warn） |
+
+三条落地口径：
+
+- **装配结论与 owner 同表**：`listAgentPlatforms()` 直接带 `owner` / `source` / `issues`，
+  `agentPlatformMetadata()` 与统一注册表都读这一处，控制台不拼第二份。
+- **实时连接状态不进注册表**：`agent_instance_offline` 由桥接的探活结论（`agentConnected`）
+  注入快照；`null`（还没探过）不判，否则启动瞬间会报一条假的离线。
+- **装配期即是插件的 TCK**：内置平台的事件契约由 `scripts/test-agent-port-tck.mjs` 钉住；
+  插件平台在启动时过的是同一道闸门的运行时版本（`RUNTIME_MEMBERS` 全集 + `createAgentPort`）。
+  `scripts/test-agent-provider.mjs` 把这三类失败与 owner 语义都钉住。
 
 ### 4.4 事件面 / 审批引用 / 用量账本三处归一
 
@@ -527,7 +539,7 @@ POST /api/sessions/:key/permission  { preset }
 | 批 | 目标 | 主要文件 | 门禁 |
 | --- | --- | --- | --- |
 | **P0** ✅ | 执行体可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
-| **P1** | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + overclaim 诊断 | `src/plugins/host-api.mjs`、`src/agent-side/runtime-registry.mjs`、`PLUGIN_KERNEL.md` | TCK + `test:audit` |
+| **P1** ✅ | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + 三条装配诊断（§4.3） | `src/agent-side/runtime-registry.mjs`、`src/agent-side/runtime.mjs`、`src/plugins/{manifest,host-api,kernel}.mjs`、`src/platforms/registry.mjs`、`PLUGIN_KERNEL.md` | `test-agent-provider` 新增、`test:audit` / `verify:repo` 全绿 |
 | **P2** | 配置 v3：`platforms.agents.<id>` 多实例、`runtime.defaultAgent`、agent 侧 probe/config 端点 | `src/config/platforms.mjs`、`scripts/*router*`（`/api/platforms/registry` 写口）、`guides/CONFIGURATION.md` | `verify:repo`、`test:console-ui` |
 | **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |
 | **P4** | 方案解绑 + 能力档 `runtime` 段 + 方言上移 + `direct` 方案 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt` |

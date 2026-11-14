@@ -11,7 +11,12 @@
 import './builtin.mjs';
 import { activeAgentPlatformId, listAgentPlatforms } from './runtime-registry.mjs';
 
-/** `{ active, platforms: [{ id, label, capabilities, active }] }` —— 全是常量。 */
+/**
+ * `{ active, platforms: [{ id, label, capabilities, configSchema, owner, source, issues, active }] }`。
+ *
+ * `owner` / `source` 回答「这条是哪来的」（内置还是哪个插件）；`issues` 是注册表记下的装配结论
+ * （自证失败 / 形状不合规 / 连不上），与「此刻连没连上」是两件事 —— 后者在 runtime.mjs 的单例里。
+ */
 export function agentPlatformMetadata() {
   const active = activeAgentPlatformId();
   return {

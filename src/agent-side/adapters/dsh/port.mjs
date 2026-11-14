@@ -2,7 +2,7 @@
 //
 // 这里是 `src/agent-side/` 里**唯一**允许出现 `session/*`、`workspace/*`、`settings/*`
 // 这些方法名的地方（连同同目录的 client.mjs 与 endpoint.mjs）。内核只经
-// src/agent-side/agent-client.mjs 取到 port，看不到任何一个 DSH 动词。
+// src/agent-side/runtime.mjs 取到 port，看不到任何一个 DSH 动词。
 //
 // 形状约定（C5 起统一）：
 //   · 返回值里的语义字段（`sessions` / `sessionId` / `preset` / `text` …）是**已解包**的，

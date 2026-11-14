@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-// Agent 侧协议只经中立门面（具体实现在 src/agent-side/adapters/dsh/client.mjs）。
-// C5：调用面走 AgentPort，本脚本不再出现平台动词。
-import { AgentApiClient, createAgentPort, createTurnCollector, discoverLaunchToken, resolveAgentBaseUrl } from './agent-side/agent-client.mjs';
+// Agent 侧连接层只经 agentRuntime()（具体实现在 src/agent-side/adapters/<id>/）。
+// 调用面走 AgentPort，本脚本不出现平台动词。
+import { agentRuntime } from './agent-side/runtime.mjs';
 // 平台配置的读法跟桥接一致（配置 v2：platforms.agents.<active>.endpoint），不自建一套。
 import { configViews } from './config/platforms.mjs';
 
@@ -45,14 +45,14 @@ async function main() {
   let file = null;
   try { file = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')); } catch {}
   const { agentPlatform } = configViews(file ?? {});
-  const baseUrl = process.argv[2] ?? (await resolveAgentBaseUrl(agentPlatform.baseUrl ?? '')).url;
-  const auth = {
-    token: agentPlatform.authToken || discoverLaunchToken(),
-    header: agentPlatform.authHeader,
-    prefix: agentPlatform.authPrefix
-  };
-  const api = new AgentApiClient(baseUrl, undefined, auth);
-  const agentPort = createAgentPort(api);
+  if (process.argv[2]) agentPlatform.baseUrl = process.argv[2];
+  const runtime = agentRuntime({ config: agentPlatform, log: console.log });
+  // 凭据与地址的补全由连接层负责：判断规则随执行体变化（stdio 没有地址，也没有 launch token）。
+  const auth = runtime.prepareAuth(agentPlatform);
+  Object.assign(agentPlatform, { authToken: auth.authToken, authTokenExplicit: auth.tokenExplicit });
+  const endpoint = await runtime.prepareEndpoint(agentPlatform);
+  if (endpoint.baseUrl) console.log(`${runtime.label} 地址: ${endpoint.baseUrl}${endpoint.auto ? '（自动识别）' : ''}`);
+  const agentPort = runtime.port();
   selfTestPort = agentPort;
   const promptText = process.argv[3] ?? '只回复两个字：收到';
 
@@ -72,14 +72,14 @@ async function main() {
 
   // 先订阅事件流（在 prompt 之前），再注入消息。
   // 必须等 WebSocket 真正 open 后再 prompt，否则 turn 事件可能在连接建立前产生而被漏掉。
-  const collector = createTurnCollector();
+  const collector = runtime.collector();
   let resolveOpened;
   let openTimer;
   const opened = new Promise((resolve, reject) => {
     openTimer = setTimeout(() => reject(new Error('等待 WebSocket open 超时（10s）')), 10_000);
     resolveOpened = () => { clearTimeout(openTimer); resolve(); };
   });
-  const stream = api.events.mux({}, undefined, () => resolveOpened());
+  const stream = runtime.events().mux({}, undefined, () => resolveOpened());
   const done = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('等待回复超时（60s）')), 60_000);
     (async () => {
@@ -102,8 +102,8 @@ async function main() {
     })().catch((error) => { clearTimeout(timer); reject(error); });
   });
   await opened;
-  // 新版 DSH 需要显式 follow 该会话，事件才会通过 remote.mux 推过来。
-  stream.follow(sessionId);
+  // 事件流需要显式 follow 该会话，事件才会通过 mux 推过来。
+  runtime.events().follow(sessionId);
 
   const prompted = await agentPort.prompt(sessionId, { content: [{ type: 'text', text: promptText }] });
   if (!prompted.ok) throw new Error(`prompt 未被接受：${prompted.error?.code}: ${prompted.error?.message}`);
@@ -114,7 +114,7 @@ async function main() {
   console.log('🤖 agent 回复:');
   console.log(ended.text || '（无文本）');
   await cleanupSelfTestSession();
-  console.log('🎉 自测通过 —— DSH 侧链路可用');
+  console.log('🎉 自测通过 —— 执行体链路可用');
   process.exit(0);
 }
 

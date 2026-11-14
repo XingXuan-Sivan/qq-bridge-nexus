@@ -2,7 +2,7 @@
 //
 // 位置：src/agent-side/adapters/dsh/。它是 **DSH 的协议实现**，不是内核：RPC 方法名、
 // 参数包装、鉴权换 Cookie、remote.mux 事件流都是 DSH 的事实。内核（bridge.js /
-// self-test.js）只经 src/agent-side/agent-client.mjs 这道门面使用它，因此换一个
+// self-test.js）只经 src/agent-side/runtime.mjs 与 AgentPort 使用它，因此换一个
 // Agent 平台时，本文件整份换掉，调用方不动。
 //
 // 为什么不去掉日志里的 `[dsh-client]` 前缀：那是运行期日志的过滤锚点，改名会连带

@@ -387,9 +387,6 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
     normalizeConversationId,
   };
 }
-// Agent 侧的平台基础设施也走门面：对外名字（resolveDshBaseUrl 等）是 0.1.x 的公开
-// 导出，保持不变；实现从 agent 侧适配器换成门面转发。
-export { resolveAgentBaseUrl as resolveDshBaseUrl, listAgentBaseUrlCandidates as dshBaseUrlCandidates, detectAgentDesktop as detectDshDesktop } from './agent-side/agent-client.mjs';
 export { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './social/sticker-collect.js';
 export { CONVERSATION_RULE_LIMITS, validateOwnerConversationAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, conversationRuleResultText, conversationRuleNoticeText } from './social/conversation-rules.js';
 export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';
@@ -398,4 +395,3 @@ export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwner
 // 门面用的是中立名（describeBackend / readBackendInfo），不能凭空造出旧名字。
 // 这是 bridge-extensions 作为「公开 API 聚合层」的唯一例外，B7 收敛控制台文案时一并处理。
 export { qqBackendFromVersionInfo, qqBackendLabel } from './user-side/adapters/qq/qq-backend-label.js';
-export { classifyAgentError as classifyDshError, createAgentHealth as createDshHealth } from './agent-side/agent-client.mjs';

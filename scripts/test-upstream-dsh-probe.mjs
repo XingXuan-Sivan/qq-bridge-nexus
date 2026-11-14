@@ -1,4 +1,4 @@
-// `src/upstream/dsh-probe.mjs`：探活 + 自动识别地址的重试/节流策略。
+// `src/agent-side/adapters/dsh/probe.mjs`：探活 + 自动识别地址的重试/节流策略。
 //
 // 这段逻辑以前长在 checkDsh 的闭包里，只能起整桥接、再把 DSH 关掉才能验证；而它要保证的
 // 恰恰是几件很容易写错的事：
@@ -8,7 +8,7 @@
 //   · 识别到地址但探活仍失败时，不能把「改了地址」当成「已恢复」。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDshProbe } from '../src/upstream/dsh-probe.mjs';
+import { createDshProbe } from '../src/agent-side/adapters/dsh/probe.mjs';
 
 function harness({ auto = true, probeResults = [], endpoints = [], interval = 10_000 } = {}) {
   let clock = 0;

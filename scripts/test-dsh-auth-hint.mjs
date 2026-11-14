@@ -1,9 +1,9 @@
-// DSH 401 诊断提示（src/dsh-auth-hint.js）的离线测试。
+// DSH 401 诊断提示（src/agent-side/adapters/dsh/auth-hint.mjs）的离线测试。
 //   ① 识别 401；
 //   ② 凭据文件缺失 / 存在但对不上 两种说法；发现另一个有凭据的目录；
 //   ③ 路径里的用户目录显示成 ~，不输出任何密钥内容；
 //   ④ 限频：10 分钟一次，恢复后立即可再提示；recentlyFailed 窗口；
-//   ⑤ bridge.js 接线：探活失败时（含从没就绪过）提示；「事件流 0 帧」在 401 时不再说成协议不匹配。
+//   ⑤ 接线：诊断与限频都归 DSH 连接层，桥接只决定写不写日志。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   isDshAuthError, buildDshAuthHint, createAuthHintGate, displayPath, candidateDshHomes, AUTH_HINT_INTERVAL_MS,
-} from '../src/dsh-auth-hint.js';
+} from '../src/agent-side/adapters/dsh/auth-hint.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOME = path.resolve('/home/fixture-user');
@@ -76,15 +76,19 @@ test('④ 限频', () => {
   assert.equal(gate.fail(), true, '恢复后再 401 立即提示');
 });
 
-test('⑤ bridge.js 接线', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src/bridge.js'), 'utf8');
-  assert.match(src, /import \{ isDshAuthError, buildDshAuthHint, createAuthHintGate \} from '\.\/dsh-auth-hint\.js';/);
-  const fail = src.indexOf('const v = dshHealth.fail(lastErr);');
+test('⑤ 接线：诊断与限频归连接层，桥接不直连提示模块', () => {
+  const bridge = fs.readFileSync(path.join(ROOT, 'src/bridge.js'), 'utf8');
+  assert.ok(!/dsh-auth-hint/.test(bridge), '401 诊断的实现归 DSH 连接层，桥接不直连');
+  const fail = bridge.indexOf('const v = agentHealth.fail(lastErr);');
   assert.ok(fail > 0);
-  const after = src.slice(fail, fail + 400);
-  assert.match(after, /isDshAuthError\(lastErr\) && dshAuthHint\.fail\(\)/);
+  const after = bridge.slice(fail, fail + 400);
   // 提示不能放在 `if (dshReady && v.unavailable)` 里面：启动时就 401 的情况 dshReady 从来不是 true
-  assert.ok(after.indexOf('dshAuthHint.fail()') < after.indexOf('if (dshReady && v.unavailable)'));
-  assert.match(src, /if \(ok\) \{\n\s+dshAuthHint\.reset\(\);/);
-  assert.match(src, /dshAuthHint\.recentlyFailed\(\)\s*\n?\s*\? '⚠️ 连续多次连上 DSH 事件流后一帧都没收到就断开：原因是 DSH 拒绝了桥接的凭据/);
+  assert.ok(after.indexOf('agentRuntime().authHint(lastErr)') < after.indexOf('if (dshReady && v.unavailable)'));
+  assert.match(after, /if \(hint\) log\(hint\);/);
+  assert.match(bridge, /if \(ok\) \{\n\s+agentRuntime\(\)\.resetAuthHint\(\);/);
+  assert.match(bridge, /agentRuntime\(\)\.authRecentlyFailed\(\)/);
+  // 「最近刚提示过」的窗口在连接层里：限频与诊断同源，不会各算一份。
+  const runtime = fs.readFileSync(path.join(ROOT, 'src/agent-side/adapters/dsh/runtime.mjs'), 'utf8');
+  assert.match(runtime, /if \(!authHintGate\.fail\(\)\) return null;/);
+  assert.match(runtime, /return authHintGate\.recentlyFailed\(\);/);
 });

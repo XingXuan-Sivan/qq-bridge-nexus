@@ -35,7 +35,7 @@ import { pickDialog } from './pick-dialog.mjs';
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
 // 配置 v2：控制中心改的是同一份 config.json，读写口径必须与桥接完全一致。
 import { CONFIG_VERSION, migrateConfigToV2, platformViews, platformsForWrite, readPlatforms } from '../config/platforms.mjs';
-import { resolveAgentBaseUrl } from '../agent-side/agent-client.mjs';
+import { agentRuntime } from '../agent-side/runtime.mjs';
 // 静态资源守卫与控制台共用一套：解码一次、拒绝穿越/盘符/符号链接/白名单外扩展名。
 import { resolveStaticPath, serveStaticFile } from '../http/static.mjs';
 
@@ -610,9 +610,13 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     if (cfg.valid) {
       try { out.bridgeApi = await bridgeApi('/api/status'); } catch (e) { out.bridgeApiError = String(e?.message ?? e); }
     }
-    // Agent 底座地址留空 = 自动识别（固定端口 19387 / 3080，再找桌面版 0.2.1 起的随机端口）；
-    // 页面以桥接的 dshReady 为准。配置 v2：地址在 platforms.agents.<active>.endpoint.baseUrl。
-    const dshUrl = (await resolveAgentBaseUrl(platformConfigOf(cfg.value).views.agentPlatform.baseUrl ?? '', { timeoutMs: 400 })).url;
+    // Agent 底座地址留空 = 自动识别；配置 v2 里地址在 platforms.agents.<active>.endpoint.baseUrl。
+    // 怎么找地址属于连接层（stdio 执行体没有地址），启动器不自己猜端口；找不到就留空。
+    let dshUrl = '';
+    try {
+      const agentConfig = platformConfigOf(cfg.value).views.agentPlatform;
+      dshUrl = String((await agentRuntime({ config: agentConfig }).prepareEndpoint(agentConfig)).baseUrl ?? '');
+    } catch { /* 连接层不可用时照常画其余卡片 */ }
     try {
       const u = new URL(dshUrl);
       out.dsh = { url: dshUrl, reachable: await portOpen(Number(u.port) || 80, u.hostname === 'localhost' ? '127.0.0.1' : u.hostname) };

@@ -16,10 +16,10 @@ import { defaultPromptState, readDefaultPrompt } from './preset-defaults.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
-// Agent 侧协议（RPC 客户端、凭据发现、返回包解包）只经这道门面；具体实现是
-// src/agent-side/adapters/<id>/，由 builtin.mjs 装配。
-// C5：调用面走 `createAgentPort`（中立动词 + 能力闸门），本文件不再出现任何 DSH 动词。
-import { AgentApiClient, createAgentPort, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth } from './agent-side/agent-client.mjs';
+// Agent 侧连接层（地址/凭据/客户端/事件/端口/收集器/健康度/探活/401 提示）只经
+// src/agent-side/runtime.mjs 的 agentRuntime()；具体实现见 src/agent-side/adapters/<id>/，
+// 由 builtin.mjs 装配。本文件不出现执行体专属的动词与连接细节。
+import { agentRuntime } from './agent-side/runtime.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -51,7 +51,6 @@ import { discoverSnowLumaConnection, persistSnowLumaEndpoint, persistToken } fro
 // 上游适配（P7 第四步）：SnowLuma 接收链路的健康判定与兜底探测都在模块里。
 import { createSnowlumaHealth } from './upstream/snowluma-health.mjs';
 // 上游编排的纯策略：DSH 探活/地址重识别节流、SnowLuma 连接参数自愈决策。
-import { createDshProbe } from './upstream/dsh-probe.mjs';
 import { resolveConnectionUpdate } from './upstream/snowluma-conn-update.mjs';
 import { hardenDir, manualDirCommand } from './state-acl.mjs';
 // HTTP 边界（docs/HTTP_BOUNDARY.md）：安全响应头集中一处，静态资源守卫在 src/http/static.mjs。
@@ -176,7 +175,6 @@ import {
 // 0.2.0：社交模型的容器词汇统一叫「会话」（conversation）；入站协议字段 `group_id`、会话 key 的
 // `qq:group:<id>` 段、关系状态值 member/left 属协议/文法面，保持不变。
 import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossConversation, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerConversationAccess, peekView, conversationRuleResultText, conversationRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
-import { isDshAuthError, buildDshAuthHint, createAuthHintGate } from './dsh-auth-hint.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
 // 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
@@ -1747,13 +1745,14 @@ function loadConfig() {
       : 2000;
   }
 
-  // DSH 0.1.7 起 launch token 是**每进程现生成的 32 字节随机数，只存在内存里**，
-  // 不落盘、不可推导；只有启动器把 `dsh web` 的 stdout 重定向到文件时才能从日志读到。
-  // 所以这里发现的 token 只是兜底，主路径是客户端用 ~/.dsh 里持久化的签名密钥
-  // 离线铸造会话 Cookie（见 src/agent-side/adapters/dsh/client.mjs 的 mintBrowserSessionCookie）。
-  // authTokenExplicit 记录「token 是用户填的还是这里猜的」，客户端据此排优先级。
-  cfg.agentPlatform.authTokenExplicit = Boolean(cfg.agentPlatform.authToken);
-  if (!cfg.agentPlatform.authToken) cfg.agentPlatform.authToken = discoverLaunchToken();
+  // 连接层由当前执行体提供（src/agent-side/runtime.mjs）：凭据怎么发现、地址怎么识别
+  // 都归它的 prepareAuth / prepareEndpoint，内核不再认识具体执行体。
+  agentRuntime({
+    config: cfg.agentPlatform,
+    log,
+    onBaseUrlChange: (url) => { cfg.agentPlatform.baseUrl = url; },
+  });
+  Object.assign(cfg.agentPlatform, agentRuntime().prepareAuth(cfg.agentPlatform));
 
   // 思考强度可能被手工改成非法值（config.json 是用户可编辑的）。DeepSeek 适配器对非法值
   // 会硬拒绝，若直接透传会让每个会话的 selectModel 每次都失败；这里统一规范化并告警。
@@ -3535,13 +3534,13 @@ async function main() {
     if (saved?.preset !== preset) invalidateSlangLearnerSession();
     if (slangLearnerSessionId) {
       learnerSessions.add(slangLearnerSessionId);
-      api.events.follow(slangLearnerSessionId);
+      agentEvents.follow(slangLearnerSessionId);
       return slangLearnerSessionId;
     }
     if (saved?.sessionId && saved.preset === preset) {
       slangLearnerSessionId = String(saved.sessionId);
       learnerSessions.add(slangLearnerSessionId);
-      api.events.follow(slangLearnerSessionId);
+      agentEvents.follow(slangLearnerSessionId);
       await ensureChatModel(slangLearnerSessionId);
       return slangLearnerSessionId;
     }
@@ -3557,7 +3556,7 @@ async function main() {
     const created = await agentPort.ensureSession(params);
     slangLearnerSessionId = created.sessionId;
     learnerSessions.add(slangLearnerSessionId);
-    api.events.follow(slangLearnerSessionId);
+    agentEvents.follow(slangLearnerSessionId);
     await ensureChatModel(slangLearnerSessionId);
     fs.mkdirSync(STATE_DIR, { recursive: true });
     atomicWriteJson(SLANG_SESSION_FILE, { sessionId: slangLearnerSessionId, preset });
@@ -3575,7 +3574,7 @@ async function main() {
     const saved = readJsonSafe(STICKER_DESCRIBE_SESSION_FILE, null);
     if (stickerDescriberSessionId && saved?.preset === preset) {
       learnerSessions.add(stickerDescriberSessionId);
-      api.events.follow(stickerDescriberSessionId);
+      agentEvents.follow(stickerDescriberSessionId);
       return stickerDescriberSessionId;
     }
     if (saved?.sessionId && saved.preset === preset) {
@@ -3593,7 +3592,7 @@ async function main() {
       log(`表情整理会话已创建：${stickerDescriberSessionId}`);
     }
     learnerSessions.add(stickerDescriberSessionId);
-    api.events.follow(stickerDescriberSessionId);
+    agentEvents.follow(stickerDescriberSessionId);
     await ensureChatModel(stickerDescriberSessionId);
     return stickerDescriberSessionId;
   }
@@ -3940,27 +3939,16 @@ async function main() {
     log('ℹ️  socialV2.voice.allowAbsolutePath=true 已不再放宽 AI 通道：AI 发的语音始终只允许来自语音库（库外文件请用语音工具/CLI 发送）');
   }
 
-  // DSH 侧。Agent 平台的 `baseUrl` 留空时自动识别端口（桌面版 0.2.0 写死 19387、0.2.1 起随机端口；命令行版默认 3080）。
-  let dshBaseUrlAuto = false;   // 留空自动识别时为 true：DSH 不可用期间 checkDsh 会定期重新识别
+  // 连接层：地址留空时由执行体自己识别（HTTP 执行体按候选端口 + 进程监听端口，
+  // stdio 执行体没有地址）。`agentEvents` 是事件流订阅面，`agentPort` 是调用面。
+  const runtime = agentRuntime();
   {
-    const ep = await resolveAgentBaseUrl(cfg.agentPlatform.baseUrl);
-    if (ep.auto) log(`DSH 地址自动识别：${ep.url}${ep.discovered ? '（DSH 桌面版随机端口，按进程监听端口发现）' : ''}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；DSH 不可用期间会定期重新识别）'}`);
-    cfg.agentPlatform.baseUrl = ep.url;
-    dshBaseUrlAuto = ep.auto;
+    const ep = await runtime.prepareEndpoint(cfg.agentPlatform);
+    if (ep.auto) log(`${runtime.label} 地址自动识别：${ep.baseUrl}${ep.discovered ? '（按进程监听端口发现）' : ''}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；不可用期间会定期重新识别）'}`);
+    if (ep.baseUrl) cfg.agentPlatform.baseUrl = ep.baseUrl;
   }
-  const api = new AgentApiClient(cfg.agentPlatform.baseUrl, undefined, {
-    token: cfg.agentPlatform.authToken,
-    // true=用户在 config.json 里显式填的；false=从日志猜的。猜来的不优先于离线铸造。
-    tokenExplicit: cfg.agentPlatform.authTokenExplicit === true,
-    header: cfg.agentPlatform.authHeader,
-    prefix: cfg.agentPlatform.authPrefix,
-    // 默认只允许把 launch token 交给回环地址；远程 DSH 需要显式 opt-in（见 Agent 适配器的 ensureAuth）。
-    allowRemote: cfg.agentPlatform.allowRemote === true
-  });
-  // C5：`api` 只管「怎么连」（地址 / 凭据 / 事件流 / 端点重识别），「连上之后做什么」一律经
-  // agentPort —— 平台动词（sessions.* / workspace.* / settings.* / respond …）只留在
-  // src/agent-side/adapters/<id>/port.mjs 里。未实现的能力位是 fail-closed（supports 可预问）。
-  const agentPort = createAgentPort(api);
+  const agentEvents = runtime.events();
+  const agentPort = runtime.port();
   // 平台装好了，才能回答「这条会话映射属于谁」：把老档案里 instance 为空的引用认领成当前
   // 平台并落盘（幂等，只在真的有旧数据时写一次）。不认领的话下次换平台会把旧 id 当新平台的用。
   agentPortId = agentPort.id;
@@ -4029,8 +4017,8 @@ async function main() {
   const wakeConfigMissCount = new Map();
   const reverse = new Map(); // sessionId -> conv key
   for (const [key, sessionId] of sessions.entries()) reverse.set(sessionId, key);
-  // 新版 DSH 事件流需要显式 follow；启动时为已持久化的 QQ 会话补上。
-  for (const sessionId of sessions.ids()) api.events.follow(sessionId);
+  // 事件流需要显式 follow；启动时为已持久化的 QQ 会话补上。
+  for (const sessionId of sessions.ids()) agentEvents.follow(sessionId);
   const sessionPromises = new Map(); // key -> create promise（防并发重复创建）
   const promptQueues = new Map(); // key -> { queue: [], running: false }：每个 QQ 会话串行投递 DSH prompt，保证 turn 顺序
 
@@ -4129,7 +4117,7 @@ async function main() {
       else if (event?.type === 'turn/end') open.delete(event.data?.turn);
     }
     if (!open.size) return;
-    const collector = createTurnCollector();
+    const collector = agentRuntime().collector();
     let restored = 0;
     for (const entry of records) {
       const event = eventOf(entry);
@@ -5397,7 +5385,7 @@ async function main() {
     social.exitingSessions.delete(sessionId);
     // 退役的会话要退订：否则 _desiredFollows 只增不减，每次重连都会为它重开一条
     // follow 流并重发一整份历史快照（内存与重连延迟都随会话数线性增长）。
-    api.events.forget?.(sessionId);
+    agentEvents.forget?.(sessionId);
     const entry = pending.get(key);
     if (entry) { clearTimeout(entry.timer); void cancelPendingEntry(entry).catch(() => {}); }
     pending.delete(key);
@@ -5624,40 +5612,19 @@ async function main() {
       }
     }
   };
-  // 连续 2 次（约 10 秒）探活失败才判定「DSH 不可用」；偶发失败一次只在恢复时记一笔（src/agent-side/adapters/dsh/health.mjs）
-  const dshHealth = createAgentHealth({ threshold: 2 });
-  // 401：凭据读错目录时给出具体提示（src/dsh-auth-hint.js）；10 分钟内只提示一次。
-  const dshAuthHint = createAuthHintGate();
-  const dshProbe = createDshProbe({
-    // 探活要「抛错即失败」的语义；agentPort.probe 是查询语义（失败返 ok:false 不抛）：
-    // 在这里翻译一次，「什么算不可用」的政策仍然留在 dsh-probe.mjs。
-    probe: async () => {
-      const r = await agentPort.probe();
-      if (!r.ok) throw new Error(r.detail || 'Agent 平台探活失败');
-    },
-    isAutoBaseUrl: () => dshBaseUrlAuto,
-    rediscover: async () => {
-      const ep = await resolveAgentBaseUrl('', { timeoutMs: 600 });
-      return ep ? { reachable: Boolean(ep.reachable), url: ep.url } : null;
-    },
-    // 端点重识别是「怎么连」而不是「能做什么」，不进 AgentPort 的调用面：换地址只能由客户端
-    // 自己做（它是唯一知道 baseUrl 与凭据绑定关系的地方）。
-    applyUrl: (url) => {
-      if (api.setBaseUrl(url)) cfg.agentPlatform.baseUrl = url;
-    },
-    log,
-  });
+  // 连续 2 次（约 10 秒）探活失败才判定「执行体不可用」；偶发失败一次只在恢复时记一笔。
+  // 健康度、探活与 401 诊断都由连接层提供，这里只拿结果去记账（状态、模式、队列）。
+  const agentHealth = agentRuntime().health({ threshold: 2 });
+  const agentProbe = agentRuntime().probe();
 
   const checkDsh = async () => {
-    // 「探活 + 失败时按 10s 节流重新识别随机端口」这条策略在 upstream/dsh-probe.mjs 里，
-    // 这里只拿结果去记账（健康度、模式、队列）。
-    const r = await dshProbe.check();
+    const r = await agentProbe.check();
     const ok = r.ok;
     const lastErr = r.error;
     if (r.rediscovered && ok) log(`DSH 地址已变化，重新识别为 ${r.url}`);
     if (ok) {
-      dshAuthHint.reset();
-      const rec = dshHealth.ok();
+      agentRuntime().resetAuthHint();
+      const rec = agentHealth.ok();
       if (dshReady && rec.recoveredFrom > 0) log(`DSH 探活偶发失败 ${rec.recoveredFrom} 次（${rec.reason?.label ?? '原因未知'}），已恢复，未判定为不可用`);
       await refreshMode();
       // DSH 起来后拉一次 preset 清单；DSH 重启（dshReady 由 false 变 true）时再拉一次。
@@ -5716,9 +5683,10 @@ async function main() {
         lastMode = currentMode;
       }
     } else {
-      const v = dshHealth.fail(lastErr);
-      // DSH 从没就绪过（启动时就 401）也要提示：否则日志里只有「事件流 0 帧」，看不出是凭据的问题。
-      if (isDshAuthError(lastErr) && dshAuthHint.fail()) log(buildDshAuthHint({ dshHome: resolveAgentHome() }));
+      const v = agentHealth.fail(lastErr);
+      // 从没就绪过（启动时就 401）也要提示：否则日志里只有「事件流 0 帧」，看不出是凭据的问题。
+      const hint = agentRuntime().authHint(lastErr);
+      if (hint) log(hint);
       if (dshReady && v.unavailable) {
         dshReady = false;
         log(`⚠️ DSH 不可用（连续 ${v.failures} 次探活失败，原因：${v.reason.label}），QQ 消息将入队等待`);
@@ -17680,7 +17648,7 @@ async function main() {
   function trackTurnEvent(sessionId, event) {
     let collector = collectors.get(sessionId);
     if (!collector && event?.type === 'turn/start') {
-      collector = createTurnCollector();
+      collector = agentRuntime().collector();
       collectors.set(sessionId, collector);
     }
     const ended = collector ? collector.push(event) : null;
@@ -17704,8 +17672,8 @@ async function main() {
     for (;;) {
       let framesThisStream = 0;
       try {
-        log('连接 DSH 事件流…');
-        for await (const envelope of api.events.mux({})) {
+        log('连接 Agent 事件流…');
+        for await (const envelope of agentEvents.mux({})) {
           framesThisStream += 1;
           const frame = envelope.payload;
           // 会话开场快照：只喂 token 账本。它含**历史** turn/end，绝不能让它们走
@@ -17728,7 +17696,7 @@ async function main() {
                 // 等待者要么拿不到结果、要么拿到错位的文本。
                 let learnerCollector = learnerCollectors.get(frame.sessionId) ?? null;
                 if (!learnerCollector && frame.event.type === 'turn/start') {
-                  learnerCollector = createTurnCollector();
+                  learnerCollector = agentRuntime().collector();
                   learnerCollectors.set(frame.sessionId, learnerCollector);
                 }
                 const learnerEnded = learnerCollector ? learnerCollector.push(frame.event) : null;
@@ -18166,10 +18134,10 @@ async function main() {
         retryMs = Math.min(30000, retryMs * 2);
         if (failureStreak === 3) {
           // 凭据被拒（401）时事件流同样连上就断：先排除鉴权，再怀疑协议版本。
-          log(dshAuthHint.recentlyFailed()
-            ? '⚠️ 连续多次连上 DSH 事件流后一帧都没收到就断开：原因是 DSH 拒绝了桥接的凭据（HTTP 401，见上面的提示），不是协议不匹配。已改为指数退避重连。'
-            : '⚠️ 连续多次连上 DSH 事件流后一帧都没收到就断开：多半是 DSH 侧事件流协议/版本不匹配'
-              + '（可在 DSH 里核对版本，或查看 issue #34；DSH 刚重启时出现一次属正常）。已改为指数退避重连，不再每 3 秒刷屏。');
+          log(agentRuntime().authRecentlyFailed()
+            ? '⚠️ 连续多次连上事件流后一帧都没收到就断开：原因是执行体拒绝了桥接的凭据（HTTP 401，见上面的提示），不是协议不匹配。已改为指数退避重连。'
+            : '⚠️ 连续多次连上事件流后一帧都没收到就断开：多半是执行体侧事件流协议/版本不匹配'
+              + '（可在执行体侧核对版本，或查看 issue #34；刚重启时出现一次属正常）。已改为指数退避重连，不再每 3 秒刷屏。');
         }
       }
       await sleep(retryMs);

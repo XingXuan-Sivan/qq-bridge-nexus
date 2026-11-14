@@ -59,13 +59,15 @@ test('原因分类：中断、鉴权、HTTP 状态、其他；标签是中文且
   assert.match(classifyDshError(Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' })).label, /超时/);
 });
 
-test('桥接接线：用 createDshHealth（阈值 2）判定；端口重新识别仍在第一次失败时开始；日志写明次数与原因', () => {
+test('桥接接线：健康度与探活都取自连接层，桥接只拿结果记账', () => {
   const src = fs.readFileSync(path.join(root, 'src', 'bridge.js'), 'utf8');
   const fn = src.slice(src.indexOf('const checkDsh = async () => {'), src.indexOf('let controllerInitPromise = null;'));
-  assert.match(src, /const dshHealth = createAgentHealth\(\{ threshold: 2 \}\);/);
-  assert.ok(fn.indexOf('if (!ok && dshBaseUrlAuto') < fn.indexOf('dshHealth.fail(lastErr)'), '重新识别端口在计数判定之前、第一次失败就做');
+  assert.match(src, /const agentHealth = agentRuntime\(\)\.health\(\{ threshold: 2 \}\);/);
+  assert.match(src, /const agentProbe = agentRuntime\(\)\.probe\(\);/);
+  assert.match(fn, /const r = await agentProbe\.check\(\);/);
   assert.match(fn, /连续 \$\{v\.failures\} 次探活失败，原因：\$\{v\.reason\.label\}/);
   assert.match(fn, /DSH 探活偶发失败 \$\{rec\.recoveredFrom\} 次/);
   assert.ok(!fn.includes("log('⚠️ DSH 不可用（重启中？）"), '不再失败一次就报不可用');
-  assert.match(fs.readFileSync(path.join(root, 'src', 'bridge-extensions.js'), 'utf8'), /agent-side\/agent-client\.mjs/);
+  assert.ok(!/createAgentHealth|createDshProbe|dshBaseUrlAuto|resolveAgentBaseUrl/.test(src),
+    '桥接不再自己拼装健康度、地址重识别与提示限频：这些都归连接层');
 });

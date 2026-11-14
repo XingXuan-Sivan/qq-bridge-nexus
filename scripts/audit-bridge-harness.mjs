@@ -38,7 +38,6 @@ import * as backfillLib from '../src/backfill.js';
 import * as rolePerKeyLib from '../src/role-per-key.js';
 // 手动静默是 bridge.js 的新 import；夹具剥掉 import 后要补回同名函数。
 import * as manualSilenceLib from '../src/manual-silence.mjs';
-import * as dshAuthHintLib from '../src/dsh-auth-hint.js';
 // 人格三层解析是纯函数模块（不读盘、不联网），直接用真实现：夹具要验证它读到的本地卡是否正确。
 import { createPersonaResolver } from '../src/persona-resolve.mjs';
 import { createSkillIndex } from '../src/skills/index.mjs';
@@ -91,13 +90,15 @@ import {
   userPlatformMetadata,
   resolveSendTarget,
 } from '../src/user-side/user-platform.mjs';
-// Agent 侧的探活走门面（B5）：health 是真实现（纯状态机、不联网），能验证「连续 2 次失败才判不可用」。
-// 地址发现 **不能** 用真实现：它会查本机进程（lsof/netstat），装了 DSH 的机器上会摸到真 DSH，
-// 所以按下面的 resolveAgentBaseUrl 离线桩注入（见 context 定义处）。
-// agentPlatformMetadata（B7）是纯注册表查询，用真实现。
-// createAgentPort（C5）：bridge 的操作面全部经由它，这里必须是**真**实现——
-// 假 api 的方法名与 DSH 同名，createDshPort 能直接吃下，能力闸门与解包逻辑照常生效。
-import { createAgentHealth, createAgentPort, agentPlatformMetadata } from '../src/agent-side/agent-client.mjs';
+// Agent 侧的连接层在 VM 里换成离线桩（见下面的 runtimeStub）：真实的地址发现会查本机进程
+// （lsof/netstat），装了 DSH 的机器上会摸到真 DSH。
+// 调用面与健康度用真实现：假 api 的方法名与 DSH 同名，createDshPort 能直接吃下，
+// 能力闸门与解包逻辑照常生效；health 是纯状态机，能验证「连续 2 次失败才判不可用」。
+// agentPlatformMetadata 是纯注册表查询，用真实现。
+import { agentPlatformMetadata } from '../src/agent-side/metadata.mjs';
+import { createAgentPort } from '../src/agent-side/port.mjs';
+import { DSH_AGENT_CAPABILITIES, createDshPort } from '../src/agent-side/adapters/dsh/port.mjs';
+import { createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry } from '../src/platforms/adapter-registry.mjs';
@@ -112,7 +113,6 @@ import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
 import { createSnowlumaHealth } from '../src/upstream/snowluma-health.mjs';
 // 上游编排的纯策略（P7 第四步）：bridge 的 import 会被本夹具剥掉，必须逐个注入。
-import { createDshProbe } from '../src/upstream/dsh-probe.mjs';
 import { resolveConnectionUpdate } from '../src/upstream/snowluma-conn-update.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
@@ -128,7 +128,7 @@ import * as memoryDefaults from '../src/memory/defaults.mjs';
 import * as memoryIngest from '../src/memory/ingest.mjs';
 import * as memoryLocalStore from '../src/memory/local-store.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
-import { unwrap, createTurnCollector } from '../src/agent-side/adapters/dsh/client.mjs';
+import { createTurnCollector } from '../src/agent-side/adapters/dsh/client.mjs';
 // P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
 // createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
 import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
@@ -258,6 +258,35 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       return success({ accepted: true });
     },
   };
+  // 连接层桩：bridge 只经 agentRuntime()（地址 / 凭据 / 客户端 / 事件 / 端口 / 收集器 / 健康 / 探活）。
+  // 地址发现与客户端必须离线：真实现会扫本机进程；端口用真实现，能力闸门与解包逻辑照常生效。
+  const agentPortStub = createAgentPort({
+    id: 'dsh',
+    label: 'DeepSeek Harness',
+    capabilities: DSH_AGENT_CAPABILITIES,
+    impl: createDshPort({ client: api }),
+  });
+  const runtimeStub = {
+    id: 'dsh',
+    label: 'DeepSeek Harness',
+    mode: 'http',
+    prepareAuth: () => ({ authToken: '', tokenExplicit: false }),
+    prepareEndpoint: async (agentConfig = {}) => {
+      const configured = String(agentConfig.baseUrl ?? '');
+      return { baseUrl: configured || 'http://127.0.0.1:3080', auto: !configured, discovered: false, reachable: false };
+    },
+    client: () => api,
+    events: () => api.events,
+    port: () => agentPortStub,
+    collector: () => createTurnCollector(),
+    health: (options) => createDshHealth(options),
+    // 探活只在 startDshWatch 里跑，而它在切片点之后：这里只要求形状成立。
+    probe: () => ({ check: async () => ({ ok: true, error: null, rediscovered: false, url: null }) }),
+    authHint: () => null,
+    resetAuthHint: () => {},
+    close: async () => {},
+  };
+  const agentRuntime = () => runtimeStub;
   class FakeBot {
     async sendPrivateMessage(id, text) { calls.sent.push({ kind: 'private', id, text }); }
     async sendGroupMessage(id, text) { calls.sent.push({ kind: 'group', id, text }); }
@@ -379,16 +408,15 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     process: { pid: process.pid, platform: process.platform, kill: process.kill, env: {}, exit: (code) => { throw new Error('unexpected exit ' + code); } },
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; },
     clearTimeout, setInterval: () => ({ unref() {} }), clearInterval: () => {},
-    AgentApiClient: class { constructor() { return api; } },
-    createAgentPort,
+    agentRuntime,
+    // 假对端本身：测试直接改它的方法（h.api.sessions.prompt = …）来模拟服务端行为。
+    api,
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,
     // bridge.js 从 src/http/security.mjs 导入（夹具会剥掉 import），这里给同名常量。
     SECURITY_HEADERS,
-    discoverLaunchToken: () => '', resolveAgentHome: () => path.join(os.tmpdir(), 'qq-bridge-audit-no-dsh-home'), unwrap, createTurnCollector,
-    createAgentHealth,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
     ...modelPrices, ...dshModel, ...quoteForward, ...modeHandover, ...roleCard, ...tokenLedger,
-    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...dshAuthHintLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...presetDefaults, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
+    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...presetDefaults, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
     // 插件内核与人格解析在 VM 里桩掉：这个夹具只验证 bridge.js 的接线与主链，不加载真插件、不连 soulkit。
     // 命令注册表用真实现（纯内存、无 IO），命令迁移后的行为才能在 VM 里验证。
     createPersonaResolver,
@@ -447,7 +475,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createSessionRegistry,
     createSessionPolicy,
     createSnowlumaHealth,
-    createDshProbe,
     resolveConnectionUpdate,
 createPromptBlockRegistry,
 createSkillIndex,
@@ -516,9 +543,6 @@ createExtensionCatalog,
       };
     },
     cleanupTemp: () => {},
-    // DSH 地址识别桩成离线：真实实现会查本机进程（lsof/netstat），装了 DSH 的机器上会找到真 DSH。
-    // B5 起 bridge 按中立名 resolveAgentBaseUrl 调用（旧名 resolveDshBaseUrl 只留在 bridge-extensions 的公开别名里）。
-    resolveAgentBaseUrl: async (configured) => ({ url: String(configured || '') || 'http://127.0.0.1:3080', auto: !configured, reachable: false, candidates: [] }),
     ...globals,
   });
   // Execute the pure model view in the bridge realm. Its plain-object checks

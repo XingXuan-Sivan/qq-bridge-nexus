@@ -1,7 +1,7 @@
 // Agent 侧的中立操作契约（`AgentPort`）：内核只认这一组动词（PLATFORM_UNIFICATION §五）。
 //
-// 与 agent-client.mjs 的分工：
-//   · agent-client.mjs 解决「怎么连上」（地址发现、凭据、RPC 客户端类、解包）；
+// 与 runtime.mjs 的分工：
+//   · runtime.mjs 解决「怎么连上」（地址、凭据、客户端、事件流、探活、401 诊断）；
 //   · 本文件解决「连上之后能干哪些事」，并把**能力位**（capability）做成可查询、可 fail-closed
 //     的闸门 —— 与用户侧的段降级是同一种思路：声明了什么才做什么，没声明就报明确的错，
 //     不做「静默降级成好像成功」。

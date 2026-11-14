@@ -108,20 +108,21 @@ test('DSH 客户端换地址：baseUrl 更新并让旧凭据失效（Cookie 绑�
   assert.equal(api.setBaseUrl('http://127.0.0.1:57764'), false, '没变化时不动');
 });
 
-test('桥接接线：留空自动识别时，DSH 不可用期间定期重新识别并切换地址', () => {
-  const src = fs.readFileSync(new URL('../src/bridge.js', import.meta.url), 'utf8');
-  // P7 第四步：策略搬进 src/upstream/dsh-probe.mjs（「失败 + 自动识别 + 节流窗口外」才重识别）。
-  const probe = fs.readFileSync(new URL('../src/upstream/dsh-probe.mjs', import.meta.url), 'utf8');
+test('连接层接线：留空自动识别时，DSH 不可用期间定期重新识别并切换地址', () => {
+  const runtime = fs.readFileSync(new URL('../src/agent-side/adapters/dsh/runtime.mjs', import.meta.url), 'utf8');
+  // 「失败 + 自动识别 + 节流窗口外」才重识别，策略本身在 adapters/dsh/probe.mjs。
+  const probe = fs.readFileSync(new URL('../src/agent-side/adapters/dsh/probe.mjs', import.meta.url), 'utf8');
   assert.match(probe, /if \(!isAutoBaseUrl\(\) \|\| throttled\(\)\)/, '只在自动识别模式、且不在节流窗口内才重新识别');
   assert.match(probe, /rediscoverIntervalMs/, '重识别必须有节流窗口');
   assert.match(probe, /applyUrl\(endpoint\.url\)/, '识别到新地址要应用');
-  // bridge 侧只保留接线：探活走 AgentPort，应用地址走客户端的 setBaseUrl（「怎么连」属于
-  // 端点管理，不属于操作契约——见 src/agent-side/port.mjs 的文件头说明）。
-  assert.match(src, /createDshProbe\(\{/, 'bridge 必须用这个模块，而不是自己再写一份');
-  assert.match(src, /probe: async \(\) => \{[\s\S]{0,200}agentPort\.probe\(\)/, '探活走 AgentPort.probe');
-  assert.match(src, /if \(!r\.ok\) throw new Error/, '查询语义要翻译成「抛错即失败」，否则失败永远不判不可用');
-  assert.match(src, /applyUrl: \(url\) => \{[\s\S]{0,160}api\.setBaseUrl\(url\)/, '切换到新地址');
-  assert.match(src, /dshBaseUrlAuto = ep\.auto;/);
+  // 连接层只保留接线：探活走 AgentPort，应用地址走客户端的 setBaseUrl（「怎么连」属于端点管理，
+  // 不属于操作契约——见 src/agent-side/port.mjs 的文件头说明）。
+  assert.match(runtime, /isAutoBaseUrl: \(\) => autoBaseUrl/);
+  assert.match(runtime, /const result = await ensurePort\(\)\.probe\(\)/, '探活走 AgentPort.probe');
+  assert.match(runtime, /if \(!result\.ok\) throw new Error/, '查询语义要翻译成「抛错即失败」，否则失败永远不判不可用');
+  assert.match(runtime, /applyUrl: \(url\) => \{[\s\S]{0,200}client\?\.setBaseUrl\?\.\(url\)/, '切换到新地址');
+  const bridge = fs.readFileSync(new URL('../src/bridge.js', import.meta.url), 'utf8');
+  assert.ok(!/createDshProbe|dshBaseUrlAuto|resolveAgentBaseUrl/.test(bridge), '桥接不再自己拼装探活与地址重识别');
 });
 
 test('preset：不再使用 DSH 0.2.1 不认的提示词变量（cwd）', () => {

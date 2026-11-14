@@ -389,9 +389,12 @@ if (want('repo')) {
   const userFacade = fs.readFileSync(path.join(ROOT, 'src/user-side/user-platform.mjs'), 'utf8');
   check('repo', '用户侧门面导出中立名（buildSendCall / describeBackend / readBackendInfo）',
     ['buildSendCall', 'describeBackend', 'readBackendInfo'].every((n) => new RegExp(`export function ${n}\\(`).test(userFacade)));
-  const agentFacade = fs.readFileSync(path.join(ROOT, 'src/agent-side/agent-client.mjs'), 'utf8');
-  check('repo', 'Agent 侧门面导出中立名（AgentApiClient / discoverLaunchToken / resolveAgentHome）',
-    ['AgentApiClient', 'discoverLaunchToken', 'resolveAgentHome'].every((n) => new RegExp(`export const ${n} =`).test(agentFacade)));
+  const agentRuntimeSource = fs.readFileSync(path.join(ROOT, 'src/agent-side/runtime.mjs'), 'utf8');
+  check('repo', 'Agent 侧连接层只经 agentRuntime()，契约成员集中声明',
+    /export const RUNTIME_MEMBERS = Object\.freeze\(/.test(agentRuntimeSource)
+    && /export function agentRuntime\(/.test(agentRuntimeSource));
+  check('repo', 'src/agent-side/agent-client.mjs 已移除（连接层职责归 adapters/<id>/runtime.mjs）',
+    !fs.existsSync(path.join(ROOT, 'src/agent-side/agent-client.mjs')));
   check('repo', 'src/dsh-client.js 与 src/platform/ 已下沉（不再存在）',
     !fs.existsSync(path.join(ROOT, 'src/dsh-client.js')) && !fs.existsSync(path.join(ROOT, 'src/platform')));
   const mainDirect = ['src/bridge.js', 'src/self-test.js']
@@ -415,15 +418,17 @@ if (want('repo')) {
   // 写一行 `api.sessions.list()` 同样能跑通，而且能力闸门、解包约定全被绕过——
   // 这种写法在测试里都看不出异常，只有换平台时才爆。
   // 范围：src/ 下除 adapters/（平台实现自己必须写平台名词）与用户侧（自有协议名词）。
-  // 白名单：api.setBaseUrl —— 「怎么连」属于端点管理，不是操作契约。
+  // 白名单：端点更换 —— 「怎么连」属于连接层，不属于操作契约。
   const AGENT_PLATFORM_VERB_RE = /\bapi\.(?:sessions?|workspace|settings|respond|stopSessionWork|callUnary|agentPresets|permissionPresets|commands)\b/;
   const kernelVerbLeaks = [...srcCode]
     .filter(([f, code]) => !f.includes('/adapters/') && !f.startsWith('src/user-side/') && AGENT_PLATFORM_VERB_RE.test(code))
     .map(([f]) => f);
   check('repo', '内核不直接调用平台 RPC（调用面全经 AgentPort）', kernelVerbLeaks.length === 0, kernelVerbLeaks.join(', '));
-  const baseUrlCallers = [...srcCode].filter(([, code]) => /\bapi\.setBaseUrl\b/.test(code)).map(([f]) => f);
-  check('repo', 'setBaseUrl 只在桥接的端点切换处调用（唯一白名单）',
-    baseUrlCallers.length === 1 && baseUrlCallers[0] === 'src/bridge.js', baseUrlCallers.join(', '));
+  const baseUrlCallers = [...srcCode]
+    .filter(([, code]) => /\b(?:client|api)\.setBaseUrl\b/.test(code))
+    .map(([f]) => f);
+  check('repo', 'setBaseUrl 只在连接层调用（地址归连接层，内核不看地址）',
+    baseUrlCallers.every((f) => f.includes('/adapters/')), baseUrlCallers.join(', '));
 
   // ── 1d-6. 会话引用去平台化（C5 第三批）───────────────────────────────────
   // 落盘形状改成 `{ instance, sessionId }` 之后，最大的风险是「形状泄漏」：

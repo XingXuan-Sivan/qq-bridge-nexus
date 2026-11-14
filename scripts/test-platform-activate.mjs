@@ -68,7 +68,7 @@ test('用户侧失败就不再激活 Agent 侧（fail-closed，不做半套）',
 
 test('真实注册表：内置的 qq / dsh 能点起来，拼错的 id 被挡住', async () => {
   // 内置平台是在 builtin.mjs 的 import 期注册的（装配点）。生产里由 bridge.js 拉起的
-  // user-platform / agent-client 间接求值；这里显式求值，才能真的验证「点得起来」。
+  // user-platform / agent-side/runtime 间接求值；这里显式求值，才能真的验证「点得起来」。
   await import('../src/user-side/builtin.mjs');
   await import('../src/agent-side/builtin.mjs');
   const { listUserPlatforms, activeUserPlatformId } = await import('../src/user-side/runtime-registry.mjs');

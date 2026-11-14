@@ -30,9 +30,11 @@ import {
 } from '../src/agent-side/port.mjs';
 import { createDshPort, DSH_AGENT_CAPABILITIES } from '../src/agent-side/adapters/dsh/port.mjs';
 import * as dshDeclaration from '../profiles/agent-platforms/dsh/adapters/runtime.mjs';
-import { ACP_PORT_CAPABILITIES } from '../src/agent-side/adapters/acp/port.mjs';
+import { ACP_PORT_CAPABILITIES, createAcpPort } from '../src/agent-side/adapters/acp/port.mjs';
 import * as acpDeclaration from '../profiles/agent-platforms/acp/adapters/runtime.mjs';
 import { BUILTIN_AGENT_PLATFORMS } from '../src/agent-side/builtin.mjs';
+import { useAgentPlatform } from '../src/agent-side/runtime-registry.mjs';
+import { agentRuntime, resetAgentRuntime } from '../src/agent-side/runtime.mjs';
 
 // ── 夹具 ────────────────────────────────────────────────────────────────────
 
@@ -476,16 +478,16 @@ test('DSH：maintenance 能力缺失时调用即 fail-closed', () => {
   });
 });
 
-test('经门面取 createAgentPort：装配点确实把 DSH 装上了', async () => {
-  const facade = await import('../src/agent-side/agent-client.mjs');
-  assert.equal(typeof facade.createAgentPort, 'function');
-  const { client, of } = fakeClient();
-  const port = facade.createAgentPort(client);
+test('装配点：端口由连接层装配，能力位与直接装配一致', async () => {
+  const { BUILTIN_AGENT_PLATFORMS } = await import('../src/agent-side/builtin.mjs');
+  const entry = BUILTIN_AGENT_PLATFORMS.find((impl) => impl.id === 'dsh');
+  assert.equal(typeof entry.createRuntime, 'function', '内置平台必须提供连接层');
+  const runtime = entry.createRuntime({ config: { baseUrl: 'http://127.0.0.1:1' }, log: () => {} });
+  const port = runtime.port();
   assert.equal(port.id, 'dsh');
-  assert.equal(port.supports('models'), true);
-  // 裸 sessionId 也能用（迁移期兼容），且落到平台时仍是纯 id。
-  await port.cancel('s42');
-  assert.equal(of('stopSessionWork')[0].args[0], 's42');
+  for (const capability of DSH_AGENT_CAPABILITIES) {
+    assert.equal(port.supports(capability), true, `连接层装出来的端口缺能力位 ${capability}`);
+  }
 });
 
 // ── ACP 适配器（C6 的第二实现）────────────────────────────────────────────
@@ -525,8 +527,9 @@ test('ACP：声明面覆盖 port 能力位，且不声明 v1 里没有的组', (
   }
 });
 
-test('ACP：装配点交出的是协商制能力位（getter 现算，不是构造时的快照）', () => {
-  const port = acpEntry().protocol.createAgentPort(fakeAcpClient());
+test('ACP：端口能力位是协商值（getter 现算，不是构造时的快照）', () => {
+  const { impl, capabilities } = createAcpPort({ client: fakeAcpClient() });
+  const port = createAgentPort({ id: acpDeclaration.id, label: acpDeclaration.label, capabilities, impl });
   // 未连接时按 v1 的固定方法面乐观声明：给空集会把 `listPermissionPresets` 锁在闸门外，
   // 而闸门背后正是唯一能做 initialize 与探测会话的地方（死锁）。
   assert.deepEqual([...port.capabilities].sort(), [...ACP_PORT_CAPABILITIES].sort());
@@ -536,12 +539,20 @@ test('ACP：装配点交出的是协商制能力位（getter 现算，不是构�
   assert.ok(Object.isFrozen(port));
 });
 
-test('ACP：protocol 面没有 NodeApiClient（所以门面在装配期就拒绝它当主平台）', () => {
+test('ACP：连接层缺事件流出口，因此当不了主平台（fail-closed）', async () => {
   const entry = acpEntry();
-  assert.equal(typeof entry.protocol.createAgentPort, 'function');
-  assert.equal(typeof entry.protocol.createAcpClient, 'function');
-  // 有它会变成 undefined → bridge 报 “is not a constructor”；门面改为报「protocol 面缺少 …」。
-  assert.equal(entry.protocol.NodeApiClient, undefined);
+  assert.equal(typeof entry.createRuntime, 'function');
+  // 没有 HTTP 客户端可继承：连接就是 spawn 子进程，现场即信任边界。
+  assert.equal(entry.NodeApiClient, undefined);
+  const runtime = entry.createRuntime({ config: {}, log: () => {} });
+  assert.equal(runtime.mode, 'stdio');
+  assert.equal(runtime.events, undefined);
+  // 真契约检查：切到 acp 后 agentRuntime() 必须直接拒绝，而不是让 bridge 撞上 undefined.mux。
+  useAgentPlatform('acp');
+  await resetAgentRuntime();
+  assert.throws(() => agentRuntime({ config: {} }), /缺少 events/);
+  useAgentPlatform('dsh');
+  await resetAgentRuntime();
 });
 
 test('ACP：级别计划按对端模式名单 fail-closed，绝不降到更宽的模式', () => {

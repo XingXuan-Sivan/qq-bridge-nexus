@@ -3,7 +3,7 @@
 //
 // 这条回归钉住「内核不认识具体平台」这件事的可执行部分：
 //   · 用户侧：内核只调 buildSendCall / describeBackend，实现住在 adapters/qq/；
-//   · Agent 侧：内核只调 AgentApiClient / discoverLaunchToken，实现住在 adapters/dsh/；
+//   · Agent 侧：内核只调 agentRuntime()，实现住在 adapters/dsh/；
 //   · 两侧注册表未注册时都必须 **抛错（fail-closed）**，不能猜一个默认平台 ——
 //     猜错的后果是把消息发到错误通道，或把权限映射成另一个平台的名字。
 //   · 目录不变式：平台专属实现不得回流到 src/ 根与 src/lib/。
@@ -38,14 +38,8 @@ import {
   requireAgentPlatform,
 } from '../src/agent-side/runtime-registry.mjs';
 import { BUILTIN_AGENT_PLATFORMS, registerBuiltinAgentPlatforms } from '../src/agent-side/builtin.mjs';
-// 顶层 import 即求值：门面在模块初始化时就绑定协议实现，这一步本身就是断言之一。
-import {
-  AgentApiClient,
-  discoverLaunchToken,
-  resolveAgentHome,
-  unwrap,
-  createTurnCollector,
-} from '../src/agent-side/agent-client.mjs';
+// 连接层契约在模块初始化时就会求值：缺成员的平台在这里就报错，而不是等第一轮对话。
+import { RUNTIME_MEMBERS, agentRuntime, resetAgentRuntime } from '../src/agent-side/runtime.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -112,27 +106,33 @@ test('未注册即抛错（fail-closed），注册后恢复', () => {
 
 // ── Agent 侧 ────────────────────────────────────────────────────────────────
 
-test('内置 Agent 平台已注册，且 protocol 由 builtin 装配', () => {
+test('内置 Agent 平台已注册，且装配点提供连接层', () => {
   assert.equal(activeAgentPlatformId(), 'dsh');
   const impl = requireAgentPlatform();
-  assert.ok(impl.protocol, 'builtin.mjs 必须把 client.mjs 装配进 protocol');
-  assert.equal(typeof impl.protocol.NodeApiClient, 'function');
-  assert.equal(typeof impl.protocol.unwrap, 'function');
-  // 声明面仍然只由 profiles/ 提供：preset 清单在声明里，协议在 protocol 里。
+  assert.equal(typeof impl.createRuntime, 'function', 'builtin.mjs 必须把连接层接上 createRuntime');
+  // 声明面仍然只由 profiles/ 提供：preset 清单在声明里，连接方式在连接层里。
   assert.deepEqual(impl.AGENT_PRESET_IDS, ['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
 });
 
-test('agent-client 门面的常量就是适配器 protocol 的成员（不是另一份实现）', () => {
-  const protocol = requireAgentPlatform().protocol;
-  assert.equal(AgentApiClient, protocol.NodeApiClient);
-  assert.equal(discoverLaunchToken, protocol.discoverDshLaunchToken);
-  assert.equal(resolveAgentHome, protocol.resolveDshHome);
-  assert.deepEqual(unwrap({ result: { ok: true, value: 42 } }, 'demo'), 42);
-  assert.throws(() => unwrap({ result: { ok: false, error: { code: 'x', message: 'y' } } }, 'demo'), /demo failed: x: y/);
-  assert.equal(typeof createTurnCollector, 'function');
+test('连接层契约：成员齐备，且不齐就 fail-closed', async () => {
+  const dsh = BUILTIN_AGENT_PLATFORMS.find((impl) => impl.id === 'dsh');
+  const runtime = dsh.createRuntime({ config: {}, log: () => {} });
+  const missing = RUNTIME_MEMBERS.filter((name) => typeof runtime[name] !== 'function');
+  assert.deepEqual(missing, [], `DSH 连接层缺 ${missing.join(' / ')}`);
+  assert.deepEqual([runtime.id, runtime.label, runtime.mode], ['dsh', 'DeepSeek Harness', 'http']);
+  // ACP 是 stdio：没有地址可识别，事件流出口尚未实现，因此还不能当主平台。
+  const acp = BUILTIN_AGENT_PLATFORMS.find((impl) => impl.id === 'acp');
+  const acpRuntime = acp.createRuntime({ config: {}, log: () => {} });
+  assert.deepEqual(RUNTIME_MEMBERS.filter((name) => typeof acpRuntime[name] !== 'function'), ['events'],
+    'ACP 只差事件流出口，其余连接层职责都由 stdio 实现提供');
+  await resetAgentRuntime();
+  const singleton = agentRuntime({ config: {} });
+  assert.equal(singleton.id, 'dsh');
+  assert.equal(agentRuntime(), singleton, '进程内同一时刻只有一个活动执行体');
+  await resetAgentRuntime();
 });
 
-test('控制台可见的平台列表不泄漏协议对象', () => {
+test('控制台可见的平台列表不泄漏连接层对象', () => {
   const json = JSON.stringify(listAgentPlatforms());
   assert.ok(!json.includes('NodeApiClient'), 'protocol 不该出现在 /api 响应里');
   for (const item of listAgentPlatforms()) {
@@ -157,8 +157,7 @@ const PLATFORM_TOKENS = /(?:^|[-_.])(qq|dsh|snowluma|napcat)(?:[-_.]|$)/i;
 // 但因为它们与传输层住在同一个目录，必须逐项登记：新增一个就说明有人把新平台
 // 实现又写回了 src/ 根，本用例会红。
 const KNOWN_ROOT_PLATFORM_MODULES = new Set([
-  // Agent 平台鉴权失败的提示文案（给用户看的恢复指引，不是协议）。
-  'src/dsh-auth-hint.js',
+  // 目录不变式里不该再出现 Agent 连接层：它现在住在 src/agent-side/adapters/ 下。
   // 控制台「选模型」的业务规则（提供方 / 模型 / 思考强度联动）。
   'src/dsh-model.js',
   // MCP server 入口：被 .mcp.json 与 package.json 按固定路径引用，改名会断外部配置。
@@ -196,11 +195,11 @@ test('主程序不直接 import 具体平台适配器', () => {
     assert.ok(!/from '\.\/(?:dsh-client|platform\/onebot|platform\/prompt|lib\/qq-backend-label|lib\/dsh-)/.test(code),
       `${rel} 仍引用已搬迁的路径`);
   }
-  // 主程序必须经门面（user-platform.mjs / agent-client.mjs）。
+  // 主程序必须经门面（user-platform.mjs / agent-side/runtime.mjs）。
   for (const rel of ['src/bridge.js', 'src/self-test.js']) {
     const code = fs.readFileSync(path.join(ROOT, rel), 'utf8');
     assert.ok(!/from '\.\/(?:user|agent)-side\/adapters\//.test(code),
-      `${rel} 必须经门面（user-platform.mjs / agent-client.mjs），不得直连 adapters/`);
+      `${rel} 必须经门面（user-platform.mjs / agent-side/runtime.mjs），不得直连 adapters/`);
   }
   // bridge-extensions 是「公开 API 聚合层」：只允许一个例外（0.1.x 的旧导出名与文件名契约）。
   const ext = fs.readFileSync(path.join(ROOT, 'src', 'bridge-extensions.js'), 'utf8');
@@ -216,16 +215,16 @@ test('装配点各自只有一处，且都列在内置清单里', () => {
   assert.deepEqual(BUILTIN_AGENT_PLATFORMS.map((p) => p.id), ['dsh', 'acp']);
 });
 
-// B5 踩过的坑：改名后夹具的注入表还钉着老符号（resolveDshBaseUrl），bridge 于是拿不到桩、
-// 落到门面的真实现上 —— 真实现会扫本机进程找 DSH，单次桥接启动多花约 0.8 秒，
-// 把 test-backfill 里「记原始发送时间」那条 2 秒容差断言顶成随机失败。
-// 这里钉住两件事：地址发现必须离线桩掉；注入表里不能残留改名前的旧符号。
-test('审计夹具的平台桩用中立名，且地址发现强制离线', () => {
+// 夹具的坑：改名后注入表还钉着老符号，bridge 于是拿不到桩、落到真实现上——
+// 真地址发现会扫本机进程找 DSH，单次桥接启动多花约 0.8 秒，把「记原始发送时间」那条
+// 2 秒容差断言顶成随机失败。这里钉住：连接层必须整体换成离线桩，注入表里不能留旧符号。
+test('审计夹具：连接层整体离线桩，旧注入名不残留', () => {
   const harness = fs.readFileSync(path.join(ROOT, 'scripts', 'audit-bridge-harness.mjs'), 'utf8');
-  assert.match(harness, /\n\s+resolveAgentBaseUrl: async \(configured\) =>/, '夹具必须按中立名离线桩掉 resolveAgentBaseUrl');
-  assert.ok(!/import \{[^}]*\bresolveAgentBaseUrl\b[^}]*\} from '\.\.\/src\/agent-side\/agent-client\.mjs'/.test(harness),
-    '夹具不得注入真地址发现：它会扫本机进程，装了 DSH 的机器上会摸到真 DSH');
-  for (const stale of ['oneBotSendCall,', 'NodeApiClient: class', 'discoverDshLaunchToken:', 'resolveDshHome:', 'resolveDshBaseUrl: async']) {
-    assert.ok(!harness.includes(stale), `夹具注入表还留着改名前的旧符号：${stale}（bridge 已经按中立名调用，旧键不会有任何绑定）`);
+  assert.match(harness, /\n\s+agentRuntime,\n/, '夹具必须把 agentRuntime 注入 VM');
+  assert.match(harness, /prepareEndpoint: async \(agentConfig = \{\}\) => \{/, '地址发现必须离线桩掉');
+  assert.ok(!/from '\.\.\/src\/agent-side\/adapters\/dsh\/endpoint\.mjs'/.test(harness),
+    '夹具不得引用真地址发现：它会扫本机进程，装了 DSH 的机器上会摸到真 DSH');
+  for (const stale of ['agent-client', 'AgentApiClient:', 'discoverLaunchToken:', 'resolveAgentHome:', 'createDshProbe,']) {
+    assert.ok(!harness.includes(stale), `夹具注入表还留着旧符号：${stale}（bridge 已经不按这个名字取绑定）`);
   }
 });

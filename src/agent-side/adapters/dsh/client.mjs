@@ -381,7 +381,7 @@ export class NodeApiClient extends AbstractApiClient {
    * 换取或铸造一个会话 Cookie。
    *
    * 两条路：
-   * 1. 有 launch token（config.json 的 dsh.authToken，或从日志发现）→ 走 DSH 的
+   * 1. 有 launch token（config.json 里当前 Agent 平台的 endpoint.authToken，或从日志发现）→ 走 DSH 的
    *    官方 token 交换；token 是进程启动凭据，只能放进 URL 查询串。
    * 2. 没有 launch token → 用持久化签名密钥**离线铸造** Cookie
    *    （见文件头的说明）。这条路不依赖启动器是否把 stdout 记进日志，
@@ -410,23 +410,23 @@ export class NodeApiClient extends AbstractApiClient {
     const canMint = secret !== null && isLoopbackBase(this.baseUrl);
     // 优先级：默认**铸造优先**——它不依赖「启动器有没有把 stdout 记进日志」，也不随
     // DSH 重启失效，是唯一不需要每次升级重新适配的一条路。两个例外：
-    // 用户在 config.json 里显式填了 dsh.authToken（那是明确意图，尊重它），
+    // 用户在 config.json 里显式填了 endpoint.authToken（那是明确意图，尊重它），
     // 或铸造刚被 401（_preferToken，见 _doFetchWithAuth）。
     if (canMint && !this._preferToken && !this.tokenExplicit) return this._mintCookie(secret);
     if (!this.launchToken) {
       if (canMint) return this._mintCookie(secret);
       throw new Error(
-        'DSH 鉴权不可用：没有可用的 launch token（config.json 的 dsh.authToken 为空，日志里也没发现），'
+        'DSH 鉴权不可用：没有可用的 launch token（config.json 里当前 Agent 平台的 endpoint.authToken 为空，日志里也没发现），'
         + `也读不到 ${path.join(resolveDshHome(), '.credentials.yaml')} 里的 `
-        + `${BROWSER_SESSION_KEY} 签名密钥。请在 config.json 里显式设置 dsh.authToken，`
+        + `${BROWSER_SESSION_KEY} 签名密钥。请在 config.json 里显式设置 当前 Agent 平台 的 endpoint.authToken，`
         + '或确认 DSH_HOME 指向真正的 .dsh 目录。'
       );
     }
     // launch token 是**进程启动凭据**，交换时只能放进 URL 查询串（DSH 的协议就这么定的）。
     // 因此绝不能把它发往非回环地址：那会把凭据交给中间人、写进对端访问日志、
-    // 也可能落在代理/CDN 的请求行日志里。要连远程 DSH 请显式声明 dsh.allowRemote。
+    // 也可能落在代理/CDN 的请求行日志里。要连远程 DSH 请显式声明 endpoint.allowRemote。
     if (!this.auth.allowRemote && !isLoopbackBase(this.baseUrl)) {
-      throw new Error(`拒绝把 DSH launch token 发往非本机地址（${this.baseUrl}）：那是进程启动凭据，只应交给 127.0.0.1。确实要连远程 DSH 时请在 config.json 里显式设置 dsh.allowRemote: true`);
+      throw new Error(`拒绝把 DSH launch token 发往非本机地址（${this.baseUrl}）：那是进程启动凭据，只应交给 127.0.0.1。确实要连远程 DSH 时请在 config.json 里显式设置当前 Agent 平台的 endpoint.allowRemote: true`);
     }
     if (this.cookiePromise) return waitWithSignal(this.cookiePromise, signal);
     const promise = (async () => {

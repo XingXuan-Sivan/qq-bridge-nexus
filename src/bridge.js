@@ -18,13 +18,14 @@ import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 // Agent 侧协议（RPC 客户端、凭据发现、返回包解包）只经这道门面；具体实现是
 // src/agent-side/adapters/<id>/，由 builtin.mjs 装配。
-import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth, agentPlatformMetadata } from './agent-side/agent-client.mjs';
+// C5：调用面走 `createAgentPort`（中立动词 + 能力闸门），本文件不再出现任何 DSH 动词。
+import { AgentApiClient, createAgentPort, createTurnCollector, discoverLaunchToken, resolveAgentHome, resolveAgentBaseUrl, createAgentHealth } from './agent-side/agent-client.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import YAML from 'yaml';
-import { createPresetStore, PRESET_IDS, validateAgentYaml } from './presets/store.mjs';
+import { createPresetStore, validateAgentYaml } from './presets/store.mjs';
 import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from './runtime/mode-store.mjs';
 import {
   listBehaviorFiles,
@@ -93,8 +94,8 @@ import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCand
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, CAPABILITIES_ROOT } from './capabilities/store.mjs';
+import { PLATFORMS_ROOT } from './profiles/paths.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITIES_ROOT } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
 // 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
@@ -102,9 +103,17 @@ import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePl
 // （段校验 → 能力降级 → 平台 transport/适配器），四处发送入口全部经它发出。
 // B7 又从这里进了两样：控制台的平台元数据（userPlatformMetadata）与 HTTP 发送端点的
 // 目标解析（resolveSendTarget）。两者都是纯查询，不触网。
-import { sendAction as dispatchSend, configureUserPlatformBackend, transportRegistry, describeBackend, readBackendInfo, userPlatformMetadata, resolveSendTarget } from './user-side/user-platform.mjs';
-import { listPlatforms, loadPlatform } from './platforms/index.mjs';
-import { builtinAdapters, createAdapterRegistry } from './runtime/adapters.mjs';
+// C3 进来的是入站：把 WS 客户端交给适配器（configureUserPlatformInbound）、
+// 启动平台的 connect（startUserPlatformInbound），以及下面的统一入站管线。
+import { sendAction as dispatchSend, configureUserPlatformBackend, configureUserPlatformInbound, startUserPlatformInbound, transportRegistry, describeBackend, readBackendInfo, userPlatformMetadata, resolveSendTarget } from './user-side/user-platform.mjs';
+// 入站管线（C3）：收消息只有这一条路 —— 校验 → 准入 → 会话映射 → 唤醒。
+// 顺序写死在管线里（见 docs/PLATFORM_UNIFICATION.md §六），桥接只提供四步的策略。
+import { INBOUND_DROP, createInboundPipeline } from './user-side/inbound.mjs';
+import { platformRegistrySnapshot } from './platforms/registry.mjs';
+// 平台清单与提示词变量都来自平台目录（C2b）：profiles/platforms/<id>/platform.yml 是唯一源，
+// src/ 里不再有内置平台清单，插件只能经 adapters:provide 注册一份「描述」。
+import { listPlatforms } from './platforms/index.mjs';
+import { createAdapterRegistry } from './platforms/adapter-registry.mjs';
 import {
   PERMISSION_LABEL,
   PERMISSION_LEVELS,
@@ -210,6 +219,10 @@ import { createPresetPolicy } from './extensions/preset-policy.mjs';
 import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
 import { accountOfConfig, configureKeys, defaultAddress, formatKey, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
+// 配置 v2（`platforms` 段）：平台配置的唯一真源。迁移与派生视图都在这里，见 docs/PLATFORM_UNIFICATION.md §八。
+import { CONFIG_VERSION, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms } from './config/platforms.mjs';
+// `platforms.active` 的落地（启动期切换运行期平台，两侧 fail-closed）。
+import { activatePlatforms } from './platforms/activate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -724,12 +737,11 @@ const PRESET_BACKUP_DIR = path.join(STATE_DIR, 'preset-backups');
 const PRESET_BACKUP_KEEP = 10;
 
 /**
- * 控制台的 preset 参数校验：接受任一**确实存在的**预设目录（缺省 = 二代）。
+ * 控制台的 preset 参数校验：接受任一**确实带 rows 段**的能力档（缺省 = 二代）。
  *
  * 早先只允许 qq-chat / qq-chat-v2，导致管理档与自建预设的提示词卡被前端直接隐藏。
- * 现在改为「目录里真的有 agent.cordis.yml」才算数，既支持所有预设，又挡住了路径穿越：
- * 名字必须是 [a-z0-9-] 且解析后的文件必须落在 profiles/agent-platforms/dsh/agents 下。
- * 返回 null 由调用方回 400。
+ * 现在改为「capabilities/<id>.yml 存在且有 rows」才算数，既支持所有预设，又挡住了路径穿越：
+ * 名字必须是 [a-z0-9-]，目录固定。返回 null 由调用方回 400。
  */
 const PRESET_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -737,10 +749,11 @@ function editablePresetName(raw) {
   const name = String(raw ?? '').trim();
   if (!name) return PRESET_NAMES.v2;
   if (!PRESET_ID_RE.test(name)) return null;
-  const dir = path.resolve(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
-  const file = path.resolve(dir, name, 'agent.cordis.yml');
-  if (!file.startsWith(dir + path.sep)) return null;
-  return fs.existsSync(file) ? name : null;
+  try {
+    return readPresetCapability(name).rows.length ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 预设代次：两个内置仿真预设之外的一律按「generic」处理（不做仿真不变量校验）。 */
@@ -750,16 +763,35 @@ function presetKind(name) {
   return 'generic';
 }
 
+/**
+ * 预设源文件 = 能力档（C4）。
+ * `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` 已删除：预设正文住在
+ * `capabilities/<id>.yml` 的 `rows` 段，`artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`
+ * 是它渲染出来的产物，不再可手改。
+ */
 function presetSourceYaml(name) {
-  return path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', name, 'agent.cordis.yml');
+  return path.join(CAPABILITIES_ROOT, `${name}.yml`);
+}
+
+/** 读一份能力档（能力档 id 就是预设 id，两者同源）。 */
+function readPresetCapability(name) {
+  const file = presetSourceYaml(name);
+  if (!fs.existsSync(file)) throw new Error(`找不到预设文件 ${path.relative(ROOT, file)}`);
+  const raw = YAML.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  return normalizeCapability(raw, { id: name, source: `capabilities/${name}.yml` });
+}
+
+/**
+ * rows 段的标准 YAML 文本：提示词编辑器在它上面做文本手术。
+ * 用 stringify 而不是读原文，是因为能力档里的 rows 缩进 2 格且外层还包着 tools/preset 段，
+ * 直接做行级手术会撞上别的段；标准文本与「高级编辑」看到的完全是同一形状。
+ */
+function presetRowsText(capability) {
+  return YAML.stringify(capability.rows, { lineWidth: 0, singleQuote: true });
 }
 
 function dshHomeDir() {
   return process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-}
-
-function installedPresetYaml(name) {
-  return path.join(dshHomeDir(), '.agent-presets', name, 'agent.cordis.yml');
 }
 
 // 这里**没有**模块级的 resolvePresetName —— 曾经有一个，但它被 main() 内部同名函数完全遮蔽
@@ -770,9 +802,9 @@ function installedPresetYaml(name) {
 // 同理不再保留 PRESET_NAME_SET：它只服务于那个死函数，留着只会诱惑下一个人去用它。
 
 function readPresetPromptText(name) {
-  const file = presetSourceYaml(name);
-  if (!fs.existsSync(file)) throw new Error(`找不到预设文件 ${path.relative(ROOT, file)}`);
-  const text = fs.readFileSync(file, 'utf8');
+  const capability = readPresetCapability(name);
+  if (!capability.rows.length) throw new Error('能力档里没有 rows 段（预设正文为空）');
+  const text = presetRowsText(capability);
   // prefix 缺省（或写成 prefix: ''）的预设也要能打开编辑器：当成空提示词，保存时
   // renderPresetPromptYaml 会按 locator 的 insert 模式把 prefix: |- 补进 persona 条目。
   if (!locatePresetPromptBlock(text)) throw new Error('预设里找不到 persona 插件行（结构可能已变化）');
@@ -780,10 +812,24 @@ function readPresetPromptText(name) {
   return { text, prefix: prefix ?? '' };
 }
 
-// 备份文件名带上预设名：两个预设的主文件名都叫 agent.cordis.yml，
-// 不加前缀会让「还原」列到另一个预设的备份。
+/**
+ * 把编辑后的 rows 文本写回能力档：只替换 `rows` 段，tools / preset / extensions 与其它
+ * 段的注释原样保留（这是 yaml Document 局部更新的意义）。
+ */
+function writePresetRows(name, rowsText) {
+  const file = presetSourceYaml(name);
+  const doc = YAML.parseDocument(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+  if (doc.errors.length) throw new Error(`能力档不是合法 YAML：${doc.errors[0].message}`);
+  const rows = YAML.parse(rowsText);
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('插件行列表必须是非空数组');
+  doc.set('rows', rows);
+  atomicWriteText(file, `${String(doc).replace(/\n+$/, '')}\n`);
+}
+
+// 备份文件名带上预设名：所有预设的源文件都叫 <id>.yml，不加前缀会让「还原」串到
+// 另一个预设的备份上。
 function presetBackupPrefix(name) {
-  return `${name}.${path.basename(presetSourceYaml(name))}`;
+  return `${name}.capability.yml`;
 }
 
 function backupPresetFile(name) {
@@ -814,14 +860,13 @@ function listPresetBackups(name) {
 }
 
 function presetStatus(name) {
-  // 只回传控制台需要的信息：不回传 DSH_HOME / 安装副本的绝对路径，减少无谓的信息暴露
-  // （路径已经写在服务端日志里，排查时看日志即可）。
+  // 只回传控制台需要的信息：不回传安装副本 / DSH_HOME 的绝对路径，减少无谓的信息暴露。
   const kind = presetKind(name);
   return {
     preset: name,
     label: kind === 'v1' ? '一代仿真（reserved）' : kind === 'v2' ? '二代仿真（reserved2）' : '预设提示词',
     sourceFile: path.relative(ROOT, presetSourceYaml(name)),
-    installed: fs.existsSync(installedPresetYaml(name)),
+    // 预设是渲染产物：改完必须重跑 build + setup-dsh 并重启 DSH 才生效。
     requiresRestart: true,
   };
 }
@@ -1000,6 +1045,35 @@ function saveConfigSection(key, value) {
   if (value === undefined) delete file[key]; else file[key] = value;
   atomicWriteJson(configFile, file);
   if (bridgeCfg) bridgeCfg[key] = value;
+}
+
+/**
+ * 平台配置的**唯一写入口**：读整份 → 往 platforms 段打补丁 → 写回。
+ *
+ * 写入方有四处（控制台选模型、改思考强度、token 自愈、控制中心换目录），
+ * 各自拼 `file.dsh = {…}` 会把 v2 结构写回 v1 形状。补丁按白名单归位
+ * （transport/endpoint vs options），调用方只需要说「改哪几个值」。
+ *
+ * `side` 是 `'user' | 'agent'`；当前平台从 `platforms.active` 取，不写死 id。
+ */
+function savePlatformPatch(side, patch) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  const nextPlatforms = patchPlatformConfig(readPlatforms(file), side, patch);
+  atomicWriteJson(configFile, {
+    ...file,
+    configVersion: CONFIG_VERSION,
+    platforms: platformsForWrite(nextPlatforms),
+  });
+  if (bridgeCfg) {
+    const views = platformViews(nextPlatforms);
+    bridgeCfg.configVersion = CONFIG_VERSION;
+    bridgeCfg.platforms = nextPlatforms;
+    bridgeCfg.platform = views.platform;
+    bridgeCfg.userPlatform = views.userPlatform;
+    bridgeCfg.agentPlatform = views.agentPlatform;
+  }
+  return nextPlatforms;
 }
 
 // ── 外部人格引用与缓存 ──────────────────────────────────────────────────────
@@ -1225,16 +1299,42 @@ function normalizeSkills(raw) {  const out = { enabled: true, maxEntries: 12, ma
 
 function loadConfig() {
   const p = path.join(ROOT, 'config.json');
-  const file = readJsonSafe(p, null, true);
-  if (!file || typeof file !== 'object' || Array.isArray(file)) throw new Error(`配置格式错误：${p}`);
-  const platform = normalizePlatform(file.platform);
+  const raw = readJsonSafe(p, null, true);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`配置格式错误：${p}`);
+  // 配置 v2 迁移（只跑一次）：v1 用 `platform` / `snowluma` / `dsh` 三个**顶层键**描述
+  // 「用哪个平台 + 它怎么连」，新增一个平台就等于往内核里加一段顶层键。v2 把它们收进
+  // 按 id 索引的 `platforms` 段。迁完立刻写回（先备份），于是磁盘上只有一份形状，
+  // 下面所有读取都不需要兼容两套。
+  const migration = migrateConfigToV2(raw);
+  if (migration.migrated) {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12).replace(/^(\d{8})(\d{4})$/, '$1-$2');
+    try {
+      fs.copyFileSync(p, `${p}.bak-${stamp}`);
+      atomicWriteJson(p, migration.config);
+      log(`config.json 已迁移到配置 v2（平台配置改存 platforms 段）：${migration.notes.join('、') || '无字段'}`);
+      log(`   原文件已备份为 config.json.bak-${stamp}`);
+    } catch (error) {
+      // 写不进去也不挡住启动：内存里已经是 v2 形状，下次启动再试。
+      log(`⚠️ 配置 v2 迁移写盘失败（本次仍按 v2 运行）：${error?.message ?? error}`);
+    }
+  }
+  const file = migration.config;
+  const platforms = readPlatforms(file);
+  const views = platformViews(platforms);
+  const platform = normalizePlatform(views.platform);
   // owner 优先读结构化 `owner`，回落旧的 `ownerQQ`（裸数字按当前平台解释）。
   const owner = normalizeOwnerAddress(file.owner ?? file.ownerQQ, platform);
   // 旧字段派生：控制台与既有接口仍读 ownerQQ。非当前平台 / 带账号的 owner 不压成数字。
   const ownerQQ = owner && owner.platform === platform.id && !owner.account && /^\d+$/.test(owner.id)
     ? Number(owner.id) : null;
   const cfg = {
-    dsh: {
+    // 平台配置的**唯一真源**（磁盘上就是这一段）；下面两个视图是它的扁平投影，
+    // 内核只认 `userPlatform` / `agentPlatform` 这两个平台中立的视图。
+    configVersion: CONFIG_VERSION,
+    platforms,
+    platform,
+    // Agent 侧平台视图：连接参数（endpoint）在前、选项在后，拍平成一层。
+    agentPlatform: {
       // 留空 = 自动识别（桌面版 19387 / 命令行版 3080，见 src/agent-side/adapters/dsh/endpoint.mjs）
       baseUrl: '',
       provider: 'deepseek-official',
@@ -1249,9 +1349,10 @@ function loadConfig() {
       authPrefix: 'Bearer',
       // 是否允许把 DSH launch token 发往非回环地址（默认 false：那是进程启动凭据）
       allowRemote: false,
-      ...(file.dsh ?? {})
+      ...views.agentPlatform,
     },
-    snowluma: { wsUrl: 'ws://127.0.0.1:3001', accessToken: '', ...(file.snowluma ?? {}) },
+    // 用户侧平台视图：同上（transport 与 options 拍平）。
+    userPlatform: { wsUrl: 'ws://127.0.0.1:3001', accessToken: '', ...views.userPlatform },
     // 空 => 每个会话在 state/agents/<key> 下建独立工作目录
     sessionCwd: file.sessionCwd ?? '',
     agentPreset: file.agentPreset ?? 'chat',
@@ -1597,19 +1698,19 @@ function loadConfig() {
   // 所以这里发现的 token 只是兜底，主路径是客户端用 ~/.dsh 里持久化的签名密钥
   // 离线铸造会话 Cookie（见 src/agent-side/adapters/dsh/client.mjs 的 mintBrowserSessionCookie）。
   // authTokenExplicit 记录「token 是用户填的还是这里猜的」，客户端据此排优先级。
-  cfg.dsh.authTokenExplicit = Boolean(cfg.dsh.authToken);
-  if (!cfg.dsh.authToken) cfg.dsh.authToken = discoverLaunchToken();
+  cfg.agentPlatform.authTokenExplicit = Boolean(cfg.agentPlatform.authToken);
+  if (!cfg.agentPlatform.authToken) cfg.agentPlatform.authToken = discoverLaunchToken();
 
   // 思考强度可能被手工改成非法值（config.json 是用户可编辑的）。DeepSeek 适配器对非法值
   // 会硬拒绝，若直接透传会让每个会话的 selectModel 每次都失败；这里统一规范化并告警。
   try {
-    cfg.dsh.reasoningEffort = normalizeReasoningEffort(cfg.dsh.reasoningEffort ?? REASONING_EFFORT_DEFAULT);
+    cfg.agentPlatform.reasoningEffort = normalizeReasoningEffort(cfg.agentPlatform.reasoningEffort ?? REASONING_EFFORT_DEFAULT);
   } catch (error) {
-    log(`⚠️ config.json 的 dsh.reasoningEffort「${cfg.dsh.reasoningEffort}」非法，已回退 ${REASONING_EFFORT_DEFAULT}（${error?.message ?? error}）`);
-    cfg.dsh.reasoningEffort = REASONING_EFFORT_DEFAULT;
+    log(`⚠️ config.json 的 dsh.reasoningEffort「${cfg.agentPlatform.reasoningEffort}」非法，已回退 ${REASONING_EFFORT_DEFAULT}（${error?.message ?? error}）`);
+    cfg.agentPlatform.reasoningEffort = REASONING_EFFORT_DEFAULT;
   }
   // 看图能力：auto = 按已知表（未知的模型按不能看图，图片降级成文字）；yes / no = 管理员手动指定。
-  cfg.dsh.vision = normalizeVisionSetting(cfg.dsh.vision);
+  cfg.agentPlatform.vision = normalizeVisionSetting(cfg.agentPlatform.vision);
 
   // 权限配置归一化；随后统一写回 config.json（见下个块）。
   cfg.permission = normalizePermissionConfig(file.permission);
@@ -1810,7 +1911,11 @@ function loadConfig() {
 // ── 状态持久化（QQ 会话 ↔ DSH 会话映射） ─────────────────────────────────────
 let state = { sessions: {} };
 // 会话映射 + 策略指纹的唯一入口；传 getter 是因为 loadState() 会整体替换 state 对象。
-const sessions = createSessionRegistry(() => state);
+// C5 第三批：映射值是 `{ instance, sessionId }` 而不是裸 id（换平台后旧引用必须判废，
+// 见 src/session/ref.mjs）。`agentPortId` 也传 getter —— 注册表在模块顶层就建好了，
+// 而平台要到 main() 里才装好，落盘形状却在那之前就要能读写。
+let agentPortId = '';
+const sessions = createSessionRegistry(() => state, { instance: () => agentPortId });
 // sessions.json 读不动/读坏时必须**大声失败**，不能静默回落成空映射：
 // 那会让每个 QQ 会话都拿到一个全新的 DSH 会话（上下文全丢），而紧接着的
 // saveState() 会把这份空映射原子写回磁盘 —— 一次截断/占用/写满就变成永久丢失。
@@ -2198,6 +2303,11 @@ function apiKey(raw) {
 // 已加载的配置（`main()` 里赋值；sessionKey 等早期函数在调用期读取）
 let bridgeCfg = null;
 
+// 入站连接的停止函数（C3：`main()` 里赋值）。放在模块级是因为 `finishExit()` /
+// `shutdownThenExit()` 在 `main()` 外面：退出时要把订阅先摘掉，否则插件收尾期间
+// 再来一条消息，唤醒会撞上已经 dispose 的插件。
+let inboundStop = null;
+
 /**
  * owner 的私聊 key（按 owner 自己的地址拼，不用进程默认地址）。
  * owner 可能配到另一个账号下 —— 那种情况下发到本进程默认地址就是发给另一个人。
@@ -2236,6 +2346,9 @@ function oneBotId(id) {
 async function main() {
   const cfg = loadConfig();
   bridgeCfg = cfg;
+  // 先激活平台再固化会话地址：configureKeys 拿的是「配置说哪个平台」，
+  // 两者必须指向同一个平台，否则 key 里的前缀和实际收发的平台会不是一回事。
+  activatePlatforms(cfg);
   configureKeys({ platform: platformOfConfig(cfg), account: accountOfConfig(cfg) });
   // 管理员托付（方案 C）：托付内容只在内存里，按目标群会话暂存；限频跨所有托付共享。
   const ownerRelayStore = createOwnerRelayStore();
@@ -2351,15 +2464,16 @@ async function main() {
     log,
     now: Date.now,
   });
-  const agentPresetsRoot = AGENT_PLATFORMS_ROOT
-    ? path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'agents')
-    : path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
-  const presetPolicy = createPresetPolicy({ root: agentPresetsRoot, log });
+  // 能力档目录（profiles/agent-platforms/dsh/capabilities/<id>.yml）是工具面 + 预设正文的唯一源；
+  // 能力档 id 就是 Agent 预设 id（C4），所以 presetPolicy / presetStore 都指向同一个目录。
+  const capabilityStore = createCapabilityStore({
+    root: CAPABILITIES_ROOT,
+    log: (line) => log(line),
+  });
+  const presetPolicy = createPresetPolicy({ capabilities: capabilityStore, log });
   const presetStore = createPresetStore({
-    root: agentPresetsRoot,
+    root: CAPABILITIES_ROOT,
     backupRoot: path.join(STATE_DIR, 'preset-editor-backups'),
-    factoryRoot: path.join(ROOT, 'assets', 'default-presets'),
-    presetIds: PRESET_IDS,
     scriptsDir: path.join(ROOT, 'scripts'),
     log,
   });
@@ -2563,18 +2677,41 @@ async function main() {
   // 内置平台（QQ）的后端配置来源：每次发送现取，config 热改后不必重启。
   // 地址与 token 属于平台实现，所以它们只经过适配器；内核不知道 httpUrl 长什么样。
   configureUserPlatformBackend(() => ({
-    httpUrl: cfg.snowluma?.httpUrl,
-    accessToken: cfg.snowluma?.accessToken,
+    httpUrl: cfg.userPlatform?.httpUrl,
+    accessToken: cfg.userPlatform?.accessToken,
     fetch: globalThis.fetch,
   }));
-  // 两端适配器：平台（QQ）与 Agent（DSH）各一份内置描述，插件可再注册。
+  // 两端适配器（C2b）：内置平台的描述已搬进平台目录，这里只剩**插件注册通道**。
+  // 不再循环注册 builtinAdapters()：那份硬编码清单与 profiles/* 重复，新增平台时改代码才算数。
   const adapterRegistry = createAdapterRegistry({ log });
-  for (const adapter of builtinAdapters()) {
-    try {
-      adapterRegistry.register(adapter.kind, adapter, 'core');
-    } catch (error) {
-      log(`⚠️ 内置适配器注册失败：${error?.message ?? error}`);
+
+  // 平台目录元信息（label / vars）按需读一次：platform.yml 没有热改语义，与旧内置清单的静态性质一致。
+  // 提示词变量 = platform.yml 的 vars（声源）+ 插件按同 id 注册的适配器（覆盖）。
+  // 「后注册的优先」只在同 id 时才成立：插件不能随手把别的平台的称呼改掉。
+  let platformProfiles = null;
+  function platformProfileOf(id) {
+    const key = String(id ?? '').trim();
+    if (!key) return null;
+    if (!platformProfiles) {
+      try {
+        platformProfiles = new Map(listPlatforms({ root: PLATFORMS_ROOT }).map((item) => [item.id, item]));
+      } catch (error) {
+        log(`⚠️ 读取平台目录失败（提示词变量将用默认值）：${error?.message ?? error}`);
+        platformProfiles = new Map();
+      }
     }
+    return platformProfiles.get(key) ?? null;
+  }
+  function platformVarsFor(id) {
+    return {
+      ...(platformProfileOf(id)?.vars ?? {}),
+      ...(adapterRegistry.get('platform', id)?.vars ?? {}),
+    };
+  }
+  /** 平台显示名：vars.platform → platform.yml 的 label → 中性说法。 */
+  function platformLabelFor(id) {
+    const vars = platformVarsFor(id);
+    return String(vars.platform || platformProfileOf(id)?.label || '当前平台').trim();
   }
 
   try {
@@ -3006,12 +3143,12 @@ async function main() {
   async function verifyVoiceMessageSent(messageId) {
     if (!messageId) return null;
     try {
-      const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+      const httpUrl = String(cfg.userPlatform?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
       const res = await fetch(`${httpUrl}/get_msg`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
+          ...(cfg.userPlatform?.accessToken ? { authorization: `Bearer ${cfg.userPlatform.accessToken}` } : {})
         },
         body: JSON.stringify({ message_id: Number(messageId) }),
         signal: AbortSignal.timeout(30000)
@@ -3054,12 +3191,12 @@ async function main() {
     const wantReadback = readback === true;
     if (wantReadback && sent.messageId) {
       try {
-        const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+        const httpUrl = String(cfg.userPlatform?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
         const res = await fetch(`${httpUrl}/fetch_ptt_text`, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
+            ...(cfg.userPlatform?.accessToken ? { authorization: `Bearer ${cfg.userPlatform.accessToken}` } : {})
           },
           body: JSON.stringify({ message_id: String(sent.messageId) }),
           signal: AbortSignal.timeout(30000)
@@ -3227,7 +3364,7 @@ async function main() {
   let backendIsNapCat = null;
   // 日志里的后端称呼（实现在 src/user-side/adapters/qq/qq-backend-label.js）：连上后由 get_version_info 填充
   let qqBackendInfo = null;
-  function backendLabelNow() { return describeBackend({ viaPlatform: cfg.snowluma?.viaPlatform === true, backend: qqBackendInfo }); }
+  function backendLabelNow() { return describeBackend({ viaPlatform: cfg.userPlatform?.viaPlatform === true, backend: qqBackendInfo }); }
 
   async function isNapCatBackend() {
     if (backendIsNapCat !== null) return backendIsNapCat;
@@ -3356,15 +3493,15 @@ async function main() {
     }
     const dir = path.join(STATE_DIR, 'slang-agent');
     fs.mkdirSync(dir, { recursive: true });
-    const wsValue = unwrap(await api.workspace.create({ path: dir }), 'slang workspace.create');
+    const workspace = await agentPort.createWorkspace({ path: dir });
     const workspaceTitle = cfg.slang?.workspaceTitle || 'QQ 黑话学习';
-    if (wsValue.created && workspaceTitle) {
-      try { await api.workspace.rename({ workspaceId: wsValue.workspace.workspaceId, title: workspaceTitle }); } catch {}
+    if (workspace.created && workspaceTitle) {
+      try { await agentPort.renameWorkspace({ workspaceId: workspace.workspaceId, title: workspaceTitle }); } catch {}
     }
-    const params = { workspaceId: wsValue.workspace.workspaceId };
+    const params = { workspaceId: workspace.workspaceId };
     params.agentPreset = preset;
-    const value = unwrap(await api.sessions.create(params), 'slang session.create');
-    slangLearnerSessionId = value.sessionId;
+    const created = await agentPort.ensureSession(params);
+    slangLearnerSessionId = created.sessionId;
     learnerSessions.add(slangLearnerSessionId);
     api.events.follow(slangLearnerSessionId);
     await ensureChatModel(slangLearnerSessionId);
@@ -3392,12 +3529,12 @@ async function main() {
     } else {
       const dir = path.join(STATE_DIR, 'sticker-agent');
       fs.mkdirSync(dir, { recursive: true });
-      const wsValue = unwrap(await api.workspace.create({ path: dir }), 'sticker workspace.create');
-      if (wsValue.created) {
-        try { await api.workspace.rename({ workspaceId: wsValue.workspace.workspaceId, title: 'QQ 表情整理' }); } catch {}
+      const workspace = await agentPort.createWorkspace({ path: dir });
+      if (workspace.created) {
+        try { await agentPort.renameWorkspace({ workspaceId: workspace.workspaceId, title: 'QQ 表情整理' }); } catch {}
       }
-      const value = unwrap(await api.sessions.create({ workspaceId: wsValue.workspace.workspaceId, agentPreset: preset }), 'sticker session.create');
-      stickerDescriberSessionId = value.sessionId;
+      const created = await agentPort.ensureSession({ workspaceId: workspace.workspaceId, agentPreset: preset });
+      stickerDescriberSessionId = created.sessionId;
       atomicWriteJson(STICKER_DESCRIBE_SESSION_FILE, { sessionId: stickerDescriberSessionId, preset });
       log(`表情整理会话已创建：${stickerDescriberSessionId}`);
     }
@@ -3455,8 +3592,8 @@ async function main() {
         if (!usable.length) { job.done += batch.length; continue; }
         content[0] = { type: 'text', text: buildDescribePrompt(usable.length) };
         const sessionId = await ensureStickerDescriberSession();
-        const accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
-        if (!accepted.result.ok) throw new Error(`看图请求被拒：${accepted.result.error?.code}: ${accepted.result.error?.message}`);
+        const prompted = await agentPort.prompt(sessionId, { content });
+        if (!prompted.ok) throw new Error(`看图请求被拒：${prompted.error?.code}: ${prompted.error?.message}`);
         const output = await waitLearnerTurn(sessionId, 240000);
         const { patches, missing } = parseDescribeOutput(output, usable);
         for (const p of patches) {
@@ -3529,9 +3666,9 @@ async function main() {
 
     const promptText = buildExtractionPrompt(messages);
     try {
-      const accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content: [{ type: 'text', text: promptText }] });
-      if (!accepted.result.ok) {
-        log(`黑话提取被拒 (${key}): ${accepted.result.error.code}: ${accepted.result.error.message}`);
+      const accepted = await agentPort.prompt(sessionId, { content: [{ type: 'text', text: promptText }] });
+      if (!accepted.ok) {
+        log(`黑话提取被拒 (${key}): ${accepted.error?.code}: ${accepted.error?.message}`);
         return;
       }
       const output = await waitLearnerTurn(sessionId);
@@ -3592,9 +3729,9 @@ async function main() {
     }
     const promptText = buildResearchPrompt(targets);
     try {
-      const accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content: [{ type: 'text', text: promptText }] });
-      if (!accepted.result.ok) {
-        log(`黑话研究被拒: ${accepted.result.error.code}: ${accepted.result.error.message}`);
+      const accepted = await agentPort.prompt(sessionId, { content: [{ type: 'text', text: promptText }] });
+      if (!accepted.ok) {
+        log(`黑话研究被拒: ${accepted.error?.code}: ${accepted.error?.message}`);
         return;
       }
       const output = await waitLearnerTurn(sessionId);
@@ -3749,46 +3886,44 @@ async function main() {
     log('ℹ️  socialV2.voice.allowAbsolutePath=true 已不再放宽 AI 通道：AI 发的语音始终只允许来自语音库（库外文件请用语音工具/CLI 发送）');
   }
 
-  // DSH 侧。dsh.baseUrl 留空时自动识别端口（桌面版 0.2.0 写死 19387、0.2.1 起随机端口；命令行版默认 3080）。
+  // DSH 侧。Agent 平台的 `baseUrl` 留空时自动识别端口（桌面版 0.2.0 写死 19387、0.2.1 起随机端口；命令行版默认 3080）。
   let dshBaseUrlAuto = false;   // 留空自动识别时为 true：DSH 不可用期间 checkDsh 会定期重新识别
   {
-    const ep = await resolveAgentBaseUrl(cfg.dsh.baseUrl);
+    const ep = await resolveAgentBaseUrl(cfg.agentPlatform.baseUrl);
     if (ep.auto) log(`DSH 地址自动识别：${ep.url}${ep.discovered ? '（DSH 桌面版随机端口，按进程监听端口发现）' : ''}${ep.reachable ? '' : '（暂时连不上，先按此地址重试；DSH 不可用期间会定期重新识别）'}`);
-    cfg.dsh.baseUrl = ep.url;
+    cfg.agentPlatform.baseUrl = ep.url;
     dshBaseUrlAuto = ep.auto;
   }
-  const api = new AgentApiClient(cfg.dsh.baseUrl, undefined, {
-    token: cfg.dsh.authToken,
+  const api = new AgentApiClient(cfg.agentPlatform.baseUrl, undefined, {
+    token: cfg.agentPlatform.authToken,
     // true=用户在 config.json 里显式填的；false=从日志猜的。猜来的不优先于离线铸造。
-    tokenExplicit: cfg.dsh.authTokenExplicit === true,
-    header: cfg.dsh.authHeader,
-    prefix: cfg.dsh.authPrefix,
+    tokenExplicit: cfg.agentPlatform.authTokenExplicit === true,
+    header: cfg.agentPlatform.authHeader,
+    prefix: cfg.agentPlatform.authPrefix,
     // 默认只允许把 launch token 交给回环地址；远程 DSH 需要显式 opt-in（见 Agent 适配器的 ensureAuth）。
-    allowRemote: cfg.dsh.allowRemote === true
+    allowRemote: cfg.agentPlatform.allowRemote === true
   });
-  // DSH 的模型目录 RPC：0.1.5 是 `session/modelCatalog`。**不能走基类门面**
-  // `api.sessions.modelCatalog` —— 桥接钉住的 `@deepseek-ai/dsh-host-apiproxy@0.1.1-rc.2`
-  // 的 sessions 门面里根本没有这个方法（只有 `models` → 已下线的 `session/models`），
-  // 调用会抛 “api.sessions.modelCatalog is not a function”，让思考强度档位静默退回内置清单。
-  // 这里直接用桥接自己覆写的 callUnary（它本来就是为「不依赖旧版客户端域方法」而存在的），
-  // 并保留一次 `session/models` 回落以兼容更老的 DSH。
-  const modelCatalogErrorLogged = new Set();
-  async function fetchModelCatalog() {
-    try {
-      return await api.callUnary('session.modelCatalog', {});
-    } catch (error) {
-      const message = String(error?.message ?? error);
-      if (!/not.?found|unknown|unsupported|404|invalid server-response/i.test(message)) throw error;
-      return api.callUnary('session.models', {});
-    }
+  // C5：`api` 只管「怎么连」（地址 / 凭据 / 事件流 / 端点重识别），「连上之后做什么」一律经
+  // agentPort —— 平台动词（sessions.* / workspace.* / settings.* / respond …）只留在
+  // src/agent-side/adapters/<id>/port.mjs 里。未实现的能力位是 fail-closed（supports 可预问）。
+  const agentPort = createAgentPort(api);
+  // 平台装好了，才能回答「这条会话映射属于谁」：把老档案里 instance 为空的引用认领成当前
+  // 平台并落盘（幂等，只在真的有旧数据时写一次）。不认领的话下次换平台会把旧 id 当新平台的用。
+  agentPortId = agentPort.id;
+  const adoptedRefs = sessions.normalizeAll();
+  if (adoptedRefs) {
+    log(`已为 ${adoptedRefs} 条会话映射补记平台标识（${agentPortId}）`);
+    saveState();
   }
   // 模型目录缓存（60 秒 TTL、并发去重、3 秒超时）：控制台下拉、保存校验、会话 selectModel 共用。
+  // 版本差（session/modelCatalog → session/models）由适配器内部处理，内核看到的只是 catalog。
+  const modelCatalogErrorLogged = new Set(); // 同一条目录读取错误只写一次日志（避免 5 秒轮询刷屏）
   const modelCatalogCache = createModelCatalogCache({
-    fetchCatalog: async () => unwrap(await fetchModelCatalog(), 'session.modelCatalog'),
+    fetchCatalog: async () => (await agentPort.listModels()).catalog,
   });
   // 当前模型能不能看图（决定 QQ 图片是交给模型还是降级成文字占位）。
-  const modelCanSeeImages = () => canSeeImages(cfg.dsh ?? {});
-  const currentModelLabel = () => `${cfg.dsh?.provider || 'deepseek-official'}/${cfg.dsh?.model || 'deepseek-flash'}`;
+  const modelCanSeeImages = () => canSeeImages(cfg.agentPlatform ?? {});
+  const currentModelLabel = () => `${cfg.agentPlatform?.provider || 'deepseek-official'}/${cfg.agentPlatform?.model || 'deepseek-flash'}`;
   // 会话级模型：档案 model 非空时按它判断看图能力与标签；未指定则沿用全局。
   const profileModelOf = (key) => {
     const m = key ? state.profiles?.[key]?.model : null;
@@ -3807,8 +3942,8 @@ async function main() {
     const m = profileModelOf(key);
     if (!m) return modelCanSeeImages();
     // 全局显式「不能看图」仍然优先；否则按该模型公布的能力判断。
-    if (normalizeVisionSetting(cfg.dsh?.vision) === 'no') return false;
-    return canSeeImages({ provider: m.provider, model: m.model, vision: normalizeVisionSetting(cfg.dsh?.vision) === 'yes' ? 'yes' : 'auto' });
+    if (normalizeVisionSetting(cfg.agentPlatform?.vision) === 'no') return false;
+    return canSeeImages({ provider: m.provider, model: m.model, vision: normalizeVisionSetting(cfg.agentPlatform?.vision) === 'yes' ? 'yes' : 'auto' });
   };
   const collectors = new Map(); // sessionId -> turn collector
   const sendToolSucceededSessions = new Set(); // sessionId：当前 turn 内 MCP 发送类工具至少成功一次
@@ -3862,7 +3997,7 @@ async function main() {
 
   /** sessionId -> 最近一次已知的实际模型。切换模型会让单价差好几倍，所以按会话记。 */
   const sessionModels = new Map();
-  const nominalModel = () => cfg.dsh?.model || 'deepseek-flash';
+  const nominalModel = () => cfg.agentPlatform?.model || 'deepseek-flash';
 
   function rememberModel(sessionId, selection) {
     const model = selection?.model;
@@ -3908,7 +4043,7 @@ async function main() {
         projection: snapshot.projections,
         at: Date.now(),
         model: known?.model ?? nominalModel(),
-        provider: known?.provider ?? cfg.dsh?.provider
+        provider: known?.provider ?? cfg.agentPlatform?.provider
       });
       tokenLedger.ingestSnapshotRecords({ sessionId, records: snapshot.records });
       rebuildInFlightCollector(sessionId, snapshot.records);
@@ -4158,13 +4293,6 @@ async function main() {
     return runtimePlans;
   }
 
-  /** 当前生效方案（缺失/非法时回落到默认方案，不抛错）。 */
-  /** 能力目录（profiles/agent-platforms/dsh/capabilities/<id>.yml）是工具面的唯一源。 */
-  const capabilityStore = createCapabilityStore({
-    root: CAPABILITIES_ROOT,
-    log: (line) => log(line),
-  });
-
   /** 会话语义下的能力；解析不到返回 null（旧会话/未迁移方案按宽松处理）。 */
   function capabilityOf(key) {
     const id = sessionPlanOf(key)?.capability;
@@ -4187,7 +4315,7 @@ async function main() {
     const id = platformIdOf(key);
     try {
       const prompt = readPlatformPrompt({ root: PLATFORM_PROMPT_ROOT, id });
-      const vars = adapterRegistry.get('platform', id)?.vars ?? {};
+      const vars = platformVarsFor(id);
       return renderPlatformText(prompt.text, vars).trim();
     } catch (error) {
       log(`⚠️ 读取平台话术失败（${id}）：${error?.message ?? error}`);
@@ -4297,13 +4425,16 @@ async function main() {
   async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false, sessionId: explicitSessionId = null } = {}) {
     const key = apiKey(rawKey);
     // 建会话时还没 bindSession，必须把刚拿到的 sessionId 显式传进来。
-    const sessionId = explicitSessionId || sessions.get(key)?.sessionId;
-    if (!sessionId || !api.commands?.execute) return { ok: true, skipped: true };
+    // 这里只能 `sessions.get` —— 它返回裸 id；`get(key)?.sessionId` 恒为 undefined，
+    // 会让不传 explicitSessionId 的调用（授权过期回收 / 命令改级别）静默地什么也不做。
+    const sessionId = explicitSessionId || sessions.get(key);
+    if (!sessionId || !agentPort.supports('permission')) return { ok: true, skipped: true };
     const level = permissionLevelOf(key);
     const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() });
     try {
-      const r = unwrap(await api.commands.execute(sessionId, `/permission ${plan.preset}`), 'commands.execute');
-      const ok = permissionCommandSucceeded(r, plan.preset);
+      // port 交回的是已解包的回执；「这份回执算不算成功」由平台档的纯函数判定。
+      const { value } = await agentPort.applyPermission(sessionId, plan.preset);
+      const ok = permissionCommandSucceeded(value, plan.preset);
       if (ok) pinnedPermissions.set(key, plan.preset);
       else pinnedPermissions.delete(key);
       ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason });
@@ -4422,8 +4553,8 @@ async function main() {
 
   async function refreshPermissionCatalog() {
     try {
-      const value = unwrap(await api.permissionPresets.catalog(), 'permissionPresets.catalog');
-      const names = Array.isArray(value?.options) ? value.options.map((o) => String(o.value ?? o.name ?? '')).filter(Boolean) : null;
+      const { options } = await agentPort.listPermissionPresets();
+      const names = options.map((o) => String(o.value ?? o.name ?? '')).filter(Boolean);
       if (names) permissionCatalog = names;
     } catch (error) {
       // 拿不到目录不致命：L1/L2 用的是 DSH 内置预设；L3 在目录未知时 fail-closed。
@@ -4491,7 +4622,7 @@ async function main() {
     // 降级只要求本地生效（紧急关闭不能被 DSH 挂掉拖住）。
     const remote = await modeStore.writeRemote({
       mode,
-      update: async (payload) => unwrap(await api.settings.update(payload), 'settings.update'),
+      update: async (payload) => (await agentPort.writeSettings(payload)).value,
     });
     const dshSynced = remote.synced || remote.skipped === true;
     if (!dshSynced && escalating) throw new Error(`写入 DSH 设置失败（${remote.error?.message ?? remote.error}），未切换`);
@@ -4525,7 +4656,7 @@ async function main() {
   // 审批超时：给 DSH 回 rejected，并告诉 owner 是哪一个。
   async function onApprovalTimeout(entry) {
     try {
-      await withTimeout(api.respond({ clientId: entry.clientId, eventId: entry.eventId, outcome: { kind: 'result', value: 'rejected' } }), 5000, '审批超时回执');
+      await withTimeout(agentPort.respondPermission({ clientId: entry.clientId, eventId: entry.eventId }, 'rejected'), 5000, '审批超时回执');
     } catch (error) {
       log(`审批 #${entry.id} 超时回执失败：${error?.message ?? error}`);
     }
@@ -4697,9 +4828,9 @@ async function main() {
     if (!sessionId) return { ok: false, error: '这个会话还没有 DSH 会话' };
     if (isConversationBusyV2(key, getSocialV2State(key))) return { ok: false, error: '会话正忙，等这一轮结束再压缩' };
     try {
-      const r = unwrap(await withTimeout(api.commands.execute(sessionId, '/compact'), 300000, 'commands.execute /compact'), 'commands.execute');
-      const text = String(r?.result?.text ?? r?.text ?? '').trim();
-      if (r?.result?.kind && r.result.kind !== 'success') return { ok: false, error: text || r.result.kind };
+      const compacted = await withTimeout(agentPort.compactSession(sessionId), 300000, 'compactSession');
+      const text = compacted.text;
+      if (!compacted.ok) return { ok: false, error: text || compacted.kind };
       promptBlocks.forget(key);
       roleRefresh.forget(key);
       log(`[compact] 已压缩 ${key} 的上下文（${reason}）：${text.slice(0, 120)}`);
@@ -4880,7 +5011,7 @@ async function main() {
   // 远端细节在 src/runtime/mode-store.mjs；本函数只保留「读到了谁、交给控制器判定」。
   async function refreshMode() {
     try {
-      const s = unwrap(await api.settings.describe({}), 'settings.describe');
+      const { value: s } = await agentPort.readSettings();
       // DSH 的默认 preset（`agent-presets` 命名空间的 default）——closed-agent 的兜底值来源
       const presetNs = s.namespaces.find((n) => n.ns === 'agent-presets');
       const defaultPreset = settingFromDshNamespace(presetNs, 'default');
@@ -4969,7 +5100,7 @@ async function main() {
   /** 拉取 DSH 当前可用的 agent preset 清单（供控制台下拉与 closed-agent 兜底使用）。 */
   async function refreshPresetList() {
     try {
-      const { presets: list } = unwrap(await api.agentPresets.list({}), 'agentPresets.list');
+      const { presets: list } = await agentPort.listPresets();
       dshPresetIds = list.map((p) => String(p.id));
       if (!dshDefaultPreset) {
         const marked = list.find((p) => p.isDefault === true);
@@ -5154,9 +5285,9 @@ async function main() {
    */
   function stopRetiredSessionWork(sessionId, key = '') {
     void (async () => {
-      try { await withTimeout(api.stopSessionWork(sessionId), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
+      try { await withTimeout(agentPort.cancel(sessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); }
       catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；本地映射已撤销，请在 DSH 检查旧任务`); }
-      try { await withTimeout(api.workspace.archiveSession({ sessionId }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); }
+      try { await withTimeout(agentPort.archiveSession(sessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); }
       catch (error) { log(`归档失效会话失败 ${key}: ${error?.message ?? error}`); }
     })();
   }
@@ -5183,13 +5314,15 @@ async function main() {
     markReadCalledKeys.delete(key);
   }
 
-  function retireSession(key, { hibernate = false } = {}) {
+  function retireSession(key, { hibernate = false, foreign = false } = {}) {
     const sessionId = sessions.get(key);
-    // 休眠：只对从没挂过本地工具的聊天会话（非 closed-agent 建的）。高权限会话永远走归档。
-    const toDormant = hibernate && !!sessionId && isHibernatablePolicy(sessions.policyOf(key));
+    // 休眠：只对从没挂过本地工具的聊天会话（非 closed-agent 建的）。高权限会话永远走归档；
+    // 属于其他平台的映射不参与休眠（那边的 id 复用过来说是“上下文连续”，实际是串台）。
+    const toDormant = hibernate && !!sessionId && !foreign && isHibernatablePolicy(sessions.policyOf(key));
     if (toDormant) {
       if (state.dormantSessions[key] && state.dormantSessions[key].sessionId !== sessionId) archiveDormantSession(key);
-      state.dormantSessions[key] = { sessionId, policy: sessions.policyOf(key), dormantAt: Date.now() };
+      // instance：休眠会话也是「平台侧 id 的引用」，换平台后不能复用（见 src/session/ref.mjs）。
+      state.dormantSessions[key] = { sessionId, policy: sessions.policyOf(key), dormantAt: Date.now(), instance: agentPort.id };
     }
     sessions.unbind(key);
     forgetDshHealth(key);
@@ -5236,6 +5369,10 @@ async function main() {
       // 只停掉在途工作，不归档：回到同一模式、同一 preset 时原样复用（令牌已在上面轮换，休眠期间旧令牌无效）
       stopSessionWorkOnly(sessionId, key);
       log(`模式切换，会话休眠 ${key} -> ${sessionId}（回到 ${parsePolicyMode(state.dormantSessions[key].policy)} 时复用，不归档）`);
+    } else if (foreign) {
+      // 映射来自另一个平台：本地撤诉即可，不向当前平台发 cancel/archive ——
+      // 那边压根没这个会话，发过去只能换回一条 404 噪声，还会掩盖真正的病因。
+      log(`会话映射属于其他平台，已撤销 ${key} -> ${sessionId}`);
     } else {
       stopRetiredSessionWork(sessionId, key);
       log(`会话权限已变化，停用旧映射 ${key} -> ${sessionId}`);
@@ -5263,7 +5400,7 @@ async function main() {
   /** 只停在途工作、不归档（休眠用）。 */
   function stopSessionWorkOnly(sessionId, key = '') {
     void (async () => {
-      try { await withTimeout(api.stopSessionWork(sessionId), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
+      try { await withTimeout(agentPort.cancel(sessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); }
       catch (error) { log(`⚠️ 停止休眠会话的在途工作失败 ${key}：${error?.message ?? error}`); }
     })();
   }
@@ -5284,12 +5421,19 @@ async function main() {
       saveSocialV2State();
     }
     saveState();
+    // 属于其他平台的休眠会话：本地丢掉即可，别向当前平台发 cancel/archive（同 retireSession 的 foreign 分支）。
+    if (d.instance && d.instance !== agentPort.id) {
+      log(`休眠会话属于其他平台，已丢弃 ${key} -> ${d.sessionId}（${reason}）`);
+      return;
+    }
     stopRetiredSessionWork(d.sessionId, key);
     log(`休眠会话归档 ${key} -> ${d.sessionId}（${reason}）`);
   }
   /** 定期 / 模式切换后清理：过期、策略对不上、不再被允许的休眠会话归档。可复用的留到下一条消息再恢复。 */
   function pruneDormantSessions() {
     for (const [key, d] of Object.entries(state.dormantSessions)) {
+      // 属于其他平台的休眠会话一律作废：它们永远不会被当前平台「想起」，留着只是占位。
+      if (d.instance && d.instance !== agentPort.id) { archiveDormantSession(key, `属于平台 ${d.instance}`); continue; }
       const decision = dormantDecision(d, {
         now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
         currentPolicy: sessionPolicy(key), allowed: isSessionAllowedInCurrentMode(key),
@@ -5431,14 +5575,21 @@ async function main() {
   // 401：凭据读错目录时给出具体提示（src/dsh-auth-hint.js）；10 分钟内只提示一次。
   const dshAuthHint = createAuthHintGate();
   const dshProbe = createDshProbe({
-    probe: () => api.settings.describe({}),
+    // 探活要「抛错即失败」的语义；agentPort.probe 是查询语义（失败返 ok:false 不抛）：
+    // 在这里翻译一次，「什么算不可用」的政策仍然留在 dsh-probe.mjs。
+    probe: async () => {
+      const r = await agentPort.probe();
+      if (!r.ok) throw new Error(r.detail || 'Agent 平台探活失败');
+    },
     isAutoBaseUrl: () => dshBaseUrlAuto,
     rediscover: async () => {
       const ep = await resolveAgentBaseUrl('', { timeoutMs: 600 });
       return ep ? { reachable: Boolean(ep.reachable), url: ep.url } : null;
     },
+    // 端点重识别是「怎么连」而不是「能做什么」，不进 AgentPort 的调用面：换地址只能由客户端
+    // 自己做（它是唯一知道 baseUrl 与凭据绑定关系的地方）。
     applyUrl: (url) => {
-      if (api.setBaseUrl(url)) cfg.dsh.baseUrl = url;
+      if (api.setBaseUrl(url)) cfg.agentPlatform.baseUrl = url;
     },
     log,
   });
@@ -5602,7 +5753,7 @@ async function main() {
   //      **不能**证明 hook 收得到 QQ 数据（心跳会一直来）。所以它只作为兜底提示，
   //      阈值取很宽，措辞必须留余地。
   const SNOWLUMA_STATUS_POLL_MS = 60_000;
-  const SNOWLUMA_SILENCE_WARN_MS = Math.max(60_000, Number(cfg.snowluma?.silenceWarnMs) || 10 * 60_000);
+  const SNOWLUMA_SILENCE_WARN_MS = Math.max(60_000, Number(cfg.userPlatform?.silenceWarnMs) || 10 * 60_000);
   // 接收链路健康度（「自报坏」与「静默」是两个故障面）的判定全在 src/upstream/snowluma-health.mjs。
   const snowlumaHealth = createSnowlumaHealth({
     log,
@@ -5614,7 +5765,7 @@ async function main() {
   function noteUpstreamPacket(kind) {
     snowlumaHealth.notePacket(kind);
     // 两次事件包隔了太久：中间断过（电脑睡眠、NapCat 重启、桥接停过），恢复后补收错过的消息（见 src/backfill.js）
-    const gap = upstreamGap.notePacket(normalizeBackfillConfig(cfg.snowluma?.backfill).gapMs);
+    const gap = upstreamGap.notePacket(normalizeBackfillConfig(cfg.userPlatform?.backfill).gapMs);
     if (gap) scheduleBackfill(gap);
   }
 
@@ -5633,7 +5784,7 @@ async function main() {
   let backfillRetryCount = 0;
   let backfillRetryTimer = null;
   function scheduleBackfill(gap) {
-    const c = normalizeBackfillConfig(cfg.snowluma?.backfill);
+    const c = normalizeBackfillConfig(cfg.userPlatform?.backfill);
     if (!c.enabled) return;
     log(`[backfill] 和 QQ 的连接断过${describeDuration(gap.gapMs)}（最后一个事件包在 ${new Date(gap.since).toLocaleTimeString('zh-CN', { hour12: false })}），${Math.round(c.settleMs / 1000)} 秒后补收错过的消息`);
     backfillPending = backfillPending ? { since: Math.min(backfillPending.since, gap.since), gapMs: Math.max(backfillPending.gapMs, gap.gapMs) } : gap;
@@ -5652,7 +5803,7 @@ async function main() {
     return [...keys].filter((k) => Boolean(parseKey(k)) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
   }
   async function runBackfill({ since, gapMs }) {
-    const c = normalizeBackfillConfig(cfg.snowluma?.backfill);
+    const c = normalizeBackfillConfig(cfg.userPlatform?.backfill);
     if (!c.enabled) return { skipped: 'disabled' };
     if (currentMode !== 'reserved2' || cfg.socialV2?.enabled === false) {
       // 其它模式会把补收的旧消息逐条交给模型回复，不补；只提醒一下
@@ -5745,15 +5896,15 @@ async function main() {
    */
   async function pollSnowlumaStatus() {
     await snowlumaHealth.pollStatus({
-      httpUrl: cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000',
-      accessToken: cfg.snowluma?.accessToken,
+      httpUrl: cfg.userPlatform?.httpUrl || 'http://127.0.0.1:3000',
+      accessToken: cfg.userPlatform?.accessToken,
     });
   }
 
   function startSnowlumaWatch() {
     snowlumaHealth.startWatch(() => ({
-      httpUrl: cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000',
-      accessToken: cfg.snowluma?.accessToken,
+      httpUrl: cfg.userPlatform?.httpUrl || 'http://127.0.0.1:3000',
+      accessToken: cfg.userPlatform?.accessToken,
     }));
   }
 
@@ -7119,16 +7270,20 @@ async function main() {
           }
           return;
         }
-        // 平台清单（用户侧平台层）：profiles/platforms/<id>/ 是唯一源。
-        if (req.method === 'GET' && (url.pathname === '/api/platforms' || /^\/api\/platforms\/[a-z][a-z0-9-]{0,39}$/.test(url.pathname))) {
-          const id = url.pathname === '/api/platforms' ? '' : url.pathname.split('/').pop();
-          if (!id) {
-            sendJson({ ok: true, platforms: listPlatforms({ root: PLATFORMS_ROOT }) });
-            return;
+        // 平台统一注册表（C1）：四类来源合成一张表，控制台只读这一个端点。
+        //
+        // 与旧的三份清单（/api/platforms、/api/runtime/platforms、
+        // /api/runtime/agent-platforms）的差别：这里同时回答「有没有配置目录」「有没有实现」
+        // 「能不能收」「哪里不一致」。于是新增平台不需要改前端，配置目录孤岛不会静默消失。
+        // 不触网、不读 config.json 以外的文件：平台没连上时控制台也要能画出表格与诊断。
+        if (req.method === 'GET' && url.pathname === '/api/platforms/registry') {
+          try {
+            // 带上当前生效的平台配置：`config_invalid` 诊断要拿真实的 account/transport 去校，
+            // 给空对象就只能校空值，等于这条诊断永不触发。
+            sendJson(platformRegistrySnapshot({ config: bridgeCfg?.platforms ?? {} }));
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '读取平台注册表失败' }, 500);
           }
-          const platform = loadPlatform({ root: PLATFORMS_ROOT, id });
-          if (!platform) { sendJson({ ok: false, error: '平台不存在' }, 404); return; }
-          sendJson({ ok: true, platform });
           return;
         }
         // 平台话术（P10.9）：profiles/platforms/<id>/prompt.md，只读写正文。
@@ -7166,8 +7321,9 @@ async function main() {
           }
           return;
         }
-        // DSH 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
-        // 权威源仍是 profiles/agent-platforms/dsh/agents/<id>/，应用前备份，apply 负责 build + setup。
+        // 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
+        // 权威源是能力档 profiles/agent-platforms/dsh/capabilities/<id>.yml（C4），
+        // 应用前备份，apply 负责 build + setup-dsh。
         if (req.method === 'POST' && url.pathname === '/api/extensions/presets/create') {
           try {
             const body = await readBody();
@@ -7363,7 +7519,7 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/presets') {
           let presets = [];
           try {
-            const { presets: list } = unwrap(await api.agentPresets.list({}), 'agentPreset.list');
+            const { presets: list } = await agentPort.listPresets();
             presets = list.map((p) => ({ id: p.id, trust: p.trust ?? 'system' }));
           } catch {}
           sendJson({ presets });
@@ -7439,31 +7595,18 @@ async function main() {
         // 能力预设的桥接侧补丁（工具可见集 / 平台提示词）：只读列表 + 单条保存。
         if (req.method === 'GET' && (url.pathname === '/api/runtime/capabilities' || url.pathname === '/api/capabilities')) {
           const plans = planStore().list();
-          // Agent 模块的勾选状态由「引用这个能力的方案」所用的 Agent 预设决定：
-          // 读 agent.cordis.yml 里的插件 id，前端按目录里的模块 id 做交集展示（只读）。
-          const agentModuleIds = (agentId) => {
-            const ids = new Set();
-            if (!agentId) return ids;
-            try {
-              const file = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'agents', agentId, 'agent.cordis.yml');
-              const text = fs.readFileSync(file, 'utf8');
-              for (const match of text.matchAll(/^\s*-\s*id:\s*([a-z0-9][a-z0-9-]*)\s*$/gmu)) ids.add(match[1]);
-            } catch {
-              // 预设文件缺失时按「没有模块」展示，不阻断能力列表。
-            }
-            return ids;
-          };
+          // Agent 模块的勾选状态直接由能力档的 rows 段算（C4 起 agents/ 已删除，能力档 id 就是
+          // Agent 预设 id）；前端仍按目录里的模块 id 做交集展示（只读）。
           const capabilities = capabilityStore.list().map((entry) => {
             const usedBy = plans.filter((plan) => plan.capability === entry.id);
-            const modules = new Set();
-            usedBy.forEach((plan) => agentModuleIds(plan.agent).forEach((id) => modules.add(id)));
+            const rows = capabilityStore.get(entry.id)?.rows ?? [];
             return {
               ...entry,
               usedBy: usedBy.map((plan) => plan.id),
-              agentModules: [...modules],
+              agentModules: rows.map((row) => String(row?.id ?? '')).filter(Boolean),
             };
           });
-          sendJson({ ok: true, catalog: toolCatalogSnapshot(), adapters: adapterRegistry.snapshot(), capabilities });
+          sendJson({ ok: true, catalog: toolCatalogSnapshot(), capabilities });
           return;
         }
         if (req.method === 'POST' && (url.pathname === '/api/capabilities' || url.pathname === '/api/runtime/capabilities')) {
@@ -7499,23 +7642,6 @@ async function main() {
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '删除失败' }, 400);
           }
-          return;
-        }
-        if (req.method === 'GET' && url.pathname === '/api/runtime/adapters') {
-          sendJson({ ok: true, ...adapterRegistry.snapshot() });
-          return;
-        }
-        // 运行期的用户侧平台清单（B7）：这个进程实际能往哪些平台发、每个平台有什么
-        // 会话类型/能力/限制。与 /api/platforms 分工：那边读 profiles/platforms/（话术与
-        // 工具表的目录），这里读两侧注册表（内置 + 插件），回答的是「谁能发消息」。
-        // 不触网、不读配置：平台没连上时控制台也要能画出表单并解释为什么发不出去。
-        if (req.method === 'GET' && url.pathname === '/api/runtime/platforms') {
-          sendJson({ ok: true, ...userPlatformMetadata() });
-          return;
-        }
-        // Agent 侧平台清单（B7）：同理，读注册表而不是读 protocol。
-        if (req.method === 'GET' && url.pathname === '/api/runtime/agent-platforms') {
-          sendJson({ ok: true, ...agentPlatformMetadata() });
           return;
         }
         if (req.method === 'POST' && /^\/api\/runtime\/capabilities\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
@@ -7859,7 +7985,7 @@ async function main() {
         // ── 仿真提示词（一代 / 二代各自的预设内置提示词）──────────────────────
         if (req.method === 'GET' && url.pathname === '/api/preset/sim-prompt') {
           const preset = editablePresetName(url.searchParams.get('preset'));
-          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
+          if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           try {
             const { prefix } = readPresetPromptText(preset);
             const initial = defaultPromptState(preset, prefix);
@@ -7885,7 +8011,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt') {
           const body = await readBody();
           const preset = editablePresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
+          if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           let nextText;
           try {
             const { text, prefix } = readPresetPromptText(preset);
@@ -7893,7 +8019,7 @@ async function main() {
             // 让一次"打开又保存"把整个提示词块变成全删全加的 diff，失去可复审性。
             const normalized = String(body.content ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
             if (normalized === prefix) {
-              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix, presetKind(preset)), synced: fs.existsSync(installedPresetYaml(preset)), requiresRestart: false, status: presetStatus(preset) });
+              sendJson({ ok: true, unchanged: true, chars: prefix.length, warnings: presetPromptWarnings(prefix, presetKind(preset)), requiresRestart: false, status: presetStatus(preset) });
               return;
             }
             nextText = renderPresetPromptYaml(text, body.content, presetKind(preset));
@@ -7903,22 +8029,20 @@ async function main() {
           }
           const warnings = presetPromptWarnings(body.content, presetKind(preset));
           let sourceBackup = null;
+          let applied;
           try {
             sourceBackup = backupPresetFile(preset);
-            atomicWriteText(presetSourceYaml(preset), nextText);
-            // 同步到 DSH 实际读取的安装目录。
-            // 注意：安装副本**不做仓库内备份**——它的内容与刚写好的源文件一致，
-            // 备份它等于把含本机绝对路径的快照塞进仓库工作区，没有额外价值。
-            const installed = installedPresetYaml(preset);
-            if (fs.existsSync(installed)) {
-              fs.copyFileSync(presetSourceYaml(preset), installed);
-            }
+            writePresetRows(preset, nextText);
+            // C4 起 preset 是渲染产物：改完能力档必须重跑 build + setup-dsh 才会进 DSH 的
+            // profile（0.1.7 之后不再有 ~/.dsh/.agent-presets 安装副本）。apply 失败时
+            // 它自己会回滚，这里再用 sourceBackup 抹平本次编辑。
+            applied = await presetStore.apply(preset);
           } catch (error) {
             // 尽力回滚源文件，避免留下半截状态
             if (sourceBackup && fs.existsSync(sourceBackup)) {
               try { fs.copyFileSync(sourceBackup, presetSourceYaml(preset)); } catch {}
             }
-            sendJson({ ok: false, error: `写入失败：${error?.message ?? error}` }, 500);
+            sendJson({ ok: false, error: `写入失败：${error?.message ?? error}` }, error?.code === 'apply_failed' ? 500 : 400);
             return;
           }
           log(`控制台：${preset} 仿真提示词已更新（${String(body.content ?? '').length} 字符）${warnings.length ? `，${warnings.length} 条警告` : ''}；需重启 DSH 生效`);
@@ -7926,16 +8050,16 @@ async function main() {
             ok: true,
             chars: String(body.content ?? '').length,
             warnings,
-            synced: fs.existsSync(installedPresetYaml(preset)),
             requiresRestart: true,
             status: presetStatus(preset),
+            apply: applied,
           });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt/reset') {
           const body = await readBody();
           const preset = editablePresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
+          if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           const initial = readDefaultPrompt(preset);
           if (initial === null) { sendJson({ ok: false, error: '这个预设没有内置的初始版本' }, 404); return; }
           const side = presetKind(preset);
@@ -7950,11 +8074,11 @@ async function main() {
             return;
           }
           let sourceBackup = null;
+          let applied;
           try {
             sourceBackup = backupPresetFile(preset);
-            atomicWriteText(presetSourceYaml(preset), nextText);
-            const installed = installedPresetYaml(preset);
-            if (fs.existsSync(installed)) fs.copyFileSync(presetSourceYaml(preset), installed);
+            writePresetRows(preset, nextText);
+            applied = await presetStore.apply(preset);
           } catch (error) {
             if (sourceBackup && fs.existsSync(sourceBackup)) {
               try { fs.copyFileSync(sourceBackup, presetSourceYaml(preset)); } catch {}
@@ -7968,15 +8092,15 @@ async function main() {
             restored: true,
             chars: initial.length,
             warnings,
-            synced: fs.existsSync(installedPresetYaml(preset)),
             requiresRestart: true,
             status: presetStatus(preset),
+            apply: applied,
           });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/preset/sim-prompt/backups') {
           const preset = editablePresetName(url.searchParams.get('preset'));
-          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
+          if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           try {
             sendJson({ ok: true, backups: listPresetBackups(preset) });
           } catch (error) {
@@ -7987,7 +8111,7 @@ async function main() {
         if (req.method === 'POST' && url.pathname === '/api/preset/sim-prompt/restore') {
           const body = await readBody();
           const preset = editablePresetName(body.preset);
-          if (!preset) { sendJson({ ok: false, error: `未知预设（预设目录里没有 agent.cordis.yml）` }, 400); return; }
+          if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           try {
             const requested = String(body.file ?? '').trim();
             const candidates = listPresetBackups(preset).map((b) => b.file);
@@ -7995,8 +8119,17 @@ async function main() {
             // 只允许还原本预设目录下的备份文件，拒绝任何路径穿越
             if (!target || !candidates.includes(target)) { sendJson({ ok: false, error: '没有可用的备份' }, 400); return; }
             const backupPath = path.join(PRESET_BACKUP_DIR, target);
-            const restored = fs.readFileSync(backupPath, 'utf8');
-            const restoredPrefix = extractPresetPrefix(restored);
+            const restoredText = fs.readFileSync(backupPath, 'utf8');
+            // 备份是整份能力档（不再是 agent.cordis.yml），先归一成 rows 文本再取 prefix。
+            let restoredPrefix;
+            try {
+              const capability = normalizeCapability(YAML.parse(restoredText.replace(/^\uFEFF/, '')), { id: preset, source: target });
+              if (!capability.rows.length) throw new Error('没有 rows 段');
+              restoredPrefix = extractPresetPrefix(presetRowsText(capability));
+            } catch (error) {
+              sendJson({ ok: false, error: `备份内容不是有效的预设文件：${error?.message ?? error}` }, 400);
+              return;
+            }
             if (restoredPrefix === null) { sendJson({ ok: false, error: '备份内容不是有效的预设文件' }, 400); return; }
             // 还原路径必须与保存路径同样严格：旧备份可能来自安全基线加入之前，
             // 直接还原会把弱化版提示词（缺「你没有本地工具」等不变量）写回去。
@@ -8007,11 +8140,11 @@ async function main() {
               return;
             }
             backupPresetFile(preset);
-            atomicWriteText(presetSourceYaml(preset), restored);
-            const installed = installedPresetYaml(preset);
-            if (fs.existsSync(installed)) fs.copyFileSync(presetSourceYaml(preset), installed);
+            atomicWriteText(presetSourceYaml(preset), restoredText);
+            // 还原的是整份能力档，同样要重跑 build + setup-dsh 才会进 DSH 的 profile。
+            const applied = await presetStore.apply(preset);
             log(`控制台：${preset} 仿真提示词已还原自备份 ${target}；需重启 DSH 生效`);
-            sendJson({ ok: true, restoredFrom: target, requiresRestart: true });
+            sendJson({ ok: true, restoredFrom: target, requiresRestart: true, apply: applied });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '还原失败' }, 500);
           }
@@ -8431,9 +8564,9 @@ async function main() {
               presets: dshPresetIds.slice(),
               model: profile?.model ?? null,
               effectiveModel: profileModelOf(key) ?? {
-                provider: cfg.dsh?.provider || 'deepseek-official',
-                model: cfg.dsh?.model || 'deepseek-flash',
-                reasoning: cfg.dsh?.reasoningEffort || '',
+                provider: cfg.agentPlatform?.provider || 'deepseek-official',
+                model: cfg.agentPlatform?.model || 'deepseek-flash',
+                reasoning: cfg.agentPlatform?.reasoningEffort || '',
               },
               dsh: getDshHealth(key, sessionId),
             });
@@ -8459,7 +8592,7 @@ async function main() {
                 let selection;
                 try {
                   selection = validateModelSelection(got.catalog, {
-                    provider: raw.provider, model: raw.model, reasoningEffort: raw.reasoning ?? '', vision: cfg.dsh?.vision,
+                    provider: raw.provider, model: raw.model, reasoningEffort: raw.reasoning ?? '', vision: cfg.agentPlatform?.vision,
                   });
                 } catch (error) { sendJson({ ok: false, error: error?.message ?? '模型选择无效' }, 400); return; }
                 patch.model = { provider: selection.provider, model: selection.model, reasoning: selection.reasoningEffort || null };
@@ -8706,10 +8839,10 @@ async function main() {
 
         // ── DSH 模型与思考强度 ───────────────────────────────────────────────
         if (req.method === 'GET' && url.pathname === '/api/dsh/model') {
-          const provider = String(cfg.dsh?.provider || 'deepseek-official');
-          const model = String(cfg.dsh?.model || 'deepseek-flash');
-          const reasoningEffort = String(cfg.dsh?.reasoningEffort ?? '');
-          const vision = normalizeVisionSetting(cfg.dsh?.vision);
+          const provider = String(cfg.agentPlatform?.provider || 'deepseek-official');
+          const model = String(cfg.agentPlatform?.model || 'deepseek-flash');
+          const reasoningEffort = String(cfg.agentPlatform?.reasoningEffort ?? '');
+          const vision = normalizeVisionSetting(cfg.agentPlatform?.vision);
           // 选项全部取自 DSH 的模型目录（不另维护硬编码清单）；目录取不到时退化到「当前值 + 内置档位」，
           // 控制台标注「目录不可用」。
           const got = await modelCatalogCache.get({ force: url.searchParams.get('refresh') === '1' });
@@ -8771,14 +8904,10 @@ async function main() {
           const got = await modelCatalogCache.get({ force: true });
           if (!got.ok) { sendJson({ ok: false, error: `读取 DSH 模型目录失败，无法校验，未保存：${got.error}` }, 503); return; }
           let selection;
-          try { selection = validateModelSelection(got.catalog, { ...body, vision: body.vision ?? cfg.dsh?.vision }); }
+          try { selection = validateModelSelection(got.catalog, { ...body, vision: body.vision ?? cfg.agentPlatform?.vision }); }
           catch (error) { sendJson({ ok: false, error: error?.message ?? '选择无效' }, 400); return; }
-          const configFile = path.join(ROOT, 'config.json');
           // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
-          const file = readConfigObject(configFile);
-          file.dsh = { ...(file.dsh ?? {}), ...selection };
-          atomicWriteJson(configFile, file);
-          cfg.dsh = { ...(cfg.dsh ?? {}), ...selection };
+          savePlatformPatch('agent', selection);
           // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
           modelSelectionEpoch += 1;
           const priced = isPriced(selection.provider, selection.model, priceTable);
@@ -8795,15 +8924,11 @@ async function main() {
           const got = await modelCatalogCache.get();
           if (got.ok) {
             try {
-              effort = validateModelSelection(got.catalog, { provider: cfg.dsh?.provider, model: cfg.dsh?.model, reasoningEffort: effort, vision: cfg.dsh?.vision }).reasoningEffort;
+              effort = validateModelSelection(got.catalog, { provider: cfg.agentPlatform?.provider, model: cfg.agentPlatform?.model, reasoningEffort: effort, vision: cfg.agentPlatform?.vision }).reasoningEffort;
             } catch (error) { sendJson({ ok: false, error: error?.message ?? '思考强度无效' }, 400); return; }
           }
-          const configFile = path.join(ROOT, 'config.json');
           // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
-          const file = readConfigObject(configFile);
-          file.dsh = { ...(file.dsh ?? {}), reasoningEffort: effort };
-          atomicWriteJson(configFile, file);
-          cfg.dsh = { ...(cfg.dsh ?? {}), reasoningEffort: effort };
+          savePlatformPatch('agent', { reasoningEffort: effort });
           // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
           modelSelectionEpoch += 1;
           log(`控制台：DSH 思考强度已设为 ${effort || '模型默认'}（对已有会话于下一条消息生效）`);
@@ -10358,12 +10483,12 @@ async function main() {
             let readbackText = null;
             if (body.readback === true && sent.messageId) {
               try {
-                const httpUrl = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+                const httpUrl = String(cfg.userPlatform?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
                 const res = await fetch(`${httpUrl}/fetch_ptt_text`, {
                   method: 'POST',
                   headers: {
                     'content-type': 'application/json',
-                    ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {})
+                    ...(cfg.userPlatform?.accessToken ? { authorization: `Bearer ${cfg.userPlatform.accessToken}` } : {})
                   },
                   body: JSON.stringify({ message_id: String(sent.messageId) }),
                   signal: AbortSignal.timeout(30000)
@@ -12125,7 +12250,7 @@ async function main() {
           if (!title) { sendJson({ ok: false, error: '标题不能为空' }, 400); return; }
           if (title.length > 60) { sendJson({ ok: false, error: '标题最多 60 个字符' }, 400); return; }
           try {
-            await api.callUnary('session.rename', { sessionId, title });
+            await agentPort.renameSession(sessionId, title);
             log(`控制台：会话改名 ${key} → ${title}`);
             sendJson({ ok: true, key, sessionId, title });
           } catch (error) {
@@ -12188,9 +12313,9 @@ async function main() {
           saveSocialV2State();
           saveState();
           // 归档只隐藏会话，不终止 DSH 侧排队的工作；先清队列并取消当前回合。
-          try { await withTimeout(api.stopSessionWork(oldSessionId), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); }
+          try { await withTimeout(agentPort.cancel(oldSessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); }
           catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-          try { await withTimeout(api.workspace.archiveSession({ sessionId: oldSessionId }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
+          try { await withTimeout(agentPort.archiveSession(oldSessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
           log(`控制台：已清除会话上下文 ${key}（旧会话 ${oldSessionId} 已停止并归档）`);
           sendJson({ ok: true, key, archived: oldSessionId });
           return;
@@ -12202,21 +12327,21 @@ async function main() {
           try {
             // 新版 DSH 不再提供 workspace.list；改为扫描本桥接创建的会话目录并归档。
             // 只处理 cwd 位于 qq-bridge state/ 下的根会话；子代理会话由父会话管理，不能误归档。
-            const list = unwrap(await withTimeout(api.sessions.list({}), DSH_CONTROL_TIMEOUT_MS, 'sessions.list'), 'session.list');
+            const { sessions: list } = await withTimeout(agentPort.listSessions(), DSH_CONTROL_TIMEOUT_MS, 'listSessions');
             const stateDir = path.resolve(STATE_DIR);
             const statePrefix = path.normalize(stateDir + path.sep);
             const normPath = (p) => path.normalize(String(p ?? '').replace(/\//g, path.sep));
             const isUnderState = (cwd) => process.platform === 'win32'
               ? cwd.toLowerCase().startsWith(statePrefix.toLowerCase())
               : cwd.startsWith(statePrefix);
-            for (const item of list.items ?? []) {
+            for (const item of list) {
               if (item.origin === 'subagent' || item.parentSessionId) continue;
               const cwd = normPath(item.cwd);
               if (isUnderState(cwd)) {
                 // 归档只隐藏会话；必须先把 DSH 侧排队的工作清掉并取消当前回合。
-                try { await withTimeout(api.stopSessionWork(item.sessionId), DSH_CONTROL_TIMEOUT_MS, 'stopSessionWork'); stoppedCount += 1; }
+                try { await withTimeout(agentPort.cancel(item.sessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); stoppedCount += 1; }
                 catch (error) { log(`⚠️ 停止旧会话失败 ${item.sessionId}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-                try { await withTimeout(api.workspace.archiveSession({ sessionId: item.sessionId }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); archivedCount += 1; } catch {}
+                try { await withTimeout(agentPort.archiveSession(item.sessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); archivedCount += 1; } catch {}
               }
             }
           } catch {}
@@ -12740,7 +12865,7 @@ async function main() {
   function isSafeLocalMediaPath(filePath) {
     try {
       const real = fs.realpathSync(String(filePath));
-      const homeDir = cfg.snowluma?.homeDir ? String(cfg.snowluma.homeDir) : null;
+      const homeDir = cfg.userPlatform?.homeDir ? String(cfg.userPlatform.homeDir) : null;
       if (!homeDir) return false;
       const realHome = fs.realpathSync(homeDir);
       return real === realHome || real.startsWith(realHome + path.sep);
@@ -13209,14 +13334,14 @@ async function main() {
         { provider: perSession.provider, model: perSession.model, reasoningEffort: perSession.reasoning },
         got.ok ? got.catalog : null,
       )
-      : resolveSelectModelParams(cfg.dsh ?? {}, got.ok ? got.catalog : null);
+      : resolveSelectModelParams(cfg.agentPlatform ?? {}, got.ok ? got.catalog : null);
     if (warning && !modelParamWarnings.has(warning)) { modelParamWarnings.add(warning); log(`⚠️ ${warning}`); }
     const signature = JSON.stringify(params);
     if (modelAppliedSessions.get(sessionId) === modelSelectionEpoch && modelAppliedSignature.get(sessionId) === signature) return 'applied';
     let lastError = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        const result = unwrap(await api.sessions.selectModel({ sessionId, ...params }), 'session.selectModel');
+        const result = await agentPort.selectModel(sessionId, params);
         modelAppliedSessions.set(sessionId, modelSelectionEpoch);
         modelAppliedSignature.set(sessionId, signature);
         log(`已设置会话模型 ${sessionId} -> ${result.selected.provider}/${result.selected.model} (${result.selected.reasoningEffort ?? '默认'})`);
@@ -13247,7 +13372,7 @@ async function main() {
   async function nameCreatedSession(key, sessionId) {
     try {
       await withTimeout(
-        api.callUnary('session.rename', { sessionId, title: sessionTitleForKey(key) }),
+        agentPort.renameSession(sessionId, sessionTitleForKey(key)),
         DSH_CONTROL_TIMEOUT_MS,
         'session.rename',
       );
@@ -13265,8 +13390,14 @@ async function main() {
     if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
     const existing = sessions.get(key);
     if (existing) {
-      // reset/清空工作区期间旧映射可能尚未清理；发现代际不匹配必须丢弃旧会话，防止复活。
-      if (!isCurrentSession(key, existing)) {
+      // 换平台：映射指向的是**上一个平台**的会话 id。同一个字符串在另一个平台可能恰好存在，
+      // 直接复用就成了两个平台的上下文串在一起；不存在则每条消息都撞 404，看起来像「会话易失」。
+      // 两种后果都源于「字符串看着一样」，所以先判归属，再判代际与健康。
+      const owner = sessions.instanceOf(key);
+      if (owner && owner !== agentPort.id) {
+        log(`会话 ${key} 的映射属于平台 ${owner}，当前是 ${agentPort.id}：撤销旧映射并按当前平台重建`);
+        retireSession(key, { foreign: true });
+      } else if (!isCurrentSession(key, existing)) {
         retireSession(key);
       } else if (getDshHealth(key, existing).status === 'missing') {
         // 周期性对账已经确认 DSH 侧没有这个会话（手动删除/归档）：本地映射作废并重建，
@@ -13289,7 +13420,7 @@ async function main() {
               const repinned = await pinSessionPermission(key, { reason: 'mode-change', throwOnError: false, sessionId: existing });
               if (!repinned.ok && !chatSession && !cfg.permission.allowFull) {
                 log(`⛔ 无法为 ${key} 更新权限预设：${repinned.error}；丢弃该会话`);
-                try { await api.workspace.archiveSession({ sessionId: existing }); } catch {}
+                try { await agentPort.archiveSession(existing); } catch {}
                 retireSession(key);
                 throw new Error(`权限预设设置失败（${repinned.error}），已拒绝继续使用该会话`);
               }
@@ -13305,11 +13436,13 @@ async function main() {
       // 先看有没有可复用的休眠会话（进 agent 前的聊天会话；回到同一模式、同一 preset 才复用）
       const dormant = hibernateEnabled() ? state.dormantSessions[key] : null;
       if (dormant) {
-        const decision = dormantDecision(dormant, {
+        // 休眠会话也是「平台侧 id 的引用」：instance 不同就不能复用（老数据没有该字段，按当前平台认领）。
+        const foreignDormant = !!dormant.instance && dormant.instance !== agentPort.id;
+        const decision = foreignDormant ? 'archive' : dormantDecision(dormant, {
           now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
           currentPolicy: policy, allowed: isSessionAllowedInCurrentMode(key),
         });
-        if (decision === 'archive') archiveDormantSession(key);
+        if (decision === 'archive') archiveDormantSession(key, foreignDormant ? `属于平台 ${dormant.instance}` : '过期或策略已变');
         if (decision === 'resume') {
           const sid = dormant.sessionId;
           delete state.dormantSessions[key];
@@ -13364,13 +13497,13 @@ async function main() {
       const allowNoPresetFallback = false;
       for (const withPreset of allowNoPresetFallback ? [true, false] : [true]) {
         try {
-          const wsValue = unwrap(await api.workspace.create({ path: dir }), 'workspace.create');
-          if (wsValue.created && cfg.workspaceTitle) {
-            await api.workspace.rename({ workspaceId: wsValue.workspace.workspaceId, title: cfg.workspaceTitle });
+          const workspace = await agentPort.createWorkspace({ path: dir });
+          if (workspace.created && cfg.workspaceTitle) {
+            await agentPort.renameWorkspace({ workspaceId: workspace.workspaceId, title: cfg.workspaceTitle });
           }
-          const params = { workspaceId: wsValue.workspace.workspaceId };
+          const params = { workspaceId: workspace.workspaceId };
           if (withPreset && preset) params.agentPreset = preset;
-          const value = unwrap(await api.sessions.create(params), 'session.create');
+          const value = await agentPort.ensureSession(params);
           sessionId = value.sessionId;
           markDshHealth(key, sessionId, 'online');
           // DSH 默认用首条消息/时间命名，侧栏里分不清是哪个群；创建后立刻钉一个确定性标题。
@@ -13378,7 +13511,7 @@ async function main() {
           if (withPreset && preset) {
             log(`会话 ${key} 已挂载 preset ${preset}`);
           } else if (preset) {
-            log(`⚠️ 会话 ${key} 未能挂载 preset ${preset}（${lastError?.message ?? '未知原因'}），已降级为无 preset 会话；请检查 ~/.dsh/.agent-presets/${preset} 后重启 DSH`);
+            log(`⚠️ 会话 ${key} 未能挂载 preset ${preset}（${lastError?.message ?? '未知原因'}），已降级为无 preset 会话；请检查 capabilities/${preset}.yml 并在 node scripts/setup-dsh.mjs 后重启 DSH`);
           }
           break;
         } catch (error) {
@@ -13398,14 +13531,14 @@ async function main() {
         const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
         if (!pinned.ok && !chatSession) {
           log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);
-          try { await api.workspace.archiveSession({ sessionId }); } catch {}
+          try { await agentPort.archiveSession(sessionId); } catch {}
           throw new Error(`权限预设设置失败（${pinned.error}），已拒绝建会话`);
         }
       }
       // reset/清空工作区期间创建完成：丢弃，防止旧会话复活
       if (epoch !== sessionEpoch || policy !== sessionPolicy(key) || !isSessionAllowedInCurrentMode(key)) {
         log(`会话创建期间发生 reset，丢弃 ${key} 的新会话（${sessionId}）`);
-        try { await withTimeout(api.workspace.archiveSession({ sessionId }), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
+        try { await withTimeout(agentPort.archiveSession(sessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
         throw new Error('会话创建期间已重置，丢弃新会话');
       }
       sessions.bindSession(key, sessionId);
@@ -14209,26 +14342,26 @@ async function main() {
   {
     const t = setInterval(() => {
       void (async () => {
-        if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !api.commands?.execute) return;
+        if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !dshReady || !agentPort.supports('permission')) return;
         const key = ownerPrivateKey();
         const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
         if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
+        // preset 由适配器从回执里解出来（「回执格式长什么样」是平台知识）；内核只比较值。
+        let preset = '';
         let text = '';
         try {
-          const r = unwrap(await api.commands.execute(sessionId, '/permission'), 'commands.execute');
-          text = String(r?.result?.text ?? '');
+          ({ preset, text } = await agentPort.readPermission(sessionId));
           permissionCheckFailures = 0;
         } catch (error) {
           // 连续 3 次核对失败按「无法确认」处理：fail-closed，回落到安全模式。
           permissionCheckFailures += 1;
           log(`权限核对失败（${permissionCheckFailures}/3）：${error?.message ?? error}`);
           if (permissionCheckFailures < 3) return;
-          text = '';
+          preset = '';
         }
-        const m = /current preset (\S+)/.exec(text);
-        if (m && m[1] === plan.permissionPreset) return;
-        if (!m) {
+        if (preset && preset === plan.permissionPreset) return;
+        if (!preset) {
           permissionCheckFailures = 0;
           ext.audit.append('permission.unverifiable', { key, sessionId, expected: plan.permissionPreset, text: text.slice(0, 120) });
           log('🚨 无法确认 owner 会话的实际权限预设（DSH 返回格式不符或持续失败），按安全策略紧急回落');
@@ -14236,9 +14369,9 @@ async function main() {
           await ext.controller.panic('external-revert');
           return;
         }
-        ext.audit.append('permission.drift', { key, sessionId, expected: plan.permissionPreset, actual: m[1] });
-        log(`🚨 owner 会话的权限预设被外部改为 ${m[1]}（应为 ${plan.permissionPreset}），紧急回落`);
-        await sendOwnerDirect(`🚨 告警：运维 Agent 会话的权限被外部改成了「${m[1]}」（桥接设定的是「${plan.permissionPreset}」）。这不是经管理通道的操作，已立即紧急关闭回到安全模式。请检查是否有人在 DSH Web 界面操作。`);
+        ext.audit.append('permission.drift', { key, sessionId, expected: plan.permissionPreset, actual: preset });
+        log(`🚨 owner 会话的权限预设被外部改为 ${preset}（应为 ${plan.permissionPreset}），紧急回落`);
+        await sendOwnerDirect(`🚨 告警：运维 Agent 会话的权限被外部改成了「${preset}」（桥接设定的是「${plan.permissionPreset}」）。这不是经管理通道的操作，已立即紧急关闭回到安全模式。请检查是否有人在 DSH Web 界面操作。`);
         await ext.controller.panic('external-revert');
       })();
     }, 60_000);
@@ -14528,13 +14661,13 @@ async function main() {
   async function reconcileDshSessions() {
     let list;
     try {
-      list = unwrap(await withTimeout(api.sessions.list({}), 30_000, 'sessions.list'), 'session.list');
+      ({ sessions: list } = await withTimeout(agentPort.listSessions(), 30_000, 'listSessions'));
     } catch (error) {
       for (const [key, sessionId] of sessions.entries()) markDshHealth(key, sessionId, 'unknown', error?.message);
       log(`⚠️ DSH 会话对账失败：${error?.message ?? error}`);
       return { ok: false, error: String(error?.message ?? error) };
     }
-    const byId = new Map((list.items ?? []).map((item) => [item.sessionId, item]));
+    const byId = new Map(list.map((item) => [item.sessionId, item]));
     let online = 0;
     let missing = 0;
     for (const [key, sessionId] of sessions.entries()) {
@@ -14657,7 +14790,7 @@ async function main() {
     for (;;) {
       if (opts.farewell) social.exitingSessions.add(sessionId);
       try {
-        accepted = await api.sessions.prompt({ sessionId, mode: 'queue', content });
+        accepted = await agentPort.prompt(sessionId, { content });
       } catch (error) {
         if (opts.farewell) social.exitingSessions.delete(sessionId);
         if (!isSessionNotFoundError(error) || healAttempted || !allowSessionHeal(key)) throw error;
@@ -14665,15 +14798,16 @@ async function main() {
         sessionId = await healDshSession(key, sessionId, error);
         continue;
       }
-      if (accepted.result.ok) break;
+      if (accepted.ok) break;
       if (opts.farewell) social.exitingSessions.delete(sessionId);
-      // DSH 可能在排队期间丢了会话：accepted 形态的错误也要走同一条自愈路径。
-      if (isSessionNotFoundError(accepted.result.error) && !healAttempted && allowSessionHeal(key)) {
+      // 受理失败（会话已丢）与抛错走同一条自愈路径：中立形状把两者归一了，
+      // 但 error 仍然是内核认识的 { code, message }，判据不用变。
+      if (isSessionNotFoundError(accepted.error) && !healAttempted && allowSessionHeal(key)) {
         healAttempted = true;
-        sessionId = await healDshSession(key, sessionId, accepted.result.error);
+        sessionId = await healDshSession(key, sessionId, accepted.error);
         continue;
       }
-      const d = await reportAgentError(key, accepted.result.error, '消息未被接受', { silent: !!opts.silent });
+      const d = await reportAgentError(key, accepted.error, '消息未被接受', { silent: !!opts.silent });
       return { ok: false, error: `${d.code}: ${d.detail}` };
     }
     markDshHealth(key, sessionId, 'online');
@@ -14688,10 +14822,10 @@ async function main() {
       // rejected/stale deliveries must not be cleared by an old cursor.
       noteModelMessagesV2(wakeState, [...wakeSnapshot.messages, ...wakeSnapshot.recent]);
     }
-    if (accepted.result.value.command?.text && !opts.silent && effectiveMode(key) !== 'reserved2') {
+    if (accepted.commandText && !opts.silent && effectiveMode(key) !== 'reserved2') {
       if (opts.farewell) social.exitingSessions.delete(sessionId);
-      await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
-    } else if (accepted.result.value.command?.text && opts.silent && opts.farewell) {
+      await auditAndSend(key, mdToPlain(accepted.commandText), { decorate: true });
+    } else if (accepted.commandText && opts.silent && opts.farewell) {
       social.exitingSessions.delete(sessionId);
     }
     return { ok: true };
@@ -15842,9 +15976,9 @@ async function main() {
     const id = String(selfUserId || '').trim();
     if (!name && !id) return '';
     const label = name ? `「${name}」` : '（昵称未取到）';
-    // 平台名取自适应器的提示词变量（QQ / 将来的其他平台），缺失时用中性说法；
+    // 平台名取平台目录的提示词变量（platform.yml 的 vars.platform），缺失时用中性说法；
     // 不写死平台名，否则新增平台时身份句会把机器人本体说成 QQ。
-    const platformLabel = String(adapterRegistry.platformVars().platform || '当前平台').trim();
+    const platformLabel = platformLabelFor(platformOfConfig(cfg ?? {}));
     const idText = id ? `（${platformLabel} ${id}）` : '';
     const callBits = name
       ? `消息里出现「@${name}」、有人叫「${name}」、或引用你的消息，指的都是你 —— 不要当成别人`
@@ -16658,7 +16792,7 @@ async function main() {
       return true;
     }
     try {
-      await api.respond({ clientId: entry.clientId, eventId: entry.eventId, outcome: { kind: 'result', value: r.decision } });
+      await agentPort.respondPermission({ clientId: entry.clientId, eventId: entry.eventId }, r.decision);
       ext.approvals.complete(entry.id);
       ext.audit.append('approval.decided', { id: entry.id, key, tool: entry.toolName, decision: r.decision, argsKnown: entry.argsKnown, actor: role });
       if (currentLevel !== 'L0') ext.controller.touch();
@@ -16741,9 +16875,11 @@ async function main() {
       saveSocialV2State,
       saveState,
       send: sendToQQ,
+      // C5：注入给 src/session/reset.mjs 的也是中立动词（cancel / archiveSession）——
+      // 清理序列不该知道平台把「取消回合」叫什么。
       api: {
-        stopSessionWork: (sessionId) => api.stopSessionWork(sessionId),
-        archiveSession: (args) => api.workspace.archiveSession(args),
+        cancel: (sessionId) => agentPort.cancel(sessionId),
+        archiveSession: (sessionId) => agentPort.archiveSession(sessionId),
       },
       withTimeout,
       dshControlTimeoutMs: DSH_CONTROL_TIMEOUT_MS,
@@ -17229,18 +17365,14 @@ async function main() {
       content = [{ type: 'text', text: modelText }, ...imageParts];
     }
     if (!isCurrentSession(key, sessionId)) throw new Error('投递前会话已重置或权限已变化');
-    const accepted = await api.sessions.prompt({
-      sessionId,
-      mode: 'queue',
-      content
-    });
-    if (!accepted.result.ok) {
-      await reportAgentError(key, accepted.result.error, '消息未被接受');
+    const accepted = await agentPort.prompt(sessionId, { content });
+    if (!accepted.ok) {
+      await reportAgentError(key, accepted.error, '消息未被接受');
       return;
     }
-    if (accepted.result.value.command) {
+    if (accepted.isCommand) {
       // 斜杠命令直接有结果，不走模型
-      if (accepted.result.value.command.text) await auditAndSend(key, mdToPlain(accepted.result.value.command.text), { decorate: true });
+      if (accepted.commandText) await auditAndSend(key, mdToPlain(accepted.commandText), { decorate: true });
       return;
     }
     if (cfg.ackMessage && effectiveMode(key) !== 'reserved2') await sendToQQ(key, cfg.ackMessage);
@@ -17252,18 +17384,10 @@ async function main() {
     if (!entry) return;
     try {
       if (entry.kind === 'approval') {
-        await withTimeout(api.respond({
-          clientId: entry.clientId,
-          eventId: entry.eventId,
-          outcome: { kind: 'result', value: 'rejected' }
-        }), 5000, '取消挂起回执');
+        await withTimeout(agentPort.respondPermission({ clientId: entry.clientId, eventId: entry.eventId }, 'rejected'), 5000, '取消挂起回执');
         log(`已取消挂起审批（拒绝回执）: ${entry.eventId ?? entry.rpcId}`);
       } else if (entry.kind === 'question') {
-        await withTimeout(api.respond({
-          clientId: entry.clientId,
-          eventId: entry.eventId,
-          outcome: { kind: 'result', value: { answers: [] } }
-        }), 5000, '取消挂起回执');
+        await withTimeout(agentPort.respondPermission({ clientId: entry.clientId, eventId: entry.eventId }, { answers: [] }), 5000, '取消挂起回执');
         log(`已取消挂起提问（空答案回执）: ${entry.eventId ?? entry.rpcId}`);
       }
     } catch (error) {
@@ -17282,11 +17406,10 @@ async function main() {
         else answers.push({ id: q.id, selected: [], custom: answerText });
       }
       try {
-        const receipt = await api.respond({
-          clientId: p.clientId,
-          eventId: p.eventId,
-          outcome: { kind: 'result', value: { answers } }
-        });
+        const { raw: receipt } = await agentPort.respondPermission(
+          { clientId: p.clientId, eventId: p.eventId },
+          { answers },
+        );
         log(`已回答提问 (${key}):`, receipt);
         // 只有回执成功才移除挂起，且必须仍是同一个挂起（防止期间被新请求覆盖）
         if (pending.get(key) === p) pending.delete(key);
@@ -17310,11 +17433,10 @@ async function main() {
         return;
       }
       try {
-        const receipt = await api.respond({
-          clientId: p.clientId,
-          eventId: p.eventId,
-          outcome: { kind: 'result', value: outcome }
-        });
+        const { raw: receipt } = await agentPort.respondPermission(
+          { clientId: p.clientId, eventId: p.eventId },
+          outcome,
+        );
         log(`已处理审批 (${key}): ${outcome}`, receipt);
         await sendToQQ(key, outcome === 'allowed-once' ? '✅ 已通过审批' : '❌ 已拒绝审批');
         // 只有回执成功才移除挂起，且必须仍是同一个挂起（防止期间被新请求覆盖）
@@ -17907,17 +18029,12 @@ async function main() {
             // 黑话学习会话不应向用户提问/请求审批；自动跳过，避免阻塞学习任务。
             try {
               if (frame.type === 'question/requested') {
-                await api.respond({
-                  clientId: frame.clientId,
-                  eventId: frame.eventId,
-                  outcome: { kind: 'result', value: { answers: frame.questions.map((q) => ({ id: q.id, selected: [], custom: '' })) } }
-                });
+                await agentPort.respondPermission(
+                  { clientId: frame.clientId, eventId: frame.eventId },
+                  { answers: frame.questions.map((q) => ({ id: q.id, selected: [], custom: '' })) },
+                );
               } else {
-                await api.respond({
-                  clientId: frame.clientId,
-                  eventId: frame.eventId,
-                  outcome: { kind: 'result', value: 'rejected' }
-                });
+                await agentPort.respondPermission({ clientId: frame.clientId, eventId: frame.eventId }, 'rejected');
               }
               log('黑话学习会话自动跳过提问/审批');
             } catch (error) {
@@ -18012,22 +18129,75 @@ async function main() {
 
   // QQ 侧（SnowLuma OneBot WebSocket 客户端）
   const bot = new SnowLumaWebSocketClient({
-    url: cfg.snowluma.wsUrl,
-    accessToken: cfg.snowluma.accessToken || undefined,
+    url: cfg.userPlatform.wsUrl,
+    accessToken: cfg.userPlatform.accessToken || undefined,
     reconnect: true
   });
 
-  bot.onPrivateMessage(async (event) => {
-    // 统一按字符串比较：网关可能把 id 序列化成 number/string 混用，
-    // 用 `===` 漏掉自己发的消息会进入正常处理（reserved2 下 AI 会回答自己 / chat 下可能回复循环）。
-    if (String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-    try { await handleIncoming('private', event.user_id, event, cfg); } catch (error) { log('处理私聊消息出错:', error?.message ?? error); }
+  // ── 入站（C3）：收消息只有一条路 ────────────────────────────────────
+  // 适配器把厂商报文翻译成统一事件 → 校验 → 准入 → 会话映射 → 唤醒。以前这里的
+  // 两个订阅直接调 handleIncoming，准入与会话映射长在它内部；插件 transport 想
+  // 接进来只能再抄一份，两套口径迟早会在「谁先判、判什么」上分叉。
+  configureUserPlatformInbound(() => bot);
+  const inbound = createInboundPipeline({
+    origin: { platform: platformOfConfig(cfg), account: accountOfConfig(cfg) },
+    // 准入：管理通道（owner / 管理员的本人私聊）先于白名单 —— 与
+    // handleIncomingImpl 里的顺序一致，否则 owner 在未授权会话里发命令会被丢掉。
+    admit(event) {
+      const { type, id } = event.conversation;
+      const key = convKey(type, id);
+      if (type === 'private' && String(event.sender?.id ?? '') === String(id)
+          && ext.adminEnabled() && actorForKey(key)?.role !== 'user') return true;
+      if (passiveAllowed(key)) return true;
+      // 措辞与收口前保持一致：排障时还是搜这句话。
+      log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.sender?.id ?? ''}）`);
+      return false;
+    },
+    // 会话映射：拿不到 key 就没有「哪个会话」可言，后面全是按 key 记账。
+    resolve(event) {
+      const { type, id } = event.conversation;
+      return { key: convKey(type, id), type, id };
+    },
+    // 唤醒：QQ 的业务体仍然吃 OneBot 原始报文（`ext.raw`）。统一的只是**入口**
+    // （校验、准入、会话映射），现在这份正文能被搬进中立形状的时机是 C5 的
+    // 会话事件面 —— 早搬只会把引用解析、合并转发、媒体下载一起担风险。
+    deliver: ({ event }) => handleIncoming(
+      event.conversation.type,
+      event.conversation.id,
+      event.ext?.raw ?? {},
+      cfg,
+    ),
+    onDrop: (drop) => {
+      // 未准入已经在 admit 里按原措辞记过（带 key 与来源），这里不重复刷屏。
+      if (drop.reason === INBOUND_DROP.NOT_ADMITTED) return;
+      const detail = Array.isArray(drop.errors) && drop.errors.length ? `：${drop.errors.join('；')}` : '';
+      log(`⚠️ 入站事件已丢弃（${drop.reason}）${detail}`);
+    },
   });
-  bot.onGroupMessage(async (event) => {
-    if (String(event?.sender?.user_id ?? '') === String(event?.self_id ?? '')
-      || String(event?.user_id ?? '') === String(event?.self_id ?? '')) return;
-    try { await handleIncoming('group', event.group_id, event, cfg); } catch (error) { log('处理群消息出错:', error?.message ?? error); }
-  });
+  let inboundHandle = null;
+  // 退出时先摘订阅：插件收尾期间再来一条消息，唤醒会撞上已经 dispose 的插件。
+  inboundStop = async () => {
+    const handle = inboundHandle;
+    inboundHandle = null;
+    try { await handle?.close(); } catch (error) { log(`入站连接关闭失败：${error?.message ?? error}`); }
+  };
+  try {
+    inboundHandle = await startUserPlatformInbound({
+      signal: null,
+      onEvent: (event) => inbound.emit(event),
+      onStatus: ({ state, detail }) => {
+        if (state === 'open') log('入站已接管：消息走统一管线（校验 → 准入 → 会话映射 → 唤醒）');
+        else log(`入站连接：${state}${detail ? `（${detail}）` : ''}`);
+      },
+    });
+    if (!inboundHandle) {
+      // 只实现发送的平台合法（插件平台常见），但得说清楚不是故障。
+      log(`当前平台 ${platformOfConfig(cfg)} 未提供 connect()：只能发不能收`);
+    }
+  } catch (error) {
+    // 入站起不来不等于不能用：出站、命令、定时任务都还在，只是收不到新消息。
+    log(`⚠️ 入站未能启动：${error?.message ?? error}`);
+  }
   bot.onNotice('notify', async (event) => {
     try { await handlePokeNotice(event); } catch (error) { log('处理拍一拍事件出错:', error?.message ?? error); }
   });
@@ -18089,7 +18259,7 @@ async function main() {
   bot.on('open', () => {
     backendIsNapCat = null; // 网关可能换了（SnowLuma ⇄ NapCat），重新判断
     // 用实际连接地址（自愈后可能与 config 里的初值不同，别打印过期的那个）
-    const connectedUrl = bot.url ?? cfg.snowluma.wsUrl;
+    const connectedUrl = bot.url ?? cfg.userPlatform.wsUrl;
     snowlumaHealth.setConnected(true);
     // 日志按实际后端称呼（经接口平台时可能是 NapCat）：先问一次 get_version_info，问不到也照样打日志
     qqBackendInfo = null;
@@ -18132,7 +18302,7 @@ async function main() {
    */
   /**
    * 应用自愈结果：**HTTP token 与 WS token 是两个不同的值**。
-   *   - cfg.snowluma.accessToken → HTTP 调用（发语音、fetch_ptt_text、get_msg 等）与写回 config.json
+   *   - cfg.userPlatform.accessToken → HTTP 调用（发语音、fetch_ptt_text、get_msg 等）与写回 config.json
    *   - bot.accessToken          → WebSocket 连接（桥接的主链路，端口 3001）
    * 只修其中一个的话，桥接仍会以 1006 反复重连（实测踩过）。
    */
@@ -18142,10 +18312,10 @@ async function main() {
     // 不变量因此在测试里可以直接断言（不用起连接）。
     const update = resolveConnectionUpdate({
       current: { wsToken: bot.accessToken, wsUrl: bot.url },
-      config: { accessToken: cfg.snowluma.accessToken, wsUrl: cfg.snowluma.wsUrl },
+      config: { accessToken: cfg.userPlatform.accessToken, wsUrl: cfg.userPlatform.wsUrl },
       discovered: r,
-      followDiscoveredEndpoint: cfg.snowluma?.followDiscoveredEndpoint,
-      viaPlatform: cfg.snowluma?.viaPlatform,
+      followDiscoveredEndpoint: cfg.userPlatform?.followDiscoveredEndpoint,
+      viaPlatform: cfg.userPlatform?.viaPlatform,
     });
     const { httpToken, wsToken, wsUrl, wsChanged } = update;
 
@@ -18155,17 +18325,17 @@ async function main() {
     bot.url = wsUrl;
     if (wsChanged) log(`🔄 SnowLuma WS 连接已更新：${wsUrl}（token ${String(wsToken).slice(0, 4)}…）`);
     if (update.httpTokenChanged) {
-      log(`🔄 SnowLuma HTTP token 已更新（来源 ${update.source}）：${String(cfg.snowluma.accessToken).slice(0, 4)}… → ${String(httpToken).slice(0, 4)}…`);
-      cfg.snowluma.accessToken = httpToken;
+      log(`🔄 SnowLuma HTTP token 已更新（来源 ${update.source}）：${String(cfg.userPlatform.accessToken).slice(0, 4)}… → ${String(httpToken).slice(0, 4)}…`);
+      cfg.userPlatform.accessToken = httpToken;
     }
     if (update.endpointIgnored) {
-      log(`   （已按 snowluma.followDiscoveredEndpoint=false 忽略发现到的端点 ${r.wsUrl}，继续用配置值 ${cfg.snowluma.wsUrl}）`);
+      log(`   （已按当前平台的 followDiscoveredEndpoint=false 忽略发现到的端点 ${r.wsUrl}，继续用配置值 ${cfg.userPlatform.wsUrl}）`);
     }
     // 把确认可用的端点写回 config.json：下次启动直接就对了，不用再自愈一遍。
     // ⚠️ 必须在**改 cfg 之前**算出要写什么，但写文件时对照的是**文件里**的旧值 ——
     //    这里显式传 wsUrl，且不依赖 cfg 的内存值来判断"是否需要写"。
     // 关掉端点跟随时不写 URL：否则"我设了别处"这件事会被自愈持久化地抹掉（`persistUrl` 已表达）。
-    if (update.persistUrl) cfg.snowluma.wsUrl = wsUrl;
+    if (update.persistUrl) cfg.userPlatform.wsUrl = wsUrl;
     try {
       const w = persistSnowLumaEndpoint(path.join(ROOT, 'config.json'), {
         accessToken: httpToken,
@@ -18187,7 +18357,7 @@ async function main() {
   /** 只写文件、不动物件（连接已成功时用）。 */
   async function syncTokenToFile() {
     try {
-      const r = persistToken(path.join(ROOT, 'config.json'), cfg.snowluma.accessToken ?? '');
+      const r = persistToken(path.join(ROOT, 'config.json'), cfg.userPlatform.accessToken ?? '');
       // 只记「已写回」，不打印 token 片段：日志会被贴进 issue / 截图，
       // 前 4 个字符同样是凭据的一部分（CWE-532，见 PR #13）。
       if (r.updated) log('🔄 已把当前 token 写回 config.json');
@@ -18260,7 +18430,7 @@ async function main() {
     // 被拒时日志里可能是 close(1006)，也可能只有一条「SnowLuma 错误」（Node 内置 WebSocket 握手被拒时不发 close，
     // v0.4.1 起 error 也会触发自愈，并由连接看门狗兜底重连）。若 homeDir 没配/被移动/读不到 SnowLuma 的
     // config/onebot_<QQ>.json，自愈就无从下手，这时才会一直连不上 —— 那种情况请查
-    // 日志里的「token 自愈失败」与 config.json 的 snowluma.homeDir。
+    // 日志里的「token 自愈失败」与 config.json 的 platforms.users.<当前平台>.transport.homeDir。
     log(`SnowLuma 首次连接未成功（将在后台自动重连并尝试自愈 WS token）: ${error?.message ?? error}`);
   });
   log('桥接已启动。按 Ctrl+C 退出。');
@@ -18283,6 +18453,9 @@ function finishExit(code) {
   process.exit(code);
 }
 function shutdownThenExit(code) {
+  // 先摘入站订阅（同步触发，不等它关完）：之后到来的消息不再进管线，
+  // 插件可以安全地 dispose。连接本身随进程退出一起消失。
+  try { void inboundStop?.(); } catch {}
   if (!plugins) return finishExit(code);
   let done = false;
   const once = () => {

@@ -346,7 +346,7 @@ DSH 预设 preset（用户可建，DSH 侧）
 
 ### 5.4 资源型文件
 
-`config/behaviors/*.yml`、`dsh/agent-presets/*`、`assets/default-presets/*`、`extensions/mcp/<id>/server.json`、`state/extensions/secrets.json`。
+`profiles/platforms/qq/behaviors/*.yml`、`profiles/agent-platforms/dsh/capabilities/*.yml`（`preset` + `rows` + `extensions` 三段）、`extensions/mcp/<id>/server.json`、`state/extensions/secrets.json`。
 
 ### 5.5 待清理
 

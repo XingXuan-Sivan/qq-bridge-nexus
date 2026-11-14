@@ -60,8 +60,10 @@ test('内置用户平台已注册，且描述里没有平台实现细节', () =>
   assert.ok(qq.capabilities.includes('sticker'), '声明了 sticker 才能按能力降级');
   assert.ok(qq.capabilities.includes('forward'));
   // 描述里只允许静态元数据：任何函数都说明实现泄漏进了控制台可见的部分。
-  // limits 自 B7 起也在这里（控制台按它画表单，不再自己写死 4000）。
-  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'label', 'limits']);
+  // limits 自 B7 起也在这里（控制台按它画表单，不再自己写死 4000）；
+  // inbound 自 C3 起也是布尔值（有没有 connect()，函数本身不出口）。
+  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'inbound', 'label', 'limits']);
+  assert.equal(typeof qq.inbound, 'boolean');
   assert.equal(qq.limits.chunkChars, 4000);
 });
 
@@ -210,7 +212,8 @@ test('主程序不直接 import 具体平台适配器', () => {
 
 test('装配点各自只有一处，且都列在内置清单里', () => {
   assert.deepEqual(BUILTIN_USER_PLATFORMS.map((p) => p.id), ['qq']);
-  assert.deepEqual(BUILTIN_AGENT_PLATFORMS.map((p) => p.id), ['dsh']);
+  // 顺序即默认 active：dsh 首位不是排版偏好，注册表把第一个注册的当当前平台。
+  assert.deepEqual(BUILTIN_AGENT_PLATFORMS.map((p) => p.id), ['dsh', 'acp']);
 });
 
 // B5 踩过的坑：改名后夹具的注入表还钉着老符号（resolveDshBaseUrl），bridge 于是拿不到桩、

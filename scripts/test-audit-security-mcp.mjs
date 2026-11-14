@@ -8,6 +8,9 @@ import { z } from 'zod';
 // mcp-snowluma-safe.js 会剥掉 import：它现在自己 configureKeys，这两个符号得注入 VM。
 import { configureKeys, key as skillKey, platformOfConfig } from '../src/session/key.mjs';
 import { accessState, normalizeAccessConfig } from '../src/session/access.mjs';
+// 配置 v2 的派生视图同样是剥掉 import 后的外部依赖；它是纯函数（入参是解析后的配置对象，
+// 不读盘），所以直接注入真模块即可，夹具配置照样能算出扁平视图。
+import { configViews } from '../src/config/platforms.mjs';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -124,6 +127,7 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     skillKey,
     accessState,
     normalizeAccessConfig,
+    configViews,
   });
   return async (name, arguments_ = {}) => {
     const tool = tools.get(name);

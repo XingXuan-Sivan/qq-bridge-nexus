@@ -32,6 +32,9 @@ const transports = new Map();
  * @param {object} [definition.instance]   create(config) 的产物；`close()` 由内核在卸载时调用
  * @param {Function} [definition.send]     async ({ address, segments, opts }) => { messageId }
  *                                         —— 不给时取 instance.send（docs §5.2 的写法）
+ * @param {Function} [definition.connect]  async ({ signal, onEvent, onStatus }) => ({ close })
+ *                                         —— 入站（C3）：拿到厂商报文后翻译成统一事件再 onEvent(evt)；
+ *                                         不给则这个平台只能发不能收（统一注册表报 `inbound_unsupported`）
  * @param {string} owner                   pluginId
  */
 export function registerTransport(definition, owner) {
@@ -53,6 +56,11 @@ export function registerTransport(definition, owner) {
   if (!send) {
     throw new Error(`transport ${id} 必须提供 send({ address, segments, opts })（定义上或 create() 的产物上）`);
   }
+  // 入站（C3）：同样可以写在定义上或实例上。**可选** —— 只实现发送的平台合法，
+  // 但它会在统一注册表里被标成「只出不进」（`inbound_unsupported`），不会静默假装能收。
+  const connect = typeof definition?.connect === 'function'
+    ? definition.connect
+    : (typeof instance?.connect === 'function' ? instance.connect.bind(instance) : null);
   // 内置平台 id（qq / …）不许被插件顶替：那条链路连着真实账号与准入，
   // 让插件接管等于把「谁在发」这件事交给运行期代码（§5.3 第 3 条）。
   if (userPlatform(id)) {
@@ -77,6 +85,7 @@ export function registerTransport(definition, owner) {
     capabilities,
     limits,
     send,
+    connect,
     instance,
     close: typeof instance?.close === 'function' ? () => instance.close() : null,
   };
@@ -116,13 +125,16 @@ export function unregisterTransportsByOwner(owner) {
 
 /** 控制台 / 健康检查用：插件注册的平台清单。 */
 export function listTransports() {
-  return [...transports.values()].map(({ id, owner, label, conversationTypes, capabilities, limits }) => ({
+  return [...transports.values()].map(({ id, owner, label, conversationTypes, capabilities, limits, connect }) => ({
     id,
     owner,
     label,
     conversationTypes: [...conversationTypes],
     capabilities: [...capabilities],
     limits: { ...limits },
+    // 能不能收消息 = 有没有 connect()。这里只给布尔值，函数不进返回值
+    // （这份对象会原样进 `/api/platforms/registry`）。
+    inbound: typeof connect === 'function',
   }));
 }
 

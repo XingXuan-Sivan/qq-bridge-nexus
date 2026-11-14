@@ -10,12 +10,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 
-const make = () => {
+const make = (platform = 'dsh') => {
   let state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
-  const registry = createSessionRegistry(() => state);
+  let instance = platform;
+  const registry = createSessionRegistry(() => state, { instance: () => instance });
   return {
     registry,
     replaceState(next) { state = next; },
+    switchPlatform(next) { instance = next; },
     get state() { return state; },
   };
 };
@@ -25,8 +27,45 @@ test('bindSession 同时写映射与策略指纹', () => {
   registry.bindSession('group:1', 'sid-a', 'policy-1');
   assert.equal(registry.get('group:1'), 'sid-a');
   assert.equal(registry.policyOf('group:1'), 'policy-1');
-  assert.deepEqual(state.sessions, { 'group:1': 'sid-a' });
+  // 落盘是 `{ instance, sessionId }`（C5 第三批）：只存 id 时换平台会把旧会话当成新平台的。
+  assert.deepEqual(state.sessions, { 'group:1': { instance: 'dsh', sessionId: 'sid-a' } });
   assert.deepEqual(state.sessionPolicies, { 'group:1': 'policy-1' });
+});
+
+test('bindSession 不传 policy 时不动已有指纹（缺省与空值不是同一件事）', () => {
+  const { registry } = make();
+  registry.bindSession('a', 'sid-1', 'p1');
+  registry.bindSession('a', 'sid-2');
+  assert.equal(registry.get('a'), 'sid-2');
+  assert.equal(registry.policyOf('a'), 'p1', '指纹该由调用方紧接着 setPolicy 改写，不能被 undefined 抹掉');
+});
+
+test('ref/instanceOf 反映这条映射是哪个平台建的', () => {
+  const { registry, switchPlatform } = make('dsh');
+  registry.bindSession('a', 'sid-1', 'p');
+  assert.deepEqual(registry.ref('a'), { instance: 'dsh', sessionId: 'sid-1' });
+  assert.equal(registry.instanceOf('a'), 'dsh');
+  switchPlatform('acp:claude');
+  assert.equal(registry.instanceOf('a'), 'dsh', '换平台后旧引用仍归属原平台，调用方据此判废');
+  assert.equal(registry.get('a'), 'sid-1', 'get 只回答「有没有」，归属由 instanceOf 回答');
+});
+
+test('老数据（裸 id）读得懂，normalizeAll 把空 instance 认领成当前平台', () => {
+  const { registry, state } = make('dsh');
+  state.sessions['a'] = 'sid-legacy';
+  assert.equal(registry.get('a'), 'sid-legacy', '升级后第一条消息不能因为“形状不对”就丢上下文');
+  assert.equal(registry.normalizeAll(), 1);
+  assert.deepEqual(state.sessions.a, { instance: 'dsh', sessionId: 'sid-legacy' });
+  assert.equal(registry.normalizeAll(), 0, '幂等');
+});
+
+test('normalizeAll 不覆盖已经明确的 instance', () => {
+  const { registry, state } = make('acp:claude');
+  state.sessions.a = { instance: 'dsh', sessionId: 'sid-dsh' };
+  state.sessions.b = { instance: '', sessionId: 'sid-empty' };
+  assert.equal(registry.normalizeAll(), 1);
+  assert.equal(state.sessions.a.instance, 'dsh', '上一个平台的引用不能被伪造成当前平台的');
+  assert.equal(state.sessions.b.instance, 'acp:claude');
 });
 
 test('unbind 两格一起删；drop 只删映射', () => {
@@ -71,6 +110,7 @@ test('clearAll 清空两格', () => {
 test('state 被整体替换后注册表跟着走（loadState 的路径）', () => {
   const { registry, replaceState } = make();
   registry.bindSession('a', 'sid-1', 'p');
+  // 整体替换时带着的仍是**老形状**（磁盘上就是这样），读侧必须照常工作。
   replaceState({ sessions: { b: 'sid-2' }, sessionPolicies: { b: 'p2' }, dormantSessions: {} });
   assert.equal(registry.get('a'), null);
   assert.equal(registry.get('b'), 'sid-2');
@@ -80,9 +120,9 @@ test('state 被整体替换后注册表跟着走（loadState 的路径）', () =
 
 test('底层字段缺失或被写坏时就地修好，不抛错', () => {
   let state = { sessions: undefined, sessionPolicies: ['not', 'a', 'map'] };
-  const registry = createSessionRegistry(() => state);
+  const registry = createSessionRegistry(() => state, { instance: () => 'dsh' });
   assert.equal(registry.get('a'), null);
   registry.bindSession('a', 'sid-1', 'p');
   assert.deepEqual(state.sessionPolicies, { a: 'p' });
-  assert.equal(state.sessions.a, 'sid-1');
+  assert.deepEqual(state.sessions.a, { instance: 'dsh', sessionId: 'sid-1' });
 });

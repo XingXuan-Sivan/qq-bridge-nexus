@@ -2,9 +2,60 @@ version: 1
 id: dsh
 label: DeepSeek Harness
 tools: tools.yml
+# C4 起能力档就是预设列表（capabilities/<id>.yml 的 preset + rows），不再有并列的 agents/ 目录。
 capabilities: capabilities
-agents: agents
 # 运行期适配器：能力声明与权限/agent preset 映射（内核只经 src/agent-side/registry 读）。
 runtime: adapters/runtime.mjs
 # 产物目录不在这里声明：约定为 <仓库根>/artifacts/<id>/，
 # 由同目录的 adapters/build.mjs（planArtifacts）与 adapters/install.mjs 决定。
+#
+# 配置面（C2b）：Agent 平台的连接与模型选项。字段是**扁平**的 —— 配置 v2 把
+# baseUrl/authToken/authHeader/authPrefix/allowRemote 存进 platforms.agents.<id>.endpoint，
+# 其余（provider/model/reasoningEffort…）进 .options，校验前由 flatPlatformEntry() 拍平。
+# 与用户侧同一套校验规则（src/plugins/config-schema.mjs），没有 schema 的平台不校验。
+# additionalProperties: true —— DSH 的选项还在长，不在 schema 里穷举就不会误报。
+configSchema:
+  type: object
+  additionalProperties: true
+  properties:
+    baseUrl:
+      type: string
+      title: DSH 地址
+      description: 留空时自动发现（命令行版 3080 / 桌面版与 0.2.1 均为随机端口）。
+    authToken:
+      type: string
+      format: textarea
+      title: 鉴权令牌
+      description: 一般由桥接从 ~/.dsh/.credentials.yaml 自取；手写令牌才是显式作废自取。
+    authTokenExplicit:
+      type: boolean
+      title: 使用显式令牌
+      description: 为 true 时只用上面的 authToken，不再自动读取凭据文件。
+    authHeader:
+      type: string
+      title: 鉴权头名称
+      description: 默认 Authorization；换成反代自己的头名时改这里。
+    authPrefix:
+      type: string
+      title: 鉴权前缀
+      description: 令牌前面的修饰词，默认 Bearer；留空表示直接使用令牌。
+    allowRemote:
+      type: boolean
+      title: 允许远程连接
+      description: 默认只连本机；打开后 baseUrl 可以指向另一台机器。
+    provider:
+      type: string
+      title: 模型凭据方式
+      description: 与 DSH 里的登录方式必须一致（deepseek-official 按量计费 / deepseek-account 账号登录），不一致会报 MISSING_CREDENTIAL。
+    model:
+      type: string
+      title: 模型
+      description: 会话默认模型；能力预设或会话可以再覆盖。
+    reasoningEffort:
+      type: string
+      title: 推理强度
+      description: 低 / 中 / 高；具体取值取决于模型。
+    vision:
+      type: string
+      title: 视觉模型
+      description: 处理图片时用的模型；留空表示不看图。

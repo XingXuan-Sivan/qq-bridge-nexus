@@ -163,6 +163,10 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     await fs.mkdir(path.join(fixture, 'src', 'session'));
     await Promise.all(['key.mjs', 'access.mjs'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', 'session', name), path.join(fixture, 'src', 'session', name))));
+    // 配置 v2 的读点统一收在 `src/config/platforms.mjs`（纯函数，无依赖）；
+    // 夹具只拷被启动的文件，漏带它子进程 import 就会失败（表现为 MCP Connection closed）。
+    await fs.mkdir(path.join(fixture, 'src', 'config'));
+    await fs.copyFile(path.join(ROOT, 'src', 'config', 'platforms.mjs'), path.join(fixture, 'src', 'config', 'platforms.mjs'));
     // 工具注册面从能力预设推导（capabilities/store.mjs + tools/catalog），子进程只有 fixture/src，
     // 依赖模块也要一起带上。
     await fs.mkdir(path.join(fixture, 'src', 'capabilities'));

@@ -16,6 +16,7 @@
 
 import { formatKey, parseKey } from './key.mjs';
 import { createAccessConfig, normalizeAccessConfig } from './access.mjs';
+import { readSessionRef } from './ref.mjs';
 
 export const SESSION_DIR_VERSION = 2;
 /** 旧三态模型的默认值；只用于“有档案但没有 defaults.json”的迁移读取。 */
@@ -112,7 +113,10 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
       : null,
     presetId: normalizeString(raw.presetId, 80) || null,
     binding: {
-      sessionId: normalizeString(bindingRaw.sessionId, 120) || null,
+      // C5 第三批：绑定的是 `{ instance, sessionId }` 而不是裸 id —— 换平台后旧引用必须判废，
+      // 不能把上一个平台的会话 id 当成当前平台的（原因见 src/session/ref.mjs）。老档案把
+      // `sessionId` 平铺在 binding 上，这里整体传给归一函数，读法只有一条。
+      agentRef: readSessionRef(bindingRaw.agentRef ?? bindingRaw, normalizeString(bindingRaw.instance, 40) || ''),
       workspaceId: normalizeString(bindingRaw.workspaceId, 120) || null,
       fingerprint: normalizeString(bindingRaw.fingerprint, 200) || null,
       status: ['online', 'missing', 'unknown'].includes(bindingRaw.status) ? bindingRaw.status : 'unknown',
@@ -141,7 +145,7 @@ export function createProfile(key, patch = {}, now = Date.now) {
     wake: { config: null },
     model: null,
     presetId: null,
-    binding: { sessionId: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
+    binding: { agentRef: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
     dormant: null,
     updatedAt: now(),
   };
@@ -295,8 +299,12 @@ export function loadSessionDirectory({ dir, fs, path, log = () => {}, now = Date
   }
 
   for (const [key, profile] of Object.entries(state.profiles)) {
-    if (profile.binding?.sessionId) {
-      state.sessions[key] = profile.binding.sessionId;
+    // 档案里的绑定是**唯一**真相；老档案（`binding.sessionId`）由 readSessionRef 归一。
+    // instance 为空时不在这里认领平台：装载期还不知道当前是哪个平台，留给注册表的
+    // `normalizeAll()` 在平台装好之后统一补写（见 src/session/registry.mjs）。
+    const ref = readSessionRef(profile.binding?.agentRef ?? profile.binding, '');
+    if (ref) {
+      state.sessions[key] = ref;
       if (profile.binding.fingerprint) state.sessionPolicies[key] = profile.binding.fingerprint;
     }
     if (profile.dormant) state.dormantSessions[key] = profile.dormant;
@@ -328,7 +336,8 @@ export function createSessionDirectoryWriter({ dir, fs, path, atomicWriteJson, l
     if (!profile) return null;
     const binding = {
       ...profile.binding,
-      sessionId: state.sessions?.[key] ?? null,
+      // 内存映射本身就是归一过的引用；再走一次归一只是为了挡住手工改坏的状态对象。
+      agentRef: readSessionRef(state.sessions?.[key], '') ?? null,
       fingerprint: state.sessionPolicies?.[key] ?? null,
     };
     const next = {

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { safeFetchBuffer } from '../src/safe-fetch.js';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -18,6 +19,8 @@ function readJson(file) {
 }
 
 const config = readJson(path.join(ROOT, 'config.json'));
+// 配置 v2：模型类选项在 platforms.agents.<active>.options，经扁平视图读。
+const { agentPlatform: agent } = configViews(config);
 let passed = 0;
 let failed = 0;
 
@@ -35,8 +38,8 @@ function check(name, cond, extra = '') {
 // 多模态模型清单：DSH 0.1.5 的 llm-deepseek 里声明 inputModalities 含 image 的模型。
 // deepseek-flash（DeepSeek-V41-Flash）是当前默认；deepseek-v4-flash-vision-exp 为历史默认。
 const MULTIMODAL_MODELS = ['deepseek-flash', 'deepseek-v4-flash-vision-exp'];
-check('config.dsh.model 为多模态模型', MULTIMODAL_MODELS.includes(config.dsh?.model), `当前 ${config.dsh?.model}`);
-check('config.dsh.reasoningEffort 为 max', config.dsh?.reasoningEffort === 'max', `当前 ${config.dsh?.reasoningEffort}`);
+check('当前 Agent 平台的 model 为多模态模型', MULTIMODAL_MODELS.includes(agent.model), `当前 ${agent.model}`);
+check('当前 Agent 平台的 reasoningEffort 为 max', agent.reasoningEffort === 'max', `当前 ${agent.reasoningEffort}`);
 check('config.socialV2.tools.getImages 默认开启', config.socialV2?.tools?.getImages !== false);
 
 // 2. safe-fetch SSRF

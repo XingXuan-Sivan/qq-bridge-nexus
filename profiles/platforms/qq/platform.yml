@@ -10,3 +10,60 @@ behaviors:
   kinds:
     - v1
     - v2
+# 提示词变量（C2b）：prompt.md 与能力预设里的 {platform}/{displayName}/{owner} 用这几个值渲染。
+# 白名单在 src/runtime/prompt-compose.mjs 的 PROMPT_VAR_KEYS；这里多写的键会被丢掉，
+# 不会悄悄生效。插件想覆盖，按 id 注册同 id 适配器即可（后注册的优先）。
+vars:
+  platform: QQ
+  displayName: QQ
+  owner: 管理员
+# 配置面（C2b）：这个平台有哪些配置项。字段是**扁平**的 —— 配置 v2 把「怎么连上」存进
+# platforms.users.<id>.transport，其余进 .options，校验前由 flatPlatformEntry() 拍平，
+# 所以这里按用户在控制台看到的样子写，不写 transport/options 这层分法。
+# additionalProperties: true —— backfill 之类的行为选项不在这张表里穷举，写多少都照收。
+# 校验器只认 src/plugins/config-schema.mjs 支持的子集（object + 标量/枚举/数组），
+# 与插件 configSchema 是同一套规则，不引新依赖。
+configSchema:
+  type: object
+  additionalProperties: true
+  properties:
+    # 留给将来多账号：现在所有调用点都按「默认账号」处理，留空即默认。
+    account:
+      type: string
+      title: 账号名
+      description: 同一平台多账号时的名字；留空表示默认账号（会话 key 里不写 @账号）。
+      maxLength: 32
+    httpUrl:
+      type: string
+      title: OneBot HTTP 地址
+      description: 发送消息走这里。指向 WebSocket 端口会得到 HTTP 426，两者不要填同一端口。
+    wsUrl:
+      type: string
+      title: OneBot WebSocket 地址
+      description: 入站与主动拉取走这里；与 httpUrl 是同一后端的两个端口。
+    accessToken:
+      type: string
+      format: textarea
+      title: 访问令牌
+      description: QQ 后端里配置的 token；后端没开鉴权时留空。
+    followDiscoveredEndpoint:
+      type: boolean
+      title: 跟随发现的端点
+      description: 后端换了端口（如 SnowLuma 重启）时自动改用探测到的地址。
+    viaPlatform:
+      type: boolean
+      title: 经接口平台转发
+      description: 出站先交给 interface-platform，再由它转给 QQ 后端。
+    silenceWarnMs:
+      type: number
+      title: 静默告警阈值（毫秒）
+      description: 这么久没收到任何事件就打一条告警；0 表示不告警。
+      minimum: 0
+    launcherPath:
+      type: string
+      title: 启动器路径
+      description: 控制中心「启动后端」按钮点击的可执行文件路径；留空表示不让控制中心启动。
+    homeDir:
+      type: string
+      title: 数据目录
+      description: 后端自己的数据目录（登录态、缓存）；控制中心据此判断「装没装」。

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// profiles/ 结构与引用自检：平台、Agent 平台、能力预设、运行方案、行为档案。
+// profiles/ 结构与引用自检：平台、Agent 平台、能力档、运行方案、行为档案。
 //
 // 这是「四条数据链只认 profiles/」的门禁：目录缺失、引用悬空、内置方案被改名或
 // 自定义方案抢占内置 id，都在这里失败。用法：node scripts/check-profiles.mjs
@@ -10,6 +10,7 @@ import {
   listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
 } from '../src/platforms/index.mjs';
 import { createCapabilityStore, CAPABILITIES_ROOT } from '../src/capabilities/store.mjs';
+import { BUILTIN_CAPABILITY_IDS } from '../src/tools/catalog.mjs';
 import { createPlanStore, validatePlanReferences, BUILTIN_PLAN_ORDER } from '../src/runtime/plans.mjs';
 import { loadBehaviorProfiles } from '../src/behaviors/index.mjs';
 import { loadBehaviorTypes } from '../src/behaviors/types.mjs';
@@ -70,7 +71,8 @@ for (const platform of platforms) {
   catch (error) { note(`平台 ${platform.id} 装载失败：${error?.message ?? error}`); }
 }
 
-// 2) Agent 平台：agent-platform.yml / tools.yml / capabilities/ / agents/<id>/preset.yml
+// 2) Agent 平台：agent-platform.yml / tools.yml / capabilities/（C4 起能力档就是预设，
+//    渲染产物在 artifacts/ 下，不再有 agents/ 目录）
 for (const id of dirs(AGENT_PLATFORMS_ROOT)) {
   const dir = path.join(AGENT_PLATFORMS_ROOT, id);
   for (const name of ['agent-platform.yml', 'tools.yml']) {
@@ -78,29 +80,23 @@ for (const id of dirs(AGENT_PLATFORMS_ROOT)) {
   }
   const capsDir = path.join(dir, 'capabilities');
   if (!fs.existsSync(capsDir)) note(`Agent 平台 ${id} 缺 capabilities/`);
-  const agents = dirs(path.join(dir, 'agents'));
-  if (agents.length === 0) note(`Agent 平台 ${id} 没有 agents/`);
-  for (const agent of agents) {
-    for (const name of ['preset.yml', 'agent.cordis.yml']) {
-      if (!fs.existsSync(path.join(dir, 'agents', agent, name))) note(`Agent ${id}/${agent} 缺 ${name}`);
-    }
+  if (fs.existsSync(path.join(dir, 'agents'))) {
+    note(`Agent 平台 ${id} 还留着 agents/（C4 起已被 capabilities/ 吸收，预设由 build 适配器渲染）`);
   }
 }
 
-// 3) 能力预设：内置四条的 id 必须存在，引用只能在同 Agent 平台内
+// 3) 能力档：内置五条的 id 必须存在，且每条工具档也必须有同名的出厂副本
 const capabilities = createCapabilityStore({ root: CAPABILITIES_ROOT }).list();
 const capabilityIds = new Set(capabilities.map((item) => item.id));
-for (const id of ['agent-chat', 'agent-readonly', 'agent-workspace', 'agent-full']) {
-  if (!capabilityIds.has(id)) note(`缺少内置能力预设 ${id}`);
+for (const id of BUILTIN_CAPABILITY_IDS) {
+  if (!capabilityIds.has(id)) note(`缺少内置能力档 ${id}`);
+  const factory = path.join(CAPABILITIES_ROOT, '.defaults', `${id}.yml`);
+  if (!fs.existsSync(factory)) note(`内置能力档 ${id} 缺出厂副本（.defaults/${id}.yml）`);
 }
-if (!fs.existsSync(CAPABILITIES_ROOT)) note(`能力预设目录不存在：${CAPABILITIES_ROOT}`);
+if (!fs.existsSync(CAPABILITIES_ROOT)) note(`能力档目录不存在：${CAPABILITIES_ROOT}`);
 
 // 4) 运行方案：内置六条齐全且只读，引用必须能解析
 const plans = createPlanStore({ root: PLANS_ROOT }).list();
-const agentIds = new Set();
-for (const id of dirs(AGENT_PLATFORMS_ROOT)) {
-  for (const agent of dirs(path.join(AGENT_PLATFORMS_ROOT, id, 'agents'))) agentIds.add(agent);
-}
 const platformIds = new Set(platforms.map((item) => item.id));
 const agentPlatformIds = new Set(dirs(AGENT_PLATFORMS_ROOT));
 const behaviorIds = new Set();
@@ -119,7 +115,6 @@ for (const plan of plans) {
   const issues = validatePlanReferences(plan, {
     behaviors: behaviorIds,
     capabilities: capabilityIds,
-    agents: agentIds,
     platforms: platformIds,
     agentPlatforms: agentPlatformIds,
   });
@@ -138,4 +133,4 @@ if (problems.length) {
   for (const problem of problems) console.error(`  - ${problem}`);
   process.exit(1);
 }
-console.log(`✅ profiles 自检通过：${platforms.length} 个平台、${capabilities.length} 个能力预设、${plans.length} 个方案、${agentIds.size} 个 Agent。`);
+console.log(`✅ profiles 自检通过：${platforms.length} 个平台、${capabilities.length} 个能力档、${plans.length} 个方案、${capabilityIds.size} 个预设。`);

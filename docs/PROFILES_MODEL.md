@@ -4,6 +4,8 @@
 > 旧的 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/` 三处存储已删除，没有兼容层。
 > 本文只描述现状；历史设计文档见文末“相关文档”。
 >
+> **后续结构以 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) 为准**：本文 §一 的层级表与 §二 的目录示例，在 C2 / C4 实施时由它改写。在此之前本文仍是各配置文件的**字段字典**，但“层怎么分、目录怎么摆”不要以本文为准。
+>
 > **源码 vs 产物**：`profiles/` 是**权威源**（人写的 yml / md / mjs），`artifacts/<agent平台>/` 是**生成或打包产物**（DSH 加载用）。
 > 产物一律由该平台的适配器生成，不手改；二者的关系见 [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md)。
 
@@ -16,7 +18,7 @@
 | **用户侧平台**（platform） | AI 在哪个聊天平台上做事（QQ、微信、B 站……） | `profiles/platforms/<id>/` | 系统给接口与公共配置，平台特有的行为由该平台目录里的数据提供 |
 | **行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | `profiles/platforms/<id>/behaviors/*.yml` | 档案作者（内置两份，可增删） |
 | **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前只有 DSH） | `profiles/agent-platforms/<id>/` | 系统给接口，具体工具/模块由该平台目录提供 |
-| **能力预设**（capability） | 这个 Agent 平台里“能拿到什么”：平台工具、Agent 模块、MCP、技能 | `profiles/agent-platforms/<id>/capabilities/*.yml` | 内置四条，可克隆/新建 |
+| **能力预设**（capability） | 这个 Agent 平台里“能拿到什么”+“预设长什么样”：平台工具、Agent 模块、MCP、技能、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml` | 内置五条，可克隆/新建 |
 | **运行方案**（plan） | 把“行为档案 + 能力预设”组合成一个可切换的档位，并声明平台与 Agent | `profiles/plans/*.yml` | 内置六条（只读），可克隆成自定义方案 |
 | **权限级别** | 具体会话最终能用能力预设里的哪些工具 | 会话配置（`state/sessions.json`） | 会话级，不落在档案里 |
 
@@ -30,7 +32,7 @@
 profiles/
 ├── platforms/
 │   └── qq/
-│       ├── platform.yml          # id / label / 说明
+│       ├── platform.yml          # id / label / vars / configSchema（字段字典见 §三）
 │       ├── tools.yml             # 平台工具目录（flag、宿主工具名、风险、defaultOff）
 │       ├── prompt.md             # 平台话术（可编辑）
 │       ├── prompt.default.md     # 出厂话术（「还原」从这里取）
@@ -42,15 +44,15 @@ profiles/
 │           └── social-v2.yml     # 二代仿真（kind: social-v2）
 ├── agent-platforms/
 │   └── dsh/
-│       ├── agent-platform.yml    # id / label / 说明
+│       ├── agent-platform.yml    # id / label / configSchema（字段字典见 §三）
 │       ├── tools.yml             # Agent 模块目录（文件读写、PowerShell、Web……）
 │       ├── capabilities/
-│       │   ├── agent-chat.yml
-│       │   ├── agent-readonly.yml
-│       │   ├── agent-workspace.yml
-│       │   └── agent-full.yml
+│       │   ├── chat.yml
+│       │   ├── chat-v2.yml
+│       │   ├── readonly.yml
+│       │   ├── workspace.yml
+│       │   └── full.yml
 │       ├── templates/rows.yml    # 安装/生成产物用的行模板
-│       ├── agents/               # 要装进 DSH 的 preset（chat、chat-v2、qq-agent-*）
 │       └── adapters/             # 该平台的构建/安装适配器（P1 起）
 │           ├── build.mjs         # planArtifacts()：源码 → 产物文件清单（纯函数）
 │           └── install.mjs       # install()：产物装进运行时（写 profile patch / junction）
@@ -66,8 +68,9 @@ artifacts/                        # 各 Agent 平台的产物根（目录名 = a
 ```
 
 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 由 **DSH 平台的 build 适配器**
-（`profiles/agent-platforms/dsh/adapters/build.mjs`）从 `profiles/agent-platforms/dsh/agents/` 生成，
-入口是 `node scripts/build-artifacts.mjs dsh`（`npm run build:artifacts`）；改 agent 目录后要重新生成并重启 DSH。
+（`profiles/agent-platforms/dsh/adapters/build.mjs`）从 `profiles/agent-platforms/dsh/capabilities/<id>.yml`
+（`preset` 元信息 + `rows` 插件行）渲染，入口是 `node scripts/build-artifacts.mjs dsh`（`npm run build:artifacts`）；
+改能力档后要重新生成并重启 DSH。
 
 同一目录里**手写**的文件（`qq-tool-restrict.mjs`、`qq-approval-gate.mjs`、`protected-paths.mjs`、`package.json`）
 不是产物，构建不会覆盖它们 —— 生成器只写 `presets/*.patch.yml`。
@@ -97,26 +100,41 @@ config: {}            # 该类型的配置（v2 与全局 socialV2 合并）
 - 新建档案时选的是「平台 + 类型（label）」，不再出现 v1/v2；同一类型下可以有多份档案（如 `social-v1`、`social-v2` 都是内置类型各一份）。
 - 旧写法 `v1:` / `v2:` 顶层段已被拒绝（报“未知顶层字段”）；`kind: v1` 这类旧值仍能被 engine 别名解析，但归档时统一写 `social-v1`。
 
-### 能力预设 `capabilities/<id>.yml`
+### 能力档 `capabilities/<id>.yml`
+
+C4 起能力档是 Agent 侧**唯一**的档位真源：`tools`（能拿到什么）、`preset`（DSH 预设元信息）、
+`rows`（插件行列表，渲染成 preset patch）、`extensions`（MCP/技能授权）四段同居一文件，
+**能力档 id 就是 Agent preset id**（`chat` / `chat-v2` / `readonly` / `workspace` / `full`）。
 
 ```yaml
 version: 1
-id: agent-chat
 label: 聊天 Agent
-note: …
-platform: qq
-agentPlatform: dsh
-agent: chat          # 该能力对应的 DSH preset
+note: 无本地工具，只做对话与问答
 tools:
   platform: { sendGroup: true, getPrompt: true, … }   # 平台工具开关（true/false 都保留）
   agent: { tool-web: true, tool-todo: true, … }       # Agent 模块开关
-  mcp: [{ server: snowluma-safe, tools: '*' }]        # MCP 服务器与工具
+  mcp: [{ server: '*', tools: '*' }]                  # MCP 服务器与工具
   skills: ['*']                                       # 技能
+preset:                                               # DSH 预设列表里显示什么
+  name: QQ 聊天角色
+  description: …
+  order: 10
+  behavior: social-v1                                 # 仿真不变量校验用（v1 / v2）
+rows:                                                 # 插件行（同 DSH cordis 行）
+  - id: persona
+    name: '@deepseek-ai/dsh-persona'
+    config: { prefix: |- … }
+extensions:                                           # 可选：外部 MCP/技能授权
+  mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }
+  skills: { allow: ['*'] }
 ```
 
-- 能力预设**只描述“拿到什么”**：不再有 order / prompt.base / safety / risk 这些只为生成 DSH 产物的字段。
-- 保存只写回这一个 yml，不再生成 `agent.cordis.yml` / `preset.yml`；内置四条不可删除，可克隆。
-- 平台工具的注册面 = 所有能力预设 `tools.platform` 的并集（`platformFlags()`），`config.json` 不再有 `tools`。
+- 能力档**同时描述“拿到什么”和“预设长什么样”**：`tools/label/note` 描述能力语义（平台无关），
+  `preset.name/description` 与 `rows` 是随平台走的预设正文（含“QQ”这类产品文案）。
+- 保存只写回这一个 yml（yaml Document 局部更新，其它段注释不丢）；内置五条不可删除，可克隆。
+- `rows` 是 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml` 的唯一源；子插件名用
+  **bundle 包名裸说明符**（如 `qq-agent-presets/qq-tool-restrict.mjs`）——`./x.mjs` 会被按 profile 目录解析而装不上。
+- 平台工具的注册面 = 所有能力档 `tools.platform` 的并集（`platformFlags()`），`config.json` 不再有 `tools`。
 
 ### 运行方案 `plans/<id>.yml`
 
@@ -127,21 +145,28 @@ label: 二代仿真
 builtin: true
 platform: qq
 agentPlatform: dsh
-agent: chat-v2
 behavior: social-v2
-capability: agent-chat
+capability: chat-v2      # 能力档 id（同时就是预设 id）
 audience: access
 note: …
 ```
 
 - 内置六条：`chat`、`social-v1`、`social-v2`、`agent-readonly`、`agent-workspace`、`agent-full`；`builtin: true` 的只能克隆，不能改/删。
+- 方案里**没有独立的 `agent` 字段**（C4 起）：能力档 id 就是预设 id，`capability` 一个字段说清「用哪套预设」。
 - `behavior` 只存档案名；引用的档案不存在时加载侧告警并退化为“无档案”，不阻断消息处理。
 - 方案解析：会话单独设置的方案优先，没设就用全局默认方案（`config.json` 的 `runtime.defaultPlan`，缺省 `social-v2`）；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
 - 内置方案、内置行为档案、内置能力预设的出厂副本放在各自目录的 `.defaults/<id>.yml`；控制台「重置」按钮复制回正式文件，改坏了可以一键还原。
 
 ### 平台 / Agent 平台
 
-`platform.yml`、`agent-platform.yml` 只放 `id / label / note` 与目录元信息；平台工具目录在 `tools.yml`，Agent 模块目录在 `agent-platforms/<id>/tools.yml`。
+`platform.yml`、`agent-platform.yml` 放身份与目录元信息（`id` / `label` / 目录项）与下面两个声明面字段；平台工具目录在 `tools.yml`，Agent 模块目录在 `agent-platforms/<id>/tools.yml`。
+
+C2b 起两侧多了两个**声明面**字段（详见 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §4.5）：
+
+| 键 | 位置 | 含义 |
+| --- | --- | --- |
+| `vars` | 仅 `platform.yml` | 提示词变量（`platform` / `displayName` / `owner`）。构建期渲染产物、运行期渲染唤醒提示词都读它；白名单外键丢弃 |
+| `configSchema` | 两侧 yml | 这个平台有哪些配置项。统一注册表用它判 `config_invalid`，控制台用它画表单。字段是**扁平**的（不写 `transport.` / `endpoint.` 前缀），`additionalProperties: true`，不设 `required` |
 
 ---
 
@@ -149,7 +174,7 @@ note: …
 
 | 能力 | 模块 |
 | --- | --- |
-| 读平台与工具目录 | `src/platforms/index.mjs`：`listPlatforms` / `loadPlatform` / `readPlatformTools` / `PLATFORM_TOOL_RISKS` |
+| 读平台与工具目录 | `src/platforms/index.mjs`：`listPlatforms`（带 `label` / `vars` / `configSchema`）/ `loadPlatform` / `readPlatformTools` / `listAgentPlatformDirs` / `PLATFORM_TOOL_RISKS` |
 | 行为档案读写 | `src/behaviors/index.mjs`：`loadBehaviorProfiles` / `normalizeBehavior` / `resolveBehavior` / `readBehaviorDocument` / `writeBehaviorData` / `duplicateBehavior` / `removeBehaviorFile` |
 | 平台话术 | `src/user-side/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
 | 能力预设 | `src/capabilities/store.mjs`：`createCapabilityStore` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
@@ -188,7 +213,7 @@ export async function install({ repoRoot, profile, env, log }) {     // 失败�
 
 ```js
 export const id = 'dsh';
-export const capabilities = Object.freeze(['session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact']);
+export const capabilities = Object.freeze(['session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact']);
 export const PERMISSION_PRESET_FOR_LEVEL = Object.freeze({ 'read-only': 'read-only', …, full: 'danger-full-access' });
 export const LEVEL_PERMISSION_PRESET = Object.freeze({ L1: 'read-only', L2: 'workspace-write', L3: 'qq-full-ask' });
 export const AGENT_PRESET_IDS = Object.freeze(['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
@@ -197,6 +222,11 @@ export const AGENT_PRESET_ALIASES = Object.freeze({ 'qq-chat': 'chat', … });  
 export function resolveLevelPlan(level, ctx) {}                     // 内核级别 → 平台落地
 export function normalizeAgentPreset(name) {}
 ```
+
+`capabilities` 是**声明面**（控制台展示与降级判断）：前七项与 `AgentPort` 能力位同名，
+`events` 是事件流订阅（不属于调用面），`maintenance` 故意不声明（DSH 0.2.x 没有重建/自愈的 RPC）。
+`AgentPort` 自己的能力位、核心方法与返回值形状见
+[PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §5.1。
 
 内核侧只认接口，不认平台名：`src/agent-side/runtime-registry.mjs`（中立、零平台名、fail-closed 抛错）负责登记与转发，`src/agent-side/builtin.mjs` 是**唯一**允许写具体平台目录的装配点，`src/admin/agent-permission.js` 只做转发。`verify:repo` 会钉住这条边界：`src/` 不得再出现旧 preset 名，也不得在 `builtin.mjs` 之外装配平台。
 
@@ -213,7 +243,8 @@ export function normalizeAgentPreset(name) {}
 | `config/behaviors/*.yml` | `profiles/platforms/qq/behaviors/*.yml` |
 | `config/platform/<id>.yml`（含 `prompt`） | `profiles/platforms/qq/prompt.md` + `prompt.default.md` |
 | `dsh/agent-presets/agent-*`（能力产物） | `profiles/agent-platforms/dsh/capabilities/*.yml`（不再有产物） |
-| `dsh/agent-presets/qq-*`（DSH preset 源） | `profiles/agent-platforms/dsh/agents/qq-*` |
+| `dsh/agent-presets/qq-*`（DSH preset 源） | `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `preset` + `rows` 段 |
+| `profiles/agent-platforms/dsh/agents/<id>/`（C4 前的预设目录） | 同上，能力档 id 就是预设 id；`assets/default-presets/**` 同时删除 |
 | `config.json` 的 `behavior.default` | `profiles/plans/chat.yml` 的 `behavior: none` |
 | `config.json` 的 `runtime.plans[]` | `profiles/plans/*.yml` |
 | `config.json` 的 `tools`（38 键） | 能力预设 `tools.platform` 并集 |

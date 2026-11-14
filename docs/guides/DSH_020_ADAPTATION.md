@@ -70,7 +70,8 @@
 
 ### 2.2 现象
 
-桥接退役/重置 QQ 会话时要先清掉 DSH 侧还没跑的队列，再取消当前 turn（`stopSessionWork`）。
+桥接退役/重置 QQ 会话时要先清掉 DSH 侧还没跑的队列，再取消当前 turn（`stopSessionWork`；
+桥接侧经 `agentPort.cancel()` 调用，不再直接写这个 RPC 名）。
 日志里每次都是：
 
 ```
@@ -427,7 +428,7 @@ v0.2.0 发布后，有人反馈「**QQ 注入失败**」。调查后修了三类
 `applyHealedTokens` 会把**发现到的** `wsUrl` 无条件写回 `config.json`。主场景（换账号端口变了）是对的，
 但它不区分「配置里是过期值」与「用户就是要指向别处」。实测踩到：把 `wsUrl` 指向死端口想让它别连，
 启动后仍被改回真实端点并连上 —— **想跑第二实例/指向另一份 SnowLuma 安装时会连错账号**。
-新增 `snowluma.followDiscoveredEndpoint`（默认 `true`＝保持既有行为），设 `false` 则只自愈 token、绝不动 URL。
+新增 `followDiscoveredEndpoint`（在 `platforms.users.<平台 id>.transport` 下，默认 `true`＝保持既有行为），设 `false` 则只自愈 token、绝不动 URL。
 
 ### E. 全新 clone 上 `npm run test:audit` 会失败 7 个脚本（真实的打包缺陷）
 

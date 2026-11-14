@@ -1,0 +1,351 @@
+// 平台统一注册表：把「平台」的四个来源合成一张表 + 一组诊断。
+//
+// 为什么要有这一层：同一个平台在系统里有四份描述，各自回答不同问题，但控制台和
+// 运维只想知道「我接了哪些平台、能不能用、哪里坏了」：
+//
+//   A  配置面 · 用户侧    profiles/platforms/<id>/          话术、工具表、行为档案
+//   B  配置面 · Agent 侧  profiles/agent-platforms/<id>/    能力档、preset 源、产物适配器
+//   C  运行期 · 用户侧    src/user-side/runtime-registry    内置 + 插件 transport（谁能发）
+//   D  运行期 · Agent 侧  src/agent-side/runtime-registry   内置 Agent 平台（谁能跑）
+//
+// 合并点放在这里而不是前端：让前端拼三份列表，必然出现「配置面有、运行期没有」这种
+// 只在一侧可见的状态，用户无法判断哪个是真的。注册表把这类差异变成**诊断码**，
+// 于是「有配置目录但没实现」不再是靠人去比对，而是一条 `profile_only` 警告。
+//
+// 两条实现约束：
+//   · `buildPlatformRegistry()` 是纯函数（输入全是普通对象），可以离线测；
+//   · `platformRegistrySnapshot()` 只负责取运行期事实与磁盘目录，不含判断逻辑。
+// 这样 `test-platform-registry` 不用起进程就能覆盖全部诊断分支。
+
+import { listAgentPlatformDirs, listPlatforms, readPlatformTools } from './index.mjs';
+import { agentPlatformMetadata } from '../agent-side/metadata.mjs';
+import { userPlatformMetadata } from '../user-side/metadata.mjs';
+import { applyPluginConfig, normalizeConfigSchema } from '../plugins/config-schema.mjs';
+// 配置 v2 的段内结构（transport/options/endpoint）不该泄露给前端：注册表对外只给扁平值。
+import { flatPlatforms } from '../config/platforms.mjs';
+import { AGENT_PLATFORMS_ROOT, PLATFORMS_ROOT } from '../profiles/paths.mjs';
+
+/**
+ * 诊断码。分级只有两档：
+ *   error —— 这个平台现在就不能按预期工作（用了会出错，或配置指向不存在的东西）；
+ *   warn  —— 能用，但有一块能力是缺的（能发不能收、配置改了不生效）。
+ * 不设 info：控制台没有地方消费「只是提示」的消息，加了就变成噪音。
+ */
+export const DIAGNOSTIC_CODES = Object.freeze({
+  CAPABILITY_MISSING: 'capability_missing',
+  CONFIG_INVALID: 'config_invalid',
+  ACTIVE_UNREGISTERED: 'active_unregistered',
+  INBOUND_UNSUPPORTED: 'inbound_unsupported',
+  PROFILE_ONLY: 'profile_only',
+  PROBE_FAILED: 'probe_failed',
+  ID_CONFLICT: 'id_conflict',
+});
+
+const DIAGNOSTIC_LEVELS = Object.freeze({
+  [DIAGNOSTIC_CODES.CAPABILITY_MISSING]: 'error',
+  [DIAGNOSTIC_CODES.CONFIG_INVALID]: 'error',
+  [DIAGNOSTIC_CODES.ACTIVE_UNREGISTERED]: 'error',
+  [DIAGNOSTIC_CODES.ID_CONFLICT]: 'error',
+  [DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED]: 'warn',
+  [DIAGNOSTIC_CODES.PROFILE_ONLY]: 'warn',
+  [DIAGNOSTIC_CODES.PROBE_FAILED]: 'warn',
+});
+
+export const PLATFORM_SIDES = Object.freeze(['user', 'agent']);
+
+const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
+
+function diagnostic(code, side, platformId, message) {
+  return { code, side, platformId, level: DIAGNOSTIC_LEVELS[code] ?? 'warn', message };
+}
+
+/** 配置面校验：没有 schema 时不判（返回 null），有 schema 时按插件那套规则查。 */
+function vetConfig(rawSchema, value) {
+  const normalized = normalizeConfigSchema(rawSchema);
+  if (!normalized.ok) {
+    return { schema: null, error: `configSchema 不合法：${normalized.errors.join('；')}` };
+  }
+  if (!normalized.schema) return { schema: null, error: '' };
+  const applied = applyPluginConfig(normalized.schema, value);
+  return { schema: normalized.schema, error: applied.ok ? '' : applied.errors.join('；') };
+}
+
+/**
+ * 合成用户侧平台。
+ *
+ * 顺序：配置面先出（磁盘上有什么就是什么），运行期里多出来的（插件注册、没有配置
+ * 目录的平台）追加在后。这样控制台的列表在平台没启用时也不会空，且顺序稳定。
+ */
+function buildUserEntries({ profilePlatforms, runtime, config }) {
+  const entries = [];
+  const diagnostics = [];
+  const live = new Map();
+  for (const item of runtime.platforms ?? []) {
+    const id = String(item?.id ?? '').trim();
+    if (!id) continue;
+    if (live.has(id)) {
+      diagnostics.push(diagnostic(DIAGNOSTIC_CODES.ID_CONFLICT, 'user', id, `同一平台被注册了两次（${live.get(id).source} 与 ${item.source ?? 'unknown'}）`));
+      continue;
+    }
+    live.set(id, item);
+  }
+
+  const seen = new Set();
+  for (const profile of profilePlatforms ?? []) {
+    const id = String(profile?.id ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const impl = live.get(id) ?? null;
+    const { schema, error } = vetConfig(profile.configSchema, config?.users?.[id] ?? {});
+    if (error) {
+      diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'user', id, error));
+    }
+    if (!impl) {
+      diagnostics.push(diagnostic(
+        DIAGNOSTIC_CODES.PROFILE_ONLY,
+        'user',
+        id,
+        `有配置目录（${profile.source ?? `profiles/platforms/${id}`}），但没有运行期实现：在这里改的配置不会生效`,
+      ));
+    } else if (impl.inbound !== true) {
+      diagnostics.push(diagnostic(
+        DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED,
+        'user',
+        id,
+        '平台未提供 connect()：只能发不能收（入站消息不会进入准入与唤醒流程）',
+      ));
+    }
+    entries.push({
+      side: 'user',
+      id,
+      label: String(impl?.label ?? profile.label ?? id),
+      note: '',
+      source: impl ? String(impl.source ?? 'builtin') : 'profile-only',
+      owner: impl?.owner ?? null,
+      active: String(runtime.active ?? '') === id,
+      capabilities: [...(impl?.capabilities ?? [])],
+      conversationTypes: [...(impl?.conversationTypes ?? [])],
+      limits: { ...(impl?.limits ?? {}) },
+      inbound: impl ? impl.inbound === true : false,
+      configSchema: schema,
+      config: clone(config?.users?.[id] ?? {}),
+      assets: {
+        prompt: {
+          active: Boolean(profile?.prompt?.active),
+          hasDefault: Boolean(profile?.prompt?.hasDefault),
+        },
+        tools: clone(profile?.tools ?? []),
+        behaviors: [...(profile?.behaviors ?? [])],
+        capabilityProfiles: [],
+      },
+    });
+  }
+
+  // 运行期注册了、但没有配置目录的平台（插件 transport 的常态）。
+  for (const [id, impl] of live) {
+    if (seen.has(id)) continue;
+    if (impl.inbound !== true) {
+      diagnostics.push(diagnostic(
+        DIAGNOSTIC_CODES.INBOUND_UNSUPPORTED,
+        'user',
+        id,
+        '平台未提供 connect()：只能发不能收（入站消息不会进入准入与唤醒流程）',
+      ));
+    }
+    entries.push({
+      side: 'user',
+      id,
+      label: String(impl.label ?? id),
+      note: '',
+      source: String(impl.source ?? 'plugin'),
+      owner: impl.owner ?? null,
+      active: String(runtime.active ?? '') === id,
+      capabilities: [...(impl.capabilities ?? [])],
+      conversationTypes: [...(impl.conversationTypes ?? [])],
+      limits: { ...(impl.limits ?? {}) },
+      inbound: impl.inbound === true,
+      configSchema: null,
+      config: {},
+      assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
+    });
+  }
+
+  return { entries, diagnostics };
+}
+
+/** 合成 Agent 侧平台。结构与用户侧同形，差异在 `assets`（能力档而不是行为档案）。 */
+function buildAgentEntries({ profilePlatforms, runtime, config }) {
+  const entries = [];
+  const diagnostics = [];
+  const live = new Map();
+  for (const item of runtime.platforms ?? []) {
+    const id = String(item?.id ?? '').trim();
+    if (!id) continue;
+    if (live.has(id)) {
+      diagnostics.push(diagnostic(DIAGNOSTIC_CODES.ID_CONFLICT, 'agent', id, '同一 Agent 平台被注册了两次'));
+      continue;
+    }
+    live.set(id, item);
+  }
+
+  const seen = new Set();
+  for (const profile of profilePlatforms ?? []) {
+    const id = String(profile?.id ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const impl = live.get(id) ?? null;
+    const { schema, error } = vetConfig(profile.configSchema, config?.agents?.[id] ?? {});
+    if (error) {
+      diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'agent', id, error));
+    }
+    if (!impl) {
+      diagnostics.push(diagnostic(
+        DIAGNOSTIC_CODES.PROFILE_ONLY,
+        'agent',
+        id,
+        `有声明目录（${profile.source ?? `profiles/agent-platforms/${id}`}），但没有装配进内核：src/agent-side/builtin.mjs 未注册它`,
+      ));
+    }
+    entries.push({
+      side: 'agent',
+      id,
+      label: String(impl?.label ?? profile.label ?? id),
+      note: '',
+      source: impl ? 'builtin' : 'profile-only',
+      owner: null,
+      active: String(runtime.active ?? '') === id,
+      capabilities: [...(impl?.capabilities ?? [])],
+      conversationTypes: [],
+      limits: {},
+      inbound: false,
+      configSchema: schema,
+      config: clone(config?.agents?.[id] ?? {}),
+      assets: {
+        prompt: { active: false, hasDefault: false },
+        tools: [],
+        behaviors: [],
+        // C4 起 preset 与能力档同名同文件（capabilities/<id>.yml 的 preset + rows），
+        // 不再有平行的 agents/ 目录，也不再另给一份 agentPresets —— 能力档列表就是预设列表。
+        capabilityProfiles: [...(profile?.capabilities ?? [])],
+      },
+    });
+  }
+
+  for (const [id, impl] of live) {
+    if (seen.has(id)) continue;
+    entries.push({
+      side: 'agent',
+      id,
+      label: String(impl.label ?? id),
+      note: '',
+      source: 'builtin',
+      owner: null,
+      active: String(runtime.active ?? '') === id,
+      capabilities: [...(impl.capabilities ?? [])],
+      conversationTypes: [],
+      limits: {},
+      inbound: false,
+      configSchema: null,
+      config: {},
+      assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
+    });
+  }
+
+  return { entries, diagnostics };
+}
+
+function summarize(entries, diagnostics) {
+  const bySide = { user: 0, agent: 0 };
+  for (const entry of entries) bySide[entry.side] += 1;
+  return {
+    total: entries.length,
+    user: bySide.user,
+    agent: bySide.agent,
+    errors: diagnostics.filter((item) => item.level === 'error').length,
+    warnings: diagnostics.filter((item) => item.level === 'warn').length,
+  };
+}
+
+/**
+ * 合成一张表。
+ *
+ * @param {object} input
+ * @param {Array} [input.profilePlatforms]      `listPlatforms()` 的结果（补齐 tools）
+ * @param {Array} [input.profileAgentPlatforms] `listAgentPlatformDirs()` 的结果
+ * @param {{active: string, platforms: Array}} [input.userRuntime]  `userPlatformMetadata()`
+ * @param {{active: string, platforms: Array}} [input.agentRuntime] `agentPlatformMetadata()`
+ * @param {{users?: object, agents?: object}} [input.config]        配置面（C2 起为配置 v2 的 platforms 段）
+ */
+export function buildPlatformRegistry({
+  profilePlatforms = [],
+  profileAgentPlatforms = [],
+  userRuntime = { active: '', platforms: [] },
+  agentRuntime = { active: '', platforms: [] },
+  config = {},
+} = {}) {
+  const user = buildUserEntries({ profilePlatforms, runtime: userRuntime, config });
+  const agent = buildAgentEntries({ profilePlatforms: profileAgentPlatforms, runtime: agentRuntime, config });
+  const entries = [...user.entries, ...agent.entries];
+  const diagnostics = [...user.diagnostics, ...agent.diagnostics];
+
+  // 「当前平台」指向一个谁都不认识的名字：启动时 useUserPlatform 就会抛错，
+  // 但配置文件被手改时进程可能还没走到那一步，所以这里补一条能看见的错。
+  for (const side of PLATFORM_SIDES) {
+    const active = String((side === 'user' ? userRuntime : agentRuntime).active ?? '').trim();
+    if (!active) continue;
+    if (entries.some((entry) => entry.side === side && entry.id === active)) continue;
+    diagnostics.push(diagnostic(
+      DIAGNOSTIC_CODES.ACTIVE_UNREGISTERED,
+      side,
+      active,
+      `当前平台指向未注册的 id：${active}（能用这一侧的平台：${entries.filter((entry) => entry.side === side).map((entry) => entry.id).join(' / ') || '无'}）`,
+    ));
+  }
+
+  return {
+    ok: true,
+    active: {
+      user: String(userRuntime.active ?? ''),
+      agent: String(agentRuntime.active ?? ''),
+    },
+    platforms: entries,
+    diagnostics,
+    summary: summarize(entries, diagnostics),
+  };
+}
+
+/**
+ * 取当前进程的真实快照。
+ *
+ * 两个 root 可注入是为了测试与离线夹具；默认值与运行时一致。
+ * `config` 接受配置 v2 的 `platforms` 段（也可直接传扁平形状）；内部统一扁平化后再校 schema。
+ */
+export function platformRegistrySnapshot({
+  profilesRoot = PLATFORMS_ROOT,
+  agentPlatformsRoot = AGENT_PLATFORMS_ROOT,
+  config = {},
+} = {}) {
+  const profilePlatforms = listPlatforms({ root: profilesRoot }).map((item) => ({
+    ...item,
+    tools: readPlatformTools({ root: profilesRoot, id: item.id }),
+  }));
+  return buildPlatformRegistry({
+    profilePlatforms,
+    profileAgentPlatforms: listAgentPlatformDirs({ root: agentPlatformsRoot }),
+    userRuntime: userPlatformMetadata(),
+    agentRuntime: agentPlatformMetadata(),
+    config: flatPlatforms(config),
+  });
+}
+
+/** 单个平台（控制台详情页用）；未找到返回 null。 */
+export function findRegistryPlatform(snapshot, side, id) {
+  const wanted = String(id ?? '').trim();
+  if (!wanted || !PLATFORM_SIDES.includes(side)) return null;
+  return (snapshot?.platforms ?? []).find((entry) => entry.side === side && entry.id === wanted) ?? null;
+}
+
+/** 该平台的诊断（详情页顶部用）。 */
+export function platformDiagnostics(snapshot, side, id) {
+  return (snapshot?.diagnostics ?? []).filter((item) => item.side === side && item.platformId === id);
+}

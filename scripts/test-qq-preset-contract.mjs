@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 import { parse as parseYaml } from 'yaml';
 
+// 真实预设的行列表（C4 起在能力档的 rows 段里，与工具面同一份文件）。
 const preset = parseYaml(fs.readFileSync(
-  new URL('../profiles/agent-platforms/dsh/agents/chat-v2/agent.cordis.yml', import.meta.url), 'utf8',
-));
+  new URL('../profiles/agent-platforms/dsh/capabilities/chat-v2.yml', import.meta.url), 'utf8',
+)).rows;
 const persona = preset.find((row) => row.id === 'persona');
 const prefix = persona?.config?.prefix ?? '';
 
@@ -26,7 +27,7 @@ test('local/admin tool restrictions and existing compaction budgets stay intact'
     'persona', 'tool-web', 'tool-ask-user', 'tool-todo', 'qq-tool-restrict', 'compaction',
   ]);
   assert.deepEqual(preset.find((row) => row.id === 'tool-web').config, { search: false, fetch: false });
-  assert.equal(preset.find((row) => row.id === 'qq-tool-restrict').name, './qq-tool-restrict.mjs');
+  assert.equal(preset.find((row) => row.id === 'qq-tool-restrict').name, 'qq-agent-presets/qq-tool-restrict.mjs');
   const compaction = preset.find((row) => row.id === 'compaction');
   assert.deepEqual(compaction.isolate, { compaction: true, toolResultPruner: true });
   assert.deepEqual(compaction.config.find((row) => row.id === 'tool-result-pruner').config, {

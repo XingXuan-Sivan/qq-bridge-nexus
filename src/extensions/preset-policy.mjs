@@ -1,8 +1,8 @@
-// 预设级扩展策略：每个 DSH preset 通过同目录的 extensions.yml 声明
-// 允许哪些外部 MCP / 工具 / 技能。缺省为空 = 全部拒绝；只读 YAML，不反向写。
+// 预设级扩展策略：每个能力档用自己的 extensions 段声明允许哪些外部 MCP / 工具 / 技能。
+// 缺省为空 = 全部拒绝；只读，不反向写。
 //
-// 为什么不是 agent.cordis.yml：该文件的根节点是插件数组（- id: ...），
-// 不能再追加顶层 mapping；扩展策略单独成文件，避免破坏 DSH preset 解析。
+// C4 起不再有独立的 extensions.yml：能力档 id = Agent 预设 id，这份策略就住在
+// profiles/agent-platforms/dsh/capabilities/<id>.yml 的 extensions 段（Hub 与预设编辑器读同一处）。
 //
 // 结构：
 // mcp:
@@ -14,7 +14,6 @@
 //   allow: ['*']
 import fs from 'node:fs';
 import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
 
 const PRESET_ID_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const MAX_LIST_ITEMS = 300;
@@ -87,22 +86,36 @@ export function skillAllowed(policy, skillId) {
   return Boolean(policy) && matches(policy.skills?.allow ?? [], skillId);
 }
 
-export function createPresetPolicy({ root, log = () => {} }) {
-  if (!root) throw new Error('createPresetPolicy: 缺少 preset 根目录');
-  const presetsRoot = path.resolve(root);
+/**
+ * 策略提供者。@param {{ capabilities: object, log?: Function }} options
+ * capabilities 是 createCapabilityStore() 的返回值（需要 root 与 get(id)）。
+ * 缓存按能力档文件的 mtime/size 失效：权限检查在每条外部工具调用上都会发生，每次都重新
+ * 解析几千字符的预设正文太贵，但改了 extensions 段又必须立刻生效。
+ */
+export function createPresetPolicy({ capabilities, log = () => {} }) {
+  if (!capabilities?.root || typeof capabilities.get !== 'function') {
+    throw new Error('createPresetPolicy: 缺少能力档存储');
+  }
+  const root = path.resolve(capabilities.root);
   const cache = new Map();
 
   function fileFor(preset) {
     if (typeof preset !== 'string' || !PRESET_ID_RE.test(preset)) {
       throw new Error('preset 名称不合法');
     }
-    const file = path.resolve(presetsRoot, preset, 'extensions.yml');
-    if (!file.startsWith(presetsRoot + path.sep)) throw new Error('preset 路径越界');
+    const file = path.resolve(root, `${preset}.yml`);
+    if (!file.startsWith(root + path.sep)) throw new Error('preset 路径越界');
     return file;
   }
 
   function read(preset) {
-    const file = fileFor(preset);
+    let file;
+    try {
+      file = fileFor(preset);
+    } catch {
+      log(`[extensions] preset 名称不合法：${preset}`);
+      return emptyPolicy();
+    }
     let stat;
     try {
       stat = fs.statSync(file);
@@ -115,9 +128,7 @@ export function createPresetPolicy({ root, log = () => {} }) {
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.policy;
     let policy;
     try {
-      const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
-      const parsed = parseYaml(text) ?? {};
-      policy = normalizePresetPolicy(parsed);
+      policy = normalizePresetPolicy(capabilities.get(preset)?.extensions ?? {});
     } catch (error) {
       log(`[extensions] preset policy 解析失败 ${preset}: ${error?.message ?? error}`);
       policy = emptyPolicy();
@@ -129,8 +140,9 @@ export function createPresetPolicy({ root, log = () => {} }) {
   return {
     get: read,
     clear(preset) {
-      const file = fileFor(preset);
-      cache.delete(file);
+      try {
+        cache.delete(fileFor(preset));
+      } catch {}
     },
   };
 }

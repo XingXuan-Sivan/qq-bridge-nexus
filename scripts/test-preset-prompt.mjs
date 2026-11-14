@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
   PRESET_BLOCKING_SUBSTRINGS,
   PRESET_REQUIRED_MARKERS,
@@ -17,8 +17,20 @@ import {
   renderPresetPromptYaml,
 } from '../src/preset-prompt.js';
 
-const PRESET_PATH = new URL('../profiles/agent-platforms/dsh/agents/chat-v2/agent.cordis.yml', import.meta.url);
-const source = fs.readFileSync(PRESET_PATH, 'utf8');
+/**
+ * 取一份能力档的「预设正文」文本。
+ *
+ * preset-prompt 的文本手术面对的是**行列表**（`- id: persona` 顶格），
+ * 而 C4 起它的宿主是能力档的 rows 段（缩进两级）。桥接在调用前会把 rows 重新
+ * stringify 成顶格数组，这里用同一个转换，保证测的是真实链路。
+ */
+function presetBodyOf(name) {
+  const file = new URL(`../profiles/agent-platforms/dsh/capabilities/${name}.yml`, import.meta.url);
+  const doc = parseYaml(fs.readFileSync(file, 'utf8'));
+  return stringifyYaml(doc.rows, { lineWidth: 0, singleQuote: true });
+}
+
+const source = presetBodyOf('chat-v2');
 const originalPrefix = extractPresetPrefix(source);
 
 // 回归：内置预设必须满足**它自己那一代**的硬性不变量。
@@ -29,7 +41,7 @@ const originalPrefix = extractPresetPrefix(source);
 // 这条测试同时钉住两件事：① 每代预设都能通过自己的清单；② 清单本身没写错字。
 test('每代内置预设都满足自己那一代的安全不变量', () => {
   for (const [name, gen] of [['chat', 'v1'], ['chat-v2', 'v2']]) {
-    const text = fs.readFileSync(new URL(`../profiles/agent-platforms/dsh/agents/${name}/agent.cordis.yml`, import.meta.url), 'utf8');
+    const text = presetBodyOf(name);
     const prefix = extractPresetPrefix(text);
     assert.equal(typeof prefix, 'string', `${name} 应能抽出 persona.prefix`);
     const blockers = presetPromptBlockers(prefix, gen);
@@ -49,7 +61,10 @@ test('真实预设能定位到 persona 的 prefix 块', () => {
   // 源文件已从折叠标量（>-）迁成字面块（|-）：保留原始换行，读写才不会被重排。
   assert.match(loc.lines[loc.keyLine].trim(), /^prefix: [|>]-$/);
   assert.ok(loc.blockEnd > loc.keyLine + 1, 'prefix 块应包含内容行');
-  assert.ok(loc.entryEnd > loc.blockEnd, 'persona 条目应在 prefix 块之后还有内容');
+  // 条目边界必须恰好停在下一个插件行：多一行会把后续行一起改掉，少一行会漏掉块尾内容。
+  // （C4 起 persona 的 config.prefix 就是块里最后一键，后面紧接的就是下一条插件行而非空行）
+  assert.ok(loc.entryEnd < loc.lines.length, 'persona 之后应还有别的插件行');
+  assert.match(loc.lines[loc.entryEnd], /^- id: /, 'persona 条目边界应落在下一条插件行');
 });
 
 test('抽出的是 YAML 解析后的真实字符串（折叠标量已展开）', () => {
@@ -137,7 +152,7 @@ test('删掉安全不变量或正文过短时阻断保存（保护 AI 效果与�
 test('写回沿用文件主导行尾，且不吞掉块尾空行', () => {
   // v0.3.0：不再依赖检出时的行尾（GitHub 源码 zip / Linux 检出是 LF，Windows autocrlf 检出是 CRLF），
   // 而是把样本显式转成 CRLF 再测「CRLF 文件写回仍是 CRLF」；LF 文件的往返由下一条断言覆盖。
-  const source = fs.readFileSync(PRESET_PATH, 'utf8').replace(/\r?\n/g, '\r\n');
+  const source = presetBodyOf('chat-v2').replace(/\r?\n/g, '\r\n');
   const lfNext = renderPresetPromptYaml(source.replace(/\r\n/g, '\n'), originalPrefix);
   assert.equal((lfNext.match(/\r\n/g) ?? []).length, 0, 'LF 文件写回后不应引入 CRLF');
   const next = renderPresetPromptYaml(source, originalPrefix);

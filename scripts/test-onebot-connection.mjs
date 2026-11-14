@@ -4,10 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient } from '@snowluma/sdk';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'config.json'), 'utf8'));
-const { wsUrl, accessToken } = cfg.snowluma;
+// 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+const { userPlatform } = configViews(cfg);
+const { wsUrl, accessToken } = userPlatform;
 
 console.log(`测试连接 ${wsUrl}（token ${accessToken ? '已配置' : '未配置'}）…`);
 

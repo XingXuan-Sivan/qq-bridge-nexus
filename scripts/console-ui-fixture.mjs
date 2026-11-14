@@ -17,7 +17,6 @@ const PLATFORM_PROMPT_SAMPLE = '【平台】你在 QQ 里说话。\n\n1. 引用�
 
 import { listKinds } from '../src/behaviors/kinds/index.mjs';
 import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
-import { builtinAdapters } from '../src/runtime/adapters.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -30,8 +29,7 @@ function presetStatusFixture(preset) {
     label: preset === 'chat'
       ? '一代仿真（reserved）'
       : preset === 'chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
-    sourceFile: `profiles/agent-platforms/dsh/agents/${preset}/agent.cordis.yml`,
-    installed: true,
+    sourceFile: `profiles/agent-platforms/dsh/capabilities/${preset}.yml`,
     requiresRestart: true,
   };
 }
@@ -351,15 +349,6 @@ function memoryStatusOf(state) {
 function ingestStatusOf(state) {
   const config = state.memoryConfig.ingest;
   return { config, enabled: config.enabled === true, baseUrl: config.baseUrl, pending: 0, enqueued: 0, sent: 0, accepted: 0, batches: 0, failed: 0, lastError: null, lastAt: null, lastStatus: 'idle' };
-}
-
-/** 两端适配器快照（与桥接的 /api/runtime/capabilities 同形）。 */
-function adaptersSnapshot() {
-  return {
-    kinds: ['platform', 'agent'],
-    platform: builtinAdapters().filter((item) => item.kind === 'platform'),
-    agent: builtinAdapters().filter((item) => item.kind === 'agent'),
-  };
 }
 
 const PERMISSION_LABELS = { 'read-only': '只读', 'workspace-write': '工作区读写', 'full-ask': '完全访问 · 每次确认', full: '完全访问 · 短时授权' };
@@ -708,7 +697,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       const presetAction = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(agent|factory)$/);
       if (presetAction) {
         const [, presetId, action] = presetAction;
-        if (action === 'factory') return json({ ok: true, id: presetId, restored: ['preset.yml', 'agent.cordis.yml', 'extensions.yml'] });
+        if (action === 'factory') return json({ ok: true, id: presetId, restored: ['capability.yml'] });
         if (method === 'PUT') return json({ ok: true, id: presetId, rows: Array.isArray(body?.rows) ? body.rows.length : 0 });
         return json({ ok: true, preset: { id: presetId, rows: [] } });
       }
@@ -854,10 +843,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/runtime/capabilities': return json({
             ok: true,
             catalog: toolCatalogSnapshot(),
-            adapters: adaptersSnapshot(),
             capabilities: [
-              { id: 'agent-chat', label: '聊天 Agent', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', usedBy: ['chat', 'social-v2'] },
-              { id: 'agent-readonly', label: 'Agent · 只读', builtin: true, agent: 'dsh', platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', usedBy: [] },
+              { id: 'chat', label: '聊天 Agent', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', hasRows: true, rowsCount: 2, usedBy: ['chat', 'social-v2'] },
+              { id: 'readonly', label: 'Agent · 只读', builtin: true, platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', hasRows: true, rowsCount: 2, usedBy: [] },
             ],
           });
           case '/api/config/behaviors': return json({
@@ -873,48 +861,114 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ok: true,
             platform: 'qq',
             active: state.planId || 'social-v2',
-            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', agent: 'chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access' },
+            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access' },
             defaultPlan: state.defaultPlan ?? 'social-v2',
             plans: [
-              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', agent: 'chat', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', agent: 'chat-v2', capability: 'agent-chat', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', agent: 'readonly', capability: 'agent-readonly', behavior: 'none', audience: 'owner', builtin: true },
+              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', capability: 'chat', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access', builtin: true },
+              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', capability: 'readonly', behavior: 'none', audience: 'owner', builtin: true },
             ],
           });
-          case '/api/platforms': return json({
+          // C1：平台统一注册表。控制台只读这一个端点回答「接了哪些平台、能不能用」。
+          // 两侧都列（user / agent），诊断与汇总与真实桥接同形。C3 起 qq 有 connect()
+          // （inbound: true），所以不再有 inbound_unsupported 这条诊断——预览也要照实反映。
+          case '/api/platforms/registry': return json({
             ok: true,
-            platforms: [{ id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2 }],
-          });
-          case '/api/platforms/qq': return json({
-            ok: true,
-            platform: { id: 'qq', label: 'QQ', toolCount: 37, behaviorCount: 2, behaviors: ['social-v1', 'social-v2'] },
-          });
-          // B7：运行期平台元数据（「谁能发消息」）。与上面的 /api/platforms 分工不同 ——
-          // 那条读 profiles/platforms/（话术与工具表的目录），这条合成内置注册表与插件传输层，
-          // 控制台的列名、筛选与表单都从这条响应里读，不再写死 qq。
-          case '/api/runtime/platforms': return json({
-            ok: true,
-            active: 'qq',
-            platforms: [{
-              id: 'qq',
-              label: 'QQ',
-              conversationTypes: ['group', 'private'],
-              capabilities: ['group', 'direct', 'mention', 'reply', 'recall', 'poke', 'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'],
-              limits: { chunkChars: 4000, markdown: false },
-              source: 'builtin',
-              owner: null,
-              active: true,
-            }],
-          });
-          case '/api/runtime/agent-platforms': return json({
-            ok: true,
-            active: 'dsh',
-            platforms: [{
-              id: 'dsh',
-              label: 'DeepSeek Harness',
-              capabilities: ['session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact'],
-              active: true,
-            }],
+            active: { user: 'qq', agent: 'dsh' },
+            platforms: [
+              {
+                side: 'user',
+                id: 'qq',
+                label: 'QQ',
+                note: '',
+                source: 'builtin',
+                owner: null,
+                active: true,
+                capabilities: ['group', 'direct', 'mention', 'reply', 'recall', 'poke', 'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'],
+                conversationTypes: ['group', 'private'],
+                limits: { chunkChars: 4000, markdown: false },
+                inbound: true,
+                // 配置面照抄 profiles/platforms/qq/platform.yml 的 configSchema：
+                // 「平台 › 配置」那一栏要能真占出一张表，而不是永远空着。
+                configSchema: {
+                  type: 'object',
+                  additionalProperties: true,
+                  properties: {
+                    account: { type: 'string', title: '账号名', description: '同一平台多账号时的名字；留空表示默认账号（会话 key 里不写 @账号）。' },
+                    httpUrl: { type: 'string', title: 'OneBot HTTP 地址', description: '发送消息走这里。指向 WebSocket 端口会得到 HTTP 426。' },
+                    wsUrl: { type: 'string', title: 'OneBot WebSocket 地址', description: '入站与主动拉取走这里；与 httpUrl 是同一后端的两个端口。' },
+                    accessToken: { type: 'string', format: 'textarea', title: '访问令牌', description: 'QQ 后端里配置的 token；后端没开鉴权时留空。' },
+                    followDiscoveredEndpoint: { type: 'boolean', title: '跟随发现的端点', description: '后端换了端口（如 SnowLuma 重启）时自动改用探测到的地址。' },
+                    viaPlatform: { type: 'boolean', title: '经接口平台转发', description: '出站先交给 interface-platform，再由它转给 QQ 后端。' },
+                    silenceWarnMs: { type: 'number', title: '静默告警阈值（毫秒）', description: '这么久没收到任何事件就打一条告警；0 表示不告警。' },
+                  },
+                },
+                // 配置 v2 把「怎么连上」放在 transport、其余放 options，注册表拍平后交给控制台。
+                config: {
+                  account: '',
+                  httpUrl: 'http://127.0.0.1:3000',
+                  wsUrl: 'ws://127.0.0.1:3001',
+                  accessToken: '',
+                  followDiscoveredEndpoint: true,
+                  viaPlatform: false,
+                  silenceWarnMs: 600000,
+                },
+                assets: {
+                  prompt: { active: true, hasDefault: true },
+                  tools: [{ flag: 'sendGroup', label: '发群消息', desc: '往群里发一条消息', risk: 'send', defaultOff: false }],
+                  behaviors: ['social-v1', 'social-v2'],
+                  capabilityProfiles: [],
+                },
+              },
+              {
+                side: 'agent',
+                id: 'dsh',
+                label: 'DeepSeek Harness',
+                note: '',
+                source: 'builtin',
+                owner: null,
+                active: true,
+                capabilities: ['session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact'],
+                conversationTypes: [],
+                limits: {},
+                inbound: false,
+                // 配置面照抄 profiles/agent-platforms/dsh/agent-platform.yml。
+                configSchema: {
+                  type: 'object',
+                  additionalProperties: true,
+                  properties: {
+                    baseUrl: { type: 'string', title: 'DSH 地址', description: '留空时自动发现（命令行版 3080 / 桌面版与 0.2.1 均为随机端口）。' },
+                    authToken: { type: 'string', format: 'textarea', title: '鉴权令牌', description: '一般由桥接从 ~/.dsh/.credentials.yaml 自取。' },
+                    authTokenExplicit: { type: 'boolean', title: '使用显式令牌', description: '为 true 时只用 authToken，不再自动读取凭据文件。' },
+                    authHeader: { type: 'string', title: '鉴权头名称', description: '默认 Authorization；换成反代自己的头名时改这里。' },
+                    authPrefix: { type: 'string', title: '鉴权前缀', description: '令牌前面的修饰词，默认 Bearer。' },
+                    allowRemote: { type: 'boolean', title: '允许远程连接', description: '默认只连本机；打开后 baseUrl 可以指向另一台机器。' },
+                    provider: { type: 'string', title: '模型凭据方式', description: '与 DSH 里的登录方式必须一致，不一致会报 MISSING_CREDENTIAL。' },
+                    model: { type: 'string', title: '模型', description: '会话默认模型；能力预设或会话可以再覆盖。' },
+                    reasoningEffort: { type: 'string', title: '推理强度', description: '低 / 中 / 高；具体取值取决于模型。' },
+                  },
+                },
+                config: {
+                  baseUrl: '',
+                  authToken: '',
+                  authTokenExplicit: false,
+                  authHeader: 'authorization',
+                  authPrefix: 'Bearer',
+                  allowRemote: false,
+                  provider: 'deepseek-official',
+                  model: 'deepseek-flash',
+                  reasoningEffort: 'max',
+                },
+                assets: {
+                  prompt: { active: false, hasDefault: false },
+                  tools: [],
+                  behaviors: [],
+                  capabilityProfiles: ['chat', 'chat-v2', 'readonly', 'workspace', 'full'],
+                },
+              },
+            ],
+            diagnostics: [],
+            summary: { total: 2, user: 1, agent: 1, errors: 0, warnings: 0 },
           });
           case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
@@ -1013,9 +1067,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               agent: [
                 { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
                 { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
-                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
+                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: { profile: 'chat' } },
               ],
-              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n',
               validation: { ok: true, rows: 3 },
               backups: [],
             },
@@ -1030,9 +1084,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               agent: [
                 { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
                 { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
-                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: { profile: 'chat' } },
+                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: { profile: 'chat' } },
               ],
-              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n',
+              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n',
               validation: { ok: true, rows: 3 },
               backups: [],
             },
@@ -1046,9 +1100,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               extensionsExists: false,
               agent: [
                 { id: 'persona', name: '@deepseek-ai/dsh-persona' },
-                { id: 'qq-tool-restrict', name: './qq-tool-restrict.mjs', config: {} },
+                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: {} },
               ],
-              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: ./qq-tool-restrict\n  config: {}\n',
+              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n  config: {}\n',
               validation: { ok: true, rows: 2 },
               backups: [],
             },
@@ -1230,7 +1284,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           }
           case '/api/preset/sim-prompt/backups': {
             const preset = String(url.searchParams.get('preset') || 'chat-v2');
-            return json({ ok: true, backups: [{ file: `${preset}.agent.cordis.yml.fixture`, mtime: Date.parse(timestamp) }] });
+            return json({ ok: true, backups: [{ file: `${preset}.capability.yml.fixture`, mtime: Date.parse(timestamp) }] });
           }
           case '/api/dsh/model': {
             const entry = fixtureDshModel(state.dshProvider, state.dshModel);
@@ -1333,7 +1387,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           const id = decodeURIComponent(path.slice('/api/runtime/capabilities/'.length));
           state.capabilityPatches = state.capabilityPatches ?? {};
           state.capabilityPatches[id] = body;
-          return json({ ok: true, capability: { id, sandbox: body.sandbox, grants: body.grants, note: body.note } });
+          return json({ ok: true, capability: { id, label: body?.label, note: body?.note, tools: body?.tools, builtin: true, platformVisible: [], agentModules: [], hasRows: true, rowsCount: 2 } });
         }
         if (path === '/api/memory/sessions' && method === 'DELETE') {
           const key = String(body.key || '');
@@ -1540,11 +1594,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/preset/sim-prompt/reset': {
             const preset = String(body.preset || 'chat-v2');
             state.simPrompts[preset] = state.simDefaults[preset];
-            return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], synced: true, requiresRestart: true, status: presetStatusFixture(preset) });
+            return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], requiresRestart: true, status: presetStatusFixture(preset) });
           }
           case '/api/preset/sim-prompt/restore': {
             const preset = String(body.preset || 'chat-v2');
-            return json({ ok: true, restoredFrom: `${preset}.agent.cordis.yml.fixture`, requiresRestart: true });
+            return json({ ok: true, restoredFrom: `${preset}.capability.yml.fixture`, requiresRestart: true });
           }
           case '/api/dsh/effort': state.dshEffort = body.reasoningEffort; return json({ ok: true, reasoningEffort: body.reasoningEffort });
           case '/api/dsh/model': {

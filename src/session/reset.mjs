@@ -13,9 +13,11 @@
 //
 // 契约见 docs/COMMAND_REGISTRY.md §9 与 docs/PLUGIN_KERNEL.md 的会话章节。
 
+import { sessionIdOf } from './ref.mjs';
+
 /**
  * @param {{
- *   state: { sessions: Record<string, string>, sessionPolicies: Record<string, any> },
+ *   state: { sessions: Record<string, { instance: string, sessionId: string }>, sessionPolicies: Record<string, any> },
  *   bumpEpoch: () => void,
  *   bySessionId: Record<string, Map<any, any> | Set<any>>,
  *   pending: Map<string, { timer?: any }>,
@@ -36,7 +38,7 @@
  *   saveSocialV2State: () => void,
  *   saveState: () => void,
  *   send: (key: string, text: string) => Promise<any>,
- *   api: { stopSessionWork: (sid: string) => Promise<any>, archiveSession: (args: { sessionId: string }) => Promise<any> },
+ *   api: { cancel: (sid: string) => Promise<any>, archiveSession: (sid: string) => Promise<any> },
  *   withTimeout: (promise: Promise<any>, ms: number, label: string) => Promise<any>,
  *   dshControlTimeoutMs: number,
  *   log: (msg: string) => void,
@@ -54,7 +56,8 @@ export function createSessionResetter(deps) {
   const bySessionId = deps.bySessionId ?? {};
 
   return async function resetSession(key) {
-    const old = state.sessions[key];
+    // 落盘是 `{ instance, sessionId }`（C5 第三批）；这里只要 id。
+    const old = sessionIdOf(state.sessions[key]);
     if (!old) return { ok: true, note: 'no-session' };
     bumpEpoch();
     delete state.sessions[key];
@@ -90,10 +93,11 @@ export function createSessionResetter(deps) {
     discardDormantForReset(key);
     saveSocialV2State();
     saveState();
-    // 与 retireSession 一致：先终止 DSH 侧排队的工作，再归档（归档只隐藏会话）。
-    try { await withTimeout(api.stopSessionWork(old), dshControlTimeoutMs, 'stopSessionWork'); }
+    // 与 retireSession 一致：先终止 Agent 侧排队的工作，再归档（归档只隐藏会话）。
+    // C5：这里只认中立动词（cancel / archiveSession），平台把「取消回合」叫什么与清理序列无关。
+    try { await withTimeout(api.cancel(old), dshControlTimeoutMs, 'cancel'); }
     catch (error) { log(`⚠️ 停止旧会话失败 ${key}：${error?.message ?? error}；请在 DSH 检查旧任务`); }
-    try { await withTimeout(api.archiveSession({ sessionId: old }), dshControlTimeoutMs, 'archiveSession'); } catch {}
+    try { await withTimeout(api.archiveSession(old), dshControlTimeoutMs, 'archiveSession'); } catch {}
     await send(key, '已重置会话，下次消息将开新上下文');
     return { ok: true };
   };

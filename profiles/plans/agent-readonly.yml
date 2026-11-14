@@ -5,7 +5,6 @@ note: 仅管理员私聊；只能读，不能改。
 builtin: true
 platform: qq
 agentPlatform: dsh
-agent: readonly
 behavior: none
-capability: agent-readonly
+capability: readonly
 audience: owner

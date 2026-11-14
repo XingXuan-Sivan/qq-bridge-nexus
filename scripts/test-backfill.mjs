@@ -16,6 +16,7 @@ import {
   selectBackfill, describeDuration, backfillNoticeBlock,
 } from '../src/backfill.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { sessionIdOf } from '../src/session/ref.mjs';
 
 const GROUP = 'qq:group:456';
 const OWNER = 'qq:private:123';
@@ -118,7 +119,7 @@ test('② 端到端：补收进未读、排唤醒、提示说明、不执行命�
     assert.equal(added.map((m) => m.messageId).join(','), '5001,5002', '只补错过的：不含命令、自己发的、实时收过的');
     assert.ok(added.every((m) => m.backfill === true), '标了 backfill');
     assert.ok(Math.abs(added[0].time - ago(20) * 1000) < 2000, '记原始发送时间');
-    assert.equal(h.state.sessions[GROUP], sid, '群里补收到的 /reset 没有执行');
+    assert.equal(sessionIdOf(h.state.sessions[GROUP]), sid, '群里补收到的 /reset 没有执行');
     assert.ok(st.pendingWakeReason, '有 @：排上了唤醒');
 
     const ownerSt = h.getSocialV2State(OWNER);

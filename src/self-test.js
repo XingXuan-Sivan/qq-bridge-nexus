@@ -10,13 +10,16 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 // Agent 侧协议只经中立门面（具体实现在 src/agent-side/adapters/dsh/client.mjs）。
-import { AgentApiClient, unwrap, createTurnCollector, discoverLaunchToken, resolveAgentBaseUrl } from './agent-side/agent-client.mjs';
+// C5：调用面走 AgentPort，本脚本不再出现平台动词。
+import { AgentApiClient, createAgentPort, createTurnCollector, discoverLaunchToken, resolveAgentBaseUrl } from './agent-side/agent-client.mjs';
+// 平台配置的读法跟桥接一致（配置 v2：platforms.agents.<active>.endpoint），不自建一套。
+import { configViews } from './config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 // 自测会话的清理句柄（见 cleanupSelfTestSession）。
-let selfTestApi = null;
+let selfTestPort = null;
 let selfTestSessionId = null;
 
 /**
@@ -25,11 +28,11 @@ let selfTestSessionId = null;
  * 更不能留在用户的 DSH 里累积。
  */
 async function cleanupSelfTestSession() {
-  if (!selfTestApi || !selfTestSessionId) return;
+  if (!selfTestPort || !selfTestSessionId) return;
   const sid = selfTestSessionId;
   selfTestSessionId = null;
   try {
-    await selfTestApi.workspace.archiveSession({ sessionId: sid });
+    await selfTestPort.archiveSession(sid);
     console.log('🧹 已归档自测会话:', sid);
   } catch (error) {
     console.log('⚠️ 自测会话归档失败（可在 DSH 里手动删除）:', sid, error?.message ?? error);
@@ -37,24 +40,23 @@ async function cleanupSelfTestSession() {
 }
 
 async function main() {
-  // 未给参数时按 config.json 的 dsh.baseUrl；留空则自动识别（桌面版 19387 / 命令行版 3080）
-  let cfgBase = '';
-  try { cfgBase = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')).dsh?.baseUrl ?? ''; } catch {}
-  const baseUrl = process.argv[2] ?? (await resolveAgentBaseUrl(cfgBase)).url;
-  let auth;
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-    auth = {
-      token: cfg.dsh?.authToken || discoverLaunchToken(),
-      header: cfg.dsh?.authHeader,
-      prefix: cfg.dsh?.authPrefix
-    };
-  } catch {}
+  // 未给参数时按 config.json 的 platforms.agents.<active>.endpoint.baseUrl；
+  // 留空则自动识别（桌面版 19387 / 命令行版 3080）
+  let file = null;
+  try { file = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')); } catch {}
+  const { agentPlatform } = configViews(file ?? {});
+  const baseUrl = process.argv[2] ?? (await resolveAgentBaseUrl(agentPlatform.baseUrl ?? '')).url;
+  const auth = {
+    token: agentPlatform.authToken || discoverLaunchToken(),
+    header: agentPlatform.authHeader,
+    prefix: agentPlatform.authPrefix
+  };
   const api = new AgentApiClient(baseUrl, undefined, auth);
-  selfTestApi = api;
+  const agentPort = createAgentPort(api);
+  selfTestPort = agentPort;
   const promptText = process.argv[3] ?? '只回复两个字：收到';
 
-  const desc = unwrap(await api.settings.describe({}), 'settings.describe');
+  const { value: desc } = await agentPort.readSettings();
   console.log('✅ DSH 连接成功:', JSON.stringify(desc).slice(0, 200));
 
   // 独立测试会话，cwd 用**系统临时目录**（不是仓库的 state/）：
@@ -63,7 +65,7 @@ async function main() {
   // 会直接 EPERM 建目录。自检是一次性探针，产物本来也不该落进仓库状态目录。
   const cwd = path.join(os.tmpdir(), 'qq-bridge-self-test');
   fs.mkdirSync(cwd, { recursive: true });
-  const created = unwrap(await api.sessions.create({ cwd }), 'session.create');
+  const created = await agentPort.ensureSession({ cwd });
   const sessionId = created.sessionId;
   selfTestSessionId = sessionId;
   console.log('✅ 测试会话已创建:', sessionId);
@@ -103,8 +105,9 @@ async function main() {
   // 新版 DSH 需要显式 follow 该会话，事件才会通过 remote.mux 推过来。
   stream.follow(sessionId);
 
-  const accepted = unwrap(await api.sessions.prompt({ sessionId, mode: 'queue', content: [{ type: 'text', text: promptText }] }), 'session.prompt');
-  console.log('✅ prompt 已接受:', JSON.stringify(accepted));
+  const prompted = await agentPort.prompt(sessionId, { content: [{ type: 'text', text: promptText }] });
+  if (!prompted.ok) throw new Error(`prompt 未被接受：${prompted.error?.code}: ${prompted.error?.message}`);
+  console.log('✅ prompt 已接受');
 
   const ended = await done;
   console.log('✅ 回合结束 reason =', ended.reason.kind);

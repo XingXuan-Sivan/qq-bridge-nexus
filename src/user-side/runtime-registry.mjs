@@ -77,6 +77,9 @@ export function listUserPlatforms() {
     conversationTypes: [...(impl.conversationTypes ?? [])],
     capabilities: [...(impl.capabilities ?? [])],
     limits: { ...(impl.limits ?? {}) },
+    // 能不能收消息 = 有没有 connect()（C3 的入站契约）。函数本身不进返回值：
+    // 这份对象会原样进 /api/platforms/registry。
+    inbound: typeof impl.connect === 'function',
   }));
 }
 

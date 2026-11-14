@@ -1,30 +1,28 @@
-// 仿真提示词的「初始版本」：直接从出厂预设 assets/default-presets/<preset>/agent.cordis.yml
-// 的 persona.prefix 读，不再单独维护一份 .md 副本。
+// 预设正文的「初始版本」：直接读能力档的出厂副本
+// profiles/agent-platforms/dsh/capabilities/.defaults/<id>.yml 的 rows 段里 persona.config.prefix。
 //
-// 与 assets/default-roles 同一思路：用户把预设里的 persona.prefix 改坏了，可以在控制台一键还原，
-// 不必回仓库找原文件。权威源仍是 profiles/agent-platforms/dsh/agents/<preset>/agent.cordis.yml，
-// assets/default-presets/ 是它的出厂快照（「还原出厂预设」用的也是这一份）。
+// C4 起能力档是唯一真源，出厂快照也只剩这一份（原来的 assets/default-presets/ 是同一份内容的
+// 第二份拷贝，已删除）。「还原出厂预设」用的正是 .defaults/，所以这里的读法必须与它一致，
+// 否则控制台的「已修改 / 已还原」判断会和实际还原结果对不上。
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+import { CAPABILITIES_ROOT } from './capabilities/store.mjs';
 
-/** 出厂预设目录（每个预设一个子目录，内含 agent.cordis.yml）。 */
-export const DEFAULT_PROMPTS_DIR = fileURLToPath(new URL('../assets/default-presets/', import.meta.url));
+/** 出厂副本目录（能力档目录下的 .defaults/）。 */
+export const DEFAULT_PROMPTS_DIR = path.join(CAPABILITIES_ROOT, '.defaults');
 
-/** 支持「还原初始版本」的预设（带出厂快照的两个仿真预设）。 */
+/** 支持「还原初始版本」的预设（带出厂快照的仿真预设）。 */
 export const DEFAULT_PROMPT_PRESETS = ['chat', 'chat-v2'];
-
-const AGENT_FILE = 'agent.cordis.yml';
 
 const norm = (text) => String(text ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
 
-/** 列出出厂目录里带 agent.cordis.yml 的预设 id。 */
+/** 列出出厂目录里的能力档 id（每个 <id>.yml 是一份快照）。 */
 export function listDefaultPrompts(dir = DEFAULT_PROMPTS_DIR) {
   try {
     return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, AGENT_FILE)))
-      .map((entry) => entry.name)
+      .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
+      .map((entry) => entry.name.replace(/\.ya?ml$/i, ''))
       .sort();
   } catch {
     return [];
@@ -35,13 +33,14 @@ export function listDefaultPrompts(dir = DEFAULT_PROMPTS_DIR) {
 export function readDefaultPrompt(preset, dir = DEFAULT_PROMPTS_DIR) {
   const name = String(preset ?? '').trim();
   if (!name || !listDefaultPrompts(dir).includes(name)) return null;
-  let rows;
+  let loaded;
   try {
-    rows = parse(fs.readFileSync(path.join(dir, name, AGENT_FILE), 'utf8').replace(/^\uFEFF/, ''));
+    loaded = parse(fs.readFileSync(path.join(dir, `${name}.yml`), 'utf8').replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }
-  const persona = Array.isArray(rows) ? rows.find((row) => row && row.id === 'persona') : null;
+  const rows = Array.isArray(loaded?.rows) ? loaded.rows : [];
+  const persona = rows.find((row) => row && row.id === 'persona');
   const prefix = persona?.config?.prefix;
   return typeof prefix === 'string' && prefix.trim() ? prefix : null;
 }

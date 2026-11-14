@@ -1,0 +1,37 @@
+version: 1
+id: acp
+label: ACP（Agent Client Protocol）
+tools: tools.yml
+# 能力档目录：有意为空（见 capabilities/README.md）。ACP 的 agent / 模型名单是**对端**
+# 在 session/new 的回执里给的，桥接只读不写，没有「装进对方的预设」这回事。
+capabilities: capabilities
+# 运行期适配器：能力声明与权限档映射（内核只经 src/agent-side/registry 读）。
+runtime: adapters/runtime.mjs
+#
+# 与 dsh 目录的两处结构差异，都是协议决定的：
+#   · 没有 adapters/build.mjs 与 adapters/install.mjs —— 没有产物要渲染、也没有对方的
+#     profile 要改（对端进程由适配器 spawn 并托管，见 PLATFORM_UNIFICATION §十一 Q5）。
+#     两个脚本按「约定优于声明」发现适配器，缺文件即不调度，不是漏写。
+#   · 没有 templates/ —— 同上，没有要渲染的行。
+#
+# 配置面：连接一个 ACP Agent 只有「怎么起进程」这一件事。ACP v1 只有 stdio 传输，
+# 因此没有 baseUrl / 鉴权头 / 远程开关。字段名与 src/agent-side/adapters/acp/client.mjs
+# 的入参一致（command / args / cwd），避免出现第二套命名。
+configSchema:
+  type: object
+  additionalProperties: true
+  properties:
+    command:
+      type: string
+      title: 启动命令
+      description: 实现 ACP v1 的 Agent 可执行文件（例如 dsh 的 ACP 模式）。v1 只有 stdio：桥接 spawn 它，用 NDJSON 在 stdin/stdout 上说 JSON-RPC。
+    args:
+      type: array
+      items:
+        type: string
+      title: 启动参数
+      description: 逐项传给启动命令的参数；不在这里拼成一整行，避免引号与路径分隔符的转义分歧。
+    cwd:
+      type: string
+      title: 工作目录
+      description: 子进程的工作目录，同时作为新会话的缺省目录（session/new 的 cwd）。

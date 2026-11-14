@@ -21,7 +21,7 @@ import {
   listPlatforms,
   platformFilterOptions,
   platformLabel,
-} from '../../js/platforms.js';
+} from '../../js/registry.js';
 
 const MODE_LABEL = {
   chat: '聊天模式',

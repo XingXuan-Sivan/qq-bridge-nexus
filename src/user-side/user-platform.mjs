@@ -9,11 +9,12 @@
 // 转发函数而不是 const 绑定：当前平台可以在运行期被 useUserPlatform() 切换
 // （B6 的多平台在线），const 绑定会在切换后指向旧平台。一次 Map.get 可忽略。
 
-import { configureBuiltinUserPlatformBackend } from './builtin.mjs';
+import { configureBuiltinUserPlatformBackend, configureBuiltinUserPlatformInbound } from './builtin.mjs';
 import {
   buildSendCall as registryBuildSendCall,
   readBackendInfo as registryReadBackendInfo,
   describeBackend as registryDescribeBackend,
+  requireUserPlatform,
   supportsUserCapability as registrySupportsUserCapability,
   userPlatformLimits as registryUserPlatformLimits,
   activeUserPlatformId,
@@ -51,6 +52,27 @@ export function pluginTransports() {
  */
 export function configureUserPlatformBackend(provider) {
   configureBuiltinUserPlatformBackend(provider);
+}
+
+/**
+ * 注入内置平台的入站来源（C3：bridge 启动时调一次）。
+ * 传的是「已经建好的连接」（WS 客户端），不是配置。
+ */
+export function configureUserPlatformInbound(provider) {
+  configureBuiltinUserPlatformInbound(provider);
+}
+
+/**
+ * 启动当前平台的入站（C3）。`context` 原样交给平台的 `connect()`：
+ * `{signal, onEvent, onStatus}`；返回 `{close}`。
+ *
+ * 只实现发送的平台（没有 connect）**不是错误**：返回 null，由调用方决定
+ * 要不要在诊断里报「只出不进」（统一注册表的 inbound_unsupported）。
+ */
+export async function startUserPlatformInbound(context = {}, ctx = {}) {
+  const impl = requireUserPlatform(ctx.platform);
+  if (typeof impl.connect !== 'function') return null;
+  return impl.connect(context);
 }
 
 /**

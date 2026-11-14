@@ -18,7 +18,7 @@ import { activeUserPlatformId, listUserPlatforms, userPlatform } from './runtime
 import { getTransport, listTransports } from './transport.mjs';
 import { formatKey, parseKey, sameConversationType } from '../session/key.mjs';
 
-/** 描述里只放常量：这个对象会原样进 `/api/platforms`。 */
+/** 描述里只放常量：这个对象会原样进 `/api/platforms/registry`。 */
 function describePlatform(impl, { source, owner = null, active = false }) {
   return {
     id: impl.id,
@@ -26,6 +26,12 @@ function describePlatform(impl, { source, owner = null, active = false }) {
     conversationTypes: [...(impl.conversationTypes ?? [])],
     capabilities: [...(impl.capabilities ?? [])],
     limits: { ...(impl.limits ?? {}) },
+    // 能不能收消息 = 有没有 connect()。这一项**只读不调**：控制台在平台没连上时
+    // 也要能画表，所以不能在这里真的去连。实现缺失时报 `inbound_unsupported`。
+    // 两侧的列表已经把这件事算成布尔值（`inbound`；函数不进返回值），描述对象直接读它。
+    inbound: impl.inbound === true
+      || typeof impl.connect === 'function'
+      || typeof impl.instance?.connect === 'function',
     source,
     owner,
     active,

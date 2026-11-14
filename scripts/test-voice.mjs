@@ -197,15 +197,14 @@ if (!hasVoiceTool()) {
   ok(fs.existsSync(path.join(ROOT, '..', '发语音-图形界面.cmd')), '上级 发语音-图形界面.cmd 启动器存在');
 }
 
-console.log('## preset 人设已描述语音能力（否则 AI 不知道自己会说话）');
+console.log('## 能力档人设已描述语音能力（否则 AI 不知道自己会说话）');
 {
-  const preset = fs.readFileSync(path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents', 'chat-v2', 'agent.cordis.yml'), 'utf8');
+  const preset = fs.readFileSync(path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities', 'chat-v2.yml'), 'utf8');
   ok(preset.includes('qq_send_voice'), 'chat-v2 人设提到 qq_send_voice');
   ok(preset.includes('qq_list_voices'), 'chat-v2 人设提到 qq_list_voices');
   ok(preset.includes('verified=true'), '人设说明 verified=true 的语义');
   ok(/不要假装发了语音/.test(preset), '人设禁止假装发语音');
-  // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
-  // （profiles/agent-platforms/dsh/agents/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
+  // 守卫的权威实现只有一份，在 qq-agent-presets bundle 里（能力档的 rows 以裸说明符引用它）。
   const restrict = fs.readFileSync(path.join(ROOT, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs'), 'utf8');
   ok(restrict.includes("'mcp__snowluma__'"), 'preset 白名单以前缀放行 mcp__snowluma__*（覆盖语音工具）');
 }

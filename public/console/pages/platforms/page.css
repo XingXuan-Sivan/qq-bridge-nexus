@@ -1,0 +1,86 @@
+/* 平台页：页面本身只是宿主（.page-stack = display:contents），
+   下面全部是 page.js / platform-detail.js 生成内容的样式。 */
+
+/* 左列表的两侧分组标题：不是可点条目，只做分隔。 */
+.platforms-page .split-group {
+  margin: 10px 4px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.platforms-page .split-group:first-child { margin-top: 2px; }
+
+/* 详情：标题行 + 标签 + 面板，三者同一节奏。 */
+.platform-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+.platform-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.platform-head-main h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.platform-head-main h3 code {
+  font-size: 12px;
+  color: var(--muted);
+}
+.platform-head-main .meta { margin: 0; }
+
+/* 标签条在详情里：.page-tabs 的默认外边距是给页首用的，这里收窄。 */
+.platform-detail .page-tabs {
+  margin: 14px 0 16px;
+  flex-wrap: wrap;
+}
+.platform-detail .page-tab { padding: 8px 14px; }
+
+/* 面板分段：详情已经在卡片里，不再套第二层卡片，标题 + 内容按段落排。 */
+.platform-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.platform-stack[hidden] { display: none; }
+.platform-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.platform-section > h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.platform-section > p.meta { margin: 0; }
+
+/* 能力预设编辑器自带整张卡片：在详情里收一点内距，避免卡中卡的厚重感。 */
+.platform-detail .card { padding: 18px 20px; }
+
+/* 行为档案的字段分组直接铺开（不额外套一层容器），分组本身仍是卡片式 fieldset。 */
+.platform-detail .behavior-groups { display: contents; }
+.platform-detail .behavior-groups .form-section--card { margin: 0; }
+
+/* 能力面板里成排的 id / 工具名：排成可换行的代码片，别挤成一串。 */
+.platform-detail .cap-tool-names,
+.platform-detail .cap-pill-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.platform-detail .cap-tool-names code { font-size: 11px; }
+
+/* schema 里的数组/对象值可能很长：允许在任意字符处折行，不撑破右栏。 */
+.platform-config-code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}

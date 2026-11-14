@@ -3,7 +3,7 @@
 // 事实（对照 DSH 桌面版 0.2.0-rc.2 安装包 resources/app.asar）：桌面版启动内置服务时写死 `--port 19387`，
 // 运行 `desktop` profile；命令行版 `dsh web` 默认 3080。部署实测踩过「文档默认 3080，桌面版实际 19387」。
 //
-// 规则：config.json 的 dsh.baseUrl **显式填写**时一律照用；留空（或缺省）时自动识别：
+// 规则：config.json 里当前 Agent 平台的 `platforms.agents.<id>.endpoint.baseUrl` **显式填写**时一律照用；留空（或缺省）时自动识别：
 //   1. 检测到桌面版 → 候选顺序 19387、3080，否则 3080、19387。检测方式：
 //      · Windows：~/.dsh/dsh-runtimes/*/runtime.json 有 desktopVersion；
 //      · macOS：桌面版没有 dsh-runtimes，改看 App 包 Info.plist 的版本号（默认 /Applications/DeepSeek Harness.app，

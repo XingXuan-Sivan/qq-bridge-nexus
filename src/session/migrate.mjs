@@ -13,6 +13,7 @@
 
 import { formatKey, parseKey } from './key.mjs';
 import { applyPatch, createProfile, normalizeDefaults } from './directory.mjs';
+import { readSessionRef } from './ref.mjs';
 
 /** 旧 key 规范化；兼容只有数字 ID 的旧白名单，不合法返回 null。 */
 function canonicalKey(raw, kindHint, platform = 'qq') {
@@ -105,11 +106,12 @@ export function migrateSessionProfiles(input = {}) {
       report.wake += 1;
     }
 
-    const sessionId = input.sessions?.[key];
+    // 老的 sessions.json 里是裸 id；新格式是 `{ instance, sessionId }`。两者都吃，归一后再写档案。
+    const sessionRef = readSessionRef(input.sessions?.[key], '');
     const fingerprint = input.policies?.[key];
-    if (sessionId) {
+    if (sessionRef) {
       patch.binding = {
-        sessionId,
+        agentRef: sessionRef,
         fingerprint: fingerprint ?? null,
         status: 'unknown',
         checkedAt: 0,
@@ -140,7 +142,11 @@ export function migrateSessionProfiles(input = {}) {
   return {
     profiles,
     defaults,
-    sessions: Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.binding?.sessionId).map(([k, p]) => [k, p.binding.sessionId])),
+    sessions: Object.fromEntries(
+      Object.entries(profiles)
+        .map(([key, profile]) => [key, readSessionRef(profile.binding?.agentRef ?? profile.binding, '')])
+        .filter(([, ref]) => !!ref),
+    ),
     sessionPolicies: Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.binding?.fingerprint).map(([k, p]) => [k, p.binding.fingerprint])),
     dormantSessions: Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.dormant).map(([k, p]) => [k, p.dormant])),
     report,

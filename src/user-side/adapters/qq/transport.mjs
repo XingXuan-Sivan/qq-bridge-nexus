@@ -6,7 +6,7 @@
 //   · 加新平台是新增一个适配器目录，不是再来四处 copy-paste。
 //
 // 后端地址与 token 用**提供者函数**注入而不是模块级常量：bridge 的 config 是可热改的
-// （控制台改 snowluma.httpUrl 后不必重启），每次发送都读当下的值，行为与收口前一致。
+// （控制台改当前平台的 `transport.httpUrl` 后不必重启），每次发送都读当下的值，行为与收口前一致。
 import { oneBotSendCall } from './onebot.mjs';
 import { toOneBotSegments } from './segments.mjs';
 
@@ -68,7 +68,7 @@ export async function sendOneBotAction({ address, segments, opts = {} }) {
   if (!res.ok || body.status !== 'ok' || body.retcode !== 0) {
     // 426 几乎只有一个原因：httpUrl 指到了 WebSocket 端口。这条提示原先在四处各写一遍，
     // 措辞还不一样；现在统一到一处，排障时只有一种说法。
-    const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址）' : '';
+    const hint = res.status === 426 ? '（HTTP 426：httpUrl 可能指向了 WebSocket 端口，请检查 config.json 里当前平台的 transport.httpUrl 是否为 OneBot HTTP API 地址）' : '';
     throw new Error(`OneBot ${action} 失败: ${body.wording || body.retcode || res.status}${hint}`);
   }
   const messageId = body.data?.message_id ?? null;

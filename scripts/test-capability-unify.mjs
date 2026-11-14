@@ -1,7 +1,14 @@
-// P10.7 红线核查：能力归一后不该再出现的旧结构与耦合。
+// C1→C4 的红线：能力模型的「唯一源」不许回退。
+//
+// 这里守的是**方向**而不是某个字段：
+//   - 服务端/前端都只能读 capabilities/<id>.yml，不许再有第二份能力定义；
+//   - 能力档的元信息（tools/label/note/preset）不许混进平台话术（那是平台侧的职责）；
+//   - plan 只说「用哪个能力档」，不许再叠加 agent 字段（C4 起两者是同一个 id）；
+//   - agents/ 目录已并入 capabilities/，任何残留都说明有地方还在写第二份正文。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 const ROOT = path.resolve('.');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -39,16 +46,39 @@ for (const file of consoleFiles) {
   assert.ok(!text.includes('suggestedPermission'), `${file} 仍用 suggestedPermission`);
 }
 
-// 4) 平台提示词只在平台侧：能力文件里不得出现 QQ 专属话术。
+// 4) 能力语义不含平台话术。
+//    C4 起 rows（预设正文）与 preset.name/description（DSH 预设列表的展示名）都随平台走，
+//    它们含「QQ」是产品文案，不算漂移；但 tools / label / note 描述的是「这个能力档能做什么」，
+//    将来换平台还得能用，所以这三处必须平台无关。
 const capDir = path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities');
+const capabilityIds = [];
 for (const name of fs.readdirSync(capDir)) {
   if (!name.endsWith('.yml')) continue;
-  const text = fs.readFileSync(path.join(capDir, name), 'utf8');
-  assert.ok(!/QQ|群聊|群友/.test(text), `${name} 混入平台话术`);
+  const id = name.replace(/\.yml$/, '');
+  capabilityIds.push(id);
+  const doc = parseYaml(fs.readFileSync(path.join(capDir, name), 'utf8')) ?? {};
+  const metaText = JSON.stringify({ label: doc.label, note: doc.note, tools: doc.tools });
+  assert.ok(!/QQ|群聊|群友/.test(metaText), `${name} 的 tools/label/note 里混入平台话术（能力语义要跨平台可复用）`);
+  assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${name} 必须带非空 rows 段（预设正文跟着能力档走）`);
 }
 
-// 5) 运行方案与执行侧都以 capability 为准。
+// 5) plan 只说能力档：不得再有 agent 字段。
+const planDir = path.join(ROOT, 'profiles/plans');
+for (const name of fs.readdirSync(planDir)) {
+  if (!name.endsWith('.yml')) continue;
+  const doc = parseYaml(fs.readFileSync(path.join(planDir, name), 'utf8')) ?? {};
+  assert.equal(doc.agent, undefined, `plans/${name} 仍带 agent 字段（C4 起与 capability 合一）`);
+  assert.ok(capabilityIds.includes(doc.capability), `plans/${name} 的 capability「${doc.capability}」不是已存在的能力档`);
+}
+
+// 6) agents/ 目录已并入 capabilities/：任何残留都说明还有第二份正文在写。
+assert.ok(
+  !fs.existsSync(path.join(ROOT, 'profiles/agent-platforms/dsh/agents')),
+  'profiles/agent-platforms/dsh/agents/ 仍存在（C4 起已并入 capabilities/）',
+);
+
+// 7) 运行方案与执行侧都以 capability 为准。
 assert.ok(read('src/bridge.js').includes('capabilityAllowsFlag'), 'bridge 未按 capability 收紧工具');
 assert.ok(read('src/runtime/plans.mjs').includes('capability'), 'plans 未接 capability');
 
-console.log('capability unify red lines: 12 checks passed');
+console.log('capability unify red lines: 17 checks passed');

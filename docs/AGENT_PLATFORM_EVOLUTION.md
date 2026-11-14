@@ -1,9 +1,13 @@
 # Agent 平台适配层（AGENT_PLATFORM_EVOLUTION）
 
 > **状态**：P0 目录迁移、P1 build/install 分离、P3 模式持久化 —— **已落地**；
-> P2「中立 Agent IR」—— **规划中，本文就是它的规格**，实施时按 §三 走，不要凭记忆重构。
+> P2「中立 Agent IR」—— **已移交**，不再单独实施（见下方“P2 已移交”）。
 >
-> 最后更新：2026-11-13（随 `artifacts/dsh/` 迁移与 P1/P3 落地）。
+> 最后更新：2026-11-14（补状态衔接；正文内容仍为 2026-11-13 版）。
+>
+> **⚠️ P2 已移交**：P2 的触发条件（“要接第二个 Agent 平台”）已满足，中立 Agent IR 的落地方式改由
+> [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §五（`AgentPort` 契约）与 C4–C6 接管；
+> 本文 §三 保留为当时的设计意图与反模式清单，**不要单独照着实施**。P0 / P1 / P3 部分仍然现行。
 
 ---
 
@@ -29,10 +33,10 @@
 
 ```
 profiles/agent-platforms/<id>/
-├── agent-platform.yml     # 元信息（id/label/tools/capabilities/agents）——不声明产物路径
+├── agent-platform.yml     # 元信息（id/label/tools/capabilities）——不声明产物路径
 ├── tools.yml              # 该平台的 Agent 模块目录（给人看 + 控制台用）
-├── capabilities/*.yml     # 能力预设（平台无关的「拿到什么」）
-├── agents/<agent>/        # Agent 源（当前 DSH 的形态：preset.yml + agent.cordis.yml + 守卫 mjs）
+├── capabilities/<id>.yml  # 能力档：tools（拿到什么）+ preset（预设元信息）+ rows（预设正文）
+│                          # C4 起原 agents/<agent>/（preset.yml + agent.cordis.yml + 守卫薄壳）并入这里
 └── adapters/
     ├── build.mjs          # 源 → 产物（纯函数）
     └── install.mjs        # 产物 → 运行时（幂等，有副作用）
@@ -128,6 +132,11 @@ npm run verify:repo              # 含 P1/P3 的文本断言与全量语法检�
 把 `agents/<id>/agent.cordis.yml`（DSH 的 cordis 行列表）抽成平台无关的声明
 `agents/<id>/agent.yml`，再由各平台适配器把它渲染成自己的格式。收益是**同一份 Agent 定义可装到多个 Agent 平台**。
 
+> **2026-11-14 补记（C4）**：`agents/<id>/` 已经不存在——源是 `capabilities/<id>.yml` 的 `preset` + `rows` 段，
+> 渲染产物是 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`（golden 已立：`build-artifacts --check` 逐字节比对）。
+> 下文 §3.2–§3.5 里的 `agents/<id>/agent.yml` 请读作「能力档里的平台无关声明 + `platformSpecific.dsh.rows` 逃生舱」，
+> 不要新建 `agents/` 目录。
+
 ### 3.2 提议结构（草案，不是最终版）
 
 ```yaml
@@ -174,19 +183,19 @@ platformSpecific:       # 逃生舱：原样注入某个平台，不做翻译
 ### 3.4 触发条件（满足任意一条再启动）
 
 - 真要接第二个 Agent 平台（不是 PoC，是要能跑会话的）；
-- 控制台需要**跨平台编辑**同一份 Agent（否则编辑器只需要认 `agents/<id>/` 的目录约定）；
+- 控制台需要**跨平台编辑**同一份 Agent（否则编辑器只需要认 `capabilities/<id>.yml` 的字段约定）；
 - DSH 的 cordis 行格式连续两次破坏性变更（说明「把格式当源」的代价已经超过迁移成本）。
 
 ### 3.5 实施步骤（届时按序）
 
-1. **先立黄金测试**：把现有 5 个 `agents/<id>/agent.cordis.yml` 固化成 golden；
+1. **先立黄金测试**：把现有 5 个预设的产物（现为 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml`）固化成 golden；
    写「IR → dsh 行列表」的渲染器，逐字节等于 golden 才算迁移成功（不允许「语义等价」）。
-2. 写 `agents/<id>/agent.yml`，只搬能被两个平台理解的部分；
+2. 写能力档里的平台无关声明（原计划为 `agents/<id>/agent.yml`，现为 `capabilities/<id>.yml` 的 `preset` 段），只搬能被两个平台理解的部分；
    搬不动的原样留在 `platformSpecific.dsh.rows`，并**统计数量作为债务指标**（目标：逐版本下降，但不必归零）。
 3. `adapters/build.mjs` 改为读 IR；对 `platformSpecific` 做「原样注入 + 位置校验」（仍要过 `normalizeRows` 的
    id 唯一、相对名改写、必需行检查）。
 4. 校验器的硬要求：**任何平台无法表达的能力必须报错**，禁止静默降级（安全边界不能因为「那个平台不支持」而消失）。
-5. 迁移期间保持 `agents/<id>/agent.cordis.yml` 可读：先用 IR 生成它，diff 为零后再删。
+5. 迁移期间保持现有产物可读：先用 IR 生成 `presets/*.patch.yml`，diff 为零后再删旧渲染路径。
 
 ### 3.6 验收标准
 

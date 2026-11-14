@@ -1,6 +1,7 @@
 # 用户侧 / Agent 侧平台解耦规格
 
-- 状态：设计规格（v1）。基于 `docs/_internal/DECOUPLING_AUDIT.md` 的现状清单与四条前置决策。
+- 状态：设计规格（v1），**B0–B8 已全部落地**（0.2.0，提交 `489ab72`）。基于 `docs/_internal/DECOUPLING_AUDIT.md` 的现状清单与四条前置决策。
+  - B8 之后的三个残留缺口（用户侧只能出站、`cfg.platform.id` 不切平台、内置平台无 `configSchema`）以及 Agent 侧 / 界面侧的通用化，**不在本文范围内**，见 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md)。
 - 前置决策（已定）：
   1. 用户侧**支持多平台同时在线**。
   2. 会话 id **接受非数字**（Telegram username、B 站直播间号、thread id 等）。
@@ -214,6 +215,11 @@ QQ 侧的还原在 `src/user-side/adapters/qq/segments.mjs`，报文逐字段不
 
 ### 3.5 AgentPlatform（Agent 侧）
 
+> **演进说明（C5）**：下面这版「一个平台导出一组自由函数」的草案已被 `AgentPort` 取代 ——
+> 能力位改成按组声明 + 未声明即 fail-closed（而不是让调用方撞 `TypeError`），动词归一为
+> `probe` / `ensureSession` / `prompt` / `cancel` / `applyPermission` …，事件流也不再走 `onEvent`。
+> 现行契约见 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §五；本节保留作为设计演进记录。
+
 ```js
 export const id = 'dsh';
 export const capabilities = Object.freeze(['session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact']);
@@ -358,6 +364,12 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 
 ### 6.1 B7 实装：端点命名与元数据来源
 
+> **现行契约见 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §五**：C1 起本节三张表里的端点已收口为
+> `GET /api/platforms/registry`（用户侧与 Agent 侧同源，同时回答「有没有配置目录」「有没有实现」
+> 「能不能收」「哪里不一致」；旧的 `/api/platforms`、`/api/runtime/platforms`、
+> `/api/runtime/agent-platforms`、`/api/runtime/adapters` 已删），控制台侧唯一调用点是
+> `public/console/js/registry.js`（C7 前名 `js/platforms.js`）。本节保留作为 B7 的设计演进记录。
+
 规划里写的 `/api/platforms` 已被占用：bridge 从 `profiles/platforms/<id>/` 读「平台 + 工具目录 + 话术」，
 那是**配置面**。两个新端点因此挂在 `/api/runtime/` 下，与既有的 `capabilities` / `plans` / `adapters` 同族：
 
@@ -368,7 +380,8 @@ ctx.adapters.register(kind, adapter)      // kind: 'platform' | 'agent'
 | `/api/runtime/agent-platforms` | 有哪些 Agent 平台、声明了什么能力、当前是哪个 | Agent 侧注册表（不经门面，未装协议也列得出空态） |
 
 "两张注册表合成一张表"的拼装在 `src/user-side/metadata.mjs`，Agent 侧在 `src/agent-side/metadata.mjs`；
-bridge 只调这两个模块，控制台只有 `public/console/js/platforms.js` 读这条响应（列名、筛选、标签、上限全查表）。
+bridge 只调这两个模块，控制台只有 `public/console/js/registry.js`（C7 前名 `js/platforms.js`）读这条响应
+（列名、筛选、标签、上限全查表）。
 例外的只有**行为档案页的平台下拉**：档案本身就存在 `profiles/platforms/<id>/behaviors/` 下，
 所以它读配置面的 `/api/platforms` —— 运行期注册表里有平台不等于有档案目录，混用会让新建档案写到不存在的目录里。
 

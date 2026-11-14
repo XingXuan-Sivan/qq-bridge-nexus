@@ -54,7 +54,9 @@ test('目录扫描：defaults + 每会话文件，binding/人格/提示词/唤�
   assert.equal(loaded.writable, true);
   assert.equal(loaded.state.migratedAt, 123);
   assert.equal(loaded.state.profiles['qq:group:123'].persona.name, '小鲸鱼');
-  assert.equal(loaded.state.sessions['qq:group:123'], 'session-a');
+  // 老档案的 `binding.sessionId` 被归一成 `{ instance, sessionId }`；装载期**不认领平台**
+  // （那时还不知道当前是哪个平台），认领由注册表的 normalizeAll() 在平台装好后补写。
+  assert.deepEqual(loaded.state.sessions['qq:group:123'], { instance: '', sessionId: 'session-a' });
   assert.equal(loaded.state.sessionPolicies['qq:group:123'], 'fp-a');
   assert.equal(loaded.state.profiles['qq:group:123'].prompt.initialText, '这是技术群');
 });
@@ -124,7 +126,7 @@ test('迁移：allow/deny、allowAllWhenEmpty、人格/提示词/唤醒/绑定�
   assert.equal(out.profiles['qq:group:4'].persona.mode, 'off');
   assert.equal(out.profiles['qq:group:1'].prompt.initialText, '技术群');
   assert.deepEqual(out.profiles['qq:group:2'].wake.config, { mode: 'active' });
-  assert.equal(out.sessions['qq:group:1'], 'session-1');
+  assert.deepEqual(out.sessions['qq:group:1'], { instance: '', sessionId: 'session-1' });
   assert.deepEqual(out.dormantSessions['qq:group:4'], { sessionId: 'session-4', since: 5 });
   const emptyAll = migrateSessionProfiles({ allowGroups: [], allowPrivate: [], allowAllWhenEmpty: true, now: () => 1 });
   assert.deepEqual(emptyAll.defaults, { passive: 'allow', proactive: 'allow' });

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from '../src/agent-side/adapters/dsh/client.mjs';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -14,10 +15,12 @@ async function main() {
   let auth;
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    // 配置 v2：DSH 的鉴权在 platforms.agents.<active>.endpoint，经扁平视图读。
+    const { agentPlatform } = configViews(cfg);
     auth = {
-      token: cfg.dsh?.authToken || discoverDshLaunchToken(),
-      header: cfg.dsh?.authHeader,
-      prefix: cfg.dsh?.authPrefix
+      token: agentPlatform.authToken || discoverDshLaunchToken(),
+      header: agentPlatform.authHeader,
+      prefix: agentPlatform.authPrefix
     };
   } catch {}
   const api = new NodeApiClient('http://127.0.0.1:3080', undefined, auth);

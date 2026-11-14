@@ -93,7 +93,10 @@ ok(fixture.includes("case '/api/voice/send'"), 'fixture mock 了 /api/voice/send
 
 console.log('## 路由与面包屑（B1–B3）');
 ok(/PAGE_STORAGE_KEY/.test(html) && /sessionStorage\.getItem\(PAGE_STORAGE_KEY\)/.test(html) && /sessionStorage\.setItem\(PAGE_STORAGE_KEY/.test(html), '当前页写入 sessionStorage（刷新兜底）');
-ok(/const hashPage = location\.hash\.slice\(1\)/.test(html) && /readStoredPage\(\)/.test(html), '首屏三层恢复：hash → sessionStorage → overview');
+ok(/const hashPage = normalizePageHash\(location\.hash\.slice\(1\)\)/.test(html) && /readStoredPage\(\)/.test(html), '首屏三层恢复：hash → sessionStorage → overview（旧 hash 先归一）');
+// 删页只允许「一次性重定向」：别名表就是全部兼容面，不允许长成第二套页面表。
+ok(/const PAGE_ALIASES = Object\.freeze\(\{[\s\S]{0,300}?behavior: 'platforms'[\s\S]{0,300}?\}\)/.test(html), '旧页面 id 走一次性别名表（#behavior → #platforms）');
+ok(!/reference: 'mcp',[\s\S]{0,80}?plans:/.test(html), '别名表只登记已删页，不新增跳转');
 ok(/addEventListener\('hashchange'/.test(html) && /addEventListener\('popstate'/.test(html), 'hashchange 与 popstate 都监听');
 ok(/function renderBreadcrumb\(page\)/.test(html) && /class="crumb-link"/.test(html) && /href="#overview"/.test(html), '面包屑父级是可点的链接');
 ok(!/id="breadcrumbPage"/.test(html), '旧的纯文本面包屑 id 已移除');
@@ -102,7 +105,7 @@ ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选�
 
 console.log('## 页面片段（运行总览 / 技能 / MCP / 管理行为 / 访问 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks'];
+const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks', 'platforms', 'plans'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
@@ -116,7 +119,43 @@ for (const id of pilotIds) {
 for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
-ok(/const PAGE_FRAGMENTS = new Set\([\s\S]{0,400}?'behavior'[\s\S]{0,400}?'memory'\]\)/.test(html), '路由器登记了片段页');
+
+console.log('## C7：界面 IA（平台页 + 方案页）');
+ok(!pageDirs.some((entry) => entry.id === 'behavior'), 'pages/behavior/ 已删除（四标签拆成平台页与方案页）');
+ok(!pageDirs.some((entry) => entry.id === 'runtime'), 'pages/runtime/ 已删除（运行方案独立成 pages/plans/）');
+ok(!fs.existsSync(path.join(ROOT, 'public', 'console', 'components', 'platform-panel')), 'components/platform-panel/ 已删除（清单并入平台页）');
+// 「平台清单」只能有一个数据源：页面不再自己打 /api/platforms/registry（口径在 js/registry.js）。
+// 只认真实的 api(...) 调用——注释里提到端点是解释，不是第二份实现。
+const registryCallers = [];
+for (const page of pageDirs) {
+  for (const file of page.scripts ?? []) {
+    if (/api\(['"]\/api\/platforms\/registry/.test(fs.readFileSync(file, 'utf8'))) registryCallers.push(path.relative(ROOT, file));
+  }
+}
+ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表请求（口径只在 js/registry.js）', registryCallers.join(', ') || '没有绕过');
+{
+  const platformsPage = pageDirs.find((entry) => entry.id === 'platforms');
+  const platformsJs = platformsPage?.js ? fs.readFileSync(platformsPage.js, 'utf8') : '';
+  ok(/SIDE_ORDER = \['user', 'agent'\]/.test(platformsJs), '平台页把用户侧与 Agent 侧都列出来');
+  ok(/platform-detail\.js/.test(platformsJs) && /mountPlatformDetail\(/.test(platformsJs), '右栏详情走 platform-detail.js');
+  const detailPath = path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js');
+  const detailJs = fs.existsSync(detailPath) ? fs.readFileSync(detailPath, 'utf8') : '';
+  // 标签由「这一侧真有的资产」推出来：不是按平台 id 写死分支。
+  ok(/assets\?\.capabilityProfiles \?\? \[\]\)\.length/.test(detailJs) && /assets\?\.behaviors \?\? \[\]\)\.length/.test(detailJs), '详情标签按资产有无给（能力 / 行为）');
+  ok(!/id === 'qq'|id === 'dsh'/.test(detailJs), '详情不按平台 id 分支');
+  const behaviorsPath = path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'behaviors-panel.js');
+  const behaviorsJs = fs.existsSync(behaviorsPath) ? fs.readFileSync(behaviorsPath, 'utf8') : '';
+  ok(/platformOfBehavior\(item\) === platformId/.test(behaviorsJs), '行为档案按所属平台过滤（档案是平台的子资源）');
+
+  const plansJs = pageDirs.find((entry) => entry.id === 'plans')?.js;
+  const plansText = plansJs ? fs.readFileSync(plansJs, 'utf8') : '';
+  ok(/capabilityProfiles/.test(plansText) && !/'dsh'/.test(plansText), '方案页不再硬编码 Agent 平台（只挑声明了能力档的）');
+  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时 Agent 平台取自下拉，不是写死的值');
+}
+// C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
+// 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。
+ok(!/PAGE_FRAGMENTS/.test(html), '路由器不再区分静态页与片段页（PAGE_FRAGMENTS 已删除）');
+ok(/pages\/\$\{page\}\/page\.html/.test(html), '每页片段都从 pages/<id>/page.html 注入');
 ok(/function hydratePage\(page\)/.test(html) && /void hydratePage\(page\)/.test(html), '切页时注入片段');
 ok(/document\.querySelectorAll\('section\[data-page\]'\)[\s\S]{0,400}?if \(!heading\) return;/.test(html), '搜索索引跳过空 section（片段未注入时不报错）');
 ok(/for \(const \[page, meta\] of Object\.entries\(consolePages\)\)/.test(html), '未注入的片段页仍可按标题搜到');
@@ -371,8 +410,6 @@ const BARE_CONTROL_BASELINE = {
   slang: 0, overview: 0, plugins: 0, usage: 0,
   operations: 0, sessions: 10, behaviors: 0, mcp: 0, skills: 0,
   config: 13, scheduler: 0, persona: 0, memory: 0,
-  // behavior：独立页保留了「选择档案 + 刷新 + 名称 + 保存」四个手写控件。
-  behavior: 4,
 };
 const bareByPage = {};
 for (const page of consolePageDirs(ROOT)) {

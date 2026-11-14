@@ -8,6 +8,8 @@
 // - 所有调用走 OneBot HTTP API（httpUrl + accessToken）。
 import fs from 'node:fs';
 import { configureKeys, key as skillKey, platformOfConfig } from './session/key.mjs';
+// 配置 v2：平台端点经扁平视图读，不直接认 `snowluma` 段。
+import { configViews } from './config/platforms.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,10 +74,12 @@ function isPassiveAllowed(kind, id) {
 }
 
 function getOneBotConfig() {
-  const c = getConfig();
+  // 配置 v2：端点在 platforms.users.<active>.transport 下，扁平视图由 config/platforms.mjs 统一算，
+  // 本进程不再认识 `snowluma` 这个段名（否则新加一个平台就要在这里加一段）。
+  const { userPlatform } = configViews(getConfig());
   return {
-    httpUrl: (c.snowluma?.httpUrl ?? 'http://127.0.0.1:3000').replace(/\/+$/, ''),
-    token: c.snowluma?.accessToken ?? ''
+    httpUrl: (userPlatform.httpUrl ?? 'http://127.0.0.1:3000').replace(/\/+$/, ''),
+    token: userPlatform.accessToken ?? ''
   };
 }
 
@@ -106,7 +110,7 @@ async function onebot(action, params = {}) {
     signal: AbortSignal.timeout(15000)
   });
   if (!res.ok) {
-    const hint = res.status === 426 ? '；HTTP 426 通常表示 httpUrl 指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl 是否为 OneBot HTTP API 地址' : '';
+    const hint = res.status === 426 ? '；HTTP 426 通常表示 httpUrl 指向了 WebSocket 端口，请检查 config.json 的 platforms.users.<当前平台>.transport.httpUrl 是否为 OneBot HTTP API 地址' : '';
     throw new Error(`HTTP ${res.status}${hint}`);
   }
   const body = await res.json();

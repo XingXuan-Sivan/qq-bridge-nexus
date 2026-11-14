@@ -29,4 +29,15 @@ export function configureBuiltinUserPlatformBackend(provider) {
   qq.setOneBotBackend(provider);
 }
 
+/**
+ * 注入内置平台的**入站**来源（C3：bridge 启动时调一次）。
+ *
+ * 与上面同构，但方向相反：那边是「往哪发」（HTTP 地址与 token），这边是
+ * 「从哪收」（已经建好的 WS 客户端）。由适配器决定怎么订阅、怎么翻译，
+ * 内核只看到 `connect()` 这一个中立契约。
+ */
+export function configureBuiltinUserPlatformInbound(provider) {
+  qq.setOneBotClient(provider);
+}
+
 registerBuiltinUserPlatforms();

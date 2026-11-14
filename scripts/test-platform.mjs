@@ -105,15 +105,17 @@ test('② 控制中心管理接口平台子进程：启动、概览出现账号�
     const link = await api(cc.port, T, 'POST', '/api/platform/link-bridge', { enabled: true });
     assert.equal(link.body.ok, true);
     const linked = JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8'));
-    assert.equal(linked.snowluma.wsUrl, `ws://127.0.0.1:${port}/onebot/v11/ws`);
-    assert.equal(linked.snowluma.httpUrl, `http://127.0.0.1:${port}/onebot/v11`);
-    assert.equal(linked.snowluma.accessToken, pdata);
-    assert.equal(linked.snowluma.viaPlatform, true);
-    assert.equal(linked.snowluma.followDiscoveredEndpoint, false);
+    // 配置 v2：接入桥接写的是 platforms.users.<active>.transport，三个旧顶层键已一次性迁走。
+    const linkedTransport = linked.platforms.users[linked.platforms.active.user].transport;
+    assert.equal(linkedTransport.wsUrl, `ws://127.0.0.1:${port}/onebot/v11/ws`);
+    assert.equal(linkedTransport.httpUrl, `http://127.0.0.1:${port}/onebot/v11`);
+    assert.equal(linkedTransport.accessToken, pdata);
+    assert.equal(linkedTransport.viaPlatform, true);
+    assert.equal(linkedTransport.followDiscoveredEndpoint, false);
     assert.equal(linked.ownerQQ, 12345678, '其他字段不动');
     assert.ok(fs.existsSync(path.join(d, 'state', 'platform-link-backup.json')));
     // 桥接按这份配置真的能经平台调用 OneBot HTTP
-    const r = await fetch(`${linked.snowluma.httpUrl}/get_login_info`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${linked.snowluma.accessToken}` }, body: '{}' });
+    const r = await fetch(`${linkedTransport.httpUrl}/get_login_info`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${linkedTransport.accessToken}` }, body: '{}' });
     assert.equal((await r.json()).data.user_id, 10001);
     // 经平台时选择 SnowLuma 目录不写桥接 homeDir
     st = await api(cc.port, T, 'GET', '/api/state');
@@ -121,7 +123,21 @@ test('② 控制中心管理接口平台子进程：启动、概览出现账号�
 
     const unlink = await api(cc.port, T, 'POST', '/api/platform/link-bridge', { enabled: false });
     assert.equal(unlink.body.restoredFromBackup, true);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8')), original, '恢复直连后与原配置完全一致');
+    const restored = JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8'));
+    // 还原是「值」的还原：控制中心按 v2 落盘，旧顶层键不会回来。
+    const restoredTransport = restored.platforms.users[restored.platforms.active.user].transport;
+    assert.equal(restored.configVersion, 2, '保存后就是 v2');
+    assert.equal(restored.ownerQQ, 12345678);
+    assert.deepEqual(
+      {
+        wsUrl: restoredTransport.wsUrl,
+        httpUrl: restoredTransport.httpUrl,
+        accessToken: restoredTransport.accessToken,
+        homeDir: restoredTransport.homeDir,
+      },
+      original.snowluma,
+      '恢复直连后连接参数与原配置一致',
+    );
 
     // 固定命令集里的 platform stop
     await cc.runCommand('platform stop');
@@ -145,11 +161,31 @@ test('③ 桥接 viaPlatform：自愈只认平台端点，不扫描 SnowLuma 目
   const p = await startPlatform({ dataDir, stdoutLogs: false, installSignalHandlers: false, exitOnShutdown: false });
   try {
     await until(() => p.platform.accounts()[0]?.health.loggedIn, 5000, '平台经目录连上');
-    const cfg = { snowluma: { viaPlatform: true, httpUrl: `http://127.0.0.1:${p.port}/onebot/v11`, wsUrl: `ws://127.0.0.1:${p.port}/onebot/v11/ws`, accessToken: p.platform.tokens.data, homeDir: home, launcherPath: path.join(home, 'launcher.bat') } };
+    const cfg = {
+      configVersion: 2,
+      platforms: {
+        active: { user: 'qq', agent: 'dsh' },
+        users: {
+          qq: {
+            account: '',
+            transport: {
+              viaPlatform: true,
+              httpUrl: `http://127.0.0.1:${p.port}/onebot/v11`,
+              wsUrl: `ws://127.0.0.1:${p.port}/onebot/v11/ws`,
+              accessToken: p.platform.tokens.data,
+              homeDir: home,
+              launcherPath: path.join(home, 'launcher.bat'),
+            },
+            options: {},
+          },
+        },
+        agents: {},
+      },
+    };
     assert.deepEqual(snowLumaHomeCandidates({ cfg }), [], 'viaPlatform 时不扫描任何 SnowLuma 目录');
     const r = await discoverSnowLumaConnection({ cfg, timeoutMs: 3000 });
     assert.equal(r.ok, true, JSON.stringify(r.tried));
-    assert.equal(r.baseUrl, cfg.snowluma.httpUrl, '自愈结果仍是平台地址');
+    assert.equal(r.baseUrl, cfg.platforms.users.qq.transport.httpUrl, '自愈结果仍是平台地址');
     assert.equal(r.token, p.platform.tokens.data);
     assert.equal(r.wsUrl, null, '不会带回 SnowLuma 的真实 WS 端点');
     assert.equal(r.wsToken, null, '不会带回 SnowLuma 的真实 WS 令牌');
@@ -161,7 +197,7 @@ test('③ 桥接 viaPlatform：自愈只认平台端点，不扫描 SnowLuma 目
       /followDiscoveredEndpoint !== false && viaPlatform !== true/,
       'viaPlatform 强制不跟随端点',
     );
-    assert.match(bridgeSrc, /viaPlatform: cfg\.snowluma\?\.viaPlatform/, 'bridge 必须把 viaPlatform 传进决策函数');
+    assert.match(bridgeSrc, /viaPlatform: cfg\.userPlatform\?\.viaPlatform/, 'bridge 必须把 viaPlatform 传进决策函数');
   } finally {
     await p.shutdown('test');
     await fake.close();

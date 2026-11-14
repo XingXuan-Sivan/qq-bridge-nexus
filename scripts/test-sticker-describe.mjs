@@ -12,6 +12,7 @@ import {
   DESCRIBE_BATCH, DESCRIBE_MAX, NOTE_MAX,
 } from '../src/sticker-describe.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { sessionIdOf } from '../src/session/ref.mjs';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=', 'base64');
 const sticker = (id, extra = {}) => ({ id, resId: id, url: `https://public.invalid/${id}.png`, md5: id, desc: '', localNote: '', tags: [], usage: '', ...extra });
@@ -143,7 +144,8 @@ test('② 端到端：启动 → 专用会话看图 → 写进本地表情库；
     for (let i = 0; i < 100 && h.stickerDescribeJob.running; i++) await settle(10);
 
     const sid = h.getStickerDescriberSessionId();
-    assert.ok(sid && !Object.values(h.state.sessions).includes(sid), '看图会话不映射任何 QQ 会话');
+    // 映射值是 `{ instance, sessionId }`（C5 第三批），比较前先取出 id。
+    assert.ok(sid && !Object.values(h.state.sessions).map(sessionIdOf).includes(sid), '看图会话不映射任何 QQ 会话');
     assert.equal(fetched.length, 7, '只取没有说明的 7 张图');
     const entries = h.getStickerEntries();
     const keep = entries.find((e) => e.id === 'keep');

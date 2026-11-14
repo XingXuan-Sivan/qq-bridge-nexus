@@ -20,21 +20,21 @@ function writeCapability(root, id, data) {
 test('store lists only capability files', () => {
   const root = tempRoot();
   fs.writeFileSync(path.join(root, 'README.md'), '# 说明\n', 'utf8');
-  writeCapability(root, 'agent-chat', {
+  writeCapability(root, 'chat', {
     label: '聊天',
     tools: { platform: { sendMessage: true }, agent: {}, mcp: [], skills: [] },
   });
   const store = createCapabilityStore({ root });
   const items = store.list();
   assert.equal(items.length, 1);
-  assert.equal(items[0].id, 'agent-chat');
+  assert.equal(items[0].id, 'chat');
   assert.equal(items[0].builtin, true);
   assert.ok(Array.isArray(items[0].platformVisible));
 });
 
 test('platform visibility: explicit flags win, defaults fill the rest', () => {
   const capability = {
-    id: 'agent-chat',
+    id: 'chat',
     tools: { platform: { sendMessage: true, sendVoice: false }, agent: {} },
   };
   const visible = visiblePlatformFlags(capability);
@@ -52,12 +52,12 @@ test('platform visibility: explicit flags win, defaults fill the rest', () => {
 
 test('save writes back the capability file without artifacts', () => {
   const root = tempRoot();
-  writeCapability(root, 'agent-chat', {
+  writeCapability(root, 'chat', {
     label: '聊天',
     tools: { platform: {}, agent: {}, mcp: [], skills: [] },
   });
   const store = createCapabilityStore({ root });
-  const saved = store.save('agent-chat', {
+  const saved = store.save('chat', {
     label: '聊天（改）',
     note: '只读工具全开',
     tools: { platform: { sendPoke: false }, agent: {}, mcp: [], skills: [] },
@@ -65,10 +65,10 @@ test('save writes back the capability file without artifacts', () => {
   assert.equal(saved.label, '聊天', '内置能力的名称不可改，保存时保留原值');
   assert.equal(saved.note, '', '内置能力的备注同样不可改');
   assert.ok(!saved.platformVisible.includes('sendPoke'));
-  const onDisk = YAML.parse(fs.readFileSync(path.join(root, 'agent-chat.yml'), 'utf8'));
+  const onDisk = YAML.parse(fs.readFileSync(path.join(root, 'chat.yml'), 'utf8'));
   assert.equal(onDisk.label, '聊天');
   assert.equal(onDisk.tools.platform.sendPoke, false);
-  assert.ok(!fs.existsSync(path.join(root, 'agent-chat', 'agent.cordis.yml')), '不应再生成产物文件');
+  assert.ok(!fs.existsSync(path.join(root, 'chat', 'agent.cordis.yml')), '不应再生成产物文件');
 });
 
 test('unknown capability returns null instead of throwing', () => {

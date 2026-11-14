@@ -17,6 +17,7 @@ import {
 } from '../src/mode-handover.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { readConsoleSource } from './console-source.mjs';
+import { sessionIdOf } from '../src/session/ref.mjs';
 
 const OWNER = 123;
 const GROUP = 456;
@@ -133,7 +134,7 @@ test('②③ 二代 → agent L2 → 回落：聊天会话休眠后原样复用�
     // agent 会话：新建，第一条消息带私聊交接，不带群聊内容
     await h.handleIncoming('private', OWNER, ownerPm('继续刚才的事'), h.cfg);
     await settle();
-    const agentSid = h.state.sessions[OWNER_KEY];
+    const agentSid = sessionIdOf(h.state.sessions[OWNER_KEY]);
     assert.ok(agentSid && agentSid !== ownerSid, 'agent 用新会话');
     assert.equal(h.calls.created.length, createdBefore + 1);
     const first = promptText(h.calls.prompts.filter((p) => p.sessionId === agentSid).at(0));
@@ -268,7 +269,7 @@ test('⑥ 私聊长期记忆：开关开着时切到 agent 一并交接（只取
       await settle();
       await h.handleIncoming('private', OWNER, ownerPm('继续吧'), h.cfg);
       await settle();
-      const agentSid = h.state.sessions[OWNER_KEY];
+      const agentSid = sessionIdOf(h.state.sessions[OWNER_KEY]);
       const first = promptText(h.calls.prompts.filter((p) => p.sessionId === agentSid).at(0));
       if (on) {
         assert.match(first, /【你在 QQ 私聊里记下的长期记忆 · 桥接提供】/);

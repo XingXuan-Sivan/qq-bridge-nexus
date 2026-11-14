@@ -25,9 +25,16 @@ export const agentPlatform = 'dsh';
 export const id = 'dsh';
 export const label = 'DeepSeek Harness';
 
-/** 实现的能力面（B5 的 AgentPlatform 逐项实现；声明顺序即控制台展示顺序）。 */
+/**
+ * 实现的能力面（声明顺序即控制台展示顺序）。
+ *
+ * C5 起前七项与 `AgentPort` 的能力位**同名**（`src/agent-side/port.mjs`）；
+ * 多出来的 `events` 不是调用面（会话事件流走客户端的 `events.follow`），但控制台要展示；
+ * 少的 `maintenance` 是 DSH 实现不了的自愈动作（0.2.0 的 API 里没有对应 RPC）。
+ * `prompt` 不在榜上：它是任何平台都必须实现的核心方法，不是可以关掉的能力位。
+ */
 export const capabilities = Object.freeze([
-  'session', 'prompt', 'events', 'models', 'permissions', 'settings', 'compact',
+  'session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact',
 ]);
 
 // ── 权限预设 ────────────────────────────────────────────────────────────────

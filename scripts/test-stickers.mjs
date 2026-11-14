@@ -15,6 +15,7 @@ import {
   applyStickerNote,
   markStickerUsed
 } from '../src/sticker-lib.js';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -128,8 +129,10 @@ if (process.env.QQ_BRIDGE_TEST_LIVE === '1') {
   console.log('## live：SnowLuma 收藏表情链路');
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-    const base = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-    const headers = { 'content-type': 'application/json', ...(cfg.snowluma?.accessToken ? { authorization: `Bearer ${cfg.snowluma.accessToken}` } : {}) };
+    // 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+    const { userPlatform } = configViews(cfg);
+    const base = String(userPlatform.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
+    const headers = { 'content-type': 'application/json', ...(userPlatform.accessToken ? { authorization: `Bearer ${userPlatform.accessToken}` } : {}) };
     const res = await fetch(`${base}/fetch_custom_face_detail`, {
       method: 'POST',
       headers,

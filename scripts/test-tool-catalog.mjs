@@ -59,9 +59,9 @@ test('读类不受能力收紧，副作用类受收紧', () => {
   assert.equal(platformToolAllowedAt('bogus-level', 'sendMessage'), false);
 });
 
-test('四个内置能力的默认工具集递增且引用真实条目', () => {
+test('五个内置能力的默认工具集递增且引用真实条目', () => {
   const ids = Object.keys(CAPABILITY_DEFAULTS);
-  assert.deepEqual(ids, ['agent-chat', 'agent-readonly', 'agent-workspace', 'agent-full']);
+  assert.deepEqual(ids, ['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
   const agentIds = new Set(AGENT_MODULES.map((module) => module.id));
   let previous = 0;
   for (const id of ids) {
@@ -72,8 +72,8 @@ test('四个内置能力的默认工具集递增且引用真实条目', () => {
     assert.ok(defaults.agent.length >= previous, `${id} 不应比上一个能力更窄`);
     previous = defaults.agent.length;
   }
-  assert.deepEqual([...capabilityDefaults('agent-chat').agent], ['tool-web', 'tool-ask-user', 'tool-todo']);
-  assert.deepEqual([...capabilityDefaults('agent-full').agent], AGENT_MODULES.map((module) => module.id));
+  assert.deepEqual([...capabilityDefaults('chat').agent], ['tool-web', 'tool-ask-user', 'tool-todo']);
+  assert.deepEqual([...capabilityDefaults('full').agent], AGENT_MODULES.map((module) => module.id));
   assert.equal(capabilityDefaults('nope'), null);
 });
 
@@ -102,7 +102,7 @@ test('目录快照字段齐全，权限矩阵覆盖四档', () => {
   assert.equal(snapshot.entries.length, 45);
   assert.equal(snapshot.platform.length, 37);
   assert.equal(snapshot.agent.length, 8);
-  assert.deepEqual(snapshot.defaultAgents['agent-chat'], ['tool-web', 'tool-ask-user', 'tool-todo']);
+  assert.deepEqual(snapshot.defaultAgents.chat, ['tool-web', 'tool-ask-user', 'tool-todo']);
   assert.ok(snapshot.levelAllows['read-only'].includes('send'));
   assert.ok(!snapshot.levelAllows['read-only'].includes('exec'));
   assert.deepEqual([...snapshot.levelAsks['full-ask']], ['exec', 'admin']);

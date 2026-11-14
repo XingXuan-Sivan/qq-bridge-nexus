@@ -90,3 +90,29 @@ test('P0：60 秒内连续 3 次自愈后熔断，第 4 次不再重建', async 
   assert.equal(attempts, attemptsBefore + 1, '熔断后只尝试一次 prompt');
   assert.equal(h.calls.created.length, createdBefore, '熔断后不应继续重建');
 });
+
+test('C5：老形状（裸 sessionId）继续复用，升级不丢上下文', async () => {
+  const h = await bridgeHarness();
+  h.setReady(true);
+  const first = await h.ensureSession(GROUP);
+  const createdBefore = h.calls.created.length;
+  // 模拟升级前的落盘：映射是裸 id，指纹不变。
+  h.state.sessions[GROUP] = 'fixture-legacy';
+  const again = await h.ensureSession(GROUP);
+  assert.equal(again, 'fixture-legacy', '形状变了不代表会话没了：旧 id 必须照常复用');
+  assert.equal(h.calls.created.length, createdBefore, '不能因为“形状不对”就重建');
+  assert.notEqual(again, first);
+});
+
+test('C5：映射属于其他平台时按当前平台重建，不去打扰旧平台的会话', async () => {
+  const h = await bridgeHarness();
+  h.setReady(true);
+  // 上个平台留下的引用（同 id 在另一个平台可能恰好存在，直接复用会串台）。
+  h.state.sessions[GROUP] = { instance: 'acp:claude', sessionId: 'acp-session-9' };
+  const sid = await h.ensureSession(GROUP);
+  assert.notEqual(sid, 'acp-session-9', '不能把别的平台的 id 当自己的用');
+  assert.equal(h.calls.created.length, 1, '应按当前平台新建一条');
+  assert.ok(!h.calls.archived.includes('acp-session-9'), '旧平台的会话不在当前平台，归档只会换回 404');
+  assert.ok(!h.calls.cancelled.includes('acp-session-9'), '同理，不发 cancel');
+  assert.deepEqual(h.state.sessions[GROUP], { instance: 'dsh', sessionId: sid }, '新映射带平台标识落盘');
+});

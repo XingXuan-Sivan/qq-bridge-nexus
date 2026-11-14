@@ -71,8 +71,7 @@
       "label": "我的 Agent",
       "platform": "qq",
       "agentPlatform": "dsh",
-      "agent": "chat",
-      "capability": "agent-chat",
+      "capability": "chat",
       "behavior": "social-v2",
       "audience": "owner",
       "note": "带人格进群"
@@ -80,7 +79,7 @@
   },
   {
     "method": "PATCH",
-    "path": "/api/runtime/capabilities/agent-chat",
+    "path": "/api/runtime/capabilities/chat",
     "body": {
       "label": "聊天 Agent",
       "note": "",

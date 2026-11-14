@@ -38,7 +38,7 @@
 | --- | --- |
 | 会话（session） | 一个 QQ 群或私聊，key 形如 `qq:group:123` / `qq:private:456` |
 | 会话档案（profile） | 这个会话的配置：显示名、准入、运行模式、人格、提示词、唤醒、模型、DSH 预算等 |
-| 绑定（binding） | 会话 → 当前 DSH `sessionId` + 建会话时的策略指纹；运行态，不是配置 |
+| 绑定（binding） | 会话 → Agent 平台的会话引用 `{ instance, sessionId }` + 建会话时的策略指纹；运行态，不是配置 |
 | 运行模式 | `chat`（聊天）/ `reserved`（一代仿真）/ `reserved2`（二代仿真）；会话可固定，也可跟随全局 |
 | 被动 | 入站消息触发的回复（被 @、私聊、群内按策略参与） |
 | 主动 | bot 自己发起：主动发言、定时任务、AI 向其它会话发送、主动唤醒 |
@@ -47,7 +47,7 @@
 
 ## 3. 数据模型
 
-目录：`state/sessions/`（默认文件 + 每会话一个文件；`src/session/store.mjs` 负责读写）。
+目录：`state/sessions/`（默认文件 + 每会话一个文件；读写由 `src/session/directory.mjs` 负责，`src/session/store.mjs` 只剩旧 `sessions.json` 的迁移读取）。
 
 ```
 state/sessions/
@@ -89,7 +89,7 @@ state/sessions/
   "model": null,
   "presetId": null,
   "binding": {
-    "sessionId": "session-…",
+    "agentRef": { "instance": "dsh", "sessionId": "session-…" },
     "workspaceId": "workspace-…",
     "fingerprint": "reserved2|chat-v2|…",
     "status": "online",
@@ -111,6 +111,7 @@ state/sessions/
 - `model`：`null` 表示跟随全局；否则 `{provider, model, reasoning}`，保存前按 DSH 目录校验。
 - `presetId`：`null` 表示按运行模式推导；否则必须是预设安全清单里的 id。
 - `binding`：运行态；`status` 取 `online` / `missing` / `unknown`；`fingerprint` 是建会话时的策略指纹，用于判断「需要重建」。放在同一文件里，删除档案即删除绑定，不留孤儿文件。
+- `binding.agentRef`：`{ instance, sessionId }`，`instance` 是**产生这个 id 的 Agent 平台**（`dsh` / 未来的 `acp:claude`）。只存 id 的话，换平台后同一个字符串在另一个平台可能恰好存在，映射会「意外命中」，两个平台的上下文串在一起；不存在则每条消息撞 404，看起来像「会话易失」。老档案的 `binding.sessionId`（裸 id）读入时归一成 `agentRef`，`instance` 留空，平台装好后由 `sessions.normalizeAll()` 补记并落盘（只补空值，不覆盖已明确的归属）。内存里 `state.sessions[key]` 也是这个形状，读写一律经 `src/session/registry.mjs`。
 - `key` 必须与文件路径完全一致（`platform/kind/id` 拼回 `key`）；不一致视为文件损坏，不进内存。
 - `admins` 不放进这个目录：管理员是全局身份，放 `config.json`（见 §10），避免会话文件被误删导致提权/锁死。
 
@@ -202,7 +203,7 @@ resolve(axis, key):
 | 旧 `defaults.* = deny`（原白名单语义） | `defaults.* = {mode:'allow', entries:[升级当次实际允许的 key]}` | 白名单，默认拒绝；包含旧规则下 owner/管理员被动豁免的会话 |
 | 旧 `defaults.* = allow`（原黑名单语义） | `defaults.* = {mode:'deny', entries:[升级当次实际拒绝的 key]}` | 黑名单，默认允许；只把旧规则下真正被拒绝的会话写进名单 |
 | 旧档案 `access.*` / `blocked` | 不保留为字段，只在迁移时参与计算 | 三态在升级当次被翻译进名单；迁移后档案里不再有准入字段 |
-| 旧 `sessions` / `sessionPolicies` | `profiles[key].binding` | 指纹原样保留，迁移后第一次判定会按新指纹重建 |
+| 旧 `sessions` / `sessionPolicies` | `profiles[key].binding.agentRef` + `binding.fingerprint` | 指纹原样保留，迁移后第一次判定会按新指纹重建；裸 id 归一成 `{instance:'', sessionId}`，启动后补记平台 |
 | `current-role.json.byKey` | `profiles[key].persona` | 有卡名 → `{mode:'card', name}`；无 → `inherit` |
 | `initial-prompts.json` | `profiles[key].prompt.initialText` | 保留更新时间 |
 | `social-v2.json.conversations[key].wakeConfig` | `profiles[key].wake.config` | 仅迁配置；未读、agentToken 留在运行态存储 |

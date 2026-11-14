@@ -20,6 +20,7 @@ import {
   describeAudio, formatBytes, formatDuration, inspectAudio, listAudioFiles,
   parseTargetKey, resolveAudioSource
 } from '../src/send-voice-lib.js';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -63,8 +64,10 @@ function loadConfig() {
 }
 
 const cfg = loadConfig();
-const httpUrl = String(val('snowluma', cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000')).replace(/\/+$/, '');
-const accessToken = String(val('token', cfg.snowluma?.accessToken || ''));
+// 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+const { platform, userPlatform } = configViews(cfg);
+const httpUrl = String(val('snowluma', userPlatform.httpUrl || 'http://127.0.0.1:3000')).replace(/\/+$/, '');
+const accessToken = String(val('token', userPlatform.accessToken || ''));
 const consolePort = Number(val('console-port', cfg.consolePort)) || 3100;
 const consoleToken = String(
   val('console-token', cfg.consoleToken || process.env.QQ_CONSOLE_TOKEN || readConsoleTokenFile() || '')
@@ -97,7 +100,7 @@ async function onebot(action, params = {}, { timeoutMs = 15000 } = {}) {
     signal: AbortSignal.timeout(timeoutMs)
   });
   if (res.status === 426) {
-    throw new Error(`HTTP 426：httpUrl 指向了 WebSocket 端口，请检查 config.json 的 snowluma.httpUrl（当前 ${httpUrl}）`);
+    throw new Error(`HTTP 426：httpUrl 指向了 WebSocket 端口，请检查 config.json 的 platforms.users.${platform.id}.transport.httpUrl（当前 ${httpUrl}）`);
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const body = await res.json().catch(() => ({}));
@@ -217,7 +220,7 @@ async function cmdList() {
   try {
     t = await fetchTargets();
   } catch (error) {
-    fail(`无法访问 SnowLuma（${httpUrl}）：${error?.message ?? error}\n   请先启动 SnowLuma（config.json 的 snowluma.launcherPath）。`);
+    fail(`无法访问 SnowLuma（${httpUrl}）：${error?.message ?? error}\n   请先启动 SnowLuma（config.json 的 platforms.users.${platform.id}.transport.launcherPath）。`);
   }
   const a = allowedSet();
   const mark = (kind, id) => {
@@ -268,8 +271,8 @@ async function cmdListVoice() {
 
 async function cmdStatus() {
   console.log(`配置文件：${CONFIG_PATH}`);
-  console.log(`  snowluma.httpUrl   = ${httpUrl}`);
-  console.log(`  snowluma.accessToken = ${revealToken ? accessToken : maskToken(accessToken)}`);
+  console.log(`  platforms.users.${platform.id}.transport.httpUrl      = ${httpUrl}`);
+  console.log(`  platforms.users.${platform.id}.transport.accessToken  = ${revealToken ? accessToken : maskToken(accessToken)}`);
   console.log(`  桥接控制台         = http://127.0.0.1:${consolePort}`);
   console.log(`  consoleToken       = ${revealToken ? consoleToken : maskToken(consoleToken)}`);
   console.log(`  语音库目录         = ${voiceDir}`);

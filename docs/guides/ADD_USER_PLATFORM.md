@@ -1,7 +1,8 @@
 # 新增用户平台（微信 / B 站 / Telegram …）
 
 > 对称于 Agent 侧（`profiles/agent-platforms/<id>/` + `src/agent-side/`）。本文描述 **0.2.0（平台解耦 B5 / B6）**
-> 之后的实际做法；规格与取舍见 [PLATFORM_DECOUPLING.md](../PLATFORM_DECOUPLING.md) §2.5 / §3.2 / §5.4。
+> 之后、且 **C3 入站接通后**的实际做法；规格与取舍见 [PLATFORM_DECOUPLING.md](../PLATFORM_DECOUPLING.md)
+> §2.5 / §3.2 / §5.4 与 [PLATFORM_UNIFICATION.md](../PLATFORM_UNIFICATION.md) §六。
 
 ---
 
@@ -9,12 +10,12 @@
 
 | 层 | 回答的问题 | 落在哪 |
 | --- | --- | --- |
-| **传输**（怎么连上平台） | 用什么协议收发、鉴权、重连 | `src/user-side/adapters/<id>/`；插件侧入口是 B6 的 `transport:provide` |
+| **传输**（怎么连上平台） | 用什么协议收发、鉴权、重连 | `src/user-side/adapters/<id>/`；出站插件侧入口是 B6 的 `transport:provide`，入站是 C3 的 `connect` |
 | **业务**（连上之后拿它做什么） | 会话、准入、唤醒、人格、表情、语音… | 内核模块（`session/` `social/` `runtime/` …），**不需要为新平台改** |
 
 新增平台只碰第一层。如果发现要改第二层，先确认是不是把「平台的实现细节」泄漏成了内核逻辑。
 
-## 二、三步落地
+## 二、四步落地
 
 ### 1. 声明面：`src/user-side/adapters/<id>/index.mjs`
 
@@ -28,6 +29,7 @@ export const limits = { chunkChars: 4000, markdown: false };
 
 export function buildSendCall(kind, id, message) {}       // → { action, params }（报文拆分用，可选）
 export async function send({ address, segments, opts }) {} // 真正发出去：中立段 → 本平台报文 → 网络
+export async function connect({ signal, onEvent, onStatus }) {} // 收：本平台报文 → 统一事件（可选，见第 4 步）
 export function describeBackend(opts) {}                   // 日志里的「经 X 后端」称呼
 export function readBackendInfo(versionInfo) {}            // get_version_info → { name, version }
 ```
@@ -51,11 +53,35 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
 
 `bridge.js` / `self-test.js` / `launcher` 只经 `src/user-side/user-platform.mjs` 门面调用
 （`buildSendCall` / `sendAction` / `previewSegments` / `describeBackend` / `readBackendInfo` /
-`supportsUserCapability` / `userPlatformLimits`）。
+`supportsUserCapability` / `userPlatformLimits`，以及入站的 `startUserPlatformInbound` /
+`configureUserPlatformInbound`）。
 门面导出的是**转发函数**而不是常量绑定，所以运行期切平台能立刻生效。
 
 后端配置（地址、token、fetch）也在这里注入：`configureUserPlatformBackend(provider)` 只传
-「怎么取配置」的函数，适配器每次发送现取，config 热改后不必重启。
+「怎么取配置」的函数，适配器每次发送现取，config 热改后不必重启。入站对称：
+`configureUserPlatformInbound(provider)` 交出「怎么拿到底层连接对象」（QQ 是那个 WS 客户端）。
+
+### 4. 收得到：`connect`（C3，可选）
+
+只实现 `send` 的平台合法存在，但会被标成「只出不进」（统一注册表报 `inbound_unsupported`，warn）。
+要能收，就在同一个 `index.mjs` 导出 `connect`：
+
+```js
+// 只做「本平台报文 → 统一事件」这一件事。
+export async function connect({ signal, onEvent, onStatus }) {
+  const conn = getTransport();                 // 来自 configureUserPlatformInbound 的注入
+  const off = conn.onRawEvent((raw) => {
+    if (isSelf(raw)) return;                   // 剔掉自己发的
+    void onEvent(toUnifiedEvent(raw));         // 不 await：SDK 回调不能被业务阻塞
+  });
+  signal?.addEventListener?.('abort', () => off(), { once: true });
+  return { close: async () => off() };
+}
+```
+
+调用方是 `bridge.js`，它把 `onEvent` 接到 `createInboundPipeline` 的 `emit` 上。进到 `onEvent` 之后的事
+（校验 → 准入 → 会话映射 → 唤醒）**全在内核**，适配器既不判断准入也不拼会话 key（§三 第 7 条）。
+QQ 的完整实现见 `src/user-side/adapters/qq/inbound.mjs`，机制说明见 §五。
 
 ## 三、必须守住的不变式
 
@@ -69,9 +95,14 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
    进程找 DSH，单次启动多花约 0.8 秒，把 `test-backfill` 的 2 秒容差断言顶成随机失败）。
 5. **外部契约不动**：`src/snowluma-conn.js` 被仓库外独立工具按固定路径引用，
    `src/user-side/adapters/qq/qq-backend-label.js` 的文件名被测试钉住 —— 两者都不得移动或改名。
-6. **控制台自动跟随（B7）**：声明面写全 `label` / `conversationTypes` / `capabilities` / `limits`，
-   新平台就会出现在 `GET /api/runtime/platforms` 里，控制台的平台下拉、类型筛选、标签与上限全从这条
-   响应读 —— **不要为此改前端代码**，更不要在 `public/console/` 里写新平台名。
+6. **控制台自动跟随（B7，C1 起单一数据源）**：声明面写全 `label` / `conversationTypes` / `capabilities` / `limits`，
+   新平台就会出现在 `GET /api/platforms/registry` 里（用户侧与 Agent 侧同源），控制台的平台下拉、类型筛选、
+   标签与上限全从这条响应读，唯一调用点是 `public/console/js/registry.js` —— **不要为此改前端代码**，
+   更不要在 `public/console/` 里写新平台名。声明面字段名不变。
+7. **入站只翻译，不判准入（C3）**：`connect` 交出去的事件必须是**已校验形状**的统一事件，但**不要**在适配器里
+   判断“这条会话能不能回”、也不要自己拼会话 key。原因：准入的真相在内核（白名单 / 管理通道 / 当前模式），
+   适配器判一次就会与内核分叉；而会话 key 的拼法一旦被适配器复写，插件就能把事件投到任意会话上。
+   同理：把整条消息判成 INVALID 是最坏的降级方式（一个陌生段就能让一句话消失），未知段一律降成占位文本。
 
 ## 四、自检
 
@@ -81,15 +112,34 @@ npm run test:audit         # 含 test-platform-adapters / test-transport-plugin 
 node scripts/test-platform-metadata.mjs  # 声明面字段（label/会话类型/limits）改动后
 node scripts/test-unified-segments.mjs   # 段类型或降级表改动后
 node scripts/test-transport-plugin.mjs   # 出站报文/transport 路由改动后
+node scripts/test-qq-inbound.mjs         # 入站报文翻译/connect 改动后（QQ 参考实现）
+node scripts/test-unified-inbound.mjs    # 入站管线四步顺序/丢弃原因改动后
 node scripts/test-prompt-layers.mjs      # 平台话术（prompt.mjs）改动后
 node scripts/test-onebot-send-call.mjs   # 发送调用构造改动后
 ```
 
-## 五、还没做的部分（入站与 B8）
+## 五、入站：已接通（PLATFORM_UNIFICATION C3）
 
-出站已通：插件可以用 `transport:provide` 自带连接器注册为一个 transport，出站经内核 `sendAction`
+出站：插件可以用 `transport:provide` 自带连接器注册为一个 transport，出站经内核 `sendAction`
 （顺序是 `onOutbound` 改中立段 → 降级 → `transport.send`）。
 
-入站尚未接通：`validateUnifiedEvent`（`src/user-side/event.mjs`）已实现并有回归，但 `bridge.js` 的入站仍是
-QQ 的 WebSocket 分支，还没有「插件 transport 上报原始事件 → 内核校验并补全 `platform/account` → 准入」
-这条路。因此第二个平台**能发不能收**，待后续批次接入（B7 只做了控制台元数据化与出站地址化）。
+入站：`transport` 契约里的 `connect({ signal, onEvent, onStatus })` 就是这条路。插件与内置平台走**同一条**
+管线 `createInboundPipeline`（`src/user-side/inbound.mjs`）：
+
+```
+raw event → validateUnifiedEvent(raw, origin) → 准入 → 会话映射 → 唤醒
+```
+
+**顺序不可换**：校验必须在准入之前，否则插件（或任何一个适配器）能看到未准入会话的正文。四步里
+只有第一步（报文 → 统一事件）在适配器，后三步全在 `bridge.js`。
+
+- 管道 `emit` **永不抛错**：任何异常都变成 `{ ok: false, reason }` 交给 `onDrop`（`INBOUND_DROP` 四种：
+  `invalid` / `not_admitted` / `conversation_unresolved` / `deliver_failed`）。
+- 未实现 `connect` 的平台仍合法：统一注册表把它标成 `inbound: false` 并报 `inbound_unsupported`（warn），
+  不再静默地“看起来能用”。QQ 在 C3 之后不再触发该诊断。
+- 启动与退出：`startUserPlatformInbound(...)` 返回 `{ close }`，`bridge.js` 在 `shutdownThenExit` 里先摘订阅。
+  同一进程只该有一条入站订阅（适配器内部守卫了重复 `connect`）。
+
+QQ 的参考实现：`src/user-side/adapters/qq/inbound.mjs`（报文 → 统一事件、剔自己发的消息、
+`onMessage` 优先于旧 SDK 的分类型订阅、未知段降级）；回归 `scripts/test-qq-inbound.mjs`（14 条）与
+`scripts/test-unified-inbound.mjs`（11 条），端到端见 `test-transport-plugin.mjs` 的 mock 平台用例。

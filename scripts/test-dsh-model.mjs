@@ -179,9 +179,12 @@ test('④ 接口：GET 给出目录；POST 校验后写 config.json 并热生效
     assert.equal(ok.json.canSeeImages, false);
     assert.deepEqual(ok.json.notices.map((n) => n.code).sort(), ['no-vision', 'third-party', 'unpriced']);
     const saved = JSON.parse(fs.readFileSync(path.join(h.temp, 'config.json'), 'utf8'));
-    assert.deepEqual({ p: saved.dsh.provider, m: saved.dsh.model, e: saved.dsh.reasoningEffort, v: saved.dsh.vision },
+    // 配置 v2：模型类选项在 platforms.agents.<active>.options，连接参数在 .endpoint。
+    const agent = saved.platforms.agents.dsh;
+    assert.deepEqual({ p: agent.options.provider, m: agent.options.model, e: agent.options.reasoningEffort, v: agent.options.vision },
       { p: 'example-cloud', m: 'example-chat', e: '', v: 'auto' }, 'config.json 落盘');
-    assert.equal(saved.dsh.authToken, 'fixture-only', '其它 dsh 字段原样保留');
+    assert.equal(agent.endpoint.authToken, 'fixture-only', '其它连接字段原样保留');
+    assert.equal(saved.dsh, undefined, '不再有 dsh 顶层键（一次性迁移）');
 
     // 热生效：已有会话下一次 ensureSession 重新 selectModel，且不带 reasoningEffort
     await h.ensureSession('group:456');
@@ -231,7 +234,7 @@ test('⑤ 不能看图时：聊天图片、工具图片都降级成文字，不�
     assert.equal(h.calls.images.length + h.calls.faces.length, 0, '不去下载图片');
 
     // 手动指定能看图后恢复正常链路（这里只看是否还走降级）
-    h.cfg.dsh.vision = 'yes';
+    h.cfg.agentPlatform.vision = 'yes';
     const parts2 = await h.resolveMediaList([{ kind: 'face', faceId: '14' }]);
     assert.ok(!parts2.some((p) => /不能看图/.test(p.text ?? '')), '能看图时不降级');
   } finally {

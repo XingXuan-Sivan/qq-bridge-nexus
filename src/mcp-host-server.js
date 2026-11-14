@@ -7,7 +7,7 @@
 // ── 为什么这里**没有**启停 SnowLuma 的工具（2026-09-20 移除，不要加回来）────────────
 //
 // 曾经有 `start_snowluma` / `stop_snowluma`（`spawn launcher.bat` / `taskkill`），默认关闭、
-// 需要 `snowluma.allowProcessControl: true` 才注册。它们被移除，理由不是"危险"，而是**许可**：
+// 需要配置里打开 `allowProcessControl` 才注册。它们被移除，理由不是"危险"，而是**许可**：
 //
 //   SnowLuma EULA §5.4（中文为准）：「除事先取得著作权人的书面授权外，您仅可为 LICENSE 允许的
 //   非商业用途，以专有组件随本软件提供的形式运行该组件；不得复制、修改、单独再分发或再许可该组件。
@@ -25,6 +25,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+// 配置 v2：网关端点经扁平视图读，本进程不认识 `snowluma` 段名。
+import { configViews } from './config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -44,10 +46,10 @@ function getConfig() {
 }
 
 function getHostConfig() {
-  const c = getConfig();
-  const httpUrl = (c.snowluma?.httpUrl ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
-  const homeDir = c.snowluma?.homeDir ?? (c.snowluma?.launcherPath ? path.dirname(c.snowluma.launcherPath) : '');
-  return { httpUrl, homeDir, token: c.snowluma?.accessToken ?? '' };
+  const { userPlatform } = configViews(getConfig());
+  const httpUrl = (userPlatform.httpUrl ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
+  const homeDir = userPlatform.homeDir ?? (userPlatform.launcherPath ? path.dirname(userPlatform.launcherPath) : '');
+  return { httpUrl, homeDir, token: userPlatform.accessToken ?? '' };
 }
 
 async function gatewayInfo() {
@@ -58,7 +60,7 @@ async function gatewayInfo() {
       signal: AbortSignal.timeout(5000)
     });
     if (!res.ok) {
-      const hint = res.status === 426 ? '（HTTP 426：snowluma.httpUrl 可能指向了 WebSocket 端口，请改为 OneBot HTTP API 地址）' : '';
+      const hint = res.status === 426 ? '（HTTP 426：httpUrl 可能指向了 WebSocket 端口，请改为 OneBot HTTP API 地址）' : '';
       return { reachable: false, httpStatus: res.status, ...(hint ? { hint } : {}) };
     }
     const body = await res.json();
@@ -84,7 +86,7 @@ server.tool(
     const payload = { ...info };
     if (info.reachable === false) {
       payload.hint = 'SnowLuma 网关不可达。请自行启动 SnowLuma（本程序不代装、不代启，原因见项目文档的合规说明 L6）。'
-        + (hc.homeDir ? '' : ' 若 config.json 的 snowluma.httpUrl 与实际端口不一致，也请一并检查。');
+        + (hc.homeDir ? '' : ' 若 config.json 里当前平台的 transport.httpUrl 与实际端口不一致，也请一并检查。');
     }
     return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
   }

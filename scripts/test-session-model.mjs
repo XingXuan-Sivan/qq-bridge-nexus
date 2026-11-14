@@ -49,11 +49,11 @@ test('档案模型优先于全局，签名与标签跟着档案走', async () =>
 test('看图能力按会话模型：全局 vision=no 时一律不能看图，yes 时放行', async () => {
   const h = await bridgeHarness();
   try {
-    h.cfg.dsh = { ...(h.cfg.dsh || {}), vision: 'no' };
+    h.cfg.agentPlatform = { ...(h.cfg.agentPlatform || {}), vision: 'no' };
     assert.equal(h.sessionCanSeeImages(GROUP), false);
-    h.cfg.dsh.vision = 'yes';
+    h.cfg.agentPlatform.vision = 'yes';
     assert.equal(h.sessionCanSeeImages(GROUP), true);
-    h.cfg.dsh.vision = 'auto';
+    h.cfg.agentPlatform.vision = 'auto';
     h.state.profiles[GROUP] = {
       key: GROUP,
       model: { provider: 'fixture', model: 'unknown-fixture-model', reasoning: null },
@@ -67,7 +67,7 @@ test('看图能力按会话模型：全局 vision=no 时一律不能看图，yes
 test('未指定会话模型时 ensureChatModel 提交全局参数', async () => {
   const h = await bridgeHarness();
   try {
-    h.cfg.dsh = { ...(h.cfg.dsh || {}), provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'low' };
+    h.cfg.agentPlatform = { ...(h.cfg.agentPlatform || {}), provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'low' };
     delete h.state.profiles[GROUP];
     await h.ensureChatModel('sess-fixture', GROUP);
     const last = h.calls.selectModels.at(-1);
@@ -82,7 +82,7 @@ test('未指定会话模型时 ensureChatModel 提交全局参数', async () => 
 test('指定会话模型后 ensureChatModel 提交档案里的模型', async () => {
   const h = await bridgeHarness();
   try {
-    h.cfg.dsh = { ...(h.cfg.dsh || {}), provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'low' };
+    h.cfg.agentPlatform = { ...(h.cfg.agentPlatform || {}), provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'low' };
     h.state.profiles[GROUP] = {
       key: GROUP,
       model: { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoning: 'high' },

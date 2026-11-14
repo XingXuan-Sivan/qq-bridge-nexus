@@ -33,6 +33,8 @@ import { inspectNapCat, napcatLaunchSpec, napcatDefaultHome, NAPCAT_DEFAULT_WEBU
 import { pickDialog } from './pick-dialog.mjs';
 // NapCat 是否已在别处运行：看它的 WebUI 端口（默认 6099，可在设置 napcatWebuiPort 改）
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
+// 配置 v2：控制中心改的是同一份 config.json，读写口径必须与桥接完全一致。
+import { CONFIG_VERSION, migrateConfigToV2, platformViews, platformsForWrite, readPlatforms } from '../config/platforms.mjs';
 import { resolveAgentBaseUrl } from '../agent-side/agent-client.mjs';
 // 静态资源守卫与控制台共用一套：解码一次、拒绝穿越/盘符/符号链接/白名单外扩展名。
 import { resolveStaticPath, serveStaticFile } from '../http/static.mjs';
@@ -130,6 +132,44 @@ function consoleToken(cfg) {
 }
 function consolePort(cfg) { return Number(cfg?.consolePort) > 0 ? Number(cfg.consolePort) : 3100; }
 
+/**
+ * config.json 的平台段（配置 v2）。
+ *
+ * 控制中心可能比桥接先跑：读到的可能还是 v1（`platform` / `snowluma` / `dsh` 三个顶层键）。
+ * 所以这里先统一走一次 `migrateConfigToV2()` —— 否则控制中心会把 `platforms` 写进去、
+ * 旧键留在旁边，桥接启动后再迁移一次就会盖掉刚改的值。
+ */
+function platformConfigOf(value) {
+  const migrated = migrateConfigToV2(value ?? {});
+  const platforms = readPlatforms(migrated.config);
+  return { file: migrated.config, platforms, views: platformViews(platforms) };
+}
+
+/** 写回平台段（连带 configVersion），其它顶层键原样保留。 */
+function savePlatforms(file, platforms) {
+  atomicWriteJsonFile(path.join(ROOT, 'config.json'), {
+    ...file,
+    configVersion: CONFIG_VERSION,
+    platforms: platformsForWrite(platforms),
+  });
+}
+
+/**
+ * 改写**当前用户侧平台**的 transport（连接参数）。`null` / `undefined` 表示删掉该键，
+ * 这样「恢复出厂」不需要把默认值硬编码进配置（读侧自带兜底）。
+ */
+function patchUserPlatform(file, platforms, patch) {
+  const id = platforms.active.user;
+  const entry = platforms.users[id] ?? { account: '', transport: {}, options: {} };
+  const transport = { ...entry.transport, ...patch };
+  for (const [key, value] of Object.entries(transport)) {
+    if (value === null || value === undefined) delete transport[key];
+  }
+  platforms.users[id] = { ...entry, transport };
+  savePlatforms(file, platforms);
+  return platforms.users[id];
+}
+
 async function bridgeApi(route, { method = 'GET', body } = {}) {
   const cfg = bridgeConfig();
   if (!cfg.valid) throw new Error(cfg.error);
@@ -206,7 +246,7 @@ async function platformApi(route, { method = 'GET', body, timeoutMs = 4000 } = {
 /** 桥接 config.json 当前是否经平台连接。 */
 function bridgeLinkState() {
   const cfg = bridgeConfig();
-  const sl = cfg.value?.snowluma ?? {};
+  const sl = cfg.valid ? platformConfigOf(cfg.value).views.userPlatform : {};
   return { viaPlatform: sl.viaPlatform === true, wsUrl: sl.wsUrl ?? null, httpUrl: sl.httpUrl ?? null, backup: fs.existsSync(LINK_BACKUP) };
 }
 
@@ -236,7 +276,8 @@ export async function startControlCenter({ open = true, port: portOverride = nul
 
   const secrets = () => {
     const cfg = bridgeConfig();
-    return [token, consoleToken(cfg.value), String(cfg.value?.snowluma?.accessToken ?? ''), String(cfg.value?.dsh?.authToken ?? ''), platformKey].filter(Boolean);
+    const views = cfg.valid ? platformConfigOf(cfg.value).views : null;
+    return [token, consoleToken(cfg.value), String(views?.userPlatform.accessToken ?? ''), String(views?.agentPlatform.authToken ?? ''), platformKey].filter(Boolean);
   };
   const redact = (line) => redactCredentials(redactKnown(line, secrets()));
 
@@ -439,34 +480,61 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     } catch { return false; }
   }
 
-  /** 接入桥接：把桥接的 SnowLuma 端点改成平台的兼容入口（先备份原值）；enabled=false 时按备份还原。 */
+  /**
+   * 接入桥接：把桥接的 OneBot 网关端点改成接口平台的兼容入口（先备份原值）；
+   * enabled=false 时按备份还原。
+   *
+   * 配置 v2 起端点住在 `platforms.users.<active>.transport`，不再有 `snowluma` 段；
+   * 备份文件同时兼容旧形状（旧版写的是 `snowluma` 键，升级后仍要能一键还原）。
+   */
   async function linkBridge(enabled) {
     const cfg = bridgeConfig();
     if (!cfg.valid) throw new Error(cfg.error);
-    const file = path.join(ROOT, 'config.json');
-    const sl = cfg.value.snowluma ?? {};
+    const { file: base, platforms, views } = platformConfigOf(cfg.value);
+    const sl = views.userPlatform;
     if (enabled) {
       if (sl.viaPlatform === true) return { ok: true, already: true };
       const oldToken = sl.accessToken ?? '';
       // 凭据由平台经管理接口交来：平台必须在运行
       let creds;
       try { creds = await platformApi('/v1/admin/bridge-link'); } catch (e) { throw Object.assign(new Error(`接入桥接需要接口平台正在运行且由控制中心管理：${e.message}`), { status: 409 }); }
-      atomicWriteJsonFile(LINK_BACKUP, { savedAt: Date.now(), snowluma: { wsUrl: sl.wsUrl ?? null, httpUrl: sl.httpUrl ?? null, accessToken: oldToken, followDiscoveredEndpoint: sl.followDiscoveredEndpoint ?? null, viaPlatform: sl.viaPlatform ?? null } });
+      atomicWriteJsonFile(LINK_BACKUP, {
+        savedAt: Date.now(),
+        platformId: platforms.active.user,
+        userPlatform: {
+          wsUrl: sl.wsUrl ?? null,
+          httpUrl: sl.httpUrl ?? null,
+          accessToken: oldToken,
+          followDiscoveredEndpoint: sl.followDiscoveredEndpoint ?? null,
+          viaPlatform: sl.viaPlatform ?? null,
+        },
+      });
       const { dataToken, wsUrl, httpUrl } = creds;
-      const next = { ...sl, wsUrl, httpUrl, accessToken: dataToken, followDiscoveredEndpoint: false, viaPlatform: true };
-      atomicWriteJsonFile(file, { ...cfg.value, snowluma: next });
+      patchUserPlatform(base, platforms, { wsUrl, httpUrl, accessToken: dataToken, followDiscoveredEndpoint: false, viaPlatform: true });
       return { ok: true };
     }
     const b = readJson(LINK_BACKUP);
-    const prev = b?.snowluma ?? {};
-    const next = { ...sl };
-    for (const k of ['wsUrl', 'httpUrl', 'accessToken', 'followDiscoveredEndpoint', 'viaPlatform']) {
-      if (prev[k] === null || prev[k] === undefined) delete next[k]; else next[k] = prev[k];
+    // 备份只有一种形状（本文件写的那一种）：`{ savedAt, platformId, userPlatform }`。
+    const prev = b?.userPlatform ?? null;
+    if (!prev) {
+      // 没有备份（或备份不可用）：回到出厂值，而不是把 viaPlatform 留在 true 上。
+      patchUserPlatform(base, platforms, {
+        viaPlatform: false,
+        followDiscoveredEndpoint: null,
+        wsUrl: 'ws://127.0.0.1:3001',
+        httpUrl: 'http://127.0.0.1:3000',
+        accessToken: '',
+      });
+      try { fs.unlinkSync(LINK_BACKUP); } catch {}
+      return { ok: true, restoredFromBackup: false };
     }
-    if (!b) { next.viaPlatform = false; delete next.followDiscoveredEndpoint; next.wsUrl = 'ws://127.0.0.1:3001'; next.httpUrl = 'http://127.0.0.1:3000'; next.accessToken = ''; }
-    atomicWriteJsonFile(file, { ...cfg.value, snowluma: next });
+    const patch = {};
+    for (const k of ['wsUrl', 'httpUrl', 'accessToken', 'followDiscoveredEndpoint', 'viaPlatform']) {
+      patch[k] = prev[k] === undefined ? null : prev[k];
+    }
+    patchUserPlatform(base, platforms, patch);
     try { fs.unlinkSync(LINK_BACKUP); } catch {}
-    return { ok: true, restoredFromBackup: !!b };
+    return { ok: true, restoredFromBackup: true };
   }
 
   // ── 接入后端开启卡：点「开启」= 确保接口平台在运行 → 启动该后端程序（能启动时）→ 确保平台里有它的实例并已连接 ──
@@ -542,8 +610,9 @@ export async function startControlCenter({ open = true, port: portOverride = nul
     if (cfg.valid) {
       try { out.bridgeApi = await bridgeApi('/api/status'); } catch (e) { out.bridgeApiError = String(e?.message ?? e); }
     }
-    // dsh.baseUrl 留空 = 自动识别（固定端口 19387 / 3080，再找桌面版 0.2.1 起的随机端口）；页面以桥接的 dshReady 为准
-    const dshUrl = (await resolveAgentBaseUrl(cfg.value?.dsh?.baseUrl ?? '', { timeoutMs: 400 })).url;
+    // Agent 底座地址留空 = 自动识别（固定端口 19387 / 3080，再找桌面版 0.2.1 起的随机端口）；
+    // 页面以桥接的 dshReady 为准。配置 v2：地址在 platforms.agents.<active>.endpoint.baseUrl。
+    const dshUrl = (await resolveAgentBaseUrl(platformConfigOf(cfg.value).views.agentPlatform.baseUrl ?? '', { timeoutMs: 400 })).url;
     try {
       const u = new URL(dshUrl);
       out.dsh = { url: dshUrl, reachable: await portOpen(Number(u.port) || 80, u.hostname === 'localhost' ? '127.0.0.1' : u.hostname) };
@@ -858,19 +927,19 @@ export async function startControlCenter({ open = true, port: portOverride = nul
         saveSettings(settings);
         snowInfo = info;
         updateInfo = null;
-        // 顺手把桥接配置里的 snowluma.homeDir 对齐（token 自愈要从它的 config/onebot_<QQ>.json 读）。
+        // 顺手把桥接配置里的用户侧平台 homeDir 对齐（token 自愈要从它的 config/onebot_<QQ>.json 读）。
         let homeDirSynced = false;
         const cfg = bridgeConfig();
+        const platformCfg = cfg.valid ? platformConfigOf(cfg.value) : null;
         // 桥接经平台连接时不写桥接的 homeDir（它会被忽略）；平台的 SnowLuma 实例总是同步。
         const platformSynced = await syncPlatformHomeDir(info.dir);
-        if (cfg.valid && body.syncBridgeHomeDir !== false && cfg.value?.snowluma?.viaPlatform !== true && cfg.value?.snowluma?.homeDir !== info.dir) {
+        if (platformCfg && body.syncBridgeHomeDir !== false && platformCfg.views.userPlatform.viaPlatform !== true && platformCfg.views.userPlatform.homeDir !== info.dir) {
           try {
-            const next = { ...cfg.value, snowluma: { ...(cfg.value.snowluma ?? {}), homeDir: info.dir } };
-            atomicWriteJsonFile(path.join(ROOT, 'config.json'), next);
+            patchUserPlatform(platformCfg.file, platformCfg.platforms, { homeDir: info.dir });
             homeDirSynced = true;
           } catch {}
         }
-        snowluma.note(`已选择 SnowLuma 目录：${info.dir}（${info.version}，${info.edition === 'full' ? '完整版' : 'Lite 版'}）${homeDirSynced ? '；已同步 config.json 的 snowluma.homeDir（重启桥接后生效）' : ''}${platformSynced ? '；已同步给接口平台的 SnowLuma 实例' : ''}`);
+        snowluma.note(`已选择 SnowLuma 目录：${info.dir}（${info.version}，${info.edition === 'full' ? '完整版' : 'Lite 版'}）${homeDirSynced ? '；已同步 config.json 的 platforms.users.<当前平台>.transport.homeDir（重启桥接后生效）' : ''}${platformSynced ? '；已同步给接口平台的 SnowLuma 实例' : ''}`);
         return send(200, { ok: true, switched: true, info, homeDirSynced, platformSynced });
       }
       if (req.method === 'POST' && p === '/api/snowluma/start') {
@@ -969,7 +1038,10 @@ export async function startControlCenter({ open = true, port: portOverride = nul
           updateInfo = null;
           const cfg = bridgeConfig();
           if (cfg.valid) {
-            try { atomicWriteJsonFile(path.join(ROOT, 'config.json'), { ...cfg.value, snowluma: { ...(cfg.value.snowluma ?? {}), homeDir: info.dir } }); } catch {}
+            try {
+              const platformCfg = platformConfigOf(cfg.value);
+              patchUserPlatform(platformCfg.file, platformCfg.platforms, { homeDir: info.dir });
+            } catch {}
           }
         }
         snowluma.note(r.ok ? `数据迁移完成：${r.from} → ${r.to}，已备份到 ${r.backupDir}` : `数据迁移失败：${r.error}`);

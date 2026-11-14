@@ -23,7 +23,7 @@ export const BACKFILL_DEFAULTS = Object.freeze({
   lookbackMs: 60_000,      // 从断线前最后一个事件包再往前多看一点，防止边界上的消息漏掉（重复的按消息 ID 去掉）
 });
 
-/** 规范化 snowluma.backfill 配置；非法值回到默认。 */
+/** 规范化用户侧平台的 `backfill` 选项（扁平视图下的 `options.backfill`）；非法值回到默认。 */
 export function normalizeBackfillConfig(raw) {
   const c = raw && typeof raw === 'object' ? raw : {};
   const num = (v, min, max, d) => (Number.isFinite(Number(v)) && Number(v) >= min && Number(v) <= max ? Number(v) : d);

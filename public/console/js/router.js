@@ -22,10 +22,11 @@ export const consolePages = {
   overview: ['运行总览', '让每一次连接，都自然发生。', '掌握桥接状态，轻松管理你的 QQ 智能伙伴。'],
   config: ['全局配置', '把工具与能力，装进一套配置。', '安全与静默、准入、行为档案与系统能力收在一页；预设页只保留预设本体。'],
   sessions: ['会话与审批', '让每一段对话，都有迹可循。', '查看 QQ 与 DSH 的会话映射，以及等待你回复的审批和提问。'],
+  platforms: ['平台', '接进来的每一侧，都能看清、能改。', '用户侧与 Agent 侧的平台都在这张表里：来源、能力、配置、话术与工具、行为与诊断。'],
+  plans: ['方案', '一次组合，决定一段对话怎么跑。', '方案把用户侧平台、Agent 能力档与行为档案组合成一种运行方式；会话可以单独指定。'],
   persona: ['人格与角色', '给你的伙伴，一点独特个性。', '选择已有角色，或用自己的语言写下新的性格与表达方式。'],
   plugins: ['插件', '把能力，做成可插拔的一块。', '查看插件加载状态、钩子与最近错误；可启停、重载、安装与卸载，改配置仍重启生效。'],
   skills: ['技能', '让 AI 知道，自己会什么。', '查看 DSH、仓库与外部技能；外部技能可新增、导入、编辑、启停与删除。'],
-  behavior: ['平台配置', '平台、方案与档案，一处配齐。', '平台、运行方案、行为档案与能力预设四层都在这一页；保存后重启桥接生效。'],
   'prompt-blocks': ['注入块', '提示词由哪些块拼成，一处看清。', '按槽位查看每次唤醒的拼装顺序，改开关与字数上限；可按会话预览真实提示词。'],
   mcp: ['MCP 与工具', '把外部能力，接成标准接口。', '查看桥接内置 MCP 的真实工具清单，并在本页管理外部 MCP；工具参考已并入本页。'],
   behaviors: ['命令', '桥接命令，一处看清也管得住。', '按注册表查看桥接命令，并逐条调整权限与启用状态；DSH 与 Agent 侧工具由能力预设负责。'],
@@ -38,9 +39,8 @@ export const consolePages = {
 const PAGE_STORAGE_KEY = 'qqb-console-page';
 let currentConsolePage = 'overview';
 
-// 页面片段：这些页面的 DOM 放在 public/console/pages/<id>/page.html，由路由器按需注入。
-// 已迁移页面按需注入；其余页面仍是 index.html 里的静态 section。
-const PAGE_FRAGMENTS = new Set(['plugins', 'skills', 'behavior', 'prompt-blocks', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'memory']);
+// 页面片段：每页的 DOM 都在 public/console/pages/<id>/page.html，由路由器按需注入。
+// C7 起 index.html 里只剩空 section —— 不再有「静态页 / 片段页」两种渲染方式。
 // 每页只取一次：并发切页复用同一个 Promise，避免重复注入与重复绑定事件。
 const fragmentLoads = new Map();
 
@@ -112,7 +112,6 @@ export function renderBreadcrumb(page) {
 /** 片段页的 DOM 在 pages/<id>/page.html：取一次、注入空 section、再动态 import 页面模块。
  *  失败时只在该 section 里显示占位文案，不影响其它页面（页面之间互不牵连）。 */
 function hydratePage(page) {
-  if (!PAGE_FRAGMENTS.has(page)) return Promise.resolve();
   if (fragmentLoads.has(page)) return fragmentLoads.get(page);
   const host = document.getElementById(`section-${page}`);
   if (!host) return Promise.resolve();
@@ -160,8 +159,6 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   // 不能用全局 [data-page] 选择器，否则点过一次分页后按钮会被当成页面宿主隐藏。
   document.querySelectorAll('main section[data-page]').forEach((el) => {
     el.hidden = el.dataset.page !== page;
-    // 片段页由 hydratePage 标记；这里只处理仍有静态 DOM 的页面。
-    if (el.dataset.page === page && !PAGE_FRAGMENTS.has(page)) el.dataset.pageReady = '1';
   });
   void hydratePage(page);
   // 导航按钮走的是 pushState，不会触发 hashchange/popstate；挂在 body 上的浮动组件
@@ -193,15 +190,21 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   return true;
 }
 
-/** 工具参考已并入 MCP 页：#reference 旧链接统一按 #mcp 处理。 */
+/** 旧页面 id 的重定向表：只允许「删页时的一次性兼容」，不新增别名。 */
+const PAGE_ALIASES = Object.freeze({
+  reference: 'mcp', // 工具参考并入 MCP 页
+  behavior: 'platforms', // C7：行为档案页拆成「平台」+「方案」
+});
+
+/** 把旧链接/旧 hash 归一成现行页面 id。 */
 function normalizePageHash(page) {
-  return page === 'reference' ? 'mcp' : page;
+  return PAGE_ALIASES[page] ?? page;
 }
 
 /** 首屏恢复：hash（深链）→ sessionStorage（同标签页刷新）→ overview。 */
 function restoreInitialPage() {
-  // 工具参考已并入 MCP 页：旧书签 #reference 直接落到 #mcp，不再当成无效页面。
-  const hashPage = location.hash.slice(1) === 'reference' ? 'mcp' : location.hash.slice(1);
+  // 旧书签（#reference、#behavior）先归一，再按现行页面表判定，不当成无效页面。
+  const hashPage = normalizePageHash(location.hash.slice(1));
   const storedPage = readStoredPage();
   const initialPage = Object.hasOwn(consolePages, hashPage) ? hashPage
     : Object.hasOwn(consolePages, storedPage ?? '') ? storedPage

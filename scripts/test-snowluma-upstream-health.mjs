@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readConsoleSource } from './console-source.mjs';
+import { configViews } from '../src/config/platforms.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const bridge = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
@@ -30,6 +31,8 @@ const healthModule = fs.readFileSync(path.join(ROOT, 'src', 'upstream', 'snowlum
 const consoleHtml = readConsoleSource();
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
+// 配置 v2：示例文件的连接参数在 platforms.users.<active>.transport，经扁平视图校验默认值。
+const exampleUser = configViews(example).userPlatform;
 
 /** 只要可执行代码：注释里会大段解释这些名字（直接扫原文会把说明当成实现）。 */
 const codeOf = (src) => src
@@ -183,10 +186,10 @@ test('端点自愈可关，且默认保持「跟随」（向后兼容）', () =>
   assert.match(
     connUpdate,
     /followDiscoveredEndpoint !== false && viaPlatform !== true/,
-    '必须支持 snowluma.followDiscoveredEndpoint 关闭端点跟随（经接口平台同样不跟随）',
+    '必须支持 followDiscoveredEndpoint 关闭端点跟随（经接口平台同样不跟随）',
   );
   assert.equal(
-    example.snowluma?.followDiscoveredEndpoint, true,
+    exampleUser.followDiscoveredEndpoint, true,
     '示例配置里默认值必须是 true —— 关闭会改变既有自愈行为，不能悄悄改默认',
   );
   // 关掉时不得把发现的端点写回文件：决策里体现为 persistUrl=false，bridge 只在 persistUrl 为真时传 wsUrl。
@@ -200,6 +203,6 @@ test('端点自愈可关，且默认保持「跟随」（向后兼容）', () =>
     /\.\.\.\(update\.persistUrl \? \{ wsUrl, httpUrl: r\.baseUrl \} : \{\}\)/,
     '关闭跟随时不得把 wsUrl 写回 config.json（否则"我设了别处"会被持久化抹掉）',
   );
-  assert.match(bridgeCode, /followDiscoveredEndpoint: cfg\.snowluma\?\.followDiscoveredEndpoint/, 'bridge 必须把开关传进决策函数');
-  assert.equal(typeof example.snowluma?.silenceWarnMs, 'number', '示例配置应记录静默告警阈值');
+  assert.match(bridgeCode, /followDiscoveredEndpoint: cfg\.userPlatform\?\.followDiscoveredEndpoint/, 'bridge 必须把开关传进决策函数');
+  assert.equal(typeof exampleUser.silenceWarnMs, 'number', '示例配置应记录静默告警阈值');
 });

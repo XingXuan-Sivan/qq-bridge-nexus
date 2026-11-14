@@ -15,10 +15,10 @@ import { redactCredentials, redactKnown } from './redact.mjs';
 const PATH_RE = /((?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s"'<>|]+|\\\\[^\\\s"'<>|]+\\[^\s"'<>|]+|(?<![A-Za-z0-9])(?:\/home\/|\/Users\/|\/root\/)[^\s"'<>|]*)/g;
 
 const KINDS = [
-  { kind: 'credential', re: /MISSING_CREDENTIAL|INVALID_CREDENTIAL|no api key|api key (?:is )?(?:invalid|missing)|unauthori[sz]ed|\b401\b/i, hint: 'DSH 没有可用的模型凭据：请在 DSH 设置里填写 DeepSeek API Key 或登录 DeepSeek 账号，并确认 config.json 的 dsh.provider 与之对应（API Key = deepseek-official，账号登录 = deepseek-account）' },
+  { kind: 'credential', re: /MISSING_CREDENTIAL|INVALID_CREDENTIAL|no api key|api key (?:is )?(?:invalid|missing)|unauthori[sz]ed|\b401\b/i, hint: 'DSH 没有可用的模型凭据：请在 DSH 设置里填写 DeepSeek API Key 或登录 DeepSeek 账号，并确认 config.json 里当前 Agent 平台的 provider 与之对应（API Key = deepseek-official，账号登录 = deepseek-account）' },
   { kind: 'quota', re: /insufficient|balance|quota|\b402\b|余额/i, hint: '模型账户余额不足或额度用完：请到 DeepSeek 平台充值或检查额度' },
   { kind: 'rate', re: /rate.?limit|too many requests|\b429\b/i, hint: '模型接口限流：稍后会自动恢复；频繁出现时可降低唤醒频率' },
-  { kind: 'model', re: /model.{0,40}(?:not found|unknown|unavailable)|MODEL_NOT_FOUND/i, hint: '模型不可用：检查 config.json 的 dsh.model 是否在 DSH 的模型列表里' },
+  { kind: 'model', re: /model.{0,40}(?:not found|unknown|unavailable)|MODEL_NOT_FOUND/i, hint: '模型不可用：检查 config.json 里当前 Agent 平台的 model 是否在 DSH 的模型列表里' },
   { kind: 'network', re: /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|network|fetch failed|socket hang up|timeout/i, hint: '连接模型服务失败：检查网络或代理' },
 ];
 

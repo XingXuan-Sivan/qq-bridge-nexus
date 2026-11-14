@@ -4,7 +4,7 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
-## 0.2.0（已定版，未发布；分支 `feat/platform-decoupling`）—— 用户侧 / Agent 侧平台解耦
+## 0.2.0（已定版，未发布；分支 `feat/platform-unification`，由 `feat/platform-decoupling` 派生）—— 用户侧 / Agent 侧平台解耦
 
 目标：内核不认识具体平台。规格与逐批取舍见 [docs/PLATFORM_DECOUPLING.md](docs/PLATFORM_DECOUPLING.md)。
 B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子包 / 4 个 MCP serverInfo），
@@ -103,6 +103,355 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 ### 修复
 - 审计夹具的 Agent 地址发现改为离线桩（旧名 `resolveDshBaseUrl` 改名后未同步，导致 bridge 落到真实现、
   每次启动扫本机进程多花约 0.8 秒，`test-backfill` 的 2 秒容差断言因此随机失败）。
+
+### 重构：平台统一注册表（C1）
+- **新增 `src/platforms/registry.mjs`**：把四类来源（`profiles/platforms/<id>/`、`profiles/agent-platforms/<id>/`、
+  用户侧运行期注册表、Agent 侧运行期注册表）合成**一张表**。`buildPlatformRegistry()` 是纯函数（可离线喂
+  输入测），`platformRegistrySnapshot()` 只负责取事实。条目形状：`side` / `source(builtin|plugin|profile-only)` /
+  `active` / `capabilities` / `conversationTypes` / `limits` / `inbound` / `configSchema` / `config` /
+  `assets{prompt,tools,behaviors,capabilityProfiles,agentPresets}`（C4 起删掉 `agentPresets`，见下）。
+- **7 个诊断码**（`capability_missing` / `config_invalid` / `active_unregistered` / `inbound_unsupported` /
+  `profile_only` / `probe_failed` / `id_conflict`）与 error/warn 两级；输入不合法时**不抛错**，只降级成诊断 ——
+  平台没连上时控制台也要能画出表和问题。
+- **`GET /api/platforms/registry` 成为平台清单的唯一数据源**：删除 `GET /api/platforms`、`GET /api/platforms/:id`、
+  `GET /api/runtime/platforms`、`GET /api/runtime/agent-platforms`、`GET /api/runtime/adapters` 与 `/api/runtime`
+  响应里的 `adapters` 字段（旧端点不留投影）。
+- **`src/platforms/index.mjs`**：`listPlatforms()` 补上 `prompt{active,hasDefault}` 与 `configSchema`；
+  新增 `listAgentPlatformDirs()`（`capabilities/` + `agents/` 目录名 + 有无 `adapters/runtime.mjs`）。
+- **`src/user-side/metadata.mjs`**：`describePlatform()` 增加 `inbound` 布尔（`connect` 是否存在）。
+- **`src/runtime/adapters.mjs`**：删除没人用的 `snapshot()`（`platformVars()` 仍服务提示词渲染，C2 搬进
+  `platform.yml` 后再整份下线）。
+- **控制台**：`js/platforms.js`、`components/platform-panel/`、`pages/behavior/`、`pages/runtime/` 四处消费点
+  改读统一注册表并按 `side === 'user'` 过滤；平台面板不再发第二次 `/api/platforms/:id` 请求，表格列改吃
+  `assets`，只能出不能收的平台显式标「只出不进」。
+- **新增回归**：`scripts/test-platform-registry.mjs`（12 条：两侧真实快照、qq 条目资产、五个诊断码、
+  summary 计数自洽）；`scripts/console-ui-fixture.mjs` 的三份旧 mock 合并为一份注册表 mock。
+- **门禁**：`verify:repo` 新增「平台清单只有 `/api/platforms/registry` 一个端点」「控制台不消费旧平台端点」
+  两条断言；`test-runtime-adapters` 的 `snapshot()` 用法改为 `list()`。
+
+### 重构：配置 v2 与 `active` 生效（C2a）
+- **新增 `src/config/platforms.mjs`**（纯函数，不读写盘）：`config.json` 的 `platforms` 段成为唯一真源——
+  `{ configVersion: 2, platforms: { active: {user, agent}, users: {<id>: {account, transport, options}},
+  agents: {<id>: {endpoint, options}} } }`。字段归属靠白名单 `USER_TRANSPORT_KEYS`(8) /
+  `AGENT_ENDPOINT_KEYS`(6)，白名单外一律进 `options` —— 加一个业务选项不需要改这个文件。
+- **一次性迁移**：`platform.*` / `snowluma.*` / `dsh.*` 三个顶层键迁进 `platforms` 后**删除**并写
+  `configVersion: 2`；迁移前备份 `config.json.bak-<YYYYMMDD-HHmm>`。**不留别名双读**（0.2.0 未发布、无外部
+  配置依赖；`snowluma-conn.js` 的 `userTransportView()` 也随之不再认旧 `snowluma` 段）。
+- **内核派生视图**：`cfg.platform`（`{id, account}`）+ `cfg.userPlatform` / `cfg.agentPlatform`（扁平投影），
+  全仓 `cfg.snowluma` / `cfg.dsh` 改为二者之一；`platformViews()` 是唯一拍平点，`transport/options/endpoint`
+  三段不外泄（注册表端点与控制台表单吃 `flatPlatforms()`）。
+- **`configViews(raw)`**：凡自己 `JSON.parse` config.json 的地方（独立脚本、`mcp-*` 侧进程、探针、控制中心）
+  统一走它（先迁移再取视图）——否则 v1 文件会被读成空表。入参是**解析后的配置对象**，不是文件路径
+  （传路径会被当成空配置、静默返回空表）。
+- **`platforms.active` 真的生效**：新增 `src/platforms/activate.mjs`，`main()` 里在 `configureKeys` **之前**
+  两侧各自 `use*Platform(id)`，id 不可用时 **fail-closed** 并列出已注册 id。此前 `platformOfConfig()` 只用于
+  拼会话 key，从未切平台 —— 「改配置换平台」因此一直没有效果。
+- **写盘收口**：控制台模型选择 / token 自愈 / 控制中心目录切换三条路都经 `patchPlatformConfig()` +
+  `platformsForWrite()`，写前一律 `migrateConfigToV2()`。修掉一个**数据丢失** bug：v1 文件上只改一个 token，
+  原本会把 `wsUrl` / `httpUrl` / `homeDir` 一并写空。
+- **修掉 token 自愈在 v2 下静默失效**：`snowLumaHomeCandidates` / `discoverSnowLumaConnection` 原按
+  `cfg?.snowluma ?? cfg` 取参，v2 下退化成整个 cfg，`homeDir` / `accessToken` 全空且无任何报错。
+- **`config.example.json`** 改为 v2；`src/mcp-snowluma-safe.js`、`src/mcp-host-server.js`、`src/self-test.js`、
+  `src/snowluma-conn.js`、`src/launcher/control-center.mjs` 与 10 个脚本的读取点全部改扁平视图。
+- **新增回归**：`scripts/test-config-v2.mjs`（15 条：分法 / 迁移 / 幂等 / 脏输入 / 扁平投影）、
+  `scripts/test-platform-activate.mjs`（5 条：假注册表 + 真实注册表，含 fail-closed 与「失败不改坏当前平台」）；
+  `test-audit` 挂上两个脚本，`audit-bridge-harness` 注入 6 个配置符号 + `activatePlatforms` 桩。
+- **审计夹具补齐新依赖**：`test-qq-model-view` 的临时夹具只拷「被启动的那几个文件」，新增的依赖
+  `src/config/platforms.mjs`（纯函数、无依赖）也要一并带上，否则子进程 import 失败直接退出（表现为
+  `MCP error -32000: Connection closed`）；`test-audit-security-mcp` 用 VM 剥掉 import，需注入 `configViews`。
+- **参数名纠正**：`migrateConfigToV2` / `readPlatforms` / `configViews` 的入参从 `file` 改为 `raw` ——
+  它们接收的是 `JSON.parse` 后的配置对象，传文件路径会被当成空配置、静默返回空表。
+
+### 重构：两侧声明面搬进平台目录（C2b）
+- **`profiles/platforms/qq/platform.yml` 带 `vars` + `configSchema`**：`vars`（`platform` / `displayName` /
+  `owner`）供 `prompt.md` 与能力预设渲染占位符；`configSchema` 声明该平台的配置项（`httpUrl` / `wsUrl` /
+  `accessToken` / `followDiscoveredEndpoint` / `viaPlatform` / `silenceWarnMs` / `launcherPath` / `homeDir` /
+  `account`）。`profiles/agent-platforms/dsh/agent-platform.yml` 同据声明 `baseUrl` / 鉴权头 / `provider` /
+  `model` / `reasoningEffort` / `vision` 等。两者字段都是**扁平**的（配置 v2 的 `transport` / `endpoint`
+  在校验前拍平），`additionalProperties: true` 且不设 `required` —— 行为选项不穷举、未配置不算错。
+  校验复用 `src/plugins/config-schema.mjs`，不引完整 JSON Schema 依赖。
+- **删除 `src/runtime/adapters.mjs`**（§4.4 删除清单）：不再有硬编码的 QQ/DSH 清单与「取第一个平台
+  适配器」的 `platformVars()`。插件注册通道（`adapters:provide`）迁到 `src/platforms/adapter-registry.mjs`，
+  只登记描述；同 id 插件的 `vars` 覆盖 `platform.yml` 的取值。
+- **提示词变量收敛到一处**：`PROMPT_VAR_KEYS` / `normalizePromptVars()` 搬进 `src/runtime/prompt-compose.mjs`
+  （声明面与插件适配器共用同一份白名单，避免「某条路径渲染了、另一条没渲染」）。
+  `listPlatforms()` 带出 `vars`，`bridge.js` 的 `platformPromptFor()` / `selfIdentityTextV2()` 改为按平台
+  id 现取（快照缓存，与旧内置清单同样是静态语义）。
+- **修 `platformPromptVars()` 仍读 v1 `config.platform.id`**：`profiles/agent-platforms/dsh/adapters/build.mjs`
+  改为 `configViews()` 取 `platforms.active.user`，变量再读 `platform.yml` 的 `vars`（退回 `label`）——
+  此前产物里的 `{platform}` 在 v2 配置下会永远渲染不出来。产物逐字节不变（`verify:artifacts`）。
+- **控制台「运行方案」摘要**改用 `/api/platforms/registry` 的当前平台与 Agent 平台名；夹具不再伪造
+  `/api/runtime/capabilities.adapters`（该字段 C1 已删）—— 摘要原来恒显示「未注册」。
+- **新增回归**：`scripts/test-platform-adapter-registry.mjs`（6 条：注册表语义、`vars` 在 `platform.yml`
+  且能渲染、两侧 `configSchema` 能过统一校验器、内核不再持有内置清单）；原 `test-runtime-adapters.mjs` 删除。
+  `test-audit-setup` 的沙箱补拷 `src/platforms/index.mjs` 与 `src/config/platforms.mjs`（build 适配器的新依赖）。
+
+### 重构：能力模型归一（C4）
+- **能力档吸收预设**：`profiles/agent-platforms/dsh/capabilities/<id>.yml` 成为 Agent 侧**唯一**档位真源，一段文件四段内容——
+  `tools`（平台/Agent 模块/MCP/技能）、`preset`（name/description/order/behavior）、`rows`（DSH 插件行）、`extensions`（MCP/技能授权）。
+  **能力档 id 就是 preset id**：`chat` / `chat-v2` / `readonly` / `workspace` / `full`（原 `agent-chat` / `agent-readonly` /
+  `agent-workspace` / `agent-full` 去掉 `agent-` 前缀；`chat-v2` 按拍板结论**保留独立档位**，不并进 `chat`）。
+  `src/capabilities/store.mjs` 的 `normalizeCapability()` 是唯一归一入口，`decorate()` 补 `builtin` / `platformVisible` /
+  `agentModules` / `hasRows` / `rowsCount`。
+- **删除 `profiles/agent-platforms/dsh/agents/` 与 `assets/default-presets/`**：5 份 `agent.cordis.yml` + `preset.yml`
+  手工源与 5 份 549B 的 `qq-tool-restrict.mjs` 转达薄壳一并移除（权威实现仍是
+  `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs`）。`agent-platform.yml` 的 `agents:` 与
+  `profiles/schemas/agent-platform.schema.json` 的 `required.agents` 同步删除，不再留有指向已删目录的悬空键。
+- **预设改渲染产物**：`adapters/build.mjs` 从能力档的 `preset` + `rows` 渲染
+  `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`，子插件名必须是 bundle 包名裸说明符
+  （`qq-agent-presets/qq-tool-restrict.mjs`）；相对/绝对名直接构建失败，产物逐字节不变（golden）。
+- **方案去 `agent` 字段**：`profiles/plans/*.yml` 只留 `capability`；`src/runtime/plans.mjs` 的
+  `normalizePlan()` 缺 `capability` 直接报错、`legacyModeOfPlan()` 按 `capability` 判定，12 处引用同步改完。
+  控制台方案编辑器同步去掉 agent 下拉（`#runtimeEditTools` 的选项就是能力档，PATCH 路径
+  `/api/runtime/capabilities/<id>` 的 id 也是能力档 id）。
+- **统一注册表去重**：`assets.agentPresets` 与 `assets.capabilityProfiles` 原来是同一串值的两份拷贝，删除前者，
+  由 `test-platform-registry` 钉住「不得再出现」。
+- **测试与夹具跟上新契约**：`test-audit-setup` 的沙箱补拷
+  `src/capabilities/store.mjs` / `src/profiles/paths.mjs` / `src/tools/catalog.mjs`（build 适配器的新依赖链）；
+  `audit-bridge-harness` 的 VM 注入表补 `YAML` 与 `normalizeCapability`（剥掉顶层 import 后靠注入补齐，否则
+  只有真走到预设编辑器分支才报 `X is not defined`）；`test-tool-catalog` 改为五个内置能力；
+  `test-runtime-plans` / `test-platform-registry` / `test-console-ui` 按新契约重写断言；
+  `console-ui-fixture` 的假数据对齐真实响应形状（能力档列表、`PATCH` 返回 `{ok, capability}`、方案去 `agent`）。
+- **删一次性迁移脚本**：`scripts/migrate-prompt-layers.mjs`（输入目录已不存在，迁移结果早已是现行源）。
+- **文档同步**：`PROFILES_MODEL.md`（§三 能力档整节重写）、`FOLDER_MAP.md`、`EXTENSION_PLATFORM.md`、
+  `INJECTION_PROFILE_CONFIG.md`、`guides/DSH_SETUP.md`、`guides/SECURITY_BASELINE.md`、`AGENT_PLATFORM_EVOLUTION.md`、
+  `PLATFORM_UNIFICATION.md`（§2.2 / §4.2 / §4.4 / §七 / §九 标注 C4 已落地）与 `README.md`。
+- **门禁**：`test:audit` 126/126；`test-capability-unify` 17 条红线；`build-artifacts --check` 与 golden 逐字节一致；
+  `test-console-ui` 全 PASS（含无 JS 报错 / 无未知 API 路由）；`verify:repo` 75 通过 0 失败。
+
+### 重构：用户侧入站接通（C3）
+- **QQ 适配器新增 `connect()`**：`src/user-side/adapters/qq/inbound.mjs` 只做「OneBot 报文 → 统一事件」，
+  并负责订阅与退订。三个细节值得记住：`onMessage` 优先于旧 SDK 的 `onPrivateMessage`/`onGroupMessage`；
+  两个分类型回调**不能共用同一个函数引用**（SDK 内部用集合存监听器，共用会变成「私聊能收、群聊收不到」）；
+  同一进程只允许一条入站订阅，重复 `connect` 先摘旧的。
+- **翻译必须全函数**：`normalizeSegment` 对未知段类型抛错，而 `face` / `json` / `xml` / `share` 在真实 QQ 消息里
+  极常见，因此未知段一律降成占位文本（`[表情]` / `[卡片消息]` …）。把整条消息判成 INVALID 是最坏的降级方式。
+- **收消息只剩一条路**：`bridge.js` 删掉 `bot.onPrivateMessage` / `bot.onGroupMessage` 两个订阅，改用
+  `configureUserPlatformInbound(() => bot)` + `createInboundPipeline({origin, admit, resolve, deliver, onDrop})` +
+  `startUserPlatformInbound(...)`。管线顺序固定为 `校验 → 准入 → 会话映射 → 唤醒`（校验必须在准入之前，
+  否则插件能看到未准入会话的正文）；准入仍保留「管理通道先于白名单」，`deliver` 仍传 `ext.raw`，下游业务体
+  吃到的报文形状留到 C5。`shutdownThenExit()` 先摘订阅再退出。
+- **门面对称**：`user-platform.mjs` 新增 `configureUserPlatformInbound` / `startUserPlatformInbound`（后者在平台
+  没有 `connect` 时返回 `null`），`builtin.mjs` 同步转发给 QQ。`bridge.js` 仍不 import `adapters/`（`verify:repo` 钉）。
+- **只发不收的平台仍合法**：显式报 `inbound_unsupported`（warn），不再静默地“看起来能用”；QQ 在 C3 之后
+  不再触发该诊断，控制台夹具的 mock 平台同步改为 `inbound: true`（`diagnostics: []`、warnings 归零）。
+- **测试**：新增 `scripts/test-qq-inbound.mjs`（14 条：群/私聊翻译、秒→毫秒、自消息过滤、陌生段降级、
+  CQ 字符串、订阅/投递/退订/状态、旧 SDK 分订阅、重复 connect、signal 已中止、`onEvent` 抛错不拖死后续、
+  翻译不判准入）；`test-transport-plugin.mjs` 增 mock 平台端到端「收 → 校验 → 准入 → 会话映射 → 唤醒 → 发」；
+  `test-platform-registry.mjs` 把「qq 只能出不能进」的条件用例改写为「能收」+ 新增「只实现发送的平台仍报
+  `inbound_unsupported`」；`audit-bridge-harness.mjs` 的源码切片锚点从 `bot.onPrivateMessage` 改到
+  `configureUserPlatformInbound(() => bot);`。
+- **文档同步**：`PLATFORM_UNIFICATION.md`（状态改 `C0–C4 已完成`、§六 C3 进度改第二批已完成、§九 C3 行标完成、
+  诊断表 `inbound_unsupported` 注脚）、`FOLDER_MAP.md`（`user-side/inbound.mjs` 与 `adapters/qq/inbound.mjs`）、
+  `guides/ADD_USER_PLATFORM.md`（§二 三步改四步并补 `connect` 示例、§三 新增「入站只翻译不判准入」不变式、
+  §五 改为已接通）。
+- **门禁**：`test:audit` 128/128；`test-qq-inbound` 14/14；`test-transport-plugin` 15/15；`test-platform-registry` 13/13；
+  `test-console-ui` 34/34；`test:v030` 四项、`build-artifacts --check`、`check-profiles`、`verify:repo` 75 条全过。
+
+### 重构：AgentPort 契约（C5 第一批）
+- **新增 `src/agent-side/port.mjs`**：中立操作契约——`AGENT_PORT_GROUPS` 把方法按**能力位**分组
+  （`session` / `rename` / `permission` / `models` / `settings` / `workspace` / `maintenance`），
+  `AGENT_PORT_CORE_METHODS`（`probe` / `listSessions` / `ensureSession` / `prompt` / `cancel`）是任何平台都必须实现的。
+  `createAgentPort()` 把实现包成冻结对象：**未声明的能力方法仍然存在，但调用时抛
+  `AgentCapabilityError`（`code: 'capability_unsupported'`）** —— 这样报错能说清缺哪个能力，
+  而不是让调用方撞上 `TypeError: not a function`（那种错分不清平台不支持与名字写错）。
+  同时导出 `AGENT_EVENT_KINDS`（§5.2 的归一事件 kind）与 `normalizeSessionRef()`（接受裸
+  `sessionId` 或 `{instance, sessionId}`，第二批落盘统一成后者）。
+- **新增 `src/agent-side/adapters/dsh/port.mjs`**：DSH 实现。每个动词落到哪个 RPC 都有注释：
+  `probe` → `settings/describe`、`listSessions`/`ensureSession`/`prompt` → `sessions/*`、
+  `cancel` → `stopSessionWork`、`archiveSession` → `workspace/archiveSession`、
+  `renameSession` → `callUnary('session/rename')`（旧 SDK 的 sessions 门面没有它）、
+  `listModels` → `session/modelCatalog` 并保留 `session/models` 回落、
+  `listPresets`/`listPermissionPresets` → `agentPresets/list` 与 `permissionPresets/catalog`。
+  **不判断策略**：`applyPermission` 只交回未判定的回执，“成不成”留给桥接的 `permissionCommandSucceeded`
+  （否则平台与内核会各有一套判定，漂移时最难查）。
+- **两处方案补全**（实施时发现原表漏了）：`agentPresets/list` 与 `permissionPresets/catalog`
+  归入 `session` / `permission` 能力位；**DSH 不声明 `maintenance`** —— 0.2.0 的 API 里没有
+  「重建/自愈会话」RPC（桥接现在的重建是「停止 + 归档 + 新建」组合），声明了会让控制台画出
+  不存在的按钮。
+- **声明面能力位与 port 能力位对齐**：`profiles/agent-platforms/dsh/adapters/runtime.mjs` 的
+  `capabilities` 改为 `['session','rename','permission','models','settings','workspace','events','compact']`
+  —— 除 `events`（事件流订阅，不是调用面）外都与 port 同名，`maintenance` 故意不声明（DSH 没有
+  重建/自愈的 RPC）；`prompt` 不进榜（它是核心方法，不是可关掉的能力位）。两者的一致性由 `test-agent-port` 钉住。
+- **门面对称**：`agent-client.mjs` 新增 `createAgentPort`（经 registry 的 `protocol.createAgentPort`），
+  `builtin.mjs` 把 `adapters/dsh/port.mjs` 合并进 protocol。`bridge.js` 的调用面已在第二批迁完
+  （见下两节）；`state/sessions/*.json` 的 `agentRef` 落盘格式已在第三批统一。
+- **测试**：新增 `scripts/test-agent-port.mjs`（19 条）：能力位 fail-closed、声明了没实现要在建 port 时炸、
+  未声明方法仍存在、返回值冻结、会话引用归一、事件 kind 表、DSH 每个动词落到哪个 RPC、
+  探活失败不抛错、权限只转发不判定、缺 `commands.execute` 时报能力缺失、`respondPermission` 缺 id 报错、
+  模型目录回落只看 `not found` 一类错误、`readSettings` 不传 ns 给原始表。`console-ui-fixture` 的 mock
+  平台能力列表同步改名。
+- **门禁**：`test-agent-port` 19/19（第二批扩到 21 条）；`test-platform-adapters` / `test-platform-registry` /
+  `test-console-ui` / `verify:repo` 75 条全过（第二批后 77 条）。
+
+### 重构：AgentPort 调用面迁移（C5 第二批）
+- **`bridge.js` 55 处调用面全部改走 `agentPort.*`**：`unwrap()` 18 处清零。`api.sessions.*` /
+  `api.workspace.*` / `api.settings.*` / `api.respond` / `api.stopSessionWork` / `api.callUnary` /
+  `api.agentPresets.*` / `api.permissionPresets.*` / `api.commands.execute` 在本文件里彻底消失。
+  保留下来的是两类「不是对会话做什么」的调用：`api.setBaseUrl`（端点重识别属于「怎么连」，
+  地址与凭据的绑定只有客户端自己知道）与 `api.events.follow/forget/mux`（事件流订阅，属传输层；
+  归一事件在消费侧翻译，而「订阅哪几条会话」没有平台无关的等价物）。
+- **port 补两个真实缺口**（不补就只能让平台操作继续留在 bridge 里）：`permission` 组加
+  `readPermission`（`/permission` 无参**只读核对**，与 `applyPermission` 分开——外部漂移检测
+  绝不能因为一次核对就把权限写回去）；新增 `compact` 组（`compactSession` → `/compact`）。
+  能力位从 6 个变 7 个：`session` / `rename` / `permission` / `models` / `settings` / `workspace` / `compact`。
+- **返回值形状统一**：语义字段是**已解包**的，`raw` 永远是平台**原始响应**。原实现不一致
+  （`listModels.raw` 是原始响应、`listPermissionPresets.raw` 是解包值），现在一致。
+  `listModels()` 返回 `{catalog, raw}`，`unwrap` 放在「回落判断之外」——只有老版本回 `not found`
+  才回落 `session/models`，`ok:false` 是真故障不能吞。`applyPermission` 交回 `{value, raw}`：
+  `value` 是解包回执，判定仍归平台档的 `permissionCommandSucceeded`（port 只拆包、不判定）。
+- **回执解析下沉**：`/permission` 的 `current preset <x>` 正则从 bridge 搬进
+  `adapters/dsh/port.mjs`（`CURRENT_PRESET_RE`），bridge 只比较 `preset` 值；`/compact` 的
+  `kind` / `text` 解析同理。平台回执长什么样，只有适配器该知道。
+- **`probe()` 语义翻译**：`agentPort.probe()` 是查询语义（失败返 `{ok:false, detail}` 不抛），
+  而 `createDshProbe` 要「抛错即失败」，bridge 里包一层 `if (!r.ok) throw`；
+  「什么算不可用」的政策仍留在 `src/upstream/dsh-probe.mjs`。
+- **`self-test.js` 与 `session/reset.mjs` 同步迁移**：`selfTestApi` → `selfTestPort`；
+  `reset.mjs` 只认中立动词 `cancel` / `archiveSession`——平台把「取消回合」叫什么都不影响清理序列。
+- **新增门禁（`verify:repo` 两条）**：内核（`src/` 下除 `adapters/` 与用户侧）不得出现
+  `api.<平台动词>`；`api.setBaseUrl` 只能在 `bridge.js` 出现一次。光靠「不 import 适配器」守不住：
+  客户端对象上就挂着 `sessions` / `workspace`，写一行 `api.sessions.list()` 同样能跑通，
+  而能力闸门与解包约定全被绕过——这种写法在测试里看不出异常，只有换平台时才爆。
+- **测试夹具**：`audit-bridge-harness.mjs` 注入**真** `createAgentPort`（假 api 的方法名与 DSH 同名，
+  `createDshPort` 直接吃得下），并补 `workspace.rename` 桩；`test-agent-port` 21 条（新增
+  `readPermission` / `compactSession` 两个用例与返回值形状断言）；`test-session-reset` 改
+  `cancel` / `archiveSession(sid)`；`test-dsh-endpoint` 的探活断言改到 `AgentPort.probe`。
+- **门禁**：`test:audit` 129/129 脚本、`verify:repo` 77 条、`test:console-ui` 34/34、
+  `build-artifacts --check` 逐字节一致、`test:v030` 四项、`test:artifact-pipeline`、
+  `check-profiles`、`verify:persona` 全过。
+
+### 重构：会话引用去平台化（C5 第三批）
+- **落盘形状换成 `binding.agentRef: { instance, sessionId }`**（内存里的 `state.sessions[key]`
+  同形）。只存裸 id 时，「这个会话归谁」根本不在数据里：换平台后同一个字符串在另一个平台可能
+  恰好存在，映射会**意外命中**，两个平台的上下文串在一起；不存在则每条消息撞 404，看起来像
+  「会话易失」。`instance` 记的是产生这个 id 的平台（`dsh` / 未来的 `acp:claude`）。
+- **读侧零改动**：`createSessionRegistry` 的 `get` / `ids` / `entries` / `raw` 仍产出裸
+  `sessionId`（`src/bridge.js` 里四十多处调用点一行没动），需要知道归属时用新增的
+  `ref(key)` / `instanceOf(key)`。形状的知识只留在 `src/session/{ref,registry}.mjs`。
+- **老数据不写一次性迁移脚本**：`src/session/ref.mjs` 把裸 id / `binding.sessionId` 读成
+  `{ instance: '', sessionId }`（空 = 未知），平台装好后 `sessions.normalizeAll()` 把它认领成
+  当前平台并落盘（只补空值，**不覆盖**已明确的归属——那可能是上一个平台留下的，覆盖掉就等于
+  伪造）。这样升级后第一条消息还能接上旧会话（不丢上下文），而这个窗口只存在一次启动。
+- **跨平台引用判废两处**：`ensureSession` 的复用分支与休眠恢复（`dormant.instance`，
+  `normalizeDormant` 同步保留该字段）。判废时**不向当前平台**发 `cancel` / `archiveSession`：
+  那边根本没有这个会话，发过去只能换回一条 404 噪声，还会把「平台换了」伪装成「会话丢了」。
+- **修一个真实的安全面 bug**：`pinSessionPermission` 里写的是 `sessions.get(key)?.sessionId`，
+  而 `get()` 一直返回裸 id —— `?.sessionId` 恒为 `undefined`，于是**不传 `explicitSessionId`
+  的调用全部静默跳过**：`clearFullGrant` 的授权过期回收、owner 用 `/permission` 命令改级别、
+  控制台的 profile / grant-full / revoke-full。表现是「授权过期了但 DSH 侧还是 full」。
+- **`bindSession` 不传 policy 时不再写 `undefined`**：落盘会丢字段、读回是 `null`，导致
+  「指纹恰好为空」的会话被判成同一个；现在缺省表示「指纹由调用方紧接着 `setPolicy` 写」。
+- **新增门禁（`verify:repo` 三条，77 → 80）**：`state.sessions` 的直接读写只允许出现在会话归一层
+  （`registry` / `directory` / `reset`）；档案里不得再出现 `binding.sessionId`；`sessions.get()`
+  之后不得再取字段（它返回裸 id，上面那个 bug 正是这么来的）。这些回退都不报错，只在换平台、
+  会话复用或权限回收那条路径上表现出来。
+- **测试**：`test-session-registry` 7 → 11 条（归一、`ref`/`instanceOf`、`normalizeAll` 认领与
+  幂等、不覆盖已明确归属、指纹不被 `undefined` 抹掉）；`test-session-lifecycle` 4 → 6 条
+  （裸 id 照常复用、跨平台引用判废且不归档旧平台会话）；`test-session-directory` 改断言为 ref 形状
+  并钉住「装载期不认领平台」；读 `h.state.sessions[...]` 的 `test-mode-handover` /
+  `test-agent-token-guard` / `test-backfill` / `test-sticker-describe` 改经 `sessionIdOf()`
+  （后者原来是 `Object.values(...).includes(sid)`，形状变了会变成恒真）。
+- **门禁**：`test:audit` 129/129 脚本、`verify:repo` 80 条、`test:console-ui` 34/34、
+  `build-artifacts --check` 逐字节一致、`test:v030` 四项、`test:artifact-pipeline`、
+  `check-profiles`、`verify:persona` 全过。
+
+### 重构：ACP 适配器（C6，第二个 Agent 平台）
+- **契约中立化（C6-a）**：`AgentPort.prompt()` 的返回从「平台信封」改成 `{ ok, isCommand, commandText, error, raw }`。
+  `bridge.js` 六处调用点原本读 `accepted.result.ok` / `accepted.result.value.command` —— 那是 DSH 的包形状；
+  现在 DSH 与 ACP 各自在自己的适配器里拍平，内核不认识任何一个平台的包。`isCommand` 是独立字段：
+  ACP v1 的 `session/prompt` 只有 `stopReason`、没有命令回执，但内核不能因此假定「所有平台都不支持命令」。
+- **能力位延迟求值（C6-b）**：`createAgentPort({ capabilities })` 接受函数形态且**不缓存**。
+  ACP 的能力位来自 `initialize` 回执，装配那一刻还不存在；常量形态仍在构造时校验（拼错能力名 / 声明了没实现
+  必须启动即暴露）。
+- **stdio 传输（C6-c）**：新增 `src/agent-side/adapters/acp/client.mjs` —— NDJSON 编解码 + JSON-RPC 双向分发
+  （`pending` 等响应 / `handlers` 收反向请求）+ 子进程生命周期。与 DSH 的根本差异是**谁是 server 反过来了**：
+  Agent 会反向发 `session/request_permission`，不回它 Agent 就永远卡在那一步，所以有 `DEFERRED`（先不回、
+  稍后 `respond`）。子进程一退出，所有挂起请求立即判失败（挂到超时是最难查的一类故障）；未注册处理函数的
+  反向请求回 `-32601` 而不是沉默。
+- **`AgentPort` 实现（C6-d）**：新增 `src/agent-side/adapters/acp/port.mjs`（核心五动词 + `session` / `permission`
+  / `models`）。三处结构差异都落在里面：
+  - **受理制**：v1 的 `session/prompt` 阻塞到回合结束，不能直接 await。要么等「本会话首条 `session/update`」、
+    要么等响应或宽限期（800ms）—— 先到者定局；响应一到一律补发 `turn-end`（含失败），否则内核永久判忙。
+    失败分两类：JSON-RPC 错误（对端拒绝受理）→ `ok:false` 走自愈；传输级错误 → 抛。
+  - **名单是会话级的**：`modes` / `configOptions` 只出现在 `session/new` 回执里。`listPresets` /
+    `listPermissionPresets` / `listModels` 在任何会话都没有时建一个**探测会话**去读（只建一次）。
+  - **不猜模式名、不升级授权**：决策只映射 `allow_once` / `reject_once`，**不映射 `allow_always`**；
+    没有「允许一次」就回 `cancelled`，宁可拒绝也不把「只批这次」升成「以后都批」。
+- **归一事件映射（C6-e）**：新增 `events.mjs`。`agent_message_chunk` → `text`、`agent_thought_chunk` →
+  `reasoning`、`tool_call(_update)` → `tool`、`plan` → `plan`、`current_mode_update` /
+  `available_commands_update` / `session_info_update` → `notice`、`user_message_chunk` → 丢弃。
+  未知判别值**不猜也不丢**：落成 `notice(unknown-update)` 并带上原文，否则协议小版本演进时会变成静默丢消息。
+- **声明面与注册（C6-f）**：新增 `profiles/agent-platforms/acp/`（`agent-platform.yml` 带
+  `command` / `args` / `cwd` 的 `configSchema`、空 `tools.yml`、`capabilities/README.md` 说明为何空、
+  `adapters/runtime.mjs`）；`src/agent-side/builtin.mjs` 注册第二个内置平台（排在 dsh 之后，顺序即默认 active）。
+  没有 `build.mjs` / `install.mjs`：ACP 没有要渲染的产物、也没有对方的 profile 要改。
+- **明确的能力取舍**：ACP v1 没有改名 / 设置 / 工作区 / 压缩 / 自愈，能力位一个都不声明，调用 fail-closed 报
+  `capability_unsupported`（不造伪能力）。**未连接时能力位乐观声明、`initialize` 后按回执收缩** —— 闸门在
+  方法之前执行，返回空集会锁死「唯一能做初始化的地方」（`listPermissionPresets` 永久被拒，L3 永远开不起来）。
+- **装配期守卫**：`src/agent-side/agent-client.mjs` 是「连一个常驻服务」的门面（`NodeApiClient` / 地址发现 /
+  Cookie / 探活分类）。acp 的 `protocol` 面只有 `createAcpClient` 与 `createAgentPort`，因此**目前不能把它配成
+  `platforms.active.agent`**：门面在装配期直接报「protocol 面缺少 …」，而不是让 bridge 撞上
+  `AgentApiClient is not a constructor`。接线（按配置 spawn、把 `onEvent` 接进事件管线）属 C6.5，
+  不改变本批已交付的任何契约。
+- **测试**：新增 `scripts/test-acp-port.mjs`（14 条，离线夹具 `scripts/fixtures/fake-acp-agent.mjs` 走真实
+  stdio，不起网络：事件映射、权限事件、能力位乐观 + 收缩、`session/list` 分页与归档、prompt 三条受理路径、
+  cancel、权限反向请求与回执、模式读写、agent 与模型目录）。`test-agent-port.mjs` 21 → 30 条（新增 5 条 ACP
+  契约一致性：声明面覆盖能力位且不多画、协商制 getter、protocol 面无 `NodeApiClient`、级别计划 fail-closed、
+  回执判据「ok 且名字一致」）。`test-platform-adapters.mjs` 的内置清单断言改为 `['dsh', 'acp']`。
+- **文档**：`PLATFORM_UNIFICATION.md` 状态改 `C0–C6 已完成`；§9.1 的 prompt 欠账与两条风险标为已解决；
+  新增 §9.2（交付物、四处设计决定、未做的接线）。
+
+### 重构：控制台界面 IA（C7，平台页 + 方案页）
+- **`#behavior` 四标签拆成两页**：`平台`（一级）= 左列表（按 `side` 分「用户侧 / Agent 侧」分组）+ 右详情
+  （标签按「这一侧真有的资产」给：用户侧 `概览 · 配置 · 话术与工具 · 行为`，Agent 侧 `概览 · 能力 · 配置`）；
+  `方案`（一级）= `pages/runtime/` 改名重写，只管「一次组合怎么跑」。`pages/behavior/`（5 文件）、
+  `pages/runtime/`（2 文件）、`components/platform-panel/` 全部删除。
+- **`js/platforms.js` → `js/registry.js`**：端点从 `/api/runtime/platforms` 换成 `/api/platforms/registry`（两侧同源），
+  函数签名保留；`test-console-static` 新增断言「页面源码里没有第二处 `/api/platforms/registry` 调用」——
+  口径只允许在这一个文件里。
+- **兼容面只有一条**：`PAGE_ALIASES = { behavior: 'platforms' }`，旧书签 `#behavior` 一次性重定向。
+  `PAGE_FRAGMENTS` 删除：每页的片段都在 `pages/<id>/page.html`，不再区分「静态页 / 片段页」。
+- **`AGENT_FALLBACK` 删除**：方案编辑器不再给 `agentPlatform` 兜底写 `'dsh'`，改为从注册表挑
+  `assets.capabilityProfiles.length > 0` 的 Agent 平台。这是**数据约束**（`plan.capability` 必须是被选平台的档），
+  不是白名单：新平台声明能力档后自动出现在下拉里；旧方案没写 `agentPlatform` 时显示「跟随能力档」。
+- **能力面板不再造假归属**：`createCapabilityPanel()` 删掉「Agent 平台」列（原值是 `cap.agentPlatform || 'dsh'`，
+  而 `src/capabilities/store.mjs` 根本没这个字段），改为收 `platformId`，把「保存后写回哪份文件」按当前平台算。
+- **三处有意留白**（界面上写明原因，不造数据）：没有「健康」标签（注册表无 `health` 字段、`probe` 端点未实现）；
+  「配置」只读（`PATCH .../config` 未实现，参数仍改 `platform.yml` + 重启）；能力档不按平台过滤（档位无平台归属字段）。
+- **行为档案按平台过滤**：`behaviors-panel` 收 `platformId`；档案自己写了 `platform` 就用它，否则用 kind 注册表里的
+  （`/api/behaviors/kinds` 的 `platform`）。列表只显示当前平台的档案，新建时直接落到当前平台。
+- **测试**：`test-console-ui` 34 → 37 条（行为档案走「平台 › 行为」、平台提示词走「话术与工具」、方案编辑器全部
+  `#planEdit*` 且 Agent 平台下拉 = 注册表里的声明者、能力档走「Agent 平台 › 能力」、两侧清单 + 没有诊断就不渲染
+  诊断卡、配置标签只读）；`test-console-static` 新增「## C7：界面 IA」整段，`BARE_CONTROL_BASELINE` 删
+  `behavior: 4`（新页基线 0：`page.html` 里没有裸控件）；`console-ui-fixture` 的注册表 mock 补上两侧
+  `configSchema` / `config`（照抄两份声明面），预览里「配置」标签才有真表可看。
+- **文档**：`PLATFORM_UNIFICATION.md` §7.2 改成实际标签矩阵、§九 C7 行标完成、新增 §9.3（交付物 / 三处留白 /
+  与 §7.6 的四处出入）、§二 加「本节写的是 C0 之前的形态」横幅；`FOLDER_MAP.md` 与 `CONSOLE.md` 的
+  `js/platforms.js` 条目改为 `js/registry.js`（端点同时换成 `GET /api/platforms/registry`）；`CONSOLE.md` §6/§7
+  的过期数字改为事实（契约 25 → 22 条、导航 10 → 15 个、不再钉具体 DOM id 数、截图页从已删的 `behaviors`
+  换成 `platforms` / `plans`）；`guides/ADD_USER_PLATFORM.md` 的平台数据源改为注册表，
+  `PLATFORM_DECOUPLING.md` §6.1 加「已收口为 `/api/platforms/registry`」横幅（该节保留作设计演进记录）。
+
+### 修复
+- **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
+  行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从
+  那里一路吃到下一个块注释结尾，把 **34 万字符真代码当注释删掉**（871115 → 527802），依赖它的断言全部
+  静默假通过。新实现区分字符串 / 模板串 / 正则字面量与注释，并保留换行。修正后 repo 层 75 条断言全通过
+  （原 74 通过 1 失败是新增断言的误判）。
+
+### 方案（仅文档，定版后追加）
+- **新增 [docs/PLATFORM_UNIFICATION.md](docs/PLATFORM_UNIFICATION.md)**：平台统一与 Agent 通用化的总纲。
+  适用前提：B0–B8 已完成，但仍有三个用户侧缺口（只能出站 / `cfg.platform.id` 不切平台 / 内置平台无
+  `configSchema`）、Agent 侧门面仍导出 DSH 语义、平台相关界面分散在 `behavior/` 的四个标签里。
+  内容：现状诊断（三源平台定义 / 能力三处描述 / 界面 IA 错位）、目标概念模型 L0–L5、`AgentPort` 窄契约
+  与 DSH/ACP 双实现、用户侧三缺口修法、统一注册表与诊断码、界面 IA 重构（四标签取舍：`pages/behavior/`
+  整页删除）、配置 v2、C0–C8 批次与验收。
+- **旧规划状态标注（避免两套方案并存）**：`AGENT_PLATFORM_EVOLUTION.md` 的 P2 标记为“已移交”（由本方案
+  C4–C6 接管，§三 仅保留设计意图与反模式）；`PLATFORM_DECOUPLING.md` 标注 B0–B8 已落地并声明 B8 之后
+  的缺口不在其范围内；`PROFILES_MODEL.md` 声明 §一 层级表与 §二 目录示例在 C2/C4 时由本方案改写。
+- **`docs/guides/ADD_USER_PLATFORM.md` §五**改为「入站：尚未接通，已定方案（C3）」，写明 `connect/close`
+  契约与不可交换的入站顺序（校验 → 准入 → 会话映射 → 唤醒）。（C3 已落地，该节现已改为「已接通」，见上方 C3 条目。）
+- `docs/README.md` 索引与“想找什么 → 去哪看”表同步登记本方案；C0 阶段无 `src/` / `public/` 改动。
 
 ---
 

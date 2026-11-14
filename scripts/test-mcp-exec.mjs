@@ -5,11 +5,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'config.json'), 'utf8'));
-const endpoint = String(cfg.snowluma?.httpUrl || 'http://127.0.0.1:3000/').replace(/\/?$/, '/');
-const token = cfg.snowluma?.accessToken || '';
+// 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+const { userPlatform } = configViews(cfg);
+const endpoint = String(userPlatform.httpUrl || 'http://127.0.0.1:3000/').replace(/\/?$/, '/');
+const token = userPlatform.accessToken || '';
 
 const mcpEntry = fileURLToPath(new URL('../node_modules/@snowluma/mcp/dist/server.js', import.meta.url));
 

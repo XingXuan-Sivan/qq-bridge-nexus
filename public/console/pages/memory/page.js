@@ -10,7 +10,7 @@ import { alertBox, confirmBox } from '../../components/message-box/message-box.j
 import { MEMORY_FIELDS } from './fields.js';
 import { cardHtml } from '../../components/card/card.js';
 // 平台名与会话类型统一查表（B7）；这里只负责把会话 key 拆成两段，不写死任何平台。
-import { conversationTypeLabel, platformFilterOptions, platformLabel } from '../../js/platforms.js';
+import { conversationTypeLabel, platformFilterOptions, platformLabel } from '../../js/registry.js';
 
 const PROVIDER_FALLBACK_LABEL = { 'local-digest': '本机轻量记忆', soulkit: 'soulkit 长期记忆' };
 const STATUS_TEXT = { injected: '已注入', truncated: '已截断', empty: '空', error: '失败', off: '已关闭', idle: '未调用' };

@@ -9,6 +9,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import { hamming, findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker, ROTATE_AFTER } from '../src/agent-token-guard.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { sessionIdOf } from '../src/session/ref.mjs';
 
 const GROUP = 'qq:group:456';
 const promptText = (p) => (Array.isArray(p?.content) ? p.content.map((c) => String(c?.text ?? '')).join('\n') : '');
@@ -88,7 +89,7 @@ test('② 端到端：抄错提示、下次唤醒提醒、连错换新、用对�
     const r3 = await call(port, q, { headers: { 'x-agent-call': '1', 'x-agent-token': wrong } });
     assert.equal(r3.status, 403);
     assert.notEqual(st.agentToken, real, `连错 ${ROTATE_AFTER} 次换新令牌`);
-    assert.equal(h.state.sessions[GROUP], sid, 'DSH 会话不动');
+    assert.equal(sessionIdOf(h.state.sessions[GROUP]), sid, 'DSH 会话不动');
     assert.match(h.buildWakePromptV2(GROUP, 'atMention'), /^【令牌提醒[^\n]*全新的/);
     const old = await call(port, q, { headers: { 'x-agent-call': '1', 'x-agent-token': real } });
     assert.equal(old.status, 403, '旧令牌立即失效');

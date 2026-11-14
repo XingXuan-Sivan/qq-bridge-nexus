@@ -4,10 +4,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'config.json'), 'utf8'));
-const { wsUrl, accessToken } = cfg.snowluma;
+// 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+const { wsUrl, accessToken } = configViews(cfg).userPlatform;
 
 const keyword = process.argv[2] ?? '机器人测试';
 const message = process.argv[3] ?? '【桥接测试】我是 DSH agent，通过 SnowLuma 桥接接入本群。收到请回复～';

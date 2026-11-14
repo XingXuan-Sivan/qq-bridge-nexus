@@ -60,7 +60,9 @@ export function normalizeDormant(raw) {
     const policy = String(v.policy ?? '');
     const at = Number(v.dormantAt);
     if (!sessionId || !isHibernatablePolicy(policy) || !Number.isFinite(at)) continue;
-    out[key] = { sessionId, policy, dormantAt: at };
+    // `instance`（C5 第三批）：休眠会话也是「平台侧 id 的引用」，换平台后不能复用。
+    // 老数据没有这个字段 → 留空串，调用方按「未知，认领当前平台」处理。
+    out[key] = { sessionId, policy, dormantAt: at, instance: String(v.instance ?? '').trim() };
   }
   return out;
 }

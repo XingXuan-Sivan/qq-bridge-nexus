@@ -136,3 +136,5 @@
 - 能力安全段不写 `safety.rules`：旧安全段点名平台对象，按分层归到平台话术；能力层保持平台无关，用默认安全边界模板。
 - 旧预设原件与逐字 persona 留在 `docs/archive/prompts/2026-11-11/`；本次未删旧 `qq-*` 预设。
 - 可重跑：`node scripts/migrate-prompt-layers.mjs`（幂等，按段落去重后覆盖三个源文件），随后 `node scripts/build-capability-artifacts.mjs`。
+  > 2026-11-14 补记：C4 起旧预设目录 `profiles/agent-platforms/dsh/agents/` 已并入 `capabilities/`，
+  > 该一次性迁移脚本依赖的输入已不存在，已删除；迁移结果（`config/platform/qq.yml`、`config/behaviors/social-*.yml`）是现行源，无需再跑。

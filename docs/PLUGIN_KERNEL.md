@@ -397,7 +397,7 @@ undefined                      // 不干预
 | `ctx.commands.register(def)` | `commands` | 注册插件命令（P3b，见 [COMMAND_REGISTRY.md](COMMAND_REGISTRY.md) §8）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.prompt.registerBlock(def)` | `prompt:provide` | 注册具名注入块（P4，见 §5.4）；卸载/停用/重载时按 pluginId 自动注销 |
 | `ctx.scheduler.registerTaskType(def)` | `task-type:provide` | 注册一种定时任务类型（见 §8.1）；任务存在 `state/scheduler.json`，重启后仍在 |
-| `ctx.adapters.register(kind, adapter)` | `adapters:provide` | 注册两端适配器（`kind: 'platform' \| 'agent'`，见 ](./archive/models/RESOURCE_MODEL.md) §3.1）；只登记描述，不接管收发；卸载时按 pluginId 自动注销 |
+| `ctx.adapters.register(kind, adapter)` | `adapters:provide` | 注册两端适配器（`kind: 'platform' \| 'agent'`，见 [RESOURCE_MODEL.md](./archive/models/RESOURCE_MODEL.md) §3.1）；只登记描述，不接管收发；同 id 的 `vars` 会覆盖 `platform.yml` 的取值；卸载时按 pluginId 自动注销 |
 | `ctx.message.send(key, payload, opts)` | `send:message` | 主动发消息。`payload` 是字符串、单个段或段数组；段校验、能力降级、`onOutbound` 都由内核完成后才到平台实现 |
 | `ctx.qq.send(key, payload, opts)` | `send:message` | 同上的旧名（0.1.x 的 `send:qq` 申请的就是这段能力），两者是**同一个对象** |
 | `ctx.userPlatforms.register(def)` | `transport:provide` | 注册一个 UserPlatform（`{ id, capabilities, create(config) }`）。id 不得与内置或其它插件平台冲突；卸载/停用时按 pluginId 注销并调用实例的 `close()`（上限 2s） |
@@ -425,7 +425,7 @@ undefined                      // 不干预
 | `net:http` | 出站 HTTP | 中（数据外发） |
 | `commands` | 注册插件命令 | 中（命令会被用户直接调用；内置命令优先，冲突不覆盖） |
 | `prompt:provide` | 注册具名注入块 | 中（影响 AI 每轮看到的内容；有块级与总预算上限） |
-| `adapters:provide` | 注册平台/Agent 适配器描述 | 低（只登记能力与提示词变量，不改收发路径） |
+| `adapters:provide` | 注册平台/Agent 适配器描述 | 低（只登记能力与提示词变量，不改收发路径）。内置平台的描述不住在代码里：C2b 起 `vars` / `configSchema` 都在 `profiles/platforms/<id>/platform.yml` |
 | `task-type:provide` | 注册定时任务类型 | 中（到点会真的发消息；走现有白名单、限额、免打扰与模式判定） |
 | `inbound:filter` | 入站丢消息/改文字 | 高（丢消息不留痕、改文字会影响命令判定；默认 `filters.inbound=false` 时不生效） |
 | `transport:provide` | 提供 UserPlatform 实现（连接与发送） | 高（接管一个平台的网络与协议；不得顶替内置平台 id） |

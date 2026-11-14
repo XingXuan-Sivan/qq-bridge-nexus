@@ -4,10 +4,10 @@ import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
 import { setMsg } from '../components/message/message.js';
-import { loadPlatforms } from './platforms.js';
+import { loadPlatforms } from './registry.js';
 
 bootstrapConsoleToken();
-// 平台元数据（B7）预热：页面渲染不等网络，先把注册表里的平台名、会话类型与上限拉回本地。
+// 平台注册表（B7 / C7）预热：页面渲染不等网络，先把两侧平台的平台名、会话类型与上限拉回本地。
 // 失败时静默（后半启动阶段端点可能还不在），页面本身有「只显示会话里出现过的平台」的降级。
 void loadPlatforms();
 

@@ -5,7 +5,6 @@ note: 自主阅读、发言与潜水（v2 行为）。
 builtin: true
 platform: qq
 agentPlatform: dsh
-agent: chat-v2
 behavior: social-v2
-capability: agent-chat
+capability: chat
 audience: access

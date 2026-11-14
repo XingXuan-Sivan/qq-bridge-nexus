@@ -76,9 +76,9 @@ if (persona) {
 
 // ── 仓库配置（始终执行）──────────────────────────────────────────────────────
 for (const preset of ['chat', 'chat-v2']) {
-  const file = path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/agents', preset, 'agent.cordis.yml');
+  const file = path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/capabilities', `${preset}.yml`);
   console.log(`\n${preset} (${path.relative(process.cwd(), file)}):`);
-  const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+  const doc = YAML.parse(fs.readFileSync(file, 'utf8')).rows;
   const row = doc.find((r) => r.id === 'persona');
 
   check('存在 persona 行', () => { if (!row) throw new Error('缺少 persona 行'); });

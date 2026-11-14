@@ -945,7 +945,7 @@
       if (!await confirmBox('仍然直接切换？', '不迁移就切换：SnowLuma 会生成新的随机 WebUI 密码（旧密码失效），需要重新扫码登录、重新开启 OneBot WebSocket。旧目录的数据不会被删除，之后仍然可以迁移。', '仍然切换')) return;
       r = await act(() => api('/api/snowluma/select', { dir, force: true }));
     }
-    if (r?.ok && r.switched !== false) { delete $('snowPick').dataset.forceShow; renderedInst = null; toast(`已选择 SnowLuma ${r.info.version}${r.platformSynced ? '，并同步给接口平台' : (S?.platform?.reachable ? '' : '（接口平台没运行，未同步；启动后在实例详情里填 SnowLuma 目录）')}${r.homeDirSynced ? '，并同步了 config.json 的 snowluma.homeDir' : ''}`, 'ok'); refresh(); }
+    if (r?.ok && r.switched !== false) { delete $('snowPick').dataset.forceShow; renderedInst = null; toast(`已选择 SnowLuma ${r.info.version}${r.platformSynced ? '，并同步给接口平台' : (S?.platform?.reachable ? '' : '（接口平台没运行，未同步；启动后在实例详情里填 SnowLuma 目录）')}${r.homeDirSynced ? '，并同步了 config.json 里当前平台的 homeDir' : ''}`, 'ok'); refresh(); }
   };
   $('snowChange').onclick = () => { $('snowPick').dataset.forceShow = '1'; $('snowDirInput').value = S?.snowluma?.dir || ''; refresh(); };
   $('snowStart').onclick = () => act(() => api('/api/snowluma/start', {}), 'SnowLuma 已启动。首次使用请打开它的 WebUI 扫码登录机器人 QQ');

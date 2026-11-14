@@ -15,19 +15,36 @@
 // 这样换账号后无需手改任何配置，工具自动跟上。
 import fs from 'node:fs';
 import path from 'node:path';
+import { CONFIG_VERSION, configViews, migrateConfigToV2, platformsForWrite, readPlatforms } from './config/platforms.mjs';
+
+/**
+ * 取「用户侧平台连接参数」的扁平视图。
+ *
+ * 两种输入都要认（踩过坑：图形界面传的是窄对象，没有平台这一层，
+ * 于是 homeDir 被忽略、per-account token 一个都扫不到 → 换账号后界面显示未连接）：
+ *   · 完整配置 / 已经派生的扁平视图：`{ platforms }` 或 `{ userPlatform }`（配置 v2）
+ *   · 窄对象：`{ homeDir, launcherPath, httpUrl, accessToken }`
+ *
+ * 顺序不能反：v2 的两个视图优先，否则带 `userPlatform` 的对象会被当成窄对象。
+ * 不认旧的 `snowluma` 顶层键 —— 迁移是一次性的，留一份别名双读就是留一笔债。
+ */
+function userTransportView(cfg) {
+  if (!cfg || typeof cfg !== 'object') return {};
+  if (cfg.userPlatform && typeof cfg.userPlatform === 'object') return cfg.userPlatform;
+  if (cfg.platforms && typeof cfg.platforms === 'object') return configViews(cfg).userPlatform;
+  return cfg;
+}
 
 /**
  * SnowLuma 主目录的常见位置。
  *
- * 同时接受两种 cfg 形状（踩过坑：图形界面传的是"窄对象"，没有 snowluma 这一层，
- * 于是 homeDir 被忽略、per-account token 一个都扫不到 → 换账号后界面显示未连接）：
- *   - 完整 config：{ snowluma: { homeDir, launcherPath, httpUrl, accessToken } }
- *   - 窄对象：    { homeDir, launcherPath, httpUrl, accessToken }
+ * cfg 可以是完整配置、v2 视图，也可以是窄对象 —— 两种形状都由 `userTransportView()` 归一。
+ * 经接口平台连接（viaPlatform）时**一个都不给**：那时令牌与端点由平台提供。
  */
 export function snowLumaHomeCandidates({ cfg = null } = {}) {
   const out = [];
   const push = (p) => { if (p && !out.includes(p)) out.push(p); };
-  const sl = cfg?.snowluma ?? cfg ?? {};
+  const sl = userTransportView(cfg);
   // 经接口平台（与桥接平行的 interface-platform）连接时，令牌和端点都由平台提供：
   // 绝不能去 SnowLuma 目录里找令牌，否则自愈会拿到 SnowLuma 的真实端点、绕过平台直连。
   if (sl.viaPlatform === true) return out;
@@ -117,7 +134,7 @@ export async function discoverSnowLumaConnection({
   homeDirs = null,
   timeoutMs = 6000
 } = {}) {
-  const sl = cfg?.snowluma ?? cfg ?? {};
+  const sl = userTransportView(cfg);
   const base = String(baseUrl || process.env.SNOWLUMA_HTTP_URL || sl.httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
   const homes = homeDirs ?? snowLumaHomeCandidates({ cfg });
   const explicit = token || process.env.SNOWLUMA_TOKEN || sl.accessToken || '';
@@ -176,34 +193,45 @@ export async function discoverSnowLumaConnection({
 }
 
 /**
- * 把当前有效的 token 写回 config.json（可选动作，供 qq-bridge 这类"必须持久化 token"的组件用）。
- * 只在真的换过账号时才写，避免无谓改动。
- * 返回 { updated, from, to }。
- */
-/**
  * 只写 accessToken（兼容旧调用）。返回 { updated, from, to } —— 保留 from/to 是因为
  * 既有调用方与测试按这个形状断言（重构时改成 changed 曾把测试打红）。
  */
 export function persistToken(cfgPath, newToken) {
   let text = fs.readFileSync(cfgPath, 'utf8');
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-  const old = String(JSON.parse(text).snowluma?.accessToken ?? '');
+  // 先迁再读：磁盘上可能还是 v1（三个顶层键），直接 readPlatforms 会读到空值，
+  // 把「换掉了哪个 token」报成空串。
+  const old = String(readActiveTransport(migrateConfigToV2(JSON.parse(text)).config).accessToken ?? '');
   const r = persistSnowLumaEndpoint(cfgPath, { accessToken: newToken });
   return { updated: r.updated, from: old, to: newToken };
 }
 
+/** 当前用户侧平台的 transport 段（配置 v2；缺段给空对象）。 */
+function readActiveTransport(cfg) {
+  const platforms = readPlatforms(cfg);
+  return platforms.users[platforms.active.user]?.transport ?? {};
+}
+
 /**
- * 把**已确认可用**的 SnowLuma 端点写回 config.json。
+ * 把**已确认可用**的 OneBot 网关端点写回 config.json。
  * 只写传进来的字段，其它配置一律不动；全部一致时不写文件（幂等）。
  * 返回 { updated, changed: {...} }。
+ *
+ * 配置 v2 起端点在 `platforms.users.<active>.transport` 下（见 src/config/platforms.mjs），
+ * 不再有 `cfg.snowluma` 这一段；写法仍然只动它认识的那几个键。
  */
 export function persistSnowLumaEndpoint(cfgPath, { accessToken, wsUrl, httpUrl } = {}) {
   let text = fs.readFileSync(cfgPath, 'utf8');
   // 读的时候必须吃掉 BOM，否则 JSON.parse 会抛「Unexpected token」。
   const hadBom = text.charCodeAt(0) === 0xFEFF;
   if (hadBom) text = text.slice(1);
-  const cfg = JSON.parse(text);
-  const cur = cfg.snowluma ?? {};
+  // 先迁再切：v1 文件里的连接参数还在 `snowluma` 顶层键里，直接切 platforms 会写成空表，
+  // 于是「只改一个 token」变成把 wsUrl/httpUrl/homeDir 全删了。
+  const cfg = migrateConfigToV2(JSON.parse(text)).config;
+  const platforms = readPlatforms(cfg);
+  const id = platforms.active.user;
+  const entry = platforms.users[id] ?? { account: '', transport: {}, options: {} };
+  const cur = entry.transport ?? {};
   const next = { ...cur };
   const changed = {};
   const consider = (key, value) => {
@@ -216,7 +244,9 @@ export function persistSnowLumaEndpoint(cfgPath, { accessToken, wsUrl, httpUrl }
   consider('wsUrl', wsUrl);
   consider('httpUrl', httpUrl);
   if (Object.keys(changed).length === 0) return { updated: false, changed: {} };
-  cfg.snowluma = next;
+  platforms.users[id] = { ...entry, transport: next };
+  cfg.configVersion = CONFIG_VERSION;
+  cfg.platforms = platformsForWrite(platforms);
   // 原来 hadBom 只用于读、没用回写：用户文件带 UTF-8 BOM 时，我们改一个 token 就把 BOM 吞掉了
   // —— 那是对用户文件的**字节级**静默改动（Windows 编辑器/工具常写 BOM），会让文件在 git 里
   // 显示成整文件重写，也可能影响按字节读它的其它程序。只改该改的字段，编码原样保留。

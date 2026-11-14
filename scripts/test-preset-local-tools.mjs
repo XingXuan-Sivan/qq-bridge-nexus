@@ -17,7 +17,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-names.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PRESETS_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'agents');
+const CAPABILITIES_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities');
+/** 守卫的权威实现（能力档的 rows 以裸说明符指向它）。 */
+const GUARD_FILE = path.join(ROOT, 'artifacts', 'dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs');
 
 /** 仿真模式使用的 preset（不允许有任何本地执行能力）。 */
 const SIMULATION_PRESETS = ['chat', 'chat-v2'];
@@ -32,25 +34,22 @@ const EXPECTED_SAFE_PREFIXES = [
   'mcp__web-search-safe__',
 ];
 
-function readPreset(id) {
-  const dir = path.join(PRESETS_DIR, id);
-  assert.ok(fs.existsSync(dir), `preset 目录存在：${id}`);
-  const cordis = path.join(dir, 'agent.cordis.yml');
-  assert.ok(fs.existsSync(cordis), `preset 有 agent.cordis.yml：${id}`);
-  return { dir, yml: fs.readFileSync(cordis, 'utf8'), cordis };
+function readCapability(id) {
+  const file = path.join(CAPABILITIES_DIR, `${id}.yml`);
+  assert.ok(fs.existsSync(file), `能力档存在：capabilities/${id}.yml`);
+  return { file, yml: fs.readFileSync(file, 'utf8') };
 }
 
 /**
- * 导入 preset 目录下的守卫（它是个 `export *` 壳，指向 bundle 里的唯一实现）。
+ * 导入守卫实现。
  *
- * 走壳而不是直接 import 实现，是为了顺带证明壳本身没坏——部署到 profile 的是壳，
- * 壳断了等于守卫没挂上。
+ * 导入的是 bundle 里的权威那份——能力档的 rows 用它当裸说明符，DSH 实际加载的也是它，
+ * 因此这里测的就是生产件本身（C4 起不再有 per-preset 的 re-export 壳）。
  */
 async function guardFor(id) {
-  const { dir } = readPreset(id);
-  const guardPath = path.join(dir, 'qq-tool-restrict.mjs');
-  assert.ok(fs.existsSync(guardPath), `${id} 的守卫文件存在`);
-  return import(pathToFileURL(guardPath).href);
+  readCapability(id);
+  assert.ok(fs.existsSync(GUARD_FILE), `${id} 的守卫文件存在（${path.relative(ROOT, GUARD_FILE)}）`);
+  return import(pathToFileURL(GUARD_FILE).href);
 }
 
 const guardMain = await guardFor('chat');
@@ -74,25 +73,22 @@ async function applyGuard(id) {
 }
 
 // ---------------------------------------------------------------------------
-test('模拟会话的 preset 都挂了工具守卫（否则 L7 没有任何载体）', () => {
+test('模拟会话的能力档都挂了工具守卫（否则 L7 没有任何载体）', () => {
   for (const id of SIMULATION_PRESETS) {
-    const { yml } = readPreset(id);
+    const { yml } = readCapability(id);
     assert.match(
       yml,
       /qq-tool-restrict/,
       `${id} 必须挂载 qq-tool-restrict（L7 的落点），否则本地工具会随全局层继承进来`,
     );
-    // 源文件里仍是 preset 目录内的相对名；DSH 0.1.7 下真正装进 DSH 的是 bundle patch
-    // （scripts/build-agent-preset-patches.mjs 生成），那里会把它改写成从 profile 目录
-    // 可解析的 `qq-agent-presets/qq-tool-restrict.mjs`——这条断言钉的是"源里必须有守卫行"，
-    // 改写结果由 test-agent-preset-patches.mjs 钉住。
-    assert.match(yml, /\.\/qq-tool-restrict\.mjs/, `${id} 的守卫要指向本目录的 .mjs`);
+    // C4 起源里就写 bundle 裸说明符：子行 name 按 profile 目录解析，相对名一定会装不上。
+    assert.match(yml, /qq-agent-presets\/qq-tool-restrict\.mjs/, `${id} 的守卫要用 bundle 裸说明符`);
   }
 });
 
-test('模拟会话的 preset 不得挂载 tool-web 的 search/fetch', () => {
+test('模拟会话的能力档不得挂载 tool-web 的 search/fetch', () => {
   for (const id of SIMULATION_PRESETS) {
-    const { yml } = readPreset(id);
+    const { yml } = readCapability(id);
     const webRow = /id:\s*tool-web[\s\S]{0,200}/.exec(yml);
     assert.ok(webRow, `${id} 应有 tool-web 条目`);
     assert.match(webRow[0], /search:\s*false/, `${id}: tool-web.search 必须为 false`);
@@ -236,25 +232,25 @@ test('operator / readonly 两个 profile 的名单从分组派生，不各自手
   }
 });
 
-test('封闭 agent 的预设在创建后必须与仿真 preset 明确区分', () => {
+test('封闭 agent 的能力档在创建后必须与仿真能力档明确区分', () => {
   // qsh-closed 由 ADR 0003 定义为**故意**拥有完整本地工具面：它的守卫只负责
   // "哪些 QQ 动作可见"，不负责"本地工具权限边界"。
   //
   // ⚠️ 这条断言初版是**恒真**的：qsh-closed 还不存在，`if (!exists) continue`
   // 直接跳过整个函数体，永远不会失败——一个永远不会失败的测试不如没有。
   // 现在改为显式记录"尚未创建"，并且一旦创建就执行真实断言。
-  const present = CLOSED_AGENT_PRESETS.filter((id) => fs.existsSync(path.join(PRESETS_DIR, id)));
+  const present = CLOSED_AGENT_PRESETS.filter((id) => fs.existsSync(path.join(CAPABILITIES_DIR, `${id}.yml`)));
   if (present.length === 0) {
     // 不是失败，但必须让人看见"这条闸门还没被真正覆盖"。
     console.log('  ⏭  qsh-closed 尚未创建（ADR 0003 待落地）；此项覆盖暂为空，不是通过。');
     return;
   }
   for (const id of present) {
-    const yml = fs.readFileSync(path.join(PRESETS_DIR, id, 'agent.cordis.yml'), 'utf8');
+    const { yml } = readCapability(id);
     assert.match(yml, /qq-tool-restrict/, `${id} 也应挂守卫（用于 QQ 动作可见性）`);
-    // 与仿真 preset 的关键区别：封闭 agent 必须能拿到本地工具 ⇒
+    // 与仿真能力档的关键区别：封闭 agent 必须能拿到本地工具 ⇒
     // 它的守卫不得把本地执行工具写进 restrict 名单。
-    const guard = fs.readFileSync(path.join(PRESETS_DIR, id, 'qq-tool-restrict.mjs'), 'utf8');
+    const guard = fs.readFileSync(GUARD_FILE, 'utf8');
     for (const tool of ['pwsh', 'read', 'write']) {
       assert.ok(
         !new RegExp(`['"]${tool}['"]`).test(guard),

@@ -3,10 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient } from '@snowluma/sdk';
+import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'config.json'), 'utf8'));
-const { wsUrl, httpUrl, accessToken } = cfg.snowluma;
+// 配置 v2：网关端点经扁平视图读，不再认旧 `snowluma` 段。
+const { wsUrl, httpUrl, accessToken } = configViews(cfg).userPlatform;
 const baseHttp = String(httpUrl || 'http://127.0.0.1:3000').replace(/\/+$/, '');
 
 console.log('配置:');

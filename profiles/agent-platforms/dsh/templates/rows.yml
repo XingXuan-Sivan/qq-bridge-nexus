@@ -61,14 +61,14 @@ structural:
 # 审批行：本地工具开着时才有意义（没有本地动作就没有要批准的）。
 gate:
   id: qq-approval-gate
-  name: './qq-approval-gate.mjs'
+  name: 'qq-agent-presets/qq-approval-gate.mjs'
   config:
     level: L2
 
 # 守卫行：本地工具关掉时兜底，执行期只允许白名单里的工具名。
 guard:
   id: qq-tool-restrict
-  name: './qq-tool-restrict.mjs'
+  name: 'qq-agent-presets/qq-tool-restrict.mjs'
   config:
     profile: simulation
 

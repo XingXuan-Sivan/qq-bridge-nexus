@@ -30,9 +30,21 @@ function fixture(name, patch = '') {
   ]) {
     fs.copyFileSync(path.join(root, 'scripts', name), path.join(repo, 'scripts', name));
   }
-  // 生成器依赖 src/runtime 的提示词组装（P9.2 起）；夹具只拷这一份，避免整棵 src 进来。
+  // 生成器依赖 src/runtime 的提示词组装（P9.2 起）与平台目录的读取（C2b 起：
+  // 提示词变量来自 platform.yml，少了这份读取 build.mjs 就 import 不过来）。
+  // 夹具只拷这几份，避免整棵 src 进来。
   fs.mkdirSync(path.join(repo, 'src/runtime'), { recursive: true });
   fs.copyFileSync(path.join(root, 'src/runtime/prompt-compose.mjs'), path.join(repo, 'src/runtime/prompt-compose.mjs'));
+  fs.mkdirSync(path.join(repo, 'src/platforms'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'src/platforms/index.mjs'), path.join(repo, 'src/platforms/index.mjs'));
+  fs.mkdirSync(path.join(repo, 'src/config'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'src/config/platforms.mjs'), path.join(repo, 'src/config/platforms.mjs'));
+  // C4 起 build.mjs 直接用能力档归一（normalizeCapability）而不是自己解析 agents/，
+  // 这条依赖链（store → profiles/paths + tools/catalog）也必须进夹具。
+  for (const rel of ['src/capabilities/store.mjs', 'src/profiles/paths.mjs', 'src/tools/catalog.mjs']) {
+    fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+    fs.copyFileSync(path.join(root, rel), path.join(repo, rel));
+  }
   // 权威源：profiles/（平台、Agent 平台、能力、方案）+ artifacts/dsh（生成 patch 的产物）。
   fs.cpSync(path.join(root, 'profiles'), path.join(repo, 'profiles'), { recursive: true });
   fs.cpSync(path.join(root, 'artifacts/dsh'), path.join(repo, 'artifacts/dsh'), { recursive: true });

@@ -64,7 +64,7 @@ bot.onEvent((event) => {
 });
 
 bot.on('error', (e) => console.log('  ws error:', e?.message ?? e));
-bot.connect().then(() => console.log(`已连接 ${cfg.snowluma.wsUrl}（只读，不发消息），等心跳…`))
+bot.connect().then(() => console.log(`已连接 ${disc.wsUrl}（只读，不发消息），等心跳…`))
   .catch((e) => { console.log('连接失败:', e?.message ?? e); finish('连接失败'); });
 
 setTimeout(() => finish('超时'), timeoutMs);

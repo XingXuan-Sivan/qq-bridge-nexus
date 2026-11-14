@@ -17,7 +17,7 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 
 export const PRESETS = dsh.PRESETS;
 export const GUARD_SPECIFIER = dsh.GUARD_SPECIFIER;
-export const RELATIVE_ROW_REWRITES = dsh.RELATIVE_ROW_REWRITES;
+export const GATE_SPECIFIER = dsh.GATE_SPECIFIER;
 export const presetRowId = dsh.presetRowId;
 export const BUNDLE_DIR = dsh.bundleDir(REPO_ROOT);
 

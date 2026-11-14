@@ -199,6 +199,38 @@ function findNodeModules(resolvedFile) {
   }
 }
 
+/**
+ * 一个 node_modules 目录是不是真的装着 DSH 自带的 `@deepseek-ai/dsh-*` 包。
+ *
+ * 为什么必须验：`createRequire(profile/package.json).resolve()` 在 profile 自己
+ * 没装这个包时会**向上冒泡**，最后可能命中宿主机上完全无关的 node_modules
+ * （全局 npm 安装的 dsh、本项目自己的依赖…）。那条路扫到的是另一个 DSH 版本，
+ * 工具集对账据此得出的「新增/消失」全是假的 —— 实测出现过桌面版 0.2.2 被全局
+ * 0.1.1 顶替、工具名从 65 掉到 39 的假红。宁可判定「目录后端不可用」，
+ * 交给 asar 后端去读真正的那一份。
+ */
+function hasDshPackages(modulesDir) {
+  try {
+    return fs.readdirSync(path.join(modulesDir, '@deepseek-ai'))
+      .some((name) => name.startsWith('dsh-'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 解析结果是否落在 profile 自己的目录里。
+ *
+ * 这是 directoryModulesDir 的真正判据：`createRequire().resolve()` 会向上冒泡，
+ * 命中宿主机上任何一份 node_modules 都算「解析成功」，但那份可能根本不是这个
+ * profile 装的（实测：profile 里没有 `@deepseek-ai/dsh-*` 时冒泡到了全局 npm
+ * 安装的 dsh，工具名从 65 掉到 39、版本号 0.2.2 变 0.1.1，对账全假）。
+ */
+function isInsideProfile(dir, profileDir) {
+  const rel = path.relative(path.resolve(profileDir), path.resolve(dir));
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 /** 目录后端：返回 `<profile>/node_modules`；一个都没有时返回 null（不抛错）。 */
 export function directoryModulesDir() {
   const override = process.env.DSH_INSTALL_MODULES || process.env.DSH_MODULES;
@@ -206,14 +238,16 @@ export function directoryModulesDir() {
 
   const home = dshHome();
   for (const profile of candidateProfiles(home)) {
-    const anchor = path.join(home, 'profiles', profile, 'package.json');
+    const profileDir = path.join(home, 'profiles', profile);
+    const anchor = path.join(profileDir, 'package.json');
     if (!fs.existsSync(anchor)) continue;
     let req;
     try { req = createRequire(anchor); } catch { continue; }
     for (const spec of PROBE_SPECIFIERS) {
       try {
         const dir = findNodeModules(req.resolve(spec));
-        if (dir) return dir;
+        // 冒泡到 profile 外的目录一律不认：宁可交给 asar 后端去读真正那一份。
+        if (dir && isInsideProfile(dir, profileDir) && hasDshPackages(dir)) return dir;
       } catch { /* 换 specifier / 换 profile */ }
     }
   }

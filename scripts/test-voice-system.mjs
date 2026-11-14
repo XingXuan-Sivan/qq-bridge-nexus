@@ -172,11 +172,10 @@ console.log('## qq-bridge 语音系统：控制台与 preset');
   ok(html.includes('initVoiceSection'), '控制台只剩语音库卡，不再有全局 sendVoice 开关');
   ok(html.includes('id="voiceList"') && html.includes('id="voiceSendBtn"'), '控制台有语音库调试面板');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
-  const preset = read(path.join('profiles', 'agent-platforms', 'dsh', 'agents', 'chat-v2', 'agent.cordis.yml'));
+  const preset = read(path.join('profiles', 'agent-platforms', 'dsh', 'capabilities', 'chat-v2.yml'));
   ok(preset.includes('qq_send_voice') && preset.includes('qq_list_voices'), 'chat-v2 人设描述语音能力');
   ok(/语音\*\*默认是关闭的\*\*/.test(preset), '人设说明默认关闭');
-  // DSH 0.1.7 起守卫的权威实现只有一份，在 qq-agent-presets bundle 里
-  // （profiles/agent-platforms/dsh/agents/<preset>/qq-tool-restrict.mjs 只是 re-export 壳）。
+  // 守卫的权威实现只有一份，在 qq-agent-presets bundle 里（能力档的 rows 以裸说明符引用它）。
   ok(read(path.join('artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).includes("'mcp__snowluma__'"),
     'preset 白名单前缀放行语音工具');
 }

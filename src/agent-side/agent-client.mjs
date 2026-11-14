@@ -22,6 +22,41 @@ if (!protocol) {
   throw new Error('当前 Agent 平台未提供 protocol（检查 src/agent-side/builtin.mjs 是否把 client.mjs 装配进 protocol）');
 }
 
+/**
+ * 门面绑定的一整套协议面成员。
+ *
+ * 为什么要在装配期整体检查：这些名字要么被下面的具名常量直接绑定，要么被 bridge 当
+ * 函数调用；缺一个时 `AgentApiClient` 会变成 `undefined`，bridge 报的是
+ * `AgentApiClient is not a constructor` —— 看不出是「配置指错平台」还是「平台实现写坏了」，
+ * 会把人引去改协议代码。这里把失败提前到装配期，并直接说出缺了什么。
+ *
+ * 现状：只有「连一个常驻服务」这一类比平台拥有整套成员。以 spawn 子进程方式接入的
+ * 平台（ACP）目前只有 AgentPort 与传输工厂，因此不能当主平台 —— 等它的连接层接线完成，
+ * 把成员补齐即可解除限制，门面这边一行都不用改。
+ */
+const REQUIRED_PROTOCOL_MEMBERS = Object.freeze([
+  'NodeApiClient',
+  'discoverDshLaunchToken',
+  'resolveDshHome',
+  'discoverDshSessionCookie',
+  'resolveDshBaseUrl',
+  'dshBaseUrlCandidates',
+  'looksLikeDsh',
+  'detectDshDesktop',
+  'createDshHealth',
+  'classifyDshError',
+  'createAgentPort',
+  'unwrap',
+  'createTurnCollector',
+  'blocksToText',
+]);
+
+const missingMembers = REQUIRED_PROTOCOL_MEMBERS.filter((name) => typeof protocol[name] !== 'function');
+if (missingMembers.length) {
+  throw new Error(`当前 Agent 平台的 protocol 面缺少 ${missingMembers.join(' / ')}：这是「连一个常驻服务」所需的整套成员。`
+    + '只提供 AgentPort 的平台要等连接层接线完成才能当主平台；请把 config.json 的 platforms.active.agent 指回一个协议面完整的平台');
+}
+
 // ── RPC 客户端 ──────────────────────────────────────────────────────────────
 
 /** Agent 平台的 RPC 客户端类。原 DSH 名 NodeApiClient。 */
@@ -57,6 +92,17 @@ export const createAgentHealth = protocol.createDshHealth;
 
 /** 把真实的 fetch 错误形状分成 refused / timeout / reset / auth / http / other。 */
 export const classifyAgentError = protocol.classifyDshError;
+
+// ── 操作契约（C5）─────────────────────────────────────
+
+/**
+ * 建一份 AgentPort：中立动词 + 能力位闸门。
+ *
+ * 参数是「连接对象」（现在是 DSH 的 `NodeApiClient` 实例）与可选的 `instance`
+ * （写进会话引用，形如 `dsh` / `acp:claude`）。返回的值冻结，方法集只包含
+ * 平台声明的能力位，未声明的调用会抛 `capability_unsupported`。
+ */
+export const createAgentPort = protocol.createAgentPort;
 
 // ── 返回包解包与事件收集 ─────────────────────────────────────────────────────
 

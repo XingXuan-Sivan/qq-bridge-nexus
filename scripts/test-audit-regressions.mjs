@@ -213,10 +213,33 @@ await test('R7 未知 preset 名直接被拒（含路径穿越形态）', async 
   const h = await bridgeHarness();
   try {
     h.setPresets([]); // 模拟 DSH 未连接：清单为空
-    // 给临时仓库放一份真实的预设源文件，验证「已知 preset 不会被误伤」
-    const presetFile = path.join(h.temp, 'profiles', 'agent-platforms', 'dsh', 'agents', 'chat-v2', 'agent.cordis.yml');
+    // 给临时仓库放一份真实的预设源文件（C4 起预设正文住在能力档的 rows 段），验证「已知 preset 不会被误伤」
+    const presetFile = path.join(h.temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities', 'chat-v2.yml');
     fs.mkdirSync(path.dirname(presetFile), { recursive: true });
-    fs.writeFileSync(presetFile, '- id: persona\n  config:\n    prefix: |-\n      测试用仿真提示词。\n');
+    fs.writeFileSync(presetFile, [
+      'version: 1',
+      'label: 聊天',
+      'note: 无本地工具',
+      'tools:',
+      '  platform: {}',
+      '  agent: {}',
+      '  mcp: []',
+      '  skills: []',
+      'preset:',
+      '  name: QQ 聊天角色',
+      '  description: 测试用',
+      '  order: 11',
+      'rows:',
+      "  - id: persona",
+      "    name: '@deepseek-ai/dsh-persona'",
+      '    config:',
+      '      prefix: |-',
+      '        测试用仿真提示词。',
+      '  - id: qq-tool-restrict',
+      '    name: qq-agent-presets/qq-tool-restrict.mjs',
+      '    config: {}',
+      '',
+    ].join('\n'));
     await withServer(h, async (port) => {
       for (const bad of ['../../etc', '..\\..\\..\\x', 'chat/../../x', 'standard']) {
         const res = await call(port, '/api/preset/sim-prompt?preset=' + encodeURIComponent(bad));

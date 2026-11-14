@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import YAML from 'yaml';
 import { dshHome, candidateProfiles, directoryModulesDir } from './dsh-package-source.mjs';
 import { discoverDshSessionCookie, NodeApiClient, unwrap } from '../src/agent-side/adapters/dsh/client.mjs';
+import { configViews } from '../src/config/platforms.mjs';
 
 const ROOT = process.cwd();
 const DSH_HOME = dshHome();
@@ -56,10 +57,81 @@ function skip(layer, label, why) {
 }
 
 // ── 公共工具 ────────────────────────────────────────────────────────────────
-/** 只看可执行代码（注释里会提到旧名字做历史说明，直接扫原文会误报）。 */
-const stripComments = (src) => src
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .split(/\r?\n/).map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+/**
+ * 只看可执行代码（注释里会提到旧名字做历史说明，直接扫原文会误报）。
+ *
+ * 用最小词法扫描，而不是「先正则删块注释、再逐行删行注释」：后者的顺序是错的 ——
+ * 行注释里写了块注释开头两个字符（例如「规则都在 src/social/ 下」这种说明里带了星号斜杠）时，
+ * 块注释正则会在删掉行注释之前就先从那两个字符一路吃到下一个块注释结尾，把整段代码当注释
+ * 删掉（0.2.0 的 bridge.js 实测被删掉 34 万字符），依赖它的断言于是**静默假通过**。
+ * 同理不能直接删字符串里的两个斜杠（`http://` 会被削成 `http:`）。
+ */
+const stripComments = (src) => {
+  // `/` 紧跟这些字符时是正则字面量的开头（而不是除号）。
+  const REGEX_PREV = new Set(['(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^']);
+  const REGEX_KEYWORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
+  const isIdent = (c) => /[A-Za-z0-9_$]/.test(c);
+  let out = '';
+  let i = 0;
+  let lastChar = '';
+  let lastWord = '';
+  const len = src.length;
+  const canStartRegex = () => lastWord === '' || REGEX_KEYWORDS.has(lastWord) || REGEX_PREV.has(lastChar);
+  while (i < len) {
+    const ch = src[i];
+    const next = src[i + 1];
+    // 行注释：删到换行，换行本身保留（让行号仍然对得上）。
+    if (ch === '/' && next === '/') {
+      while (i < len && src[i] !== '\n') i += 1;
+      continue;
+    }
+    // 块注释：删到配对的结尾两个字符，用一个空格占位免得把两侧 token 粘在一起。
+    if (ch === '/' && next === '*') {
+      const end = src.indexOf('*/', i + 2);
+      i = end === -1 ? len : end + 2;
+      out += ' ';
+      continue;
+    }
+    // 字符串 / 模板字符串：原样保留（里面的斜杠都不是注释）。
+    if (ch === "'" || ch === '"' || ch === '`') {
+      out += ch;
+      i += 1;
+      while (i < len) {
+        if (src[i] === '\\') { out += src[i] + (src[i + 1] ?? ''); i += 2; continue; }
+        out += src[i];
+        if (src[i] === ch) { i += 1; break; }
+        i += 1;
+      }
+      lastChar = ch;
+      lastWord = '';
+      continue;
+    }
+    // 正则字面量：跳过整段（含字符类里的斜杠），否则转义过的星号斜杠会被当成注释开头。
+    if (ch === '/' && canStartRegex()) {
+      out += ch;
+      i += 1;
+      let inClass = false;
+      while (i < len) {
+        const c = src[i];
+        if (c === '\\') { out += c + (src[i + 1] ?? ''); i += 2; continue; }
+        out += c;
+        if (c === '\n') { i += 1; break; }
+        if (c === '[') inClass = true;
+        else if (c === ']') inClass = false;
+        else if (c === '/' && !inClass) { i += 1; break; }
+        i += 1;
+      }
+      lastChar = '/';
+      lastWord = '';
+      continue;
+    }
+    if (isIdent(ch)) lastWord = /[A-Za-z_$]/.test(ch) ? lastWord + ch : '';
+    else if (!/\s/.test(ch)) { lastWord = ''; lastChar = ch; }
+    out += ch;
+    i += 1;
+  }
+  return out;
+};
 
 /**
  * 尽量加载「DSH 自带的模块」（用于拿 DSH 自己的解析器 / schema 做对照）。
@@ -133,10 +205,10 @@ function candidateBaseUrls() {
   return [...new Set(list)];
 }
 
-/** 从 preset 源文件里取出一行。 */
+/** 从能力档的 rows 段里取出一行（C4 起预设正文与工具面同一份文件）。 */
 function readPresetRow(id) {
-  const f = path.join(ROOT, 'profiles/agent-platforms/dsh/agents', id, 'agent.cordis.yml');
-  return YAML.parse(fs.readFileSync(f, 'utf8')).find((r) => r.id === 'persona');
+  const f = path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities', `${id}.yml`);
+  return YAML.parse(fs.readFileSync(f, 'utf8')).rows.find((r) => r.id === 'persona');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -245,7 +317,9 @@ if (want('repo')) {
 
   // ── 1d. 桥接侧不变式 ────────────────────────────────────────────────────
   const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
-  check('repo', 'config.json dsh.model = deepseek-flash', cfg.dsh?.model === 'deepseek-flash', `当前 ${cfg.dsh?.model}`);
+  // 配置 v2：模型类选项在 platforms.agents.<active>.options，经扁平视图读。
+  const { agentPlatform } = configViews(cfg);
+  check('repo', 'config.json 当前 Agent 平台的 model = deepseek-flash', agentPlatform.model === 'deepseek-flash', `当前 ${agentPlatform.model}`);
   const bridgeSrc = fs.readFileSync(path.join(ROOT, 'src/bridge.js'), 'utf8');
   const bridgeCode = stripComments(bridgeSrc);
   // P1 起安装逻辑在 DSH 平台适配器里，setup-dsh.mjs 只是转发壳；断言必须盯真实现。
@@ -334,6 +408,74 @@ if (want('repo')) {
     })
     .map(([f]) => f);
   check('repo', 'adapters/ 外的内核模块不 import 具体平台实现', adapterImporters.length === 0, adapterImporters.join(', '));
+
+  // ── 1d-4. 调用面归 port（C5）─────────────────────────────────────────────
+  // 上一段守的是「不 import 适配器」；这一段守「不隔着门面直接调平台 RPC」。
+  // 光有 import 约束不够：bridge 拿到的客户端对象上就挂着 `sessions` / `workspace`，
+  // 写一行 `api.sessions.list()` 同样能跑通，而且能力闸门、解包约定全被绕过——
+  // 这种写法在测试里都看不出异常，只有换平台时才爆。
+  // 范围：src/ 下除 adapters/（平台实现自己必须写平台名词）与用户侧（自有协议名词）。
+  // 白名单：api.setBaseUrl —— 「怎么连」属于端点管理，不是操作契约。
+  const AGENT_PLATFORM_VERB_RE = /\bapi\.(?:sessions?|workspace|settings|respond|stopSessionWork|callUnary|agentPresets|permissionPresets|commands)\b/;
+  const kernelVerbLeaks = [...srcCode]
+    .filter(([f, code]) => !f.includes('/adapters/') && !f.startsWith('src/user-side/') && AGENT_PLATFORM_VERB_RE.test(code))
+    .map(([f]) => f);
+  check('repo', '内核不直接调用平台 RPC（调用面全经 AgentPort）', kernelVerbLeaks.length === 0, kernelVerbLeaks.join(', '));
+  const baseUrlCallers = [...srcCode].filter(([, code]) => /\bapi\.setBaseUrl\b/.test(code)).map(([f]) => f);
+  check('repo', 'setBaseUrl 只在桥接的端点切换处调用（唯一白名单）',
+    baseUrlCallers.length === 1 && baseUrlCallers[0] === 'src/bridge.js', baseUrlCallers.join(', '));
+
+  // ── 1d-6. 会话引用去平台化（C5 第三批）───────────────────────────────────
+  // 落盘形状改成 `{ instance, sessionId }` 之后，最大的风险是「形状泄漏」：
+  //   · 有人在 bridge 里把 `state.sessions[key]` 当字符串用 → 拿到的是对象，比较恒 false；
+  //   · 有人往档案里写 `binding.sessionId` → 又变回「只有 id、没有归属」，换平台后必然误用。
+  // 两种写法都不报错，只在换平台 / 会话复用那条路径上才表现出来，所以钉在门禁上。
+  const SESSION_SHAPE_OWNERS = ['src/session/registry.mjs', 'src/session/directory.mjs', 'src/session/reset.mjs'];
+  const rawSessionTouchers = [...srcCode]
+    .filter(([f, code]) => !SESSION_SHAPE_OWNERS.includes(f) && /\bstate\.sessions\s*\??\.?\s*\[|\bstate\.sessions\s*=/.test(code))
+    .map(([f]) => f);
+  check('repo', 'state.sessions 的直接读写只在会话归一层',
+    rawSessionTouchers.length === 0, rawSessionTouchers.join(', '));
+  const legacyBindingWriters = [...srcCode].filter(([, code]) => /\bbinding\.sessionId\b/.test(code)).map(([f]) => f);
+  check('repo', '会话档案只写 binding.agentRef（不再出现 binding.sessionId）',
+    legacyBindingWriters.length === 0, legacyBindingWriters.join(', '));
+  // `sessions.get()` 返回裸 sessionId。曾在 `pinSessionPermission` 里写成 `get(key)?.sessionId`，
+  // 结果恒为 undefined，四个不传 explicitSessionId 的调用（授权过期回收、命令改级别、
+  // 控制台 profile / grant-full / revoke-full）全部静默跳过 —— 权限根本没被重钉。
+  const refUnwrapLeaks = [...srcCode]
+    .filter(([, code]) => /\bsessions\.get\([^)]*\)\s*\??\./.test(code))
+    .map(([f]) => f);
+  check('repo', 'sessions.get() 之后不再二次取字段（它返回裸 id）',
+    refUnwrapLeaks.length === 0, refUnwrapLeaks.join(', '));
+
+  // ── 1d-5. 平台清单单一数据源（C1）─────────────────────────────────────────
+  // 四个旧端点（/api/platforms、/api/runtime/platforms、/api/runtime/agent-platforms、
+  // /api/runtime/adapters）已合并进 /api/platforms/registry。任何一个回来，「新增平台不
+  // 自动出现在界面」就会以「某页还在读旧表」的形式复发，而两张表的分歧只在运行时可见。
+  const legacyPlatformEndpoints = ['/api/runtime/platforms', '/api/runtime/agent-platforms', '/api/runtime/adapters'];
+  check('repo', '平台清单只有 /api/platforms/registry 一个端点',
+    bridgeCode.includes("'/api/platforms/registry'")
+    && !/pathname === '\/api\/platforms'/.test(bridgeCode)
+    && legacyPlatformEndpoints.every((endpoint) => !bridgeCode.includes(`'${endpoint}'`)));
+  const consoleFiles = [];
+  const walkConsole = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walkConsole(full);
+      else if (/\.js$/.test(entry.name)) {
+        consoleFiles.push({
+          rel: path.relative(ROOT, full).replace(/\\/g, '/'),
+          code: stripComments(fs.readFileSync(full, 'utf8')),
+        });
+      }
+    }
+  };
+  walkConsole(path.join(ROOT, 'public/console'));
+  const legacyConsumers = consoleFiles
+    .filter((file) => legacyPlatformEndpoints.some((endpoint) => file.code.includes(endpoint))
+      || /api\(\s*['"]\/api\/platforms['"]\s*\)/.test(file.code))
+    .map((file) => file.rel);
+  check('repo', '控制台不消费旧平台端点（只读 /api/platforms/registry）', legacyConsumers.length === 0, legacyConsumers.join(', '));
 
   // ── 1e. 版本身份一致性 ──────────────────────────────────────────────────
   // v0.1.5 曾带着自称 0.1.2-alpha.1 的 package-lock.json 发布出去（package.json 却是

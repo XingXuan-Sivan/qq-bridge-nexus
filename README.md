@@ -122,7 +122,7 @@ QQ 消息 ──► SnowLuma / NapCat（OneBot v11 WS，可经接口平台）─
 ## 架构
 
 - **QQ 侧**：`@snowluma/sdk` 的 `SnowLumaWebSocketClient`（OneBot v11 WebSocket 客户端，自动重连）
-- **DSH 侧**：适配 DSH 0.1.2 起引入、**0.2.0-rc.2 上逐项复核、0.2.1 上沿用**的协议——用本机持久化签名密钥铸造会话 Cookie 鉴权、`/api/<namespace>/<method>` 斜杠 RPC、`/api/remote.mux` + `session/follow` 事件流（`session/control` 的队列读 `value.projections[<id>].values.inbox`，另有一元 `session/projections` 主路径）；复用 `AbstractApiClient` 传输层但不再依赖旧版 zod value schema。会话模型由桥接按 `config.json` 的 `dsh.model` 逐会话 `session.selectModel` 固定（默认 `deepseek-flash` = DeepSeek-V41-Flash，多模态）
+- **DSH 侧**：适配 DSH 0.1.2 起引入、**0.2.0-rc.2 上逐项复核、0.2.1 上沿用**的协议——用本机持久化签名密钥铸造会话 Cookie 鉴权、`/api/<namespace>/<method>` 斜杠 RPC、`/api/remote.mux` + `session/follow` 事件流（`session/control` 的队列读 `value.projections[<id>].values.inbox`，另有一元 `session/projections` 主路径）；复用 `AbstractApiClient` 传输层但不再依赖旧版 zod value schema。会话模型由桥接按 `config.json` 里当前 Agent 平台的 `options.model`（`platforms.agents.<id>.options.model`）逐会话 `session.selectModel` 固定（默认 `deepseek-flash` = DeepSeek-V41-Flash，多模态）
 - **agent 自主收发 QQ**：DSH 的 MCP 客户端（`~/.dsh/profiles/web/cordis.patch.yml` 配置）接入三个 MCP server：
   - `snowluma`（桥接自带 `src/mcp-snowluma-safe.js`）：QQ 动作**安全子集**（查状态/查群/查消息/发消息，发送强制白名单；发送工具支持可选 `replyToMessageId` 引用回复）
   - `snowluma-host`（桥接自带 `src/mcp-host-server.js`）：**只有** `snowluma_status`（只读探活 `get_login_info`）。
@@ -269,7 +269,7 @@ npm start          # 或双击 start.bat（守护模式：崩溃自动重启，�
 - **用 start.bat 启动**（守护模式），窗口别关——桥接崩溃会在 5 秒后自动拉起
 - 桥接异常/消息无反应时：双击 `restart.bat`（自动杀旧实例 → 清理锁 → 重新启动守护）
 - **重启 DSH 通常不需要动桥接**：每 5 秒探活，DSH 不可用期间收到的 QQ 消息在桥接进程内排队（最多 50 条/会话，满后丢最旧项），恢复后尝试补投。桥接进程退出会丢失内存队列；断线期间已经结束的回复暂不保证补发。
-- 修改 `config.json` 后重启桥接生效；人格（`roles/*.md`、当前角色）在控制台里改即生效，不用重启（二代仿真里下一次唤醒或选「立即」时生效）；修改 `profiles/agent-platforms/dsh/agents/`（改完要跑 `npm run build:artifacts` 重新生成 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml`）或 MCP 配置后重启 DSH 生效
+- 修改 `config.json` 后重启桥接生效；人格（`roles/*.md`、当前角色）在控制台里改即生效，不用重启（二代仿真里下一次唤醒或选「立即」时生效）；修改 `profiles/agent-platforms/dsh/capabilities/<id>.yml`（能力档的 `rows` 段；改完要跑 `npm run build:artifacts` 重新生成 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml`）或 MCP 配置后重启 DSH 生效
 
 日志示例：
 

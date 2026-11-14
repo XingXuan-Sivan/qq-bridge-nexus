@@ -123,30 +123,37 @@ export const CATALOG_ENTRIES = Object.freeze([
   })),
 ]);
 
-/** 内置能力：只读，可克隆但不可删除；自定义能力可以删。 */
-export const BUILTIN_CAPABILITY_IDS = Object.freeze(['agent-chat', 'agent-readonly', 'agent-workspace', 'agent-full']);
+/** 内置能力：只读，可克隆但不可删除；自定义能力可以删。id 与 Agent 预设同名（C4 归一）。 */
+export const BUILTIN_CAPABILITY_IDS = Object.freeze(['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
 
 /** 内置能力的默认工具集：平台全开；Agent 按能力递增（见 SPEC §3.4）。 */
 export const CAPABILITY_DEFAULTS = Object.freeze({
-  'agent-chat': Object.freeze({
+  chat: Object.freeze({
     platform: true,
     agent: Object.freeze(['tool-web', 'tool-ask-user', 'tool-todo']),
     mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
     skills: Object.freeze(['*']),
   }),
-  'agent-readonly': Object.freeze({
+  // 一代/二代仿真共用同一份工具面：区别在预设正文（rows），不在能力。
+  'chat-v2': Object.freeze({
+    platform: true,
+    agent: Object.freeze(['tool-web', 'tool-ask-user', 'tool-todo']),
+    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
+    skills: Object.freeze(['*']),
+  }),
+  readonly: Object.freeze({
     platform: true,
     agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-web', 'tool-ask-user', 'tool-todo']),
     mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
     skills: Object.freeze(['*']),
   }),
-  'agent-workspace': Object.freeze({
+  workspace: Object.freeze({
     platform: true,
     agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-pwsh', 'tool-jobs', 'tool-web', 'tool-ask-user', 'tool-todo']),
     mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
     skills: Object.freeze(['*']),
   }),
-  'agent-full': Object.freeze({
+  full: Object.freeze({
     platform: true,
     agent: Object.freeze(AGENT_MODULES.map((module) => module.id)),
     mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),

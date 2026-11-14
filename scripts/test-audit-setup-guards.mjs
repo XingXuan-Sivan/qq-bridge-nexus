@@ -5,8 +5,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
+// 守卫的权威实现只有一份（artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs，由
+// capabilities/<id>.yml 的 rows 段引用）。C4 起 preset 目录已删除，不再有 re-export 壳。
+const guardPath = path.join(root, 'artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs');
 for (const preset of ['chat', 'chat-v2']) {
-  const { apply } = await import(pathToFileURL(path.join(root, 'profiles/agent-platforms/dsh/agents', preset, 'qq-tool-restrict.mjs')).href);
+  const { apply } = await import(pathToFileURL(guardPath).href);
   let guard;
   const restricted = [];
   apply({ tools: {

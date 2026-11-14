@@ -17,7 +17,7 @@ import { pathToFileURL } from 'node:url';
 
 export const ADAPTER_KINDS = Object.freeze(['build', 'install']);
 
-/** 与 src/runtime/adapters.mjs 的 ID_RE 保持一致：平台 id 只能是目录名，不能是路径。 */
+/** 与 src/platforms/adapter-registry.mjs 的 ID_RE 保持一致：平台 id 只能是目录名，不能是路径。 */
 const ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
 export function agentPlatformsRoot(repoRoot) {

@@ -1,5 +1,5 @@
-// L1「本地只读 Agent」（readonly preset）的硬边界：
-//   · preset 行列表里没有任何 shell / 子代理 / 工作流 / 任务类行；
+// L1「本地只读 Agent」（readonly 能力档）的硬边界：
+//   · 能力档的 rows 里没有任何 shell / 子代理 / 工作流 / 任务类行；
 //   · 守卫以 profile: readonly-agent 运行，只多放行只读工具，写入/执行一律拒绝；
 //   · 不带 profile 时守卫行为与原版完全一致（群友会话不因此多出读文件能力）。
 import test from 'node:test';
@@ -10,8 +10,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const presetDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', 'readonly');
+const capabilityDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'capabilities');
 const guardUrl = pathToFileURL(path.join(root, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
+
+/** 能力档的 rows 段（C4 起预设正文与工具面同一份文件）。 */
+function capabilityRows(id) {
+  const file = path.join(capabilityDir, `${id}.yml`);
+  const doc = parseYaml(fs.readFileSync(file, 'utf8')) ?? {};
+  assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${id} 有非空 rows 段`);
+  return flatten(doc.rows);
+}
 
 function flatten(rows) {
   const out = [];
@@ -29,8 +37,8 @@ function makeGuard(mod, config) {
   return { guard, restricted };
 }
 
-test('L1 preset 不挂载任何执行/派生类工具行', () => {
-  const rows = flatten(parseYaml(fs.readFileSync(path.join(presetDir, 'agent.cordis.yml'), 'utf8')));
+test('L1 能力档不挂载任何执行/派生类工具行', () => {
+  const rows = capabilityRows('readonly');
   const names = rows.map((r) => r.name);
   for (const forbidden of ['dsh-tool-pwsh', 'dsh-tool-bash', 'dsh-tool-subagent', 'dsh-tool-workflow', 'dsh-tool-jobs', 'dsh-workflow-ptc', 'dsh-tool-ralph', 'dsh-tool-str-replace-editor', 'dsh-tool-goal', 'dsh-plan-mode', 'dsh-tool-workspace-dependencies']) {
     assert.ok(!names.some((n) => String(n).includes(forbidden)), `不应挂载 ${forbidden}`);
@@ -123,9 +131,9 @@ test('operator 守卫：拒绝派生/编排类与凭据读取，其余交给审�
   assert.ok(!restricted.includes('pwsh'));
 });
 
-test('L2/L3 preset：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
+test('L2/L3 能力档：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
   for (const [id, level] of [['workspace', 'L2'], ['full', 'L3']]) {
-    const rows = flatten(parseYaml(fs.readFileSync(path.join(root, 'profiles', 'agent-platforms', 'dsh', 'agents', id, 'agent.cordis.yml'), 'utf8')));
+    const rows = capabilityRows(id);
     assert.equal(rows.find((r) => r.id === 'qq-approval-gate')?.config?.level, level, id);
     assert.equal(rows.find((r) => r.id === 'qq-tool-restrict')?.config?.profile, 'operator', id);
     for (const forbidden of ['dsh-tool-subagent', 'dsh-tool-workflow', 'dsh-workflow-ptc', 'dsh-plugin-manager', 'dsh-tool-skill', 'dsh-plan-mode', 'dsh-tool-goal']) {

@@ -146,7 +146,8 @@ const tests = [
   'test-prompt-layers.mjs',
   'test-prompt-compose.mjs',
   'test-platform-prompt.mjs',
-  'test-runtime-adapters.mjs',
+  // C2b 插件适配器注册表 + 平台声明面：vars / configSchema 住在 profiles/*，内核不再有内置清单。
+  'test-platform-adapter-registry.mjs',
   // 技能清单（§9.2）：frontmatter 解析、同名去重、固定行数渲染、字数预算、扫描缓存。
   'test-skills-index.mjs',
   // 外部技能存储（P3）：frontmatter 校验、写入/备份/启停/删除、ZIP 导入与路径边界。
@@ -211,11 +212,26 @@ const tests = [
   'test-unified-segments.mjs',
   // B6 统一事件：形状校验 + platform/account 由内核补全（插件伪造的平台必须被覆盖）。
   'test-unified-event.mjs',
-  // B6 插件 transport：id 冲突拒绝、sendAction 路由、降级先于 transport、QQ 报文不变。
+  // C3 入站管线：校验 → 准入 → 会话映射 → 唤醒，顺序不可交换（畸形事件不得先进准入）。
+  'test-unified-inbound.mjs',
+  // C3 QQ 入站：OneBot 报文 → 统一事件（陌生段降级不丢消息）+ connect() 的订阅/退订契约。
+  'test-qq-inbound.mjs',
+  // B6 插件 transport：id 冲突拒绝、sendAction 路由、降级先于 transport、QQ 报文不变；
+  // C3 起还跑一遍 mock 平台端到端（收 → 准入 → 唤醒 → 发）。
   'test-transport-plugin.mjs',
   // B7 平台元数据：内置 + 插件合成一张表、只含常量、resolveSendTarget 的校验顺序
   // （未注册平台与未声明的会话类型在这里就被挡住，而不是到发送时才报超时）。
   'test-platform-metadata.mjs',
+  // C1 平台统一注册表：四源合一 + 诊断码（profile_only / inbound_unsupported /
+  // active_unregistered / id_conflict / config_invalid）。界面只读这一个端点。
+  'test-platform-registry.mjs',
+  // C2 配置 v2：一次性迁移（不留别名双读）、写散键按白名单归位、扁平投影。
+  'test-config-v2.mjs',
+  // C2 启动期激活：platforms.active 必须真的落到运行期，两侧 fail-closed。
+  'test-platform-activate.mjs',
+  // C5 AgentPort：中立动词 + 能力位 fail-closed（capability_unsupported 而不是 TypeError），
+  // 以及 DSH 适配器把每个动词落到正确的 RPC（策略判定留在桥接）。
+  'test-agent-port.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

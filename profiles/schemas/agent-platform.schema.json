@@ -5,8 +5,7 @@
     "id",
     "label",
     "tools",
-    "capabilities",
-    "agents"
+    "capabilities"
   ],
   "properties": {
     "version": {
@@ -25,10 +24,6 @@
       "minLength": 1
     },
     "capabilities": {
-      "type": "string",
-      "minLength": 1
-    },
-    "agents": {
       "type": "string",
       "minLength": 1
     },

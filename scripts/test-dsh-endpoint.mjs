@@ -115,18 +115,21 @@ test('桥接接线：留空自动识别时，DSH 不可用期间定期重新识�
   assert.match(probe, /if \(!isAutoBaseUrl\(\) \|\| throttled\(\)\)/, '只在自动识别模式、且不在节流窗口内才重新识别');
   assert.match(probe, /rediscoverIntervalMs/, '重识别必须有节流窗口');
   assert.match(probe, /applyUrl\(endpoint\.url\)/, '识别到新地址要应用');
-  // bridge 侧只保留接线：探活走 api.settings.describe，应用地址走 api.setBaseUrl。
+  // bridge 侧只保留接线：探活走 AgentPort，应用地址走客户端的 setBaseUrl（「怎么连」属于
+  // 端点管理，不属于操作契约——见 src/agent-side/port.mjs 的文件头说明）。
   assert.match(src, /createDshProbe\(\{/, 'bridge 必须用这个模块，而不是自己再写一份');
-  assert.match(src, /probe: \(\) => api\.settings\.describe\(\{\}\)/, '探活走 DSH 的 settings.describe');
+  assert.match(src, /probe: async \(\) => \{[\s\S]{0,200}agentPort\.probe\(\)/, '探活走 AgentPort.probe');
+  assert.match(src, /if \(!r\.ok\) throw new Error/, '查询语义要翻译成「抛错即失败」，否则失败永远不判不可用');
   assert.match(src, /applyUrl: \(url\) => \{[\s\S]{0,160}api\.setBaseUrl\(url\)/, '切换到新地址');
   assert.match(src, /dshBaseUrlAuto = ep\.auto;/);
 });
 
 test('preset：不再使用 DSH 0.2.1 不认的提示词变量（cwd）', () => {
-  for (const dir of fs.readdirSync(new URL('../profiles/agent-platforms/dsh/agents/', import.meta.url))) {
-    const f = new URL(`../profiles/agent-platforms/dsh/agents/${dir}/agent.cordis.yml`, import.meta.url);
-    if (!fs.existsSync(f)) continue;
-    assert.ok(!fs.readFileSync(f, 'utf8').includes('{{cwd}}'), `${dir} 不得使用 {{cwd}}`);
+  // 源侧：能力档（含 rows 段里的预设正文）。
+  for (const name of fs.readdirSync(new URL('../profiles/agent-platforms/dsh/capabilities/', import.meta.url))) {
+    if (!name.endsWith('.yml')) continue;
+    const f = new URL(`../profiles/agent-platforms/dsh/capabilities/${name}`, import.meta.url);
+    assert.ok(!fs.readFileSync(f, 'utf8').includes('{{cwd}}'), `${name} 不得使用 {{cwd}}`);
   }
   for (const f of fs.readdirSync(new URL('../artifacts/dsh/qq-agent-presets/presets/', import.meta.url))) {
     assert.ok(!fs.readFileSync(new URL(`../artifacts/dsh/qq-agent-presets/presets/${f}`, import.meta.url), 'utf8').includes('{{cwd}}'), `${f} 不得使用 {{cwd}}`);

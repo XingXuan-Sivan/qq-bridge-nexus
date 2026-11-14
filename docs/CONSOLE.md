@@ -22,7 +22,7 @@
 | `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
-| `public/console/js/platforms.js` | **运行期平台元数据**（0.2.0 B7）：`loadPlatforms()` 读 `GET /api/runtime/platforms`，对外给 `platformLabel` / `conversationTypeLabel` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**，列名、筛选、标签、上限都从这里取 |
+| `public/console/js/registry.js` | **平台注册表**（C7，原名 `js/platforms.js`）：`loadPlatforms()` 读 `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应），对外给 `registryMeta` / `platformLabel` / `capabilityLabel` / `conversationTypeLabel` / `conversationTypeTone` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**：列名、筛选、标签、上限都从这里取；全仓库只有这一个文件打这个端点 |
 | `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住 |
 | `public/console/css/*.css` | `tokens` → `base` → `layout` → `grid` → `components` → `utilities`，**顺序即层叠顺序** |
 | `public/console/pages/<name>/` | 页面片段：`page.html` + `page.js` + `page.css`，由路由按需加载 |
@@ -216,9 +216,9 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 
 改样式可以，这些不能动：
 
-- **225 个 DOM id 全部存在且唯一**（`scripts/test-console-ui.mjs` 第一条断言）。
-- **25 条接口契约原样**（`scripts/console-ui-contracts.json`）：`POST /api/mode`×5、`/api/roles/create`、`/api/role`×2、`/api/role-mode`×2、`/api/whitelist`、`/api/security`×2、`/api/socialV2/config`×2、`/api/socialV2/activity`×2、`/api/social`、`/api/social/state`、`/api/social/flush`、`/api/slang`、`/api/slang/demo-candidate/confirm`、`/api/slang/config`、`/api/test-send`、`/api/console/notify-ai`。
-- 10 个导航目标可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
+- **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
+- **22 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`、`POST /api/runtime/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
 契约确实变了才重录：`node scripts/test-console-ui.mjs --accept-contracts`，并在提交信息里写明原因。
 
@@ -229,9 +229,9 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 | 门禁 | 覆盖什么 |
 | --- | --- |
 | `node scripts/test-console-static.mjs` | 结构约定：页面必须用 `tableHtml`、不许手写 `className='meta ok\|err'`、组件导出齐全、`input.search-box` 唯一定义、页面搜索框带 `type` |
-| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、25 条契约基线、几何与分页、移动端无横向溢出 |
+| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、22 条写载荷契约基线、几何与分页、移动端无横向溢出 |
 | `npm run test:audit` | 全量脚本回归（提交前必跑） |
-| 截图 | 视觉一致性：`sessions` / `behaviors` / `access` / `persona` / `overview` 三档（1440 / 1180 / 760） |
+| 截图 | 视觉一致性：`sessions` / `platforms` / `plans` / `persona` / `overview` 三档（1440 / 1180 / 760） |
 
 新增组件时同时补：导出函数断言、共享样式断言、至少一个页面迁移。
 

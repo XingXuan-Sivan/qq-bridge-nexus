@@ -6,7 +6,9 @@
 //   2. 降级发生在交给 transport **之前** —— 插件收不到超出自己能力声明的段；
 //   3. QQ 的 OneBot 报文逐字段不变（动作名、group_id/user_id、at/record/reply 的还原），
 //      这条断言是「收口没改行为」的唯一凭证；
-//   4. 卸载按 owner 批量清干净，close() 留给内核上超时。
+//   4. 卸载按 owner 批量清干净，close() 留给内核上超时；
+//   5. 入站（C3）：connect 可选，有它才能收；mock 平台端到端跑一遍
+//      「收 → 校验 → 准入 → 会话映射 → 唤醒 → 发」。
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -18,6 +20,7 @@ import {
   resetTransports,
 } from '../src/user-side/transport.mjs';
 import { sendAction, previewSegments } from '../src/user-side/outbound.mjs';
+import { createInboundPipeline, INBOUND_DROP } from '../src/user-side/inbound.mjs';
 import { configureUserPlatformBackend, activeUserPlatformId } from '../src/user-side/user-platform.mjs';
 
 const GROUP = { platform: 'qq', account: '10000', conversation: { type: 'group', id: '123456' } };
@@ -168,7 +171,7 @@ test('OneBot 回执异常时统一措辞，426 附带 httpUrl 指向 WS 端口�
   );
   await assert.rejects(
     sendAction(GROUP, [{ type: 'text', data: { text: 'b' } }]),
-    /HTTP 426：snowluma\.httpUrl 可能指向了 WebSocket 端口/,
+    /HTTP 426：httpUrl 可能指向了 WebSocket 端口/,
   );
 });
 
@@ -194,6 +197,45 @@ test('create(config) 的产物挂在 instance 上，close 由内核在卸载时�
   const [removed] = unregisterTransportsByOwner('p1');
   await removed.close();
   assert.equal(closed, 1);
+});
+
+test('入站（C3）：connect 可选；有没有它决定注册表报不报「只出不进」', async () => {
+  resetTransports();
+  // 只实现发送：合法，但 listTransports 必须报 inbound:false（控制台据此报 inbound_unsupported）。
+  registerTransport({ id: 'sender-only', send: async () => ({}) }, 'p1');
+  assert.equal(listTransports()[0].inbound, false);
+  assert.equal(getTransport('sender-only').connect, null);
+
+  // 带上 connect：函数能拿到 onEvent / onStatus 并返回一个可关闭的句柄。
+  let seen = null;
+  const connect = async (context) => {
+    seen = context;
+    return { close: async () => { seen.closed = true; } };
+  };
+  const entry = registerTransport({ id: 'full-duplex', send: async () => ({}), connect }, 'p1');
+  assert.equal(listTransports().find((item) => item.id === 'full-duplex').inbound, true);
+  const handle = await entry.connect({ signal: null, onEvent: () => {}, onStatus: () => {} });
+  assert.equal(typeof seen.onEvent, 'function');
+  assert.equal(typeof seen.onStatus, 'function');
+  await handle.close();
+  assert.equal(seen.closed, true);
+  resetTransports();
+});
+
+test('入站（C3）：connect 写在 create() 实例上时同样被采纳，且 this 指向实例', async () => {
+  resetTransports();
+  const instance = {
+    got: null,
+    async connect(context) {
+      this.got = context;
+      return { close: async () => {} };
+    },
+  };
+  const entry = registerTransport({ id: 'from-instance', instance, send: async () => ({}) }, 'p1');
+  assert.equal(listTransports()[0].inbound, true);
+  await entry.connect({ signal: null, onEvent: () => {}, onStatus: () => {} });
+  assert.ok(instance.got, 'connect 必须 bind 到实例（连接句柄挂在 this 上）');
+  resetTransports();
 });
 
 test('previewSegments 只降级不发送（控制台预览用）', () => {
@@ -230,5 +272,97 @@ test('同进程多平台在线：地址里的平台各自生效，既不串号�
   unregisterTransportsByOwner('p1');
   assert.equal(getTransport('alpha'), null);
   assert.equal(getTransport('beta')?.owner, 'p2');
+  resetTransports();
+});
+
+// C3 的验收点（docs/PLATFORM_UNIFICATION.md §九）：一个**只有插件平台可提供**的平台，
+// 从收到发走完整链路，中间不经过 qq 任何一行。这条跑通才叫「新增平台既能收又能发」。
+test('mock 平台端到端（C3）：收 → 校验 → 准入 → 会话映射 → 唤醒 → 发', async () => {
+  resetTransports();
+  const delivered = [];
+  const calls = [];
+  const drops = [];
+  let feed = null; // connect 拿到的 onEvent：模拟「厂商报文到了」
+
+  const inbound = createInboundPipeline({
+    origin: { platform: 'mock', account: 'bot-1' },
+    // 准入：演示用规则 —— id 为 blocked 的会话不放行。
+    admit: (event) => event.conversation.id !== 'blocked',
+    resolve: (event) => ({
+      key: `mock:${event.conversation.type}:${event.conversation.id}`,
+      type: event.conversation.type,
+      id: event.conversation.id,
+    }),
+    deliver: async ({ address, key, event }) => {
+      delivered.push({ key, text: event.message?.text });
+      // 唤醒之后按管线给的地址回一条：必须经内核降级，落到 mock 的 send。
+      await sendAction(address, [
+        { type: 'text', data: { text: '收到' } },
+        { type: 'sticker', data: { url: 'https://public.invalid/1.png' } },
+      ]);
+    },
+    onDrop: (drop) => drops.push(drop),
+  });
+
+  const entry = registerTransport({
+    id: 'mock',
+    label: 'Mock',
+    conversationTypes: ['channel'],
+    capabilities: ['text'], // 没有 sticker：出站必须降级成 [表情]
+    send: async (payload) => { calls.push(payload); return { messageId: 'm1' }; },
+    connect: async ({ onEvent }) => {
+      feed = onEvent;
+      return { close: async () => { feed = null; } };
+    },
+  }, 'plugin-a');
+
+  assert.equal(listTransports().find((item) => item.id === 'mock').inbound, true);
+  const handle = await entry.connect({
+    signal: null,
+    onEvent: (event) => inbound.emit(event),
+    onStatus: () => {},
+  });
+  assert.equal(typeof feed, 'function', 'connect 必须把 onEvent 交给平台');
+
+  const valid = {
+    kind: 'message',
+    type: 'message.channel',
+    conversation: { type: 'channel', id: 'c1' },
+    sender: { id: 'u1', name: '路人' },
+    message: { id: '1', segments: [{ type: 'text', data: { text: '在吗' } }] },
+  };
+
+  await feed(valid);
+  assert.deepEqual(delivered, [{ key: 'mock:channel:c1', text: '在吗' }]);
+  assert.equal(calls.length, 1, '唤醒后那一条必须落到 mock 的 send');
+  assert.deepEqual(calls[0].address, {
+    platform: 'mock',
+    account: 'bot-1',
+    conversation: { type: 'channel', id: 'c1' },
+  });
+  assert.deepEqual(calls[0].segments, [
+    { type: 'text', data: { text: '收到' } },
+    { type: 'text', data: { text: '[表情]' } },
+  ], '插件声明的能力决定降级，不按平台名');
+
+  // 伪造 platform：内核的 origin 必须覆盖它，不能串到 qq。
+  await feed({ ...valid, platform: 'qq', account: 'someone-else' });
+  assert.equal(calls.at(-1).address.platform, 'mock');
+  assert.equal(calls.at(-1).address.account, 'bot-1');
+
+  // 畸形事件：校验在准入之前，所以连准入都没到。
+  const beforeBad = drops.length;
+  await feed({ ...valid, conversation: { type: 'Channel!', id: 'c1' } });
+  assert.equal(drops.length, beforeBad + 1);
+  assert.equal(drops.at(-1).reason, INBOUND_DROP.INVALID);
+
+  // 准入拒绝：不映射、不唤醒、也不发。
+  const sentBeforeBlocked = calls.length;
+  await feed({ ...valid, conversation: { type: 'channel', id: 'blocked' } });
+  assert.equal(drops.at(-1).reason, INBOUND_DROP.NOT_ADMITTED);
+  assert.equal(calls.length, sentBeforeBlocked, '被拒绝的会话不该产生任何发送');
+
+  await handle.close();
+  assert.equal(feed, null, 'close() 要能摘掉订阅');
   resetTransports();
 });

@@ -17,7 +17,12 @@ function riskPill(risk) {
   return `<span class="tag ${tone}">${esc(text)}</span>`;
 }
 
-export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
+/**
+ * 能力档面板：列表 + 内联编辑器。
+ * @param {{listHost: HTMLElement, editorHost?: HTMLElement, onSaved?: () => void, platformId?: string}} opts
+ *   platformId 只用来把「写回哪份文件」说准：面板挂在哪个 Agent 平台下，就写回那个平台的目录。
+ */
+export function createCapabilityPanel({ listHost, editorHost, onSaved, platformId = '' }) {
   let catalog = null;
   let capabilities = [];
   let extensions = null; // /api/extensions：MCP 服务器与技能目录
@@ -50,7 +55,6 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     const rows = capabilities.map((cap) => ({
       cells: [
         `<code>${esc(cap.id)}</code><div class="meta">${esc(cap.label || '')}</div>`,
-        `<span class="tag">${esc(String(cap.agentPlatform || 'dsh').toUpperCase())}</span>`,
         visibleSummary(cap),
         extensionSummary(cap),
         `<div class="row-actions">
@@ -61,7 +65,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
       ],
     }));
     return dataTableHtml({
-      columns: [{ label: '能力预设' }, { label: 'Agent 平台', width: '100px' }, { label: '工具' }, { label: 'MCP · 技能', width: '220px' }, { label: '操作', width: '160px' }],
+      columns: [{ label: '能力预设' }, { label: '工具' }, { label: 'MCP · 技能', width: '220px' }, { label: '操作', width: '160px' }],
       rows,
       pageSize: 20,
       search: { placeholder: '搜索能力预设 / id' },
@@ -270,6 +274,9 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
     for (const hostId of EDITOR_TABLES) mountTable(hostId);
   }
 
+  // 写回路径按当前 Agent 平台算：面板挂在哪个平台的详情里，就写回那个平台的目录。
+  const platformDir = platformId ? `profiles/agent-platforms/${esc(platformId)}/capabilities` : 'profiles/agent-platforms/<Agent 平台>/capabilities';
+
   function renderEditor() {
     if (!editorHost) return;
     if (!draft) {
@@ -283,7 +290,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved }) {
         <div class="card-head">
           <div>
             <h2>基本信息 · <code>${esc(draft.id)}</code></h2>
-            <div class="meta">保存后写回 <code>profiles/agent-platforms/dsh/capabilities/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</div>
+            <div class="meta">保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</div>
           </div>
           <div class="row-actions">
             <button class="btn primary" type="button" id="capabilitySave">保存</button>

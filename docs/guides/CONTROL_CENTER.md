@@ -51,7 +51,7 @@
 
 1. **选择目录**：第一次使用时点「浏览…」，在弹出的 Windows 文件夹选择框里选中你自己下载并解压的 SnowLuma 目录
    （含 `launcher.bat`、`index.mjs` 的那一层），或者直接粘贴路径，再点「使用这个目录」。
-   SnowLuma **不需要、也不应该**放进项目目录。选择后会同时把 `config.json` 的 `snowluma.homeDir` 改成这个目录（如果已有 `config.json`）。
+   SnowLuma **不需要、也不应该**放进项目目录。选择后会同时把 `config.json` 的 `platforms.users.<当前平台>.transport.homeDir` 改成这个目录（如果已有 `config.json`）。
 2. 选好后显示：版本、**完整版 / Lite 版**（目录里有 `node.exe` 的是完整版）、目录、已配置的机器人账号、WebUI 地址。
 3. **启动 / 停止 SnowLuma**：按发行包原样运行它自带的 `launcher.bat`。SnowLuma 退出后**不会**自动重启。
    如果你在外面自己双击了 `launcher.bat`，页面会显示「外部运行中」，此时控制中心不会去停它。
@@ -104,7 +104,7 @@ DSH（端口是否可达、桥接是否就绪）· 模式 / 权限级别 · 各�
 | 日志 | 按核心 / 兼容入口 / 实例 / 账号、级别筛选；暂停滚动、清屏（只清显示）、下载 |
 | 设置 | 「接入桥接 / 恢复直连」、数据目录、端口、兼容入口地址、版本与支持范围 |
 
-**接入桥接**会把 `config.json` 的 `snowluma.wsUrl/httpUrl/accessToken` 改为平台的 OneBot 兼容入口和数据令牌，并设置 `viaPlatform: true`；
+**接入桥接**会把 `config.json` 的 `platforms.users.<当前平台>.transport.wsUrl/httpUrl/accessToken` 改为平台的 OneBot 兼容入口和数据令牌，并设置 `viaPlatform: true`；
 原值备份在 `state/platform-link-backup.json`，「恢复直连」按备份还原。两者都要重启桥接才生效。接入后接口平台必须保持运行，机器人才能收发。
 
 macOS 上请用 `control-center.command` 启动：NapCat 的配置在 QQ 的沙盒容器里，macOS 把读取算在**启动控制中心的程序**头上。

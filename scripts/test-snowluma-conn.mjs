@@ -27,7 +27,7 @@ const readTool = (rel) => (hasVoiceTool() ? fs.readFileSync(voiceToolPath(rel), 
 
 console.log('## home 目录推断');
 {
-  const homes = snowLumaHomeCandidates({ cfg: { snowluma: { homeDir: 'X:/sl', launcherPath: 'X:/sl2/launcher.bat' } } });
+  const homes = snowLumaHomeCandidates({ cfg: { userPlatform: { homeDir: 'X:/sl', launcherPath: 'X:/sl2/launcher.bat' } } });
   ok(homes.includes('X:/sl'), '优先用 homeDir');
   ok(homes.some((h) => h.replace(/\\/g, '/') === 'X:/sl2'), '其次用 launcherPath 所在目录');
   ok(snowLumaHomeCandidates({ cfg: {} }).length >= 0, '无配置时返回空或环境变量值（不抛错）');
@@ -95,7 +95,9 @@ console.log('## token 写回 config.json');
   const r1 = persistToken(cfgPath, 'new-token');
   ok(r1.updated === true && r1.from === 'old-token', '换 token 时写入');
   const after = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  ok(after.snowluma.accessToken === 'new-token', 'config.json 已更新');
+  // 配置 v2：token 属 transport；写回时顺带一次性迁移，旧顶层键不再存在。
+  const afterTransport = after.platforms.users[after.platforms.active.user].transport;
+  ok(afterTransport.accessToken === 'new-token', 'config.json 已更新');
   ok(after.allow.groups[0] === 1, '其它配置字段未被破坏');
   const r2 = persistToken(cfgPath, 'new-token');
   ok(r2.updated === false, 'token 未变时不重复写（幂等）');

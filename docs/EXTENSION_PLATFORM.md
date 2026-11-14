@@ -13,7 +13,7 @@
 核心决定：
 
 1. **桥接聚合**：对 DSH 暴露一个稳定的扩展入口，不让每次增删 MCP / 技能都重启 DSH。
-2. **统一目录**：`extensions/` 放数据型扩展，`src/extensions/` 放实现，`state/extensions/` 放运行态；现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/` 继续作为内置来源，由 catalog 合并，不立刻大搬迁。
+2. **统一目录**：`extensions/` 放数据型扩展，`src/extensions/` 放实现，`state/extensions/` 放运行态；现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/capabilities/` 继续作为内置来源，由 catalog 合并，不立刻大搬迁。
 3. **预设是授权中心**：MCP 工具、技能、插件注入、工具清单都按 DSH preset 配置；预设可结构化编辑，也允许直接改 YAML 高级编辑。
 4. **默认保守、能力可显式解锁**：默认 preset 是安全集；开发者可以定义/选择 `workspace`、`operator` 甚至绑定到群。系统给警告与审计；临时 `arm` 只活在本次进程，长期权限靠建会话时的 preset。
 5. **两档暴露**：默认用 `ext_list` / `ext_describe` / `ext_call` 元工具吸收长尾与动态扩展；高频且稳定的工具再「提升」为带命名空间的直连工具。纯元工具会把参数校验退化成字符串 JSON，纯直连会把所有工具塞进所有预设的 schema，两者都不够好。
@@ -32,14 +32,14 @@
 | MCP | 内置 server 真实工具清单；外部 MCP 新增/编辑/测试/刷新/日志/删除；Hub 元工具 | 技能尚未接入 Hub；预设策略目前只有 `chat-v2` 的 `extensions.yml`，编辑器在 P3 |
 | 技能 | 只读扫描 `SKILL.md` | 不能安装、编辑、启停、删除；不能分配 preset |
 | 工具参考 | 已并入 MCP 页（server 概览 + 工具参考） | 独立页面与导航已移除，旧 `#reference` 重定向到 `#mcp` |
-| 预设 | 只能改 `chat` / `chat-v2` 的提示词正文 | 五个 preset 写死在 `profiles/agent-platforms/dsh/agents/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `qq-agent-*` 无入口 |
+| 预设 | 改提示词只能改 `chat` / `chat-v2` | 五个 preset 写死在 `profiles/agent-platforms/dsh/capabilities/`；工具白名单藏在 `qq-tool-restrict.mjs`，不可见；三个 `readonly`/`workspace`/`full` 无入口 |
 
 关键代码位置：
 
 - `src/bridge.js:5309-5319` 的 `GET /api/extensions`：MCP 是 3 条字面量；`snowluma-safe` 的 `tools` 为空，但 `src/mcp-snowluma-safe.js:383-1463` 实际注册 36 个 `qq_*` 工具。
 - `public/console/pages/reference/fields.js:5-15`：9 条硬编码工具说明，页面不发请求。
 - `src/bridge.js:5321-5329`：`GET /api/presets` 只回 `{id, trust}`。
-- `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` 是 preset 权威源；`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
+- `profiles/agent-platforms/dsh/capabilities/<id>.yml` 是 preset 权威源（`preset` + `rows` 段）；`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
 - `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs:244-252`：执行期 guard 只放行 `SAFE_EXACT`（`ask_user_question`、`todo_write`）、三个 MCP 前缀与 L1 只读工具；`compress` 被拒。
 
 ### 1.2 三个结构性问题
@@ -81,7 +81,7 @@
 | `mcp` | 一个 MCP server（stdio / SSE / Streamable HTTP）及其工具 | `extensions/mcp/<id>/server.json`，内置 server 仍由 `src/mcp-*.js` 提供 | 连接、工具清单、健康、错误 |
 | `skill` | 一份 `SKILL.md`，只注入 name/description，正文按需读 | `extensions/skills/<id>/SKILL.md`，内置来源 `DSH_HOME/skills`、仓库 `skills/`、插件自带 skills | 扫描结果、启用状态 |
 | `plugin` | 桥接进程内插件（钩子 / 人格 provider / 命令 / 注入块） | `plugins/<id>/plugin.json` + `plugins.json` | 加载状态、钩子、调用计数 |
-| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` | 安装后的 patch / 当前会话绑定 |
+| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `profiles/agent-platforms/dsh/capabilities/<id>.yml`（`preset` + `rows` + `extensions`） | 安装后的 patch / 当前会话绑定 |
 
 说明：`preset` 不是「扩展」本身，但它是扩展授权的中心，所以放进同一个 catalog 视图；不把 preset 伪装成可安装插件。
 
@@ -124,7 +124,7 @@ state/extensions/               # 运行态（不提交）
   staging/                      # 安装临时目录
 ```
 
-现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/` **不搬**：catalog 通过 source adapter 合并；等 P4 市场稳定后再评估是否把第三方数据迁到 `extensions/`。
+现有 `plugins/`、`skills/`、`profiles/agent-platforms/dsh/capabilities/` **不搬**：catalog 通过 source adapter 合并；等 P4 市场稳定后再评估是否把第三方数据迁到 `extensions/`。
 
 ### 3.4 Catalog 条目
 
@@ -165,7 +165,7 @@ state/extensions/               # 运行态（不提交）
 | 启停 / 配置 / 测试 / 刷新 | 允许（按类型能力） | 允许 |
 | 删除 / 卸载 / 改名 / 覆盖 | 禁止 | 允许 |
 | 更新 | 随桥接发布，不单独更新 | 允许按 source 更新，失败回滚 |
-| 物理位置 | 保持现有目录（`src/mcp-*.js`、`plugins/`、`skills/`、`profiles/agent-platforms/dsh/agents/`） | 统一 `extensions/<kind>/<id>/` |
+| 物理位置 | 保持现有目录（`src/mcp-*.js`、`plugins/`、`skills/`、`profiles/agent-platforms/dsh/capabilities/`） | 统一 `extensions/<kind>/<id>/` |
 
 - 内置项由 source adapter 提供 manifest，catalog 标记 `source: "builtin"`；不要求把现有内置搬进 `extensions/`。
 - 内置项也必须有稳定 id、可显示的工具/技能/配置 schema；不能因为“内置”就只给一行只读摘要。
@@ -452,7 +452,7 @@ resolve source → preview manifest → staging download
 ### 8.1 权威源与生成链
 
 ```text
-profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml   # 权威源（人可读，可 review）
+profiles/agent-platforms/dsh/capabilities/<id>.yml   # 权威源（preset + rows，人可读、可 review）
   → profiles/agent-platforms/dsh/adapters/build.mjs（planArtifacts，调度器 scripts/build-artifacts.mjs）
   → artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml
   → profiles/agent-platforms/dsh/adapters/install.mjs（scripts/install-agent-platform.mjs）安装到 DSH profile

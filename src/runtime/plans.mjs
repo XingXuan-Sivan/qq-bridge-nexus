@@ -1,4 +1,4 @@
-// 运行方案：组合「用户侧平台的行为档案」与「Agent 侧平台的能力预设」。
+// 运行方案：组合「用户侧平台的行为档案」与「Agent 侧平台的能力档」。
 //
 // 权威源：profiles/plans/<id>.yml。内置方案带 builtin: true，控制台只读、可克隆；
 // 自定义方案同目录，删改都落文件。桥接只依赖 createPlanStore().list()/get()/save()/remove()。
@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { PLANS_ROOT } from '../profiles/paths.mjs';
-// 方案里的 agent 是 Agent 平台托管的 preset id；哪个 id 属于管理通道哪一级由平台适配器声明
-// （AGENT_PRESET_FOR_LEVEL），这里不写死任何 preset 名。
+// 方案里的 capability 就是能力档 id，也**就是** Agent 平台托管的 preset id（C4 后不再单写 agent）。
+// 哪个 preset 属于管理通道哪一级由平台适配器声明（AGENT_PRESET_FOR_LEVEL），这里不写死任何 preset 名。
 import { agentPresetLevel } from '../agent-side/runtime-registry.mjs';
 import '../agent-side/builtin.mjs';
 
@@ -19,7 +19,8 @@ export const PLAN_AUDIENCES = ['owner', 'access'];
 export const BUILTIN_PLAN_ORDER = ['chat', 'social-v1', 'social-v2', 'agent-readonly', 'agent-workspace', 'agent-full'];
 
 const PLAN_FILE_HEADER = '# 运行方案：组合 platform（用户侧平台）+ agentPlatform（Agent 侧平台）\n'
-  + '# 的 behavior / capability / agent。builtin: true 为只读方案，可克隆，不可改删。';
+  + '# 的 behavior / capability。capability 就是能力档 id，也是 Agent 侧的 preset id。\n'
+  + '# builtin: true 为只读方案，可克隆，不可改删。';
 
 function text(value, max = 120) {
   if (typeof value !== 'string') return '';
@@ -38,8 +39,6 @@ export function normalizePlan(raw, { source = 'plan', defaultPlatform = '' } = {
   if (!PLAN_ID_RE.test(id)) throw new Error(`${source}.id 不合法：${id || '(空)'}`);
   const platform = text(value.platform, 40) || text(defaultPlatform, 40);
   const agentPlatform = text(value.agentPlatform, 40) || 'dsh';
-  const agent = text(value.agent, 80);
-  if (!agent) throw new Error(`${source}.agent 不能为空`);
   const capability = text(value.capability, 40);
   if (!capability) throw new Error(`${source}.capability 不能为空`);
   const behavior = text(value.behavior, 80) || 'none';
@@ -52,7 +51,6 @@ export function normalizePlan(raw, { source = 'plan', defaultPlatform = '' } = {
     builtin: value.builtin === true,
     platform,
     agentPlatform,
-    agent,
     behavior,
     capability,
     audience,
@@ -68,7 +66,6 @@ function planText(plan) {
     builtin: plan.builtin === true,
     platform: plan.platform,
     agentPlatform: plan.agentPlatform,
-    agent: plan.agent,
     behavior: plan.behavior,
     capability: plan.capability,
     audience: plan.audience,
@@ -167,13 +164,13 @@ export function legacyModeOfPlan(plan) {
   if (!plan) return 'chat';
   if (plan.behavior === 'social-v2') return 'reserved2';
   if (plan.behavior === 'social-v1') return 'reserved';
-  if (agentPresetLevel(plan.agent)) return 'closed-agent';
+  if (agentPresetLevel(plan.capability)) return 'closed-agent';
   return 'chat';
 }
 
-/** 方案对应的旧级别（仅 agent 方案有；其余 L0）。 */
+/** 方案对应的旧级别（仅带权限级别的能力档有；其余 L0）。 */
 export function legacyLevelOfPlan(plan) {
-  return agentPresetLevel(plan?.agent) ?? 'L0';
+  return agentPresetLevel(plan?.capability) ?? 'L0';
 }
 
 /** 旧「模式 + 级别」→ 最接近的方案 id（迁移与会话覆盖用，不参与运行时判断）。 */
@@ -191,12 +188,11 @@ export function findPlan(plans, planId) {
 }
 
 /** 校验方案里的引用是否都存在（check-profiles 与启动自检共用）。 */
-export function validatePlanReferences(plan, { behaviors, capabilities, agents, platforms, agentPlatforms }) {
+export function validatePlanReferences(plan, { behaviors, capabilities, platforms, agentPlatforms }) {
   const problems = [];
   if (platforms && !platforms.has(plan.platform)) problems.push(`platform ${plan.platform} 不存在`);
   if (agentPlatforms && !agentPlatforms.has(plan.agentPlatform)) problems.push(`agentPlatform ${plan.agentPlatform} 不存在`);
   if (behaviors && plan.behavior !== 'none' && !behaviors.has(plan.behavior)) problems.push(`behavior ${plan.behavior} 不存在`);
   if (capabilities && !capabilities.has(plan.capability)) problems.push(`capability ${plan.capability} 不存在`);
-  if (agents && !agents.has(plan.agent)) problems.push(`agent ${plan.agent} 不存在`);
   return problems;
 }

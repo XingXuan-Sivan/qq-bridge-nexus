@@ -2,7 +2,23 @@
 
 > **2026-11-09 规划**：配置结构将按 ](../archive/models/GLOBAL_CONFIG.md) 的三层模型重构；`social` / `socialV2` 的行为字段会迁入 `config/behaviors/*.yml`，`social-v1` / `social-v2` / `access` 页面会删除。本文只描述**当前版本**的字段，实施后同步改写。
 
-原版字段（`dsh.*`、`snowluma.*`、`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
+原版字段（`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
+
+**平台配置（0.2.0 起为 v2）**：所有「用哪个平台、它怎么连」都收在 `config.json` 的 `platforms` 段里，
+旧版顶层键 `platform.*` / `snowluma.*` / `dsh.*` 在首次启动时**一次性迁移并删除**（迁移前备份
+`config.json.bak-<YYYYMMDD-HHmm>`，之后不再读旧键）：
+
+```jsonc
+"platforms": {
+  "active": { "user": "qq", "agent": "dsh" },      // 用哪个平台；不可用时启动直接报错并列出已注册 id
+  "users":  { "qq":  { "account": "", "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
+  "agents": { "dsh": { "endpoint":  { /* 地址与鉴权 */ }, "options": { /* 模型与行为选项 */ } } }
+}
+```
+
+下文中带 `platforms.users.<id>.` / `platforms.agents.<id>.` 前缀的路径都指这个段；写散在条目里
+（不在 `transport`/`options`/`endpoint` 下）的键会被自动归位，不会丢。
+
 本文只列 v0.3.0 起新增的配置段、工具开关和状态文件。所有字段都可省略，省略即取下表默认值；**默认值都是安全的**。
 修改 `config.json` 后需要重启桥接；修改 `socialV2.tools.*` 还需要重启 DSH（MCP 工具清单在 DSH 启动时读取）。
 
@@ -138,39 +154,39 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 只在网关是 NapCat 时用到：NapCat 的 `add_custom_face` 只接受本地文件路径，桥接会把已校验的表情字节写成一个随机名、权限 0600 的临时文件交给它，调用结束立即删除。
 留空时：macOS 用 QQ 沙盒容器里的 `~/Library/Containers/com.tencent.qq/Data/tmp`（App Store 版 QQ 读不到系统临时目录），其它系统用系统临时目录。SnowLuma 不用这个目录。
 
-## `dsh.provider` / `dsh.model` / `dsh.reasoningEffort` / `dsh.vision` —— 模型选择
+## `platforms.agents.<id>.options`：`provider` / `model` / `reasoningEffort` / `vision` —— 模型选择
 
 推荐在桥接控制台「运行总览 → DSH 模型与思考强度」里选：提供方、模型、思考强度三个下拉联动，选项全部来自 DSH 的模型目录（`session.modelCatalog`），
 保存后对已有会话的下一条消息生效，不用重启桥接。手改 `config.json` 也可以，重启桥接后生效。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `dsh.provider` | `deepseek-official` | 提供方。DSH 桌面版 0.2.1 起 DeepSeek 自家的提供方叫 `deepseek-account`。其它提供方是第三方：QQ 里的聊天内容会发给它们，控制台会提示隐私并在保存前再确认一次 |
-| `dsh.model` | `deepseek-flash` | 模型 id（DeepSeek-V4.1-Flash，能看图） |
-| `dsh.reasoningEffort` | `max` | 思考档位：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，具体模型支持哪些以 DSH 目录为准；留空 = 用模型默认。`off` 是关闭思考，回复更快但工具调用和人格一致性可能变差。模型没有思考档位时自动不带这个参数 |
-| `dsh.vision` | `auto` | 看图能力：`auto` = 只有核实过能看图的模型（目前是 DeepSeek 的 `deepseek-flash`）才把 QQ 图片交给它，其余模型把图片、表情改成文字占位（避免整条消息被拒）；`yes` / `no` = 手动指定 |
+| `options.provider` | `deepseek-official` | 提供方。DSH 桌面版 0.2.1 起 DeepSeek 自家的提供方叫 `deepseek-account`。其它提供方是第三方：QQ 里的聊天内容会发给它们，控制台会提示隐私并在保存前再确认一次 |
+| `options.model` | `deepseek-flash` | 模型 id（DeepSeek-V4.1-Flash，能看图） |
+| `options.reasoningEffort` | `max` | 思考档位：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，具体模型支持哪些以 DSH 目录为准；留空 = 用模型默认。`off` 是关闭思考，回复更快但工具调用和人格一致性可能变差。模型没有思考档位时自动不带这个参数 |
+| `options.vision` | `auto` | 看图能力：`auto` = 只有核实过能看图的模型（目前是 DeepSeek 的 `deepseek-flash`）才把 QQ 图片交给它，其余模型把图片、表情改成文字占位（避免整条消息被拒）；`yes` / `no` = 手动指定 |
 
 - 控制台保存时由服务端按目录硬校验：提供方 / 模型不在目录里、档位不在该模型的列表里都会拒绝；目录读不到时**不保存**（返回 503），聊天照常按原配置进行。
 - 价格表（`src/model-prices.js`）只收录 DeepSeek 自家的价目；换到其它模型后，「令牌与花费」的金额按 DeepSeek-V4.1-Flash 估算并标「估算」。
 - 只有控制台能改模型：AI 的令牌调不了这些接口，QQ 私聊管理通道也没有改模型的命令。
 - 和思考强度一样，切换会同时写入 DSH 的全局默认（`~/.dsh/settings.yaml` 的 `agent-default-model`），Web GUI 里新建会话的默认模型也会跟着变。
 
-## `dsh.baseUrl` —— DSH 地址（默认留空 = 自动识别）
+## `platforms.agents.<id>.endpoint.baseUrl` —— DSH 地址（默认留空 = 自动识别）
 
 留空时按顺序识别：桌面版固定端口 19387 / 命令行版 3080 → 都连不上时查 DSH 桌面版进程正在监听的回环端口（DSH 桌面版 0.2.1 起每次启动换随机端口），
 并用未登录请求的 401 提示文字确认确实是 DSH。DSH 不可用期间桥接每 10 秒重新识别一次，DSH 重启换端口后会自动跟上。
 显式填写时一律照用、不做发现（DSH 跑在别处或别的端口时才需要填）。
 
-## `snowluma.viaPlatform` —— 经接口平台连接（默认 `false`）
+## `platforms.users.<id>.transport.viaPlatform` —— 经接口平台连接（默认 `false`）
 
-为 `true` 时，`snowluma.wsUrl` / `httpUrl` / `accessToken` 指向接口平台（与桥接平行的 `interface-platform/`）的 OneBot 兼容入口，令牌是平台的数据令牌：
+为 `true` 时，同段的 `wsUrl` / `httpUrl` / `accessToken` 指向接口平台（与桥接平行的 `interface-platform/`）的 OneBot 兼容入口，令牌是平台的数据令牌：
 
 - token 自愈不再扫描 SnowLuma 目录（`homeDir` / `launcherPath` / `SNOWLUMA_HOME` 一律忽略），也不跟随发现到的端点 —— 否则会拿到 SnowLuma 的真实地址、绕过平台直连；
 - 等同于强制 `followDiscoveredEndpoint: false`。
 
 一般不用手改：在控制中心「接口平台 → 设置」点「接入桥接」，会写好这几个字段并把原值备份到 `state/platform-link-backup.json`，「恢复直连」可还原。「接入桥接」时数据令牌和地址由平台经管理接口交给控制中心，控制中心不读平台的文件，所以平台必须正在运行。详见同级目录的 `interface-platform/README.md`。
 
-## `snowluma.backfill` —— 断线期间错过的消息，恢复后补收
+## `platforms.users.<id>.options.backfill` —— 断线期间错过的消息，恢复后补收
 
 电脑睡眠（比如 Mac 合盖）、NapCat 重启、桥接停过的时候，这段时间群里和私聊的消息不会作为事件推给桥接，AI 也就不知道有人 @ 过它。
 桥接发现两次事件包隔得太久，就在连接恢复后用 `get_group_msg_history` / `get_friend_msg_history` 把这段时间的消息补收进未读。

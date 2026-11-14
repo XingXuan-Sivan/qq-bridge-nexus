@@ -1,0 +1,8 @@
+version: 1
+# ACP 没有「装进对方 profile 的工具模块」：工具面由 Agent 自己定义，桥接不渲染任何
+# 插件行，只在 `session/request_permission` 上做审批。因此这里是空表，而不是照抄
+# dsh 的模块清单 —— 抄一份会让控制台显示一堆「这个平台并不存在」的开关。
+#
+# 文件本身不能省：check-profiles 要求每个 Agent 平台目录都有 tools.yml，
+# 「没有可声明的模块」与「忘了写」必须是两件能区分的事。
+modules: []

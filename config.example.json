@@ -1,13 +1,42 @@
 {
-  "dsh": {
-    "baseUrl": "",
-    "provider": "deepseek-official",
-    "model": "deepseek-flash",
-    "reasoningEffort": "max",
-    "authToken": "",
-    "authHeader": "authorization",
-    "authPrefix": "Bearer",
-    "allowRemote": false
+  "configVersion": 2,
+  "platforms": {
+    "active": {
+      "user": "qq",
+      "agent": "dsh"
+    },
+    "users": {
+      "qq": {
+        "account": "",
+        "transport": {
+          "wsUrl": "ws://127.0.0.1:3001",
+          "httpUrl": "http://127.0.0.1:3000",
+          "accessToken": "",
+          "followDiscoveredEndpoint": true,
+          "viaPlatform": false,
+          "silenceWarnMs": 600000,
+          "launcherPath": "",
+          "homeDir": ""
+        },
+        "options": {}
+      }
+    },
+    "agents": {
+      "dsh": {
+        "endpoint": {
+          "baseUrl": "",
+          "authToken": "",
+          "authHeader": "authorization",
+          "authPrefix": "Bearer",
+          "allowRemote": false
+        },
+        "options": {
+          "provider": "deepseek-official",
+          "model": "deepseek-flash",
+          "reasoningEffort": "max"
+        }
+      }
+    }
   },
   "role": {
     "saveApply": "nextWake"
@@ -67,22 +96,8 @@
     "maxDescriptionChars": 40,
     "dirs": []
   },
-  "platform": {
-    "id": "qq",
-    "account": ""
-  },
   "runtime": {
     "defaultPlan": "social-v2"
-  },
-  "snowluma": {
-    "wsUrl": "ws://127.0.0.1:3001",
-    "httpUrl": "http://127.0.0.1:3000",
-    "accessToken": "",
-    "followDiscoveredEndpoint": true,
-    "viaPlatform": false,
-    "silenceWarnMs": 600000,
-    "launcherPath": "",
-    "homeDir": ""
   },
   "owner": null,
   "sessionCwd": "",

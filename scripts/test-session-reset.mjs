@@ -75,9 +75,10 @@ function makeHarness(overrides = {}) {
     saveSocialV2State: () => calls.push('saveSocialV2State'),
     saveState: () => calls.push('saveState'),
     send: async (key, text) => { calls.push(`send:${key}:${text}`); return { ok: true }; },
+    // C5：桥接注入的是中立动词（cancel 对应平台自己的「取消回合」）。
     api: {
-      stopSessionWork: async (sid) => { calls.push(`stopSessionWork:${sid}`); },
-      archiveSession: async ({ sessionId }) => { calls.push(`archiveSession:${sessionId}`); },
+      cancel: async (sid) => { calls.push(`cancel:${sid}`); },
+      archiveSession: async (sid) => { calls.push(`archiveSession:${sid}`); },
     },
     withTimeout: (promise) => promise,
     dshControlTimeoutMs: 1000,
@@ -137,7 +138,7 @@ test('全量清理：所有按键/按旧 sessionId 记账的桶都被清空', as
   assert.ok(h.calls.includes(`discardDormant:${KEY}`));
   assert.ok(h.calls.includes('saveSocialV2State'));
   assert.ok(h.calls.includes('saveState'));
-  assert.ok(h.calls.includes(`stopSessionWork:${OLD}`));
+  assert.ok(h.calls.includes(`cancel:${OLD}`));
   assert.ok(h.calls.includes(`archiveSession:${OLD}`));
   assert.ok(h.calls.some((c) => c.startsWith(`send:${KEY}:已重置会话`)));
 });
@@ -147,7 +148,7 @@ test('顺序：先落盘再调 DSH，最后才回执', async () => {
   await h.reset(KEY);
   const index = (needle) => h.calls.findIndex((c) => c.startsWith(needle));
   const save = Math.max(index('saveSocialV2State'), index('saveState'));
-  const stop = index('stopSessionWork:');
+  const stop = index('cancel:');
   const archive = index('archiveSession:');
   const send = index('send:');
   assert.ok(save > 0 && save < stop, '落盘必须在停止 DSH 之前');
@@ -158,8 +159,8 @@ test('顺序：先落盘再调 DSH，最后才回执', async () => {
 test('停止旧会话失败：记日志但继续归档并回执', async () => {
   const h = makeHarness({
     api: {
-      stopSessionWork: async () => { throw new Error('dsh 掉线'); },
-      archiveSession: async ({ sessionId }) => h.calls.push(`archiveSession:${sessionId}`),
+      cancel: async () => { throw new Error('dsh 掉线'); },
+      archiveSession: async (sid) => h.calls.push(`archiveSession:${sid}`),
     },
   });
   const result = await h.reset(KEY);

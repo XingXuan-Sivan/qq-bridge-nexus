@@ -33,9 +33,9 @@
 
    然后编辑 `config.json`，填写：
 
-   - `snowluma.wsUrl` / `httpUrl`（例如 `ws://127.0.0.1:3001` / `http://127.0.0.1:3000`，分别对应 OneBot WebSocket 与 HTTP API 端口）
-   - `snowluma.accessToken`
-   - `dsh.authToken`（新版 DSH 的 launch token，用于换取 Cookie；默认留空，桥接会自动从 DSH guard 日志发现，DSH 重启后也会自动重新发现）
+   - 当前用户侧平台的连接参数：`platforms.users.<平台 id>.transport.wsUrl` / `httpUrl`（例如 `ws://127.0.0.1:3001` / `http://127.0.0.1:3000`，分别对应 OneBot WebSocket 与 HTTP API 端口）
+   - `platforms.users.<平台 id>.transport.accessToken`
+   - `platforms.agents.<平台 id>.endpoint.authToken`（新版 DSH 的 launch token，用于换取 Cookie；默认留空，桥接会自动从 DSH guard 日志发现，DSH 重启后也会自动重新发现）
    - `ownerQQ`
    - `allow.private` / `allow.groups`
 
@@ -56,7 +56,7 @@
 
    脚本会完成（实现在 `profiles/agent-platforms/dsh/adapters/install.mjs`）：
 
-   - 安装 agent preset：通过 `artifacts/dsh/qq-agent-presets` 这个 DSH bundle 把 `chat` / `chat-v2` 两条 `@deepseek-ai/dsh-agent-preset` 行插入 profile（DSH 0.1.7 起 preset **不再是** `~/.dsh/.agent-presets/<名>/` 目录，该目录完全不被读取）。patch 由 `profiles/agent-platforms/dsh/adapters/build.mjs` 从 `profiles/agent-platforms/dsh/agents/` 的权威源生成
+   - 安装 agent preset：通过 `artifacts/dsh/qq-agent-presets` 这个 DSH bundle 把 `chat` / `chat-v2` 两条 `@deepseek-ai/dsh-agent-preset` 行插入 profile（DSH 0.1.7 起 preset **不再是** `~/.dsh/.agent-presets/<名>/` 目录，该目录完全不被读取）。patch 由 `profiles/agent-platforms/dsh/adapters/build.mjs` 从 `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `preset` + `rows` 段渲染
    - 在 `~/.dsh/profiles/web/cordis.patch.yml` 挂载：
      - `mcp-snowluma`（`src/mcp-snowluma-safe.js`，带 `toolCallTimeoutMs: 725000`）
      - `mcp-snowluma-host`（`src/mcp-host-server.js`）
@@ -99,7 +99,7 @@
 
 ## 常见问题
 
-- **每次启动日志里都先报一次「连接断开（1006）」再报「已连接」**：**这是正常的，不是故障**。原因：SnowLuma 同一账号的 **HTTP token（默认 3000 端口）与 WS token（默认 3001 端口）是两个不同的值**，而 `config.json` 的 `snowluma.accessToken` 只能存一个（存的是 HTTP 那个）。所以 WS 首次连接会被拒 → 触发 token 自愈（重新发现 WS token）→ 重连成功。有的 SnowLuma 版本握手被拒时不报 1006，只记一行 `SnowLuma 错误: … non-101 status code`——v0.4.1 起同样会触发自愈，并由连接看门狗定时重连，结果相同。真正有问题的是**自愈也失败**：日志里会出现 `token 自愈失败`，QQ 侧完全收不到消息。那时先确认 `config.json` 的 `snowluma.homeDir` 指向真正的 SnowLuma 安装目录（自愈要从它的 `config/onebot_<QQ号>.json` 里读 WS token）。
+- **每次启动日志里都先报一次「连接断开（1006）」再报「已连接」**：**这是正常的，不是故障**。原因：SnowLuma 同一账号的 **HTTP token（默认 3000 端口）与 WS token（默认 3001 端口）是两个不同的值**，而 `config.json` 里当前平台的 `transport.accessToken` 只能存一个（存的是 HTTP 那个）。所以 WS 首次连接会被拒 → 触发 token 自愈（重新发现 WS token）→ 重连成功。有的 SnowLuma 版本握手被拒时不报 1006，只记一行 `SnowLuma 错误: … non-101 status code`——v0.4.1 起同样会触发自愈，并由连接看门狗定时重连，结果相同。真正有问题的是**自愈也失败**：日志里会出现 `token 自愈失败`，QQ 侧完全收不到消息。那时先确认 `platforms.users.<平台 id>.transport.homeDir` 指向真正的 SnowLuma 安装目录（自愈要从它的 `config/onebot_<QQ号>.json` 里读 WS token）。
 - **QQ 上毫无反应，但桥接日志说「SnowLuma 已连接」**：这几乎总是 **SnowLuma 侧的 `[Hook]` 收不到 QQ 数据**，不是桥接的问题。桥接的 WebSocket 连的是 SnowLuma，SnowLuma 再通过原生组件挂进 QQ 客户端进程；中间这层退化时 SnowLuma 进程与它的 WebSocket 都还活着，所以桥接这边看不出异常。
   1. 打开控制台「运行总览」，看 **`SnowLuma 上游`** 卡片：`已连接 · 未接收` 就是这个状态；「访问与安全」页会有对应告警条与处置建议。`GET /api/status` 的 `snowluma` 字段（`degraded` / `good` / `hint`）给的是同一份判断。
   2. 去看 **SnowLuma 自己的日志** `logs/snowluma-*.log`，搜 `[Hook]`：
@@ -118,15 +118,15 @@
 - **启动 DSH 报 `failed to apply loader entry persona (@deepseek-ai/dsh-persona): invalid config: $.prefix missing required value`**：preset 的 persona 段缺少 `prefix`。DSH 0.1.5 起 `dsh-persona` 只接受 `prefix` / `suffix` / `complete` / `includeRuntimeContext`，而旧写法用的是 `text` —— schemastery 的 `z.object` 非 strict，未知键会被**静默忽略**，于是真正报出来的是「缺 `prefix`」（**不是**「`text` 这个键被拒绝」）。重新运行 `node scripts/setup-dsh.mjs`（本仓库 preset 已改为 `prefix`），或手动把 preset 里的 `text:` 改成 `prefix:`。可用 `node scripts/verify-persona-config.mjs` 提前自检。
 - **profile 的 bundle 条目被重置**：升级 DSH 可能重置 `~/.dsh/profiles/web/package.json`，把 `qq-mode-console` 的依赖与 bundle 条目删掉（症状是启动报 `cannot resolve profile bundle`，或桥接读不到 `qq-mode` 设置值）。重新运行 `node scripts/setup-dsh.mjs`，再跑 `dsh plugin --profile web install` 并重启 DSH。
 - **QQ preset 挂载失败，群里 AI 完全没反应**：`chat` / `reserved` / `reserved2`（会话可能属于 QQ 群）**必须**挂上 `chat` / `chat-v2`，否则桥接**直接拒绝建会话**并打日志 `⛔ 群聊/仿真会话缺少 preset …`——QQ 上表现为「发了消息没人回」，而桥接日志里能查到原因。这是有意的 fail-closed 设计：**「无 preset 会话」= DSH 默认 preset（通常 `standard`，含 bash/文件读写）**，降级过去等于把本地工具暴露给群里的任何人。`closed-agent` 模式（仅 owner 私聊）是唯一例外，那里本就使用完整工具面，允许回落。修复：确认 `artifacts/dsh/qq-agent-presets` bundle 已注册进 profile（`bundles` + `link:` 依赖 + `node_modules` junction 三者齐备，跑 `node scripts/setup-dsh.mjs` 可自动补齐）并重启 DSH；若手改过 `config.json` 的 `agentPreset`，确认该名字确实在 DSH 的 preset 清单里。
-- **发送消息报 `unauthorized` / HTTP 401**：`config.json` 的 `snowluma.accessToken` 与 SnowLuma 的 OneBot 实例 token 不一致。将 SnowLuma WebUI 中 HTTP 与 WebSocket 两端的 accessToken 设为相同，再填入 `config.json`，然后重启桥。
+- **发送消息报 `unauthorized` / HTTP 401**：`platforms.users.<平台 id>.transport.accessToken` 与 SnowLuma 的 OneBot 实例 token 不一致。将 SnowLuma WebUI 中 HTTP 与 WebSocket 两端的 accessToken 设为相同，再填入 `config.json`，然后重启桥。
 - **DSH 一直 401（事件流「本次收到 0 帧」、读模型目录 / 写设置都报 HTTP 401，QQ 消息全部入队）**：几乎都是**桥接读错了 DSH 的数据目录**，不是 DSH 版本或协议变了。
   - 原理：桥接用 DSH 数据目录里 `.credentials.yaml` 的 `client-connection/browser-session` 签名密钥在本机铸造会话 Cookie（DSH 0.1.7 起进程启动 token 只在内存里，不能再从日志读）。数据目录默认是 `~/.dsh`（官方桌面版在 Windows / macOS / Linux 上都用它，已对照 0.2.1-rc.3 安装包核实）。DSH 实际用的若是别的目录——自己设过 `DSH_HOME`、用了第三方桌面壳（反馈里见过 `%APPDATA%\dsh-desktop\harness`）——桥接读到的就是另一份或陈旧的密钥，所有请求都 401，事件流连上就被关掉，所以一帧都没有。
   - 新版桥接（见 CHANGELOG）遇到 401 会直接在日志里说明：读的是哪个文件、有没有设 `DSH_HOME`、是否发现了另一个有凭据的目录（10 分钟提示一次）。
   - 处理：把环境变量 `DSH_HOME` 设成 DSH 实际的数据目录（里面有 `.credentials.yaml` 和 `profiles` 文件夹）。Windows：`setx DSH_HOME "<目录>"`，然后**关掉再重新打开**控制中心（`setx` 只对之后新开的程序生效）；macOS / Linux：`export DSH_HOME="<目录>"` 后启动控制中心，Linux 服务写进服务的环境变量。
   - **还要重跑 `node scripts/setup-dsh.mjs` 并重启 DSH**：preset（chat / chat-v2）和 MCP 工具要装进 DSH 实际用的那个目录的 profile 里，否则鉴权通过后桥接也会因为缺 preset 拒绝建会话。
   - 自己验证时注意：DSH 的接口是 `POST /api/<命名空间>/<方法>`，请求体是 `{"type":"client-request","rpcId":"…","method":"session/modelCatalog","payload":{"args":{}}}`。**用 GET 请求会得到 404**（官方 DSH 也一样），不代表接口不存在；`/api/session/stream` 在官方 DSH 上也不存在。事件流仍是 WebSocket `/api/remote.mux`。
-  - `config.json` 的 `dsh.baseUrl` 可以手动指定地址（留空 = 自动识别）；`dsh.authToken` 一般留空，填了才会优先走启动 token 交换。`npm run test:dsh-auth` 与 `npm run self-test` 可快速定位。
-- **发送消息报 HTTP 426（Upgrade Required）**：说明 `config.json` 里的 `snowluma.httpUrl` 指向了 **WebSocket 端口**。`httpUrl` 必须是 OneBot 的 **HTTP API 地址**（例如 `http://127.0.0.1:3000`），而 `wsUrl` 才是 WebSocket 地址（例如 `ws://127.0.0.1:3001`）。请在 SnowLuma WebUI 的 OneBot 配置里分别确认 HTTP 和 WebSocket 的端口。也可以运行诊断脚本：
+  - `platforms.agents.<平台 id>.endpoint.baseUrl` 可以手动指定地址（留空 = 自动识别）；`endpoint.authToken` 一般留空，填了才会优先走启动 token 交换。`npm run test:dsh-auth` 与 `npm run self-test` 可快速定位。
+- **发送消息报 HTTP 426（Upgrade Required）**：说明 `platforms.users.<平台 id>.transport.httpUrl` 指向了 **WebSocket 端口**。`httpUrl` 必须是 OneBot 的 **HTTP API 地址**（例如 `http://127.0.0.1:3000`），而 `wsUrl` 才是 WebSocket 地址（例如 `ws://127.0.0.1:3001`）。请在 SnowLuma WebUI 的 OneBot 配置里分别确认 HTTP 和 WebSocket 的端口。也可以运行诊断脚本：
    ```bash
    node scripts/check-onebot-status.mjs
    ```

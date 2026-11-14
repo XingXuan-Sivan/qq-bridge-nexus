@@ -189,6 +189,10 @@ public/console/components/platform-panel/ （C7 已删，内容拆入平台页�
 protocol 面缺少 …」那条校验。ACP 恰好没有这一层（连接是 spawn 子进程），所以把它当主平台被这条校验挡住；
 要删它，得先把这层职责迁到别处，否则等于用「删文件」换「装配期无守卫」。C6.5 接线时一并处理。
 
+> C6.5 的落地方案见 **[EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md)** §4：
+> 连接层下沉为适配器契约 `createRuntime({config,log,signal}) → { probe, port, close }`，
+> `REQUIRED_PROTOCOL_MEMBERS` 随之删除，注册门槛改为 `scripts/test-agent-port-tck.mjs`（P0）。
+
 ### 4.5 声明面字段（C2b 落地）
 
 两侧声明面只多两个键，其余字段含义不变：

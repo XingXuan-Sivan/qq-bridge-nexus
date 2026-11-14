@@ -12,6 +12,8 @@
     "start": "node src/bridge.js",
     "test:audit": "node scripts/test-audit.mjs",
     "test:regressions": "node scripts/test-audit-regressions.mjs",
+    "test:tck": "node scripts/test-agent-port-tck.mjs",
+    "test:agents": "node scripts/test-agent-port.mjs && node scripts/test-acp-port.mjs && node scripts/test-agent-port-tck.mjs",
     "test:issues": "node scripts/test-issue-regressions.mjs",
     "test:media-search": "node scripts/test-media-search.mjs",
     "test:initial-prompt": "node scripts/test-v2-initial-prompt.mjs",

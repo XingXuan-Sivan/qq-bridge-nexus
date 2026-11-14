@@ -501,9 +501,13 @@ if (want('repo')) {
   // spawnSync 在受限环境（DSH 沙箱的 workspace-write）会以 EPERM 失败——那是**环境**
   // 不允许起子进程，不是文件有语法错。显式记为跳过，否则会输出一串假失败。
   const SYNTAX_FILES = [
-    'src/bridge.js', 'src/agent-side/adapters/dsh/client.mjs', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
+    'src/bridge.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
     'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js',
     'src/runtime/mode-store.mjs',
+    // 执行体适配层整目录纳入：新增平台 / 事件面 / 收集器时不必再回来改这份清单。
+    ...srcFiles.map((file) => path.relative(ROOT, file).replace(/\\/g, '/'))
+      .filter((rel) => rel.startsWith('src/agent-side/')),
+    'scripts/test-agent-port.mjs', 'scripts/test-agent-port-tck.mjs', 'scripts/test-acp-port.mjs',
     'scripts/setup-dsh.mjs', 'scripts/install-agent-platform.mjs', 'scripts/build-artifacts.mjs',
     'scripts/agent-platform-adapters.mjs',
     'profiles/agent-platforms/dsh/adapters/build.mjs',

@@ -3,13 +3,15 @@
 // 内核只经 src/agent-side/runtime.mjs 的 agentRuntime() 调这里的方法名；本文件与
 // 同目录的 client / endpoint / health / port / auth-hint / probe 是「连一个常驻 HTTP 服务」
 // 这一整类实现的归口。换执行体时只替换这一层，AgentPort 的调用面不受影响。
-import { NodeApiClient, createTurnCollector, discoverDshLaunchToken, resolveDshHome } from './client.mjs';
+import { NodeApiClient, discoverDshLaunchToken, resolveDshHome } from './client.mjs';
+import { createDshEventPlane } from './events-plane.mjs';
 import { resolveDshBaseUrl } from './endpoint.mjs';
 import { createDshHealth } from './health.mjs';
 import { createDshProbe } from './probe.mjs';
 import { buildDshAuthHint, createAuthHintGate, isDshAuthError } from './auth-hint.mjs';
 import { DSH_AGENT_CAPABILITIES, createDshPort } from './port.mjs';
 import { createAgentPort } from '../../port.mjs';
+import { createAgentTurnCollector } from '../../collector.mjs';
 import * as declaration from '../../../../profiles/agent-platforms/dsh/adapters/runtime.mjs';
 
 /** 地址重新识别的开销不小（扫进程监听端口），失败时按这个间隔节流。 */
@@ -26,8 +28,11 @@ const REDISCOVER_INTERVAL_MS = 10_000;
 export function createRuntime({ config = {}, log = () => {}, onBaseUrlChange } = {}) {
   let client = null;
   let port = null;
+  let events = null;
   let autoBaseUrl = false;
   const authHintGate = createAuthHintGate();
+  /** 挂起表：`requestId -> { clientId, eventId, sessionId }`，事件面写入、端口读出。 */
+  const approvals = new Map();
 
   /** 懒建：地址与凭据都就绪后才建客户端。 */
   function ensureClient() {
@@ -52,10 +57,16 @@ export function createRuntime({ config = {}, log = () => {}, onBaseUrlChange } =
         id: declaration.id,
         label: declaration.label,
         capabilities: DSH_AGENT_CAPABILITIES,
-        impl: createDshPort({ client: ensureClient() }),
+        impl: createDshPort({ client: ensureClient(), approvals }),
       });
     }
     return port;
+  }
+
+  /** 懒建事件面：wire 帧的翻译全在 events-plane，这里只接上客户端的连接。 */
+  function ensureEvents() {
+    if (!events) events = createDshEventPlane({ getClient: ensureClient, approvals });
+    return events;
   }
 
   return {
@@ -95,9 +106,9 @@ export function createRuntime({ config = {}, log = () => {}, onBaseUrlChange } =
       return ensureClient();
     },
 
-    /** 事件流订阅面：follow / forget / mux 都在客户端上，这里只转发。 */
+    /** 事件流订阅面：mux 产的是归一事件，wire 帧不出适配器。 */
     events() {
-      return ensureClient().events;
+      return ensureEvents();
     },
 
     port() {
@@ -105,7 +116,7 @@ export function createRuntime({ config = {}, log = () => {}, onBaseUrlChange } =
     },
 
     collector() {
-      return createTurnCollector();
+      return createAgentTurnCollector();
     },
 
     health(options = {}) {
@@ -160,6 +171,8 @@ export function createRuntime({ config = {}, log = () => {}, onBaseUrlChange } =
 
     async close() {
       port = null;
+      events = null;
+      approvals.clear();
       if (typeof client?.close === 'function') await client.close();
       client = null;
     },

@@ -66,6 +66,7 @@ export class AgentCapabilityError extends Error {
 
 /** 归一事件类型（§5.2）：桥接只认这些 kind，平台怎么命名是适配器的事。 */
 export const AGENT_EVENT_KINDS = Object.freeze([
+  'turn-start',
   'text',
   'reasoning',
   'tool',
@@ -76,7 +77,32 @@ export const AGENT_EVENT_KINDS = Object.freeze([
   'compaction',
   'notice',
   'turn-end',
+  'snapshot',
 ]);
+
+/**
+ * 归一事件形状（适配器产出、内核消费）。
+ *
+ * 公共字段 `{ kind, sessionId }`；平台有回合编号时带上 `turn`（DSH 有，ACP 没有），
+ * 收集器按 `turn` 分组、缺省按会话分组。其余字段按 kind：
+ *
+ *   turn-start  无附加字段。收到它才会建收集器 —— 其余事件不建，否则重连补发的
+ *               半截事件会留下永不收尾的收集器，而「会话是否繁忙」正是按它判断的。
+ *   text        `{ delta }`：分片与整句都合法，收集器负责累加。
+ *   reasoning   `{ delta }`。
+ *   tool        `{ callId, name, phase:'start'|'update'|'end', args?, summary?, ok?, error? }`。
+ *   permission  `{ requestId, callId, name, toolKind, reason, options }`：平台在等内核决定。
+ *   question    `{ requestId, questions }`。
+ *   usage       `{ turn, step, retry, seq, at, model, provider, usage }`：一次模型调用的用量样本。
+ *               `retry` 由适配器按平台的重试信号算出，账本不再自己维护重试轴。
+ *   notice      `{ notice, ... }`：平台说了件内核不一定关心的事（模型切换 / 流错误 / 模式变更）。
+ *   turn-end    `{ reason: { kind:'completed'|'error'|'aborted', error? } }`。
+ *   snapshot    `{ model?, baseline?: { tokenUsage, asOfSeq }, records }`：会话开场快照，
+ *               `records` 是同形状的归一事件数组，只用于喂账本与重建进行中的回合。
+ *
+ * 事件流只经 `agentRuntime().events()` 取得；`permission` / `question` 的回执走
+ * `AgentPort.respondPermission({ instance, sessionId, requestId }, decision)`。
+ */
 
 /** 判断一个对象是不是已经归一过的事件（适配器自测与控制台预览共用）。 */
 export function isAgentEvent(value) {
@@ -100,6 +126,22 @@ export function normalizeSessionRef(ref, instance = '') {
   const sessionId = String(ref ?? '').trim();
   if (!sessionId) throw new Error('AgentPort: 会话引用为空');
   return { instance: String(instance ?? '').trim(), sessionId };
+}
+
+/**
+ * 审批 / 提问引用归一：`{ instance, sessionId, requestId }`。
+ *
+ * 平台自己的回执键各不一样（DSH 要 clientId + eventId，ACP 要 JSON-RPC id），统一成
+ * 「哪个平台的哪个会话的哪次请求」；平台内部怎么找回自己的键是适配器的事。
+ */
+export function normalizePermissionRef(ref, instance = '') {
+  if (!ref || typeof ref !== 'object' || Array.isArray(ref)) {
+    throw new Error('AgentPort: 审批引用必须是 { instance, sessionId, requestId }');
+  }
+  const { instance: inst, sessionId } = normalizeSessionRef(ref, instance);
+  const requestId = String(ref.requestId ?? '').trim();
+  if (!requestId) throw new Error('AgentPort: 审批引用缺少 requestId');
+  return { instance: inst, sessionId, requestId };
 }
 
 /** 能力位 → 方法名反查：`methodCapabilityOf('selectModel')` → `'models'`。 */

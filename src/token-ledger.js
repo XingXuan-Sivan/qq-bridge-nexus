@@ -1,19 +1,17 @@
-// Token 用量账本：把 DSH 会话事件里的 provider usage 落成「按会话 × 按回合」的可查明细，
+// Token 用量账本：把归一用量事件里的 provider usage 落成「按会话 × 按回合」的可查明细，
 // 并在读取时用价目表折算成金额。
 //
 // 为什么这样设计（三条约束决定了实现形态）：
 //
-// 1. **权威总量来自 DSH 的 tokenUsage 投影，不来自桥接自己累加。**
-//    `session/follow` 的 snapshot 帧带 `projections.values.tokenUsage`，是**整条会话日志**的
-//    累计桶（含桥接启动之前的历史）。桥接只补「基线之后」的增量，所以总量是精确的，
-//    不需要重放全部历史。
+// 1. **权威总量来自平台的 tokenUsage 投影，不来自桥接自己累加。**
+//    `session/follow` 的 snapshot 帧带整条会话日志的累计桶（含桥接启动之前的历史）。
+//    桥接只补「基线之后」的增量，所以总量是精确的，不需要重放全部历史。
 //
-// 2. **逐轮明细靠事件折叠，且必须幂等。**
+// 2. **逐轮明细靠采样折叠，且必须幂等。**
 //    snapshot 帧的 `records` 是最多 maxMessages 条历史事件，重连时会**重新下发**；
 //    因此同一 (session, turn, step, retry) 的采样必须「后到覆盖先到」，而不是累加。
-//    这与 DSH `dsh-token-meter` 的 tokenUsage 折叠语义一致：
-//      - `assistant/message` / `assistant/attempt` 带 usage 时，同 (turn, step) 覆盖上一次采样；
-//      - `llm/retry-started` 结束该覆盖作用域，于是重试的第二次请求**另算一次**（retry 轴 +1）。
+//    口径与平台自己的 token 计量一致：同一步骤的第二次请求另算一次，重试序号由适配器
+//    在翻译事件时算好并随采样带进来 —— 账本不认识平台的宣告事件。
 //
 // 3. **不能把唯一副本放在会被重连清空的内存里。**
 //    `pumpMux` 的 finally 会清掉所有 per-turn Map（否则重连后回复会重复累加）。
@@ -65,31 +63,6 @@ export function pickBucketMs(windowMs, maxBuckets) {
 }
 
 /**
- * 从 assistant stream 记录里取最后一个 usage 采样。
- * 与 DSH `dsh-token-meter` 的 `lastAssistantStreamChunk(stream, 'usage')` 同义。
- */
-export function usageFromStream(stream) {
-  if (!Array.isArray(stream)) return undefined;
-  for (let i = stream.length - 1; i >= 0; i -= 1) {
-    const chunk = stream[i];
-    if (chunk && typeof chunk === 'object' && chunk.usage !== undefined) return chunk.usage;
-  }
-  return undefined;
-}
-
-/**
- * 取一条会话事件携带的 provider usage（原始桶，未归一化）。
- * 与 DSH `usageOf(event)` 一致：assistant/message 优先用 data.usage，
- * 否则回落到 assistant/attempt / assistant/message 的 stream 尾部采样。
- */
-export function usageOfEvent(event) {
-  if (!event || typeof event !== 'object') return undefined;
-  if (event.type === 'assistant/message' && event.data?.usage !== undefined) return event.data.usage;
-  if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return undefined;
-  return usageFromStream(event.data?.stream);
-}
-
-/**
  * 建立一个 token 账本。
  * @param {object} options
  * @param {string} options.file           JSONL 落盘路径
@@ -113,8 +86,6 @@ export function createTokenLedger({
   const baselines = new Map();
   /** sampleKey -> 采样记录 */
   const samples = new Map();
-  /** sessionId -> { turn, step, retry, seq }：重试轴，用于区分同一步骤的多次计费请求 */
-  const retryAxis = new Map();
   /** sessionId -> 最近一次见到的会话 key（会话退役后仍可归属到原 QQ 会话） */
   const sessionKeys = new Map();
   /** sessionId -> 被淘汰（只剩累计值、无法再拆到某一轮）的采样汇总 */
@@ -212,8 +183,6 @@ export function createTokenLedger({
         provider: record.provider,
         buckets
       });
-      const axis = retryAxis.get(sid);
-      if (!axis || axis.seq <= seq) retryAxis.set(sid, { turn, step, retry, seq });
       if (t > (sessionSeen.get(sid) ?? 0)) sessionSeen.set(sid, t);
       return true;
     }
@@ -223,7 +192,6 @@ export function createTokenLedger({
   function load() {
     baselines.clear();
     samples.clear();
-    retryAxis.clear();
     sessionKeys.clear();
     sessionSeen.clear();
     journalLines = 0;
@@ -380,62 +348,51 @@ export function createTokenLedger({
   // ── 摄入 ────────────────────────────────────────────────────────────────
 
   /**
-   * 摄入一条会话事件。
+   * 摄入一条用量采样。
+   *
+   * 入参是**已经归一好的结果样本**（回合/步骤/重试序号、时间、模型都已由适配器解出）：
+   * 账本只负责幂等折叠与落盘，不再解析任何平台事件 —— 平台的事件形状、重试宣告
+   * 都住在各自的适配层里。
+   *
    * @param {object} args
    * @param {string} args.sessionId
-   * @param {object} args.event       SessionEvent（含 seq/type/data）
-   * @param {'live'|'snapshot'} [args.origin] 事件来源；仅用于统计，两路都走同一套幂等折叠
-   * @param {number} [args.at]        事件时间（缺省用事件自带的 time）
-   * @param {string} [args.model]     实际模型（调用方按会话跟踪；缺省尝试从事件里取）
+   * @param {number} args.turn
+   * @param {number} args.step
+   * @param {number} [args.retry=0]     同一 (turn, step) 的第几次请求
+   * @param {number} [args.seq]         平台事件序号：重放时用来判定新旧
+   * @param {number} [args.at]          采样时间（缺省用收到时间）
+   * @param {string} [args.model]       实际模型
    * @param {string} [args.provider]
+   * @param {object} args.usage         provider 返回的原始用量桶
    * @returns {boolean} 是否产生了新的账本记录
    */
-  function ingestEvent({ sessionId, event, origin = 'live', at, model, provider } = {}) {
-    if (typeof sessionId !== 'string' || !sessionId || !event || typeof event !== 'object') return false;
-    // 时间优先取事件自带的 `time`（Unix 毫秒，由 DSH 写入），它决定峰谷档位；
+  function ingestSample({ sessionId, turn, step, retry = 0, seq, at, model, provider, usage } = {}) {
+    if (typeof sessionId !== 'string' || !sessionId || !usage || typeof usage !== 'object') return false;
+    // 时间优先取采样自带的时间（由平台写入），它决定峰谷档位；
     // 取不到才回落到「收到时间」，避免机器时钟/重放顺序影响计价。
-    const t = Number.isFinite(Number(at)) ? Number(at)
-      : (Number.isFinite(Number(event.time)) ? Number(event.time) : now());
-    const seq = Number.isFinite(Number(event.seq)) ? Number(event.seq) : -1;
-    const eventModel = model ?? event.data?.model ?? event.data?.usage?.model;
-    const eventProvider = provider ?? event.data?.provider;
-
-    if (event.type === 'llm/retry-started') {
-      const turn = Number(event.data?.turn);
-      const step = Number(event.data?.step);
-      if (!Number.isFinite(turn) || !Number.isFinite(step)) return false;
-      const retry = Number.isFinite(Number(event.data?.retry)) ? Number(event.data.retry) : 1;
-      const axis = retryAxis.get(sessionId);
-      if (axis && axis.seq > seq) return false;
-      retryAxis.set(sessionId, { turn, step, retry, seq });
-      return false; // 轴本身不入账
-    }
-
-    if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return false;
-    const raw = usageOfEvent(event);
-    if (!raw) return false;
-    const turn = Number(event.data?.turn);
-    const step = Number(event.data?.step);
-    if (!Number.isFinite(turn) || !Number.isFinite(step)) return false;
-    const axis = retryAxis.get(sessionId);
-    const retry = axis && axis.turn === turn && axis.step === step ? axis.retry : 0;
-    const buckets = normalizeUsage(raw);
+    const t = Number.isFinite(Number(at)) ? Number(at) : now();
+    const seqOf = Number.isFinite(Number(seq)) ? Number(seq) : -1;
+    const turnOf = Number(turn);
+    const stepOf = Number(step);
+    if (!Number.isFinite(turnOf) || !Number.isFinite(stepOf)) return false;
+    const retryOf = Number.isFinite(Number(retry)) ? Number(retry) : 0;
+    const buckets = normalizeUsage(usage);
     if (totalTokensOf(buckets) === 0) return false;
 
     const key = keyOf(sessionId);
-    const sk = sampleKeyOf(sessionId, turn, step, retry);
+    const sk = sampleKeyOf(sessionId, turnOf, stepOf, retryOf);
     const prev = samples.get(sk);
-    if (prev && seq >= 0 && prev.seq >= seq) return false;
+    if (prev && seqOf >= 0 && prev.seq >= seqOf) return false;
 
     const record = {
-      k: 'turn', t, sid: sessionId, key, seq,
-      turn, step, retry,
-      model: eventModel ?? prev?.model,
-      provider: eventProvider ?? prev?.provider,
+      k: 'turn', t, sid: sessionId, key, seq: seqOf,
+      turn: turnOf, step: stepOf, retry: retryOf,
+      model: model ?? prev?.model,
+      provider: provider ?? prev?.provider,
       b: buckets
     };
     samples.set(sk, {
-      sessionId, key, seq, t, turn, step, retry,
+      sessionId, key, seq: seqOf, t, turn: turnOf, step: stepOf, retry: retryOf,
       model: record.model, provider: record.provider, buckets
     });
     if (t > (sessionSeen.get(sessionId) ?? 0)) sessionSeen.set(sessionId, t);
@@ -446,15 +403,13 @@ export function createTokenLedger({
   }
 
   /**
-   * 摄入 `session/follow` snapshot 帧的投影基线（整条会话日志的权威累计桶）。
+   * 摄入一条投影基线（整条会话日志的权威累计桶）。
+   *
    * 语义：基线与「seq 大于 baseline.seq 的采样」相加才是会话总量。
    */
-  function ingestBaseline({ sessionId, projection, at, model, provider } = {}) {
-    if (typeof sessionId !== 'string' || !sessionId || !projection) return false;
-    const values = projection.values ?? projection;
-    const tokenUsage = values?.tokenUsage;
-    if (!tokenUsage) return false;
-    const seq = Number.isFinite(Number(projection.asOfSeq)) ? Number(projection.asOfSeq) : -1;
+  function ingestBaseline({ sessionId, tokenUsage, asOfSeq, at, model, provider } = {}) {
+    if (typeof sessionId !== 'string' || !sessionId || !tokenUsage || typeof tokenUsage !== 'object') return false;
+    const seq = Number.isFinite(Number(asOfSeq)) ? Number(asOfSeq) : -1;
     const t = Number.isFinite(Number(at)) ? Number(at) : now();
     const buckets = normalizeUsage(tokenUsage);
     const prev = baselines.get(sessionId);
@@ -476,21 +431,9 @@ export function createTokenLedger({
       model, provider, b: buckets
     });
     // 基线也要参与压缩判断：重连风暴会在每个会话上各追加一行基线，
-    // 只靠 ingestEvent 触发压缩的话，这些行可能永远等不到一次压缩。
+    // 只靠 ingestSample 触发压缩的话，这些行可能永远等不到一次压缩。
     maybeCompact();
     return true;
-  }
-
-  /** 摄入 snapshot 的全部历史记录（逐轮明细回填）。 */
-  function ingestSnapshotRecords({ sessionId, records, at } = {}) {
-    if (!Array.isArray(records)) return 0;
-    let n = 0;
-    for (const entry of records) {
-      const event = entry?.type === 'event' ? entry.event : entry;
-      if (!event || typeof event !== 'object') continue;
-      if (ingestEvent({ sessionId, event, origin: 'snapshot', at })) n += 1;
-    }
-    return n;
   }
 
   // ── 读取 ────────────────────────────────────────────────────────────────
@@ -918,7 +861,6 @@ export function createTokenLedger({
   function reset() {
     baselines.clear();
     samples.clear();
-    retryAxis.clear();
     sessionKeys.clear();
     sessionSeen.clear();
     // 被淘汰采样汇总是「权威累计」的一部分：漏清它，控制台点完重置仍会报出旧花费，
@@ -942,9 +884,8 @@ export function createTokenLedger({
   load();
 
   return {
-    ingestEvent,
+    ingestSample,
     ingestBaseline,
-    ingestSnapshotRecords,
     summary,
     conversation,
     series,

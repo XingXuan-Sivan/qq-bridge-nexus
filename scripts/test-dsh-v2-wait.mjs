@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { NodeApiClient, unwrap, createTurnCollector, discoverDshLaunchToken } from '../src/agent-side/adapters/dsh/client.mjs';
+import { NodeApiClient, unwrap, discoverDshLaunchToken } from '../src/agent-side/adapters/dsh/client.mjs';
+import { createDshEventPlane } from '../src/agent-side/adapters/dsh/events-plane.mjs';
+import { createAgentTurnCollector } from '../src/agent-side/collector.mjs';
 import { configViews } from '../src/config/platforms.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,31 +34,33 @@ async function main() {
   const sessionId = created.sessionId;
   console.log('SESSION_CREATED', sessionId);
 
-  const stream = api.events.mux({});
-  const collector = createTurnCollector();
+  // 走桥接自己的那条路：事件面把 wire 帧翻成归一事件，收集器按回合攒文本。
+  // 这样这份「实时」测试才能验证线上真正跑的那两层，而不是另写一份 wire 解析。
+  const plane = createDshEventPlane({ getClient: () => api, approvals: new Map() });
+  const events = plane.mux({});
+  const collector = createAgentTurnCollector();
   const done = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('等待回复超时（120s）')), 120_000);
     (async () => {
-      for await (const envelope of stream) {
-        const frame = envelope.payload;
-        if (frame.type === 'session/event' && frame.sessionId === sessionId) {
-          const ended = collector.push(frame.event);
+      for await (const event of events) {
+        if (event.sessionId === sessionId) {
+          const ended = collector.push(event);
           if (ended) {
             clearTimeout(timer);
             resolve(ended);
             return;
           }
         }
-        if (frame.type === 'stream/error') {
+        if (event.kind === 'notice' && event.notice === 'stream-error') {
           clearTimeout(timer);
-          reject(new Error('事件流错误: ' + JSON.stringify(frame.error)));
+          reject(new Error('事件流错误: ' + JSON.stringify(event.error)));
           return;
         }
       }
     })().catch((error) => { clearTimeout(timer); reject(error); });
   });
 
-  stream.follow(sessionId);
+  plane.follow(sessionId);
   const accepted = unwrap(await api.sessions.prompt({ sessionId, mode: 'queue', content: [{ type: 'text', text: '请只输出你当前可用的工具名列表（JSON 数组），不要调用任何工具，不要发送消息。只输出 JSON。' }] }), 'session.prompt');
   console.log('PROMPT_ACCEPTED', JSON.stringify(accepted).slice(0, 120));
   const ended = await done;

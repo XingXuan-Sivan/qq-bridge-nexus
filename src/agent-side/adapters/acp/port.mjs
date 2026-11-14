@@ -30,6 +30,7 @@ import {
   AgentCapabilityError,
   CAPABILITY_UNSUPPORTED,
   normalizeSessionRef,
+  normalizePermissionRef,
 } from '../../port.mjs';
 import { DEFERRED } from './client.mjs';
 import { mapPermissionRequest, mapSessionUpdate } from './events.mjs';
@@ -145,6 +146,10 @@ export function createAcpPort({
   // ── 反向请求与受理信号 ────────────────────────────────────────────────────
   const pendingPermissions = new Map(); // requestId -> { rpcId, sessionId, options, at }
   const signalWaiters = new Map();      // sessionId -> Set<fn>：首条 update 的等待者
+  // ACP 不宣告回合号，但收集器按 turn 分组（同一会话的第二个回合不能混进前一条回复）。
+  // 编号由这一层给：未结束的回合寄在 activeTurns，事件发出前统一打戳。
+  const activeTurns = new Map();        // sessionId -> 当前在途回合编号
+  const turnCounters = new Map();       // sessionId -> 已发出的回合数
 
   const notedOnce = new Set();
   /** 同一类提示只记一次：这些不是错误，是「该平台没有这个语义」的说明。 */
@@ -156,11 +161,24 @@ export function createAcpPort({
 
   function safeEmit(event) {
     if (!event) return;
+    // 在途回合的事件都带上同一个 turn：turn-start / text / turn-end 才能落到同一组。
+    const stamped = event.turn === undefined && activeTurns.has(event.sessionId)
+      ? { ...event, turn: activeTurns.get(event.sessionId) }
+      : event;
     try {
-      onEvent(event);
+      onEvent(stamped);
     } catch (error) {
       logger('error', `ACP 事件处理抛错（${event.kind}）：${error?.message ?? error}`);
     }
+  }
+
+  /** 开一个新回合：编号 +1、记在途，并发出 `turn-start`（收集器只认它建立回合）。 */
+  function beginTurn(sessionId) {
+    const turn = (turnCounters.get(sessionId) ?? 0) + 1;
+    turnCounters.set(sessionId, turn);
+    activeTurns.set(sessionId, turn);
+    safeEmit({ kind: 'turn-start', sessionId, turn });
+    return turn;
   }
 
   /** 能力位缺位但方法本身存在（核心方法）时的错误：与 port 的闸门同一个错误码。 */
@@ -388,16 +406,22 @@ export function createAcpPort({
     });
   }
 
-  function emitTurnEnd(sessionId, stopReason, error) {
+  /**
+   * 回合结束：带上开回合时的编号。
+   * 不能用在途表打戳 —— 同一会话的下一回合可能已经把它覆盖。
+   */
+  function emitTurnEnd(sessionId, stopReason, error, turn) {
     const event = {
       kind: 'turn-end',
       sessionId,
+      turn,
       stopReason: clean(stopReason) || (error ? 'error' : DEFAULT_STOP_REASON),
     };
     if (error) {
       event.error = { code: clean(error?.code), message: clean(error?.message ?? error) };
     }
     safeEmit(event);
+    if (activeTurns.get(sessionId) === turn) activeTurns.delete(sessionId);
   }
 
   // ── 内容块 ────────────────────────────────────────────────────────────────
@@ -529,10 +553,11 @@ export function createAcpPort({
       const blocks = toPromptBlocks(content);
       if (!blocks.length) throw new Error('prompt: 提示内容为空');
 
+      const turnNo = beginTurn(sessionId);
       const turn = client.request('session/prompt', { sessionId, prompt: blocks });
       turn.then(
-        (result) => emitTurnEnd(sessionId, clean(result?.stopReason), null),
-        (error) => emitTurnEnd(sessionId, 'error', error),
+        (result) => emitTurnEnd(sessionId, clean(result?.stopReason), null, turnNo),
+        (error) => emitTurnEnd(sessionId, 'error', error, turnNo),
       );
 
       const first = await Promise.race([
@@ -657,15 +682,16 @@ export function createAcpPort({
     /**
      * 回执一个挂起的权限请求（语义与 DSH 相反：这里是**答** Agent 的问）。
      *
-     * `ref` 的 id 取 `requestId`，`eventId` 兜底 —— 后者不是别名双读：内核的挂起表
-     * 统一用 `eventId` 记「平台事件 id」（bridge 就是拿它拼回执引用的），ACP 的
-     * JSON-RPC id 正好放在那里；`clientId` 那一层 ACP 没有。
+     * `ref` 是归一引用 `{ instance, sessionId, requestId }`；`requestId` 就是 ACP 的
+     * JSON-RPC id（`session/request_permission` 的请求号），本平台不需要第二把键。
      */
     async respondPermission(ref, decision) {
-      const requestId = clean(ref?.requestId) || clean(ref?.eventId);
-      if (!requestId) throw new Error('respondPermission: 缺少 requestId / eventId');
+      const { sessionId, requestId } = normalizePermissionRef(ref, agentId);
       const waiting = pendingPermissions.get(requestId);
       if (!waiting) throw new Error(`respondPermission: 没有挂起的权限请求 ${requestId}`);
+      if (waiting.sessionId && waiting.sessionId !== sessionId) {
+        throw new Error(`respondPermission: 请求 ${requestId} 属于会话 ${waiting.sessionId}，不是 ${sessionId}`);
+      }
       const outcome = outcomeFor(waiting.options, decision);
       // 先摘表再回执：回执写失败也不该留下一个「以为还能再答一次」的挂起项。
       pendingPermissions.delete(requestId);

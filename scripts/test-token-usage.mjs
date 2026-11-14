@@ -26,7 +26,7 @@ import {
   resolvePriceTable,
   totalTokensOf
 } from '../src/model-prices.js';
-import { createTokenLedger, usageOfEvent, usageFromStream } from '../src/token-ledger.js';
+import { createTokenLedger } from '../src/token-ledger.js';
 
 let failed = 0;
 function assert(cond, label) {
@@ -97,22 +97,23 @@ const usage = (inputTokens, outputTokens, cacheReadTokens = 0, extra = {}) =>
 // ⇒ 这个测试会随"跑测试的时刻"时红时绿（实测：周一 17:29 会失败，12:00-16:00 通过）。
 // 这里统一钉到下面的 `at`（周一 20:00，空闲档），让期望值与任何跑测试的时刻无关。
 const at = mon('20:00');
-const evMsg = (seq, turn, step, u) => ({ seq, time: at, type: 'assistant/message', data: { turn, step, usage: u } });
-const evRetry = (seq, turn, step, retry) => ({ seq, time: at, type: 'llm/retry-started', data: { turn, step, retry } });
+// 中立用量样本：回合 / 步骤 / 重试 / 时间都由适配器解好，账本不认识平台事件。
+const ingest = (target, seq, turn, step, u, extra = {}) =>
+  target.ingestSample({ sessionId: 's1', seq, turn, step, at, usage: u, ...extra });
 
 let ledger = freshLedger({ resolveKey: (sid) => (sid === 's1' ? 'group:100' : undefined) });
 
-// 流式采样 → 最终结算应覆盖，而不是累加
-ledger.ingestEvent({ sessionId: 's1', event: { seq: 10, time: at, type: 'assistant/attempt', data: { turn: 1, step: 1, stream: [{ usage: usage(1000, 50, 0) }] } } });
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(11, 1, 1, usage(1200, 80, 4000)) });
+// 同一 (turn, step, retry) 后到的采样应覆盖，而不是累加
+ingest(ledger, 10, 1, 1, usage(1000, 50, 0));
+ingest(ledger, 11, 1, 1, usage(1200, 80, 4000));
 let conv = ledger.conversation('group:100');
 assert(conv.turns.length === 1, '同一 (turn, step) 只有一行逐轮明细（流式被结算覆盖）');
 assert(conv.turns[0].buckets.cacheMiss === 1200 && conv.turns[0].buckets.output === 80,
-  '覆盖语义：保留最终结算值 1200/80');
+  '覆盖语义：保留后到样本的 1200/80');
 assert(conv.turns[0].steps === 1, 'steps 计为该回合的采样条数（1）');
 
 // 同回合第二个 step 累加
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(12, 1, 2, usage(300, 20, 100)) });
+ingest(ledger, 12, 1, 2, usage(300, 20, 100));
 conv = ledger.conversation('group:100');
 assert(conv.turns[0].steps === 2, '同回合第 2 个 step 计入同一行');
 assert(conv.turns[0].buckets.cacheMiss === 1500 && conv.turns[0].buckets.output === 100, '同回合跨 step 累加');
@@ -120,36 +121,35 @@ assert(conv.turns.length === 1, '两个 step 仍是同一轮对话');
 
 // 重连重放：同 seq 同内容不得翻倍
 const before = ledger.recent(50).length;
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(11, 1, 1, usage(1200, 80, 4000)) });
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(12, 1, 2, usage(300, 20, 100)) });
+ingest(ledger, 11, 1, 1, usage(1200, 80, 4000));
+ingest(ledger, 12, 1, 2, usage(300, 20, 100));
 assert(ledger.recent(50).length === before, '重连重放同样的事件不新增采样（幂等）');
 conv = ledger.conversation('group:100');
 assert(conv.turns[0].buckets.cacheMiss === 1500, '重放后用量不翻倍');
 
 // 旧快照不得覆盖新数据：seq 更旧、以及 seq 相等但内容不同，都必须被拒绝
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(5, 1, 1, usage(1, 1, 0)) });
+ingest(ledger, 5, 1, 1, usage(1, 1, 0));
 conv = ledger.conversation('group:100');
 assert(conv.turns[0].buckets.cacheMiss === 1500, 'seq 更旧的采样被拒绝（不回退）');
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(11, 1, 1, usage(1, 1, 0)) });
+ingest(ledger, 11, 1, 1, usage(1, 1, 0));
 conv = ledger.conversation('group:100');
 assert(conv.turns[0].buckets.cacheMiss === 1500, 'seq 相等但内容不同的采样被拒绝（只信严格更新的 seq）');
 
-// 重试轴：同一步骤的第二次请求另算
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(20, 2, 1, usage(500, 10, 0)) });
-ledger.ingestEvent({ sessionId: 's1', event: evRetry(21, 2, 1, 1) });
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(22, 2, 1, usage(600, 12, 0)) });
+// 重试轴已下沉到适配器：样本自带 retry 序号，账本只认结果字段
+ingest(ledger, 20, 2, 1, usage(500, 10, 0));
+ingest(ledger, 22, 2, 1, usage(600, 12, 0), { retry: 1 });
 conv = ledger.conversation('group:100');
 const t2 = conv.turns.find((r) => r.turn === 2);
-assert(t2.buckets.cacheMiss === 1100 && t2.buckets.output === 22, 'llm/retry-started 之后同一 step 的第二次请求另算一次');
+assert(t2.buckets.cacheMiss === 1100 && t2.buckets.output === 22, '同一 step 的第二次请求（retry=1）另算一次');
 assert(t2.attempts === 1, '重试次数被记录');
 
 // 基线：权威总量 = 基线 + 基线之后的增量
 ledger = freshLedger({ resolveKey: () => 'group:100' });
-ledger.ingestBaseline({ sessionId: 's1', projection: { asOfSeq: 100, values: { tokenUsage: { uncachedInputTokens: 5000, outputTokens: 500, cacheReadTokens: 50000, cacheWriteTokens: 0 } } }, at: mon('20:00'), model: 'deepseek-flash' });
+ledger.ingestBaseline({ sessionId: 's1', tokenUsage: { uncachedInputTokens: 5000, outputTokens: 500, cacheReadTokens: 50000, cacheWriteTokens: 0 }, asOfSeq: 100, at: mon('20:00'), model: 'deepseek-flash' });
 // seq <= 100 的采样属于基线范围，只进逐轮明细、不再计入总量
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(80, 1, 1, usage(5000, 500, 50000)) });
+ingest(ledger, 80, 1, 1, usage(5000, 500, 50000));
 // seq > 100 的采样是增量
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(120, 2, 1, usage(1000, 100, 0)) });
+ingest(ledger, 120, 2, 1, usage(1000, 100, 0));
 let sum = ledger.summary();
 let c = sum.conversations.find((x) => x.key === 'group:100');
 assert(c.buckets.cacheMiss === 6000, '权威总量 = 基线 5000 + 增量 1000');
@@ -164,8 +164,8 @@ assert(sum.totals.cacheHitRate > 0.85, `缓存命中率按输入桶计算（${(s
 
 // 峰谷混算：同一会话内高峰与空闲的采样各按各的档位
 ledger = freshLedger({ resolveKey: () => 'group:100' });
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(10, 1, 1, usage(1e6, 1e6, 0)), at: mon('10:00') }); // 高峰：1 + 4 → ×2
-ledger.ingestEvent({ sessionId: 's1', event: evMsg(20, 2, 1, usage(1e6, 1e6, 0)), at: mon('20:00') }); // 空闲：1 + 4
+ingest(ledger, 10, 1, 1, usage(1e6, 1e6, 0), { at: mon('10:00') }); // 高峰：1 + 4 → ×2
+ingest(ledger, 20, 2, 1, usage(1e6, 1e6, 0), { at: mon('20:00') }); // 空闲：1 + 4
 c = ledger.summary().conversations[0];
 assert(near(c.cost, (1 + 4) * 2 + (1 + 4)), `峰谷分时计价：高峰轮 ¥10 + 空闲轮 ¥5 = ¥15（实得 ${c.cost}）`);
 assert(near(c.byTier.peak, 10) && near(c.byTier.off, 5), '高峰期/空闲期花费分开统计');
@@ -181,7 +181,7 @@ assert(ledger.summary().conversations.length === 1, '半行之后仍能读出既
 // 但**累计总量必须精确**——即使这个会话没有投影基线。
 ledger = freshLedger({ resolveKey: () => 'group:100', maxLines: 20 });
 for (let i = 0; i < 30; i += 1) {
-  ledger.ingestEvent({ sessionId: 's1', event: evMsg(1000 + i, i + 1, 1, usage(10, 1, 0)), at: mon('20:00') });
+  ingest(ledger, 1000 + i, i + 1, 1, usage(10, 1, 0), { at: mon('20:00') });
 }
 const stats = ledger.stats();
 assert(stats.samples <= 20, `逐轮明细被压到上限内（实得 ${stats.samples}）`);
@@ -200,7 +200,7 @@ assert(near(reloaded.summary().totals.cost, afterEvict.cost, 1e-9), '淘汰结�
 ledger = freshLedger({ resolveKey: () => 'group:100', maxLines: 5000 });
 for (let turn = 1; turn <= 40; turn += 1) {
   for (let step = 1; step <= 5; step += 1) {
-    ledger.ingestEvent({ sessionId: 's1', event: evMsg(turn * 100 + step, turn, step, usage(100, 10, 0)), at: mon('20:00') });
+    ingest(ledger, turn * 100 + step, turn, step, usage(100, 10, 0), { at: mon('20:00') });
   }
 }
 const multi = ledger.summary();
@@ -216,10 +216,13 @@ assert(detail.turns.length === 40 && detail.turns[0].turn === 40, '逐轮明细�
 ledger = freshLedger({ resolveKey: () => 'group:100' });
 const sBase = Date.parse('2026-03-02T09:00:00+08:00'); // 周一 09:00 = 高峰窗口起点
 const sAt = sBase + 6 * 3600_000;                      // 观察时刻
-const emitAt = (ms, turn, step, u) => ledger.ingestEvent({
+const emitAt = (ms, turn, step, u) => ledger.ingestSample({
   sessionId: 's1',
-  event: { seq: turn * 100 + step, time: ms, type: 'assistant/message', data: { turn, step, usage: u } },
-  at: ms
+  seq: turn * 100 + step,
+  turn,
+  step,
+  at: ms,
+  usage: u
 });
 // 09:30、09:45（高峰）各一笔；13:00（午休空闲）一笔；中间留出 3 小时空档
 const peak1 = sBase + 30 * 60_000;
@@ -273,10 +276,14 @@ ledger.reset();
 assert(ledger.summary().conversations.length === 0, 'reset 清空内存态');
 assert(fs.readFileSync(ledgerFile, 'utf8') === '', 'reset 清空磁盘日志');
 
-// ── usageOfEvent ────────────────────────────────────────────────────────
-assert(usageOfEvent({ type: 'assistant/message', data: { usage: { inputTokens: 1 } } })?.inputTokens === 1, 'usageOfEvent 优先取 data.usage');
-assert(usageFromStream([{ usage: { inputTokens: 7 } }, { text: 'x' }])?.inputTokens === 7, 'usageFromStream 从流尾部找 usage');
-assert(usageOfEvent({ type: 'tool/call', data: {} }) === undefined, '非 assistant 事件不产生 usage');
+// ── 样本的形状守卫 ─────────────────────────────────────────────────────
+ledger = freshLedger({ resolveKey: () => 'group:100' });
+assert(ledger.ingestSample({ sessionId: 's1', turn: 1, step: 1, at, usage: usage(100, 10) }) === true,
+  '有 turn / step / usage 的样本被接受');
+assert(ledger.ingestSample({ sessionId: 's1', step: 1, at, usage: usage(100, 10) }) === false,
+  '缺 turn 的样本被拒绝（无从归属，记账会让实数失真）');
+assert(ledger.ingestSample({ sessionId: 's1', turn: 1, step: 1, at, usage: usage(0, 0) }) === false,
+  '零用量样本被拒绝');
 
 // ── 收尾 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

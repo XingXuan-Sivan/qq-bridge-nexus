@@ -103,10 +103,10 @@ export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, s
     return parsed ? parsed.key : raw;
   }
 
-  /** 登记一个新审批，返回带编号的条目。同一 eventId 重复登记返回原条目（事件流重连重放）。 */
-  function register({ key, sessionId, clientId, eventId, toolName, callId, reason }) {
+  /** 登记一个新审批，返回带编号的条目。同一 requestId 重复登记返回原条目（事件流重连重放）。 */
+  function register({ key, sessionId, requestId, toolName, callId, reason }) {
     const norm = normKey(key);
-    for (const e of entries.values()) if (e.eventId === eventId && e.clientId === clientId) return { entry: e, duplicate: true };
+    for (const e of entries.values()) if (e.requestId === requestId) return { entry: e, duplicate: true };
     const sameKey = [...entries.values()].filter((e) => e.key === norm);
     let evicted = null;
     if (sameKey.length >= maxPerKey) {
@@ -120,8 +120,7 @@ export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, s
       id: seq,
       key,
       sessionId,
-      clientId,
-      eventId,
+      requestId,
       toolName: String(toolName ?? call?.name ?? ''),
       callId: callId != null ? String(callId) : null,
       args: call ? call.args : undefined,

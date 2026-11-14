@@ -1,9 +1,9 @@
 // 自测脚本：不依赖 SnowLuma / QQ，只验证 DSH 侧链路——
 //   1. 连接 DSH Web API
 //   2. 创建一个独立测试会话（不会碰现有会话）
-//   3. 通过 events.mux 订阅事件流
-//   4. session.prompt 注入一条消息
-//   5. 等 agent 回复（turn/end）并打印
+//   3. 通过事件面订阅归一事件流
+//   4. 端口注入一条消息
+//   5. 等回合结束并打印回复
 // 用法：node src/self-test.js [baseUrl]
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -83,19 +83,18 @@ async function main() {
   const done = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('等待回复超时（60s）')), 60_000);
     (async () => {
-      for await (const envelope of stream) {
-        const frame = envelope.payload;
-        if (frame.type === 'session/event' && frame.sessionId === sessionId) {
-          const ended = collector.push(frame.event);
+      for await (const event of stream) {
+        if (event.sessionId === sessionId) {
+          const ended = collector.push(event);
           if (ended) {
             clearTimeout(timer);
             resolve(ended);
             return;
           }
         }
-        if (frame.type === 'stream/error') {
+        if (event.kind === 'notice' && event.notice === 'stream-error') {
           clearTimeout(timer);
-          reject(new Error('事件流错误: ' + JSON.stringify(frame.error)));
+          reject(new Error('事件流错误: ' + JSON.stringify(event.error)));
           return;
         }
       }

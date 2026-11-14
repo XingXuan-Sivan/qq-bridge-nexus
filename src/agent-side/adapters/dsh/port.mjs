@@ -14,6 +14,7 @@
 //     `{result:{ok,value,error}}` 信封在这里拍平，不外泄给内核。
 import {
   normalizeSessionRef,
+  normalizePermissionRef,
   AgentCapabilityError,
 } from '../../port.mjs';
 import { unwrap } from './client.mjs';
@@ -100,14 +101,16 @@ const CURRENT_PRESET_RE = /current preset (\S+)/;
 /**
  * 建一份 DSH port。
  *
- * @param {{client: object, instance?: string}} spec
+ * @param {{client: object, instance?: string, approvals?: Map<string, object>}} spec
  *   `client` 是 NodeApiClient 实例（或测试里的替身）；`instance` 写进会话引用，
- *   形如 `dsh`（将来 ACP 是 `acp:claude`）。
+ *   形如 `dsh`（将来 ACP 是 `acp:claude`）；`approvals` 是与事件面共享的挂起表
+ *   （`requestId -> { clientId, eventId }`），回执靠它找回平台自己的键。
  */
-export function createDshPort({ client, instance = 'dsh' } = {}) {
+export function createDshPort({ client, instance = 'dsh', approvals = new Map() } = {}) {
   if (!client || typeof client !== 'object') {
     throw new Error('createDshPort: 缺少 RPC 客户端');
   }
+  if (!(approvals instanceof Map)) throw new Error('createDshPort: approvals 必须是 Map');
   const agentId = String(instance ?? 'dsh');
   const sessionIdOf = (ref) => normalizeSessionRef(ref, agentId).sessionId;
   /** 斜杠命令通道缺失时的话术统一在这里，免得每个方法各写一遍。 */
@@ -248,19 +251,26 @@ export function createDshPort({ client, instance = 'dsh' } = {}) {
     /**
      * 回执一个挂起的审批 / 提问。
      *
-     * `ref` 是 `{ clientId, eventId }`（DSH 的审批请求带这两个 id，缺一个都回不过去）；
-     * `decision` 由内核给：审批是 `allowed-once` / `rejected`，提问是 `{ answers }`。
+     * `ref` 是归一引用 `{ instance, sessionId, requestId }`；`decision` 由内核给：
+     * 审批是 `allowed-once` / `rejected`，提问是 `{ answers }`。
+     * DSH 回执需要 `clientId` + `eventId`，两者从挂起表取 —— 内核不持有平台键。
      * 包装成 `{ kind: 'result', value }` 是本平台的事。
      */
     async respondPermission(ref, decision) {
-      const clientId = String(ref?.clientId ?? '').trim();
-      const eventId = String(ref?.eventId ?? '').trim();
-      if (!clientId || !eventId) throw new Error('respondPermission: 缺少 clientId / eventId');
+      const { sessionId, requestId } = normalizePermissionRef(ref, agentId);
+      const waiting = approvals.get(requestId);
+      if (!waiting) {
+        throw new Error(`respondPermission: 没有挂起的请求 ${requestId}（连接已断开或已回执）`);
+      }
+      if (waiting.sessionId && waiting.sessionId !== sessionId) {
+        throw new Error(`respondPermission: 请求 ${requestId} 属于会话 ${waiting.sessionId}，不是 ${sessionId}`);
+      }
       const raw = await client.respond({
-        clientId,
-        eventId,
+        clientId: waiting.clientId,
+        eventId: waiting.eventId,
         outcome: { kind: 'result', value: decision },
       });
+      approvals.delete(requestId);
       return { raw };
     },
 

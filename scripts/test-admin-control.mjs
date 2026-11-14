@@ -299,18 +299,18 @@ test('审批：并发编号、带编号回复、裸回复歧义拒绝、旧编�
   const timedOut = [];
   const reg = createApprovalRegistry({ timeoutMs: 1000, onTimeout: async (e) => timedOut.push(e.id) });
   reg.noteToolCall('s1', 'c1', 'pwsh', JSON.stringify({ command: 'winget install foo' }));
-  const a = reg.register({ key: 'private:111', sessionId: 's1', clientId: 'k', eventId: 'e1', toolName: 'pwsh', callId: 'c1' }).entry;
+  const a = reg.register({ key: 'private:111', sessionId: 's1', requestId: 'e1', toolName: 'pwsh', callId: 'c1' }).entry;
   assert.equal(a.argsKnown, true);
   assert.match(describeToolArgs(a.args), /command: winget install foo/);
-  const b = reg.register({ key: 'private:111', sessionId: 's1', clientId: 'k', eventId: 'e2', toolName: 'write', callId: 'c2' }).entry;
+  const b = reg.register({ key: 'private:111', sessionId: 's1', requestId: 'e2', toolName: 'write', callId: 'c2' }).entry;
   assert.equal(b.argsKnown, false);
   assert.notEqual(a.id, b.id);
-  const dup = reg.register({ key: 'private:111', sessionId: 's1', clientId: 'k', eventId: 'e1', toolName: 'pwsh', callId: 'c1' });
+  const dup = reg.register({ key: 'private:111', sessionId: 's1', requestId: 'e1', toolName: 'pwsh', callId: 'c1' });
   assert.equal(dup.duplicate, true, '事件流重放不重复编号');
   assert.match(reg.resolveReply('private:111', '通过').error, /2 个待审批/);
   const r = reg.resolveReply('private:111', `通过 #${b.id}`);
   assert.equal(r.ok, true);
-  assert.equal(r.entry.eventId, 'e2');
+  assert.equal(r.entry.requestId, 'e2');
   reg.complete(b.id);
   assert.match(reg.resolveReply('private:111', `通过 #${b.id}`).error, /不存在或已失效/);
   assert.equal(reg.resolveReply('private:111', '通过').entry.id, a.id, '只剩一个时裸回复可用');
@@ -322,7 +322,7 @@ test('审批：并发编号、带编号回复、裸回复歧义拒绝、旧编�
 test('审批：超时自动拒绝回调；编号跨重启不复用', async () => {
   const timedOut = [];
   const reg = createApprovalRegistry({ timeoutMs: 20, onTimeout: async (e) => timedOut.push(e.id), startId: 41 });
-  const e = reg.register({ key: 'private:111', sessionId: 's', clientId: 'k', eventId: 'x', toolName: 'pwsh' }).entry;
+  const e = reg.register({ key: 'private:111', sessionId: 's', requestId: 'x', toolName: 'pwsh' }).entry;
   assert.equal(e.id, 42);
   await new Promise((r) => setTimeout(r, 60));
   assert.deepEqual(timedOut, [42]);

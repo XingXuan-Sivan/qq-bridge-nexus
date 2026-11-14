@@ -164,27 +164,27 @@ await test('R4 timeout/replyCheck 类暂存唤醒按定时器语义补发', asyn
   } finally { await h.close(); }
 });
 
-// ── R5. turn/end 没有 turn/start：不得留下永久 collector ─────────────────────
-await test('R5 未跟踪的 turn/end 不留下 collector（否则会话永久繁忙）', async () => {
+// ── R5. turn-end 没有 turn-start：不得留下永久 collector ────────────────────
+await test('R5 未跟踪的 turn-end 不留下 collector（否则会话永久繁忙）', async () => {
   const h = await bridgeHarness();
   try {
     h.setMode('reserved2');
     const sid = 'fixture-session';
 
-    // ① 只有 turn/end（重连快照没带上 turn/start）
-    const orphan = h.trackTurnEvent(sid, { type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } });
+    // ① 只有 turn-end（重连快照没带上 turn-start）
+    const orphan = h.trackTurnEvent(sid, { kind: 'turn-end', turn: 7, reason: { kind: 'completed' } });
     assert.equal(orphan.ended, null);
-    assert.equal(h.collectors.has(sid), false, '孤儿 turn/end 不得留下 collector');
+    assert.equal(h.collectors.has(sid), false, '孤儿 turn-end 不得留下 collector');
 
-    // ② 只有 assistant/message（第一条事件不是 turn/start）
-    h.trackTurnEvent(sid, { type: 'assistant/message', data: { turn: 8, message: { content: [{ type: 'text', text: 'hi' }] } } });
-    assert.equal(h.collectors.has(sid), false, '非 turn/start 的首条事件不得创建 collector');
+    // ② 只有 text（首条事件不是 turn-start）
+    h.trackTurnEvent(sid, { kind: 'text', turn: 8, delta: 'hi' });
+    assert.equal(h.collectors.has(sid), false, '非 turn-start 的首条事件不得创建 collector');
 
     // ③ 正常回合仍然要能收集到文本并收尾
-    h.trackTurnEvent(sid, { type: 'turn/start', data: { turn: 9 } });
-    assert.equal(h.collectors.has(sid), true, 'turn/start 必须建立 collector');
-    h.trackTurnEvent(sid, { type: 'assistant/message', data: { turn: 9, message: { content: [{ type: 'text', text: '回复内容' }] } } });
-    const done = h.trackTurnEvent(sid, { type: 'turn/end', data: { turn: 9, reason: { kind: 'completed' } } });
+    h.trackTurnEvent(sid, { kind: 'turn-start', turn: 9 });
+    assert.equal(h.collectors.has(sid), true, 'turn-start 必须建立 collector');
+    h.trackTurnEvent(sid, { kind: 'text', turn: 9, delta: '回复内容' });
+    const done = h.trackTurnEvent(sid, { kind: 'turn-end', turn: 9, reason: { kind: 'completed' } });
     assert.equal(done.ended?.text, '回复内容', '正常回合的文本必须被收集');
     assert.equal(h.collectors.has(sid), false, '正常回合结束后 collector 必须清理');
   } finally { await h.close(); }
@@ -380,10 +380,9 @@ await test('R14 淘汰桶被新基线覆盖后不再重复累加', async () => {
     const ledger = createTokenLedger({ file, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'qq:group:456', maxLines: 2 });
     const at = Date.parse('2026-03-02T20:00:00+08:00');
     const usage = (input, output) => ({ inputTokens: input, outputTokens: output });
-    const evMsg = (seq, turn, step, u) => ({ seq, time: at, type: 'assistant/message', data: { turn, step, usage: u } });
-    for (let i = 1; i <= 3; i += 1) ledger.ingestEvent({ sessionId: 's1', event: evMsg(i, i, 1, usage(1000, 100)), at });
+    for (let i = 1; i <= 3; i += 1) ledger.ingestSample({ sessionId: 's1', seq: i, turn: i, step: 1, at, usage: usage(1000, 100) });
     // 基线（整条会话日志的权威累计）覆盖了全部三条
-    ledger.ingestBaseline({ sessionId: 's1', projection: { asOfSeq: 3, values: { tokenUsage: usage(3000, 300) } }, at });
+    ledger.ingestBaseline({ sessionId: 's1', tokenUsage: usage(3000, 300), asOfSeq: 3, at });
     const totals = ledger.summary().totals;
     const tokens = totals.buckets.cacheMiss + totals.buckets.cacheHit + totals.buckets.cacheWrite + totals.buckets.output;
     assert.equal(tokens, 3300, `基线已包含被淘汰的采样，不能重复计费（实得 ${tokens}）`);

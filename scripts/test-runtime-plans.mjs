@@ -22,7 +22,8 @@ function builtinStore() {
 }
 
 test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
-  const plans = builtinStore().list();
+  // 用户克隆出来的方案就在同一个目录（profiles/plans/），只数内置的那几条。
+  const plans = builtinStore().list().filter((plan) => plan.builtin);
   assert.equal(plans.length, 6);
   assert.deepEqual(plans.map((plan) => plan.id), BUILTIN_PLAN_ORDER);
   const expected = {

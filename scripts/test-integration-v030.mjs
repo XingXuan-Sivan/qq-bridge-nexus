@@ -283,8 +283,14 @@ await test('审批：并发编号、展示实际命令、带编号回复、旧�
   const key = `qq:private:${OWNER}`;
   const sid = await h.ensureSession(key);
   h.ext.approvals.noteToolCall(sid, 'call-1', 'pwsh', JSON.stringify({ command: 'winget install Some.App', token: 'password=hunter2' }));
-  const a = h.ext.approvals.register({ key, sessionId: sid, clientId: 'k', eventId: 'e1', toolName: 'pwsh', callId: 'call-1' }).entry;
-  const b = h.ext.approvals.register({ key, sessionId: sid, clientId: 'k', eventId: 'e2', toolName: 'write', callId: 'call-2' }).entry;
+  // 平台键先进挂起表（线上同一条路径），内核与审批表只认 requestId。
+  const request = (eventId, toolName, callId) => h.agentEvents.requestEvent({
+    type: 'approval/requested', clientId: 'k', sessionId: sid, eventId, toolName, callId,
+  });
+  request('e1', 'pwsh', 'call-1');
+  const a = h.ext.approvals.register({ key, sessionId: sid, requestId: 'e1', toolName: 'pwsh', callId: 'call-1' }).entry;
+  request('e2', 'write', 'call-2');
+  const b = h.ext.approvals.register({ key, sessionId: sid, requestId: 'e2', toolName: 'write', callId: 'call-2' }).entry;
   const shown = h.ext.renderApprovalRequest(a, { key, auditKey: false, redactAll: (s) => s });
   assert.match(shown, /winget install Some\.App/);
   assert.ok(!shown.includes('hunter2'), '凭据被抹掉');
@@ -305,7 +311,8 @@ await test('审批：并发编号、展示实际命令、带编号回复、旧�
   assert.equal(h.calls.responds.at(-1).eventId, 'e1');
   assert.equal(h.calls.responds.at(-1).outcome.value, 'allowed-once');
   // 群友回复「通过」不会被当作审批
-  const c = h.ext.approvals.register({ key: `qq:group:${GROUP}`, sessionId: 'sx', clientId: 'k', eventId: 'e3', toolName: 'x' }).entry;
+  h.agentEvents.requestEvent({ type: 'approval/requested', clientId: 'k', sessionId: 'sx', eventId: 'e3', toolName: 'x' });
+  const c = h.ext.approvals.register({ key: `qq:group:${GROUP}`, sessionId: 'sx', requestId: 'e3', toolName: 'x' }).entry;
   await h.handleIncoming('group', GROUP, groupMsg(MALLORY, '路人', `通过 #${c.id}`), h.cfg);
   await settle();
   assert.ok(!h.calls.responds.some((r) => r.eventId === 'e3'));
@@ -470,7 +477,7 @@ await test('审计 F2：/panic 无条件退役运维会话并作废其审批；�
   await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L2' });
   const key = sessionKey('private', OWNER);
   const sid = await h.ensureSession(key);
-  h.ext.approvals.register({ key, sessionId: sid, clientId: 'k', eventId: 'e-old', toolName: 'pwsh' });
+  h.ext.approvals.register({ key, sessionId: sid, requestId: 'e-old', toolName: 'pwsh' });
   h.setPresets([]); // 模拟 DSH preset 清单读取失败（reconcileSessionPolicies 会跳过判定）
   await h.handleIncoming('private', OWNER, ownerPm('/panic'), h.cfg);
   await settle();
@@ -485,7 +492,7 @@ await test('审计 F2：/panic 无条件退役运维会话并作废其审批；�
 await test('审计 F2：会话失效后的审批回复被作废并拒绝', async (h) => {
   await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L2' });
   const key = `qq:private:${OWNER}`;
-  const e = h.ext.approvals.register({ key, sessionId: 'not-current', clientId: 'k', eventId: 'e-x', toolName: 'pwsh' }).entry;
+  const e = h.ext.approvals.register({ key, sessionId: 'not-current', requestId: 'e-x', toolName: 'pwsh' }).entry;
   await h.handleIncoming('private', OWNER, ownerPm(`通过 #${e.id}`), h.cfg);
   await settle();
   assert.match(lastOwnerText(h), /已失效/);
@@ -526,11 +533,11 @@ await test('审计 F9：入群事件里的名片换行与伪造行被清理', as
 });
 
 await test('审计 F4：审批编号跨重启连续，不会复用', async (h) => {
-  const a = h.ext.approvals.register({ key: `qq:private:${OWNER}`, sessionId: 's', clientId: 'k', eventId: 'r1', toolName: 'pwsh' }).entry;
+  const a = h.ext.approvals.register({ key: `qq:private:${OWNER}`, sessionId: 's', requestId: 'r1', toolName: 'pwsh' }).entry;
   h.ext.controller.persistApprovalSeq(h.ext.approvals.lastId);
   const { createBridgeExtensions } = await import('../src/bridge-extensions.js');
   const again = createBridgeExtensions({ cfg: h.cfg, stateDir: path.join(h.temp, 'state'), log: () => {}, notifyOwner: async () => {}, applyMode: async () => {}, onApprovalTimeout: async () => {} });
-  const b = again.approvals.register({ key: `qq:private:${OWNER}`, sessionId: 's2', clientId: 'k', eventId: 'r2', toolName: 'pwsh' }).entry;
+  const b = again.approvals.register({ key: `qq:private:${OWNER}`, sessionId: 's2', requestId: 'r2', toolName: 'pwsh' }).entry;
   assert.ok(b.id > a.id, `重启后编号 ${b.id} 应大于 ${a.id}`);
   clearTimeout(a.timer); clearTimeout(b.timer);
 });

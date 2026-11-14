@@ -128,7 +128,8 @@ import * as memoryDefaults from '../src/memory/defaults.mjs';
 import * as memoryIngest from '../src/memory/ingest.mjs';
 import * as memoryLocalStore from '../src/memory/local-store.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
-import { createTurnCollector } from '../src/agent-side/adapters/dsh/client.mjs';
+import { createAgentTurnCollector } from '../src/agent-side/collector.mjs';
+import { createDshEventPlane } from '../src/agent-side/adapters/dsh/events-plane.mjs';
 // P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
 // createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
 import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
@@ -200,7 +201,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, typeof content === 'string' ? content : JSON.stringify(content));
   }
-  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], cancelled: [], images: [], faces: [], http: [], commands: [], settings: [], responds: [], renames: [], selectModels: [] };
+  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], forgets: [], cancelled: [], images: [], faces: [], http: [], commands: [], settings: [], responds: [], renames: [], selectModels: [] };
   // 语音发送在桥接里是**直接 fetch 网关**（与文本/表情共用 sendChain，但要自己带 record 段），
   // 所以这里给 VM 注入一个记录型 fetch：既不让测试真的发 QQ 消息，又能断言发出的段内容。
   const fakeFetch = async (url, init = {}) => {
@@ -226,7 +227,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   };
   const success = (value) => ({ result: { ok: true, value } });
   const api = {
-    events: { follow: (id) => calls.follows.push(id) },
+    events: { follow: (id) => calls.follows.push(id), forget: (id) => calls.forgets.push(id) },
     // settings.describe 的默认桩：没有 qq-mode 命名空间 ⇒ refreshMode() 回退到本地 mode.json。
     // 测试可覆盖它来验证「DSH 设置里的空 ownerQQ 不得覆盖 config.json」等契约。
     settings: {
@@ -260,12 +261,17 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   };
   // 连接层桩：bridge 只经 agentRuntime()（地址 / 凭据 / 客户端 / 事件 / 端口 / 收集器 / 健康 / 探活）。
   // 地址发现与客户端必须离线：真实现会扫本机进程；端口用真实现，能力闸门与解包逻辑照常生效。
+  // 审批 / 提问的挂起表由事件面写入、端口读出：两者必须共用同一份。
+  const approvals = new Map();
   const agentPortStub = createAgentPort({
     id: 'dsh',
     label: 'DeepSeek Harness',
     capabilities: DSH_AGENT_CAPABILITIES,
-    impl: createDshPort({ client: api }),
+    impl: createDshPort({ client: api, approvals }),
   });
+  // 事件面用真实现：测试要模拟平台的审批请求，走的就是线上那条翻译路径
+  // （`requestEvent()` 同时把回执键记进挂起表）。
+  const eventsPlane = createDshEventPlane({ getClient: () => api, approvals });
   const runtimeStub = {
     id: 'dsh',
     label: 'DeepSeek Harness',
@@ -276,13 +282,14 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       return { baseUrl: configured || 'http://127.0.0.1:3080', auto: !configured, discovered: false, reachable: false };
     },
     client: () => api,
-    events: () => api.events,
+    events: () => eventsPlane,
     port: () => agentPortStub,
-    collector: () => createTurnCollector(),
+    collector: () => createAgentTurnCollector(),
     health: (options) => createDshHealth(options),
     // 探活只在 startDshWatch 里跑，而它在切片点之后：这里只要求形状成立。
     probe: () => ({ check: async () => ({ ok: true, error: null, rediscovered: false, url: null }) }),
     authHint: () => null,
+    authRecentlyFailed: () => false,
     resetAuthHint: () => {},
     close: async () => {},
   };
@@ -553,7 +560,7 @@ createExtensionCatalog,
   const bridge = await context.auditReady;
   bridge.setPresets(['standard', 'chat', 'chat-v2', 'readonly', 'workspace', 'full']);
   bridge.setReady(true);
-  return { ...bridge, calls, temp, async close() {
+  return { ...bridge, calls, temp, agentEvents: eventsPlane, agentApprovals: approvals, agentPort: agentPortStub, async close() {
     for (const timer of timers) clearTimeout(timer);
     fs.rmSync(temp, { recursive: true, force: true });
   } };

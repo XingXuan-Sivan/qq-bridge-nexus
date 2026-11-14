@@ -273,8 +273,9 @@ test('权限：Agent 反向请求 → 挂起 → 内核回执后它继续跑', a
     assert.equal(permission.sessionId, 'sess-1');
     assert.equal(permission.options.length, 3);
 
-    // bridge 就是这么拼引用的（`{ clientId, eventId }`）：ACP 的 id 放在 eventId 里。
-    const replied = await port.respondPermission({ clientId: '', eventId: permission.requestId }, 'allowed-once');
+    // bridge 就是这么拼引用的（`{ instance, sessionId, requestId }`）：平台的 JSON-RPC id 做 requestId。
+    const permissionRef = { sessionId: permission.sessionId, requestId: permission.requestId };
+    const replied = await port.respondPermission(permissionRef, 'allowed-once');
     assert.equal(replied.raw.optionId, 'allow-once', '只批一次，绝不能落到 allow_always');
 
     const outcome = await waitFor(() => events.find((event) => event.kind === 'text' && /权限结果/.test(event.delta)));
@@ -292,10 +293,10 @@ test('权限：拒绝落到 reject_once；没有挂起项时明确报错', async
     await port.ensureSession({ cwd: ROOT });
     await port.prompt('sess-1', { content: [{ type: 'text', text: '改文件' }] });
     const permission = await waitFor(() => events.find((event) => event.kind === 'permission'));
-    // 用 requestId 直传（另一种调用形状），拒绝走 reject_once。
-    const replied = await port.respondPermission({ requestId: permission.requestId }, 'rejected');
+    const permissionRef = { sessionId: 'sess-1', requestId: permission.requestId };
+    const replied = await port.respondPermission(permissionRef, 'rejected');
     assert.equal(replied.raw.optionId, 'reject-once');
-    await assert.rejects(() => port.respondPermission({ requestId: permission.requestId }, 'rejected'), /没有挂起的权限请求/);
+    await assert.rejects(() => port.respondPermission(permissionRef, 'rejected'), /没有挂起的权限请求/);
   } finally {
     await client.stop();
   }

@@ -3,31 +3,53 @@
 // 与 DSH 的结构差异（都不是遗漏）：
 //   · 没有地址发现与凭据猜测：stdio 传输没有 baseUrl，也没有 launch token；
 //   · 没有「端口重新识别」：地址不是可变的，probe 失败只记账，不重试换地址；
-//   · 事件是**归一后**的形状（AGENT_EVENT_KINDS），不是 wire 事件，因此收集器按
-//     kind 累加文本、以 turn-end 收口，而不是识别 DSH 的 turn/start。
+//   · 事件是**归一后**的形状（AGENT_EVENT_KINDS），翻译在 port 的反向请求处理器里
+//     （`session/update` / `session/request_permission`）；这里只负责把它交出去。
 import { createAcpClient } from './client.mjs';
 import { createAcpPort } from './port.mjs';
 import { createAgentPort } from '../../port.mjs';
+import { createAgentTurnCollector } from '../../collector.mjs';
 import * as declaration from '../../../../profiles/agent-platforms/acp/adapters/runtime.mjs';
 
-/** 归一事件按会话收成一轮：text 累加，turn-end 收口。 */
-function createCollector() {
-  const turns = new Map(); // sessionId -> { text }
+/**
+ * 事件面：把 port 吐出的归一事件排成一条可消费的流。
+ *
+ * 与 DSH 的差别：stdio 只有一条连接，平台侧没有「订阅某个会话」的概念，
+ * `follow` / `forget` 是契约成员但无操作 —— 会话归属由内核按 `sessionId` 判。
+ */
+function createEventPlane() {
+  const queue = [];
+  let wake = null;
+
+  const signal = () => {
+    const resume = wake;
+    wake = null;
+    resume?.();
+  };
+
   return {
     push(event) {
-      const sessionId = String(event?.sessionId ?? '');
-      if (event?.kind === 'text') {
-        const turn = turns.get(sessionId) ?? { text: '' };
-        turn.text += String(event.delta ?? '');
-        turns.set(sessionId, turn);
-        return null;
+      if (!event) return;
+      queue.push(event);
+      signal();
+    },
+
+    follow() {},
+
+    forget() {},
+
+    async *mux(_payload, abortSignal) {
+      const onAbort = () => signal();
+      abortSignal?.addEventListener?.('abort', onAbort, { once: true });
+      try {
+        for (;;) {
+          if (abortSignal?.aborted) return;
+          while (queue.length) yield queue.shift();
+          await new Promise((resolve) => { wake = resolve; });
+        }
+      } finally {
+        abortSignal?.removeEventListener?.('abort', onAbort);
       }
-      if (event?.kind === 'turn-end') {
-        const turn = turns.get(sessionId) ?? { text: '' };
-        turns.delete(sessionId);
-        return { text: turn.text, event };
-      }
-      return null;
     },
   };
 }
@@ -35,6 +57,7 @@ function createCollector() {
 export function createRuntime({ config = {}, log = () => {} } = {}) {
   let client = null;
   let port = null;
+  const events = createEventPlane();
 
   function ensureClient() {
     if (!client) {
@@ -50,7 +73,10 @@ export function createRuntime({ config = {}, log = () => {} } = {}) {
 
   function ensurePort() {
     if (!port) {
-      const { impl, capabilities } = createAcpPort({ client: ensureClient() });
+      const { impl, capabilities } = createAcpPort({
+        client: ensureClient(),
+        onEvent: (event) => events.push(event),
+      });
       port = createAgentPort({
         id: declaration.id,
         label: declaration.label,
@@ -84,8 +110,12 @@ export function createRuntime({ config = {}, log = () => {} } = {}) {
       return ensurePort();
     },
 
+    events() {
+      return events;
+    },
+
     collector() {
-      return createCollector();
+      return createAgentTurnCollector();
     },
 
     /** 连续失败计数：对端退出 / 超时由调用方给出的错误决定，这里只管次数。 */
@@ -143,7 +173,7 @@ export function createRuntime({ config = {}, log = () => {} } = {}) {
 
     async close() {
       port = null;
-      if (typeof client?.close === 'function') await client.close();
+      if (typeof client?.stop === 'function') await client.stop();
       client = null;
     },
   };

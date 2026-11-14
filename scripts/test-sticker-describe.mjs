@@ -194,5 +194,10 @@ test('③ 闸门：agent token 拒绝；agent 模式 / 不能看图 / DSH 未就
 test('④ 看图会话在每一批结束后仍留在学习会话集合里（否则第二批的回答收不到）', async () => {
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../src/bridge.js', import.meta.url), 'utf8');
-  assert.match(src, /frame\.sessionId !== slangLearnerSessionId && frame\.sessionId !== stickerDescriberSessionId\) learnerSessions\.delete/);
+  // 变量名跟着事件面走，判据只认「两个常驻学习会话不参与清理」这件事本身。
+  assert.match(
+    src,
+    /(\w+)\.sessionId !== slangLearnerSessionId && \1\.sessionId !== stickerDescriberSessionId\) learnerSessions\.delete/,
+    '学习会话结束时必须先排除黑话学习与看图会话，否则第二批回答收不到',
+  );
 });

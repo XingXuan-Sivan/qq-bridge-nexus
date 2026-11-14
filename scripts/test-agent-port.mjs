@@ -33,7 +33,11 @@ import * as dshDeclaration from '../profiles/agent-platforms/dsh/adapters/runtim
 import { ACP_PORT_CAPABILITIES, createAcpPort } from '../src/agent-side/adapters/acp/port.mjs';
 import * as acpDeclaration from '../profiles/agent-platforms/acp/adapters/runtime.mjs';
 import { BUILTIN_AGENT_PLATFORMS } from '../src/agent-side/builtin.mjs';
-import { useAgentPlatform } from '../src/agent-side/runtime-registry.mjs';
+import {
+  registerAgentPlatform,
+  unregisterAgentPlatform,
+  useAgentPlatform,
+} from '../src/agent-side/runtime-registry.mjs';
 import { agentRuntime, resetAgentRuntime } from '../src/agent-side/runtime.mjs';
 
 // ── 夹具 ────────────────────────────────────────────────────────────────────
@@ -333,7 +337,8 @@ test('DSH：会话 / 命名 / 归档 / preset 清单', async () => {
 
 test('DSH：权限只转发不判定（策略归桥接）', async () => {
   const { client, of } = fakeClient();
-  const impl = createDshPort({ client });
+  const approvals = new Map();
+  const impl = createDshPort({ client, approvals });
 
   const applied = await impl.applyPermission('s1', 'workspace-write');
   assert.deepEqual(of('commands.execute')[0].args, ['s1', '/permission workspace-write']);
@@ -343,15 +348,18 @@ test('DSH：权限只转发不判定（策略归桥接）', async () => {
   assert.deepEqual(applied.value, { changed: true });
   assert.deepEqual(applied.raw, { result: { ok: true, value: { changed: true } } });
 
-  // 审批回执：内核给决定，平台负责包装。
-  await impl.respondPermission({ clientId: 'c1', eventId: 'e1' }, 'allowed-once');
+  // 审批回执：内核只持有归一引用，DSH 要的 clientId + eventId 从挂起表取。
+  approvals.set('e1', { clientId: 'c1', eventId: 'e1', sessionId: 's1', at: Date.now() });
+  await impl.respondPermission({ sessionId: 's1', requestId: 'e1' }, 'allowed-once');
   assert.deepEqual(of('respond')[0].args[0], {
     clientId: 'c1',
     eventId: 'e1',
     outcome: { kind: 'result', value: 'allowed-once' },
   });
+  assert.equal(approvals.has('e1'), false);
   // 提问回执同样是「原样送 value」。
-  await impl.respondPermission({ clientId: 'c1', eventId: 'e2' }, { answers: [{ id: 'q1', selected: ['是'] }] });
+  approvals.set('e2', { clientId: 'c1', eventId: 'e2', sessionId: 's1', at: Date.now() });
+  await impl.respondPermission({ sessionId: 's1', requestId: 'e2' }, { answers: [{ id: 'q1', selected: ['是'] }] });
   assert.deepEqual(of('respond')[1].args[0].outcome.value, { answers: [{ id: 'q1', selected: ['是'] }] });
 });
 
@@ -402,10 +410,14 @@ test('DSH：缺 commands.execute 时 applyPermission 明确报能力缺失', asy
   });
 });
 
-test('DSH：respondPermission 缺 id 就报错（回执发不出去会一直挂到超时）', async () => {
+test('DSH：respondPermission 没有挂起请求或引用不全就报错（回执发不出去会一直挂到超时）', async () => {
   const { client } = fakeClient();
   const impl = createDshPort({ client });
-  await assert.rejects(() => impl.respondPermission({ clientId: 'c1' }, 'rejected'), /缺少 clientId \/ eventId/);
+  await assert.rejects(
+    () => impl.respondPermission({ sessionId: 's1', requestId: 'e-missing' }, 'rejected'),
+    /没有挂起的请求/,
+  );
+  await assert.rejects(() => impl.respondPermission({ sessionId: 's1' }, 'rejected'), /缺少 requestId/);
 });
 
 test('DSH：模型目录优先 modelCatalog，not found 时回落 models', async () => {
@@ -539,19 +551,23 @@ test('ACP：端口能力位是协商值（getter 现算，不是构造时的快�
   assert.ok(Object.isFrozen(port));
 });
 
-test('ACP：连接层缺事件流出口，因此当不了主平台（fail-closed）', async () => {
+test('ACP：连接层成员齐备，成员不齐则 agentRuntime() fail-closed', async () => {
   const entry = acpEntry();
   assert.equal(typeof entry.createRuntime, 'function');
   // 没有 HTTP 客户端可继承：连接就是 spawn 子进程，现场即信任边界。
   assert.equal(entry.NodeApiClient, undefined);
   const runtime = entry.createRuntime({ config: {}, log: () => {} });
   assert.equal(runtime.mode, 'stdio');
-  assert.equal(runtime.events, undefined);
-  // 真契约检查：切到 acp 后 agentRuntime() 必须直接拒绝，而不是让 bridge 撞上 undefined.mux。
-  useAgentPlatform('acp');
+  // 事件流出口由 stdio 侧自建：子进程的 stdout 就是事件源，没有可继承的连接对象。
+  assert.equal(typeof runtime.events, 'function');
+  // 真契约检查（fail-closed）：少一个成员的实现不得当主平台，
+  // 否则调用方会撞上 undefined.mux / undefined.port，分不清是没实现还是名字写错。
   await resetAgentRuntime();
-  assert.throws(() => agentRuntime({ config: {} }), /缺少 events/);
-  useAgentPlatform('dsh');
+  registerAgentPlatform({ ...entry, id: 'acp-thin', createRuntime: () => ({ ...runtime, collector: undefined }) });
+  useAgentPlatform('acp-thin');
+  assert.throws(() => agentRuntime({ config: {} }), /缺少 collector/);
+  unregisterAgentPlatform('acp-thin');
+  useAgentPlatform('acp');
   await resetAgentRuntime();
 });
 

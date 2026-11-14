@@ -37,14 +37,20 @@ async function withHarness(run, compact = { thresholdTokens: 100_000, idleDelayM
   h.setMode('reserved2');
   try { await run(h); } finally { await h.close(); }
 }
-// DSH 的 usage 字段：cacheReadTokens = 命中，inputTokens = 未命中（见 model-prices.js 的 normalizeUsage）
-const usageEvent = (hit, miss) => ({ type: 'assistant/message', data: { usage: { cacheReadTokens: hit, inputTokens: miss, outputTokens: 10 } } });
+// DSH 的用量桶：cacheReadTokens = 命中，inputTokens = 未命中（见 model-prices.js 的 normalizeUsage）
+const recordUsage = (h, sessionId, hit, miss) => h.recordSessionUsage({
+  kind: 'usage',
+  sessionId,
+  turn: 1,
+  step: 1,
+  usage: { cacheReadTokens: hit, inputTokens: miss, outputTokens: 10 }
+});
 const compactCalls = (h) => h.calls.commands.filter((c) => c.line === '/compact');
 
 test('② 端到端：超过阈值 → 空闲后压缩 → 重新完整给关键内容；冷却 / 忙 / 未超 / 非二代都不压', async () => {
   await withHarness(async (h) => {
     const sid = await h.ensureSession(GROUP);
-    h.recordSessionUsage(sid, usageEvent(140_000, 2_000));
+    recordUsage(h, sid, 140_000, 2_000);
     assert.ok(h.sessionLastInput.get(sid) >= 140_000, '记下最近一步读了多少');
     h.roleRefresh.markSeen(GROUP, sid, h.currentRoleFingerprintV2());
     h.promptBlocks.delivered(GROUP, sid, 'sticker', h.promptBlocks.decide(GROUP, sid, 'sticker', 'X'));
@@ -56,7 +62,7 @@ test('② 端到端：超过阈值 → 空闲后压缩 → 重新完整给关键
     assert.equal(h.promptBlocks.get(GROUP), null, '下次唤醒重新完整给表情块和黑话表');
     assert.equal(h.roleRefresh.needsRefresh(GROUP, sid, h.currentRoleFingerprintV2()), true, '下次唤醒重新给角色卡');
 
-    h.recordSessionUsage(sid, usageEvent(150_000, 0));
+    recordUsage(h, sid, 150_000, 0);
     h.maybeAutoCompact(GROUP, sid);
     await settle();
     assert.equal(compactCalls(h).length, 1, '冷却期内不再压');
@@ -64,12 +70,12 @@ test('② 端到端：超过阈值 → 空闲后压缩 → 重新完整给关键
 
   await withHarness(async (h) => {
     const sid = await h.ensureSession(GROUP);
-    h.recordSessionUsage(sid, usageEvent(50_000, 0));
+    recordUsage(h, sid, 50_000, 0);
     h.maybeAutoCompact(GROUP, sid);
     await settle();
     assert.equal(compactCalls(h).length, 0, '没超阈值不压');
 
-    h.recordSessionUsage(sid, usageEvent(200_000, 0));
+    recordUsage(h, sid, 200_000, 0);
     h.v2TurnStartAt.set(sid, Date.now());
     h.maybeAutoCompact(GROUP, sid);
     await settle();
@@ -84,7 +90,7 @@ test('② 端到端：超过阈值 → 空闲后压缩 → 重新完整给关键
 
   await withHarness(async (h) => {
     const sid = await h.ensureSession(GROUP);
-    h.recordSessionUsage(sid, usageEvent(900_000, 0));
+    recordUsage(h, sid, 900_000, 0);
     h.maybeAutoCompact(GROUP, sid);
     await settle();
     assert.equal(compactCalls(h).length, 0, '关掉后不压');
@@ -134,7 +140,7 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
 
   await withHarness(async (h) => {
     const sid = await h.ensureSession(GROUP);
-    h.recordSessionUsage(sid, usageEvent(420_000, 1_000));
+    recordUsage(h, sid, 420_000, 1_000);
     const server = h.startConsoleServer();
     if (!server.listening) await new Promise((r) => server.once('listening', r));
     const port = server.address().port;
@@ -157,7 +163,7 @@ test('④ 控制台改压缩方式：提前压缩（填几万）或交给 DSH', 
 
       const dsh = await call(port, '/api/compact/config', { method: 'POST', body: { mode: 'dsh' } });
       assert.equal(dsh.json.mode, 'dsh');
-      h.recordSessionUsage(sid, usageEvent(780_000, 0));
+      recordUsage(h, sid, 780_000, 0);
       h.maybeAutoCompact(GROUP, sid);
       await settle(30);
       assert.equal(compactCalls(h).length, 0, '交给 DSH：桥接不提前压');

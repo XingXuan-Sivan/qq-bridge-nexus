@@ -120,11 +120,12 @@ test('连接层契约：成员齐备，且不齐就 fail-closed', async () => {
   const missing = RUNTIME_MEMBERS.filter((name) => typeof runtime[name] !== 'function');
   assert.deepEqual(missing, [], `DSH 连接层缺 ${missing.join(' / ')}`);
   assert.deepEqual([runtime.id, runtime.label, runtime.mode], ['dsh', 'DeepSeek Harness', 'http']);
-  // ACP 是 stdio：没有地址可识别，事件流出口尚未实现，因此还不能当主平台。
+  // ACP 走 stdio：没有地址可识别，但成员同样要齐 —— 少一个就 fail-closed。
   const acp = BUILTIN_AGENT_PLATFORMS.find((impl) => impl.id === 'acp');
   const acpRuntime = acp.createRuntime({ config: {}, log: () => {} });
-  assert.deepEqual(RUNTIME_MEMBERS.filter((name) => typeof acpRuntime[name] !== 'function'), ['events'],
-    'ACP 只差事件流出口，其余连接层职责都由 stdio 实现提供');
+  const acpMissing = RUNTIME_MEMBERS.filter((name) => typeof acpRuntime[name] !== 'function');
+  assert.deepEqual(acpMissing, [], `ACP 连接层缺 ${acpMissing.join(' / ')}`);
+  assert.deepEqual([acpRuntime.id, acpRuntime.mode], ['acp', 'stdio']);
   await resetAgentRuntime();
   const singleton = agentRuntime({ config: {} });
   assert.equal(singleton.id, 'dsh');

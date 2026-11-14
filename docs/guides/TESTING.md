@@ -16,13 +16,13 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-control-center.mjs` | v0.4.0 控制中心：SnowLuma 目录识别（版本、完整版/Lite、端口、账号）、版本比较、更新数据迁移（先备份、只搬 config/data、不碰程序文件、拒绝降级/同目录）、更新检查、子进程输出捕获/脱敏/自动重启/停止、HTTP 令牌/Host/跨站/非 JSON、未部署时不能启动桥接、固定命令集、选择目录不启动 SnowLuma、同步 homeDir、L6 合规 |
 | `scripts/test-snowluma-reconnect.mjs` | v0.4.1：真实 `@snowluma/sdk` + 假 WebSocket，复现握手只报 error 时 SDK 不重连；连接看门狗恢复连接、连上即停、退避上限；正常 close 路径不变 |
 | `scripts/test-agent-errors.mjs` | v0.4.1：DSH 回合错误的错误码识别与分类；日志详情抹掉凭据、令牌、本机路径；群聊只显示错误码 |
-| `scripts/test-dsh-endpoint.mjs` | v0.4.1：DSH 地址自动识别（显式配置照用、桌面版优先 19387、命令行版 3080、端口探测） |
+| `scripts/test-dsh-endpoint.mjs` | v0.4.1：DSH 地址自动识别（显式配置照用、桌面版优先 19387、命令行版 3080、端口探测）；连接层接线（`adapters/dsh/runtime.mjs` 走 `prepareEndpoint`、探活失败按 10 秒节流重识别、`setBaseUrl` 只在 `adapters/` 内调用） |
 | `scripts/test-owner-relay.mjs` | v0.4.2：管理员私聊托付群会话——只有 owner 私聊能托付、目标必须是白名单群、开关默认关闭、限频、待办只看不取直到最终投递、提示词不让原样转发；端点只唤醒目标群会话、不直接发送 |
 | `scripts/test-platform.mjs` | 接口平台 M1（仓库内 `interface-platform/`，缺失即失败）：平台自身单元/端到端测试（假 SnowLuma + 真实 `@snowluma/sdk` 客户端走兼容入口、发送状态 confirmed/failed/unknown 与去重、SSE 游标、多账号路由、停用桥接、断开/重连、令牌分离、Host 校验）；控制中心托管平台进程与「接入桥接」备份/还原；`viaPlatform` 时自愈不绕过平台；顶部大标签切换不发请求；控制中心只经 HTTP 管理接口与平台通信 |
 | `scripts/test-napcat-manage.mjs` | NapCat 管理：系统「浏览…」窗口（macOS osascript / Windows PowerShell，参数不拼进脚本）、NapCat 版本（后端自报 / Windows 安装文件）、检查更新只读 Release 不下载、设置校验与经控制中心接口保存、页面元素 |
 | `scripts/test-qq-backend-label.mjs` | 桥接日志里 QQ 后端的称呼：经接口平台写「QQ 后端（经接口平台 · NapCat 版本）」，直连 SnowLuma 仍写 SnowLuma |
 | `scripts/test-mac-app.mjs` | macOS 无窗口启动 App 的脚本约定（后台启动、reopen、控制中心退出后 App 退出、不碰 SnowLuma/QQ）；macOS 上实际生成并校验签名 |
-| `scripts/test-dsh-health.mjs` | DSH 探活：连续 2 次失败才判定不可用；失败原因分类（用真实的 fetch「连接被拒」「超时」错误验证）；桥接接线 |
+| `scripts/test-dsh-health.mjs` | DSH 探活：连续 2 次失败才判定不可用；失败原因分类（用真实的 fetch「连接被拒」「超时」错误验证）；连接层接线（bridge 用 `agentRuntime()` 的 `health` / `probe`，源码里不再出现探活构造器） |
 | `scripts/test-linux-support.mjs` | Linux 支持：SnowLuma 2.x Windows / Linux 发行包识别与启动、Node 要求与平台不符时拒绝启动、按平台的更新建议、Linux「浏览…」（zenity / kdialog）、NapCat 在 Linux、systemd 用户服务；并断言 Windows / macOS 原有行为不变 |
 | `scripts/test-deploy-fixes.mjs` | Windows 实机部署反馈的回归：ZIP 中文文件名 UTF-8 标志与可执行位、黑话研究日志计数、会话重置清等待租约、Linux 服务文件 POSIX 路径、禁止用 `URL.pathname` 当文件路径 |
 | `scripts/test-slang-guess.mjs` | 黑话研究未确认时的 AI 推测（`lastGuess`）：字段清洗与限长、不进提示词、不进给 AI 的公开条目、确认 / 填含义后清空、控制台只在「待研究」显示并转义、「采用为含义」只填编辑框 |
@@ -39,7 +39,7 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-auto-compact.mjs` | 自动压缩：配置规范化、阈值与冷却、超阈值空闲后执行 /compact 并让关键内容下次重新完整给、忙 / 未超 / 非二代 / 关闭时不压、手动接口只给控制台；控制台改压缩方式（提前压缩填几万 / 交给 DSH，校验 5～80 万、写进 config.json、马上按新阈值判断、AI 改不了） |
 | `scripts/test-default-roles.mjs` | 恢复默认人格：发布包自带的原版卡合法、状态（在 / 被删 / 改过）、被删放回、改过先备份再恢复、本来就是原版不动、备份最多 10 份、不是默认人格拒绝；端到端（恢复当前人格按生效方式处理、不自动切换人格、AI 调不了） |
 | `scripts/test-role-per-key.mjs` | 按会话设置人格卡：老状态文件不变、byKey 命中 / 未命中 / null 三种回落、非法 key 与别名、路径穿越拒绝（含 `provider:id` 形式的非法引用）、改名 / 删除跟随；各会话注入自己的卡（二代【当前角色】、一代角色提示、qq_get_prompt）；只给卡变了的会话安排读卡唤醒；控制台接口与 AI 调不了；`/role` 只改当前会话、群友发的不生效 |
-| `scripts/test-dsh-auth-hint.mjs` | DSH 401 诊断提示：识别 401；凭据缺失 / 对不上两种说法与发现另一个有凭据的目录；用户目录显示成 ~、不输出密钥；10 分钟限频与恢复后重置；bridge.js 接线（从没就绪过也提示、「事件流 0 帧」在 401 时不再说成协议不匹配） |
+| `scripts/test-dsh-auth-hint.mjs` | DSH 401 诊断提示：识别 401；凭据缺失 / 对不上两种说法与发现另一个有凭据的目录；用户目录显示成 ~、不输出密钥；10 分钟限频与恢复后重置；bridge 接线（从没就绪过也提示、「事件流 0 帧」在 401 时不再说成协议不匹配）；诊断与限频归连接层（`adapters/dsh/auth-hint.mjs`） |
 | `scripts/test-backfill.mjs` | 断线补收：断档检测（含桥接重启后读回）、消息 ID 去重、命令类识别、挑选（时间窗 / 自己发的 / 收过的 / 太旧 / 上限）；端到端（补收进未读带原始时间与标记、有 @ 排唤醒、唤醒提示说明是补收的且送达后清掉、不执行补收到的命令只提醒管理员、重复补收不重复、太旧不唤醒、非二代不补）；启动后第一个事件包自动触发；拉历史失败时记下没补上的时间、重试、下次从更早的时间补 |
 | `scripts/test-send-limit-console.mjs` | 发言上限：超过每分钟上限 AI 收到说明（桥接的上限，不是 QQ 的）、控制台状态里有最近 24 小时被拦次数（AI 拿不到）、控制台改上限马上生效；总览页卡片 |
 | `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |

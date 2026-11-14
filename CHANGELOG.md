@@ -468,6 +468,31 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **门禁**：`test:audit` 129/129、`test:console-ui` 38/38（43 条隔离 mock 写请求）、`verify:repo` 80 通过 0 失败 0 跳过、`test-console-static` 全过、`node --check` 全过。
 - **文档**：`COMMAND_REGISTRY.md` §9 补 `role` 注入契约；`guides/TESTING.md`、`guides/CONFIGURATION.md`、`guides/SECURITY_BASELINE.md`、`PLUGIN_KERNEL.md` §9.2 按新事实校正；`PLATFORM_UNIFICATION.md` 新增 §9.5。
 
+### 重构：执行体通用化 P0（C6.5，连接层下沉）
+- **连接层唯一入口**：新增 `src/agent-side/runtime.mjs` —— `agentRuntime({config,log,onBaseUrlChange})` 按
+  `platforms.active.agent` 取实现、调 `createRuntime`、按 `RUNTIME_MEMBERS`（12 个成员）校验后缓存；
+  缺成员或未声明 `id` / `label` / `mode` 直接抛错。缓存键是实现对象本身，注册表重置后重新装配同一平台
+  不复用旧句柄；`resetAgentRuntime()` 丢弃并 `close()`，切换执行体后下一次调用按新平台重建。
+- **删门面**：`src/agent-side/agent-client.mjs` 与 `REQUIRED_PROTOCOL_MEMBERS` 删除（B5/C8 的「有意保留」到此核销）。
+  bridge 改从 `agentRuntime()` 取 `events` / `port` / `collector` / `health` / `probe` / `authHint`，`src/` 内不再有第二套连接入口。
+- **DSH 连接层归口**：`adapters/dsh/runtime.mjs` 提供全部 12 个成员（`prepareAuth` / `prepareEndpoint` / `client` /
+  `events` / `port` / `collector` / `health` / `probe` / `authHint` / `authRecentlyFailed` / `resetAuthHint` / `close`）；
+  地址发现与 401 诊断限频都在 `adapters/dsh/` 内，`client.setBaseUrl` 只在适配器里调用，新地址经
+  `onBaseUrlChange` 交给调用方决定是否落盘。
+- **ACP 连接层建立**：`adapters/acp/runtime.mjs` 按 `command` / `args` / `cwd` spawn 子进程、懒建客户端与 port、
+  按归一事件收成一轮，没有地址与凭据猜测。它**仍不能当主平台**，缺口从「协议面缺 14 个成员」缩到「没有 `events()`」。
+- **调用方迁移**：`src/self-test.js`、`src/launcher/control-center.mjs` 改走 `agentRuntime()`；
+  `src/bridge-extensions.js` 删掉两组 DSH 直导出（仓内已无消费者）；`scripts/audit-bridge-harness.mjs` 夹具
+  改为注入连接层离线桩 + 真 `AgentPort`，不再注入旧符号。
+- **测试**：连接层契约用例新增（成员齐备、单例与 reset、ACP 只缺 `events` 因此 fail-closed）；
+  `test-dsh-{health,auth-hint,endpoint}`、`test-upstream-dsh-probe`、`test-platform-adapters`、`test-agent-port`、
+  `verify-adaptation` 的断言同步到新契约（`bridge` 里不再出现 `createAgentHealth` / `createDshProbe` / `resolveAgentBaseUrl`）。
+- **门禁**：`verify:repo` 81 通过 0 失败；`test:audit` 128/129（唯一失败是本地未纳入版本管理的
+  `profiles/plans/agent-full-copy.yml` 让「内置方案六条」变成七条，与本次改动无关）。
+- **文档**：`EXECUTION_BODY_GENERALIZATION.md` §4.1 改为实际形态（成员表 + fail-closed + ACP 缺口）、
+  §8.6 给出概览指标卡的目标语义；`PLATFORM_UNIFICATION.md` §4.3/§4.4 与 ACP 接线段、删除清单表的
+  「门面保留」改为已删除；`PROFILES_MODEL.md`、`guides/TESTING.md` 同步。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

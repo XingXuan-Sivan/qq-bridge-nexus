@@ -169,7 +169,7 @@ profiles/
 | — | `src/platforms/adapter-registry.mjs` | 只留**插件注册通道**（`adapters:provide`）：内置平台描述在平台目录里 |
 | — | `src/platforms/registry.mjs` | 统一注册表：四个来源合成一张表 + `diagnostics` |
 | — | `src/agent-side/agent-port.mjs` | 中立契约 + `requireCapability()` |
-| `src/agent-side/agent-client.mjs` | **保留**（有意偏离原计划） | 它只剩「连一个常驻服务」的装配门面（`NodeApiClient` / 地址发现 / 凭据 / 探活分类），调用面已全部改走 `AgentPort`（bridge 经 `createAgentPort` 拿到端口）。删掉会把装配期校验（协议面完整性）与连接职责一起丢掉 |
+| `src/agent-side/agent-client.mjs` | **已删除**（C6.5 / P0） | 连接职责下沉进 `adapters/<id>/runtime.mjs` 的 `createRuntime`，装配期校验由 `src/agent-side/runtime.mjs` 的 `RUNTIME_MEMBERS` 承担（缺成员即抛错）；调用面本来就全在 `AgentPort`。见 EXECUTION_BODY_GENERALIZATION §4.1 |
 | `src/capabilities/store.mjs` | 扩为 capability 真源 + 渲染接口 | 吸收 agents/ 语义 |
 | `src/behaviors/index.mjs` | 保留 | 行为档案仍是平台子资源 |
 
@@ -178,20 +178,19 @@ profiles/
 ```
 profiles/agent-platforms/dsh/agents/     （C4 已删）
 src/runtime/adapters.mjs          （C2b 已删）
-src/agent-side/agent-client.mjs   （C8 核销：保留，见下）
+src/agent-side/agent-client.mjs   （C6.5 已删，连接层归 agent-side/runtime.mjs）
 public/console/pages/behavior/            （C7 已删，整页，四标签全部拆走）
 public/console/components/platform-panel/ （C7 已删，内容拆入平台页）
 ```
 
-四项已清零，一项有意偏离：`src/agent-side/agent-client.mjs` **不删**。它的调用面（会话 / 回合 / 权限 / 模型 /
-设置 / 工作区 / 压缩）在 C5 已全部搬进 `AgentPort`，bridge 与 `self-test.js` 只经 `createAgentPort` 拿端口；
-剩下的是**怎么连上平台**——`AgentApiClient`、地址发现、凭据、探活分类，以及装配期「当前 Agent 平台的
-protocol 面缺少 …」那条校验。ACP 恰好没有这一层（连接是 spawn 子进程），所以把它当主平台被这条校验挡住；
-要删它，得先把这层职责迁到别处，否则等于用「删文件」换「装配期无守卫」。C6.5 接线时一并处理。
+五项已清零：`src/agent-side/agent-client.mjs` 在 C6.5 删除。它原来承担的两件事各有了归口——「怎么连上平台」
+（客户端、地址发现、凭据、探活分类）进 `src/agent-side/adapters/<id>/runtime.mjs` 的 `createRuntime`，
+装配期守卫进 `src/agent-side/runtime.mjs` 的 `RUNTIME_MEMBERS`（缺成员 fail-closed，守卫没丢）。ACP 仍不能
+当主平台，但缺口从「协议面缺 14 个成员」缩到「没有 `events()`」。
 
 > C6.5 的落地方案见 **[EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md)** §4：
-> 连接层下沉为适配器契约 `createRuntime({config,log,signal}) → { probe, port, close }`，
-> `REQUIRED_PROTOCOL_MEMBERS` 随之删除，注册门槛改为 `scripts/test-agent-port-tck.mjs`（P0）。
+> 连接层下沉为适配器契约 `createRuntime({config,log,onBaseUrlChange})`，成员表与 fail-closed 口径见 §4.1.1；
+> `REQUIRED_PROTOCOL_MEMBERS` 已随门面删除，注册门槛将改为 `scripts/test-agent-port-tck.mjs`（P0 剩余项）。
 
 ### 4.5 声明面字段（C2b 落地）
 
@@ -465,7 +464,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 | **C3** | 用户侧入站：`connect/onEvent` + 统一入站管线**（已完成）** | `src/user-side/{inbound,event,transport,user-platform,builtin}.mjs`、`src/user-side/adapters/qq/inbound.mjs`、`bridge.js` 入站 | `test-qq-inbound.mjs` 14 条；`test-transport-plugin` mock 平台端到端（收→准入→唤醒→发）；`test-platform-registry` 13 条 |
 | **C4** | 能力模型归一：capability 吸收 agents/、plan 去 `agent` 字段、preset 改渲染产物**（已完成）** | `src/capabilities/store.mjs`、`profiles/agent-platforms/dsh/*`、`adapters/build.mjs`、`scripts/check-profiles.mjs` | 渲染结果与现有 `artifacts/**/presets/*.patch.yml` 逐字节一致（golden）：`build-artifacts --check` 逐字节一致、`test-capability-unify` 17 条、`test:audit` 126/126 |
 | **C5** | `AgentPort` 契约 + DSH 适配器 + bridge 调用面迁移 + 会话引用去平台化（**已完成**三批：契约与适配器、`bridge.js` 55 处调用面、`state/sessions/*.json` 的 `binding.agentRef`） | `src/agent-side/{port,agent-client,builtin}.mjs`、`src/agent-side/adapters/dsh/port.mjs`、`src/session/{ref,registry,directory,reset,migrate}.mjs`、`bridge.js`、`self-test.js` | `test-agent-port.mjs` 21 条（能力位 fail-closed + 每个动词落到哪个 RPC + 返回值形状）；`test-session-registry.mjs` 11 条（归一、认领、跨平台归属、指纹不被 `undefined` 抹掉）；`verify:repo` 新增五条：内核不直接调平台 RPC（`\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callUnary|agentPresets|permissionPresets|commands)\b`）、`api.setBaseUrl` 只能在 `bridge.js` 出现一次、`state.sessions` 的直接读写只在会话归一层、档案里不再出现 `binding.sessionId`、`sessions.get()` 之后不再取字段；`test-session-lifecycle` 6 条（含裸 id 复用与跨平台判废） |
-| **C6** | ACP 适配器（第二实现）**（已完成）**：`client.mjs`（stdio + 双向分发）、`events.mjs`（归一映射）、`port.mjs`（`AgentPort` 实现）、声明面 `profiles/agent-platforms/acp/`、`builtin.mjs` 注册 | `src/agent-side/adapters/acp/`、`profiles/agent-platforms/acp/`、`src/agent-side/builtin.mjs`、`src/agent-side/agent-client.mjs`（仅装配期守卫）、`scripts/test-{acp-port,agent-port}.mjs` | **不改 `src/` 其余文件**跑通 session/prompt/permission/models：`test-acp-port.mjs` 14 条（离线夹具走真实 stdio）+ `test-agent-port.mjs` 30 条（含 5 条 ACP 契约一致性）；`check-profiles` 通过 |
+| **C6** | ACP 适配器（第二实现）**（已完成）**：`client.mjs`（stdio + 双向分发）、`events.mjs`（归一映射）、`port.mjs`（`AgentPort` 实现）、声明面 `profiles/agent-platforms/acp/`、`builtin.mjs` 注册 | `src/agent-side/adapters/acp/`、`profiles/agent-platforms/acp/`、`src/agent-side/builtin.mjs`、`src/agent-side/runtime.mjs`（装配期守卫）、`scripts/test-{acp-port,agent-port}.mjs` | **不改 `src/` 其余文件**跑通 session/prompt/permission/models：`test-acp-port.mjs` 14 条（离线夹具走真实 stdio）+ `test-agent-port.mjs` 30 条（含 5 条 ACP 契约一致性）；`check-profiles` 通过 |
 | **C7** | 界面 IA 重构（平台页 + 方案页，行为档案与能力预设并入平台详情）**（已完成）** | `public/console/**`、`scripts/console-source.mjs`、`test-console-*` | `test:console-static` 全过；`test:console-ui` 37/37（新增平台页、方案页、配置只读、两侧清单四条契约） |
 | **C8** | 收尾**（已完成）**：文档改写（PROFILES_MODEL §一/§二、FOLDER_MAP、CONSOLE、README 索引、CHANGELOG）、删除清单逐项核销、方案端点按 §7.4 改名为 `/api/plans` | `docs/*`、`src/bridge.js`（三处路由）、`public/console/pages/plans/page.js`、`scripts/console-ui-{contracts.json,fixture.mjs}`、`scripts/test-console-ui.mjs` | 全套门禁 + `git grep` 删除清单为空（结果见 §9.4） |
 
@@ -587,16 +586,17 @@ v2 的判别值是另一套（`agent_message` / `state_update` / …），两者
    `permissionCommandSucceeded` 判 `ok === true && modeId === wanted` —— `session/set_mode` 没有回执值，
    能确认的只有「RPC 成功」，`current_mode_update` 是事件、不保证先到，不假装能读到最终状态。
 
-**未做：接线（C6.5）**
+**接线状态（C6.5）**
 
-`src/agent-side/agent-client.mjs` 是「连一个常驻服务」的门面（`NodeApiClient` / 地址发现 / Cookie /
-探活分类）；acp 的 `protocol` 面只有 `createAcpClient` 与 `createAgentPort` 两项。因此：
+acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `command` / `args` / `cwd` spawn 子进程，
+懒建客户端与 port，按归一事件收成一轮）。它声明 `mode: 'stdio'`，没有地址发现与凭据猜测——这些差异
+不再需要内核假设。因此：
 
-- `builtin.mjs` 注册了 acp（控制台能看见它的能力位与配置表），但**不能把它配成 `platforms.active.agent`**；
-- 门面在装配期用一条明确的错误拒绝（`当前 Agent 平台的 protocol 面缺少 …`），而不是让 bridge 撞上
+- `builtin.mjs` 注册了 acp（控制台能看见它的能力位与配置表），但**仍不能把它配成 `platforms.active.agent`**；
+- 拒绝发生在 `agentRuntime()` 的成员表校验上，错误明确为「缺少 events」，而不是让 bridge 撞上
   `AgentApiClient is not a constructor`；
-- 接线要做三件事：按 `platforms.agents.acp` 的 `command` / `args` / `cwd` 建客户端、把 `onEvent` 接进
-  事件管线、把 port 交回内核。这三步不改变本批已交付的任何契约。
+- 剩下要做的两件事：给 ACP 补 `events()`（把 `onEvent` 归一后接进事件管线）、把 ACP 纳入
+  `scripts/test-agent-port-tck.mjs`（P0 剩余项）。两者都不改变本批已交付的契约。
 
 **测试**
 
@@ -671,7 +671,7 @@ v2 的判别值是另一套（`agent_message` / `state_update` / …），两者
 | `src/runtime/adapters.mjs` | C2b 已删 |
 | `public/console/pages/behavior/` | C7 已删 |
 | `public/console/components/platform-panel/` | C7 已删 |
-| `src/agent-side/agent-client.mjs` | **保留**（有意偏离，理由见 §4.4） |
+| `src/agent-side/agent-client.mjs` | C6.5 已删（连接层归 `src/agent-side/runtime.mjs` 与 `adapters/<id>/`） |
 
 **门禁**：`verify:repo` 80 通过 0 失败 0 跳过；`test:audit` 129/129；`test-console-static` 全过；`test:console-ui` 37/37（41 条隔离 mock 写请求）；`test-artifact-pipeline` 全过；`build-artifacts --check` 全部最新；`test:v030` 9/9；`check-profiles` 通过。`git grep` 残留只出现在测试的「已删除」断言、平台页的 `data-platform-panel-body` 属性名与文档的历史说明里。
 

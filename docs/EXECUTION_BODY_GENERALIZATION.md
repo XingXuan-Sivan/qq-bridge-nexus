@@ -1,8 +1,9 @@
 # 执行体通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**方案（待实施）**。本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
+> 状态：**实施中**——P0 的连接层下沉已落地（§4.1），P0 剩余的 ACP `events` 与 TCK（§4.2）以及 P1 起各批未做。
+> 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
 > 也是「可换执行体」在运行时第一次成立的地方。
-> 版本口径：0.2.0；分支 `feat/platform-unification` 的后续批次（C10 起）。
+> 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
 > 边界：AstrBot 目录只读；本文不改变已发布的 `AgentPort` 五个核心方法。
 
 本文要回答四件事（与设计评审提出的四条补充一一对应）：
@@ -42,6 +43,9 @@
 | 连接层（地址发现 / Cookie / 探活分类 / RPC 客户端）没有归口 | 同上 + `adapters/dsh/{client,endpoint}.mjs` | 换执行体 = 重写一次连接层；`describe()` 里无法表达「怎么连」 |
 | Agent 侧只有「描述」注册，没有「实现」注册 | `src/platforms/adapter-registry.mjs`（`ADAPTER_KINDS=['platform','agent']`，仅 id/label/note/vars）；`src/plugins/host-api.mjs` 的 `ctx.userPlatforms.register` 只对用户侧开放 | 用户侧可插件扩展，Agent 侧不能 |
 | 单 active | `src/config/platforms.mjs` 的 `platforms.active.{user,agent}` | 多平台并发在配置面就不成立 |
+
+前两条已按 §4.1 收口：`src/agent-side/agent-client.mjs` 与 `REQUIRED_PROTOCOL_MEMBERS` 已删除，
+连接层的唯一入口是 `src/agent-side/runtime.mjs` 的 `agentRuntime()`，实现落在 `adapters/<id>/`。
 
 ### 2.2 预设体系的三处「多套并存」
 
@@ -119,36 +123,52 @@ capability: direct          # 能力档 id；其 runtime.apply 决定 preset / p
 
 ### 4.1 连接层下沉
 
-新增适配器契约方法（不改 `AgentPort` 已有的调用面）：
+一个平台要能被配成 `platforms.active.agent`，只需在实现面提供一个 `createRuntime`；
+调用面（会话 / 回合 / 权限 / 模型 / 设置 / 工作区 / 压缩）仍在 `AgentPort`，两件事不混在一个对象里。
 
 ```js
-// src/agent-side/adapters/<id>/runtime.mjs（声明面，纯常量/纯函数）
-export const id = 'dsh';
-export const label = 'DeepSeek Harness';
-export const protocol = { runtime: './runtime.mjs', port: './port.mjs' };
-export const capabilities = [...];              // 已有
-export function describe(config = {}) { ... }   // 已有，补 supportedPrompt / supportedPermission
-
-// src/agent-side/adapters/<id>/index.mjs（实现面，新增）
-export function createRuntime({ config, log, signal }) {
-  return {
-    probe(),                    // 探活：ok / unreachable / unauthorized / version_mismatch
-    port(),                     // 返回 AgentPort（懒建）
-    close(),                    // 释放连接 / 子进程
-    connection: { mode: 'http' | 'stdio' | 'remote', detail },  // 仅供控制台展示
-  };
+// src/agent-side/adapters/<id>/runtime.mjs（连接面）
+export function createRuntime({ config, log, onBaseUrlChange }) {
+  return { id, label, mode /* http | stdio */, ...members };
 }
 ```
 
-有了 `createRuntime` 之后：
-- `agent-client.mjs` 只剩「按 `platforms.active.agent` 找适配器 → `createRuntime` → 缓存 → 转发」；
-  `REQUIRED_PROTOCOL_MEMBERS` **删除**，装配期守卫改成「`createRuntime` 必须可调用 + 返回对象含 probe/port/close」。
-- ACP 的 `stdio` 子进程生命周期归 ACP 自己的 `createRuntime`，内核不再假设「有个常驻 HTTP 服务」。
-- DSH 的地址发现 / Cookie / 探活分类 / `looksLikeDsh` 全部搬进 `adapters/dsh/`。
+`config` 是 `platforms.agents.<id>` 的**活引用**：识别到新地址时连接层直接改它，调用方不再同步副本。
+
+### 4.1.1 单一入口与成员表
+
+`src/agent-side/runtime.mjs` 的 `agentRuntime({config, log, onBaseUrlChange})` 是内核唯一的连接入口：
+按 `platforms.active.agent` 取已注册实现 → 调 `createRuntime` → 按成员表校验 → 缓存。
+进程内同一时刻只有一个句柄；缓存键是**实现对象本身**（不是 id），注册表重置后重新装配同一平台不会复用旧句柄。
+`resetAgentRuntime()` 丢弃句柄并 `close()`，切换执行体后下一次调用按新平台重建。
+
+| 成员 | 谁用 | 说明 |
+| --- | --- | --- |
+| `prepareAuth(config)` | bridge / self-test / 启动器 | 连接前补全凭据，返回 `{ authToken, tokenExplicit }`；不发请求 |
+| `prepareEndpoint(config)` | 同上 | 连接前补全地址，返回 `{ baseUrl, auto, discovered, reachable }`；stdio 执行体返回空串 + `auto: false` |
+| `client()` | 连接层内部 / 诊断 | 懒建底层客户端 |
+| `events()` | bridge | 事件流订阅面（`follow` / `forget` / `mux`） |
+| `port()` | bridge / 工具面 | 懒建 `AgentPort`，能力位由 `createAgentPort` 装配 |
+| `collector()` | bridge | 按本平台的事件口径把一条流收成「一轮」 |
+| `health({threshold})` | bridge | 连续失败计数：`ok()` / `fail(err)`（阈值策略归调用方） |
+| `probe()` | bridge / 启动器 | `check()` → `{ ok, error, rediscovered, url }`；HTTP 执行体自带重识别与节流 |
+| `authHint(err)` | bridge | 401 诊断文本；不是凭据问题或在限频窗口内返回 `null` |
+| `authRecentlyFailed()` | bridge | 「连上就断」日志的归因依据 |
+| `resetAuthHint()` | bridge | 恢复后清空限频与计数 |
+| `close()` | 切换执行体 / 退出 | 断开连接或结束子进程 |
+
+- **fail-closed 在装配期**：`RUNTIME_MEMBERS` 缺任一成员，或未声明 `id` / `label` / `mode`，`agentRuntime()` 直接抛错：
+  不允许「少一个方法先跑起来」，也不允许内核按 `undefined` 分支猜行为。
+- **ACP 的缺口只剩 `events`**：`stdio` 子进程没有地址、没有凭据猜测、没有重识别，这些差异都在 ACP 自己的
+  `createRuntime` 里；`events()` 尚未实现，因此它仍不能当主平台，报错从「缺 14 个成员」变成「缺少 events」。
+- **DSH 专有符号不出 `adapters/dsh/`**：地址发现（`endpoint.mjs`）、Cookie 与客户端（`client.mjs`）、
+  探活重识别（`probe.mjs`）、401 诊断与限频（`auth-hint.mjs`）、失败分类（`health.mjs`）都在该目录内，
+  内核只认成员名。
 
 ### 4.2 一致性测试包（TCK）
 
-新增 `scripts/test-agent-port-tck.mjs`，对每个已注册 Agent 平台跑同一组离线用例：
+P0 剩余项。新增 `scripts/test-agent-port-tck.mjs`，对每个已注册 Agent 平台跑同一组离线用例；
+ACP 进入用例集的前提是补齐 `events()`（§4.1.1）：
 
 | 用例 | 断言 |
 | --- | --- |
@@ -171,8 +191,8 @@ ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台
 | --- | --- |
 | 新权限 | `agent-provider:provide`（与 `transport:provide` / `adapters:provide` 并列） |
 | host-api | `ctx.agentPlatforms = { register(def), list() }`；`unregisterAgentPlatformsByOwner(owner)` 在卸载时调用 |
-| 注册形状 | `register({ id, label, capabilities, configSchema, describe, create })`，`create({config, log, signal}) → {port, probe, close}` |
-| 懒建与缓存 | 按 `(id, endpoint 指纹)` 缓存实例；配置变更 → `close` 旧实例再建 |
+| 注册形状 | `register({ id, label, capabilities, configSchema, describe, createRuntime })`，连接层成员同 §4.1.1 |
+| 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active → `resetAgentRuntime()` 后再取新句柄 |
 | 安全边界 | 插件**不能自证能力**：`capabilities` 先跑 TCK 再进注册表；权限决策权只在内核；`readPermission` 用于发现漂移 |
 | 诊断 | `capability_overclaimed` / `agent_provider_invalid` / `agent_instance_offline` |
 
@@ -435,7 +455,22 @@ POST /api/sessions/:key/permission  { preset }
 
 ### 8.6 概览与诊断
 
-- 概览：在执行体摘要处显示「默认执行体 + 探活」；用户侧显示在线实例数。
+概览顶部五格指标卡的语义按「执行体 / 用户平台 / 默认方案 / 会话 / 待处理」重排（现状第 1、2 格写死 DSH 与
+SnowLuma，换执行体后第一格名字就是错的；SnowLuma 是 QQ 侧上游，不该占据固定席位）：
+
+| 格 | 标题 | 值 | 副行 | 点击 |
+| --- | --- | --- | --- | --- |
+| 1 | 执行体 | `label`（如 DeepSeek Harness）+ 连接态 | 模式徽标（http / stdio）+ 最近探活结果 | 平台配置 › Agent 侧 |
+| 2 | 用户平台 | 在线实例数 `N / M` | 当前实例 label + 上游摘要（QQ 类平台显示 SnowLuma 的 good 与最近消息时间） | 平台配置 › 用户侧 |
+| 3 | 默认方案 | `runtime.defaultPlan` 的 label | 角色（`state/profiles/<key>.role`） | 运行方案 |
+| 4 | 已建立会话 | 会话数 | 查看会话映射 | 会话与审批 |
+| 5 | 待处理请求 | 提问 + 审批数 | 提问与工具审批 | 会话与审批 › 待处理 |
+
+- 第 2 格的上游摘要按平台声明面的能力位出现，不是按平台名判断：执行体换成 ACP 或用户侧换成非 QQ 平台时该行自然消失，
+  格子标题仍成立。
+- 数据仍由 `js/app.js` 的 `refreshStatus()` 统一写入，DOM 仍由 `OVERVIEW_FIELDS.metrics` 的 bare HTML 产出；
+  不新增组件、不在页面里写样式。现有按 id 写死的字号特例（`#metricMode` / `#metricSnowluma`）改为 `.metric`
+  内的通用选择器，新格子不再需要新的样式分支。
 - 新诊断码：`capability_overclaimed`、`agent_provider_invalid`、`agent_instance_offline`、
   `passthrough_degraded`、`permission_unreadable`、`permission_write_failed`、`plan_warn`。
   全部走既有 `diagnostics` 通道（`/api/platforms/registry` 携带），不新开接口。
@@ -448,7 +483,7 @@ POST /api/sessions/:key/permission  { preset }
 
 | 批 | 目标 | 主要文件 | 门禁 |
 | --- | --- | --- | --- |
-| **P0** | 执行体可换：连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS` + ACP 当主平台 + TCK | `src/agent-side/agent-client.mjs`、`adapters/{dsh,acp}/`、`scripts/test-agent-port-tck.mjs`、`builtin.mjs` | `verify:repo`、`test:audit`、TCK 两家全绿 |
+| **P0** | 执行体可换：连接层下沉（✅）+ 删 `REQUIRED_PROTOCOL_MEMBERS`（✅）+ ACP 当主平台（待补 `events`）+ TCK（待做） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`scripts/test-agent-port-tck.mjs`、`builtin.mjs` | `verify:repo`、`test:audit`、TCK 两家全绿 |
 | **P1** | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + overclaim 诊断 | `src/plugins/host-api.mjs`、`src/agent-side/runtime-registry.mjs`、`PLUGIN_KERNEL.md` | TCK + `test:audit` |
 | **P2** | 配置 v3：`platforms.agents.<id>` 多实例、`runtime.defaultAgent`、agent 侧 probe/config 端点 | `src/config/platforms.mjs`、`scripts/*router*`（`/api/platforms/registry` 写口）、`guides/CONFIGURATION.md` | `verify:repo`、`test:console-ui` |
 | **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |
@@ -456,8 +491,10 @@ POST /api/sessions/:key/permission  { preset }
 | **P5** | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`prompt` 能力位）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-console-ui`、新增 `test-passthrough-plan.mjs`、`verify:persona` |
 | **P6** | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销 | `docs/**` | `verify:repo` 全绿 |
 
-回滚：P2（配置）与 P4（方案）各自带 `configVersion` 与方案 `version` 递增，读旧值即旧行为；
-P0/P1 是纯增量（新增契约方法，不删旧路径），单独回滚不影响运行。
+回滚：P0 的连接层下沉与删门面是同一版内的替换，不存在「先留着旧路径以后删」的中间态；
+要换执行体就换 `createRuntime` 的实现，要退只能整批退回上一个可运行提交。
+P2（配置）与 P4（方案）各自带 `configVersion` 与方案 `version` 递增，读旧值即旧行为；
+P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 
 ---
 

@@ -219,6 +219,21 @@ P0 的两项遗留（ACP 当主平台、TCK）卡在同一处：`events()` 还�
 TCK 排在最后的原因：它的「事件归一」用例要求每家都产出 `AGENT_EVENT_KINDS`；在 DSH 事件面归一之前先写 TCK，
 只能把这条用例降级成「已知缺口」——那是一条写进合同里的假绿。
 
+落地清单（按依赖顺序，逐项可独立验证）：
+
+1. `src/agent-side/port.mjs`：`AGENT_EVENT_KINDS` 补 `turn-start` / `snapshot`；定义中立事件形状。
+2. `src/agent-side/collector.mjs`（新增）：中立收集器（`turn-start` 开回合、`text` 追加、`turn-end` 收口），两家共用。
+3. `src/agent-side/adapters/dsh/events-plane.mjs`（新增）：wire 事件 / snapshot / `$events` 提问审批 → 中立事件；
+   DSH 的 `events()` 与 `collector()` 改用它，`client.mjs` 的 `createTurnCollector` 删除。
+4. `src/token-ledger.js`：`ingestEvent()` 改吃中立用量记录，`ingestBaseline()` 吃 `{ tokenUsage, asOfSeq }`；
+   重试轴随样本传入（不再靠 `llm/retry-started` 事件）。
+5. `src/bridge.js`：`pumpMux` 按 `kind` 分发，`recordSessionUsage` / `recordSessionSnapshot` /
+   `rebuildInFlightCollector` / `trackTurnEvent` 改吃中立事件；删除所有 `turn/start` / `tool/call` 等判别值。
+6. `src/agent-side/port.mjs` + 两家 `port.mjs` + bridge：`respondPermission` 的引用归一成 `{ instance, sessionId, requestId }`。
+7. `src/agent-side/adapters/acp/runtime.mjs`：用 `onEvent` 建事件总线，实现 `events()` 的 `mux` / `follow` / `forget`。
+8. `scripts/test-agent-port-tck.mjs`（新增）：逐家跑能力自证 / fail-closed / 会话引用 / 事件归一 / 生命周期 / 权限只读，
+   接入 `package.json` 的 `test:tck`。
+
 ---
 
 ## 5. 执行体切换机制（补充一）

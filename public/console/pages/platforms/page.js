@@ -55,6 +55,8 @@ function listItemHtml(meta, item) {
   const hasError = diags.some((diag) => diag.level === 'error');
   const badges = [
     item.active ? '<span class="tag tag--success tag--sm">运行期</span>' : '',
+    // 配置面已改为默认、本进程还没装配：重启后才会变成「运行期」。
+    item.configured && !item.active ? '<span class="tag tag--warning tag--sm">待重启</span>' : '',
     hasError ? '<span class="tag tag--danger tag--sm">错误</span>' : '',
     !hasError && diags.length ? '<span class="tag tag--warning tag--sm">警告</span>' : '',
   ].filter(Boolean).join('');
@@ -139,7 +141,8 @@ function paintDetail() {
     return;
   }
   // 诊断按平台切好一起交给详情：详情只认「这一个平台」，不再回头查全局。
-  mountPlatformDetail(panel, { ...item, diagnostics: diagnosticsOf(meta, item.side, item.id) });
+  // onChanged：写口成功后重拉注册表并重画（列表、诊断卡、详情同属一份快照）。
+  mountPlatformDetail(panel, { ...item, diagnostics: diagnosticsOf(meta, item.side, item.id) }, { onChanged: () => void refresh() });
 }
 
 function render() {

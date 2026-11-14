@@ -15,7 +15,7 @@
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
 | [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) | **平台统一与 Agent 通用化（总纲）**：统一平台注册表、`AgentPort` 窄契约 + DSH/ACP 双实现、用户侧入站、界面 IA 重构（平台配置页 + 运行方案页）、配置 v2、C0–C8 批次与验收；§9.5 记 C9「控制台文案与人格生效口径」 | ✅ C0–C8 已完成，C9 补充与 C6.5 ACP 接线均已收口；动平台/Agent/平台页之前先读这份 |
-| [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) | **执行体通用化与运行方案重构**：执行体切换（`runtime.defaultAgent`，单活动 + 多实例）、四轴方案模型（应用方式 / 工具面 / 权限权威 / 行为）、能力档 `runtime` 段、直通模式的提示注入与权限权威、界面改造清单、P0–P6 批次；接 PLATFORM_UNIFICATION 的 C6.5 | ✅ P0 已落地（连接层下沉 / 三处归一 / ACP 事件流出口与 TCK / 概览指标卡按位置命名）、P1 已落地（Agent 侧插件化）；P2 起各批待实施；动方案 / 权限档 / 执行体之前先读 |
+| [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) | **执行体通用化与运行方案重构**：执行体切换（`runtime.defaultAgent`，单活动 + 多实例）、四轴方案模型（应用方式 / 工具面 / 权限权威 / 行为）、能力档 `runtime` 段、直通模式的提示注入与权限权威、界面改造清单、P0–P6 批次；接 PLATFORM_UNIFICATION 的 C6.5 | ✅ P0 已落地（连接层下沉 / 三处归一 / ACP 事件流出口与 TCK / 概览指标卡按位置命名）、P1 已落地（Agent 侧插件化）、P2 已落地（Agent 平台配置写口 / 探活 / 默认执行体）；P3 起各批待实施；动方案 / 权限档 / 执行体之前先读 |
 | [PROFILES_MODEL.md](PROFILES_MODEL.md) | **四层配置模型**：用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | **Agent 平台适配层**：P0 目录迁移 / P1 build-install 分离 / P3 模式持久化的现状与不变式；P2 中立 Agent IR 的规划、触发条件与反模式 | ✅ P0/P1/P3 已落地；P2 已纳入 PLATFORM_UNIFICATION 的 C4 |
 | [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) | **两侧解耦规格**：地址模型（`platform[@account]:type:id`、多平台并存防串号）、`UserPlatform` / `AgentPlatform` 运行期契约、中立消息段与降级规则、`interface-platform` 合并取舍、插件接管连接的安全边界、B0–B8 迁移批次与验收 | ✅ B0–B8 已落地；B8 之后的缺口由 PLATFORM_UNIFICATION 接管 |

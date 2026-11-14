@@ -17,6 +17,7 @@ import {
   platformViews,
   platformsForWrite,
   readPlatforms,
+  setActivePlatform,
   userPlatformConfig,
 } from '../src/config/platforms.mjs';
 
@@ -125,16 +126,43 @@ test('platformViews：连接参数与选项拍平，内核只认平台中立的�
 
 test('patchPlatformConfig：按白名单分到 endpoint/options，不改变其它平台', () => {
   const base = readPlatforms(migrateConfigToV2(V1).config);
-  const patched = patchPlatformConfig(base, 'agent', { model: 'deepseek-v4', authToken: 'next' });
+  const patched = patchPlatformConfig(base, 'agent', '', { model: 'deepseek-v4', authToken: 'next' });
   assert.equal(patched.agents.dsh.options.model, 'deepseek-v4');
   assert.equal(patched.agents.dsh.endpoint.authToken, 'next');
   assert.equal(patched.agents.dsh.options.reasoningEffort, 'max', '未提到的选项保持原值');
   assert.equal(patched.users.qq.transport.accessToken, 'tok', '另一侧不受影响');
 
-  const userPatched = patchPlatformConfig(base, 'user', { accessToken: 'tok2', backfill: { gapMs: 1 }, account: 'snow' });
+  const userPatched = patchPlatformConfig(base, 'user', '', { accessToken: 'tok2', backfill: { gapMs: 1 }, account: 'snow' });
   assert.equal(userPatched.users.qq.transport.accessToken, 'tok2');
   assert.deepEqual(userPatched.users.qq.options.backfill, { gapMs: 1 });
   assert.equal(userPatched.users.qq.account, 'snow');
+});
+
+test('patchPlatformConfig：可以写非当前的那一条（多实例），非法 id 不写', () => {
+  const base = readPlatforms(migrateConfigToV2(V1).config);
+  const patched = patchPlatformConfig(base, 'agent', 'acp', { command: 'acp-server', allowRemote: true });
+  assert.equal(patched.agents.acp.options.command, 'acp-server', '新条目按白名单分字段');
+  assert.equal(patched.agents.acp.endpoint.allowRemote, true);
+  assert.equal(patched.active.agent, 'dsh', '写某一条不会改「默认用谁」');
+  assert.equal(patched.agents.dsh.options.model, base.agents.dsh.options.model, '其它条目原样');
+
+  // 非法 id 直接丢弃，不静默回落到 active（否则「写了 acp」会变成「改了 dsh」）。
+  const untouched = patchPlatformConfig(base, 'agent', 'Bad Id', { model: 'x' });
+  assert.equal(untouched.agents.dsh.options.model, base.agents.dsh.options.model);
+  assert.equal(untouched.agents.acp, undefined);
+});
+
+test('setActivePlatform：只改指向，缺条目时补空壳', () => {
+  const base = readPlatforms(migrateConfigToV2(V1).config);
+  const switched = setActivePlatform(base, 'agent', 'acp');
+  assert.equal(switched.active.agent, 'acp');
+  // `active` 必须能在目录里找到：空壳条目的存在就是为了不让注册表报 active_unregistered。
+  assert.deepEqual(switched.agents.acp, { endpoint: {}, options: {} });
+  assert.equal(switched.agents.dsh.options.model, 'deepseek-flash', '旧条目的配置不删');
+  assert.equal(switched.active.user, 'qq', '另一侧不受影响');
+
+  const bad = setActivePlatform(base, 'agent', 'Bad Id');
+  assert.equal(bad.active.agent, base.active.agent, '非法 id 不改指向');
 });
 
 test('platformsForWrite：只回写三段结构，不把读时的推断带进文件', () => {

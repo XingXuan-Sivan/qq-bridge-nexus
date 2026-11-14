@@ -14,6 +14,10 @@
  *     agents: { dsh: { endpoint: {…}, options: {…} } },
  *   }
  *
+ * 一、两侧的目录都是**多条目**的：`agents` 里可以有多个 Agent 平台各自带端点与选项，
+ * `active` 只决定「默认用哪一个」（`agentRuntime()` 按它装配）。没被选中的条目照样
+ * 可读、可写、可探活 —— 切换默认执行体不该要求先把另一条配置删掉。
+ *
  * 字段归属靠白名单：`transport` / `endpoint` 是「怎么连上」（URL、token、端口、进程目录），
  * 其余一律进 `options`。白名单之外的新字段不需要改本文件 —— 它落到 options 即可。
  *
@@ -22,6 +26,10 @@
  *   2. 迁移是**一次性**的：迁完删掉三个旧顶层键并写 `configVersion: 2`，不留别名双读；
  *   3. `active` 指向不存在的 id 时**不静默回退**：保留原值，由统一注册表的
  *      `active_unregistered` 诊断和启动期的明确报错把它暴露出来。
+ *
+ * 版本仍是 2：「默认执行体」不是第二个配置键，它就是 `platforms.active.agent`
+ * （控制台与 `/api/config/runtime` 读的是同一个值）。两处各存一份必然漂移 —— 一个由
+ * 控制台写、一个由手改 config.json 写，而装配时只能有一个赢家。
  */
 
 /** 当前配置结构版本。缺失或小于它即视为 v1，需要迁移。 */
@@ -274,17 +282,46 @@ export function flatPlatforms(platforms) {
 /**
  * 就地打补丁：按白名单把 `patch` 分到 transport/endpoint 与 options，返回新的 platforms。
  *
- * 写配置的三条路径（控制台的模型选择、token 自愈、控制中心的目录切换）形状不同但语义相同，
+ * `id` 是**寻址**：给空串表示「写当前平台」（模型选择、token 自愈这类写我正在用的那条），
+ * 给具体 id 就写那一条（控制台的平台配置页写的是选中实例，不一定是 active）。
+ * 非法 id 直接返回原表、不写 —— 路由层已经用同一套文法校过，纯函数不再猜。
+ *
+ * 写配置的四条路径（控制台选模型、改思考强度、token 自愈、控制中心换目录）形状不同但语义相同，
  * 都从这里走，避免各自拼 `file.dsh = {...}` 把 v2 结构写坏。
  */
-export function patchPlatformConfig(platforms, side, patch) {
+export function patchPlatformConfig(platforms, side, id, patch) {
   const base = readPlatforms({ platforms });
   if (!isPlainObject(patch)) return base;
-  const id = side === 'agent' ? base.active.agent : base.active.user;
+  // 空串 = 写当前平台；给了具体 id 就必须过同一套文法。非法 id 返回原表，
+  // 不悄悄回落到 active —— 否则「写了 acp」会变成「改了 dsh」。
+  const given = typeof id === 'string' ? id.trim().toLowerCase() : '';
+  if (typeof id === 'string' && id !== '' && !PLATFORM_ID_RE.test(given)) return base;
+  const target = given || (side === 'agent' ? base.active.agent : base.active.user);
+  if (!target) return base;
   if (side === 'agent') {
-    base.agents[id] = normalizeAgentEntry({ ...base.agents[id], ...patch });
+    base.agents[target] = normalizeAgentEntry({ ...base.agents[target], ...patch });
   } else {
-    base.users[id] = normalizeUserEntry({ ...base.users[id], account: base.users[id]?.account, ...patch });
+    base.users[target] = normalizeUserEntry({ ...base.users[target], account: base.users[target]?.account, ...patch });
+  }
+  return base;
+}
+
+/**
+ * 切换默认平台：只改 `active` 指向，不动条目（条目是「这台平台怎么连」，与「默认用谁」无关）。
+ *
+ * 条目不存在时补一条空壳：`active` 必须能在该侧目录里找到 —— 否则注册表会报
+ * `active_unregistered`，而这条说的恰恰是「刚被设为默认的那个平台」。
+ */
+export function setActivePlatform(platforms, side, id) {
+  const base = readPlatforms({ platforms });
+  const wanted = platformId(id, '');
+  if (!wanted) return base;
+  if (side === 'agent') {
+    base.active.agent = wanted;
+    if (!base.agents[wanted]) base.agents[wanted] = normalizeAgentEntry({});
+  } else {
+    base.active.user = wanted;
+    if (!base.users[wanted]) base.users[wanted] = normalizeUserEntry({});
   }
   return base;
 }

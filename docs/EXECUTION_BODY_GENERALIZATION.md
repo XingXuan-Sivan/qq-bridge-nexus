@@ -1,6 +1,6 @@
 # 执行体通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）；P2 起各批未做。
+> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）、P2 已落地（配置多实例与默认执行体 §5.2 / §8.2）；P3 起各批未做。
 > 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
 > 也是「可换执行体」在运行时第一次成立的地方。
 > 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
@@ -19,7 +19,8 @@
 
 ## 1. 结论先行
 
-1. **执行体「注册多份、同时只跑一份」**。`runtime.defaultAgent` 是唯一活动执行体，切的是「新会话用谁」，
+1. **执行体「注册多份、同时只跑一份」**。`platforms.active.agent` 是唯一活动执行体（`/api/config/runtime` 的
+   `runtime.defaultAgent` 就是它的读视图，不是第二个配置键），切的是「新会话用谁」，
    不是「把运行中的会话搬过去」。已绑定会话保留原实例（`agentRef.instance`），并提供显式的「在新执行体上重开」。
 2. **现有预设不是三套体系，而是同一张表的三个轴被写死了**。把「应用方式 / 权限权威 / 行为 / 工具面」
    拆成正交四轴之后，直通只是 `apply: passthrough` 的一个取值，不再是第二套方案。
@@ -270,20 +271,20 @@ P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` �
 
 | 步骤 | 规则 |
 | --- | --- |
-| 1. 选目标 | 下拉只列出「已注册且已配置端点」的 Agent 平台；未配置的项禁用并给出跳转 |
-| 2. 预检 | 对目标 `createRuntime().probe()`；`unreachable` / `unauthorized` 一律**不落盘**，保留原默认 |
-| 3. 落盘 | `POST /api/config/runtime { defaultAgent }`（扩展现有端点，与 `defaultPlan` 同形） |
-| 4. 旧实例 | 不是立刻 `close`：等空闲回收窗口（与现有会话闲置超时同口径），避免正在跑的回合被切断 |
-| 5. 审计 | 写一条 `agent_switched` 事件（旧 → 新 + 操作者），控制台「调试与运维」可见 |
+| 1. 选目标 | 入口在「平台 › Agent 侧 › 详情」：每条注册表条目带「设为默认执行体」（已经是默认的不重复显示按钮）。写配置与切默认互相独立 —— 没配过端点的平台也可以先存配置再切 |
+| 2. 预检 | 同一请求里先探活：active 复用后台轮询的结论，其余建临时 `createRuntime()` 探完 `close()`。失败回 409 且**不落盘**；结论留在快照的 `entry.probe` 里，控制台能看出「为什么没切成功」 |
+| 3. 落盘 | 只改 `platforms.active.agent`，条目原样保留；响应带 `requiresRestart: true`，审计记 `runtime.defaultAgent`（旧 → 新） |
+| 4. 运行期 | 这一版**不换**：`agentEvents` / `agentPort` / `agentProbe` 在启动期捕获的是单例，换掉只会得到「旧的事件面 + 新的调用面」。重启桥接才装配新平台 |
+| 5. 窗口可见 | 配置面（`configured`）与本进程装配（`active`）不一致时，注册表出 `active_pending_restart`（warn）；详情页与列表同时标「已设为默认，重启后生效」/「待重启」 |
 
 ### 5.3 入口只做两处，同一 API
 
-| 入口 | 位置 | 交互 |
+| 入口 | 位置 | 状态 |
 | --- | --- | --- |
-| 全局配置 › 行为与模型 | 新增卡片「执行体」 | 当前默认（下拉）+ 连接方式徽标 + 探活结果 + 「切换」按钮 |
-| 平台配置 › Agent 侧 › 详情 | 已有详情右栏 | 「设为默认执行体」按钮（同一端点）+ 能力位矩阵 |
+| 平台配置 › Agent 侧 › 详情 | 「执行体」卡：探活 + 「设为默认执行体」+ 上次结论 | 已落地（P2） |
+| 全局配置 › 行为与模型 | 新增卡片「执行体」：当前默认（下拉）+ 连接方式徽标 + 探活结果 | P5 |
 
-两处都读同一份 `/api/platforms/registry`，按钮都打 `POST /api/config/runtime`。**不新开第二个数据源**。
+两处都读同一份 `/api/platforms/registry`，按钮都打 `POST /api/config/runtime`。**不新开第二个数据源**——第二个入口只是同一端点上的另一个视图，补卡时不需要新接口。
 
 ### 5.4 与方案的关系
 
@@ -476,10 +477,10 @@ POST /api/sessions/:key/permission  { preset }
 
 | 变更 | 内容 |
 | --- | --- |
-| 新增动作 | 「设为默认执行体」（同一端点）+ 当前是否 active 的徽标 |
-| 能力位矩阵 | 补两行：提示注入通道（system / prefix / tool）、权限权威支持面（bridge / agent） |
-| 配置编辑 | 端点与选项改为可写（`PATCH /api/platforms/registry/agent/:id/config`，目前是只读，见 `platforms/platform-detail.js` 文件头注释） |
-| 探活 | `POST /api/platforms/registry/agent/:id/probe`，把结果写进注册表快照供两处复用 |
+| 新增动作 | 「设为默认执行体」（同一端点）+ 当前是否 active 的徽标（「当前启用」/「已设为默认，重启后生效」/「未启用」） |
+| 能力位矩阵 | 补两行：提示注入通道（system / prefix / tool）、权限权威支持面（bridge / agent）（P5） |
+| 配置编辑 | Agent 侧端点与选项可写（`PATCH /api/platforms/registry/agent/:id/config`，字段由 `configSchema` 生成）；用户侧仍只读——连接参数由活着的传输手柄持有，随 P3 多入站一起做 |
+| 探活 | `POST /api/platforms/registry/agent/:id/probe`，结论写进注册表快照（`entry.probe`）供详情与切换预检复用 |
 
 ### 8.3 会话与审批 › 会话详情
 
@@ -540,7 +541,7 @@ POST /api/sessions/:key/permission  { preset }
 | --- | --- | --- | --- |
 | **P0** ✅ | 执行体可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
 | **P1** ✅ | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + 三条装配诊断（§4.3） | `src/agent-side/runtime-registry.mjs`、`src/agent-side/runtime.mjs`、`src/plugins/{manifest,host-api,kernel}.mjs`、`src/platforms/registry.mjs`、`PLUGIN_KERNEL.md` | `test-agent-provider` 新增、`test:audit` / `verify:repo` 全绿 |
-| **P2** | 配置 v3：`platforms.agents.<id>` 多实例、`runtime.defaultAgent`、agent 侧 probe/config 端点 | `src/config/platforms.mjs`、`scripts/*router*`（`/api/platforms/registry` 写口）、`guides/CONFIGURATION.md` | `verify:repo`、`test:console-ui` |
+| **P2** ✅ | 配置：`platforms.agents.<id>` 多实例可写、默认执行体（`platforms.active.agent`）、agent 侧 probe/config 端点与注册表的 `configured`/`probe` 读视图 | `src/config/platforms.mjs`、`src/platforms/registry.mjs`、`src/bridge.js`（注册表写口与 `/api/config/runtime`）、`public/console/pages/platforms/`、`public/console/components/form/schema.js`、`guides/CONFIGURATION.md` | `verify:repo`、`test:audit`（含新增 `test-platform-config`）、`test-console-{static,ui}` |
 | **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |
 | **P4** | 方案解绑 + 能力档 `runtime` 段 + 方言上移 + `direct` 方案 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt` |
 | **P5** | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`prompt` 能力位）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-console-ui`、新增 `test-passthrough-plan.mjs`、`verify:persona` |

@@ -9,6 +9,8 @@ import { collapseHtml } from '../../components/collapse/collapse.js';
 import { tileHtml } from '../../components/tile/tile.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+// schema → 表单的映射与插件、平台共用一份（components/form/schema.js）。
+import { readSchemaPatch, schemaFields } from '../../components/form/schema.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { PLUGINS_FIELDS } from './fields.js';
 
@@ -92,63 +94,6 @@ async function runPluginAction(id, action, button) {
 let pluginDetailId = null;
 let pluginDetailSchema = null;
 
-function pluginConfigField(key, property, value) {
-  const name = `cfg__${key}`;
-  const label = property.title || key;
-  const hint = property.description || '';
-  if (property.type === 'boolean') {
-    return { type: 'switch', name, label, hint, checked: value === true, onLabel: '开', offLabel: '关' };
-  }
-  if (property.type === 'enum') {
-    return {
-      type: 'select', name, label, hint,
-      value: value === undefined ? '' : String(value),
-      options: property.enum.map((item) => ({ value: String(item), label: String(item) })),
-    };
-  }
-  if (property.type === 'array') {
-    return { type: 'textarea', name, label, hint, rows: 4, mono: true, value: JSON.stringify(value ?? [], null, 2) };
-  }
-  if (property.type === 'number' || property.type === 'integer') {
-    return {
-      type: 'number', name, label, hint,
-      value: value === undefined ? '' : value,
-      min: property.minimum, max: property.maximum,
-      step: property.type === 'integer' ? 1 : 'any',
-      integer: property.type === 'integer',
-    };
-  }
-  if (property.format === 'textarea') {
-    return { type: 'textarea', name, label, hint, rows: 4, value: value === undefined ? '' : String(value) };
-  }
-  return { type: 'text', name, label, hint, value: value === undefined ? '' : String(value) };
-}
-
-function readPluginConfig(schema) {
-  const patch = {};
-  for (const [key, property] of Object.entries(schema?.properties ?? {})) {
-    const el = document.getElementById(`cfg__${key}`);
-    if (!el) continue;
-    if (property.type === 'boolean') { patch[key] = getSwitch(el); continue; }
-    if (property.type === 'array') {
-      const raw = String(el.value ?? '').trim();
-      patch[key] = raw ? JSON.parse(raw) : [];
-      continue;
-    }
-    if (property.type === 'number' || property.type === 'integer') {
-      const raw = String(el.value ?? '').trim();
-      if (raw !== '') patch[key] = Number(raw);
-      continue;
-    }
-    if (property.type === 'enum') {
-      patch[key] = property.enum.find((item) => String(item) === String(el.value)) ?? el.value;
-      continue;
-    }
-    patch[key] = String(el.value ?? '');
-  }
-  return patch;
-}
-
 function renderPluginConfig(plugin) {
   const host = document.getElementById('pluginConfigMount');
   if (!host) return;
@@ -165,9 +110,8 @@ function renderPluginConfig(plugin) {
     return;
   }
   const fields = [{ type: 'section', label: '插件配置', card: true, hint: '由插件清单的 configSchema 生成；保存后写入 plugins.json 并重载该插件。' }];
-  for (const [key, property] of Object.entries(pluginDetailSchema.properties ?? {})) {
-    fields.push(pluginConfigField(key, property, plugin.config?.[key] ?? property.default));
-  }
+  // schema 里的字段顺序就是表单里的顺序；值取「配置里有就用配置的，否则用 schema 默认」。
+  fields.push(...schemaFields(pluginDetailSchema, plugin.config));
   fields.push({
     type: 'action',
     items: [
@@ -187,7 +131,7 @@ async function savePluginConfig(testOnly) {
   const msg = document.getElementById('pluginConfigMsg');
   let patch;
   try {
-    patch = readPluginConfig(pluginDetailSchema);
+    patch = readSchemaPatch(pluginDetailSchema, document.getElementById('pluginConfigMount'));
   } catch (error) {
     if (msg) msg.textContent = `配置不是合法 JSON：${error?.message || '解析失败'}`;
     return;

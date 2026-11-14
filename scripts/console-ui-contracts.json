@@ -64,6 +64,26 @@
     }
   },
   {
+    "method": "PATCH",
+    "path": "/api/platforms/registry/agent/dsh/config",
+    "body": {
+      "baseUrl": "",
+      "authToken": "",
+      "authTokenExplicit": false,
+      "authHeader": "authorization",
+      "authPrefix": "Bearer",
+      "allowRemote": false,
+      "provider": "deepseek-official",
+      "model": "deepseek-pro",
+      "reasoningEffort": "max"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/platforms/registry/agent/dsh/probe",
+    "body": {}
+  },
+  {
     "method": "POST",
     "path": "/api/plans",
     "body": {
@@ -133,6 +153,13 @@
           "*"
         ]
       }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/config/runtime",
+    "body": {
+      "defaultAgent": "acp"
     }
   },
   {

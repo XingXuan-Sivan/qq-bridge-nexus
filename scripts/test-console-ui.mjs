@@ -355,20 +355,50 @@ try {
     // 两侧平台都列在主从清单里；诊断为空时汇总卡不占地方（fixture 的 diagnostics: []）。
     assert.equal(await page.locator('#platformSplit [data-split-key="user:qq"]').count(), 1, '用户侧平台在清单里');
     assert.equal(await page.locator('#platformSplit [data-split-key="agent:dsh"]').count(), 1, 'Agent 侧平台在清单里');
+    assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"]').count(), 1, '第二个 Agent 平台也在清单里');
     assert.equal(await page.locator('#platformDiagnosticsCard').count(), 0, '没有诊断时不渲染诊断卡');
-    assert.equal(await page.locator('#platformSplit button.split-item').count(), 2, '两侧平台都走主从组件的条目');
+    assert.equal(await page.locator('#platformSplit button.split-item').count(), 3, '每条注册的平台都走主从组件的条目');
   });
 
-  await test('Platform detail config tab is read-only and lists the platform schema', async () => {
+  await test('Platform detail config tab keeps the user side read-only', async () => {
     await navigate('platforms');
     await page.click('[data-split-key="user:qq"]');
     await page.click('[data-platform-tab="config"]');
     await page.waitForSelector('[data-platform-panel-body] code', { timeout: 5000 });
     const body = page.locator('[data-platform-panel-body]');
     assert.ok(await body.locator('text=httpUrl').count() > 0, '配置表列出 platform.yml 声明的字段');
-    // 只读：控制台还没有写平台配置的端点，所以值以 <code> 文本呈现，也没有保存按钮。
+    // 用户侧仍然只读：连接参数由活着的传输手柄持有，值以 <code> 文本呈现，也没有保存按钮。
     assert.ok(await body.locator('td code').count() >= 3, '配置值以只读文本呈现');
-    assert.equal(await body.locator('[data-platform-config-save], #platformConfigSave').count(), 0, '配置标签里没有保存按钮');
+    assert.equal(await body.locator('[data-platform-config-save], #platformConfigSave').count(), 0, '用户侧配置标签里没有保存按钮');
+  });
+
+  await test('Agent platform config form saves through the registry write endpoint', async () => {
+    await navigate('platforms');
+    await page.click('[data-split-key="agent:dsh"]');
+    await page.click('[data-platform-tab="config"]');
+    await page.waitForSelector('#platformConfigMount [data-field="cfg__model"]', { timeout: 5000 });
+    // 字段由 configSchema 生成，值来自注册表条目的 config：与插件详情同构。
+    assert.equal(await page.locator('#cfg__model').inputValue(), 'deepseek-flash');
+    assert.equal(await page.locator('[data-field="cfg__reasoningEffort"]').evaluate((el) => el.tagName), 'INPUT', '字符串字段渲染成输入框');
+    assert.equal(await page.locator('[role="switch"][data-field="cfg__allowRemote"]').count(), 1, '布尔字段走开关');
+    await page.locator('#cfg__model').fill('deepseek-pro');
+    const patch = await clickWrite('#platformConfigSave', '/api/platforms/registry/agent/dsh/config', 'PATCH');
+    // 补丁是整张表单的现值：写口按 schema 校验合并后的整份，只落盘这里给的键。
+    assert.equal(patch.model, 'deepseek-pro', '保存应提交改过的模型');
+    assert.equal(patch.provider, 'deepseek-official', '未改动的字段照旧提交现值');
+    assert.equal(patch.reasoningEffort, 'max');
+    // 保存成功后重新拉快照：标签保留在配置页，字段显示刚写进去的值。
+    await page.waitForFunction(() => document.getElementById('cfg__model')?.value === 'deepseek-pro', null, { timeout: 5000 });
+  });
+
+  await test('Agent platform probe reports its conclusion in the overview', async () => {
+    await navigate('platforms');
+    await page.click('[data-split-key="agent:dsh"]');
+    await page.click('[data-platform-tab="overview"]');
+    await page.waitForSelector('#platformProbe', { timeout: 5000 });
+    await clickWrite('#platformProbe', '/api/platforms/registry/agent/dsh/probe');
+    // 探活结论进注册表快照（entry.probe），刷新后由「执行体」卡画出来。
+    await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('上次探活通过'), null, { timeout: 5000 });
   });
 
   await test('Plans page editor contracts', async () => {
@@ -419,6 +449,19 @@ try {
     assert.equal(body.safety, undefined, '安全补充字段已删除，不再提交');
     assert.equal(body.tools?.visible, undefined, '可见集不再直接提交，由能力文件推导');
     assert.equal(body.sandbox, undefined, '沙箱不再由能力预设承载');
+  });
+
+  await test('Agent platform becomes the default executor only after a successful probe', async () => {
+    await navigate('platforms');
+    await page.click('[data-split-key="agent:acp"]');
+    await page.waitForSelector('#platformSetDefault', { timeout: 5000 });
+    const body = await clickWrite('#platformSetDefault', '/api/config/runtime');
+    assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交执行体 id，不夹带默认方案');
+    // 切换只落盘：本进程仍装配 dsh，于是「待重启」同时出现在详情与清单，外加一条可复查的诊断。
+    await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
+    assert.equal(await page.locator('#platformSetDefault').count(), 0, '已设为默认的平台不再显示同一个按钮');
+    assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"] .tag').filter({ hasText: '待重启' }).count(), 1, '清单里标出待重启');
+    assert.match(await page.textContent('#platformDiagnosticsCard'), /active_pending_restart/, '配置面与运行期不一致时给一条诊断');
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {

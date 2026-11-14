@@ -19,6 +19,24 @@
 下文中带 `platforms.users.<id>.` / `platforms.agents.<id>.` 前缀的路径都指这个段；写散在条目里
 （不在 `transport`/`options`/`endpoint` 下）的键会被自动归位，不会丢。
 
+## `platforms.agents.<id>` —— 多实例与默认执行体
+
+Agent 侧可以同时存多条平台的配置：`agents` 里每条都有自己的 `endpoint`（怎么连）与 `options`（模型与行为选项），
+`active.agent` 只决定「默认用哪一个」。没被选中的条目照样可读、可写、可探活 —— 切换默认执行体不需要先把另一条删掉。
+
+| 入口 | 作用 |
+| --- | --- |
+| 平台 › Agent 侧 › 详情 › 配置 | 表单字段就是 `platforms.agents.<id>` 那一份，保存只写用户给的键（不把 schema 默认值固化成设置） |
+| 平台 › Agent 侧 › 详情 › 执行体 | 「探活」与「设为默认执行体」；后者先探活，探不通不落盘 |
+
+- **端点与选项的生效时机不同**：`endpoint.*`（`baseUrl` / `authToken` / `authTokenExplicit` / `authHeader` /
+  `authPrefix` / `allowRemote`）决定「下一次连接去哪」，改了要重启桥接；`options.*`（`provider` / `model` /
+  `reasoningEffort` / `vision`）由调用面每次现读，改完即生效。
+- **切换默认执行体只改 `active.agent`**，条目原样保留。运行期的连接层句柄是启动时装配的单例，所以切换后要重启桥接；
+  在那之前注册表会给一条 `active_pending_restart`（warn），控制台同时显示「已设为默认，重启后生效」与列表里的「待重启」。
+- **默认执行体没有第二份配置**：控制台「默认执行体」与 `/api/config/runtime` 的 `runtime.defaultAgent` 读的都是
+  `platforms.active.agent`。两处各存一份必然漂移 —— 一个由控制台写、一个由手改 `config.json` 写。
+
 本文只列 v0.3.0 起新增的配置段、工具开关和状态文件。所有字段都可省略，省略即取下表默认值；**默认值都是安全的**。
 修改 `config.json` 后需要重启桥接；修改 `socialV2.tools.*` 还需要重启 DSH（MCP 工具清单在 DSH 启动时读取）。
 

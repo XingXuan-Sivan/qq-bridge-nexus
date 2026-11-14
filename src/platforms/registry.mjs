@@ -35,6 +35,8 @@ export const DIAGNOSTIC_CODES = Object.freeze({
   CAPABILITY_MISSING: 'capability_missing',
   CONFIG_INVALID: 'config_invalid',
   ACTIVE_UNREGISTERED: 'active_unregistered',
+  // 配置面与运行期已选的不一致：刚改过默认平台，重启后才会装配新的那个。
+  ACTIVE_PENDING_RESTART: 'active_pending_restart',
   INBOUND_UNSUPPORTED: 'inbound_unsupported',
   PROFILE_ONLY: 'profile_only',
   PROBE_FAILED: 'probe_failed',
@@ -57,6 +59,7 @@ const DIAGNOSTIC_LEVELS = Object.freeze({
   [DIAGNOSTIC_CODES.PROFILE_ONLY]: 'warn',
   [DIAGNOSTIC_CODES.PROBE_FAILED]: 'warn',
   [DIAGNOSTIC_CODES.AGENT_INSTANCE_OFFLINE]: 'warn',
+  [DIAGNOSTIC_CODES.ACTIVE_PENDING_RESTART]: 'warn',
 });
 
 export const PLATFORM_SIDES = Object.freeze(['user', 'agent']);
@@ -67,8 +70,13 @@ function diagnostic(code, side, platformId, message) {
   return { code, side, platformId, level: DIAGNOSTIC_LEVELS[code] ?? 'warn', message };
 }
 
-/** 配置面校验：没有 schema 时不判（返回 null），有 schema 时按插件那套规则查。 */
-function vetConfig(rawSchema, value) {
+/**
+ * 配置面校验：没有 schema 时不判（返回 null schema），有 schema 时按插件那套规则查。
+ *
+ * 写口（`PATCH .../config`）与注册表的 `config_invalid` 诊断必须用同一个函数：
+ * 控制台接受的值和诊断拒绝的值不能是两套规则，否则「保存成功但带一条错误诊断」。
+ */
+export function vetPlatformConfig(rawSchema, value) {
   const normalized = normalizeConfigSchema(rawSchema);
   if (!normalized.ok) {
     return { schema: null, error: `configSchema 不合法：${normalized.errors.join('；')}` };
@@ -104,7 +112,7 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const impl = live.get(id) ?? null;
-    const { schema, error } = vetConfig(profile.configSchema, config?.users?.[id] ?? {});
+    const { schema, error } = vetPlatformConfig(profile.configSchema, config?.users?.[id] ?? {});
     if (error) {
       diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'user', id, error));
     }
@@ -131,6 +139,9 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
       source: impl ? String(impl.source ?? 'builtin') : 'profile-only',
       owner: impl?.owner ?? null,
       active: String(runtime.active ?? '') === id,
+      // 配置面选的默认平台 = 重启后会装配的那个；`active` 是**本进程实际装配的**。
+      // 两者不一致就是「刚改过、还没重启」，控制台据此显示这一状态。
+      configured: String(config?.active?.user ?? '') === id,
       capabilities: [...(impl?.capabilities ?? [])],
       conversationTypes: [...(impl?.conversationTypes ?? [])],
       limits: { ...(impl?.limits ?? {}) },
@@ -168,6 +179,7 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
       source: String(impl.source ?? 'plugin'),
       owner: impl.owner ?? null,
       active: String(runtime.active ?? '') === id,
+      configured: String(config?.active?.user ?? '') === id,
       capabilities: [...(impl.capabilities ?? [])],
       conversationTypes: [...(impl.conversationTypes ?? [])],
       limits: { ...(impl.limits ?? {}) },
@@ -181,8 +193,9 @@ function buildUserEntries({ profilePlatforms, runtime, config }) {
   return { entries, diagnostics };
 }
 
-/** 合成 Agent 侧平台。结构与用户侧同形，差异在 `assets`（能力档而不是行为档案）。 */
-function buildAgentEntries({ profilePlatforms, runtime, config }) {
+/** 合成 Agent 侧平台。结构与用户侧同形，差异在 `assets`（能力档而不是行为档案）与 `probe`。 */
+function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
+  const probeOf = (id) => probes?.[id] ?? null;
   const entries = [];
   const diagnostics = [];
   const live = new Map();
@@ -207,7 +220,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const impl = live.get(id) ?? null;
-    const { schema, error } = vetConfig(profile.configSchema, config?.agents?.[id] ?? {});
+    const { schema, error } = vetPlatformConfig(profile.configSchema, config?.agents?.[id] ?? {});
     if (error) {
       diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'agent', id, error));
     }
@@ -227,12 +240,16 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
       source: impl ? String(impl.source ?? 'builtin') : 'profile-only',
       owner: impl?.owner ?? null,
       active: String(runtime.active ?? '') === id,
+      configured: String(config?.active?.agent ?? '') === id,
       capabilities: [...(impl?.capabilities ?? [])],
       conversationTypes: [],
       limits: {},
       inbound: false,
       configSchema: schema,
       config: clone(config?.agents?.[id] ?? {}),
+      // 最近一次显式探活（控制台按钮 / 切换预检）的结论；null = 没探过。
+      // 与 `agentConnected` 分工不同：后者是后台轮询的「现在能不能用」，这里只回答「刚才探了一次」。
+      probe: probeOf(id),
       assets: {
         prompt: { active: false, hasDefault: false },
         tools: [],
@@ -248,7 +265,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
   // 校验规则与声明面同一套（同一个 `platforms.agents.<id>`）。
   for (const [id, impl] of live) {
     if (seen.has(id)) continue;
-    const { schema, error } = vetConfig(impl.configSchema, config?.agents?.[id] ?? {});
+    const { schema, error } = vetPlatformConfig(impl.configSchema, config?.agents?.[id] ?? {});
     if (error) {
       diagnostics.push(diagnostic(DIAGNOSTIC_CODES.CONFIG_INVALID, 'agent', id, error));
     }
@@ -260,12 +277,14 @@ function buildAgentEntries({ profilePlatforms, runtime, config }) {
       source: String(impl.source ?? 'builtin'),
       owner: impl.owner ?? null,
       active: String(runtime.active ?? '') === id,
+      configured: String(config?.active?.agent ?? '') === id,
       capabilities: [...(impl.capabilities ?? [])],
       conversationTypes: [],
       limits: {},
       inbound: false,
       configSchema: schema,
       config: clone(config?.agents?.[id] ?? {}),
+      probe: probeOf(id),
       assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },
     });
   }
@@ -295,6 +314,7 @@ function summarize(entries, diagnostics) {
  * @param {{active: string, platforms: Array}} [input.agentRuntime] `agentPlatformMetadata()`
  * @param {{users?: object, agents?: object}} [input.config]        配置面（C2 起为配置 v2 的 platforms 段）
  * @param {boolean|null} [input.agentConnected]                     当前执行体的探活结论；null = 还不知道
+ * @param {object} [input.agentProbes]                              各 Agent 平台最近一次显式探活的结果（按 id 索引）
  */
 export function buildPlatformRegistry({
   profilePlatforms = [],
@@ -303,9 +323,10 @@ export function buildPlatformRegistry({
   agentRuntime = { active: '', platforms: [] },
   config = {},
   agentConnected = null,
+  agentProbes = {},
 } = {}) {
   const user = buildUserEntries({ profilePlatforms, runtime: userRuntime, config });
-  const agent = buildAgentEntries({ profilePlatforms: profileAgentPlatforms, runtime: agentRuntime, config });
+  const agent = buildAgentEntries({ profilePlatforms: profileAgentPlatforms, runtime: agentRuntime, config, probes: agentProbes });
   const entries = [...user.entries, ...agent.entries];
   const diagnostics = [...user.diagnostics, ...agent.diagnostics];
 
@@ -320,6 +341,20 @@ export function buildPlatformRegistry({
       side,
       active,
       `当前平台指向未注册的 id：${active}（能用这一侧的平台：${entries.filter((entry) => entry.side === side).map((entry) => entry.id).join(' / ') || '无'}）`,
+    ));
+  }
+
+  // 配置面写的默认平台与本进程实际装配的不一致：刚改过、还没重启。这不是错误 ——
+  // 下次启动就一致了 —— 但必须看得见：否则控制台会一边说「已设为默认」一边说「未启用」。
+  for (const side of PLATFORM_SIDES) {
+    const wanted = String(config?.active?.[side] ?? '').trim();
+    const running = String((side === 'user' ? userRuntime : agentRuntime).active ?? '').trim();
+    if (!wanted || !running || wanted === running) continue;
+    diagnostics.push(diagnostic(
+      DIAGNOSTIC_CODES.ACTIVE_PENDING_RESTART,
+      side,
+      wanted,
+      `配置已把默认平台改为 ${wanted}，本进程仍装配 ${running}：重启桥接后生效`,
     ));
   }
 
@@ -361,6 +396,7 @@ export function platformRegistrySnapshot({
   agentPlatformsRoot = AGENT_PLATFORMS_ROOT,
   config = {},
   agentConnected = null,
+  agentProbes = {},
 } = {}) {
   const profilePlatforms = listPlatforms({ root: profilesRoot }).map((item) => ({
     ...item,
@@ -373,6 +409,7 @@ export function platformRegistrySnapshot({
     agentRuntime: agentPlatformMetadata(),
     config: flatPlatforms(config),
     agentConnected,
+    agentProbes,
   });
 }
 

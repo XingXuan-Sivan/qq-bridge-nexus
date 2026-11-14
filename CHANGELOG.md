@@ -560,6 +560,26 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **门禁**：新增 `scripts/test-agent-provider.mjs`（9 条：owner 语义、三类装配结论、诊断码、内核接线），
   `test-plugin-kernel` / `test-platform-registry` / `test-agent-port` / `test:tck` 全绿。
 
+### 重构：平台配置写口与默认执行体（P2）
+- **Agent 侧配置可写**：`PATCH /api/platforms/registry/agent/:id/config` 按 id 写 `platforms.agents.<id>`
+  （端点进 `endpoint`、其余进 `options`），只落盘用户给的补丁，不把 schema 默认值固化成设置；
+  写入前用与 `config_invalid` 诊断同一个 `vetPlatformConfig()` 校「旧值 + 补丁」合并后的整份。
+  id 不在注册表里直接 404 —— 写一个没人读的 id 等于制造死数据。
+- **探活**：`POST /api/platforms/registry/agent/:id/probe`。active 复用后台轮询的结论，其余建临时
+  `createRuntime()` 探完 `close()`，不碰单例也不回写配置；结论进快照的 `entry.probe`，控制台与切换预检共用。
+  探活失败是有效结论（200 + `probe.ok=false`），只有未注册 / 没有运行期实现才 400/404。
+- **默认执行体**：`/api/config/runtime` 增 `defaultAgent`（读的就是 `platforms.active.agent`，不另存一份）。
+  切换先预检，探不通回 409 不落盘；成功后带 `requiresRestart: true` 并记审计 `runtime.defaultAgent`。
+  一个请求只改一项（方案与执行体不同时提交）。
+- **配置面与运行期分开看**：注册表条目新增 `configured`（配置面选的）与 `active`（本进程装配的）并列，
+  不一致时出 `active_pending_restart`（warn）；控制台详情显示「已设为默认，重启后生效」，列表标「待重启」。
+- **控制台**：平台详情「配置」改为由 `configSchema` 生成的可写表单（用户侧仍只读），概览新增「执行体」卡
+  （探活 + 设为默认 + 上次结论）；schema → 表单的映射抽成 `components/form/schema.js`，插件详情与平台详情共用。
+  保存/探活/切默认后重拉同一份注册表快照，标签不被打回概览。
+- **门禁**：新增 `scripts/test-platform-config.mjs`（9 条：按 id 打补丁、端点/选项分界、不固化默认值、
+  非法 id、切默认补空壳、`configured` 与 `active_pending_restart`、探活入快照、写口与诊断同一套校验）；
+  `test-console-ui` 新增可写/探活/设为默认三条用例，`console-ui-contracts.json` 按新写口重录（只新增 3 条）。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

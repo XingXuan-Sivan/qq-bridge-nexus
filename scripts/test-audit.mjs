@@ -235,6 +235,9 @@ const tests = [
   // P1 Agent 侧插件化：owner 归属（同 owner 覆盖 / 换 owner 拒绝 / 按 owner 注销）、
   // 装配结论（离线 / 契约不合规 / 自证失败）与三条诊断码、插件内核的 agent-provider:provide。
   'test-agent-provider.mjs',
+  // P2 平台配置写口：按 id 打补丁、端点/选项分界、切换默认执行体只改指针，
+  // 以及注册表为控制台补的 configured / probe 读视图与 active_pending_restart。
+  'test-platform-config.mjs',
 ];
 let failed = 0;
 for (const test of tests) {

@@ -22,7 +22,7 @@ import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { agentRuntime, agentRuntimeId } from './agent-side/runtime.mjs';
 // 插件提供的 Agent 平台（`agent-provider:provide`）：注册表本身就是注入给插件内核的依赖，
 // 桥接不维护第二张表，也不在插件停用后再清另一份状态。
-import { agentProviderRegistry } from './agent-side/runtime-registry.mjs';
+import { agentPlatform, agentProviderRegistry } from './agent-side/runtime-registry.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -111,7 +111,7 @@ import { sendAction as dispatchSend, configureUserPlatformBackend, configureUser
 // 入站管线（C3）：收消息只有这一条路 —— 校验 → 准入 → 会话映射 → 唤醒。
 // 顺序写死在管线里（见 docs/PLATFORM_UNIFICATION.md §六），桥接只提供四步的策略。
 import { INBOUND_DROP, createInboundPipeline } from './user-side/inbound.mjs';
-import { platformRegistrySnapshot } from './platforms/registry.mjs';
+import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } from './platforms/registry.mjs';
 // 平台清单与提示词变量都来自平台目录（C2b）：profiles/platforms/<id>/platform.yml 是唯一源，
 // src/ 里不再有内置平台清单，插件只能经 adapters:provide 注册一份「描述」。
 import { listPlatforms } from './platforms/index.mjs';
@@ -221,7 +221,7 @@ import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
 import { accountOfConfig, configureKeys, defaultAddress, formatKey, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
 // 配置 v2（`platforms` 段）：平台配置的唯一真源。迁移与派生视图都在这里，见 docs/PLATFORM_UNIFICATION.md §八。
-import { CONFIG_VERSION, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms } from './config/platforms.mjs';
+import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform } from './config/platforms.mjs';
 // `platforms.active` 的落地（启动期切换运行期平台，两侧 fail-closed）。
 import { activatePlatforms } from './platforms/activate.mjs';
 
@@ -1051,28 +1051,79 @@ function saveConfigSection(key, value) {
 /**
  * 平台配置的**唯一写入口**：读整份 → 往 platforms 段打补丁 → 写回。
  *
- * 写入方有四处（控制台选模型、改思考强度、token 自愈、控制中心换目录），
+ * 写入方有五处（控制台选模型、改思考强度、token 自愈、控制中心换目录、平台详情页配置），
  * 各自拼 `file.dsh = {…}` 会把 v2 结构写回 v1 形状。补丁按白名单归位
  * （transport/endpoint vs options），调用方只需要说「改哪几个值」。
  *
- * `side` 是 `'user' | 'agent'`；当前平台从 `platforms.active` 取，不写死 id。
+ * `side` 是 `'user' | 'agent'`；`id` 是寻址：给空串表示「写当前平台」（前四处都是这个语义），
+ * 给具体 id 就写那一条（平台详情页写的是选中实例，不一定是 active）。
+ *
+ * 视图对象是**就地更新**的：`createRuntime({ config })` 拿的是活引用（见 §4.1），
+ * 替换对象会让正在跑的句柄继续读旧配置，而控制台已经显示新值了。
  */
-function savePlatformPatch(side, patch) {
+function savePlatformPatch(side, patch, id = '') {
   const configFile = path.join(ROOT, 'config.json');
   const file = readConfigObject(configFile);
-  const nextPlatforms = patchPlatformConfig(readPlatforms(file), side, patch);
+  const nextPlatforms = patchPlatformConfig(readPlatforms(file), side, id, patch);
   atomicWriteJson(configFile, {
     ...file,
     configVersion: CONFIG_VERSION,
     platforms: platformsForWrite(nextPlatforms),
   });
   if (bridgeCfg) {
-    const views = platformViews(nextPlatforms);
+    const wroteAddress = Boolean(patch) && typeof patch === 'object' && 'baseUrl' in patch;
     bridgeCfg.configVersion = CONFIG_VERSION;
     bridgeCfg.platforms = nextPlatforms;
-    bridgeCfg.platform = views.platform;
-    bridgeCfg.userPlatform = views.userPlatform;
-    bridgeCfg.agentPlatform = views.agentPlatform;
+    syncPlatformViews(bridgeCfg, nextPlatforms, !wroteAddress);
+  }
+  return nextPlatforms;
+}
+
+/**
+ * 把 platforms 的三个视图就地写回 cfg（保持对象身份，见 savePlatformPatch 的注释）。
+ *
+ * `keepRuntimeAddress` 是 Agent 视图专用的例外：执行体重新识别到地址时是**就地**写进这个
+ * 活配置对象的（`config.baseUrl = url`），磁盘上仍是旧值。只有这次确实写了地址、或者换了
+ * 默认执行体（视图整份换成另一条平台），才允许用配置面的值覆盖它 —— 否则「改个模型」
+ * 会把连接打回旧端口。
+ */
+function syncPlatformViews(target, platforms, keepRuntimeAddress = true) {
+  const views = platformViews(platforms);
+  replaceObject(target.platform, views.platform);
+  replaceObject(target.userPlatform, views.userPlatform);
+  const nextAgent = { ...views.agentPlatform };
+  if (keepRuntimeAddress && target.agentPlatform?.baseUrl) nextAgent.baseUrl = target.agentPlatform.baseUrl;
+  replaceObject(target.agentPlatform, nextAgent);
+}
+
+/** 原地替换一个视图对象：不换引用，但把上一个平台残留的键删掉。 */
+function replaceObject(target, next) {
+  if (!target || typeof target !== 'object') return;
+  for (const key of Object.keys(target)) delete target[key];
+  Object.assign(target, next);
+}
+
+/**
+ * 切换默认执行体：只改 `platforms.active.agent`，条目原样保留。
+ *
+ * 进程里的连接层句柄不在这里换：启动期的 `agentEvents` / `agentPort` 已经捕获了那个单例，
+ * 换掉只会得到「旧的事件面 + 新的调用面」。切换后桥接重启才装配新平台，
+ * 注册表的 `active_pending_restart` 诊断把这段窗口显式地暴露出来。
+ */
+function saveActiveAgentPlatform(id) {
+  const configFile = path.join(ROOT, 'config.json');
+  const file = readConfigObject(configFile);
+  const nextPlatforms = setActivePlatform(readPlatforms(file), 'agent', id);
+  atomicWriteJson(configFile, {
+    ...file,
+    configVersion: CONFIG_VERSION,
+    platforms: platformsForWrite(nextPlatforms),
+  });
+  if (bridgeCfg) {
+    bridgeCfg.configVersion = CONFIG_VERSION;
+    bridgeCfg.platforms = nextPlatforms;
+    // 换了默认执行体：Agent 视图整份换成另一条平台，运行期地址不再适用。
+    syncPlatformViews(bridgeCfg, nextPlatforms, false);
   }
   return nextPlatforms;
 }
@@ -5647,6 +5698,65 @@ async function main() {
   const agentHealth = agentRuntime().health({ threshold: 2 });
   const agentProbe = agentRuntime().probe();
 
+  // 各 Agent 平台最近一次「显式探活」的结论（控制台按钮 / 切换预检），按 id 索引，
+  // 由 `/api/platforms/registry` 透给控制台。与 `agentReady` 分工不同：
+  // 那个是后台轮询持续维护的「现在能不能用」，这里只回答「刚才有人点过一次，结果是什么」。
+  const agentProbes = new Map();
+
+  /** 注册表快照要的那一份探活结果（Map → 普通对象）。 */
+  const agentProbeResults = () => Object.fromEntries(agentProbes);
+
+  /** 本进程当前真正装配的执行体 id；还没装配时回落到配置里的默认。 */
+  const runningAgentPlatformId = () => agentRuntimeId() || String(cfg.platforms?.active?.agent ?? '');
+
+  /**
+   * 当前注册表快照（含探活结果）。写口与快照端点共用一个拼装函数：
+   * 校验用的配置面、响应里的条目、控制台看到的表不可能是三份事实。
+   */
+  const currentPlatformRegistry = () => platformRegistrySnapshot({
+    config: bridgeCfg?.platforms ?? {},
+    agentConnected: agentProbeSettled ? agentReady : null,
+    agentProbes: agentProbeResults(),
+  });
+
+  /**
+   * 对某个已注册的 Agent 平台做一次探活，结果记进 `agentProbes`。
+   *
+   * 当前执行体复用后台轮询那一份：再建一个连接层句柄会多开一条客户端（ACP 还会多起一个
+   * 子进程）。其它平台建临时句柄、探完立刻关掉，不碰进程单例，也不回写配置 ——
+   * 探活重新识别到的地址只是这一次的结果，改配置归写口管。
+   */
+  async function probeAgentPlatform(id) {
+    let current = null;
+    try { current = agentRuntime(); } catch { current = null; }
+    let temp = null;
+    let runtime = current;
+    if (!runtime || runtime.id !== id) {
+      const impl = agentPlatform(id);
+      // 只有配置目录、没有运行期实现：配置可以写，但没人能发这个请求。
+      if (!impl) throw new Error(`${id} 没有运行期实现，探活不了（等它的插件装上并重启）`);
+      temp = impl.createRuntime({ config: flatPlatformEntry(cfg.platforms, 'agent', id), log });
+      runtime = temp;
+    }
+    let result;
+    try {
+      const r = await runtime.probe().check();
+      result = {
+        ok: r?.ok === true,
+        error: r?.ok === true ? '' : String(r?.error ?? '探活未通过'),
+        url: String(r?.url ?? ''),
+        at: new Date().toISOString(),
+      };
+    } catch (error) {
+      result = { ok: false, error: String(error?.message ?? error), url: '', at: new Date().toISOString() };
+    } finally {
+      // 临时句柄用完就关：它的客户端/子进程不该活到下一次探活。
+      if (temp) { try { await temp.close(); } catch {} }
+    }
+    agentProbes.set(id, result);
+    return result;
+  }
+
   const checkDsh = async () => {
     const r = await agentProbe.check();
     agentProbeSettled = true;
@@ -7331,11 +7441,55 @@ async function main() {
         // 不触网、不读 config.json 以外的文件：平台没连上时控制台也要能画出表格与诊断。
         if (req.method === 'GET' && url.pathname === '/api/platforms/registry') {
           try {
-            // 带上当前生效的平台配置：`config_invalid` 诊断要拿真实的 account/transport 去校，
-            // 给空对象就只能校空值，等于这条诊断永不触发。
-            sendJson(platformRegistrySnapshot({ config: bridgeCfg?.platforms ?? {}, agentConnected: agentProbeSettled ? agentReady : null }));
+            // 快照要带两样东西才能校出真实诊断：当前生效的平台配置（`config_invalid` 要拿
+            // 真实值去校，给空对象等于永不触发），以及各平台最近一次显式探活的结论。
+            sendJson(currentPlatformRegistry());
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '读取平台注册表失败' }, 500);
+          }
+          return;
+        }
+        // Agent 平台的写口与探活（P2）：两个动作用同一条路径前缀，因为它们都以「注册表里的
+        // 这个平台」为对象 —— id 不在表里就 404，写一个没人读的 id 等于制造死数据。
+        const agentPlatformRoute = url.pathname.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
+        if (agentPlatformRoute) {
+          const agentId = agentPlatformRoute[1];
+          const action = agentPlatformRoute[2];
+          try {
+            const known = findRegistryPlatform(currentPlatformRegistry(), 'agent', agentId);
+            if (!known) {
+              sendJson({ ok: false, error: `没有这个 Agent 平台：${agentId}` }, 404);
+              return;
+            }
+            if (action === 'config') {
+              if (req.method !== 'PATCH') { sendJson({ ok: false, error: '不支持的方法' }, 405); return; }
+              const body = await readBody();
+              if (!body || typeof body !== 'object' || Array.isArray(body)) {
+                sendJson({ ok: false, error: '配置补丁必须是对象' }, 400);
+                return;
+              }
+              // 校验与诊断共用一个函数（`vetPlatformConfig`）：控制台接受的值不能比诊断宽。
+              // 校的是「合完的整份」：补丁只带改动的字段，必填项得靠旧值补齐。
+              const vet = vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...body });
+              if (vet.error) { sendJson({ ok: false, error: vet.error }, 400); return; }
+              // 只落盘用户给的补丁：校验结果里带着 schema 默认值，写进去等于把默认值固化成设置。
+              savePlatformPatch('agent', body, agentId);
+              // 端点字段决定「下一次连接去哪」，正在跑的那条改了要重启才生效；
+              // 选项（provider / model / 思考强度）由调用面每次现读，改完即生效。
+              const requiresRestart = agentId === runningAgentPlatformId()
+                && Object.keys(body).some((key) => AGENT_ENDPOINT_KEYS.includes(key));
+              ext.audit.append('platform.agent.config', { platform: agentId, keys: Object.keys(body).sort(), requiresRestart });
+              const registry = currentPlatformRegistry();
+              sendJson({ ok: true, requiresRestart, platform: findRegistryPlatform(registry, 'agent', agentId), registry });
+              return;
+            }
+            if (req.method !== 'POST') { sendJson({ ok: false, error: '不支持的方法' }, 405); return; }
+            // 探活失败是**有效结论**，不是请求错误：照样 200，让控制台把结论画出来。
+            const probe = await probeAgentPlatform(agentId);
+            ext.audit.append('platform.agent.probe', { platform: agentId, ok: probe.ok });
+            sendJson({ ok: true, probe, registry: currentPlatformRegistry() });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '平台操作失败' }, 400);
           }
           return;
         }
@@ -7626,14 +7780,46 @@ async function main() {
           });
           return;
         }
-        // 全局默认运行方案：新建/未指定/重建的会话都用它；会话自己的 planId 优先。
+        // 全局默认（P4 / P2）：默认运行方案与默认执行体。两者都是「开工时的默认值」，
+        // 会话自己的 planId 与平台侧的 `platforms.active` 优先。
         if (url.pathname === '/api/config/runtime') {
+          // 默认执行体没有单独一份配置：它读的就是 `platforms.active.agent`，与注册表同源。
+          const defaultAgent = String(cfg.platforms?.active?.agent ?? '');
           if (req.method === 'GET') {
-            sendJson({ ok: true, runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '' }, plans: ensureRuntime() });
+            sendJson({
+              ok: true,
+              runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '', defaultAgent },
+              runningAgent: runningAgentPlatformId(),
+              plans: ensureRuntime(),
+            });
             return;
           }
           if (req.method === 'POST') {
             const body = await readBody();
+            // 一个请求只改一项：同时改方案与执行体时，「预检没过」到底哪项没落盘说不清楚。
+            if (body?.defaultAgent !== undefined) {
+              const wanted = String(body.defaultAgent ?? '').trim().toLowerCase();
+              if (!wanted || !agentPlatform(wanted)) {
+                sendJson({ ok: false, error: `没有这个 Agent 平台：${wanted || '(空)'}` }, 400);
+                return;
+              }
+              const running = runningAgentPlatformId();
+              if (wanted === running) {
+                sendJson({ ok: true, requiresRestart: false, runtime: { defaultAgent: wanted }, runningAgent: running });
+                return;
+              }
+              // 预检：连不上的平台不设为默认 —— 否则下一次启动直接落在「执行体不可用」上，
+              // 而那时控制台只能看到一条探活失败，不知道是刚才哪个动作造的。
+              const probe = await probeAgentPlatform(wanted);
+              if (!probe.ok) {
+                sendJson({ ok: false, error: `${wanted} 探活未通过：${probe.error || '未响应'}`, probe, runningAgent: running }, 409);
+                return;
+              }
+              saveActiveAgentPlatform(wanted);
+              ext.audit.append('runtime.defaultAgent', { from: running, to: wanted });
+              sendJson({ ok: true, requiresRestart: true, probe, runtime: { defaultAgent: wanted }, runningAgent: running });
+              return;
+            }
             const defaultPlan = normalizeRuntimePlanId(body.defaultPlan);
             if (!defaultPlan || !findPlan(ensureRuntime(), defaultPlan)) {
               sendJson({ ok: false, error: '没有这个运行方案' }, 400);

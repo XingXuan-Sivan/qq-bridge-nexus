@@ -405,6 +405,23 @@ export function makeFixtureState() {
     dshProvider: 'deepseek-official',
     dshModel: 'deepseek-flash',
     dshVision: 'auto',
+    // Agent 平台的配置面与最近一次显式探活（P2 写口 / probe 的落点）：初值与注册表里的 config 一致。
+    agentConfigs: {
+      dsh: {
+        baseUrl: '',
+        authToken: '',
+        authTokenExplicit: false,
+        authHeader: 'authorization',
+        authPrefix: 'Bearer',
+        allowRemote: false,
+        provider: 'deepseek-official',
+        model: 'deepseek-flash',
+        reasoningEffort: 'max',
+      },
+      acp: { command: 'npx @zed-industries/agent', args: ['--stdio'], timeoutMs: 120000 },
+    },
+    agentProbes: {},
+    defaultAgent: 'dsh',
     whitelist: { ownerQQ: '100001', admins: [] },
     access: {
       passive: { mode: 'allow', entries: ['qq:group:123456789', 'qq:group:100003', 'qq:private:100001'] },
@@ -763,7 +780,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (method === 'GET') {
           return json({
             ok: true,
-            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2' },
+            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2', defaultAgent: state.defaultAgent },
+            runningAgent: 'dsh',
             plans: [
               { id: 'chat', label: '聊天' },
               { id: 'social-v1', label: '一代仿真' },
@@ -772,9 +790,33 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             ],
           });
         }
+        // 默认执行体：设置即落盘，重启后装配（与真实桥接同一语义：requiresRestart: true）。
+        if (body?.defaultAgent !== undefined) {
+          state.defaultAgent = String(body.defaultAgent);
+          return json({ ok: true, requiresRestart: true, runtime: { defaultAgent: state.defaultAgent }, runningAgent: 'dsh' });
+        }
         const value = typeof body?.defaultPlan === 'string' ? body.defaultPlan.trim() : '';
         state.defaultPlan = value || 'social-v2';
         return json({ ok: true, runtime: { defaultPlan: state.defaultPlan } });
+      }
+      // P2：Agent 平台的写口与探活。保存改 state.agentConfigs（下一次拉注册表就能读回来），
+      // 探活结论记在 state.agentProbes —— 控制台要验的是「按钮发对了请求、结论画出来了」。
+      const agentPlatformMatch = path.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/(config|probe)$/);
+      if (agentPlatformMatch && (method === 'PATCH' || method === 'POST')) {
+        const agentId = agentPlatformMatch[1];
+        const action = agentPlatformMatch[2];
+        if (!state.agentConfigs[agentId]) return json({ ok: false, error: `没有这个 Agent 平台：${agentId}` }, 404);
+        if (action === 'config' && method === 'PATCH') {
+          const patch = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+          state.agentConfigs[agentId] = { ...state.agentConfigs[agentId], ...patch };
+          const endpointKeys = ['baseUrl', 'authToken', 'authTokenExplicit', 'authHeader', 'authPrefix', 'allowRemote'];
+          return json({ ok: true, requiresRestart: Object.keys(patch).some((key) => endpointKeys.includes(key)) });
+        }
+        if (action === 'probe' && method === 'POST') {
+          state.agentProbes[agentId] = { ok: true, error: '', url: `http://127.0.0.1:3080/${agentId}`, at: timestamp };
+          return json({ ok: true, probe: state.agentProbes[agentId] });
+        }
+        return json({ ok: false, error: '不支持的方法' }, 405);
       }
       if (path === '/api/config/send-limit') {
         if (method === 'GET') return json({ ok: true, send: state.limits.send });
@@ -874,6 +916,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           // （inbound: true），所以不再有 inbound_unsupported 这条诊断——预览也要照实反映。
           case '/api/platforms/registry': return json({
             ok: true,
+            // 配置面（`configured`）由 state.defaultAgent 派生，运行期（`active`）恒为 dsh：
+            // 切换默认执行体之后重拉快照，就能同时看到「待重启」与那条诊断。
             active: { user: 'qq', agent: 'dsh' },
             platforms: [
               {
@@ -884,6 +928,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 source: 'builtin',
                 owner: null,
                 active: true,
+                configured: true,
                 capabilities: ['group', 'direct', 'mention', 'reply', 'recall', 'poke', 'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'],
                 conversationTypes: ['group', 'private'],
                 limits: { chunkChars: 4000, markdown: false },
@@ -928,6 +973,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 source: 'builtin',
                 owner: null,
                 active: true,
+                configured: state.defaultAgent === 'dsh',
                 capabilities: ['session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact'],
                 conversationTypes: [],
                 limits: {},
@@ -948,17 +994,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                     reasoningEffort: { type: 'string', title: '推理强度', description: '低 / 中 / 高；具体取值取决于模型。' },
                   },
                 },
-                config: {
-                  baseUrl: '',
-                  authToken: '',
-                  authTokenExplicit: false,
-                  authHeader: 'authorization',
-                  authPrefix: 'Bearer',
-                  allowRemote: false,
-                  provider: 'deepseek-official',
-                  model: 'deepseek-flash',
-                  reasoningEffort: 'max',
-                },
+                // 写口（PATCH .../config）存的就是这一份：控制台改完再拉快照要能读回来。
+                config: { ...state.agentConfigs.dsh },
+                // 最近一次显式探活（POST .../probe）；null = 本次运行里还没探过。
+                probe: state.agentProbes.dsh ?? null,
                 assets: {
                   prompt: { active: false, hasDefault: false },
                   tools: [],
@@ -966,9 +1005,49 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                   capabilityProfiles: ['chat', 'chat-v2', 'readonly', 'workspace', 'full'],
                 },
               },
+              {
+                // 第二个 Agent 平台：没被选中、也没设为默认。用来验「设为默认执行体」与多实例配置，
+                // 不声明能力档 —— 方案页的 Agent 平台下拉因此仍只有 dsh。
+                side: 'agent',
+                id: 'acp',
+                label: 'ACP 执行体',
+                note: '',
+                source: 'builtin',
+                owner: null,
+                active: false,
+                configured: state.defaultAgent === 'acp',
+                capabilities: ['session', 'events'],
+                conversationTypes: [],
+                limits: {},
+                inbound: false,
+                configSchema: {
+                  type: 'object',
+                  additionalProperties: true,
+                  properties: {
+                    command: { type: 'string', title: '启动命令', description: 'stdio 执行体的命令行；留空时按 agent-platform.yml 里的默认值。' },
+                    args: { type: 'array', title: '参数', description: '逐项传给启动命令。' },
+                    timeoutMs: { type: 'integer', title: '超时（毫秒）', description: '单轮调用的总时长上限。' },
+                  },
+                },
+                config: { ...state.agentConfigs.acp },
+                probe: state.agentProbes.acp ?? null,
+                assets: {
+                  prompt: { active: false, hasDefault: false },
+                  tools: [],
+                  behaviors: [],
+                  capabilityProfiles: [],
+                },
+              },
             ],
-            diagnostics: [],
-            summary: { total: 2, user: 1, agent: 1, errors: 0, warnings: 0 },
+            // 配置面与运行期选的不一致 = 刚改过、还没重启：与真实桥接同一条诊断。
+            diagnostics: state.defaultAgent === 'dsh' ? [] : [{
+              code: 'active_pending_restart',
+              side: 'agent',
+              platformId: state.defaultAgent,
+              level: 'warn',
+              message: `配置已把默认平台改为 ${state.defaultAgent}，本进程仍装配 dsh：重启桥接后生效`,
+            }],
+            summary: { total: 3, user: 1, agent: 2, errors: 0, warnings: state.defaultAgent === 'dsh' ? 0 : 1 },
           });
           case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，

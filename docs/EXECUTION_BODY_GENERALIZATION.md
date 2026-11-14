@@ -167,8 +167,7 @@ export function createRuntime({ config, log, onBaseUrlChange }) {
 
 ### 4.2 一致性测试包（TCK）
 
-P0 剩余项。新增 `scripts/test-agent-port-tck.mjs`，对每个已注册 Agent 平台跑同一组离线用例；
-ACP 进入用例集的前提是补齐 `events()`（§4.1.1）：
+P0 剩余项，依赖 §4.4 的事件面归一。新增 `scripts/test-agent-port-tck.mjs`，对每个已注册 Agent 平台跑同一组离线用例：
 
 | 用例 | 断言 |
 | --- | --- |
@@ -195,6 +194,30 @@ ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台
 | 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active → `resetAgentRuntime()` 后再取新句柄 |
 | 安全边界 | 插件**不能自证能力**：`capabilities` 先跑 TCK 再进注册表；权限决策权只在内核；`readPermission` 用于发现漂移 |
 | 诊断 | `capability_overclaimed` / `agent_provider_invalid` / `agent_instance_offline` |
+
+### 4.4 事件面 / 审批引用 / 用量账本三处归一（P0 剩余）
+
+P0 的两项遗留（ACP 当主平台、TCK）卡在同一处：`events()` 还不是中立面。现状证据都在 `src/bridge.js` 里：
+
+| 位置 | 依赖 | 后果 |
+| --- | --- | --- |
+| `pumpMux()`（约 17667 起，700 余行） | `frame.type` 取 `session/snapshot` / `session/event` / `question/requested` / `approval/requested`；`frame.event.type` 取 `turn/start` / `tool/call` / `tool/result` | 换执行体 = 重写这 700 行；ACP 的归一事件在这套判别值上一格都对不上 |
+| `recordSessionUsage()` / `recordSessionSnapshot()` / `rebuildInFlightCollector()` | 事件体是 DSH wire 形状（`data.usage`、`turn`、`assistant/message`）与快照的 `projections.tokenUsage` / `records` | 用量账本与「断线重建进行中回合」都绑在 DSH 上 |
+| `agentPort.respondPermission({ clientId, eventId })` | 审批回执引用是 DSH 事件标识的形状 | ACP 用 `requestId`（`pendingPermissions`），审批转发要各自分叉 |
+
+三项归一，缺一不算完成：
+
+1. **事件面**：`events().mux()` 产出 `{ sessionId, kind, ... }`，`kind` ∈ `AGENT_EVENT_KINDS`（补 `turn-start` 与 `snapshot`）。
+   wire 形状的翻译全部在适配器内，内核不再出现 `turn/start` / `tool/call` 这类名字；历史快照与用量作为**载荷**
+   由适配器提供（`snapshot` / `usage` 字段），内核只透传给账本，不解析平台字段。
+2. **审批引用**：`respondPermission(ref)` 归一成 `{ instance, sessionId, requestId }`；
+   DSH 的 `clientId` / `eventId`、ACP 的 `requestId` 都在适配器内部映射，内核只认中性引用。
+3. **用量账本**：`createTokenLedger.ingestEvent()` 的入参从「DSH 事件」改为中立用量记录
+   （`{ sessionId, turn, step, retry, model, provider, usage, at }`）；投影基线与 `records` 由适配器转成同一形状。
+
+顺序：先 1 + 3（同一张事件表上的两件事，缺 3 则账本在 ACP 下记不到数），再 2，最后 TCK。
+TCK 排在最后的原因：它的「事件归一」用例要求每家都产出 `AGENT_EVENT_KINDS`；在 DSH 事件面归一之前先写 TCK，
+只能把这条用例降级成「已知缺口」——那是一条写进合同里的假绿。
 
 ---
 
@@ -483,7 +506,7 @@ SnowLuma，换执行体后第一格名字就是错的；SnowLuma 是 QQ 侧上�
 
 | 批 | 目标 | 主要文件 | 门禁 |
 | --- | --- | --- | --- |
-| **P0** | 执行体可换：连接层下沉（✅）+ 删 `REQUIRED_PROTOCOL_MEMBERS`（✅）+ ACP 当主平台（待补 `events`）+ TCK（待做） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`scripts/test-agent-port-tck.mjs`、`builtin.mjs` | `verify:repo`、`test:audit`、TCK 两家全绿 |
+| **P0** | 执行体可换（分三段）：**P0a ✅** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` 与账本）、`scripts/test-agent-port-tck.mjs` | P0a：`verify:repo`、`test:audit`；P0c：TCK 两家全绿 |
 | **P1** | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + overclaim 诊断 | `src/plugins/host-api.mjs`、`src/agent-side/runtime-registry.mjs`、`PLUGIN_KERNEL.md` | TCK + `test:audit` |
 | **P2** | 配置 v3：`platforms.agents.<id>` 多实例、`runtime.defaultAgent`、agent 侧 probe/config 端点 | `src/config/platforms.mjs`、`scripts/*router*`（`/api/platforms/registry` 写口）、`guides/CONFIGURATION.md` | `verify:repo`、`test:console-ui` |
 | **P3** | 多入站：每实例一条管线、出站解析、用户侧实例 UI | `src/bridge.js`（`startUserPlatformInbound` 单例处）、`src/user-side/inbound.mjs`、`src/config/platforms.mjs` | `test:audit`、`test-console-ui`、`test:v030` 等价回归 |

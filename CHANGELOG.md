@@ -490,8 +490,9 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **门禁**：`verify:repo` 81 通过 0 失败；`test:audit` 128/129（唯一失败是本地未纳入版本管理的
   `profiles/plans/agent-full-copy.yml` 让「内置方案六条」变成七条，与本次改动无关）。
 - **文档**：`EXECUTION_BODY_GENERALIZATION.md` §4.1 改为实际形态（成员表 + fail-closed + ACP 缺口）、
-  §8.6 给出概览指标卡的目标语义；`PLATFORM_UNIFICATION.md` §4.3/§4.4 与 ACP 接线段、删除清单表的
-  「门面保留」改为已删除；`PROFILES_MODEL.md`、`guides/TESTING.md` 同步。
+  §4.4 拆出剩余的「事件面 / 审批引用 / 用量账本」三处归一并把 P0 分成 P0a/P0b/P0c、§8.6 给出概览指标卡的目标语义；
+  `PLATFORM_UNIFICATION.md` §4.3/§4.4 与 ACP 接线段、删除清单表的「门面保留」改为已删除；
+  `PROFILES_MODEL.md`、`guides/TESTING.md` 同步。
 
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删

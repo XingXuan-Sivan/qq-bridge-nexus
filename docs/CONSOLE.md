@@ -223,7 +223,8 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 改样式可以，这些不能动：
 
 - **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
-- **22 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **27 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×3、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **基线是改造前的快照**：录制时控制台仍是 `scripts/fixtures/console.before.html` 那一版，所以基线只认「改造前就有的写口」。改造后新加的写口（例如 `POST /api/sessions/<key>/permission`）不进基线——它们要有自己的专项用例，并由夹具的 `unknownRequests` 兜住「调了没人认领的路线」。
 - 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
 契约确实变了才重录：`node scripts/test-console-ui.mjs --accept-contracts`，并在提交信息里写明原因。
@@ -235,7 +236,7 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 | 门禁 | 覆盖什么 |
 | --- | --- |
 | `node scripts/test-console-static.mjs` | 结构约定：页面必须用 `tableHtml`、不许手写 `className='meta ok\|err'`、组件导出齐全、`input.search-box` 唯一定义、页面搜索框带 `type` |
-| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、22 条写载荷契约基线、几何与分页、移动端无横向溢出 |
+| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、27 条写载荷契约基线、几何与分页、移动端无横向溢出 |
 | `npm run test:audit` | 全量脚本回归（提交前必跑） |
 | 截图 | 视觉一致性：`sessions` / `platforms` / `plans` / `persona` / `overview` 三档（1440 / 1180 / 760） |
 
@@ -269,9 +270,33 @@ tileHtml({ id, title, badges, description, tags, error, actions, body, interacti
 
 ---
 
-## 9. 不做的事
+## 9. 执行体 / 方案 / 权限的界面口径（P2–P5）
+
+这四块界面共用一条规矩：**值从哪来写清、写口只有一个**。四轴与存储分层见
+[PROFILES_MODEL.md](PROFILES_MODEL.md) §1.1 / §1.2，两级权限权威见
+[SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) §5.5。
+
+| 界面 | 数据源 | 写口 | 口径 |
+| --- | --- | --- | --- |
+| 平台页（列表 + 分栏） | `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应，列表与分栏共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
+| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户侧一行「能力位」；Agent 侧四行「能力位 / 应用方式 / 提示注入通道 / 权限权威支持面」。空项给「—」；权限权威支持面由 `canPinPermission` 决定（能钉档给两种，否则只有「执行体自身」） |
+| 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个执行体」由注册表回答 |
+| 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器再跳平台›能力标签 |
+| 会话详情›执行体与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：执行体名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉与「在新执行体上重开」；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
+| 全局配置›运行（执行体卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认执行体只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
+| 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉不列 `full`——要 full 先打开「允许 full 档」，再在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
+
+三条落地细节：
+
+- **一次取全**：会话详情不为「执行体 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台分栏也不为每个标签重拉注册表。
+- **写口只有一个**：权限档只走 `/permission`（不混进会话 PATCH），默认执行体只走 `/api/config/runtime`（不混进平台配置），能力档只走 `/capabilities/<id>`。同一个值出现第二个写口就是缺陷。
+- **失败写在块内**：写后回读不一致、桥接权威拦截（409）、禁用档（403）都在块内联报错，不弹全局 toast、不静默改回。
+
+---
+
+## 10. 不做的事
 
 - 不引框架（Vue/React/Svelte）与打包器：当前体量下收益不抵引入成本，且会破坏「改完刷新即生效」。
 - 不引 CSS 预处理器：变量已用 CSS 自定义属性表达。
-- 不引 Bootstrap 整包：只是借它的组织与纪律。现有令牌与组件已够用，整包替换等于全量重录 25 条契约。
+- 不引 Bootstrap 整包：只是借它的组织与纪律。现有令牌与组件已够用，整包替换等于全量重录 27 条契约。
 - 不做运行时组件注册（插件 UI 是另一件事，见 [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) 的插件 UI 沙箱）。

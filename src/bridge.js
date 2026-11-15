@@ -5552,11 +5552,7 @@ async function main() {
     // 直通：能力档明确要求「不装预设」。档案里残留的 presetId 也不能挂上——
     // 直通的含义就是不改执行体环境，挂上就等于偷偷装了一个。
     if (runtimeOf(key).apply === 'passthrough') return undefined;
-    // P6：会话固定的能力预设优先（全局方案的引擎已投影进 currentMode，能力仍走下面旧分支）。
-    const fixedTools = sessionPlanOf(key)?.tools;
-    const planPreset = fixedTools ? resolvePresetName(fixedTools, { strict: true }) : '';
-    if (planPreset) return planPreset;
-    // 会话档案可以固定 preset；否则按模式推导。
+    // 会话档案可以固定 preset；否则按模式推导（方案不带工具面，能力档只决定档位）。
     const override = state.profiles?.[key]?.presetId;
     if (override && mode !== 'closed-agent') {
       const picked = resolvePresetName(override, { strict: true });
@@ -9126,9 +9122,9 @@ async function main() {
               wake,
               mode: profile?.mode ?? 'inherit',
               effectiveMode: effectiveMode(key),
-              // P5：会话级的运行方案下拉（跟随全局 = null）。presetId 仍保留供旧客户端读取。
+              // 会话级的运行方案下拉（跟随全局 = null）；presetId 是会话级的预设覆盖，与方案无关。
               planId: profile?.planId ?? null,
-              plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, tools: p.tools, audience: p.audience, builtin: p.builtin })),
+              plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, audience: p.audience, builtin: p.builtin })),
               // 下拉里的「跟随全局（当前：…）」要显示全局方案的名字，所以给整份定义（与 `/api/plans` 的 activePlan 同形）。
               activePlan: activePlan() ?? null,
               permission: permissionPayload(key),

@@ -695,6 +695,29 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **门禁**：`test-passthrough-plan` 6/6、`test-console-ui` 45/45（52 条隔离写）、`test-console-static` 全通过、
   `test:audit` 133/133、`verify:adaptation --layer all` 134 通过 0 失败、`check-profiles`、`verify:persona` 全通过。
 
+### 重构：文档同步与 C6.5 核销（P6）
+- **PROFILES_MODEL.md 改成「四轴 + 存储分层」**：应用方式 / 工具面 / 权限权威 / 行为四轴互不推导；存储按
+  「会话档案 → 方案 → 能力档 → 全局运行时」分层；默认解析链只有**两层**（会话 `planId` → `runtime.defaultPlan`，
+  缺省 `social-v2`），设计稿里的 `platforms.users.<id>.defaultPlan` 从未落地。
+- **SESSION_SUBSYSTEM.md 追平实现**：档案补 `planId` / `permission` / `permissionMirror` / `promptInjected`；
+  §5.1 的有效模式换成代码里的两条分支（有 `planId` 走 `sessionPlanOf` + `planMode`，否则 `resolveEffectiveMode`），
+  并点明 `currentMode` 是全局方案的投影、不单独存盘；新增 §5.4（提示注入四通道）与 §5.5（执行体与权限的两权威），
+  §8.2 的详情弹窗补齐十张卡。
+- **CONSOLE.md 对上盘子**：写载荷契约从 22 条改 27 条（补齐平台注册表那一组 `PATCH .../registry/<side>/<id>/config`、
+  `POST .../registry/agent/<id>/probe` 等），导航目标 15 个；新增 §9「执行体 / 方案 / 权限的界面口径」（7 行表 +
+  「一次取全 / 写口只有一个 / 失败写在块内」三条），原 §9 顺延为 §10；并写明基线是改造前的快照——改造后新增的
+  写口不进基线，由专项用例与夹具的 `unknownRequests` 兜住。
+- **PLATFORM_UNIFICATION.md 核销 C6.5**：状态行不再说「唯一没做的是 C6.5」；§7.4 的注册表字段 `health` 改为
+  `probe`（与 `src/platforms/registry.mjs` 一致），补 `configured` / `enabled` / `inboundState` / `outbound` /
+  `rawEvent`；§9.3 两处「有意留白」标注已由 P2/P3 补上；§9.4 的 CONSOLE 行改成 27 条契约 / 15 个导航。
+- **清掉「方案带 `tools`」的残留**：`normalizePlan()` 只产出八键、没有 `tools`，于是 `modePreset()` 里「档案锁定
+  的方案带工具面」那一支与 `/api/sessions` payload 的 `plans[].tools` 都是死代码——一并删除，注释改成实情
+  （方案不带工具面，能力档只决定档位）。
+- **口径统一**：根 `README.md`、`docs/README.md`、`FOLDER_MAP.md`、`INJECTION_PROFILE_CONFIG.md`、
+  `PLATFORM_DECOUPLING.md` 里的「四层配置模型」改成「四轴 + 存储分层」；历史发布说明与 archive 描述保持原样。
+- **门禁**：`verify:repo` 103 通过 0 失败 0 跳过、`test:audit` 133/133、`test-console-ui` 45/45（52 条隔离写）、
+  `test-console-static` 全通过。
+
 ### 修复
 - **`verify-persona-config` 的「正文 500 字」断言换成段落断言**：P4 方言上移后能力档正文只剩安全边界与
   送达方式两段（435/480 字符），按字数判完整性的断言便一直红着——而它想防的是「正文被截断」。

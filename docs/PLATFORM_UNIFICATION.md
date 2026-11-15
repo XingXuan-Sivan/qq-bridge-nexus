@@ -1,7 +1,7 @@
 # 平台统一与 Agent 通用化（PLATFORM_UNIFICATION）
 
-> **状态**：C0–C8 已完成（C8 收尾于 2026-11-14 完成，结果见 §9.4）；随后按用户反馈补了 C9「控制台文案与人格生效口径」（不新增批次，结果见 §9.5）。唯一未做的是 C6.5「把 ACP 接成主平台」——
-> 它要求 ACP 也具备「连一个常驻服务」的门面，属后续批次，不影响本方案的验收口径（原因见 §9.2 末节）。衔接并取代两份旧规划中"只做了一半"的部分：
+> **状态**：C0–C9 已完成（C8 收尾于 2026-11-14，结果见 §9.4；C9 见 §9.5）。C6.5「把 ACP 接成主平台」已收口 ——
+> 见 §9.2 的「接线状态」：ACP 自带连接层与 `createRuntime`，与 DSH 同过 `RUNTIME_MEMBERS` 成员表校验，可在「全局配置 › 运行」里切成默认执行体。衔接并取代两份旧规划中"只做了一半"的部分：
 > [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) 的 B0–B8 已完成（本方案不推翻，只补齐 B8 之后的缺口）；
 > [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) 的 P2「中立 Agent IR」**触发条件已满足**（要接第二个 Agent 平台），纳入本方案 C4。
 >
@@ -66,7 +66,7 @@ P4 起再增 `runtime` 段（`apply` / `prompt` / `permission` / `narrow`）：`
 
 ### 2.3 界面 IA 错位：四标签按"存储层级"组织，不按"用户问题"组织
 
-`pages/behavior/page.html` 的四个标签（`platform` / `plans` / `behaviors` / `capabilities`）恰好对应四层配置模型，
+`pages/behavior/page.html` 的四个标签（`platform` / `plans` / `behaviors` / `capabilities`）恰好对应当时的配置层级，
 但**没有一层是"平台能不能用"**——而"能不能用"正是 B5–B7 做的运行期能力。结果是：
 
 | 用户的问题 | 现在去哪 | 数据源 | 结论 |
@@ -370,14 +370,16 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 | `capabilities[]` / `conversationTypes[]` / `limits{}` | 能力面（来自实现） |
 | `configSchema` / `config` | 配置面（来自声明面 + `config.json`） |
 | `assets` | `{ prompt, tools, behaviors, capabilities }` 有无 |
-| `health` | `{ ok, checkedAt, detail }` |
+| `probe` | 上次探活结论 `{ ok, at, url, error }`（P2 落地；是「最近一次请求的结果」，不是快照自带的事实） |
 | `diagnostics[]` | 见 7.5 |
 
 **C1 已落地的字段**：`id` / `side` / `label` / `note` / `source` / `owner` / `active` / `capabilities` /
 `conversationTypes` / `limits` / `inbound` / `configSchema` / `config` / `assets` / `diagnostics`。
 `assets` 实际形状是 `{ prompt:{active,hasDefault}, tools, behaviors, capabilityProfiles }`（C4 起能力档列表就是预设列表，不再另给 `agentPresets`）；
 `source` 只取 `builtin` / `plugin` / `profile-only` 三值（`profile-only` 是合成出来的，不再单设“只有目录”那一栏）。
-待落地：`health`（随探活端点）、`PATCH .../config`（C2 带 `configSchema` 校验）。
+P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `active` 不一致时出 `active_pending_restart`）、`enabled` /
+`inboundState` / `outbound` / `rawEvent`（用户侧每条实例各自的入站管线）、`probe`（Agent 侧上次探活结论）。
+原定的两处待落地已清：探活端点与 `PATCH .../config` 均在 P2 落地（两侧共用一条写路径，校验与诊断同一套 schema 规则）。
 
 端点（旧的全部删除，不留投影）：
 
@@ -385,7 +387,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 | --- | --- |
 | `GET /api/platforms/registry` | 统一读（平台页、会话页下拉、方案页共用） |
 | `PATCH /api/platforms/registry/:side/:id/config` | 写配置（按 `configSchema` 校验） |
-| `POST /api/platforms/registry/:side/:id/probe` | 探活 |
+| `POST /api/platforms/registry/agent/:id/probe` | 探活（只有 Agent 侧；用户侧看条目的 `inboundState`，不另做探活） |
 | `GET /api/plans` / `POST /api/plans[/:id]` | 方案 CRUD（原 `/api/runtime/plans`） |
 
 ### 7.5 可检测（诊断码）
@@ -586,7 +588,7 @@ v2 的判别值是另一套（`agent_message` / `state_update` / …），两者
    `permissionCommandSucceeded` 判 `ok === true && modeId === wanted` —— `session/set_mode` 没有回执值，
    能确认的只有「RPC 成功」，`current_mode_update` 是事件、不保证先到，不假装能读到最终状态。
 
-**接线状态（C6.5）**
+**接线状态（C6.5，已收口）**
 
 acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `command` / `args` / `cwd` spawn 子进程，
 懒建客户端与 port，按归一事件收成一轮）。它声明 `mode: 'stdio'`，没有地址发现与凭据猜测——这些差异
@@ -628,8 +630,8 @@ acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `com
 
 **三处有意留白**（界面上写明原因，不造数据）
 
-1. **不做「健康」标签**：注册表没有 `health` 字段（§7.4 自标待落地），`POST .../probe` 也未实现。§7.2 的 tab 图里画过「健康」，本批不做，等探活端点落地。
-2. **「配置」只读**：`PATCH /api/platforms/registry/:side/:id/config` 未实现（C7 不改 `src/`），所以这一栏只把声明面字段与当前值列成表，并写明「参数改在 `profiles/platforms/<id>/platform.yml`，重启桥接生效」。
+1. **不做「健康」标签**（后续已补探活）：当时注册表没有 `health` 字段、探活端点也未实现，所以 §7.2 tab 图里的「健康」没做。P2 落了 `POST /api/platforms/registry/agent/<id>/probe`，结论回填成条目的 `probe` 字段，在「全局配置 › 运行」与平台详情里各显示一次 —— 仍不新开「健康」标签页。
+2. **「配置」当时只读**（后续已补写口）：C7 不改 `src/`，那一栏只能把声明面字段与当前值列成表。P2/P3 落了 `PATCH /api/platforms/registry/<side>/<id>/config`（两侧同一条路径，`vetPlatformConfig` 与诊断共用同一套 schema 规则），配置栏改成按 `configSchema` 生成的表单；连接参数写明「重启后生效」。
 3. **能力面板不按平台过滤**：`src/capabilities/store.mjs` 没有 `agentPlatform` 字段（能力档实际只有 DSH 一份）。因此：列表不再显示「Agent 平台」列（原来 `cap.agentPlatform || 'dsh'` 是造出来的值）；面板挂在哪个 Agent 平台下，写回路径就用哪个平台的目录（`createCapabilityPanel({ platformId })`）；不假装「这个平台只有这几套档」。
 
 **与 §7.6 预判的出入**
@@ -657,7 +659,7 @@ acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `com
 | --- | --- |
 | `PROFILES_MODEL.md` | 顶部横幅指向本方案；§一 层级表按 C2/C4/C7 的事实重写（能力预设 → 能力档，Agent 平台写「当前 DSH 与 ACP」，关系句写明方案不再有 `agent` 字段）；§二 目录树补 `behaviors/.defaults/`、`capabilities/.defaults/`、`plans/.defaults/`、`adapters/runtime.mjs`、`acp/` 平台 |
 | `FOLDER_MAP.md` | 新增 `src/platforms/` 与 `src/config/` 两行；`src/agent-side/` 补 `adapters/acp/`；`src/user-side/metadata.mjs` 的端点改注册表；adapters 行区分 dsh 三份 / acp 一份；scripts 计数改 208；docs 树补本文件 |
-| `CONSOLE.md` | §4 数据源改 `js/registry.js`；§6/§7 的过期数字改为事实（契约 22 条、导航 15 个、截图页 `sessions` / `platforms` / `plans` / `persona` / `overview`）；契约清单里的方案端点随改名更新 |
+| `CONSOLE.md` | §4 数据源改 `js/registry.js`；§6/§7 的过期数字改为事实（契约 27 条、导航 15 个、截图页 `sessions` / `platforms` / `plans` / `persona` / `overview`）；契约清单里的方案端点随改名更新；P6 已补 §9「执行体 / 方案 / 权限的界面口径」 |
 | `PLATFORM_DECOUPLING.md` | §6.1 加「已收口为 `GET /api/platforms/registry`」横幅，该节保留作设计演进记录 |
 | `README.md` / `CHANGELOG.md` | 索引状态改「C0–C8 已完成」；CHANGELOG 新增 C8 段 |
 

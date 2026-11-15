@@ -19,7 +19,7 @@
 > 版本状态：**0.2.0 已在 `feat/platform-decoupling` 分支定版**（用户侧/Agent 侧平台解耦 B0–B8），尚未合入 `main`；
 > `main` 当前仍是 0.1.1。合入后本节即默认版本，无需切换分支。
 
-> 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四层配置模型、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
+> 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四轴配置模型（应用方式 / 工具面 / 权限权威 / 行为）、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
 > 原版的消息桥接、多群白名单、二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查等能力全部保留并继续演进。
 > 下表括号里的版本号指上游 qq-bridge-nexus 的历史版本，**相关能力均已包含在本版本中**；部署请以本节和 [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md) 为准。
 > 问题反馈与 Release 下载：本仓库的 Issues / Releases。
@@ -323,7 +323,7 @@ qq-bridge-nexus/       # fork 后的仓库目录名（上游仓库名为 dsh-qq�
     release/            # 发布说明与发布流程
     （design/ research/ audits/ 是本地开发文档，不随仓库发布）
   audio/                # 语音库（自己建，不入库）：把准备好的音频放这里，AI 可作 QQ 语音发出（用法见 docs/guides/VOICE.md）
-  profiles/             # 四层配置的唯一源：platforms/ agent-platforms/<id>/{capabilities,agents,adapters}/ plans/ schemas/
+  profiles/             # 配置的唯一源（四轴：应用方式 / 工具面 / 权限权威 / 行为）：platforms/ agent-platforms/<id>/{capabilities,adapters}/ plans/ schemas/
   artifacts/<agent平台>/  # 由该平台适配器生成的产物（当前只有 dsh/）
     dsh/qq-mode-console   # 注册 qq-mode 设置命名空间（仅 host 半，UI 卡片未实现）
     dsh/qq-agent-presets  # 预设 bundle（patch 由 npm run build:artifacts 生成，setup-dsh.mjs 装进 DSH）

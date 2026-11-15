@@ -1,5 +1,7 @@
-# 四层配置模型（PROFILES_MODEL）
+# 配置模型：四轴与存储分层（PROFILES_MODEL）
 
+> 一条会话最终怎么跑由**四轴**决定：应用方式 / 工具面 / 权限权威 / 行为（定义与各轴取值见
+> [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) §3.1）。轴是语义分类，§一 的表才是**取值存在哪**：
 > 从 2026-11-12 起，桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别**。
 > 旧的 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/` 三处存储已删除，没有兼容层。
 > 本文只描述现状；历史设计文档见文末“相关文档”。
@@ -12,21 +14,48 @@
 
 ---
 
-## 一、四层各自负责什么
+## 一、四轴、存储分层与默认解析链
+
+### 1.1 四轴：一条会话最终怎么跑
+
+| 轴 | 取值 | 决定什么 | 住哪 |
+| --- | --- | --- | --- |
+| **应用方式** `apply` | `preset` / `passthrough` | 要不要在执行体里装一套预设（能力档 `rows` → bundle patch） | 能力档 `runtime.apply` |
+| **工具面** `tools` | 平台工具 / Agent 模块 / MCP / 技能，再按会话权限级别收窄 | 发什么工具给模型 | 能力档 `tools` 段 + 会话 `permission` |
+| **权限权威** `permission` | `bridge` / `agent` | 对端权限档由谁定、谁回钉 | 能力档 `runtime.permission` |
+| **行为** `behavior` | `none` / `social-v1` / `social-v2` … | 回合怎么被驱动、话术风格 | 方案 `behavior` → `profiles/platforms/<id>/behaviors/` |
+
+四个轴互不推导。`direct`（`apply: passthrough`）**不装预设**，但它仍有工具面（宿主环境自带的）、仍有权限权威（`agent`，桥接只告警 + 给「改回」）、仍挑一个行为档案（`none`）——
+「直通」只说明应用方式，不等于「没有方案」。
+
+### 1.2 存储分层
 
 | 层 | 回答的问题 | 存储 | 谁提供 |
 | --- | --- | --- | --- |
 | **用户侧平台**（user platform） | AI 在哪个聊天平台上做事（QQ、微信、B 站……）：怎么连、有哪些平台工具、怎么说话 | `profiles/platforms/<id>/`（`platform.yml` + `tools.yml` + `prompt.md` + `behavior-types/`） | 系统给接口与公共配置（`configSchema` / `vars`），具体工具、话术、档案类型由该平台目录提供 |
 | **行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | `profiles/platforms/<id>/behaviors/*.yml` | 档案作者（内置两份，可增删）；C7 起它是「平台 › 详情 › 行为」的子资源，不再有整页 |
 | **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前 DSH 与 ACP） | `profiles/agent-platforms/<id>/` | 系统给 `AgentPort` 契约，具体工具 / 能力档 / 产物由该平台目录提供 |
-| **能力档**（capability） | 这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”：平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条，可克隆 / 新建；`.defaults/` 留出厂副本供「还原」 |
+| **能力档**（capability） | 四个轴里的前三个：这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”——平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条，可克隆 / 新建；`.defaults/` 留出厂副本供「还原」 |
 | **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选执行体）”组合成一个可切换的档位 | `profiles/plans/*.yml` | 内置六条，可克隆成自定义方案 |
-| **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话配置（`state/sessions.json`） | 会话级，不落在档案里 |
+| **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话档案 `state/sessions/<platform>/<kind>/<id>.json` 的 `permission`（`inherit` = 跟随全局 `config.json` 的 `permission.default`） | 会话级，不落在档案里 |
 
 关系一句话：**方案 = 能力档 + 行为档案 + 受众**，需要时再加一个执行体（`agentPlatform`，缺省 `auto` 跟随全局默认）。
 方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id；C4 起方案不再有 `agent` 字段
 （能力档 id 就是该平台的 preset id），所以“换能力档”不会再把“换预设”忘在后面。
-方案决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
+方案与能力档决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
+
+### 1.3 默认解析链（两层）
+
+会话没有单独选方案时，按下面的顺序取值，第一处有值即停：
+
+| 顺位 | 键 | 作用 |
+| --- | --- | --- |
+| 会话 | `state/sessions/<platform>/<kind>/<id>.json` 的 `planId` | 单会话覆盖（`null` = 没选） |
+| 全局 | `config.json` 的 `runtime.defaultPlan`（缺省 `social-v2`） | 兜底默认 |
+
+解析链**只有这两层**。设计期还留过中间一层「平台默认方案」（`platforms.users.<id>.defaultPlan`：同一用户平台的实例各有一套默认方案），
+落地时没做——平台维度已经由「每个平台一条 `active` 实例」表达，再叠一层默认方案会让「这个会话为什么是这个档」出现三个来源；
+要按平台分方案，给会话单独选即可。没有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。
 
 ---
 
@@ -212,7 +241,7 @@ C2b 起两侧多了两个**声明面**字段（详见 [PLATFORM_UNIFICATION.md](
 | 平台适配器发现 | `scripts/agent-platform-adapters.mjs`：`ADAPTER_KINDS` / `adapterFile` / `listAgentPlatforms` / `loadAdapter` / `normalizeArtifactFiles`。**约定优于声明**：只看 `profiles/agent-platforms/<id>/adapters/<kind>.mjs` 存不存在，不读 `agent-platform.yml` |
 | 产物构建调度 | `scripts/build-artifacts.mjs`：`buildArtifacts({targets, check})`。遍历平台 → 调 `planArtifacts()` → 校验路径/去重 → 写盘；`--check` 只比对不写（漂移即非零退出） |
 | 产物安装调度 | `scripts/install-agent-platform.mjs`：`installAgentPlatform({agentPlatform, profile})`。**先 build 再 install**，避免装到旧产物 |
-| 运行期适配器 `runtime.mjs` | `profiles/agent-platforms/<id>/adapters/runtime.mjs` 是**声明面**：能力、权限映射、preset 清单等纯常量与纯函数，**不得 import `src/`**（否则四层模型反向依赖内核，构建期无法单独打包）。协议面（RPC 客户端、鉴权、事件解包）在 `src/agent-side/adapters/<id>/`，由 `src/agent-side/builtin.mjs` 用 `createRuntime` 字段与声明面拼装后注册；内核只经 `src/agent-side/runtime.mjs` 的 `agentRuntime()` 调用（B4 / B5 / C6.5） |
+| 运行期适配器 `runtime.mjs` | `profiles/agent-platforms/<id>/adapters/runtime.mjs` 是**声明面**：能力、权限映射、preset 清单、`applies` / `promptChannels` 等纯常量与纯函数，**不得 import `src/`**（否则声明面反向依赖内核，构建期无法单独打包）。协议面（RPC 客户端、鉴权、事件解包）在 `src/agent-side/adapters/<id>/`，由 `src/agent-side/builtin.mjs` 用 `createRuntime` 字段与声明面拼装后注册；内核只经 `src/agent-side/runtime.mjs` 的 `agentRuntime()` 调用（B4 / B5 / C6.5） |
 
 自检：`node scripts/check-profiles.mjs`（校验目录四件套、工具风险值、内置能力/方案、引用闭合、旧目录不得存在）。
 产物链路自检：`npm run verify:artifacts`（产物未漂移）、`npm run test:artifact-pipeline`（发现/校验/幂等/mock 平台隔离）。

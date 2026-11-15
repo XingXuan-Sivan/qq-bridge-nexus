@@ -105,16 +105,16 @@ capability: direct          # 能力档 id；其 runtime.apply 决定 preset / p
 # platform / agentPlatform 不再必填：缺省跟随全局默认（见 §5）
 ```
 
-### 3.2 三层默认（与会话人格同构）
+### 3.2 两层默认
 
 | 层 | 键 | 作用 |
 | --- | --- | --- |
-| 会话 | `state/profiles/<key>.planId` | 单会话覆盖（已有） |
-| 平台 | `platforms.users.<id>.defaultPlan` | 同一平台的实例可以有不同默认方案（新增） |
-| 全局 | `runtime.defaultPlan` | 全局默认（已有） |
+| 会话 | `state/sessions/<platform>/<kind>/<id>.json` 的 `planId` | 单会话覆盖 |
+| 全局 | `runtime.defaultPlan` | 兜底默认（缺省 `social-v2`） |
 
-`runtime.defaultPlan` 从「所有会话都靠它」变成「最后一层兜底」——这正是多平台并发之后它「不再适用」的部分：
-不是删掉它，而是让它在平台层之下生效。
+解析链只有这两层：会话有 `planId` 就用它，否则用全局默认。设计期还计划过中间一层「平台默认方案」
+（`platforms.users.<id>.defaultPlan`），落地（P2/P3/P5）时没做：平台维度已经由「每个平台一条 `active` 实例」表达，
+再叠一层默认方案会让「这个会话为什么是这个档」出现三个来源；要按平台分方案，给会话单独选即可。
 
 ### 3.3 为什么不做「组合自由」
 
@@ -581,7 +581,7 @@ POST /api/sessions/:key/permission  { preset }
 | **P3** ✅ | 多入站：每实例一条管线、`enabled` 条目开关、出站解析、用户侧实例 UI（§8.5） | `src/bridge.js`（逐实例装配 `startUserPlatformInbound` + 平台写口）、`src/user-side/{inbound,metadata,user-platform,runtime-registry}.mjs`、`src/config/platforms.mjs`（`userInstances`）、`src/platforms/registry.mjs`、`public/console/pages/platforms/`、`guides/CONFIGURATION.md` | `test:audit`（含新增 `test-user-instances`）、`test-console-{static,ui}`、`test-unified-inbound`、`verify:repo` |
 | **P4** ✅ | 能力档 `runtime` 段 + 方案解绑（去 `platform`、`agentPlatform` 默认 `auto`）+ 方言上移（能力档只留安全边界与送达方式）+ `direct` 能力档 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `check-profiles`、`verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt`、`test:runtime-plans`、`test:audit` 132/132、`test-console-{static,ui}` |
 | **P5** ✅ | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡、方案页生效方式、能力位矩阵 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`RUNTIME_PROMPT` 声明面）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-passthrough-plan` 6/6、`test-console-static`、`test-console-ui` 45/45、`check-profiles`、`test:audit`、`verify:persona` |
-| **P6** | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销 | `docs/**` | `verify:repo` 全绿 |
+| **P6** ✅ | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销、口径统一到「四轴 + 存储分层」、清掉「方案带 `tools`」的残留分支 | `docs/**`、`README.md`、`src/bridge.js` | `verify:repo` 103/0、`test:audit` 133/133、`test-console-ui` 45/45、`test-console-static` |
 
 回滚：P0 的连接层下沉与删门面是同一版内的替换，不存在「先留着旧路径以后删」的中间态；
 要换执行体就换 `createRuntime` 的实现，要退只能整批退回上一个可运行提交。
@@ -621,7 +621,7 @@ P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 | 文档 | 关系 |
 | --- | --- |
 | [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) | 总纲；本文接 §4.4 的 C6.5 核销与 §9.1 的 ACP 差异表 |
-| [PROFILES_MODEL.md](PROFILES_MODEL.md) | 「四层配置」在 P4 后要改写为「四轴 + 三层默认」，届时同步 |
+| [PROFILES_MODEL.md](PROFILES_MODEL.md) | 配置把值存在哪（存储分层）与四轴怎么落到文件上；已按本文 §3.1 / §3.2 改写 |
 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | P0 的连接层下沉是该文 P2「中立 Agent IR」的先行部分 |
 | [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md) | 直通下 `/level` 语义变化要同步（§7.4） |
 | [CONSOLE.md](CONSOLE.md) / [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | §8 的界面改动必须遵守的组件与表单约定 |

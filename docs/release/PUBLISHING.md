@@ -6,7 +6,7 @@
 
 ```powershell
 npm ci
-npm run test:audit                 # Windows 上应全部通过（116/116）；macOS / Linux 上 test-console-encoding.mjs 是 Windows 专用，会跳过
+npm run test:audit                 # Windows 上应全部通过（134/134）；macOS / Linux 上 test-console-encoding.mjs 是 Windows 专用，会跳过
 npm run privacy-scan               # 上游的隐私扫描：不应出现真实 QQ 号、本机路径、令牌
 git status --short                 # 确认没有 config.json / state/ / node_modules / audio/ 被跟踪
 ```

@@ -114,7 +114,7 @@ docs/
 ├── CONSOLE_FORM_LESSONS.md# 表单迁移踩坑
 ├── DSH_DEPLOYMENT.md      # 从零部署
 ├── guides/                # 面向使用者/运维（见 README 索引）
-├── release/               # PUBLISHING.md + RELEASE_NOTES_v0.1.0.md
+├── release/               # PUBLISHING.md + 各版本 RELEASE_NOTES
 │   └── legacy/            # 上游时期的发布说明（v0.3.0–v1.1.2，只作存档）
 └── archive/               # 历史设计稿：models/ console/ capability/
 ```

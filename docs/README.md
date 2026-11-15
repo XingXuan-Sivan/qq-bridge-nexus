@@ -83,6 +83,8 @@
 | 文档 | 内容 |
 | --- | --- |
 | [release/PUBLISHING.md](release/PUBLISHING.md) | 发布流程：发布前检查、推送与打标签、生成 Release ZIP、创建 GitHub Release |
+| [release/RELEASE_NOTES_v0.2.1.md](release/RELEASE_NOTES_v0.2.1.md) | 0.2.1：消息调度内核 + 配置资源统一（行为引擎、出厂副本、全量快照） |
+| [release/RELEASE_NOTES_v0.2.0.md](release/RELEASE_NOTES_v0.2.0.md) | 0.2.0：平台解耦 / 平台统一 / 执行体通用化 |
 | [release/RELEASE_NOTES_v0.1.0.md](release/RELEASE_NOTES_v0.1.0.md) | 本仓库首个发布基线的说明 |
 
 `release/legacy/` 是上游 fork 时期的发布说明（v0.3.0 – v1.1.2），**只作存档**，版本号与本仓库无关。

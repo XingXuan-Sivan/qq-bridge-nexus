@@ -3,8 +3,6 @@ id: agent-full
 label: Agent · 高权限
 note: 仅管理员私聊；完全访问。
 builtin: true
-platform: qq
-agentPlatform: dsh
 behavior: none
 capability: full
 audience: owner

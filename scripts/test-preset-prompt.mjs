@@ -49,10 +49,12 @@ test('每代内置预设都满足自己那一代的安全不变量', () => {
   }
 });
 
-test('一代与二代的硬性不变量清单确实不同（防止又合并成一份）', () => {
+test('一代与二代的硬性不变量清单只差在送达方式（不共成一份）', () => {
   assert.notDeepEqual(presetBlockingSubstrings('v1'), presetBlockingSubstrings('v2'));
-  // 二代的工具面不变量不应该出现在一代清单里
-  assert.ok(!presetBlockingSubstrings('v1').includes('你没有本地工具'));
+  // 安全边界两代共享，无法用「某串只在一代」区分；差别必须落在送达方式上。
+  assert.ok(presetBlockingSubstrings('v2').includes('送达方式：工具发送'));
+  assert.ok(presetBlockingSubstrings('v1').includes('送达方式：自动转发'));
+  assert.ok(!presetBlockingSubstrings('v1').includes('送达方式：工具发送'));
 });
 
 test('真实预设能定位到 persona 的 prefix 块', () => {
@@ -69,7 +71,7 @@ test('真实预设能定位到 persona 的 prefix 块', () => {
 
 test('抽出的是 YAML 解析后的真实字符串（折叠标量已展开）', () => {
   assert.equal(typeof originalPrefix, 'string');
-  assert.ok(originalPrefix.length > 2000, `提示词应有实质内容，实际 ${originalPrefix.length} 字符`);
+  assert.ok(originalPrefix.length > 400, `提示词应有实质内容，实际 ${originalPrefix.length} 字符`);
   for (const marker of PRESET_REQUIRED_MARKERS) {
     assert.ok(originalPrefix.includes(marker), `内置提示词应包含安全基线段落：${marker}`);
   }
@@ -187,22 +189,20 @@ test('只含空格/Tab 的行也能安全往返（不会被当成空行读丢）
 
 test('缺少安全基线段落时给出警告（但不阻断保存）', () => {
   assert.deepEqual(presetPromptWarnings(originalPrefix), [], '内置提示词不应有警告');
-  const stripped = originalPrefix.replace(/【二代仿真模式 —— 安全规则[^\n]*\n/, '');
+  const stripped = originalPrefix.replace(/【送达方式：工具发送】[^\n]*\n/, '');
   const warnings = presetPromptWarnings(stripped);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /安全规则/);
+  assert.match(warnings[0], /送达方式/);
   assert.ok(presetPromptWarnings('').some((w) => /内容为空/.test(w)));
 });
 
-// 回归：软校验（warnings）同样必须按代次取清单。
-// 曾经两代共用一份「二代」清单，切到一代时永远报「缺少二代仿真模式段落」，
-// 而一代的段落本来就叫「【QQ 群聊模式 —— 安全规则】」「【发送与汇报禁令】」。
-test('提示词软校验按代次取清单：一代不该被要求二代段落', () => {
-  const v1 = '【QQ 群聊模式 —— 安全规则（最高优先级，不可违反）】\n【发送与汇报禁令（违反即严重违规）】';
-  const v2 = '【二代仿真模式 —— 安全规则】\n【二代仿真模式 —— 工具协议】';
+// 软校验（warnings）与硬校验一样按代次取清单：两代共享安全边界，只差送达方式。
+test('提示词软校验按代次取清单：一代不该被要求二代的送达方式', () => {
+  const v1 = '【安全边界（最高优先级，不可违反）】\n【送达方式：自动转发】';
+  const v2 = '【安全边界（最高优先级，不可违反）】\n【送达方式：工具发送】';
   assert.deepEqual(presetPromptWarnings(v1, 'v1'), [], '一代内容按一代校验不应报缺段');
   assert.deepEqual(presetPromptWarnings(v2, 'v2'), [], '二代内容按二代校验不应报缺段');
-  assert.equal(presetPromptWarnings(v1, 'v2').length, 2, '一代内容按二代校验应报两段缺失');
+  assert.equal(presetPromptWarnings(v1, 'v2').length, 1, '一代内容按二代校验应报送达方式缺失');
 });
 
 // 回归：qq-agent-* 与自建预设的 persona.prefix 可能缺省或为空。

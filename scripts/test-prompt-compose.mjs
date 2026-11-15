@@ -1,13 +1,8 @@
 #!/usr/bin/env node
-// 平台提示词组装：占位符、空值不改变产物、只动 persona 行。
+// 平台提示词渲染：占位符、变量白名单，以及「产物与能力档源文件逐字一致」。
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  appendPlatformPrompt,
-  composeRows,
-  readPlatformPromptFromConfig,
-  renderPlatformPrompt,
-} from '../src/runtime/prompt-compose.mjs';
+import { normalizePromptVars, renderPlatformPrompt } from '../src/runtime/prompt-compose.mjs';
 import { PRESETS, buildPatches } from '../scripts/build-agent-preset-patches.mjs';
 
 test('占位符：认识的替换、不认识的保留', () => {
@@ -21,37 +16,17 @@ test('占位符：认识的替换、不认识的保留', () => {
   assert.equal(renderPlatformPrompt('{owner}', {}), '管理员');
 });
 
-test('拼接：空值不接入、正文尾部空白被清掉', () => {
-  assert.equal(appendPlatformPrompt('正文', ''), '正文');
-  assert.equal(appendPlatformPrompt('正文', '   '), '正文');
-  assert.equal(appendPlatformPrompt('正文\n\n', '补充'), '正文\n\n补充');
-  assert.equal(appendPlatformPrompt('', '补充'), '补充');
-  assert.equal(appendPlatformPrompt('正文', '补充'), '正文\n\n补充');
+test('变量白名单：只留三个键，空值丢掉、超长截断', () => {
+  assert.deepEqual(
+    normalizePromptVars({ platform: 'QQ', displayName: '', owner: ' 老张 ', 额外: 'x' }),
+    { platform: 'QQ', owner: '老张' },
+  );
+  assert.deepEqual(normalizePromptVars(null), {});
+  assert.deepEqual(normalizePromptVars(['QQ']), {});
+  assert.equal(normalizePromptVars({ platform: 'x'.repeat(300) }).platform.length, 200);
 });
 
-test('composeRows：只改 persona 行，其余行与顺序不动', () => {
-  const rows = [
-    { id: 'persona', config: { prefix: '原始人格' } },
-    { id: 'qq-tool-restrict', config: { profile: 'chat' } },
-  ];
-  const same = composeRows(rows, { platformText: '' });
-  assert.equal(same, rows, '空补充应原样返回（保证生成物逐字节不变）');
-  const next = composeRows(rows, { platformText: '你在 {platform} 上。', vars: { platform: 'QQ' } });
-  assert.equal(next[0].config.prefix, '原始人格\n\n你在 QQ 上。');
-  assert.equal(next[1], rows[1]);
-  assert.equal(rows[0].config.prefix, '原始人格', '不能改到原数组');
-  assert.equal(next[0].id, 'persona');
-});
-
-test('从 config 读平台提示词', () => {
-  const config = { capabilities: { 'chat': { prompt: { personaPrefix: '你是 QQ 机器人。' } } } };
-  assert.equal(readPlatformPromptFromConfig(config, 'chat'), '你是 QQ 机器人。');
-  assert.equal(readPlatformPromptFromConfig(config, 'chat-v2'), '');
-  assert.equal(readPlatformPromptFromConfig({}, 'chat'), '');
-  assert.equal(readPlatformPromptFromConfig(null, 'chat'), '');
-});
-
-test('内置预设：没有平台提示词时，生成的 patch 与仓库产物逐字一致', () => {
+test('内置预设：生成的 patch 与仓库产物逐字一致', () => {
   const results = buildPatches({ check: true });
   assert.equal(results.length, PRESETS.length);
   for (const result of results) {

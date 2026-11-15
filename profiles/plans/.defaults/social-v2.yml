@@ -3,8 +3,6 @@ id: social-v2
 label: 二代仿真
 note: 自主阅读、发言与潜水（v2 行为）。
 builtin: true
-platform: qq
-agentPlatform: dsh
 behavior: social-v2
-capability: chat
+capability: chat-v2
 audience: access

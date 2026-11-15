@@ -60,7 +60,8 @@
 
 **C4 之后的形态**：一份 `capabilities/<id>.yml` 同时给出 `tools`（能做什么）、`preset`（DSH 预设列表里显示什么）、
 `rows`（插件行，渲染成 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`）、`extensions`（MCP/技能授权）四段；
-**能力档 id 就是 preset id**（`chat` / `chat-v2` / `readonly` / `workspace` / `full`）。核对结果：那 5 份薄壳只是把裸说明符
+**能力档 id 就是 preset id**（`chat` / `chat-v2` / `readonly` / `workspace` / `full` / `direct`）。
+P4 起再增 `runtime` 段（`apply` / `prompt` / `permission` / `narrow`）：`apply: passthrough` 的档不装预设、`rows` 可为空、不产 patch。核对结果：那 5 份薄壳只是把裸说明符
 `qq-agent-presets/qq-tool-restrict.mjs` 转发一次，随 `agents/` 一起删除；权威实现留在 artifacts 里不动。
 
 ### 2.3 界面 IA 错位：四标签按"存储层级"组织，不按"用户问题"组织
@@ -107,7 +108,7 @@ L2  能力档（唯一）      —                          capabilities/<tier>.
                                    │                        │
 L3  行为档案            profiles/platforms/<id>/behaviors/<id>.yml
                                    │
-L4  运行方案            profiles/plans/<id>.yml = platform + agentPlatform + capability + behavior
+L4  运行方案            profiles/plans/<id>.yml = capability + behavior + audience（+ 可选 agentPlatform）
                                    │
 L5  会话绑定 + 权限级别  state/sessions/*.json = planId + agentRef + level
 ```

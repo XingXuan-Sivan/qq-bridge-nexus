@@ -13,6 +13,7 @@ import {
   legacyLevelOfPlan,
   planIdForLegacy,
   findPlan,
+  validatePlanReferences,
 } from '../src/runtime/plans.mjs';
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-plans-'));
 const tmpFile = (name = 'runtime.json') => path.join(tmpRoot(), name);
@@ -36,8 +37,9 @@ test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
   };
   for (const plan of plans) {
     assert.equal(plan.builtin, true, plan.id);
-    assert.equal(plan.platform, 'qq');
-    assert.equal(plan.agentPlatform, 'dsh');
+    // 方案不绑平台：没有 platform 字段；执行体默认 auto，跟随 config 的 platforms.active.agent。
+    assert.equal('platform' in plan, false, `${plan.id} 不应带 platform 字段`);
+    assert.equal(plan.agentPlatform, 'auto', plan.id);
     assert.deepEqual([legacyModeOfPlan(plan), legacyLevelOfPlan(plan)], expected[plan.id], plan.id);
     assert.equal(planIdForLegacy(...expected[plan.id]), plan.id);
   }
@@ -65,7 +67,7 @@ test('自定义方案：写入 / 读取 / 克隆 / 删除都落文件', () => {
   const store = createPlanStore({ root });
   assert.deepEqual(store.list(), []);
   const saved = store.save({
-    id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh',
+    id: 'my-agent', label: '我的 Agent',
     capability: 'full', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
   });
   assert.equal(saved.builtin, false);
@@ -79,6 +81,46 @@ test('自定义方案：写入 / 读取 / 克隆 / 删除都落文件', () => {
   store.remove('my-agent');
   assert.equal(store.list().length, 1);
   assert.equal(store.get('my-agent'), null);
+});
+
+test('旧文件里的 platform 字段：读时提示、存时不写', () => {
+  const root = tmpRoot();
+  fs.writeFileSync(path.join(root, 'legacy.yml'), [
+    'version: 1',
+    'id: legacy',
+    'platform: qq',
+    'capability: chat',
+    'behavior: none',
+    '',
+  ].join('\n'), 'utf8');
+  const store = createPlanStore({ root });
+  const plan = store.get('legacy');
+  assert.equal('platform' in plan, false, '归一后的方案不带 platform');
+  assert.equal(plan.warnings?.[0]?.code, 'plan_warn');
+  assert.match(plan.warnings[0].message, /platform/);
+  // 存一次就把旧字段抹掉（不拖到以后版本）
+  store.save(plan);
+  assert.equal(store.get('legacy').warnings, undefined);
+  assert.ok(!fs.readFileSync(path.join(root, 'legacy.yml'), 'utf8').includes('platform:'));
+});
+
+test('引用校验：执行体/能力档事实不符时报错，直通进群只提示', () => {
+  const capabilities = new Map([
+    ['chat', { apply: 'preset', hasRows: true, permission: 'bridge' }],
+    ['direct', { apply: 'passthrough', hasRows: false, permission: 'agent' }],
+    ['empty', { apply: 'preset', hasRows: false, permission: 'bridge' }],
+  ]);
+  const agentPlatforms = new Map([['dsh', { apply: ['preset'], permission: true }]]);
+  const codes = (plan) => validatePlanReferences(plan, { capabilities, agentPlatforms }).map((issue) => issue.code);
+
+  assert.deepEqual(codes({ capability: 'chat', agentPlatform: 'auto', behavior: 'none', audience: 'owner' }), []);
+  assert.deepEqual(codes({ capability: 'missing', agentPlatform: 'auto', behavior: 'none' }), ['capability_invalid']);
+  assert.deepEqual(codes({ capability: 'empty', agentPlatform: 'auto', behavior: 'none' }), ['capability_invalid']);
+  assert.deepEqual(codes({ capability: 'chat', agentPlatform: 'nope', behavior: 'none' }), ['plan_invalid']);
+  // 直通：执行体不认领就报错，而不是在运行期静默投影成别的档位
+  assert.deepEqual(codes({ capability: 'direct', agentPlatform: 'dsh', behavior: 'none' }), ['plan_invalid']);
+  // 直通进群聊：只是提示，不阻断（安全边界由执行体自身承担）
+  assert.deepEqual(codes({ capability: 'direct', agentPlatform: 'auto', behavior: 'none', audience: 'access' }), ['plan_warn']);
 });
 
 test('方案解析不再有全局指针：默认方案来自 config.runtime.defaultPlan', () => {

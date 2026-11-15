@@ -610,6 +610,37 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   `console-ui-contracts.json` 按新写口重录（只新增 2 条）。`test-config-v2` 的期望值随 `enabled`
   进扁平投影更新——它是条目级显式字段，与 `account` 同层；缺条目时不编造 `enabled`。
 
+### 重构：方案解绑与能力档 `runtime` 段（P4）
+- **能力档第四段 `runtime`**：`{ apply, prompt, permission, narrow }`，缺省 `preset / none / bridge / []` ——
+  不写这一段的能力档行为与引入前完全一致。四项取值非法直接报错，不猜默认值（把「不装预设」悄悄装成预设
+  会同时错掉安全边界与权限权威）。新增 `direct.yml`：`apply: passthrough`（`rows: []`）、`permission: agent`、
+  `tools.agent.host: true`，构建期跳过、不产 `direct.patch.yml`，`preset` 段只作界面建议值。
+- **执行体认领 `apply`**：DSH 声明面新增 `RUNTIME_APPLY = ['preset']`。引用直通能力档的方案会被
+  `validatePlanReferences()` 拒成 `plan_invalid`，而不是在运行期被静默投影成别的档位；直通运行期在 P5。
+- **方案不再绑用户平台**：`normalizePlan()` 不读 `platform`，`planText()` 不写它；旧文件里的 `platform` 由
+  `planWarnings()` 报 `plan_warn`，保存时自然丢弃 —— 不需要迁移，也不动方案 `version`。`agentPlatform` 默认
+  `auto`（跟随 `platforms.active.agent`），内置方案全部 `auto`；写死具体 id 会在换全局执行体后被拉回旧平台，
+  这条同样出 `plan_warn`。
+- **校验按事实判**：`validatePlanReferences()` 现在能看能力档事实（`apply` / `hasRows` / `permission`）与执行体
+  声明（认领的 `apply`、是否有权限预设映射），产出 `capability_invalid` / `plan_invalid` / `plan_warn` 三码；
+  群聊直通仍是「允许 + 警告」。`check-profiles` 与 `test-runtime-plans` 消费同一份结论。
+- **方言上移**：能力档 `rows` 只剩平台无关的两段（`【安全边界（最高优先级，不可违反）】` +
+  `【送达方式：自动转发】` / `【送达方式：工具发送】`）；QQ 场景规则、认人、工具协议、操作即动作、
+  群聊不是客服队列、模式切换、学习群友策略、群管禁令、发送与汇报禁令全部只住在 `profiles/platforms/qq/prompt.md`，
+  运行期由 `core-platform-prompt` 注入一份。`prompt-compose.mjs` 里构建期把平台话术追加进 `persona.prefix`
+  的死路径（`composeRows()`）随之删除。
+- **预设不变量按代次**：`src/preset-prompt.js` 的必带段落改为「安全边界 + 送达方式」，一代查
+  `【送达方式：自动转发】`、二代查 `【送达方式：工具发送】`；正文最短长度阈值从 500 降到 300
+  （两代正文只剩两段时约 490 字符，旧阈值会把两个预设都锁死）。
+- **平台提示词条件化**：`prompt.md` 的【发送】一条改成「只有『工具发送』档位才自己发消息」——
+  一代同样挂着 MCP，不条件化就会出现「提示词让你发、能力档说自动转发」的两套口径。
+- **控制台**：方案页去掉用户平台字段与必填校验，执行体下拉加 `auto`（显示为「跟随全局（当前：…）」），
+  表格列名改「执行体」，导出不再写 `platform`；`test-console-static` 加静态断言防回退。
+- **出厂副本**：`profiles/plans/.defaults/` 六份与 `capabilities/.defaults/` 六份（含新增 `direct`）逐字同步。
+- **门禁**：`check-profiles`、`verify:artifacts`、`test:artifact-pipeline`、`verify:repo`、`verify:adaptation`
+  （repo + all）、`test:preset-prompt` 16/16、`test:runtime-plans` 8/8、`test:qq-preset-contract` 10/10、
+  `test-platform-prompt` 1/1、`test:audit` 132/132、`test-console-static`、`test-console-ui` 42/42。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

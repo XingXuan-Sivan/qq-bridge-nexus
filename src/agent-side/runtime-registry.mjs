@@ -233,3 +233,21 @@ export function agentPresetIds(ctx = {}) {
   const impl = requireAgentPlatform(ctx.agentPlatform);
   return [...(impl.AGENT_PRESET_IDS ?? Object.values(impl.AGENT_PRESET_FOR_LEVEL ?? {}))];
 }
+
+/**
+ * 该平台认领哪些生效方式（能力档 `runtime.apply` 的取值）。
+ *
+ * 认领 `passthrough` 的平台能把会话直接交给自己的原生 agent：不装预设、不建沙箱。
+ * 未声明时按 `preset` 处理——只会装预设的平台不需要额外声明。
+ */
+export function agentPlatformApplies(id = '', ctx = {}) {
+  const impl = agentPlatform(id || ctx.agentPlatform);
+  const declared = impl?.RUNTIME_APPLY;
+  const values = Array.isArray(declared) ? declared.filter((value) => typeof value === 'string' && value.trim()) : [];
+  return values.length ? values : ['preset'];
+}
+
+/** 该平台是否认领权限预设映射（能力档 `runtime.permission: bridge` 的前提）。 */
+export function agentPlatformCanPinPermission(id = '', ctx = {}) {
+  return Boolean(agentPlatform(id || ctx.agentPlatform)?.PERMISSION_PRESET_FOR_LEVEL);
+}

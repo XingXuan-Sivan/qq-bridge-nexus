@@ -52,6 +52,42 @@
           }
         }
       }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "缺省等价于 { apply: preset, prompt: none, permission: bridge, narrow: [] }。",
+      "properties": {
+        "apply": {
+          "enum": [
+            "preset",
+            "passthrough"
+          ],
+          "description": "preset：装预设；passthrough：直通，不产 patch（rows 可为空）。"
+        },
+        "prompt": {
+          "enum": [
+            "none",
+            "system",
+            "prefix",
+            "tool"
+          ],
+          "description": "提示注入通道。"
+        },
+        "permission": {
+          "enum": [
+            "bridge",
+            "agent"
+          ],
+          "description": "权限档归谁：桥接钉住，还是读执行体自己的档位。"
+        },
+        "narrow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "投递侧 deny 名单；直通下不是硬边界。"
+        }
+      }
     }
   }
 }

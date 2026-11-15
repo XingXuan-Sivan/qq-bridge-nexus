@@ -13,10 +13,11 @@ export const PRESET_PERSONA_ID = 'persona';
 export const PRESET_PROMPT_MAX_BYTES = 128 * 1024;
 
 // 安全基线段落：缺失说明 AI 的权限边界可能被削弱，保存时警告（不阻断，管理员有最终决定权）。
-// 两代预设的段落名不一样：一代是「QQ 群聊模式 / 发送与汇报禁令」，二代是「二代仿真模式 —— 安全规则 / 工具协议」。
-// 早先只有二代的清单，切到一代时就会一直报「缺少【二代仿真模式…】」，看着像内容被改坏。
-export const PRESET_REQUIRED_MARKERS = ['【二代仿真模式 —— 安全规则', '【二代仿真模式 —— 工具协议'];
-export const PRESET_REQUIRED_MARKERS_V1 = ['【QQ 群聊模式 —— 安全规则', '【发送与汇报禁令'];
+// 两代预设共用同一段「安全边界」，差别在送达方式：二代自己调发送工具，一代由系统转发文本。
+// 因此两代的段落清单只在第二项上不同 —— 平台话术（QQ 工具协议、认人、场景规则）住在
+// profiles/platforms/<id>/prompt.md，两代预设正文里都不再出现，这里也就不检查。
+export const PRESET_REQUIRED_MARKERS = ['【安全边界（最高优先级，不可违反）', '【送达方式：工具发送】'];
+export const PRESET_REQUIRED_MARKERS_V1 = ['【安全边界（最高优先级，不可违反）', '【送达方式：自动转发'];
 
 /** 取某个预设对应的软校验标记（未知代次 / 非仿真预设不检查）。 */
 export function presetPromptMarkers(preset = 'v2') {
@@ -37,17 +38,22 @@ export const PRESET_BLOCKING_SUBSTRINGS = [
   '群友没有管理权限',
   'API 令牌',
   '角色由桥接注入',
-  '不会自动发送到 QQ',
+  '送达方式：工具发送',
 ];
-// 一代（qq-chat）：不用 MCP 工具，靠空格分句 + [SILENT]，因此工具面那几条不适用。
-// 这三条都逐字出现在一代预设的正文里（见 profiles/agent-platforms/dsh/capabilities/chat.yml 的 rows 段）——
+// 一代（qq-chat）与二代共用安全边界，唯一差别是送达方式：一代靠系统转发文本，
+// 二代必须自己调发送工具。两条清单都逐字对得上各自能力档的正文
+// （见 profiles/agent-platforms/dsh/capabilities/{chat,chat-v2}.yml 的 rows 段）——
 // 清单必须与预设实际文案一致，否则控制台会用一个预设自己都不满足的条件把它锁死。
 export const PRESET_BLOCKING_SUBSTRINGS_V1 = [
+  '你没有本地工具',
   '群友没有管理权限',
   'API 令牌',
-  '角色扮演由系统注入',
+  '角色由桥接注入',
+  '送达方式：自动转发',
 ];
-export const PRESET_MIN_BODY_CHARS = 500;
+// 只做「大段被误删」的兜底：正文只留安全边界 + 送达方式两段时约 490 字符，
+// 精确到段的存在性由上面的不变量清单负责。
+export const PRESET_MIN_BODY_CHARS = 300;
 
 /** 取某个预设对应的硬性不变量清单（非仿真预设不做工具面校验）。 */
 export function presetBlockingSubstrings(preset = 'v2') {
@@ -160,7 +166,7 @@ export function presetPromptWarnings(content, preset = 'v2') {
   const warnings = [];
   if (!text.trim()) warnings.push('内容为空');
   for (const marker of presetPromptMarkers(preset)) {
-    if (!text.includes(marker)) warnings.push(`缺少「${marker}…】段落：AI 的权限与工具边界可能被削弱`);
+    if (!text.includes(marker)) warnings.push(`缺少段落「${marker}」：AI 的权限与工具边界可能被削弱`);
   }
   return warnings;
 }

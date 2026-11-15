@@ -57,6 +57,10 @@
 | 能力档根目录属于 dsh | `src/capabilities/store.mjs` 的 `CAPABILITIES_ROOT = AGENT_PLATFORMS_ROOT/dsh/capabilities`（`src/profiles/paths.mjs` 其实已有 `agentPlatformDir()` 未使用） | 第二家执行体的能力档没有地方放 |
 | 方案是日常编辑对象 | 仓库里已有用户克隆出来的 `profiles/plans/agent-full-copy.yml` | 重构必须让克隆方案自动继承新字段，不能要求用户重建 |
 
+前三条（方言两处并存、方案钉平台与执行体、克隆方案继承）已按 §6.1–§6.3 收口：平台话术只剩 `prompt.md` 一份，
+方案不再写 `platform`、`agentPlatform` 缺省 `auto`，能力档多了 `runtime` 段。能力档根目录仍只有 `dsh`，
+等第二家执行体真要存能力档时再按 `agentPlatformDir()` 挪。
+
 ### 2.3 权限链路（现状，直通要复用）
 
 ```
@@ -322,7 +326,10 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 
 - `apply: preset` 的能力档保持现状（`rows` 非空、参与 build、`verify:artifacts` 管住漂移）。
 - `apply: passthrough` 的能力档 `rows: []` 合法，`build.mjs` 跳过它，`verify:artifacts` 也不为它产文件。
-- `runtime` 段缺省等价于 `{ apply: preset, prompt: none, permission: bridge }`——老能力档不用改。
+- `runtime` 段缺省等价于 `{ apply: preset, prompt: none, permission: bridge, narrow: [] }`——老能力档不用改。
+- 取值非法直接报错，不猜默认值：把「不装预设」悄悄装成预设会同时错掉安全边界与档位权威。
+- 执行体用 `RUNTIME_APPLY` 声明自己认领哪些 `apply`；DSH 目前只认 `preset`，所以引用 `direct` 的方案会被静态校验拒绝，
+  而不是在运行期被静默投影成别的档位——直通运行期与 `direct` 方案同批落地（§9 P5）。
 
 ### 6.2 内置方案收敛表
 
@@ -331,7 +338,7 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 
 | 方案 | apply | 能力档 | 权限权威 | 行为 | audience |
 | --- | --- | --- | --- | --- | --- |
-| `chat` | preset | `chat` | bridge | `social-v1` | access |
+| `chat` | preset | `chat` | bridge | none | access |
 | `social-v2` | preset | `chat-v2` | bridge | `social-v2` | access |
 | `agent-readonly` | preset | `readonly` | bridge | none | owner |
 | `agent-workspace` | preset | `workspace` | bridge | none | owner |
@@ -341,19 +348,21 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 - **群聊直通不内置**：需要的人从 `direct` 克隆，把 `audience` 改 access、`behavior` 改 social-v2。
   这是「一套体系」的检验点——直通复用同一批轴，不是另一条代码路径。
 - `social-v1` 保留为一代行为的内置方案（行为档案本身没变，只是不再和能力档的 `preset.behavior` 纠缠）。
+- P4 落地的是 `direct` **能力档**与执行体 `RUNTIME_APPLY` 声明；`direct` **方案**与直通运行期一起在 P5 加，
+  免得先放一个「选中就报错」的内置方案出去。
 
 ### 6.3 方言上移
 
-| 现在 | 之后 | 迁移方式 |
+| 迁移前 | 现在（已落地） | 迁移方式 |
 | --- | --- | --- |
-| `capabilities/chat.yml` 的 `persona.prefix` 里 100 行 QQ 规则 | `profiles/platforms/qq/prompt.md`（已有 94 行，二代口径） | 能力档只留**平台无关**的安全边界；平台规则唯一住在 `prompt.md`，由 `platform.yml` 的 `prompt.active` 指定 |
-| `capabilities/chat-v2.yml` rows 里的 QQ 工具协议 | 同上 | 同上；`{platform}` / `{displayName}` / `{owner}` 三个变量继续由 `vars` 渲染 |
-| `prompt-compose.mjs` 的 `composeRows()` 只 patch `persona` 行 | 保留 | 它只在 `apply: preset` 的构建期运行；直通走运行期注入（§7.3），两条路不共用函数 |
+| `capabilities/chat.yml` 的 `persona.prefix` 里近百行 QQ 规则 | 能力档 `rows` 只剩**平台无关**的两段：`【安全边界（最高优先级，不可违反）】` 与 `【送达方式：自动转发】` / `【送达方式：工具发送】` | 平台规则唯一住在 `profiles/platforms/qq/prompt.md`，由 `platform.yml` 的 `prompt.active` 指定 |
+| `capabilities/chat-v2.yml` rows 里的 QQ 工具协议、认人、发送禁令 | 同上（`prompt.md` 的 `【QQ 工具协议】` / `【认人：只认 QQ 号】` / `【发送与汇报禁令】` 等段） | 同上；`{platform}` / `{displayName}` / `{owner}` 三个变量继续由 `vars` 渲染 |
+| `prompt-compose.mjs` 的 `composeRows()` 把平台提示词追加进 `persona.prefix` | **已删除** | 构建期不再拼任何平台话术；平台提示词只在运行期由 `core-platform-prompt` 注入一份 |
 
-这一步的收益不只是干净：现在「一代说自动转发、二代说文本不发送」的矛盾只在那份拼好的 prefix 里可见，
-上移之后平台规则与能力档各只有一份，代差变成**同一个文件的版本**，改错能一眼看见。
+收益是代差从「两份拼在一起才看得出」变成「同一份 `prompt.md` 里的一句话」：一代由系统转发文本，
+二代必须自己调发送工具——这个差别现在写在能力档的【送达方式】段，两代共用同一份平台话术。
 
-### 6.4 校验（`validatePlanReferences` 扩展）
+### 6.4 校验（`validatePlanReferences` 扩展，已落地）
 
 | 新校验 | 失败诊断 |
 | --- | --- |
@@ -362,6 +371,10 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 | `apply: passthrough` 但方案的 `agentPlatform` 被写死成某个只支持 `preset` 的平台 | `plan_invalid`（提示改用 `auto`） |
 | `permission: bridge` 但适配器没有 `PERMISSION_PRESET_FOR_LEVEL` | `plan_invalid`（禁止静默退化成不设权限） |
 | `audience: access` + `apply: passthrough` | `plan_warn`：允许，但控制台在方案卡上标「群聊直通：对端工具对群友可见」 |
+
+落地位置是 `src/runtime/plans.mjs`：`validatePlanReferences()` 产出引用类诊断（`capability_invalid` / `plan_invalid`），
+`planWarnings()` 产出非阻断提示（旧 `platform` 字段、内置方案写死执行体）。`check-profiles` 在门禁里跑这两份结论，
+`test-runtime-plans` 逐条钉住诊断码。
 
 ### 6.5 `tools.agent.host` 的诚实含义
 
@@ -552,13 +565,13 @@ POST /api/sessions/:key/permission  { preset }
 | **P1** ✅ | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + 三条装配诊断（§4.3） | `src/agent-side/runtime-registry.mjs`、`src/agent-side/runtime.mjs`、`src/plugins/{manifest,host-api,kernel}.mjs`、`src/platforms/registry.mjs`、`PLUGIN_KERNEL.md` | `test-agent-provider` 新增、`test:audit` / `verify:repo` 全绿 |
 | **P2** ✅ | 配置：`platforms.agents.<id>` 多实例可写、默认执行体（`platforms.active.agent`）、agent 侧 probe/config 端点与注册表的 `configured`/`probe` 读视图 | `src/config/platforms.mjs`、`src/platforms/registry.mjs`、`src/bridge.js`（注册表写口与 `/api/config/runtime`）、`public/console/pages/platforms/`、`public/console/components/form/schema.js`、`guides/CONFIGURATION.md` | `verify:repo`、`test:audit`（含新增 `test-platform-config`）、`test-console-{static,ui}` |
 | **P3** ✅ | 多入站：每实例一条管线、`enabled` 条目开关、出站解析、用户侧实例 UI（§8.5） | `src/bridge.js`（逐实例装配 `startUserPlatformInbound` + 平台写口）、`src/user-side/{inbound,metadata,user-platform,runtime-registry}.mjs`、`src/config/platforms.mjs`（`userInstances`）、`src/platforms/registry.mjs`、`public/console/pages/platforms/`、`guides/CONFIGURATION.md` | `test:audit`（含新增 `test-user-instances`）、`test-console-{static,ui}`、`test-unified-inbound`、`verify:repo` |
-| **P4** | 方案解绑 + 能力档 `runtime` 段 + 方言上移 + `direct` 方案 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt` |
+| **P4** ✅ | 能力档 `runtime` 段 + 方案解绑（去 `platform`、`agentPlatform` 默认 `auto`）+ 方言上移（能力档只留安全边界与送达方式）+ `direct` 能力档 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `check-profiles`、`verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt`、`test:runtime-plans`、`test:audit` 132/132、`test-console-{static,ui}` |
 | **P5** | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`prompt` 能力位）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-console-ui`、新增 `test-passthrough-plan.mjs`、`verify:persona` |
 | **P6** | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销 | `docs/**` | `verify:repo` 全绿 |
 
 回滚：P0 的连接层下沉与删门面是同一版内的替换，不存在「先留着旧路径以后删」的中间态；
 要换执行体就换 `createRuntime` 的实现，要退只能整批退回上一个可运行提交。
-P2（配置）与 P4（方案）各自带 `configVersion` 与方案 `version` 递增，读旧值即旧行为；
+P2（配置）带 `configVersion` 递增；P4 不动方案 `version`——旧文件里的 `platform` 字段读时忽略并提示，保存时自然丢弃，不需要迁移；
 P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 
 ---
@@ -584,7 +597,7 @@ P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 | 2 | `runtime.defaultAgent` 与方案 `agentPlatform` 的优先级 | 方案显式 > 全局默认；内置方案全部 `auto` |
 | 3 | 群聊直通 | 不内置，从 `direct` 克隆；克隆时 `plan_warn` 提示风险 |
 | 4 | `allowForbiddenPreset` | 默认 `false`；仅 owner + 二次确认可开 |
-| 5 | 旧方案里的 `platform` 字段 | 读取时忽略 + `plan_warn`，下一版删字段 |
+| 5 | 旧方案里的 `platform` 字段 | 读取时忽略 + `plan_warn`，保存时不再写出（P4 已落地） |
 | 6 | `social-v1` 是否并入平台层 | 不并：行为档案按平台走，方案只引用行为 id |
 
 ---

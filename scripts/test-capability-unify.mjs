@@ -59,7 +59,12 @@ for (const name of fs.readdirSync(capDir)) {
   const doc = parseYaml(fs.readFileSync(path.join(capDir, name), 'utf8')) ?? {};
   const metaText = JSON.stringify({ label: doc.label, note: doc.note, tools: doc.tools });
   assert.ok(!/QQ|群聊|群友/.test(metaText), `${name} 的 tools/label/note 里混入平台话术（能力语义要跨平台可复用）`);
-  assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${name} 必须带非空 rows 段（预设正文跟着能力档走）`);
+  // 直通档不装预设（rows 必须为空），其余档的预设正文跟着能力档走（不能空）。
+  if ((doc.runtime?.apply ?? 'preset') === 'passthrough') {
+    assert.ok(Array.isArray(doc.rows) && doc.rows.length === 0, `${name} 是直通档，rows 必须为空（不装预设）`);
+  } else {
+    assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${name} 必须带非空 rows 段（预设正文跟着能力档走）`);
+  }
 }
 
 // 5) plan 只说能力档：不得再有 agent 字段。

@@ -1283,7 +1283,7 @@ async function externalPersonaTarget(providerId, id, rawLabel) {
 // 运行方案文件仓库（profiles/plans/*.yml）：方案的唯一定义处，config.json 只留指针。
 let planFileStore = null;
 function planStore() {
-  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), defaultPlatform: bridgeCfg?.platform?.id ?? '', log });
+  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), log });
   return planFileStore;
 }
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
@@ -7832,7 +7832,6 @@ async function main() {
           const plan = activePlan();
           sendJson({
             ok: true,
-            platform: cfg.platform?.id ?? plan?.platform ?? '',
             plans,
             active: plan?.id ?? null,
             activePlan: plan,

@@ -16,6 +16,10 @@
 // C4 之前这三段分散在 agents/<preset>/（preset.yml + agent.cordis.yml）：能力与预设各说各话，
 // plan 里要同时写 agent 与 capability。归一后一个能力档就是全部：id 即 preset id。
 //
+// 平台话术不在这里拼：`profiles/platforms/<id>/prompt.md` 由运行期的 core-platform-prompt
+// 注入块交给会话（见 docs/EXECUTION_BODY_GENERALIZATION.md §6.3），构建期只负责预设正文。
+// `runtime.apply: passthrough` 的能力档不装预设，这里跳过它、也不为它产文件。
+//
 // ── 适配器契约（scripts/build-artifacts.mjs 消费，新增 agent 平台照此实现）────────
 //   export const agentPlatform = '<id>'          必须与 profiles/agent-platforms/<id>/ 目录名一致
 //   export function planArtifacts({ repoRoot })  返回 { files: [{ path, content }] }
@@ -25,14 +29,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { composeRows, readPlatformPromptFromConfig } from '../../../../src/runtime/prompt-compose.mjs';
 // 能力档的归一化与内核同一份实现（缺段/脏值的宽容度一致，不在构建期再写一套）。
-import { normalizeCapability } from '../../../../src/capabilities/store.mjs';
-// 平台目录的读取（label / vars）与内核同一份实现：构建期自己再解析一遍 platform.yml，
-// 就会出现「产物里叫一个名字、运行时叫另一个名字」的漂移。两者都是纯读，不碰 cwd。
-import { listPlatforms } from '../../../../src/platforms/index.mjs';
-// 配置 v2：v1 的 platform.id / snowluma.* / dsh.* 由 configViews 迁移，这里不重复实现。
-import { configViews } from '../../../../src/config/platforms.mjs';
+import { appliesPreset, normalizeCapability } from '../../../../src/capabilities/store.mjs';
 import { AGENT_PRESET_IDS } from './runtime.mjs';
 
 export const agentPlatform = 'dsh';
@@ -88,47 +86,11 @@ function readCapability(repoRoot, name) {
   }
   const capability = normalizeCapability(raw, { id: name, source: `capabilities/${name}.yml` });
   if (!capability.preset) throw new Error(`${name}: 缺 preset 段（name/description/order）`);
-  if (!capability.rows.length) throw new Error(`${name}: rows 为空（预设正文不能为空）`);
+  // 直通不装预设，rows 为空是它的正常形态；装预设的空正文才是错误。
+  if (appliesPreset(capability) && !capability.rows.length) {
+    throw new Error(`${name}: runtime.apply 是 preset 但 rows 为空（预设正文不能为空）`);
+  }
   return capability;
-}
-
-/** 能力预设里的平台提示词（config.json > capabilities[id].prompt.personaPrefix）。 */
-function capabilityPlatformPrompt(repoRoot, name) {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config.json'), 'utf8'));
-    return readPlatformPromptFromConfig(config, name);
-  } catch {
-    return '';
-  }
-}
-
-/**
- * 平台提示词变量：配置 v2 的 `platforms.active.user` → profiles/platforms/<id>/platform.yml 的 vars。
- * 没有 config.json（干净克隆）时，若仓库里只有一个平台目录就用它；都没有则返回空。
- * `platform.yml` 没写 vars 时退回 label：产物里的 {platform} 必须渲染成真平台名，
- * 空对象等于把占位符原样圈进 agent 的正文（作者在制品里才发现）。
- */
-function platformPromptVars(repoRoot) {
-  const root = path.join(repoRoot, 'profiles', 'platforms');
-  let id = '';
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config.json'), 'utf8'));
-    id = String(configViews(config).platform.id ?? '').trim();
-  } catch {
-    id = '';
-  }
-  let profiles = [];
-  try {
-    profiles = listPlatforms({ root });
-  } catch {
-    profiles = [];
-  }
-  if (!id && profiles.length === 1) id = profiles[0].id;
-  const profile = id ? profiles.find((item) => item.id === id) : null;
-  if (!profile) return {};
-  const label = String(profile.label || id).trim();
-  // vars 叠在 label 之后：作者显式写的 platform 值优先于目录 label。
-  return { ...(label ? { platform: label, displayName: label } : {}), ...(profile.vars ?? {}) };
 }
 
 /**
@@ -174,14 +136,12 @@ function normalizeRows(rows, preset) {
 /** 渲染一个 preset 的 patch 文件内容。 */
 export function renderPatch(repoRoot, name) {
   const capability = readCapability(repoRoot, name);
+  if (!appliesPreset(capability)) throw new Error(`${name}: runtime.apply 是 passthrough，不产 patch`);
   const meta = capability.preset;
   for (const field of ['name', 'description', 'order']) {
     if (meta[field] === undefined) throw new Error(`${name}: preset 段缺少 ${field}`);
   }
-  const plugins = composeRows(
-    normalizeRows(capability.rows, name),
-    { platformText: capabilityPlatformPrompt(repoRoot, name), vars: platformPromptVars(repoRoot) },
-  );
+  const plugins = normalizeRows(capability.rows, name);
   const row = {
     id: presetRowId(name),
     name: '@deepseek-ai/dsh-agent-preset',
@@ -208,14 +168,15 @@ export function renderPatch(repoRoot, name) {
 
 /**
  * 计划本平台的全部产物（纯函数，不写盘）。
+ * 直通能力档不装预设，因此不在此列；`--check` 也不会为它找文件。
  * @param {{repoRoot: string}} ctx
  * @returns {{files: {path: string, content: string}[]}}
  */
 export function planArtifacts({ repoRoot }) {
-  return {
-    files: PRESETS.map((name) => ({
-      path: patchFileFor(repoRoot, name),
-      content: renderPatch(repoRoot, name),
-    })),
-  };
+  const files = [];
+  for (const name of PRESETS) {
+    if (!appliesPreset(readCapability(repoRoot, name))) continue;
+    files.push({ path: patchFileFor(repoRoot, name), content: renderPatch(repoRoot, name) });
+  }
+  return { files };
 }

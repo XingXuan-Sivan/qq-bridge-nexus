@@ -1,11 +1,14 @@
 // Agent 侧能力档：profiles/agent-platforms/dsh/capabilities/<id>.yml。
 //
-// C4 起一个能力档就是**唯一档位真源**，三段各管一件事：
+// 一个能力档是**唯一档位真源**，四段各管一件事：
 //   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
+//   runtime    怎么生效（装不装预设 / 提示怎么注入 / 谁定权限档）
 //   preset     Agent 平台预设的元信息（名字 / 描述 / 顺序 / 绑定行为）
 //   rows       预设正文（Agent 平台的插件行列表，由该平台的 build 适配器渲染成产物）
 //   extensions 扩展授权（MCP / 技能白名单，Hub 读取）
 // 能力档 id 与 Agent 预设 id 同名：plan 只引用能力，不再另写 preset 名。
+// `runtime.apply: passthrough` 的能力档不装预设（rows 允许为空），
+// 此时 preset 段只作为「建议值」供界面展示，不参与构建。
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML, { parseDocument } from 'yaml';
@@ -14,10 +17,27 @@ import { capabilityCovers, capabilityDefaults, PLATFORM_TOOLS, AGENT_MODULES, BU
 
 export const CAPABILITIES_ROOT = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'capabilities');
 
-const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，preset = 预设元信息，rows = 插件行列表。\n'
+const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，runtime = 生效方式，preset = 预设元信息，rows = 插件行列表。\n'
   + '# 由控制台平台详情的「能力」维护；保存 tools 不会重写 preset / rows。';
 
 const PRESET_KEYS = Object.freeze(['name', 'description', 'order', 'behavior']);
+
+/** 生效方式：装预设，还是交给执行体自己（直通）。 */
+export const CAPABILITY_APPLY = Object.freeze(['preset', 'passthrough']);
+/** 提示注入通道：不注入 / 系统提示 / 首轮前缀 / 只靠工具拉取。 */
+export const CAPABILITY_PROMPT = Object.freeze(['none', 'system', 'prefix', 'tool']);
+/** 权限档归谁：桥接钉住（preset），还是读执行体自己的档位（passthrough）。 */
+export const CAPABILITY_PERMISSION = Object.freeze(['bridge', 'agent']);
+
+const RUNTIME_KEYS = Object.freeze(['apply', 'prompt', 'permission', 'narrow']);
+
+/** `runtime` 段缺省值：不写这一段的能力档行为与引入前完全一致。 */
+export const CAPABILITY_RUNTIME_DEFAULTS = Object.freeze({
+  apply: 'preset',
+  prompt: 'none',
+  permission: 'bridge',
+  narrow: [],
+});
 
 function boolMap(value) {
   const out = {};
@@ -62,6 +82,25 @@ export function normalizeExtensions(raw) {
   };
 }
 
+/**
+ * 生效方式（`runtime` 段）。任何一项取值非法都直接报错 —— 猜一个默认值会把
+ * 「不装预设」的能力悄悄装成预设，安全边界与档位权威都会跟着错位。
+ */
+export function normalizeRuntime(raw) {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const apply = value.apply === undefined || value.apply === '' ? CAPABILITY_RUNTIME_DEFAULTS.apply : String(value.apply).trim();
+  if (!CAPABILITY_APPLY.includes(apply)) throw new Error(`runtime.apply 只能是 ${CAPABILITY_APPLY.join(' / ')}：${apply}`);
+  const prompt = value.prompt === undefined || value.prompt === '' ? CAPABILITY_RUNTIME_DEFAULTS.prompt : String(value.prompt).trim();
+  if (!CAPABILITY_PROMPT.includes(prompt)) throw new Error(`runtime.prompt 只能是 ${CAPABILITY_PROMPT.join(' / ')}：${prompt}`);
+  const permission = value.permission === undefined || value.permission === ''
+    ? CAPABILITY_RUNTIME_DEFAULTS.permission
+    : String(value.permission).trim();
+  if (!CAPABILITY_PERMISSION.includes(permission)) {
+    throw new Error(`runtime.permission 只能是 ${CAPABILITY_PERMISSION.join(' / ')}：${permission}`);
+  }
+  return { apply, prompt, permission, narrow: stringList(value.narrow) };
+}
+
 /** 预设元信息：没有 name = 该能力档不渲染 Agent 预设（纯工具档）。 */
 export function normalizePreset(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -100,10 +139,16 @@ export function normalizeCapability(raw, { id, source = 'capability' } = {}) {
       mcp: mcpList(value.tools?.mcp),
       skills: stringList(value.tools?.skills),
     },
+    runtime: normalizeRuntime(value.runtime),
     preset: normalizePreset(value.preset),
     extensions: normalizeExtensions(value.extensions),
     rows: normalizeRows(value.rows),
   };
+}
+
+/** 该能力档是否要装预设（passthrough 不装、不产 patch）。 */
+export function appliesPreset(capability) {
+  return (capability?.runtime?.apply ?? CAPABILITY_RUNTIME_DEFAULTS.apply) === 'preset';
 }
 
 function capabilityText(capability) {
@@ -114,6 +159,11 @@ function capabilityText(capability) {
     note: capability.note,
     tools: capability.tools,
   };
+  // 只在偏离缺省时写这一段：新建的普通能力档不必为「和以前一样」多背四行。
+  const runtime = capability.runtime ?? CAPABILITY_RUNTIME_DEFAULTS;
+  if (RUNTIME_KEYS.some((key) => JSON.stringify(runtime[key]) !== JSON.stringify(CAPABILITY_RUNTIME_DEFAULTS[key]))) {
+    body.runtime = Object.fromEntries(RUNTIME_KEYS.map((key) => [key, runtime[key]]));
+  }
   if (capability.preset) {
     body.preset = Object.fromEntries(PRESET_KEYS.filter((key) => capability.preset[key] !== '').map((key) => [key, capability.preset[key]]));
   }
@@ -266,8 +316,19 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
   /** 预设正文（插件行列表）：整段覆盖；高级编辑与表单编辑都走这里。 */
   function setRows(id, rows) {
     const next = normalizeRows(rows);
-    if (!next.length) throw new Error('插件行列表不能为空');
+    // 直通不装预设，行列表为空是它的正常形态；装预设的空正文才是错误。
+    if (!next.length && appliesPreset(get(id))) throw new Error('插件行列表不能为空');
     return mutate(id, (doc) => { doc.set('rows', next); });
+  }
+
+  /** 生效方式（apply / prompt / permission / narrow）。 */
+  function setRuntime(id, patch = {}) {
+    const current = get(id);
+    if (!current) throw new Error(`没有这个能力档：${id}`);
+    const next = normalizeRuntime({ ...current.runtime, ...(patch ?? {}) });
+    return mutate(id, (doc) => {
+      for (const key of RUNTIME_KEYS) doc.setIn(['runtime', key], next[key]);
+    });
   }
 
   /** 扩展授权（MCP / 技能白名单）。 */
@@ -278,7 +339,7 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
     });
   }
 
-  /** 删除自定义能力；内置五条不允许删（只能克隆改）。 */
+  /** 删除自定义能力；内置能力档不允许删（只能克隆改）。 */
   function remove(id) {
     const name = String(id ?? '').trim();
     const current = get(name);
@@ -301,7 +362,7 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
     return get(name);
   }
 
-  return { root, list, get, save, setPreset, setRows, setExtensions, remove, reset };
+  return { root, list, get, save, setPreset, setRows, setRuntime, setExtensions, remove, reset };
 }
 
 /**

@@ -1,0 +1,34 @@
+# 能力档（Agent 侧，唯一档位真源）：tools = 工具面，runtime = 生效方式，
+# preset = 预设元信息（直通下只作建议值），rows = 插件行列表（直通为空）。
+#
+# 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、MCP 下发、会话编排。
+# 因此本档没有 rows，也不产 artifacts/dsh/qq-agent-presets/presets/direct.patch.yml。
+
+version: 1
+id: direct
+label: 直通 · 主人
+note: 不装环境，用 Agent 侧现成工具与权限；不做工具级限制
+tools:
+  platform: {}
+  agent:
+    # host = 「不指定工具清单」，用对端全部。它不是「拿到全部工具」的保证：
+    # 工具面由对端决定，桥接在直通下给不出工具级硬边界（只能过滤经由桥接的调用）。
+    host: true
+  mcp:
+    - server: '*'
+      tools: '*'
+  skills:
+    - '*'
+runtime:
+  apply: passthrough
+  prompt: system
+  # 权限档归对端：桥接读得到、可以替用户改，但不回钉、不冒充。
+  permission: agent
+  # 投递侧 deny 名单（可选）。直通下它不是硬边界，只拦「经由桥接」的调用。
+  narrow: []
+preset:
+  name: 直通 · 主人
+  description: 不装 preset 与沙箱，直接使用 Agent 侧的会话、工具与权限档。
+  order: 20
+  behavior: none
+rows: []

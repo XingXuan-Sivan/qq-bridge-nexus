@@ -1,12 +1,11 @@
 // 方案页：一次组合，决定一段对话怎么跑。
 //
-// 方案 = 用户侧平台 + Agent 平台 + 能力档 + 行为档案 + 受众。全局默认方案在
-// 「全局配置」里，会话可以在「会话与审批 › 详情」里单独指定；本页只管方案本身，
-// 不切换全局指针（切换卡已删除，全局只留「默认方案」一个指针）。
+// 方案 = 能力档 + 行为档案 + 受众 +（可选）执行体。方案**不绑用户平台**：平台话术与行为档案
+// 天然按平台走，方案只引用它们的 id。全局默认方案在「全局配置」里，会话可以在「会话与审批 ›
+// 详情」里单独指定；本页只管方案本身，不切换全局指针（全局只留「默认方案」一个指针）。
 //
 // 内置方案只读，要改先克隆；自定义方案的增删改都在页内弹窗里（字段用 renderFields，
-// 表格用表格组件，卡片用 cardHtml）。C7 之前这里是「行为档案 › 运行方案」标签，
-// 现在独立成页：Agent 平台不再是写死的 dsh，而是从注册表里挑。
+// 表格用表格组件，卡片用 cardHtml）。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { cardHtml } from '../../components/card/card.js';
@@ -29,15 +28,11 @@ function planById(id) {
   return (payload?.plans ?? []).find((plan) => plan.id === id) ?? null;
 }
 
-// ── 平台口径 ────────────────────────────────────────────────────────────────
-// 用户侧平台决定「行为档案与平台话术从哪来」；Agent 平台决定「能力档从哪来」。
-// 只有真的声明了能力档的 Agent 平台才能进方案：plan.capability 必须是这个平台的档，
-// 否则保存时后端会以「能力档不存在」拒掉。这不是白名单，是数据约束——平台接上
-// capabilities/ 目录后自动出现在下拉里。
-function userPlatforms() {
-  return (registryMeta().platforms ?? []).filter((item) => item.side === 'user');
-}
-
+// ── 执行体口径 ──────────────────────────────────────────────────────────────
+// 执行体（Agent 平台）决定「能力档从哪来」。只有真的声明了能力档的平台才能进下拉：
+// plan.capability 必须是它的档，否则保存时后端会以「能力档不存在」拒掉。这不是白名单，
+// 是数据约束——平台接上 capabilities/ 目录后自动出现在下拉里。
+// 默认 auto：跟随全局 platforms.active.agent，换执行体时不会被方案拉回旧平台。
 function planAgentPlatforms() {
   return (registryMeta().platforms ?? [])
     .filter((item) => item.side === 'agent' && (item.assets?.capabilityProfiles ?? []).length > 0);
@@ -49,9 +44,9 @@ function platformNameOf(side, id) {
   return found?.label || id || '未注册';
 }
 
-/** 老旧方案可能没写 agentPlatform：显示「跟随能力档」，不假装它是某一侧。 */
+/** `auto` 是方案的常态：显示实际跟随的执行体，不假装它是某一侧。 */
 function agentPlatformText(plan) {
-  if (!plan?.agentPlatform) return '跟随能力档';
+  if (!plan?.agentPlatform || plan.agentPlatform === 'auto') return `跟随全局（${platformNameFor('agent')}）`;
   return platformNameOf('agent', plan.agentPlatform);
 }
 
@@ -87,7 +82,7 @@ function summaryHtml() {
 function rowHtml(plan) {
   return [
     `<code>${esc(plan.id)}</code><div class="meta">${esc(plan.label)}</div>`,
-    `<span class="meta">${esc(platformNameOf('user', plan.platform))} · ${esc(agentPlatformText(plan))}</span>`,
+    `<span class="meta">${esc(agentPlatformText(plan))}</span>`,
     `<span class="meta">${esc(plan.capability || '')}</span>`,
     `<span class="meta">${esc(behaviorLabel(plan.behavior))}</span>`,
     `<span class="meta">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>`,
@@ -106,7 +101,7 @@ function tableCardHtml() {
     ? dataTableHtml({
       columns: [
         { label: '方案', width: '210' },
-        { label: '平台 · Agent 平台', width: '210' },
+        { label: '执行体', width: '210' },
         { label: '能力档', width: '170' },
         { label: '行为', width: '140' },
         { label: '受众', width: '110' },
@@ -144,7 +139,6 @@ function render() {
 // ── 方案编辑器（新建 / 克隆 / 编辑） ─────────────────────────────────────────
 function editorFields(plan) {
   const agents = planAgentPlatforms();
-  const users = userPlatforms();
   const behaviorOptions = [
     { value: 'none', label: '不带行为（纯工具/对话）' },
     ...behaviors.filter((item) => item.id !== 'none' && item.id !== 'inherit')
@@ -161,19 +155,17 @@ function editorFields(plan) {
     },
     { name: 'planEditLabel', type: 'text', label: '名称', value: plan?.label || '', maxlength: 40 },
     {
-      name: 'planEditPlatform', type: 'select', label: '用户侧平台', value: plan?.platform || users[0]?.id || '',
-      options: users.map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.id}）` })),
-      hint: '行为档案与平台话术都来自这个平台。',
-    },
-    {
-      name: 'planEditAgentPlatform', type: 'select', label: 'Agent 平台',
-      value: plan?.agentPlatform || agents[0]?.id || '',
-      options: agents.map((item) => ({
-        value: item.id,
-        label: `${item.label || item.id}（${(item.assets?.capabilityProfiles ?? []).length} 套能力档）`,
-      })),
+      name: 'planEditAgentPlatform', type: 'select', label: '执行体',
+      value: plan?.agentPlatform || 'auto',
+      options: [
+        { value: 'auto', label: `跟随全局（${platformNameFor('agent')}）` },
+        ...agents.map((item) => ({
+          value: item.id,
+          label: `${item.label || item.id}（${(item.assets?.capabilityProfiles ?? []).length} 套能力档）`,
+        })),
+      ],
       hint: agents.length
-        ? '只有声明了能力档的 Agent 平台才出现在这里：方案的「能力档」必须是它的档。'
+        ? '默认跟随全局 platforms.active.agent；只有「这个方案必须跑在某个执行体上」时才钉具体 id（钉住后换全局执行体不会带走它）。'
         : '还没有 Agent 平台声明能力档：先在 profiles/agent-platforms/<id>/capabilities 下放能力档。',
     },
     {
@@ -228,8 +220,7 @@ async function savePlan() {
   const body = {
     id: el('planEditId')?.value.trim() ?? '',
     label: el('planEditLabel')?.value.trim() ?? '',
-    platform: el('planEditPlatform')?.value ?? '',
-    agentPlatform: el('planEditAgentPlatform')?.value ?? '',
+    agentPlatform: el('planEditAgentPlatform')?.value || 'auto',
     capability: el('planEditTools')?.value ?? '',
     behavior: el('planEditBehavior')?.value ?? 'none',
     audience: el('planEditAudience')?.value ?? 'access',
@@ -237,14 +228,6 @@ async function savePlan() {
   };
   if (!/^[a-z][a-z0-9-]{1,39}$/.test(body.id)) {
     setEditorMsg('方案 id 只能用小写字母、数字与连字符，且以字母开头（2–40 字符）');
-    return;
-  }
-  if (!body.platform) {
-    setEditorMsg('先选一个用户侧平台');
-    return;
-  }
-  if (!body.agentPlatform) {
-    setEditorMsg('先选一个 Agent 平台（没有可选项说明还没有平台声明能力档）');
     return;
   }
   if (!body.capability) {
@@ -286,7 +269,7 @@ function jsonModal({ id, title, value, readonly, confirmLabel, onConfirm }) {
     id,
     title,
     wide: true,
-    body: `<div class="form-stack"><label class="field-row"><span class="field-label">方案 JSON</span><div class="field-control"><textarea class="code-area" id="${id}Text" rows="16" spellcheck="false"${readonly ? ' readonly' : ''}></textarea><div class="field-hint">数组，元素字段：id / label / note / platform / agentPlatform / capability / behavior / audience。内置方案也会导出，但导入时只能作为自定义方案的同 id 覆盖名称与说明。</div></div></label></div><p class="meta" id="${id}Msg" role="status"></p>`,
+    body: `<div class="form-stack"><label class="field-row"><span class="field-label">方案 JSON</span><div class="field-control"><textarea class="code-area" id="${id}Text" rows="16" spellcheck="false"${readonly ? ' readonly' : ''}></textarea><div class="field-hint">数组，元素字段：id / label / note / agentPlatform / capability / behavior / audience。内置方案也会导出，但导入时只能作为自定义方案的同 id 覆盖名称与说明。</div></div></label></div><p class="meta" id="${id}Msg" role="status"></p>`,
     footer: `<button class="btn" type="button" data-modal-close>关闭</button><button class="btn primary" type="button" id="${id}Go">${confirmLabel}</button>`,
   }));
   const overlay = el(id);
@@ -302,7 +285,6 @@ function exportPlans() {
     id: plan.id,
     label: plan.label,
     note: plan.note,
-    platform: plan.platform,
     agentPlatform: plan.agentPlatform,
     capability: plan.capability,
     behavior: plan.behavior,

@@ -418,16 +418,17 @@ try {
     await page.waitForSelector('#planEditor .modal', { timeout: 5000 });
     await page.fill('#planEditId', 'my-agent');
     await page.fill('#planEditLabel', '我的 Agent');
-    await page.selectOption('#planEditPlatform', 'qq');
-    // Agent 平台不再写死：下拉只列「声明了能力档」的 Agent 平台（注册表 mock 里只有 dsh 声明了）。
-    assert.deepEqual(await page.$$eval('#planEditAgentPlatform option', (nodes) => nodes.map((node) => node.value)), ['dsh']);
+    // 方案不绑用户平台，默认跟随全局执行体；钉具体 id 只在需要时（下拉只列声明了能力档的平台）。
+    assert.equal(await page.locator('#planEditPlatform').count(), 0, '用户侧平台字段已从方案里移除');
+    assert.deepEqual(await page.$$eval('#planEditAgentPlatform option', (nodes) => nodes.map((node) => node.value)), ['auto', 'dsh']);
+    assert.equal(await page.locator('#planEditAgentPlatform').inputValue(), 'auto', '新建方案默认 auto');
     assert.equal(await page.locator('#runtimeEditAgent').count(), 0, '旧 runtime 编辑器 id 已随 pages/runtime 删除');
     await page.selectOption('#planEditTools', 'chat');
     await page.selectOption('#planEditBehavior', 'social-v2');
     await page.selectOption('#planEditAudience', 'owner');
     await page.fill('#planEditNote', '带人格进群');
     assert.deepEqual(await clickWrite('#planEditSave', '/api/plans'), {
-      id: 'my-agent', label: '我的 Agent', platform: 'qq', agentPlatform: 'dsh',
+      id: 'my-agent', label: '我的 Agent', agentPlatform: 'auto',
       capability: 'chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
     });
   });

@@ -103,8 +103,7 @@
     "body": {
       "id": "my-agent",
       "label": "我的 Agent",
-      "platform": "qq",
-      "agentPlatform": "dsh",
+      "agentPlatform": "auto",
       "capability": "chat",
       "behavior": "social-v2",
       "audience": "owner",

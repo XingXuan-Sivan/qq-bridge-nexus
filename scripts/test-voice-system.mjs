@@ -172,9 +172,10 @@ console.log('## qq-bridge 语音系统：控制台与 preset');
   ok(html.includes('initVoiceSection'), '控制台只剩语音库卡，不再有全局 sendVoice 开关');
   ok(html.includes('id="voiceList"') && html.includes('id="voiceSendBtn"'), '控制台有语音库调试面板');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
-  const preset = read(path.join('profiles', 'agent-platforms', 'dsh', 'capabilities', 'chat-v2.yml'));
-  ok(preset.includes('qq_send_voice') && preset.includes('qq_list_voices'), 'chat-v2 人设描述语音能力');
-  ok(/语音\*\*默认是关闭的\*\*/.test(preset), '人设说明默认关闭');
+  // 语音工具属于 QQ 平台话术（与认人、工具协议同层），不在能力档正文里。
+  const preset = read(path.join('profiles', 'platforms', 'qq', 'prompt.md'));
+  ok(preset.includes('qq_send_voice') && preset.includes('qq_list_voices'), '平台提示词描述语音能力');
+  ok(/语音\*\*默认是关闭的\*\*/.test(preset), '平台提示词说明默认关闭');
   // 守卫的权威实现只有一份，在 qq-agent-presets bundle 里（能力档的 rows 以裸说明符引用它）。
   ok(read(path.join('artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).includes("'mcp__snowluma__'"),
     'preset 白名单前缀放行语音工具');

@@ -3,8 +3,6 @@ id: agent-workspace
 label: Agent · 工作区
 note: 仅管理员私聊；可读写工作区。
 builtin: true
-platform: qq
-agentPlatform: dsh
 behavior: none
 capability: workspace
 audience: owner

@@ -4,9 +4,6 @@
   "required": [
     "id",
     "label",
-    "platform",
-    "agentPlatform",
-    "agent",
     "behavior",
     "capability",
     "audience"
@@ -29,17 +26,10 @@
     "builtin": {
       "type": "boolean"
     },
-    "platform": {
-      "type": "string",
-      "minLength": 1
-    },
     "agentPlatform": {
       "type": "string",
-      "minLength": 1
-    },
-    "agent": {
-      "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "auto = 跟随全局默认执行体；写具体 id 表示这套方案必须跑在该执行体上。"
     },
     "behavior": {
       "type": "string",

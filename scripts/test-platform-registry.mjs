@@ -76,7 +76,7 @@ test('Agent 侧条目带能力档（C4 起能力档 id 就是预设 id，一张�
   const dsh = findRegistryPlatform(snapshot, 'agent', 'dsh');
   assert.ok(dsh);
   assert.equal(dsh.source, 'builtin');
-  assert.deepEqual(dsh.assets.capabilityProfiles, ['chat', 'chat-v2', 'full', 'readonly', 'workspace']);
+  assert.deepEqual(dsh.assets.capabilityProfiles, ['chat', 'chat-v2', 'direct', 'full', 'readonly', 'workspace']);
   assert.equal('agentPresets' in dsh.assets, false, '不再保留平行的预设清单字段');
   assert.equal(dsh.inbound, false, 'Agent 侧没有「收消息」这个概念');
 });

@@ -59,12 +59,13 @@ test('读类不受能力收紧，副作用类受收紧', () => {
   assert.equal(platformToolAllowedAt('bogus-level', 'sendMessage'), false);
 });
 
-test('五个内置能力的默认工具集递增且引用真实条目', () => {
+test('内置能力的默认工具集递增且引用真实条目（直通档除外）', () => {
   const ids = Object.keys(CAPABILITY_DEFAULTS);
-  assert.deepEqual(ids, ['chat', 'chat-v2', 'readonly', 'workspace', 'full']);
+  assert.deepEqual(ids, ['chat', 'chat-v2', 'readonly', 'workspace', 'full', 'direct']);
   const agentIds = new Set(AGENT_MODULES.map((module) => module.id));
   let previous = 0;
-  for (const id of ids) {
+  // 直通档不装预设，工具面由对端执行体决定（tools.agent.host），不参与「越往上越宽」的比较。
+  for (const id of ids.filter((item) => item !== 'direct')) {
     const defaults = capabilityDefaults(id);
     assert.ok(defaults, id);
     assert.equal(defaults.platform, true, id);
@@ -72,6 +73,8 @@ test('五个内置能力的默认工具集递增且引用真实条目', () => {
     assert.ok(defaults.agent.length >= previous, `${id} 不应比上一个能力更窄`);
     previous = defaults.agent.length;
   }
+  assert.equal(capabilityDefaults('direct').platform, true, '直通档的平台侧仍是全开');
+  assert.deepEqual([...capabilityDefaults('direct').agent], [], '直通档不声明 Agent 模块（由对端给）');
   assert.deepEqual([...capabilityDefaults('chat').agent], ['tool-web', 'tool-ask-user', 'tool-todo']);
   assert.deepEqual([...capabilityDefaults('full').agent], AGENT_MODULES.map((module) => module.id));
   assert.equal(capabilityDefaults('nope'), null);

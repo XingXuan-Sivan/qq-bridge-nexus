@@ -150,7 +150,8 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   const plansJs = pageDirs.find((entry) => entry.id === 'plans')?.js;
   const plansText = plansJs ? fs.readFileSync(plansJs, 'utf8') : '';
   ok(/capabilityProfiles/.test(plansText) && !/'dsh'/.test(plansText), '方案页不再硬编码 Agent 平台（只挑声明了能力档的）');
-  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时 Agent 平台取自下拉，不是写死的值');
+  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时执行体取自下拉，不是写死的值');
+  ok(!/planEditPlatform|platform: el\('planEdit/.test(plansText) && !/plan\.platform/.test(plansText), '方案页不再有用户侧平台字段（方案不绑平台）');
 }
 // C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
 // 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。

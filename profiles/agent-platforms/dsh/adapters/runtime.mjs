@@ -26,6 +26,15 @@ export const id = 'dsh';
 export const label = 'DeepSeek Harness';
 
 /**
+ * 认领的能力档生效方式。
+ *
+ * 直通（`passthrough`）需要一条不建会话沙箱、不装 preset 的注入通道，DSH 侧尚未
+ * 落地，因此这里只认 `preset`：引用直通能力档的方案会被静态校验拒绝，而不是在
+ * 运行时被静默投影成别的档位。
+ */
+export const RUNTIME_APPLY = Object.freeze(['preset']);
+
+/**
  * 实现的能力面（声明顺序即控制台展示顺序）。
  *
  * C5 起前七项与 `AgentPort` 的能力位**同名**（`src/agent-side/port.mjs`）；

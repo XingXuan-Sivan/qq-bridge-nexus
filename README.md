@@ -16,8 +16,8 @@
 
 ## 🆕 qq-bridge-nexus v0.2.0
 
-> 版本状态：**0.2.0 已在 `feat/platform-decoupling` 分支定版**（用户侧/Agent 侧平台解耦 B0–B8），尚未合入 `main`；
-> `main` 当前仍是 0.1.1。合入后本节即默认版本，无需切换分支。
+> 版本状态：**0.2.0 已合入 `main` 并发布（2026-11-15）**：用户侧/Agent 侧平台解耦（B0–B8）、平台统一（C1–C9）、
+> 执行体通用化（P0–P6）三批同在 0.2.0。clone 默认拿 main，无需切换分支，也可从 Releases 下载 ZIP。
 
 > 本仓库（<https://github.com/XingXuan-Sivan/qq-bridge-nexus>）起步于 [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3（来源与授权见 [NOTICE.md](NOTICE.md)），此后已整体重构：四轴配置模型（应用方式 / 工具面 / 权限权威 / 行为）、接口平台、插件内核、扩展平台、控制台 15 页、会话/记忆子系统。
 > 原版的消息桥接、多群白名单、二代仿真、QQ 自主工具、人格、控制台、安全守卫、令牌统计、MCP、SnowLuma 健康检查等能力全部保留并继续演进。

@@ -452,7 +452,7 @@ P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `act
 
 **写配置的三条路**（控制台模型选择 / token 自愈 / 控制中心目录切换）形状不同、语义相同，全部经 `patchPlatformConfig` + `platformsForWrite`，不允许各自拼 `file.dsh = {...}` 把 v2 结构写坏；写前一律 `migrateConfigToV2`（否则「只改一个 token」会变成把 `wsUrl` / `homeDir` 全删掉）。
 
-**不留别名双读**（与 B8 的兼容策略相反：0.2.0 未发布、无外部配置依赖；留着就是债）：`snowluma.*` / `dsh.*` / `platform.*` 只在 `migrateConfigToV2` 里出现一次，其余读取点一律经扁平视图；`src/snowluma-conn.js` 的 `userTransportView()` 也不再认旧 `snowluma` 段。
+**不留别名双读**（与 B8 的兼容策略相反：v2 从 0.2.0 起生效、没有需要长期兼容的外部配置；留着就是债）：`snowluma.*` / `dsh.*` / `platform.*` 只在 `migrateConfigToV2` 里出现一次，其余读取点一律经扁平视图；`src/snowluma-conn.js` 的 `userTransportView()` 也不再认旧 `snowluma` 段。
 
 ---
 

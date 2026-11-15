@@ -5,8 +5,8 @@
 **English**: [README.en.md](README.en.md) | **中文**: [README.md](README.md)
 
 > **qq-bridge-nexus v0.2.0** ([XingXuan-Sivan/qq-bridge-nexus](https://github.com/XingXuan-Sivan/qq-bridge-nexus)) — started from [Derpyu520/qq-bridge](https://github.com/Derpyu520/qq-bridge) v0.2.0-r3 and now a full rewrite (origin and licensing in [NOTICE.md](NOTICE.md)).
-> Version state: **0.2.0 is frozen on the `feat/platform-decoupling` branch** (user-side / agent-side platform decoupling) and not yet merged into `main`;
-> `main` is still 0.1.1.
+> Version state: **0.2.0 is released on `main` (2026-11-15)**: user-side / agent-side platform decoupling (B0–B8),
+> platform unification (C1–C9) and execution-body generalization (P0–P6) all ship in this version.
 > It turns one QQ account into an "AI group member" driven by DeepSeek Harness (DSH) agents, and runs on **Windows, macOS and Linux**.
 > Most documentation is in Chinese: the step-by-step deployment guide is [docs/DSH_DEPLOYMENT.md](docs/DSH_DEPLOYMENT.md), the changelog is [CHANGELOG.md](CHANGELOG.md),
 > and the documentation index is [docs/README.md](docs/README.md).

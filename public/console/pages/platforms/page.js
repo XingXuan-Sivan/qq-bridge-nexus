@@ -22,6 +22,8 @@ const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
 
 // 选中项跨刷新保留：「user:qq」这种 key 同时说明是哪一侧，避免两侧同名 id 串位。
 let selected = '';
+// 别的页面点名要落到哪个标签（方案页「改能力档」）：首屏渲染前就摆好，详情挂载时消费掉。
+let pendingTab = '';
 
 function keyOf(item) {
   return `${item.side}:${item.id}`;
@@ -148,7 +150,9 @@ function paintDetail() {
   }
   // 诊断按平台切好一起交给详情：详情只认「这一个平台」，不再回头查全局。
   // onChanged：写口成功后重拉注册表并重画（列表、诊断卡、详情同属一份快照）。
-  mountPlatformDetail(panel, { ...item, diagnostics: diagnosticsOf(meta, item.side, item.id) }, { onChanged: () => void refresh() });
+  const tab = pendingTab;
+  pendingTab = '';
+  mountPlatformDetail(panel, { ...item, diagnostics: diagnosticsOf(meta, item.side, item.id) }, { onChanged: () => void refresh(), tab });
 }
 
 function render() {
@@ -167,6 +171,19 @@ function select(key) {
   if (!key || key === selected) return;
   selected = key;
   paintDetail();
+}
+
+/**
+ * 从其它页面指定选中某个平台（可选落到某个标签）。
+ * 先摆状态再切页：平台页还没注入时分片不在了，init 里的首次 render 会带着它渲染。
+ * @param {string} key `user:<id>` / `agent:<id>`
+ * @param {{tab?: string}} [options] 要落到的标签 id（条目真有的标签才会生效）
+ */
+export function focusPlatform(key, { tab = '' } = {}) {
+  if (!key) return;
+  selected = key;
+  pendingTab = tab;
+  if (document.getElementById('platformHost')) render();
 }
 
 async function refresh({ force = true } = {}) {

@@ -13,8 +13,9 @@ import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { renderFields } from '../../components/form/form.js';
 import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
-import { onPageRefresh } from '../../js/router.js';
+import { onPageRefresh, setConsolePage } from '../../js/router.js';
 import { loadPlatforms, registryMeta } from '../../js/registry.js';
+import { focusPlatform } from '../platforms/page.js';
 
 let payload = null;
 let presets = []; // 能力档（= /api/runtime/capabilities 的 capabilities）
@@ -52,6 +53,31 @@ function agentPlatformText(plan) {
 
 const BEHAVIOR_LABEL = { none: '不带行为', inherit: '跟随默认行为' };
 const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
+// 生效方式与权限权威都取自能力档的 `runtime` 段：方案只是引用能力档，不另存一份。
+const APPLY_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
+const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
+
+function capabilityOf(id) {
+  return presets.find((item) => item.id === id) ?? null;
+}
+
+function applyOf(plan) {
+  const cap = capabilityOf(plan?.capability);
+  return cap ? (cap.runtime?.apply ?? 'preset') : '';
+}
+
+function authorityOf(plan) {
+  const cap = capabilityOf(plan?.capability);
+  return cap ? (cap.runtime?.permission ?? 'bridge') : '';
+}
+
+/** 声明了这套能力档的执行体（能力档是 Agent 平台的资产，改它要去那一侧）。 */
+function capabilityPlatformId(capabilityId) {
+  if (!capabilityId) return '';
+  const owners = planAgentPlatforms()
+    .filter((item) => (item.assets?.capabilityProfiles ?? []).includes(capabilityId));
+  return owners[0]?.id || registryMeta().active?.agent || '';
+}
 
 function behaviorLabel(value) {
   if (BEHAVIOR_LABEL[value]) return BEHAVIOR_LABEL[value];
@@ -80,10 +106,23 @@ function summaryHtml() {
 }
 
 function rowHtml(plan) {
+  const apply = applyOf(plan);
+  const authority = authorityOf(plan);
   return [
     `<code>${esc(plan.id)}</code><div class="meta">${esc(plan.label)}</div>`,
     `<span class="meta">${esc(agentPlatformText(plan))}</span>`,
     `<span class="meta">${esc(plan.capability || '')}</span>`,
+    // 直通不装预设、也不做工具级限制：这一行要能一眼看出它和「装预设」的方案不是一回事。
+    apply === 'passthrough'
+      ? '<span class="tag tag--primary">直通</span><div class="meta">不做工具级限制</div>'
+      : apply === 'preset'
+        ? '<span class="tag">装预设</span>'
+        : '<span class="meta">—</span>',
+    authority === 'agent'
+      ? '<span class="tag tag--warning">执行体自身</span>'
+      : authority === 'bridge'
+        ? '<span class="tag">桥接钉档</span>'
+        : '<span class="meta">—</span>',
     `<span class="meta">${esc(behaviorLabel(plan.behavior))}</span>`,
     `<span class="meta">${esc(AUDIENCE_LABEL[plan.audience] ?? plan.audience)}</span>`,
     `<span class="tag">${plan.builtin ? '内置' : '自定义'}</span>`,
@@ -100,11 +139,13 @@ function tableCardHtml() {
   const body = plans.length
     ? dataTableHtml({
       columns: [
-        { label: '方案', width: '210' },
-        { label: '执行体', width: '210' },
-        { label: '能力档', width: '170' },
-        { label: '行为', width: '140' },
-        { label: '受众', width: '110' },
+        { label: '方案', width: '190' },
+        { label: '执行体', width: '170' },
+        { label: '能力档', width: '130' },
+        { label: '应用方式', width: '130' },
+        { label: '权限权威', width: '120' },
+        { label: '行为', width: '120' },
+        { label: '受众', width: '100' },
         { label: '来源', width: '80' },
         { label: '说明' },
         { label: '操作', width: '130' },
@@ -137,6 +178,26 @@ function render() {
 }
 
 // ── 方案编辑器（新建 / 克隆 / 编辑） ─────────────────────────────────────────
+/** 能力档的生效方式与权限权威：只读展示，要改得去能力档本体（它不属于方案）。 */
+function runtimeSummaryHtml(capabilityId) {
+  const cap = capabilityOf(capabilityId);
+  if (!cap) {
+    return '<span class="meta">这套能力档不在目录里：应用方式与权限权威都读不出来。</span>';
+  }
+  const apply = cap.runtime?.apply ?? 'preset';
+  const authority = cap.runtime?.permission ?? 'bridge';
+  const passthrough = apply === 'passthrough';
+  return `<div class="row">
+      <span class="tag${passthrough ? ' tag--primary' : ''}">应用方式 ${esc(APPLY_LABEL[apply] ?? apply)}</span>
+      <span class="tag${authority === 'agent' ? ' tag--warning' : ''}">权限权威 ${esc(AUTHORITY_LABEL[authority] ?? authority)}</span>
+      <button class="btn small" type="button" data-plan-cap-jump>改能力档</button>
+    </div>
+    <div class="meta">${passthrough
+    ? '直通：不装预设、使用宿主环境（不做工具级限制），权限档由执行体自身管理。'
+    : '装预设：能力档的插件行会渲染进 Agent 预设，权限档由桥接钉住并自动改回。'}
+      两者都只读展示——改它们等于改能力档，不能在方案里各说各话。</div>`;
+}
+
 function editorFields(plan) {
   const agents = planAgentPlatforms();
   const behaviorOptions = [
@@ -171,7 +232,13 @@ function editorFields(plan) {
     {
       name: 'planEditTools', type: 'select', label: '能力档', value: plan?.capability || '',
       options: presets.map((item) => ({ value: item.id, label: `${item.id} · ${item.label || item.id}` })),
-      hint: '能力档决定拿到哪些工具（正文与工具面在「平台 › 能力」里维护）；会话权限级别再决定实际能用哪些。',
+      hint: '能力档决定拿到哪些工具（正文与工具面在「平台 › 能力」里维护）；会话权限级别再决定实际能用哪些。'
+        + '选定的是直通档时，方案只引用，不限制工具。',
+    },
+    // 应用方式 / 权限权威跟着上面那套能力档走：只读展示 + 跳转到能力档本体。
+    {
+      name: 'planRuntimeSummary', type: 'custom', label: '生效方式', span: 2,
+      html: `<div id="planRuntimeSummary">${runtimeSummaryHtml(plan?.capability || presets[0]?.id || '')}</div>`,
     },
     {
       name: 'planEditBehavior', type: 'select', label: '行为档案', value: plan?.behavior || 'none',
@@ -206,6 +273,14 @@ function openEditor(plan, { clone = false } = {}) {
   }));
   const overlay = el('planEditor');
   renderFields(overlay.querySelector('#planEditFields'), editorFields(source), { layout: 'inline', columns: 1 });
+  // 换能力档就重画只读块：应用方式与权限权威随之变，但不往保存体里加字段。
+  overlay.querySelector('#planEditTools')?.addEventListener('change', (event) => {
+    const host = overlay.querySelector('#planRuntimeSummary');
+    if (host) host.innerHTML = runtimeSummaryHtml(event.target.value);
+  });
+  overlay.querySelector('#planEditFields')?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-plan-cap-jump]')) void jumpToCapability();
+  });
   wireModal(overlay, { onClose: () => overlay.remove() });
   overlay.querySelector('#planEditSave').addEventListener('click', () => void savePlan());
   openModal(overlay);
@@ -214,6 +289,25 @@ function openEditor(plan, { clone = false } = {}) {
 function setEditorMsg(text) {
   const msg = el('planEditMsg');
   if (msg) msg.textContent = text;
+}
+
+/** 「改能力档」：应用方式与权限权威住在能力档里，跳过去改，不在方案里开第二个写口。 */
+async function jumpToCapability() {
+  const capabilityId = el('planEditTools')?.value || '';
+  const platformId = capabilityPlatformId(capabilityId);
+  if (!capabilityId || !platformId) {
+    setEditorMsg('还没有 Agent 平台声明这套能力档，先去「平台」里接上一个执行体。');
+    return;
+  }
+  if (!(await confirmBox({
+    title: '去改能力档',
+    message: `应用方式与权限权威由能力档 ${capabilityId} 决定，得在「平台 › 能力」里改。当前编辑器里没保存的内容会丢掉。`,
+    confirmText: '去改',
+  }))) return;
+  el('planEditor')?.remove();
+  // 先把目标平台与标签摆好，再切页：平台页首次注入时靠这两个参数直接落到「能力」。
+  focusPlatform(`agent:${platformId}`, { tab: 'capabilities' });
+  setConsolePage('platforms', { updateHash: true });
 }
 
 async function savePlan() {

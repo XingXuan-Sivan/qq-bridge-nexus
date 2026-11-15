@@ -60,11 +60,17 @@ function personaCell(entry) {
   return `<div class="persona-name">${name}</div><div class="session-tags">${source}${stale}</div>`;
 }
 
+function whenText(ts) {
+  const value = Number(ts) || 0;
+  if (!value) return '';
+  const d = new Date(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function whenCell(ts) {
   if (!ts) return '<span class="meta">—</span>';
-  const d = new Date(ts);
-  const pad = (n) => String(n).padStart(2, '0');
-  return esc(`${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  return esc(whenText(ts));
 }
 
 function accessPill(value) {
@@ -481,6 +487,9 @@ let detailKey = null;
 let detailCache = null;
 let detailDirty = false;
 let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
+// 「执行体与权限」的数据（GET /api/sessions/:key/agent）：读的是执行体此刻的状态
+// （对端档位、注入通道），与上面那份桥接档案分开取，也不写回档案。
+let detailAgent = null;
 
 function detailDshLabel(health, sessionId) {
   if (!sessionId) return '<span class="tag">未建</span>';
@@ -595,6 +604,100 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
   if (preferredReasoning && efforts.some((e) => e.id === preferredReasoning)) reasonEl.value = preferredReasoning;
 }
 
+const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
+const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
+
+/** 提示注入通道：降级（方案要 system 但执行体没有）只说事实，不把降级当配置生效。 */
+function promptChannelHtml(channel) {
+  if (!channel) return '<span class="meta">未声明</span>';
+  const channelId = channel.channel || '';
+  const label = PROMPT_CHANNEL_LABEL[channelId] || channelId || '—';
+  const tag = `<span class="tag${channel.degraded ? ' tag--warning' : ''}">${esc(label)}</span>`;
+  const requested = channel.requested && channel.requested !== channelId
+    ? ` <span class="meta">方案要求 ${esc(PROMPT_CHANNEL_LABEL[channel.requested] || channel.requested)}</span>`
+    : '';
+  const reason = channel.degraded
+    ? `<div class="meta">${esc(channel.reason || '执行体没有这个通道，已降级')}</div>`
+    : '';
+  return `${tag}${requested}${reason}`;
+}
+
+/**
+ * 「执行体与权限」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
+ * 权限档按权威分两态：桥接权威只读展示生效级别；执行体权威才给下拉，且写后由后端回读核对。
+ */
+function detailAgentFields() {
+  const agent = detailAgent;
+  if (!agent) {
+    return [{
+      name: 'detailAgentMissing', type: 'custom', span: 2,
+      html: '<span class="meta err">执行体信息读取失败：不影响上面的档案保存，重开详情再试一次。</span>',
+    }];
+  }
+  const platform = agent.agentPlatform || {};
+  const permission = agent.permission || {};
+  const authority = permission.authority === 'agent' ? 'agent' : 'bridge';
+  const drift = permission.drift || null;
+  const canReopen = authority === 'agent' || agent.instanceForeign === true;
+  const fields = [
+    {
+      name: 'detailAgentInstance', type: 'custom', label: '执行体', span: 2,
+      html: `<strong>${esc(platform.label || platform.id || '—')}</strong>`
+        + ` <code>${esc(agent.instance || '')}</code> `
+        + (agent.instanceForeign
+          ? '<span class="tag tag--warning">跟随建会话时的实例</span>'
+          : '<span class="tag tag--success">当前执行体</span>'),
+      hint: agent.instanceForeign
+        ? '这个会话建在切换前的实例上：历史与状态留在旧实例，只有「重开」才会在新实例上新建会话。'
+        : '会话绑在这个实例上；换执行体后旧会话不会自动迁移。',
+    },
+    {
+      name: 'detailAgentPlan', type: 'custom', label: '方案', span: 2,
+      html: (agent.plan
+        ? `${esc(agent.plan.label || agent.plan.id)}${agent.plan.capability ? ` <span class="meta">${esc(agent.plan.capability)}</span>` : ''}`
+        : '<span class="meta">跟随全局方案</span>')
+        + ` <span class="tag${authority === 'agent' ? ' tag--warning' : ''}">权限档：${esc(AUTHORITY_LABEL[authority])}</span>`,
+      hint: '应用方式与权限权威都来自能力档的 runtime 段；换方案用上面的「运行 › 运行方案」。',
+    },
+    {
+      name: 'detailAgentPrompt', type: 'custom', label: '提示注入', span: 2,
+      html: promptChannelHtml(agent.promptChannel),
+      hint: '这是平台话术进会话的方式；降级只记一条审计，不改变对端配置。',
+    },
+  ];
+  if (authority === 'agent') {
+    fields.push({
+      name: 'detailAgentPreset', type: 'select', label: '权限档', span: 2,
+      value: permission.current || '',
+      placeholder: permission.readable ? '' : '读不出来（不等于没改过）',
+      disabled: !(permission.options || []).length,
+      options: (permission.options || []).map((item) => ({ value: item.value, label: item.name || item.value })),
+      hint: [
+        permission.readable ? '' : `对端档位读不出来：${permission.reason || '返回格式不符'}`,
+        permission.catalogError ? `档位目录读取失败：${permission.catalogError}` : '',
+        permission.setAt ? `最近核对 ${whenText(permission.setAt)}` : '还没经桥接改过（没有写入基线）',
+      ].filter(Boolean).join('；'),
+    });
+  } else {
+    fields.push({
+      name: 'detailAgentPresetReadonly', type: 'custom', label: '权限档', span: 2,
+      html: `<strong>${esc(permissionLevelLabel(permission.current))}</strong>`
+        + (permission.grantActive ? ' <span class="tag tag--warning">full 短时授权中</span>' : ''),
+      hint: '桥接权威：这一档由桥接钉住并自动改回；改档用上面的「运行 › 权限级别」。',
+    });
+  }
+  const actions = [
+    drift
+      ? `<span class="tag tag--warning">漂移：对端现在是 ${esc(drift.actual)}</span>`
+        + `<button class="btn small" type="button" data-detail-agent-revert="${esc(drift.expected)}">改回 ${esc(drift.expected)}</button>`
+      : '',
+    canReopen ? '<button class="btn small" type="button" data-detail-agent-reopen>在新执行体上重开</button>' : '',
+    '<span class="form-actions-status" id="detailAgentMsg" role="status"></span>',
+  ].filter(Boolean).join('');
+  fields.push({ name: 'detailAgentActions', type: 'custom', span: 2, html: `<div class="form-actions">${actions}</div>` });
+  return fields;
+}
+
 function renderDetail(data) {
   const body = document.getElementById('sessionDetailBody');
   if (!body) return;
@@ -635,6 +738,12 @@ function renderDetail(data) {
       ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
       ${card('初始提示词', '', 'prompt')}
       ${card('唤醒', '这里只改最常见的触发条件；更细的批次窗口等参数仍在「二代仿真」页。', 'wake')}
+
+      <div class="detail-card">
+        <h4>执行体与权限</h4>
+        <div class="meta">会话绑在执行体实例上；权限档归谁由运行方案的能力档决定。</div>
+        <div data-detail-form="agent"></div>
+      </div>
 
       <div class="detail-card">
         <h4>记忆</h4>
@@ -766,6 +875,8 @@ function renderDetail(data) {
     },
   ], { columns: 2 });
 
+  renderFields(formHost('agent'), detailAgentFields(), { columns: 2 });
+
   bindCounters(body);
   body.querySelectorAll('select').forEach((el) => el.dispatchEvent(new Event('change', { bubbles: true })));
   syncDetailModelSelects(data.model?.model || data.effectiveModel?.model || '', data.model?.reasoning || '');
@@ -836,13 +947,17 @@ async function openDetail(key) {
   if (saveBtn) saveBtn.disabled = true;
   openModal(overlay);
   try {
-    const [data] = await Promise.all([
+    const [data, agent] = await Promise.all([
       api(`/api/sessions/${encodeURIComponent(key)}/profile`),
+      // 执行体那一块单独取：它读的是对端此刻的状态，与桥接档案不是同一份数据。
+      // 读不到只影响这一块（detailAgentFields 会写出重试提示），不能连带整个详情失败。
+      api(`/api/sessions/${encodeURIComponent(key)}/agent`).catch(() => null),
       ensureDetailCatalog(),
       ensurePersonaCatalog(),
     ]);
     if (!data?.ok) throw new Error(data?.error || '读取失败');
     detailCache = data;
+    detailAgent = agent?.ok === true ? agent : null;
     renderDetail(data);
   } catch (error) {
     if (body) body.innerHTML = `<div class="empty-state"><strong>读取会话失败</strong><p>${esc(String(error?.message ?? error))}</p></div>`;
@@ -994,6 +1109,44 @@ async function detailReset() {
   }
 }
 
+/**
+ * 直通下改对端权限档（§7.6）：写口自己会回读核对，这里只负责发请求与重画。
+ * 失败时一定重画：界面上不能留下一个「看起来已经改了」的档位。
+ */
+async function writeAgentPermission(preset) {
+  if (!detailKey || !preset) return;
+  const key = detailKey;
+  const msg = document.getElementById('detailAgentMsg');
+  if (msg) msg.textContent = '写入中…';
+  try {
+    const r = await api(`/api/sessions/${encodeURIComponent(key)}/permission`, 'POST', { preset });
+    if (!r?.ok) throw new Error(r?.error || '写入失败');
+    detailAgent = r;
+    renderDetail(detailCache || { key });
+    showConsoleToast(`对端权限档已改为 ${r.permission?.current || preset}`);
+  } catch (error) {
+    const text = String(error?.message ?? error);
+    renderDetail(detailCache || { key });
+    setMsg('detailAgentMsg', `改档失败：${text}`, 'err');
+    showConsoleToast(`改档失败：${text}`);
+  }
+}
+
+/** 换过执行体后把会话在新实例上重开：归档旧会话并新建一个，历史不迁移。 */
+async function detailAgentReopen() {
+  if (!detailKey) return;
+  if (!window.confirm(`在新执行体上重开会归档当前会话并新建一个（${detailKey}）：历史消息不会迁移到新会话，人格/提示词/准入保留。继续？`)) return;
+  try {
+    const r = await api(`/api/sessions/${encodeURIComponent(detailKey)}/rebuild`, 'POST');
+    if (!r?.ok) throw new Error(r?.error || '重开失败');
+    showConsoleToast('已在新执行体上重开');
+    await refreshSessions();
+    await openDetail(detailKey);
+  } catch (error) {
+    showConsoleToast(`重开失败：${String(error?.message ?? error)}`);
+  }
+}
+
 async function detailClearMemory() {
   if (!detailKey) return;
   if (!window.confirm(`清空 ${detailKey} 的本机轻量记忆（话题/想法/印象/规则）？`)) return;
@@ -1078,11 +1231,18 @@ export function init() {
   if (detailOverlay && detailOverlay.parentElement !== document.body) document.body.appendChild(detailOverlay);
   wireModal(detailOverlay, {
     onBeforeClose: () => !detailDirty || window.confirm('详情里有未保存的改动，确定关闭？'),
-    onClose: () => { detailKey = null; detailCache = null; detailDirty = false; },
+    onClose: () => { detailKey = null; detailCache = null; detailAgent = null; detailDirty = false; },
   });
 
   document.getElementById('sessionDetailBody')?.addEventListener('input', () => { if (!detailRendering) detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('change', () => { if (!detailRendering) detailDirty = true; });
+  // 对端权限档下拉选完即写（直通权威下）：写入不是整页保存的一部分，
+  // 也不能被渲染期的「联动 change」触发——detailRendering 期间一律忽略。
+  document.getElementById('sessionDetailBody')?.addEventListener('change', (event) => {
+    if (detailRendering) return;
+    if (!event.target.matches('#detailAgentPreset')) return;
+    void writeAgentPermission(event.target.value);
+  });
   document.getElementById('sessionDetailSave')?.addEventListener('click', () => { void saveDetailAll(); });
 
   // full 短时授权：POST/DELETE 都走控制台接口，成功后重读详情让下拉与按钮状态同步。
@@ -1116,6 +1276,9 @@ export function init() {
     }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
+    const agentRevert = event.target.closest('[data-detail-agent-revert]');
+    if (agentRevert) { void writeAgentPermission(agentRevert.dataset.detailAgentRevert || ''); return; }
+    if (event.target.closest('[data-detail-agent-reopen]')) { void detailAgentReopen(); return; }
     if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); return; }
     const nav = event.target.closest('[data-detail-nav]');
     if (nav) {

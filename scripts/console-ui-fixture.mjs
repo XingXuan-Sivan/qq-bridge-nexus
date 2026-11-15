@@ -364,6 +364,130 @@ function fixturePermissionState(state) {
   };
 }
 
+/** 方案清单：`/api/plans` 与「会话 › 执行体与权限」读同一份，避免两处拼出不同的方案。 */
+function fixturePlans() {
+  return [
+    { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', capability: 'chat', behavior: 'social-v2', audience: 'access', builtin: true },
+    { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access', builtin: true },
+    { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', capability: 'readonly', behavior: 'none', audience: 'owner', builtin: true },
+    { id: 'agent-direct', label: 'Agent · 直通', note: '管理员私聊，直通执行体', platform: 'qq', agentPlatform: 'auto', capability: 'direct', behavior: 'none', audience: 'owner', builtin: false },
+  ];
+}
+
+/**
+ * 能力档：`runtime` 段是「怎么生效」的唯一真源，与控制台的显示同源。
+ * `direct` 用 passthrough / agent 覆盖直通那一路（方案页的两列与标记靠它可见）。
+ */
+function fixtureCapabilities() {
+  return [
+    {
+      id: 'chat', label: '聊天 Agent', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'],
+      agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'],
+      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      runtime: { apply: 'preset', prompt: 'none', permission: 'bridge', narrow: [] },
+      note: '', hasRows: true, rowsCount: 2, usedBy: ['chat', 'social-v2'],
+    },
+    {
+      id: 'chat-v2', label: '二代仿真', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'],
+      agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'],
+      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      runtime: { apply: 'preset', prompt: 'tool', permission: 'bridge', narrow: [] },
+      note: '', hasRows: true, rowsCount: 2, usedBy: ['social-v2'],
+    },
+    {
+      id: 'readonly', label: 'Agent · 只读', builtin: true, platformVisible: ['sendMessage', 'markRead'],
+      agentModules: ['tool-fs', 'tool-fs-search'],
+      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      runtime: { apply: 'preset', prompt: 'none', permission: 'bridge', narrow: [] },
+      note: '', hasRows: true, rowsCount: 2, usedBy: ['agent-readonly'],
+    },
+    {
+      id: 'direct', label: '直通 · 主人', builtin: true, platformVisible: ['sendMessage', 'markRead'],
+      agentModules: [],
+      tools: { platform: {}, mcp: [], skills: [] },
+      runtime: { apply: 'passthrough', prompt: 'system', permission: 'agent', narrow: [] },
+      note: '不装预设与沙箱，直接使用执行体自己的会话、工具与权限档', hasRows: false, rowsCount: 0, usedBy: ['agent-direct'],
+    },
+  ];
+}
+
+/** 只读预设：执行体自报的档位目录（DSH / ACP 都是这一套名字）。 */
+const AGENT_PERMISSION_PRESETS = Object.freeze([
+  { value: 'read-only', name: 'Read Only' },
+  { value: 'workspace-write', name: 'Workspace Write' },
+  { value: 'default', name: 'Default' },
+]);
+
+// 会话跑哪套方案：管理员私聊走直通方案（权限归执行体），群聊走「聊天」（桥接钉档）。
+// 两种权威在离线预览里都能看到，不靠测试脚本改状态去凑。
+const FIXTURE_SESSION_PLAN_ID = Object.freeze({ 'private:100001': 'agent-direct' });
+
+function fixtureSessionPlanId(key) {
+  return FIXTURE_SESSION_PLAN_ID[key] ?? 'chat';
+}
+
+/** 会话详情 ›「执行体与权限」的离线数据（与 GET /api/sessions/:key/agent 同形）。 */
+function fixtureSessionAgent(state, key) {
+  const plan = fixturePlans().find((item) => item.id === fixtureSessionPlanId(key)) ?? null;
+  const capability = plan ? fixtureCapabilities().find((item) => item.id === plan.capability) ?? null : null;
+  const runtime = capability?.runtime ?? { apply: 'preset', prompt: 'none', permission: 'bridge', narrow: [] };
+  const authority = runtime.permission === 'agent' ? 'agent' : 'bridge';
+  const current = state.agentPresets?.[key] ?? 'default';
+  const mirror = state.agentMirror?.[key] ?? null;
+  const permission = authority === 'agent'
+    ? {
+      authority,
+      current,
+      readable: true,
+      reason: '',
+      options: AGENT_PERMISSION_PRESETS.map((item) => ({ ...item })),
+      defaultPreset: 'default',
+      catalogError: '',
+      mirror: mirror?.preset ?? null,
+      setAt: Number(mirror?.at) || 0,
+      drift: mirror?.preset && current !== mirror.preset
+        ? { expected: mirror.preset, actual: current, at: Number(mirror.at) || 0 }
+        : null,
+    }
+    : {
+      authority,
+      current: 'read-only',
+      readable: true,
+      reason: '',
+      options: Object.entries(PERMISSION_LABELS).map(([value, name]) => ({ value, name })),
+      defaultPreset: '',
+      catalogError: '',
+      mirror: null,
+      setAt: 0,
+      drift: null,
+      fullAllowed: state.permission.allowFull === true,
+      grantActive: state.fullActive === true,
+    };
+  return {
+    ok: true,
+    key,
+    sessionId: state.sessions.find((item) => item.key === key)?.sessionId ?? null,
+    instance: 'dsh',
+    instanceForeign: false,
+    agentPlatform: { id: 'dsh', label: 'DeepSeek Harness' },
+    plan: plan
+      ? {
+        id: plan.id,
+        label: plan.label,
+        audience: plan.audience,
+        builtin: plan.builtin,
+        capability: plan.capability,
+        apply: runtime.apply,
+        authority: runtime.permission,
+        prompt: runtime.prompt,
+      }
+      : null,
+    capability: capability ? { id: capability.id, label: capability.label } : null,
+    promptChannel: { channel: runtime.prompt, requested: runtime.prompt, degraded: false },
+    permission,
+  };
+}
+
 export function makeFixtureState() {
   return {
     mode: 'reserved2', role: '小鲸鱼', roleMode: 'active', closedAgentPreset: '', paused: false,
@@ -422,6 +546,9 @@ export function makeFixtureState() {
     },
     agentProbes: {},
     defaultAgent: 'dsh',
+    // 直通会话的对端档位与桥接最后一次写档的基线（`agent` 权威才用；这里是执行体自报的现值）。
+    agentPresets: { 'private:100001': 'default' },
+    agentMirror: { 'private:100001': { preset: 'read-only', at: timestamp } },
     // 用户实例（一条 `platforms.users` 条目 = 一个实例）。qq 是默认且在用；wx 是插件注册的
     // 第二条平台、条目被停用 —— 用来验条目开关、入站状态与「设为默认实例」。
     userConfigs: {
@@ -880,6 +1007,22 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         state.fullActive = false;
         return json({ ok: true, permission: fixturePermissionState(state) });
       }
+      if (/^\/api\/sessions\/[^/]+\/permission$/.test(path) && method === 'POST') {
+        const key = decodeURIComponent(path.split('/')[3] ?? '');
+        const payload = fixtureSessionAgent(state, key);
+        // 桥接权威的会话不接受直写：与真实桥接同一条拒绝理由（409）。
+        if (payload.permission.authority !== 'agent') {
+          return json({ ok: false, error: '当前方案由桥接钉住权限档：请改用「运行 › 权限级别」' }, 409);
+        }
+        const preset = String(body?.preset ?? '').trim();
+        if (!preset) return json({ ok: false, error: '缺少目标档位' }, 400);
+        if (!payload.permission.options.some((item) => item.value === preset)) {
+          return json({ ok: false, error: `执行体没有这个档位：${preset}`, current: payload.permission.current }, 400);
+        }
+        state.agentPresets = { ...(state.agentPresets ?? {}), [key]: preset };
+        state.agentMirror = { ...(state.agentMirror ?? {}), [key]: { preset, at: timestamp } };
+        return json(fixtureSessionAgent(state, key));
+      }
       if (method === 'POST' && /\/reset$/.test(path)) {
         if (path.startsWith('/api/runtime/capabilities/')) return json({ ok: true, requiresRestart: true });
         if (path.startsWith('/api/plans/')) return json({ ok: true, requiresRestart: true });
@@ -889,6 +1032,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         const profileMatch = path.match(/^\/api\/sessions\/([^/]+)\/profile$/);
         if (profileMatch) {
           const key = decodeURIComponent(profileMatch[1]);
+          const planId = fixtureSessionPlanId(key);
+          const plan = fixturePlans().find((item) => item.id === planId) ?? null;
           return json({
             ok: true,
             key,
@@ -896,7 +1041,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             sessionId: `demo-${key.replace(/[^a-z0-9]+/gi, '-')}`,
             dsh: { label: 'DSH 已连接' },
             access: { passiveMode: state.access.passive.mode, proactiveMode: state.access.proactive.mode },
-            plans: [], planId: '', activePlan: { id: 'chat', label: '聊天' },
+            plans: [], planId: '', activePlan: { id: planId, label: plan?.label || planId },
             persona: { mode: 'inherit' },
             prompt: { maxChars: 2000, text: '' },
             wake: { triggers: { atMention: true } },
@@ -905,6 +1050,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             effectiveModel: { provider: state.dshProvider, model: state.dshModel },
           });
         }
+        const sessionAgentMatch = path.match(/^\/api\/sessions\/([^/]+)\/agent$/);
+        if (sessionAgentMatch) return json(fixtureSessionAgent(state, decodeURIComponent(sessionAgentMatch[1])));
         switch (path) {
           case '/api/roles/limit':
             return json({
@@ -921,10 +1068,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/runtime/capabilities': return json({
             ok: true,
             catalog: toolCatalogSnapshot(),
-            capabilities: [
-              { id: 'chat', label: '聊天 Agent', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'], agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', hasRows: true, rowsCount: 2, usedBy: ['chat', 'social-v2'] },
-              { id: 'readonly', label: 'Agent · 只读', builtin: true, platformVisible: ['sendMessage', 'markRead'], agentModules: ['tool-fs', 'tool-fs-search'], tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] }, note: '', hasRows: true, rowsCount: 2, usedBy: [] },
-            ],
+            capabilities: fixtureCapabilities(),
           });
           case '/api/config/behaviors': return json({
             ok: true,
@@ -941,11 +1085,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             active: state.planId || 'social-v2',
             activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access' },
             defaultPlan: state.defaultPlan ?? 'social-v2',
-            plans: [
-              { id: 'chat', label: '聊天', note: '白名单内随时对话', platform: 'qq', agentPlatform: 'dsh', capability: 'chat', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'social-v2', label: '二代仿真', note: '自主阅读、发言与潜水', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access', builtin: true },
-              { id: 'agent-readonly', label: 'Agent · 只读', note: '管理员私聊，只读', platform: 'qq', agentPlatform: 'dsh', capability: 'readonly', behavior: 'none', audience: 'owner', builtin: true },
-            ],
+            plans: fixturePlans(),
           });
           // C1：平台统一注册表。控制台只读这一个端点回答「接了哪些平台、能不能用」。
           // 两侧都列（user / agent），诊断与汇总与真实桥接同形。C3 起 qq 有 connect()
@@ -1034,6 +1174,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 active: true,
                 configured: state.defaultAgent === 'dsh',
                 capabilities: ['session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact'],
+                // 声明面三件套：能跑哪些应用方式、话术能走哪些通道、能不能钉权限档。
+                applies: ['preset', 'passthrough'],
+                promptChannels: ['prefix', 'tool'],
+                canPinPermission: true,
                 conversationTypes: [],
                 limits: {},
                 inbound: false,
@@ -1061,7 +1205,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                   prompt: { active: false, hasDefault: false },
                   tools: [],
                   behaviors: [],
-                  capabilityProfiles: ['chat', 'chat-v2', 'readonly', 'workspace', 'full'],
+                  capabilityProfiles: ['chat', 'chat-v2', 'direct', 'full', 'readonly', 'workspace'],
                 },
               },
               {
@@ -1076,6 +1220,9 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 active: false,
                 configured: state.defaultAgent === 'acp',
                 capabilities: ['session', 'events'],
+                applies: ['preset', 'passthrough'],
+                promptChannels: ['system', 'tool'],
+                canPinPermission: true,
                 conversationTypes: [],
                 limits: {},
                 inbound: false,

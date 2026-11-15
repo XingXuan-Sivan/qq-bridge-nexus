@@ -31,6 +31,10 @@ const SOURCE_HINT = {
 };
 const LEVEL_LABEL = { error: '错误', warn: '警告' };
 const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
+/** 能力位矩阵里的三个声明面：应用方式、提示注入通道、权限权威支持面。 */
+const APPLY_KIND_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
+const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
+const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
 /** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
 const ENABLED_FIELD = 'platformEnabled';
 /** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
@@ -65,6 +69,27 @@ function tagsOf(list, render) {
 }
 
 // ── 概览 ────────────────────────────────────────────────────────────────────
+
+/**
+ * 能力位矩阵：能力位之外还有三个「这个执行体支不支持」的声明——
+ * 应用方式（能力档能不能不装预设）、提示注入通道（话术怎么进去）、
+ * 权限权威支持面（能不能把权限档钉在桥接侧）。
+ */
+function capabilityMatrix(item) {
+  const rows = [{
+    cells: [
+      '能力位',
+      tagsOf(item.capabilities ?? [], (name) => `<span class="tag">${esc(capabilityLabel(name))}</span>`),
+    ],
+  }];
+  if (item.side !== 'agent') return rows;
+  const declared = (list, labels) => tagsOf(list ?? [], (name) => `<span class="tag">${esc(labels[name] ?? name)}</span>`);
+  rows.push({ cells: ['应用方式', declared(item.applies, APPLY_KIND_LABEL)] });
+  rows.push({ cells: ['提示注入通道', declared(item.promptChannels, PROMPT_CHANNEL_LABEL)] });
+  // 权限权威支持面：能钉档的执行体两种权威都能跑；不能钉的只有「执行体自身」这一种。
+  rows.push({ cells: ['权限权威支持面', declared(item.canPinPermission ? ['bridge', 'agent'] : ['agent'], AUTHORITY_SIDE_LABEL)] });
+  return rows;
+}
 
 /** 运行期状态：「装配的是哪个」（active）与「配置面选的是哪个」（configured）是两件事。 */
 function runtimeStateCell(item) {
@@ -201,7 +226,11 @@ function overviewHtml(item) {
     <section class="platform-section">
       <h3>能力位</h3>
       <p class="meta">平台声明的能力位决定表单与适配器能做什么；没声明的能力不会出现在任何界面里。</p>
-      <div class="row">${tagsOf(item.capabilities ?? [], (name) => `<span class="tag">${esc(capabilityLabel(name))}</span>`)}</div>
+      ${dataTableHtml({
+    columns: [{ label: '项目', width: '160px' }, { label: '声明' }],
+    rows: capabilityMatrix(item),
+    pageSize: 10,
+  })}
     </section>
     <section class="platform-section">
       <h3>诊断</h3>
@@ -534,7 +563,7 @@ function paintPanel() {
  * 在右栏挂载某个平台的详情。
  * @param {HTMLElement} target [data-split-detail] 容器
  * @param {object} item 注册表条目（含 diagnostics 时一并展示）
- * @param {{onChanged?: () => void}} [options] 写成功后的刷新回调（重拉注册表并重画页面）
+ * @param {{onChanged?: () => void, tab?: string}} [options] 写成功后的刷新回调；tab 指定落到的标签页
  */
 export function mountPlatformDetail(target, item, options = {}) {
   root = target;
@@ -543,6 +572,8 @@ export function mountPlatformDetail(target, item, options = {}) {
   // 同一平台重挂（保存 / 探活 / 切默认后的整页刷新）时保留当前标签：改完配置不该跳回概览。
   const key = `${item.side}:${item.id}`;
   if (key !== mountedKey) tab = 'overview';
+  // 别的页面点名要落到哪个标签（方案页「改能力档」）：条目真有的标签才切过去。
+  if (options.tab && tabsOf(item).some((entryTab) => entryTab.id === options.tab)) tab = options.tab;
   mountedKey = key;
   resetPanels();
   root.innerHTML = shell(item);

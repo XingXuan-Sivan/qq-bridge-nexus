@@ -13,6 +13,7 @@ import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
 import { DOCK_ICONS } from '../../components/action-dock/action-dock.js';
 import { CONFIG_FIELDS } from './fields.js';
+import { loadPlatforms, registryMeta } from '../../js/registry.js';
 import { init as initAccessPage, loadSecurity, securitySection, tokenSection } from './access-section.js';
 import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobalAccess } from '../sessions/page.js';
 import { initVoiceSection } from './voice-section.js';
@@ -29,7 +30,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadPermission(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -497,6 +498,122 @@ const runtimeDefaultSection = {
   },
 };
 
+// ── 执行体（默认执行体 / 当前运行 / 探活）──────────────────────────────────────
+// 配置面（`runtime.defaultAgent`）与运行期（`/api/status` 的 `agent`）是两个事实：
+// 换默认只落盘，本进程装配的执行体在重启前不变。
+const CONNECT_MODE_LABEL = { http: 'HTTP', stdio: 'stdio', remote: '远程' };
+let agentState = { runtime: null, status: null };
+
+function agentEntries() {
+  return (registryMeta().platforms ?? []).filter((item) => item.side === 'agent');
+}
+
+function runningAgentOf() {
+  return agentState.status?.agent ?? { id: '', label: '', mode: '', ready: false };
+}
+
+/** 把「当前运行」与「探活」两行填上：它们不属于任何表单字段，只是两个事实。 */
+function renderAgentReadout() {
+  const running = runningAgentOf();
+  const configured = agentState.runtime?.runtime?.defaultAgent ?? '';
+  const entry = agentEntries().find((item) => item.id === configured) ?? null;
+  const runningHost = $('agentRunningReadout');
+  if (runningHost) {
+    runningHost.innerHTML = [
+      `<span class="tag">${esc(running.label || running.id || '未知执行体')}</span>`,
+      `<code>${esc(running.id || '')}</code>`,
+      `<span class="tag">连接方式 ${esc((CONNECT_MODE_LABEL[running.mode] ?? running.mode) || '未报告')}</span>`,
+      running.ready ? '<span class="tag tag--success">已就绪</span>' : '<span class="tag tag--danger">未就绪</span>',
+      configured && configured !== running.id
+        ? `<span class="tag tag--warning">配置面已改为 ${esc(configured)}，重启后生效</span>`
+        : '',
+    ].filter(Boolean).join(' ');
+  }
+  const probeHost = $('agentProbeReadout');
+  if (!probeHost) return;
+  const probe = entry?.probe ?? null;
+  probeHost.innerHTML = !probe
+    ? `<span class="meta">${esc(configured || '未设置')} 本次运行里还没探活过：在「平台 › 该执行体 › 执行体」里单独探。</span>`
+    : probe.ok
+      ? `<span class="tag tag--success">上次探活通过</span><span class="meta">${esc(probe.at || '')}${probe.url ? ` · ${esc(probe.url)}` : ''}</span>`
+      : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`;
+}
+
+/**
+ * 模型卡的标题跟随当前执行体，并只在它声明了 `models` 能力位时才给出模型字段：
+ * 没这个能力位的执行体，模型只能在它自己的界面里改。
+ */
+function applyAgentGates() {
+  const running = runningAgentOf();
+  const entry = agentEntries().find((item) => item.id === running.id) ?? null;
+  const label = running.label || running.id || '当前执行体';
+  const card = $('section-dsh');
+  const heading = card?.querySelector('h2');
+  if (heading) heading.textContent = `${label} 模型与思考强度`;
+  const supported = (entry?.capabilities ?? []).includes('models');
+  const fieldsHost = card?.querySelector('[data-overview-fields="dsh"]');
+  if (fieldsHost) fieldsHost.hidden = !supported;
+  const notice = $('dshModelUnsupported');
+  if (notice) notice.hidden = supported;
+}
+
+async function loadAgentSection() {
+  const select = $('agentDefaultSelect');
+  if (!select) return;
+  try {
+    const [runtime, status] = await Promise.all([
+      api('/api/config/runtime'),
+      api('/api/status').catch(() => null),
+    ]);
+    agentState = { runtime, status };
+    await loadPlatforms({ force: true });
+    const entries = agentEntries();
+    const current = runtime?.runtime?.defaultAgent ?? '';
+    select.innerHTML = entries
+      .map((item) => `<option value="${esc(item.id)}">${esc(item.label || item.id)}${item.active ? '（当前运行）' : ''}</option>`)
+      .join('');
+    // 配置面选的执行体已经不在注册表里（拆了目录 / 没装）/ 或注册表还没回来：把原值补进下拉，不默认成别人。
+    if (current && !entries.some((item) => item.id === current)) {
+      select.insertAdjacentHTML('beforeend', `<option value="${esc(current)}">${esc(current)}（未注册）</option>`);
+    }
+    if (current) select.value = current;
+    select.disabled = !entries.length;
+    const button = $('agentSwitchBtn');
+    if (button) button.disabled = !entries.length;
+    renderAgentReadout();
+    applyAgentGates();
+    setMsg('agentSwitchMsg', '');
+  } catch (error) {
+    setMsg('agentSwitchMsg', `读取执行体失败：${error?.message ?? error}`, 'err');
+  }
+}
+
+/** 切换默认执行体：只落盘，本进程不换装配；服务端已经先预检过。 */
+async function switchAgent() {
+  const wanted = $('agentDefaultSelect')?.value ?? '';
+  if (!wanted) {
+    setMsg('agentSwitchMsg', '先选一个执行体', 'err');
+    return;
+  }
+  const button = $('agentSwitchBtn');
+  if (button) button.disabled = true;
+  setMsg('agentSwitchMsg', '预检中…');
+  try {
+    const label = agentEntries().find((item) => item.id === wanted)?.label || wanted;
+    const r = await api('/api/config/runtime', 'POST', { defaultAgent: wanted });
+    if (!r?.ok) throw new Error(r?.error || '切换失败');
+    // 重读放在写状态位之前：loadAgentSection 会清掉上一次的状态文字。
+    await loadAgentSection();
+    setMsg('agentSwitchMsg', r.requiresRestart ? `已把默认执行体改为 ${label}，重启桥接后生效` : `${label} 已经是当前执行体`);
+    showConsoleToast(r.requiresRestart ? `已设为默认执行体 ${label}，重启桥接后生效` : `当前执行体就是 ${label}`);
+  } catch (error) {
+    // 失败保留用户选的那个值（他要的就是这个），只把原因写出来。
+    setMsg('agentSwitchMsg', `切换失败：${error?.message ?? error}`, 'err');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 const CONFIG_TABS = ['runtime', 'access', 'security', 'voice'];
 const CONFIG_TAB_KEY = 'qq-console:tab:config';
 
@@ -532,6 +649,14 @@ function showConfigSection(name, { persist = true } = {}) {
 const CONFIG_CARDS = {
   configRuntimeCards: [
     {
+      id: 'section-agent',
+      title: '执行体',
+      note: '切换后重启生效',
+      description: '桥接装配的 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）。'
+        + '这里改的是<b>默认执行体</b>：本进程仍装配原来那个，重启桥接后才换过去。',
+      body: '<div data-overview-fields="agent"></div>',
+    },
+    {
       id: 'section-personabehavior',
       title: '人格与行为',
       note: '下一条消息生效',
@@ -551,7 +676,8 @@ const CONFIG_CARDS = {
       title: 'DSH 模型与思考强度',
       note: '下一条消息生效',
       description: '当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span>',
-      body: '<div data-overview-fields="dsh"></div>',
+      body: '<div data-overview-fields="dsh"></div>'
+        + '<div id="dshModelUnsupported" hidden><p class="meta">当前执行体没有声明 <code>models</code> 能力位：模型与思考强度在它自己的界面里改。</p></div>',
     },
     {
       id: 'section-compact-config',
@@ -686,6 +812,9 @@ export function init() {
   $('dshEffortSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
   $('dshVisionSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
   $('dshCatalogRefresh').addEventListener('click', () => refreshDshModel(true));
+
+  // 执行体：换了默认只落盘，重启桥接后装配。
+  $('agentSwitchBtn')?.addEventListener('click', () => void switchAgent());
 
   // 手动静默：同一个按钮按当前状态开启或关闭
   $('silentToggle').addEventListener('click', async () => {

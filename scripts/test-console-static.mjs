@@ -153,6 +153,27 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时执行体取自下拉，不是写死的值');
   ok(!/planEditPlatform|platform: el\('planEdit/.test(plansText) && !/plan\.platform/.test(plansText), '方案页不再有用户侧平台字段（方案不绑平台）');
 }
+console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 / 权限权威）');
+{
+  const plansText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plans', 'page.js'), 'utf8');
+  ok(/APPLY_LABEL/.test(plansText) && /AUTHORITY_LABEL/.test(plansText), '方案页的生效方式标签与能力档同源（不在方案里另存一份）');
+  ok(/不做工具级限制/.test(plansText), '直通方案行明显不做工具级限制');
+  ok(/planRuntimeSummary/.test(plansText) && /data-plan-cap-jump/.test(plansText), '方案编辑器的生效方式只读块带「改能力档」');
+  ok(/focusPlatform\(`agent:\$\{platformId\}`/.test(plansText), '「改能力档」跳到声明这套档的执行体');
+  const detailText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
+  ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /canPinPermission/.test(detailText),
+    '平台详情的能力位矩阵写出注入通道与权限权威支持面');
+  const sessionsText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
+  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染执行体与权限');
+  ok(/\/permission`, 'POST', \{ preset \}/.test(sessionsText), '执行体权威只提交目标档位（不混进整页保存）');
+  ok(/data-detail-agent-revert/.test(sessionsText), '漂移结论带「改回」按钮');
+  const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
+  const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
+  ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「执行体」卡：默认执行体 + 当前运行');
+  ok(/applyAgentGates/.test(configText) && /dshModelUnsupported/.test(configText), '模型卡按运行执行体的 models 能力位门控');
+  ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), '执行体字段走 fields 规格（不手写控件）');
+  ok(/fixtureSessionAgent\(/.test(fixture) && /agentMirror/.test(fixture), '离线夹具实现会话 /agent 与权限写口（含漂移）');
+}
 // C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
 // 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。
 ok(!/PAGE_FRAGMENTS/.test(html), '路由器不再区分静态页与片段页（PAGE_FRAGMENTS 已删除）');

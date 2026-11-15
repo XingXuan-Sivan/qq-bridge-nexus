@@ -106,9 +106,12 @@ for (const preset of ['chat', 'chat-v2']) {
   check('不再包含已废弃的 text 字段', () => {
     if (Object.hasOwn(row.config, 'text')) throw new Error('仍有 text 字段');
   });
-  check('persona 正文（除头句）完整保留', () => {
+  // P4 方言上移后，能力档正文只剩平台无关的两段（平台话术住在 profiles/platforms/qq/prompt.md）：
+  // 长度不再是完整性的信号，缺段才是。按段落名判，不按字数判。
+  check('persona 正文保留两段必备内容（安全边界 + 送达方式）', () => {
     const body = String(row.config.prefix ?? '').split('\n').slice(1).join('\n');
-    if (body.length < 500) throw new Error(`正文疑似丢失，仅 ${body.length} 字符`);
+    const missing = ['【安全边界', '【送达方式'].filter((mark) => !body.includes(mark));
+    if (missing.length) throw new Error(`正文缺少 ${missing.join(' / ')}：疑似被截断`);
   });
 }
 

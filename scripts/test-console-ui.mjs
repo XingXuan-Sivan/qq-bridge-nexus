@@ -1242,6 +1242,113 @@ try {
     await page.waitForSelector('#metricSessions');
   });
 
+  // P5：直通运行期把「谁能改权限档」摆到界面上。管理员私聊走直通方案（权限归执行体），
+  // 群聊走「聊天」（桥接钉档）——两种权威都要能从同一个详情里读出来。
+  if (!original) await test('会话详情：执行体与权限按权威分两态，直通会话改档后漂移消失', async () => {
+    // 会话 key 里带冒号，请求路径里是百分号编码的：比对前先解回来。
+    const pathOf = (url) => decodeURIComponent(new URL(url).pathname);
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key="private:100001"]');
+    await page.click('#sessionList [data-manage-key="private:100001"]');
+    await page.waitForSelector('#detailAgentPreset');
+    const agentCard = page.locator('#sessionDetailBody [data-detail-form="agent"]');
+    let text = await agentCard.textContent();
+    assert.match(text, /DeepSeek Harness/, '执行体名字要写出来');
+    assert.match(text, /权限档：执行体自身/, '直通档的权限权威是执行体自身');
+    assert.match(text, /系统提示/, '话术按能力档声明的 system 通道注入');
+    assert.match(text, /漂移：对端现在是 default/, '桥接基线与对端现值不一致要写出来');
+    assert.deepEqual(await page.locator('#detailAgentPreset option').evaluateAll((nodes) => nodes.map((node) => node.value)), ['read-only', 'workspace-write', 'default'], '档位目录来自执行体');
+    assert.equal(await page.locator('#detailAgentPreset').inputValue(), 'default');
+
+    const [written] = await Promise.all([
+      page.waitForResponse((r) => pathOf(r.url()) === '/api/sessions/private:100001/permission' && r.request().method() === 'POST'),
+      page.selectOption('#detailAgentPreset', 'workspace-write'),
+    ]);
+    assert.equal(written.status(), 200);
+    assert.deepEqual(fixture.requests.at(-1)?.body, { preset: 'workspace-write' }, '改档只提交目标档位');
+    await page.waitForFunction(() => document.getElementById('detailAgentPreset')?.value === 'workspace-write');
+    text = await agentCard.textContent();
+    assert.equal(/漂移/.test(text), false, '写后核对一致，漂移结论应消失');
+    assert.equal(await page.locator('[data-detail-agent-reopen]').count(), 1, '执行体权威给出「在新执行体上重开」');
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+
+    // 群聊走桥接钉档：只读展示生效档位，没有改档下拉，也不给重开按钮。
+    await page.click('#sessionList [data-manage-key="group:123456789"]');
+    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('桥接钉档'));
+    const bridgeText = await agentCard.textContent();
+    assert.match(bridgeText, /桥接权威：这一档由桥接钉住并自动改回/);
+    assert.equal(await page.locator('#detailAgentPreset').count(), 0, '桥接权威不给改档下拉');
+    assert.equal(await page.locator('[data-detail-agent-reopen]').count(), 0, '实例没换过就不给重开按钮');
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+  });
+
+  if (!original) await test('方案页：应用方式 / 权限权威只读展示，改能力档跳到平台的能力标签', async () => {
+    await navigate('plans');
+    await page.waitForSelector('#planCard [data-plan-edit="agent-direct"]');
+    const table = await page.locator('#planCard').textContent();
+    assert.match(table, /应用方式/);
+    assert.match(table, /权限权威/);
+    assert.match(table, /不做工具级限制/, '直通方案行要标记不做工具级限制');
+    assert.match(table, /执行体自身/);
+    assert.match(table, /桥接钉档/);
+
+    await page.click('#planCard [data-plan-edit="agent-direct"]');
+    await page.waitForSelector('#planRuntimeSummary');
+    let summary = await page.locator('#planRuntimeSummary').textContent();
+    assert.match(summary, /应用方式 直通（不装预设）/);
+    assert.match(summary, /权限权威 执行体自身/);
+    // 换能力档：只读块跟着重画，但不往保存体里加字段。
+    await page.selectOption('#planEditTools', 'chat');
+    summary = await page.locator('#planRuntimeSummary').textContent();
+    assert.match(summary, /应用方式 装预设/);
+    assert.match(summary, /权限权威 桥接钉档/);
+
+    await page.selectOption('#planEditTools', 'direct');
+    await page.locator('[data-plan-cap-jump]').click();
+    await page.waitForFunction(() => location.hash === '#platforms');
+    await page.waitForSelector('[data-platform-tab="capabilities"].active');
+    await page.waitForSelector('#platformCapabilityList [data-cap-edit]');
+    assert.equal(await page.locator('#planEditor').count(), 0, '跳转前先关掉方案编辑器');
+    assert.equal(await page.locator('#platformSplit [data-split-key="agent:dsh"].is-active').count(), 1, '能力档属于声明它的执行体');
+  });
+
+  if (!original) await test('全局配置：执行体卡区分配置面与运行期，切换默认执行体只落盘', async () => {
+    await navigate('config');
+    await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.options.length >= 2);
+    // 前面的用例可能已经把默认执行体改成 acp：这里跟着当前值走，结束时换回原来那个。
+    const initial = await page.locator('#agentDefaultSelect').inputValue();
+    assert.ok(['dsh', 'acp'].includes(initial), `默认执行体应来自注册表，实际 ${initial}`);
+    const running = await page.locator('#agentRunningReadout').textContent();
+    assert.match(running, /DeepSeek Harness/);
+    assert.match(running, /连接方式 HTTP/);
+    assert.match(running, /已就绪/);
+    // 模型卡标题跟随当前运行执行体；dsh 声明了 models，替代文案不出现。
+    assert.match(await page.locator('#section-dsh h2').textContent(), /DeepSeek Harness 模型与思考强度/);
+    assert.equal(await page.locator('#dshModelUnsupported').isHidden(), true);
+
+    // 先归位到运行中的 dsh：这条用例只验证「切到另一个 → 待重启」，不依赖前面的用例怎么收场。
+    if (initial !== 'dsh') {
+      await page.selectOption('#agentDefaultSelect', 'dsh');
+      await clickWrite('#agentSwitchBtn', '/api/config/runtime');
+      await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.value === 'dsh');
+      // 「当前运行」那一行在选出值之后才重写：等它把上一个用例留下的「待重启」提示抹掉。
+      await page.waitForFunction(() => !/配置面已改为/.test(document.getElementById('agentRunningReadout')?.textContent || ''));
+    }
+
+    await page.selectOption('#agentDefaultSelect', 'acp');
+    assert.deepEqual(await clickWrite('#agentSwitchBtn', '/api/config/runtime'), { defaultAgent: 'acp' });
+    await page.waitForFunction(() => (document.getElementById('agentSwitchMsg')?.textContent || '').includes('已把默认执行体改为 ACP 执行体'));
+    const switched = await page.locator('#agentRunningReadout').textContent();
+    assert.match(switched, /配置面已改为 acp，重启后生效/);
+    assert.match(switched, /DeepSeek Harness/, '本进程仍在跑 dsh');
+
+    // 收拾现场：恢复进入本用例前的配置面，别把「待重启」状态改了。
+    await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.value === 'acp');
+    await page.selectOption('#agentDefaultSelect', initial);
+    assert.deepEqual(await clickWrite('#agentSwitchBtn', '/api/config/runtime'), { defaultAgent: initial });
+    await page.waitForFunction((value) => document.getElementById('agentDefaultSelect')?.value === value, initial);
+  });
+
   if (artifacts) {
     await mkdir(resolve(artifacts), { recursive: true });
     await page.setViewportSize({ width: 1440, height: 1000 });

@@ -65,7 +65,7 @@ export const OVERVIEW_FIELDS = {
       {
         name: 'runtimeDefaultSelect',
         type: 'select',
-        label: '默认运行方案',
+        label: '默认方案（无平台/会话覆盖时生效）',
         options: [],
         hint: '新建、未单独设置和重建的会话都用这个方案；某个会话要换方案，在「会话与审批 › 详情」里单独指定。',
       },

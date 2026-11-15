@@ -641,7 +641,7 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   （repo + all）、`test:preset-prompt` 16/16、`test:runtime-plans` 8/8、`test:qq-preset-contract` 10/10、
   `test-platform-prompt` 1/1、`test:audit` 132/132、`test-console-static`、`test-console-ui` 42/42。
 
-### 重构：直通运行期（P5，声明面 + 运行期接线）
+### 重构：直通运行期（P5）
 - **提示通道声明面**：能力档 `runtime.prompt` 的四个取值各自有明确语义——`none` 每次唤醒都带；
   `prefix` 只首轮带一次；`system` 建会话时交给对端；`tool` 完全不带。执行体在 `adapters/runtime.mjs`
   用 `RUNTIME_PROMPT` 认领，注册表 `agentPlatformPromptChannels()` 读出，在 `listAgentPlatforms()` 里
@@ -676,12 +676,30 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   列表过滤 + 写口 403 各用一次；需要高权限走 `full-ask`。
 - **其余写口对齐**：`PATCH /api/sessions/:key/profile` 在直通下写 `presetId` 改 409（不挂预设就不该假装有开关）；
   `GET /api/sessions/:key/profile` 增 `apply`，页面靠它决定要不要显示预设/沙箱那几张卡。
+- **控制台 · 会话详情**：新增「执行体与权限」卡，一条 `GET /api/sessions/:key/agent` 渲染执行体、方案、
+  提示注入通道与权限档。执行体权威给下拉（写后由后端回读核对），桥接权威只读展示生效级别并写
+  「桥接权威：这一档由桥接钉住并自动改回」；漂移标黄并给「改回」，会话建在旧实例上时给「重开」。
+- **控制台 · 方案页**：清单补「应用方式 / 权限权威」两列，直通行是「直通」徽标 + 「不做工具级限制」；
+  编辑器新增「生效方式」只读块（两枚徽标 + 「改能力档」），改能力档先二次确认，然后关掉编辑器跳到
+  声明这套档的执行体的「能力」标签——方案与能力档不各存一份说法。
+- **控制台 · 平台详情**：能力位矩阵补应用方式、提示注入通道、权限权威支持面三行，全部读注册表声明。
+- **控制台 · 全局配置**：新增「执行体」卡（默认执行体下拉 + 当前运行一行 + 待重启提示），
+  模型卡按当前执行体的 `models` 能力位门控，未声明时写「模型与思考强度在它自己的界面里改」。
 - **测试**：新增 `scripts/test-passthrough-plan.mjs`（6 条：不挂预设、`system` 降级只记一次、`prefix` 首轮一次、
   `tool` 完全不带、写后回读失败不污染基线、两个端点的权限/漂移/409/403/502 契约）。
   同时补上审计夹具缺的两个符号（`agentPlatform`、`user-side/prompt.mjs` 整个命名空间）——此前平台话术在夹具里
   恒为空串，前缀通道的断言会静默变成「断言空串」。
+- **控制台测试**：`test-console-ui` 新增 3 条（会话详情两权威、方案页两列与跳转、全局配置执行体卡），
+  共 45/45；`test-console-static` 新增「P5 声明面」13 条，堵住「方案里另存一份生效方式」「页面硬编码执行体 id」
+  这类回退。夹具补 `/api/sessions/:key/agent` 与 `POST .../permission`（含漂移），离线预览也能看到两态。
+- **门禁**：`test-passthrough-plan` 6/6、`test-console-ui` 45/45（52 条隔离写）、`test-console-static` 全通过、
+  `test:audit` 133/133、`verify:adaptation --layer all` 134 通过 0 失败、`check-profiles`、`verify:persona` 全通过。
 
 ### 修复
+- **`verify-persona-config` 的「正文 500 字」断言换成段落断言**：P4 方言上移后能力档正文只剩安全边界与
+  送达方式两段（435/480 字符），按字数判完整性的断言便一直红着——而它想防的是「正文被截断」。
+  改为按段落名判（`【安全边界` + `【送达方式` 缺一即报），与 `src/preset-prompt.js` 的必带段落同源，
+  不再随正文长短拨阈值。
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从
   那里一路吃到下一个块注释结尾，把 **34 万字符真代码当注释删掉**（871115 → 527802），依赖它的断言全部

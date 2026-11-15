@@ -84,19 +84,6 @@ schema:
       label: 唤醒推荐提示词
       type: textarea
       rows: 3
-    - name: wake_batchWindowMs
-      label: 多条合并窗口
-      type: number
-      step: any
-      hint: 毫秒
-    - name: wake_maxWakePerMinute
-      label: 每分钟最多唤醒
-      type: number
-      step: any
-    - name: wake_maxWakePerHour
-      label: 每小时最多唤醒
-      type: number
-      step: any
     - name: wake_noActionLimit
       label: 无动作上限
       type: number
@@ -105,6 +92,65 @@ schema:
       label: 唤醒配置提醒上限
       type: number
       step: any
+    - type: section
+      card: true
+      label: 投递节奏
+    - name: wake_adaptiveDebounce
+      label: 动态合批
+      type: switch
+    - name: wake_directBaseMs
+      label: 点名基础等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_directMaxWaitMs
+      label: 点名最长等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_ambientBaseMs
+      label: 普通基础等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_ambientMaxWaitMs
+      label: 普通最长等待
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_directBudgetCapacity
+      label: 点名预算容量
+      type: number
+      step: any
+      hint: 次；0 表示不限
+    - name: wake_directRefillMs
+      label: 点名预算回填间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_ambientBudgetCapacity
+      label: 普通预算容量
+      type: number
+      step: any
+      hint: 次；0 表示不限
+    - name: wake_ambientRefillMs
+      label: 普通预算回填间隔
+      type: number
+      step: any
+      hint: 毫秒
+    - name: wake_backlogEnabled
+      label: 积压触达
+      type: switch
+    - name: wake_backlogWakeAfter
+      label: 积压触达阈值
+      type: number
+      step: any
+      hint: 条
+    - name: wake_backlogQuietMs
+      label: 积压安静窗口
+      type: number
+      step: any
+      hint: 毫秒
     - type: section
       card: true
       label: 发送

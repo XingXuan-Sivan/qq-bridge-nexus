@@ -44,8 +44,7 @@ import {
   validateBehaviorText,
   writeBehaviorFile,
 } from './behaviors/index.mjs';
-import { getKind, defaultsForEngine } from './behaviors/kinds/index.mjs';
-import { loadBehaviorTypes } from './behaviors/types.mjs';
+import { listBehaviorKinds } from './behaviors/types.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -198,6 +197,11 @@ import { createSessionResetter } from './session/reset.mjs';
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from './session/access.mjs';
 import { migrateAccessModel, summarizeAccessConfig } from './session/access-migrate.mjs';
 import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
+// 调度内核（L1）：合批、预算、档位、游标全部是纯函数，桥接只负责喂事件与执行结论。
+import { batchDelayMs, tighterTier } from './scheduling/batching.mjs';
+import { createPacingState, normalizePacingState, takeToken, refundToken, pacingSnapshot } from './scheduling/pacing.mjs';
+import { classifyPendingWake, clearAcknowledgedOverflow, noteOverflow } from './scheduling/cursor.mjs';
+import { batchLimits, resolveSchedulingPolicy, tierOf } from './scheduling/policy.mjs';
 // 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
 import { actorForAddress, addressKey, normalizeAdmins, normalizeOwner, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
@@ -1631,9 +1635,6 @@ function loadConfig() {
         recommendedQuestion: true,
         recommendedPoke: true,
         recommendedHint: '如果你要潜水，推荐先调用 qq_wait_for_messages(timeoutMs=300000) 完成一次沉睡前观察：5 分钟内没人说话就可以设置下一次唤醒并沉睡；若期间有人发新消息，先查看 newMessages，判断不需要你参与可直接沉睡，若参与了则下次想睡需再等观察窗口。潜水时长推荐 5~120 分钟，普通消息概率 0.05；@/名字/关键词/提问唤醒建议保持开启。需要等特定某人/某几人时，可额外设置 triggers.speakerIds。',
-        batchWindowMs: 8000,
-        maxWakePerMinute: 1,
-        maxWakePerHour: 12,
         noActionLimit: 3,
         maxWakeConfigReminders: 2
       },
@@ -2235,6 +2236,15 @@ function localClock(atMs = Date.now()) {
 }
 
 const appendBridgeLog = createCappedLogger(BRIDGE_LOG, 2000);
+
+// 调度指标：延迟、预算拒绝、溢出、搭车。单独一份 JSONL，不和工具调用混在一起
+// （回归要按 kind 过滤，控制台要算分布，混着写就只能正则猜）。
+const appendSchedulingLog = createCappedLogger(path.join(STATE_DIR, 'scheduling.jsonl'), 5000);
+function noteSchedulingEvent(kind, fields = {}) {
+  try {
+    appendSchedulingLog(`${JSON.stringify({ at: new Date().toISOString(), kind, ...fields })}\n`);
+  } catch {}
+}
 
 function log(...args) {
   let line;
@@ -4384,12 +4394,12 @@ async function main() {
     clearManualSilencePasses();
     for (const [key, st] of socialV2.conversations) {
       if (!st) continue;
-      if (st.pendingWakeTimer) { clearTimeout(st.pendingWakeTimer); st.pendingWakeTimer = null; }
+      clearPendingBatchV2(st);
       if (st.sleepTimer) { clearTimeout(st.sleepTimer); st.sleepTimer = null; }
-      if (st.rateLimitRetryTimer) { clearTimeout(st.rateLimitRetryTimer); st.rateLimitRetryTimer = null; }
       cancelReplyCheckV2(key);
       cancelProactiveCheckV2(key);
-      st.pendingWakeReason = null;
+      if (st.ambientRetryTimer) { clearTimeout(st.ambientRetryTimer); st.ambientRetryTimer = null; }
+      st.pendingAmbient = null;
       st.pendingWakeReasons = [];
       st.manualSilenceMissedDirect = false;
     }
@@ -7604,20 +7614,9 @@ async function main() {
         }
         // 行为类型（kind）注册表：字段规格的唯一来源，控制台按它渲染表单。
         if (url.pathname === '/api/behaviors/kinds' && req.method === 'GET') {
-          // 类型来自 profiles/platforms/qq/behavior-types；字段规格优先取类型 yml 里的 schema，缺省回落到引擎模块。
-          const types = loadBehaviorTypes({ root: path.join(PLATFORMS_ROOT, 'qq') });
-          const kinds = types.map((type) => {
-            const engine = getKind(type.engine);
-            return {
-              kind: type.id,
-              label: type.label,
-              platform: type.platform || 'qq',
-              engine: type.engine,
-              fields: Array.isArray(type.schema?.fields) ? type.schema.fields : (engine?.fields ?? []),
-              defaults: defaultsForEngine(type.engine),
-            };
-          });
-          sendJson({ ok: true, kinds });
+          // 类型来自 profiles/platforms/qq/behavior-types；字段规格取类型 yml 的 schema，
+          // 缺省回落到引擎模块；两种情况都由 listBehaviorKinds 把引擎默认值补到字段上。
+          sendJson({ ok: true, kinds: listBehaviorKinds({ root: path.join(PLATFORMS_ROOT, 'qq') }) });
           return;
         }
         // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
@@ -10277,10 +10276,7 @@ async function main() {
               anyMessage: normalizeTriggerBool('anyMessage', current.triggers.anyMessage === true),
               poke: normalizeTriggerBool('poke', current.triggers.poke === true),
               keywords: nextKeywords
-            },
-            batchWindowMs: Number.isFinite(Number(input.batchWindowMs)) && Number(input.batchWindowMs) >= 1000
-              ? Math.min(3600000, Math.round(Number(input.batchWindowMs)))
-              : current.batchWindowMs
+            }
           };
           // 从 active 切回 diving 时，若 AI 没显式保留 anyMessage，则清除，避免“潜水=每条都唤醒”的语义矛盾。
           if (next.mode === 'diving' && !('anyMessage' in inputTriggers)) {
@@ -10375,10 +10371,7 @@ async function main() {
           saveSocialV2State();
           wakeConfigUpdatedKeys.add(key);
           wakeConfigMissCount.delete(key);
-          if (st.pendingWakeTimer) {
-            clearTimeout(st.pendingWakeTimer);
-            st.pendingWakeTimer = null;
-          }
+          clearPendingBatchV2(st);
           cancelReplyCheckV2(key); // AI 已主动设置新的唤醒配置，取消回复检查
           setupSleepTimerV2(key);
           log(`[reserved2] 更新唤醒配置 ${key}: mode=${next.mode} infinite=${next.infinite} sleepUntil=${next.sleepUntil ?? 'null'}`);
@@ -10386,6 +10379,7 @@ async function main() {
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/socialV2/states') {
+          const policy = schedulingPolicyV2();
           const list = [];
           for (const [key, st] of socialV2.conversations) {
             list.push({
@@ -10395,7 +10389,12 @@ async function main() {
               recentCount: st.recentMessages.length,
               lastWakeReason: st.lastWakeReason,
               lastAiReplyAt: st.lastAiReplyAt,
-              noActionCount: st.wakeConfig.noActionCount || 0
+              noActionCount: st.wakeConfig.noActionCount || 0,
+              // 调度只读视图：剩余额度与暂存积压。桶状态不给模型，也不能被改。
+              pacing: pacingSnapshot(st.wakePacing ?? createPacingState(policy.pacing), policy.pacing),
+              pendingWakeCount: Array.isArray(st.pendingWakeReasons) ? st.pendingWakeReasons.length : 0,
+              overflowCount: Number(st.wakeOverflow?.count) || 0,
+              directOverflow: Number(st.wakeDirectOverflow) || 0
             });
           }
           sendJson({ ok: true, conversations: list });
@@ -10416,10 +10415,7 @@ async function main() {
             return;
           }
           const st = getSocialV2State(key);
-          if (st.pendingWakeTimer) {
-            clearTimeout(st.pendingWakeTimer);
-            st.pendingWakeTimer = null;
-          }
+          clearPendingBatchV2(st);
           // 第一次唤醒必须走 bootstrap：那条 prompt 里带着「二代协议说明 + 操作者为这个会话
           // 预写的初始提示词（群环境/氛围）」。若用手动唤醒的 admin 文案顶掉它，这个会话就
           // 永远拿不到引导 —— 而 bootstrapSent 一旦置真，后续再也不会补发。
@@ -11575,10 +11571,7 @@ async function main() {
           // 同时给 quietMs 加上限，避免被模型/群友诱导导致 HTTP handler 长时间挂起。
           const maxQuietMs = Math.max(minQuietAfterNewMs, Math.min(120000, Number(waitCfg.maxMs) || 600000));
           const quietMs = Math.min(maxQuietMs, Math.max(minQuietAfterNewMs, Math.round(rawQuietMs) || 0));
-          if (st.pendingWakeTimer) {
-            clearTimeout(st.pendingWakeTimer);
-            st.pendingWakeTimer = null;
-          }
+          clearPendingBatchV2(st);
           cancelReplyCheckV2(key); // AI 正在主动等待，取消回复检查定时器避免重复唤醒
           // A reply wait must also include messages received while the model
           // was reading/thinking after its snapshot, before this HTTP request.
@@ -14252,6 +14245,136 @@ async function main() {
     return out;
   }
 
+  // ── 调度：L1 内核的桥接侧 ──────────────────────────────────────────────────
+  //
+  // 这里只做三件事：把当前策略解成普通对象、把事件喂给内核、把内核的结论执行掉。
+  // 合批窗口、预算额度、档位归属、收尾判据全部在 src/scheduling/ 里，改手感改那里，不改这里。
+
+  function schedulingPolicyV2() {
+    return resolveSchedulingPolicy(cfg.socialV2?.wake ?? {});
+  }
+
+  /** 预算桶惰性初始化：加载期拿不到行为上下文（容量属于策略），所以首次用到时才归一。 */
+  function ensurePacingV2(st, policy = schedulingPolicyV2()) {
+    const now = Date.now();
+    st.wakePacing = st.wakePacing
+      ? normalizePacingState(st.wakePacing, policy.pacing, now)
+      : createPacingState(policy.pacing, now);
+    return st.wakePacing;
+  }
+
+  /**
+   * 未读缓冲裁到上限。
+   *
+   * 被挤出缓冲的消息模型永远不会再看到（`buildWakeSnapshotV2` 只读缓冲），
+   * 所以不能默默截断：记一笔溢出，下一次唤醒在 prompt 里明确交代条数与 seq 范围。
+   */
+  function trimUnreadV2(key, st, unreadLimit) {
+    if (!Array.isArray(st.unread) || st.unread.length <= unreadLimit) return 0;
+    const dropped = st.unread.splice(0, st.unread.length - unreadLimit);
+    st.wakeOverflow = noteOverflow(st.wakeOverflow, dropped, Date.now());
+    noteSchedulingEvent('overflow', {
+      key,
+      count: dropped.length,
+      fromSeq: st.wakeOverflow.fromSeq,
+      toSeq: st.wakeOverflow.toSeq,
+    });
+    return dropped.length;
+  }
+
+  /** 本次唤醒要额外交代的调度信息（溢出与合并次数）；没有就返回空串。 */
+  function schedulingNoticeV2(st) {
+    const bits = [];
+    const overflow = st.wakeOverflow;
+    if (overflow && Number(overflow.count) > 0) {
+      bits.push(`【调度说明】有 ${overflow.count} 条消息（seq ${overflow.fromSeq}~${overflow.toSeq}）因为未读缓冲上限被挤出、从未展示给你。需要时用 qq_get_unread_messages 或 qq_get_recent_messages 查看上下文，不要假设它们不存在。`);
+    }
+    const merged = Number(st.wakeMergedCount) || 0;
+    if (merged > 0) {
+      st.wakeMergedCount = 0;
+      bits.push(`【调度说明】上一轮繁忙期间另有 ${merged} 次唤醒机会被合并到这一次。`);
+    }
+    return bits.length ? `${bits.join('\n')}\n\n` : '';
+  }
+
+  /**
+   * ambient 预算打空：不丢弃，降级为「搭车」—— 等 token 回填后再叫一次。
+   *
+   * 只留一个重试定时器，重复打空不叠加。为什么不能直接 return：
+   * 丢掉的那一枪没人再补，下一次唤醒要等下一条消息，等于把「慢」变回「漏」。
+   */
+  function notePendingAmbientV2(key, st, reason, waitMs) {
+    st.pendingAmbient = { reason, seq: st.lastUnreadSeq || 0, at: Date.now() };
+    if (st.ambientRetryTimer) return;
+    const delay = Math.max(1000, Math.min(600000, Math.round(Number(waitMs)) || 5000));
+    st.ambientRetryTimer = setTimeout(() => {
+      st.ambientRetryTimer = null;
+      const pending = st.pendingAmbient;
+      st.pendingAmbient = null;
+      if (!pending) return;
+      // 回填窗口里消息可能已经被别的回合处理掉，没必要再叫一次（时钟类原因与未读无关，不检查）。
+      if (!isTimerWakeReason(pending.reason) && !(Array.isArray(st.unread) && st.unread.length > 0)) {
+        log(`[reserved2] ambient 预算回填时未读已清空，跳过 ${key}（${pending.reason}）`);
+        return;
+      }
+      noteSchedulingEvent('piggyback', { key, reason: pending.reason });
+      scheduleWakeV2(key, pending.reason);
+    }, delay);
+    st.ambientRetryTimer.unref?.();
+    log(`[reserved2] ambient 预算不足，${Math.round(delay / 1000)}s 后搭车唤醒 ${key}（${reason}）`);
+  }
+
+  /** 丢弃未发出的合批窗口（会话转忙 / 被静默 / 被投递接管时）。 */
+  function clearPendingBatchV2(st) {
+    if (st.pendingWakeTimer) {
+      clearTimeout(st.pendingWakeTimer);
+      st.pendingWakeTimer = null;
+    }
+    st.pendingWakeBatch = null;
+    st.pendingWakeReason = null;
+  }
+
+  /**
+   * 堆积触达：没有人点名，但消息已经积了一层，而 bot 一直没被叫醒。
+   *
+   * 「看了可以不回」允许 bot 沉默，但沉默不等于消失 —— 一整天没人 @ 它、它也从没读过
+   * 这些消息，就是「后台略过消息」那个现象的根。这里在积压到阈值、且距离上一次投递
+   * 已经安静足够久时补一次唤醒，档位是 ambient（走合批窗口，不插队）。
+   *
+   * 计数在每次真正投递时归零，所以它不是「定时器」，而是「积压计数器到点了」。
+   */
+  function noteBacklogArrivalV2(key, st) {
+    const policy = schedulingPolicyV2();
+    if (!policy.backlog.enabled) return;
+    st.backlogSinceWake = (Number(st.backlogSinceWake) || 0) + 1;
+    if (st.backlogSinceWake < policy.backlog.wakeAfter) return;
+    // 已经在等合批窗口，或已经排了一次「安静够了再看一眼」，不叠加。
+    if (st.pendingWakeTimer || st.backlogTimer) return;
+    const lastWakeAt = Number(st.wakeConfig?.lastWakeAt) || 0;
+    const quietMs = policy.backlog.quietMs;
+    const remaining = quietMs - (lastWakeAt > 0 ? Date.now() - lastWakeAt : quietMs);
+    if (remaining <= 0) {
+      fireBacklogWakeV2(key, st);
+      return;
+    }
+    // 安静窗口还没走完。不能就这么交给「下一条消息再判断」：这一波可能就是最后一波，
+    // 之后没人再说话，积压就永远沉底了。等窗口走完主动回看一眼。
+    st.backlogTimer = setTimeout(() => {
+      st.backlogTimer = null;
+      if (!isSessionAllowedInCurrentMode(key) || st.pendingWakeTimer) return;
+      if ((Number(st.backlogSinceWake) || 0) < policy.backlog.wakeAfter) return;
+      fireBacklogWakeV2(key, st);
+    }, Math.max(1000, Math.round(remaining)));
+    st.backlogTimer.unref?.();
+  }
+
+  function fireBacklogWakeV2(key, st) {
+    if (!(Array.isArray(st.unread) && st.unread.length > 0)) return;
+    noteSchedulingEvent('backlog', { key, count: Number(st.backlogSinceWake) || 0, unread: st.unread.length });
+    log(`[reserved2] ${key} 积压 ${st.backlogSinceWake} 条且无人点名、安静窗口已过，补一次唤醒`);
+    scheduleWakeV2(key, 'backlog');
+  }
+
   function defaultWakeConfigV2() {
     const w = cfg.socialV2?.wake ?? {};
     const defaultMode = w.defaultMode === 'active' ? 'active' : 'diving';
@@ -14277,7 +14400,6 @@ async function main() {
         anyMessage: defaultMode === 'active',
         probability: Math.min(1, Math.max(0, Number(w.recommendedProbability) || 0))
       },
-      batchWindowMs: Math.max(1000, Number(w.batchWindowMs) || 8000),
       lastWakeAt: 0,
       wakeCount: 0,
       noActionCount: 0,
@@ -14409,14 +14531,23 @@ async function main() {
         lastActionAt: 0,
         agentToken: crypto.randomBytes(16).toString('hex'),
         bootstrapSent: false,
-        wakeTimes: [],
+        // 投递预算（双桶）。落盘在会话档案的 wake.pacing，重启不清零。
+        wakePacing: null,
+        wakeDirectOverflow: 0,
         sendTimes: [],
         stickerCollectTimes: [],
         pendingWakeTimer: null,
+        pendingWakeBatch: null,
+        pendingWakeReasons: [],
+        ambientRetryTimer: null,
+        pendingAmbient: null,
+        wakeOverflow: null,
+        wakeMergedCount: 0,
+        backlogSinceWake: 0,
+        backlogTimer: null,
         sleepTimer: null,
         replyCheckTimer: null,
         proactiveTimer: null,
-        rateLimitRetryTimer: null,
         lastIncomingAt: 0,
         preSleepWaitSatisfiedAt: 0,
         preSleepWaitObservedAt: 0,
@@ -14477,10 +14608,21 @@ async function main() {
             lastActionAt: Number(val.lastActionAt) || 0,
             agentToken,
             bootstrapSent: !!val.bootstrapSent,
-            wakeTimes: Array.isArray(val.wakeTimes) ? val.wakeTimes : [],
+            // 预算桶住在会话档案（`profile.wake.pacing`，与 wakeConfig 并列），重启不清零。
+            // 这里不做归一：容量属于策略，加载期拿不到行为上下文，首次用到时再 normalize。
+            wakePacing: profile?.wake?.pacing ?? null,
+            wakeDirectOverflow: 0,
             sendTimes: Array.isArray(val.sendTimes) ? val.sendTimes : [],
             stickerCollectTimes: Array.isArray(val.stickerCollectTimes) ? val.stickerCollectTimes : [],
             pendingWakeTimer: null,
+            pendingWakeBatch: null,
+            pendingWakeReasons: [],
+            ambientRetryTimer: null,
+            pendingAmbient: null,
+            wakeOverflow: null,
+            wakeMergedCount: 0,
+            backlogSinceWake: Number(val.backlogSinceWake) || 0,
+            backlogTimer: null,
             sleepTimer: null,
             replyCheckTimer: null,
             proactiveTimer: null,
@@ -14552,7 +14694,9 @@ async function main() {
       for (const [key, st] of socialV2.conversations) {
         const profile = ensureSessionProfile(key);
         if (profile) {
-          profile.wake = { config: st.wakeConfig };
+          // 并列键必须保留：整段覆写会把预算桶（wake.pacing）连带清掉，
+          // 结果是每次落盘都回到满桶 —— 预算形同虚设。
+          profile.wake = { ...(profile.wake || {}), config: st.wakeConfig, pacing: st.wakePacing ?? null };
           profile.updatedAt = Date.now();
         }
         obj.conversations[key] = {
@@ -14563,7 +14707,7 @@ async function main() {
           lastActionAt: st.lastActionAt,
           agentToken: st.agentToken,
           bootstrapSent: st.bootstrapSent,
-          wakeTimes: st.wakeTimes.slice(-200),
+          backlogSinceWake: st.backlogSinceWake || 0,
           sendTimes: st.sendTimes.slice(-500),
           stickerCollectTimes: Array.isArray(st.stickerCollectTimes) ? st.stickerCollectTimes.slice(-500) : [],
           lastIncomingAt: st.lastIncomingAt || 0,
@@ -15322,12 +15466,17 @@ async function main() {
     let blockPlan = null;
     if (opts.wakeReason) {
       if (wakeBlocked()) return skipWake();
+      // 在途入站先落地：prompt 里的未读与「有没有未读」都按记账结果算，
+      // 不等就会从还在解析引用的那条消息身上跨过去（见 handleIncoming 上方的说明）。
+      await settleIngestV2(key);
       // 唤醒时顺手刷新人格卡：TTL、单飞、失败降级都在内核注册表里，这里只给它一次机会。
       // 首次唤醒缓存为空时也在这里拿卡；超时/失败不阻塞唤醒，回落旧缓存或本地卡。
-      if (plugins) await plugins.personaWarm(key).catch(() => {});
-      // 记忆预热：异步 provider（soulkit）在唤醒前取一次，注入时只读缓存；
-      // 超时/失败都只影响这一块，绝不影响唤醒本身。
-      await memoryRegistry.warm({ key, query: memoryQueryV2(getSocialV2State(key)) }).catch(() => {});
+      // 人格卡与记忆预热互不依赖：并行发起，串行会让唤醒的固定成本变成两者之和。
+      // 各自失败只影响对应的注入块，绝不影响唤醒本身。
+      await Promise.all([
+        plugins ? plugins.personaWarm(key).catch(() => {}) : Promise.resolve(),
+        memoryRegistry.warm({ key, query: memoryQueryV2(getSocialV2State(key)) }).catch(() => {}),
+      ]);
       // Build only after session creation: retries may rotate the token, and an
       // offline queue may have received more messages since this wake was queued.
       wakeState = getSocialV2State(key);
@@ -15350,6 +15499,10 @@ async function main() {
         const snapshotBlock = corePromptBlocks.renderBlockSync('core-snapshot', { snapshot: wakeSnapshot });
         if (snapshotBlock.text) promptText += `\n\n${snapshotBlock.text}`;
       }
+      // 调度交代：溢出条数与「本轮合并了几次机会」。
+      // 不参与注入块注册表：它只描述调度本身的账，不属于人格/规则/记忆任何一块。
+      const schedulingNotice = schedulingNoticeV2(wakeState);
+      if (schedulingNotice) promptText += `\n\n${schedulingNotice.trimEnd()}`;
     }
     let modelText = withSlangContext(withHandover(key, promptText), { slang: blockPlan?.slang });
     if (plugins) {
@@ -16213,7 +16366,7 @@ async function main() {
     st.recentMessages.push(msg);
     if (st.recentMessages.length > recentLimit) st.recentMessages.splice(0, st.recentMessages.length - recentLimit);
     st.unread.push(msg);
-    if (st.unread.length > unreadLimit) st.unread.splice(0, st.unread.length - unreadLimit);
+    trimUnreadV2(key, st, unreadLimit);
     const lowerPlain = String(plainContent ?? textContent ?? '');
     localMemory.touch({ key, text: lowerPlain });
     saveSocialV2State();
@@ -16256,7 +16409,7 @@ async function main() {
     st.recentMessages.push(msg);
     if (st.recentMessages.length > recentLimit) st.recentMessages.splice(0, st.recentMessages.length - recentLimit);
     st.unread.push(msg);
-    if (st.unread.length > unreadLimit) st.unread.splice(0, st.unread.length - unreadLimit);
+    trimUnreadV2(key, st, unreadLimit);
     saveSocialV2State();
     return msg;
   }
@@ -16479,6 +16632,7 @@ async function main() {
       st.lastReadThroughSeq = Math.max(st.lastReadThroughSeq || 0, throughSeq);
     }
     noteModelMessagesV2(st, []);
+    st.wakeOverflow = clearAcknowledgedOverflow(st.wakeOverflow, st.lastReadThroughSeq);
     return before - st.unread.length;
   }
 
@@ -16707,6 +16861,12 @@ async function main() {
         fallback: ''
       };
     }
+    if (reason === 'backlog') {
+      return {
+        branch: `【补看积压】${key}\n原因：无人点名，只是消息积压到阈值，补一次看。\n看一眼即可，不必接话；不接就照常收尾（qq_mark_read 或 qq_set_wake_config）。`,
+        fallback: ''
+      };
+    }
     if (reason === 'poke') {
       return {
         branch: `【唤醒】${key}\n原因：有人拍了一拍（可能拍了你，也可能拍了别人）。\n先看未读/最近消息里的 [拍一拍] 事件：如果是拍你，可以自然回应一句，也可以用 qq_send_poke 回一个拍一拍；如果是拍别人，觉得有趣也可以接梗。除了回应，偶尔也可以主动戳一下正在聊的人/熟人，像真人手贱/提醒/逗一下，但别频繁。不想接就安静收尾（qq_mark_read 或 qq_set_wake_config）。`,
@@ -16894,44 +17054,34 @@ async function main() {
       log(`[reserved2] 会话繁忙，暂存唤醒原因 ${key}（${reason}@seq${seq}，原因=${busyReasonV2(key, st)}）`);
       return;
     }
-    // 唤醒频率硬限制：超限则**延后重试**，不能直接丢弃。直接 return 的后果：
-    //   · timeout 唤醒时 setupSleepTimerV2 已经清空 sleepTimer，丢弃后这个会话会停在
-    //     「infinite=false、sleepUntil 已过期、没有任何定时器」的静默态，除非重启或
-    //     主动机会兜底（默认 30~90 分钟）才可能恢复；
-    //   · @/提问被丢弃则要等下一条消息才可能再唤醒。
-    // 重试仍然遵守限频（等到窗口腾出位置），只是把「这一枪」补回来。
+    // 投递预算：两档令牌桶。档位只决定「多快、占多少额度」，不改变「回不回」。
+    //   · clock（timeout/replyCheck/…）：不耗预算 —— 被预算拦住的 timeout 会让会话停在
+    //     「潜水已到期 + 没有任何定时器」的静默态，比省一次唤醒严重得多；
+    //   · direct 桶打空：照常投递并告警。它是异常熔断，不是限流 —— 真人不会一分钟叫 3 次，
+    //     真出现了也不该让一条 @ 去排队；
+    //   · ambient 桶打空：不丢弃，降级为搭车，token 回填后再叫（见 notePendingAmbientV2）。
     const now = Date.now();
-    const maxPerMinute = Number(cfg.socialV2?.wake?.maxWakePerMinute) || 0;
-    const maxPerHour = Number(cfg.socialV2?.wake?.maxWakePerHour) || 0;
-    const recentMinute = (st.wakeTimes || []).filter((t) => now - t < 60000).length;
-    const recentHour = (st.wakeTimes || []).filter((t) => now - t < 3600000).length;
-    if ((maxPerMinute > 0 && recentMinute >= maxPerMinute) || (maxPerHour > 0 && recentHour >= maxPerHour)) {
-      let retryAfterMs = 0;
-      if (maxPerMinute > 0 && recentMinute >= maxPerMinute) {
-        const times = (st.wakeTimes || []).filter((t) => now - t < 60000).sort((a, b) => a - b);
-        if (times.length) retryAfterMs = Math.max(retryAfterMs, 60000 - (now - times[0]) + 500);
+    const policy = schedulingPolicyV2();
+    const tier = tierOf(reason);
+    let budgetTier = null;
+    if (tier !== 'clock') {
+      ensurePacingV2(st, policy);
+      const took = takeToken(st.wakePacing, tier, policy.pacing, now);
+      st.wakePacing = took.state;
+      if (took.allowed) {
+        budgetTier = tier;
+      } else if (tier === 'direct') {
+        st.wakeDirectOverflow = (Number(st.wakeDirectOverflow) || 0) + 1;
+        noteSchedulingEvent('directOverflow', { key, reason, tokens: took.tokens });
+        log(`[reserved2] direct 预算打空仍投递 ${key}（${reason}），剩余 ${took.tokens.toFixed(2)}；一分钟内被叫醒 3 次以上，检查是否有多条唤醒源叠加`);
+      } else {
+        notePendingAmbientV2(key, st, reason, took.waitMs);
+        saveSocialV2State();
+        return;
       }
-      if (maxPerHour > 0 && recentHour >= maxPerHour) {
-        const times = (st.wakeTimes || []).filter((t) => now - t < 3600000).sort((a, b) => a - b);
-        if (times.length) retryAfterMs = Math.max(retryAfterMs, 3600000 - (now - times[0]) + 500);
-      }
-      // 每次只等一小段（最长 60s）：小时级限频不会一次性睡满一小时而错过中途可用的窗口。
-      const waitMs = Math.min(60000, Math.max(1000, Math.round(retryAfterMs) || 5000));
-      if (!st.rateLimitRetryTimer) {
-        st.rateLimitRetryTimer = setTimeout(() => {
-          st.rateLimitRetryTimer = null;
-          // 消息类原因在重试前再确认一次：等待窗口里消息可能已被别的回合处理掉，
-          // 没必要为一条已经处理过的消息再唤醒一次（定时器类原因与未读无关，不检查）。
-          if (!isTimerWakeReason(reason) && !(Array.isArray(st.unread) && st.unread.length > 0)) {
-            log(`[reserved2] 限频重试前发现未读已清空，跳过 ${key}（${reason}）`);
-            return;
-          }
-          void sendWakePromptV2(key, reason).catch((error) => log(`[reserved2] 限频重试唤醒异常 ${key}:`, error?.message ?? error));
-        }, waitMs);
-        st.rateLimitRetryTimer.unref?.();
-      }
-      log(`[reserved2] 唤醒频率超限，${Math.round(waitMs / 1000)}s 后重试 ${key}（${reason}）`);
-      return;
+    }
+    if (st.lastIncomingAt > 0) {
+      noteSchedulingEvent('deliver', { key, reason, tier, latencyMs: Math.max(0, now - st.lastIncomingAt) });
     }
     // Only a real new wake resets observation; skipped/busy candidates must
     // preserve the current turn's progress through its required wait window.
@@ -16939,9 +17089,6 @@ async function main() {
     st.preSleepWaitObservedAt = 0;
     st.preSleepWaitAccumMs = 0;
     cancelReplyCheckV2(key); // 本次唤醒已接管，清理仍在排队的回复检查
-    const wakeTime = now;
-    st.wakeTimes.push(wakeTime);
-    if (st.wakeTimes.length > 200) st.wakeTimes = st.wakeTimes.slice(-200);
     // 无论提前唤醒还是超时唤醒，都清理有限潜水定时器与 sleepUntil，避免状态残留/重复唤醒
     const prevSleepUntil = st.wakeConfig.sleepUntil;
     const hadFiniteSleep = !st.wakeConfig.infinite && !!prevSleepUntil && Number.isFinite(Date.parse(prevSleepUntil));
@@ -16956,9 +17103,9 @@ async function main() {
     saveSocialV2State();
     const promptText = buildWakePromptV2(key, reason);
     log(`[reserved2] 唤醒 ${key}（${reason}）`);
-    const rollbackWakeTime = () => {
-      const idx = st.wakeTimes.lastIndexOf(wakeTime);
-      if (idx >= 0) st.wakeTimes.splice(idx, 1);
+    const refundBudget = () => {
+      if (!budgetTier) return;
+      st.wakePacing = refundToken(st.wakePacing, budgetTier, policy.pacing, Date.now());
       saveSocialV2State();
     };
     try {
@@ -16976,18 +17123,24 @@ async function main() {
       if (result && result.ok === false) {
         pendingWakeKeys.delete(key);
         disarmPendingWakeLease(key);
-        rollbackWakeTime();
+        refundBudget();
         restoreFiniteSleep();
         log(`[reserved2] 唤醒投递被拒 ${key}: ${result.error || '未知错误'}`);
       } else if (result && result.queued === true) {
         // 入队而非真正在途：保留 pendingWakeKeys，等 DSH 恢复后真正投递的 turn/end 再触发收尾保护；
         // 不能在这里删除，否则补投的唤醒回合会丢失“未设置唤醒配置”的安全兜底。
         log(`[reserved2] 唤醒已入队 ${key}（${reason}），等待 DSH 恢复后补投`);
+        // 积压计数在真正投递时归零；被拒的投递不算读过，继续积压。
+        st.backlogSinceWake = 0;
+        saveSocialV2State();
+      } else {
+        st.backlogSinceWake = 0;
+        saveSocialV2State();
       }
     } catch (error) {
       pendingWakeKeys.delete(key);
       disarmPendingWakeLease(key);
-      rollbackWakeTime();
+      refundBudget();
       if (hadFiniteSleep) {
         st.wakeConfig.sleepUntil = prevSleepUntil;
         st.wakeConfig.infinite = false;
@@ -17095,7 +17248,9 @@ async function main() {
     replyCheck: 40,
     timeout: 30,
     proactiveCheck: 20,
-    roleRefresh: 25
+    roleRefresh: 25,
+    // 积压触达是最后手段：窗口里出现任何真实触发都应当升级覆盖它。
+    backlog: 5
   };
 
   // 唤醒原因可能带子类型（如 keyword:小鲸鱼、speaker:昵称），取冒号前的基名计算优先级。
@@ -17138,16 +17293,9 @@ async function main() {
       }
     }
     const st = getSocialV2State(key);
-    if (st.pendingWakeTimer) {
-      // 合并窗口内已有待发送唤醒：按优先级升级最终原因，避免先概率后 @ 却仍按概率唤醒。
-      const cur = st.pendingWakeReason || reason;
-      if (wakePriorityV2(reason) > wakePriorityV2(cur)) {
-        st.pendingWakeReason = reason;
-        log(`[reserved2] 合并窗口内升级唤醒原因 ${key}: ${cur} -> ${reason}`);
-      }
-      return;
-    }
-    if (isConversationBusyV2(key, st)) {
+    // 已有待发送的合批窗口时不再判忙：那个定时器本身就是 busy 的来源，
+    // 先判忙会把「又来了一条」错当成「会话在思考」，直接送入暂存。
+    if (!st.pendingWakeTimer && isConversationBusyV2(key, st)) {
       if (!Array.isArray(st.pendingWakeReasons)) st.pendingWakeReasons = [];
       const seq = st.lastUnreadSeq || 0;
       if (!st.pendingWakeReasons.some((r) => r && r.reason === reason && r.seq === seq)) {
@@ -17163,58 +17311,121 @@ async function main() {
       clearTimeout(st.sleepTimer);
       st.sleepTimer = null;
     }
-    st.pendingWakeReason = reason;
-    const batchMs = Math.max(1000, Number(st.wakeConfig?.batchWindowMs) || 8000);
+    const now = Date.now();
+    const policy = schedulingPolicyV2();
+    const prev = st.pendingWakeBatch;
+    // 合并窗口里又来了一条：原因按优先级升级（避免先概率后 @ 却仍按概率唤醒），
+    // 等待时长按「更急的那一档」重算 —— 点名类不能陪着群闲聊等满 ambient 窗口。
+    const cur = st.pendingWakeReason || reason;
+    const merged = wakePriorityV2(reason) > wakePriorityV2(cur) ? reason : cur;
+    if (merged !== cur) log(`[reserved2] 合并窗口内升级唤醒原因 ${key}: ${cur} -> ${merged}`);
+    const tier = tighterTier(prev?.tier, tierOf(merged));
+    const firstAt = Number(prev?.firstAt) || now;
+    const limits = batchLimits(policy, tier);
+    const delay = batchDelayMs({
+      now,
+      firstAt,
+      prevAt: Number(prev?.lastAt) || 0,
+      baseMs: limits.baseMs,
+      maxWaitMs: limits.maxWaitMs,
+      adaptive: policy.adaptiveDebounce,
+    });
+    if (st.pendingWakeTimer) {
+      clearTimeout(st.pendingWakeTimer);
+      st.pendingWakeTimer = null;
+    }
+    st.pendingWakeReason = merged;
+    st.pendingWakeBatch = { firstAt, lastAt: now, tier };
     st.pendingWakeTimer = setTimeout(() => {
       st.pendingWakeTimer = null;
-      const finalReason = st.pendingWakeReason || reason;
+      st.pendingWakeBatch = null;
+      const finalReason = st.pendingWakeReason || merged;
       st.pendingWakeReason = null;
       void sendWakePromptV2(key, finalReason).catch((error) => log(`[reserved2] 计划唤醒异常 ${key}:`, error?.message ?? error));
-    }, batchMs);
+    }, Math.max(0, delay));
     // 与其它 per-conversation 定时器保持一致：别让一个待唤醒定时器把进程钉住不退出。
     st.pendingWakeTimer.unref?.();
-    log(`[reserved2] 计划唤醒 ${key}（${reason}），${Math.round(batchMs / 1000)}s 后发送`);
+    log(`[reserved2] 计划唤醒 ${key}（${merged}·${tier}），${(delay / 1000).toFixed(1)}s 后发送`);
   }
 
   /**
-   * 回合结束后补发「繁忙期间暂存」的唤醒原因。
+   * 回合结束后消费「繁忙期间暂存」的全部唤醒原因。
+   *
+   * 一次全消费而不是每回合只 shift 一条：连发多条消息时，逐条 shift 会把其余滞留到
+   * 下一次回合结束，表现就是「补发永远追不上暂存」。
    *
    * 两类原因必须分开处理：
-   *   · 消息类（@/关键词/提问/私聊/拍一拍…）只有在那条消息还没被本回合处理掉时才补发
-   *     （unread 里还能找到它的 seq）；
-   *   · 定时器类（timeout/replyCheck/proactiveCheck/bootstrap/admin）与未读水位无关：
-   *     那一轮很可能已经把未读全部标读，用 unread 判断会让「到点唤醒」被静默吞掉 ——
-   *     timeout 时 sleepTimer 已被清空，结果是会话停在「sleepUntil 已过期、无任何定时器」。
+   *   · 消息类：按 explicitAck → unreadStill → overflowed 三态判定（见 cursor.mjs），
+   *     通过的合并成一次唤醒（原因取最高优先级），只消耗对应档位的 1 个 token；
+   *   · 定时器类：与未读水位无关，逐条按原语义补偿。那一轮很可能已经把未读全部标读，
+   *     用 unread 判断会让「到点唤醒」被静默吞掉 —— timeout 时 sleepTimer 已被清空，
+   *     结果是会话停在「sleepUntil 已过期、无任何定时器」。
    */
-  function replayPendingWakeReasonsV2(key) {
+  function replayPendingWakeReasonsV2(key, opts = {}) {
+    // 还在解析引用/名称的入站先等落地：三态判定读的是未读缓冲，
+    // 消息还没记账时判出来的是「没有未读」，会被误当成无需补发。
+    // 只顺延一轮：新消息源源不断时不能把补偿无限往后推。
+    if (!opts.joined && hasIngestInFlightV2(key)) {
+      void settleIngestV2(key).then(() => replayPendingWakeReasonsV2(key, { joined: true }));
+      return null;
+    }
     const st = getSocialV2State(key);
     if (!Array.isArray(st.pendingWakeReasons) || !st.pendingWakeReasons.length) return null;
-    const item = st.pendingWakeReasons.shift();
-    if (!item || typeof item !== 'object') return null;
-    if (isTimerWakeReason(item.reason)) {
-      if (item.reason === 'timeout') {
-        log(`[reserved2] ${key} 补收繁忙期间到期的潜水定时器`);
-        setupSleepTimerV2(key);
-      } else if (item.reason === 'replyCheck') {
-        log(`[reserved2] ${key} 补排繁忙期间的回复检查`);
-        scheduleReplyCheckV2(key);
-      } else if (item.reason === 'proactiveCheck') {
-        // 主动机会有周期性重排，错过一次可接受（也不该在回合结束时立刻补一刀）。
-        log(`[reserved2] ${key} 繁忙期间的主动机会已过期，跳过补发`);
-      } else {
-        log(`[reserved2] ${key} 补发繁忙期间积压的唤醒：${item.reason}`);
-        scheduleWakeV2(key, item.reason);
+    const items = st.pendingWakeReasons.splice(0, st.pendingWakeReasons.length).filter((item) => item && typeof item === 'object');
+    if (!items.length) return null;
+    st.wakeOverflow = clearAcknowledgedOverflow(st.wakeOverflow, st.lastReadThroughSeq);
+    let timers = 0;
+    let replay = null;
+    let acked = 0;
+    let overflowed = 0;
+    let candidates = 0;
+    for (const item of items) {
+      if (isTimerWakeReason(item.reason)) {
+        timers += 1;
+        if (item.reason === 'timeout') {
+          log(`[reserved2] ${key} 补收繁忙期间到期的潜水定时器`);
+          setupSleepTimerV2(key);
+        } else if (item.reason === 'replyCheck') {
+          log(`[reserved2] ${key} 补排繁忙期间的回复检查`);
+          scheduleReplyCheckV2(key);
+        } else if (item.reason === 'proactiveCheck') {
+          // 主动机会有周期性重排，错过一次可接受（也不该在回合结束时立刻补一刀）。
+          log(`[reserved2] ${key} 繁忙期间的主动机会已过期，跳过补发`);
+        } else {
+          log(`[reserved2] ${key} 补发繁忙期间积压的唤醒：${item.reason}`);
+          scheduleWakeV2(key, item.reason);
+        }
+        continue;
       }
-      return { reason: item.reason, action: 'timer' };
+      const verdict = classifyPendingWake({
+        item,
+        unread: st.unread,
+        lastReadThroughSeq: st.lastReadThroughSeq,
+        overflow: st.wakeOverflow,
+      });
+      if (verdict === 'explicitAck') { acked += 1; continue; }
+      if (verdict === 'overflowed') { overflowed += 1; continue; }
+      candidates += 1;
+      if (!replay || wakePriorityV2(item.reason) > wakePriorityV2(replay.reason)) replay = item;
     }
-    const stillRelevant = Array.isArray(st.unread) && st.unread.some((m) => m && Number(m.seq) >= Number(item.seq));
-    if (stillRelevant) {
-      log(`[reserved2] ${key} 补发繁忙期间积压的唤醒：${item.reason}@seq${item.seq}`);
-      scheduleWakeV2(key, item.reason);
-      return { reason: item.reason, action: 'replayed' };
+    const result = { reason: items[0].reason, action: null, acked, overflowed, merged: Math.max(0, candidates - 1) };
+    if (replay) {
+      st.wakeMergedCount = Math.max(0, candidates - 1);
+      log(`[reserved2] ${key} 补发繁忙期间积压的唤醒：${replay.reason}${candidates > 1 ? `（合并 ${candidates} 次机会）` : ''}`);
+      scheduleWakeV2(key, replay.reason);
+      result.reason = replay.reason;
+      result.action = 'replayed';
+    } else if (timers) {
+      result.action = 'timer';
+    } else if (overflowed) {
+      // 消息已经挤出缓冲、模型从未见过：不再叫一次（没内容可看），
+      // 但下一次唤醒会带上【调度说明】把条数与 seq 范围交代清楚。
+      result.action = 'overflowed';
+    } else {
+      log(`[reserved2] ${key} 繁忙期间的 ${acked} 次消息唤醒都已显式回执，跳过补发`);
+      result.action = 'skipped';
     }
-    log(`[reserved2] ${key} 繁忙期间唤醒 ${item.reason}@seq${item.seq} 已被当前回合处理，跳过补发`);
-    return { reason: item.reason, action: 'skipped' };
+    return result;
   }
 
   function setupSleepTimerV2(key) {
@@ -17340,11 +17551,7 @@ async function main() {
   function clearSocialV2Timers(key) {
     const st = socialV2.conversations.get(key);
     if (!st) return;
-    if (st.pendingWakeTimer) {
-      clearTimeout(st.pendingWakeTimer);
-      st.pendingWakeTimer = null;
-    }
-    st.pendingWakeReason = null;
+    clearPendingBatchV2(st);
     if (st.sleepTimer) {
       clearTimeout(st.sleepTimer);
       st.sleepTimer = null;
@@ -17357,10 +17564,15 @@ async function main() {
       clearTimeout(st.proactiveTimer);
       st.proactiveTimer = null;
     }
-    if (st.rateLimitRetryTimer) {
-      clearTimeout(st.rateLimitRetryTimer);
-      st.rateLimitRetryTimer = null;
+    if (st.ambientRetryTimer) {
+      clearTimeout(st.ambientRetryTimer);
+      st.ambientRetryTimer = null;
     }
+    if (st.backlogTimer) {
+      clearTimeout(st.backlogTimer);
+      st.backlogTimer = null;
+    }
+    st.pendingAmbient = null;
     if (Array.isArray(st.pendingWakeReasons)) st.pendingWakeReasons.length = 0;
   }
 
@@ -17602,6 +17814,58 @@ async function main() {
   };
   for (const definition of createBuiltinCommands(builtinCommandDeps)) commandRegistry.register(definition);
 
+  // ── 入站在途对齐 ────────────────────────────────────────────────
+  // 一条消息从收到到「记进未读」之间隔着几次等待：引用原文最远等 REPLY_INGEST_WAIT_MS，
+  // 群名片解析也是一次网络往返。而唤醒与回合结束的补偿都按**记账结果**判活——
+  // 它们若正好落在这段窗口里，就会从这条消息身上跨过去：prompt 里没有它，
+  // 补偿也说「没有未读」，表现就是「略过了这一条」。
+  // 所以这两处先对齐在途入站：等的不是消息本身，而是它变成可判活的事实。
+  const ingestInFlight = new Map(); // key -> Set<Promise>
+
+  /** 登记一次入站，返回同一条链路（调用方照常 await）。 */
+  function trackIngestV2(key, run) {
+    // 包一层 then：run 同步抛错也要变成 rejection，否则登记表里会留一个永不落地的洞。
+    const promise = Promise.resolve().then(run);
+    const item = promise.then(() => {}, () => {});
+    let set = ingestInFlight.get(key);
+    if (!set) {
+      set = new Set();
+      ingestInFlight.set(key, set);
+    }
+    set.add(item);
+    item.then(() => {
+      set.delete(item);
+      if (set.size === 0) ingestInFlight.delete(key);
+    });
+    return promise;
+  }
+
+  /** 这个会话有没有还没记账完的入站（只用来决定要不要延后，不阻塞同步路径）。 */
+  function hasIngestInFlightV2(key) {
+    const set = ingestInFlight.get(key);
+    return !!set && set.size > 0;
+  }
+
+  /**
+   * 等这个会话在途的入站全部落地。
+   *
+   * 上限取 REPLY_INGEST_WAIT_MS：那是入站自己允许卡住的最大值，唤醒等它不引入新的最坏情况；
+   * 超时也照常往下走——宁可少带一条，不能让唤醒卡在网关手上。
+   */
+  async function settleIngestV2(key) {
+    const set = ingestInFlight.get(key);
+    if (!set || set.size === 0) return;
+    let timer = null;
+    try {
+      await Promise.race([
+        Promise.all([...set]),
+        new Promise((resolve) => { timer = setTimeout(resolve, REPLY_INGEST_WAIT_MS); timer?.unref?.(); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async function handleIncoming(kind, id, event, cfg, opts = {}) {
     // 地址上下文：从这条消息进入内核开始，直到处理结束，下游所有模块（社交、记忆、
     // 定时、语音、审批）产出的 key 都跟着同一个地址走。
@@ -17609,7 +17873,7 @@ async function main() {
     // 才用进程默认地址 —— 多平台并存时它就是唯一正确的「这次该用哪个账号」来源。
     return withAddress(opts.address ?? defaultAddress(), () => {
       const key = convKey(kind, id);
-      return withBehavior(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts), {
+      return withBehavior(key, () => trackIngestV2(key, () => handleIncomingImpl(key, kind, id, event, cfg, opts)), {
         optional: looksLikeAdminChannelText(event),
       });
     });
@@ -17678,8 +17942,14 @@ async function main() {
     };
     // textContent 带引用对象信息，供 DSH 判断“这句话在对谁说”；
     // plainContent 只保留当前消息自己的文字，用于命令/指向性判断，避免被引用原文干扰。
-    let textContent = await segmentsToText(event.message ?? [], { resolveAtName, resolveReply });
-    let plainContent = await segmentsToText(event.message ?? [], { resolveAtName, includeReply: false });
+    // 引用原文与正文两次解析互不依赖：并行发起。串行时「引用查询」（最长
+    // REPLY_INGEST_WAIT_MS）会把正文解析也拖在后面，而入站链路里绝大多数闸门只看正文。
+    const [resolvedText, resolvedPlain] = await Promise.all([
+      segmentsToText(event.message ?? [], { resolveAtName, resolveReply }),
+      segmentsToText(event.message ?? [], { resolveAtName, includeReply: false }),
+    ]);
+    let textContent = resolvedText;
+    let plainContent = resolvedPlain;
     const mediaList = extractMediaFromSegments(event.message ?? []);
     const messageRef = String(event.message_id ?? event.msg_id ?? event.message_seq ?? '');
     const seqRef = event.message_seq != null ? String(event.message_seq) : '';
@@ -17879,6 +18149,9 @@ async function main() {
         const reason = evaluateWakeTriggerV2(key, st, event, kind, textContent, plainContent, quoteTargetIsSelf);
         if (reason) {
           scheduleWakeV2(key, reason);
+        } else {
+          // 没有任何触发条件命中：消息只进了未读缓冲。积压到阈值且安静够久时补一次唤醒。
+          noteBacklogArrivalV2(key, st);
         }
       }
       appendActivity(`${key} [reserved2] ${backfill ? '补收' : '消息'}已入未读：${textContent.slice(0, 80)}`);

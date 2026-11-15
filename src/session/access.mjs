@@ -144,6 +144,8 @@ export const WAKE_REASON_AXES = Object.freeze({
   probability: 'proactive',
   // 静默结束后给「静默期间被直接找过」的会话补一次唤醒：触发源是被动消息。
   silenceEnded: 'passive',
+  // 无人点名但消息已积压到阈值：触发源仍是别人发来的消息，只是没有直接指向 bot。
+  backlog: 'passive',
   // bot 自己发起
   timeout: 'proactive',
   replyCheck: 'proactive',

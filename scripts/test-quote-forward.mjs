@@ -125,7 +125,7 @@ const groupEvent = (messageId, replyTo, text) => ({
 });
 
 test('③④ 收消息不被慢引用卡住；之后 AI 能查详情并打开引用里的转发，第二次读走缓存', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { wake: { batchWindowMs: 60000 } } } });
+  const h = await bridgeHarness({ config: { socialV2: { wake: { adaptiveDebounce: false, ambientMaxWaitMs: 60000 } } } });
   const server = h.startConsoleServer();
   try {
     h.setMode('reserved2');

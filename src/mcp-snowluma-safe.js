@@ -310,7 +310,7 @@ async function legacyReadToolAllowed() {
   return String(status?.mode ?? '') === 'closed-agent';
 }
 
-const server = new McpServer({ name: 'snowluma-safe', version: '0.2.0' });
+const server = new McpServer({ name: 'snowluma-safe', version: '0.2.1' });
 
 // ── 工具开关必须在**注册期**生效，而不是只在校验期 ──────────────────────────
 //
@@ -669,8 +669,7 @@ server.tool(
         poke: z.boolean().optional().describe('有人拍一拍时唤醒（群聊包括拍你和拍别人，私聊为对方拍你）'),
         anyMessage: z.boolean().optional().describe('任意新消息都唤醒（活跃模式）'),
         probability: z.number().optional().describe('普通消息按该概率随机唤醒（0~1）')
-      }).optional(),
-      batchWindowMs: z.number().optional().describe('多条消息合并唤醒窗口（毫秒，>=1000）')
+      }).optional()
     }).describe('要设置的唤醒配置，缺省字段保留原值')
   },
   async ({ key, token, config, throughSeq }) => {

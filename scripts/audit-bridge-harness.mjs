@@ -141,9 +141,17 @@ import { createDshEventPlane } from '../src/agent-side/adapters/dsh/events-plane
 // P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
 // createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
 import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
+// 调度内核（src/scheduling/）：bridge 直接 import 这些纯函数，
+// 夹具剥掉 import 后按顶层名补回。整体注入命名空间，内核新增导出不必回来补行。
+import * as schedulingBatching from '../src/scheduling/batching.mjs';
+import * as schedulingPacing from '../src/scheduling/pacing.mjs';
+import * as schedulingCursor from '../src/scheduling/cursor.mjs';
+import * as schedulingPolicy from '../src/scheduling/policy.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, plans = [] } = {}) {
+export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, plans = [],
+  // fetchDelay：按网关动作人为拖慢一条请求（目前只用于 get_msg），构造「入站还在解析」的窗口。
+  fetchDelay = {} } = {}) {
   // 取 realpath：macOS 默认的 /var/folders 是 /private/var/folders 的软链接，而语音库解析会返回 realpath（挡 symlink 逃逸），
   // 不先归一的话「库内路径」断言在真实 Mac 上会因为前缀不同而失败。
   const temp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'qq-audit-bridge-')));
@@ -311,6 +319,16 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       return { base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=' };
     }
     async fetchFaceEntity(id) { calls.faces.push(id); return null; }
+    // get_msg：引用原文解析（resolveReplyInfo → replyRawCache）走的是这个口。
+    // 只提供时序与「能取到一条消息」；归属校验用的字段一律不给，于是内容仍然被拒，
+    // 与真网关取不到归属时的结果一致。fetchDelay.get_msg 用来把这条请求拖慢。
+    async getMessage(messageId) {
+      calls.messages = calls.messages ?? [];
+      calls.messages.push(messageId);
+      const delayMs = Number(fetchDelay?.get_msg ?? 0);
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return { message_id: Number(messageId), message: [{ type: 'text', data: { text: 'fixture-quoted' } }] };
+    }
     async request(action, params) {
       // botRequest：按动作名模拟网关回执（例如 NapCat 与 SnowLuma 对 add_custom_face 的不同行为）
       calls.requests = calls.requests ?? [];
@@ -411,6 +429,10 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     CAPABILITY_RUNTIME_DEFAULTS,
     agentPlatform,
     agentPlatformPromptChannels,
+    ...schedulingBatching,
+    ...schedulingPacing,
+    ...schedulingCursor,
+    ...schedulingPolicy,
     ...platformPromptLib,
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。

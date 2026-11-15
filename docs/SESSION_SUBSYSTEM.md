@@ -192,12 +192,14 @@ resolve(axis, key):
 
 | 类别 | 原因 | 说明 |
 | --- | --- | --- |
-| `passive` | private / anyMessage / atMention / nameMention / keyword / question / speaker / probability / poke / silenceEnded | 由别人发来的消息或动作触发；静默结束补唤醒的触发源也是被动消息 |
+| `passive` | private / anyMessage / atMention / nameMention / keyword / question / speaker / probability / poke / silenceEnded / backlog | 由别人发来的消息或动作触发；静默结束补唤醒与堆积触达的触发源也都是被动消息 |
 | `proactive` | timeout / replyCheck / proactiveCheck / memberJoin / memberLeave / roleRefresh | 没有新消息、由 bot 自己或定时器发起（潜水到期、回复检查、主动机会、群事件反应、读新角色卡） |
 | `operator` | bootstrap / admin / scheduled / ownerRelay | 操作者或系统通道，不受会话准入约束（定时任务在调度器里按目标会话主动轴判定并通知创建者） |
 
 未登记的原因按 `proactive` 失败关闭；`test-session-proactive` 会扫描 `src/bridge.js` 与 `src/social/conversation-events.js`
-里的原因字面量，漏登记直接失败。排程侧同样判一次（`scheduleWakeV2`、`scheduleReplyCheckV2`、
+里的原因字面量，漏登记直接失败。本节只管「允不允许叫醒」；某原因用哪一档、占哪一份投递预算，
+以及新增原因时两侧如何同步登记，见 `MESSAGE_PACING.md` §5。
+排程侧同样判一次（`scheduleWakeV2`、`scheduleReplyCheckV2`、
 `setupSleepTimerV2Impl`），DSH 断线补投（`flushQueue`）投递前再判一次；准入名单变化（`/api/access` 与会话详情
 `PATCH .../profile`）会调 `rescheduleProactiveChecksAfterAccessChange()`，立刻撤掉主动机会与回复检查定时器、
 给放开的会话补回未到期的潜水定时器。
@@ -394,7 +396,7 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 3. 运行：运行方案（`planId`，首项是「跟随全局（当前：…）」）、权限级别（`inherit` / 三档；`full` 需先开总开关再限时授权，并给收回按钮）、模型 / 具体模型 / 思考强度。
 4. 人格：来源 `inherit` / `off` / `card`，卡名必须在本地角色库中。
 5. 初始提示词：首次唤醒注入一次。
-6. 唤醒：常用触发条件；更细的批次窗口等参数仍在「二代仿真」页。
+6. 唤醒：常用触发条件；合批窗口与投递预算归平台行为档案（见 `MESSAGE_PACING.md` §6），会话上只读展示两档剩余 token、暂存与未读溢出条数。
 7. 执行体与权限（P5）：见 §5.5——执行体实例、方案的应用方式 / 权限权威 / 提示注入通道、能力档、对端档位与漂移；直通权威下改档即写，桥接权威下只读并指向「运行」卡的权限级别。
 8. 记忆：计数、清空本会话、去记忆页。
 9. 定时任务：只读列出指向本会话的任务，给「去定时任务」。

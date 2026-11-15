@@ -268,7 +268,7 @@ await test('手动唤醒在会话未 bootstrap 时必须走 bootstrap（否则�
 
 // ── 8. 端到端：真实进线消息 → bootstrap 唤醒 → 投递的 prompt 带环境说明 ────────
 await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的 prompt 带初始提示词', async () => {
-  const h = await bridgeHarness({ behavior: { v2: { wake: { batchWindowMs: 1000 } } } });
+  const h = await bridgeHarness({ behavior: { v2: { wake: { adaptiveDebounce: false, ambientMaxWaitMs: 1000 } } } });
   try {
     h.setMode('reserved2');
     h.setInitialPrompt('qq:group:456', ENV_TEXT);

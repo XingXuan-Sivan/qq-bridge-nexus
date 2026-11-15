@@ -28,6 +28,7 @@
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
 | [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：`state/sessions/` 档案目录、准入、运行方案（`planId`）、人格、提示词、唤醒、模型、执行体与权限（两权威 + 漂移）；被动/主动每轴一条全局名单；DSH 自愈/对账/命名 | ✅ 现行 |
+| [MESSAGE_PACING.md](MESSAGE_PACING.md) | **消息调度（合批 / 预算 / 档位 / 收尾）**：L0 平台 / L1 调度内核 / L2 行为档案三层归属、两档分级与双桶预算、动态合批硬上限、游标 `explicitAck` 三态收尾与溢出交代、堆积触达、参数唯一真源与 N0–N5 批次；改唤醒节奏或收尾判据前先读这份 | 🧪 0.2.1 已落地 N0–N5（含 N4b 入站在途对齐） |
 | [MEMORY_SUBSYSTEM.md](MEMORY_SUBSYSTEM.md) | **记忆子系统**：采集、写入、召回与注入的边界，与 soulkit 的联动 | ✅ 现行 |
 
 ### 控制台
@@ -123,6 +124,7 @@
 | 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
 | 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
 | 改会话准入、方案、人格 | [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md)、[PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) |
+| 消息回得慢 / 被略过 / 调合批与唤醒预算 | [MESSAGE_PACING.md](MESSAGE_PACING.md)（准入部分见 SESSION_SUBSYSTEM.md §4） |
 | 写 / 改插件 | [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) |
 | 接 MCP、技能、外部扩展 | [EXTENSION_PLATFORM.md](EXTENSION_PLATFORM.md) |
 | 动权限、鉴权、发布前安全检查 | [guides/ADMIN_CHANNEL.md](guides/ADMIN_CHANNEL.md)、[guides/SECURITY_BASELINE.md](guides/SECURITY_BASELINE.md) |

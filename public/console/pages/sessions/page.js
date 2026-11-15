@@ -737,7 +737,7 @@ function renderDetail(data) {
       ${card('运行', '默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。', 'run')}
       ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
       ${card('初始提示词', '', 'prompt')}
-      ${card('唤醒', '这里只改最常见的触发条件；更细的批次窗口等参数仍在「二代仿真」页。', 'wake')}
+      ${card('唤醒', '这里只改最常见的触发条件；合批窗口与投递预算由平台行为档案的 social-v2 决定，不在会话上。', 'wake', '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div>')}
 
       <div class="detail-card">
         <h4>执行体与权限</h4>
@@ -896,6 +896,7 @@ function renderDetail(data) {
   syncPersonaSelect();
   void loadDetailMemory(data.key);
   void loadDetailTasks(data.key);
+  void loadDetailScheduling(data.key);
   detailRendering = false;
   detailDirty = false;
   const saveBtn = document.getElementById('sessionDetailSave');
@@ -931,6 +932,35 @@ async function loadDetailMemory(key) {
     ].map(([label, n]) => `<span><span class="meta">${label}</span> <strong>${Number(n) || 0}</strong></span>`).join('');
   } catch {
     box.innerHTML = '<span class="meta">记忆计数读取失败</span>';
+  }
+}
+
+/**
+ * 调度只读行：两档各剩几个 token、暂存与溢出条数。
+ *
+ * 桶靠投递自然回填，不能手动改；这里只是把「为什么这一枪被拦」变成看得见的事实。
+ */
+async function loadDetailScheduling(key) {
+  const box = document.getElementById('detailScheduling');
+  if (!box) return;
+  try {
+    const r = await api('/api/socialV2/states');
+    const row = (r?.conversations || []).find((x) => x.key === key);
+    if (!row) { box.innerHTML = '<span class="meta">这个会话还没有调度状态（没收到过消息）</span>'; return; }
+    const tokens = (tier) => {
+      const p = row.pacing?.[tier] || {};
+      const capacity = Number(p.capacity) || 0;
+      // capacity 为 0 是「不限额」，不是「没额度」——两者写同一个 0 会让人以为被锁死。
+      return capacity ? `${(Number(p.tokens) || 0).toFixed(1)}/${capacity}` : '不限';
+    };
+    box.innerHTML = [
+      ['direct', tokens('direct')],
+      ['ambient', tokens('ambient')],
+      ['暂存', String(Number(row.pendingWakeCount) || 0)],
+      ['未读溢出', String(Number(row.overflowCount) || 0)],
+    ].map(([label, value]) => `<span><span class="meta">${label}</span> <strong>${esc(value)}</strong></span>`).join('');
+  } catch {
+    box.innerHTML = '<span class="meta">调度状态读取失败</span>';
   }
 }
 

@@ -407,11 +407,16 @@ await test('busy and rate-limited wake attempts preserve the current observation
   await h.sendWakePromptV2(KEY, 'question');
   checkObservation();
   h.promptQueues.delete(KEY);
-  h.cfg.socialV2.wake.maxWakePerMinute = 1;
-  st.wakeTimes = [Date.now()];
+  h.cfg.socialV2.wake.ambientBudgetCapacity = 1;
+  h.cfg.socialV2.wake.ambientRefillMs = 600000;
+  st.wakePacing = { direct: { tokens: 1, at: Date.now() }, ambient: { tokens: 0, at: Date.now() } };
   await h.sendWakePromptV2(KEY, 'question');
   checkObservation();
   assert.equal(h.calls.prompts.length, 0);
+  if (st.ambientRetryTimer) {
+    clearTimeout(st.ambientRetryTimer);
+    st.ambientRetryTimer = null;
+  }
 });
 
 await test('a rejected prompt does not authorize the undelivered snapshot', async ({ h, st, request, append }) => {

@@ -12,7 +12,11 @@ function defaultsOf(fields) {
   const out = {};
   for (const item of fields) {
     if (!item?.name) continue;
-    const value = item.type === 'switch' ? false : item.type === 'number' ? 0 : item.list ? [] : '';
+    // 字段自己声明了 default 就透传（节奏参数的默认值真源在 src/scheduling/policy.mjs），
+    // 没声明的仍按控件类型给空值。
+    const value = item.default !== undefined
+      ? item.default
+      : item.type === 'switch' ? false : item.type === 'number' ? 0 : item.list ? [] : '';
     if (!item.name.includes('_')) {
       out[item.name] = value;
       continue;

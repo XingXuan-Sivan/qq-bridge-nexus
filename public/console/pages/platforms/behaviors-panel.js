@@ -5,7 +5,7 @@
 // 字段规格仍由后端 kind 注册表下发（GET /api/behaviors/kinds），页面不自带一份。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { renderFields } from '../../components/form/form.js';
+import { renderFields, bindSwitches } from '../../components/form/form.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { modalHtml, openModal, closeModal } from '../../components/modal/modal.js';
@@ -23,6 +23,7 @@ let kindsPromise = null;
 let promptCard = null;
 let platformId = '';
 let host = null;
+let unbindSwitches = null;
 
 function fieldsOf(kind) {
   return kindSpecs.get(kind) ?? [];
@@ -135,7 +136,6 @@ async function loadDoc(id) {
     const label = host.querySelector('#behaviorFormLabel');
     if (label) label.value = doc.data?.label ?? '';
     panel.innerHTML = '';
-    renderFields(panel, behaviorFields(fieldsOf(doc.kind)), { columns: 2 });
     fillBehaviorForm(panel, fieldsOf(doc.kind), doc.data?.config ?? {});
     const cardHost = host?.querySelector('#behaviorPromptCard');
     const factory = doc.factoryPrompt ?? doc.data?.prompt ?? '';
@@ -288,6 +288,10 @@ export function mountBehaviorsPanel(target, { platformId: id } = {}) {
   behaviorDoc = null;
   promptCard = null;
   host.innerHTML = markup();
+  // 这一页没有走 createForm，开关（button[role=switch]）必须单独绑点击委托；
+  // 委托挂在 host 上，不会因为后面档案表单的 innerHTML 重建失效。
+  unbindSwitches?.();
+  unbindSwitches = bindSwitches(host);
   const listHost = host.querySelector('[data-behavior-fields="list"]');
   if (listHost) renderFields(listHost, BEHAVIOR_FIELDS.list.fields, { columns: 1 });
 

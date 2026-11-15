@@ -14,7 +14,8 @@ import { BUILTIN_CAPABILITY_IDS } from '../src/tools/catalog.mjs';
 import { createPlanStore, validatePlanReferences, BUILTIN_PLAN_ORDER } from '../src/runtime/plans.mjs';
 import { agentPlatformApplies, agentPlatformCanPinPermission, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 import { loadBehaviorProfiles } from '../src/behaviors/index.mjs';
-import { loadBehaviorTypes } from '../src/behaviors/types.mjs';
+import { loadBehaviorTypes, typeFields } from '../src/behaviors/types.mjs';
+import { getKind } from '../src/behaviors/kinds/index.mjs';
 import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, PLANS_ROOT } from '../src/profiles/paths.mjs';
 
 const problems = [];
@@ -51,6 +52,16 @@ for (const platform of platforms) {
     for (const type of types) {
       if (!['v1', 'v2'].includes(type.engine)) note(`行为类型 ${type.id} 的 engine 不合法：${type.engine}`);
       if (!Array.isArray(type.schema?.fields) || type.schema.fields.length === 0) note(`行为类型 ${type.id} 缺 schema.fields`);
+      // 类型 yml 一旦写了 schema.fields 就整体盖掉引擎字段表（默认值也跟着没），
+      // 所以这里必须按控制台实际拿到的字段规格核对：引擎声明的默认值一个都不能丢。
+      const engine = getKind(type.engine);
+      const served = new Map(typeFields(type, engine).map((field) => [field?.name, field]));
+      for (const field of engine?.fields ?? []) {
+        if (!field?.name || field.default === undefined) continue;
+        const got = served.get(field.name);
+        if (!got) note(`行为类型 ${type.id} 的字段表缺少引擎字段 ${field.name}`);
+        else if (got.default !== field.default) note(`行为类型 ${type.id} 的字段 ${field.name} 默认值不一致：类型=${String(got.default)} 引擎=${String(field.default)}`);
+      }
     }
   } catch (error) {
     note(`平台 ${platform.id} 行为类型加载失败：${error?.message ?? error}`);

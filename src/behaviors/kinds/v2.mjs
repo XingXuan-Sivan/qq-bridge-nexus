@@ -1,8 +1,9 @@
 // 行为档案的字段规格：控制台与后端共用（GET /api/behaviors/kinds 下发）。
 // 只描述字段与取值映射，渲染交给 components/form 的 renderFields。
+import { SCHEDULING_DEFAULTS as D } from '../../scheduling/policy.mjs';
 
 const num = (name, label, extra = {}) => ({ name, label, type: 'number', step: 'any', ...extra });
-const sw = (name, label) => ({ name, label, type: 'switch' });
+const sw = (name, label, extra = {}) => ({ name, label, type: 'switch', ...extra });
 
 const FIELDS = [
   { type: 'section', card: true, label: '自动回复' },
@@ -24,11 +25,23 @@ const FIELDS = [
   sw('wake_recommendedQuestion', '推荐：提问唤醒'),
   sw('wake_recommendedPoke', '推荐：拍一拍唤醒'),
   { name: 'wake_recommendedHint', label: '唤醒推荐提示词', type: 'textarea', rows: 3 },
-  num('wake_batchWindowMs', '多条合并窗口', { hint: '毫秒' }),
-  num('wake_maxWakePerMinute', '每分钟最多唤醒' ),
-  num('wake_maxWakePerHour', '每小时最多唤醒'),
   num('wake_noActionLimit', '无动作上限' ),
   num('wake_maxWakeConfigReminders', '唤醒配置提醒上限' ),
+  { type: 'section', card: true, label: '投递节奏' },
+  // default 只供界面回填：档案不写这个键时，控件要显示"实际生效的值"而不是空/关。
+  // 默认值真源是 SCHEDULING_DEFAULTS，这里只透传，不抄第二份数字。
+  sw('wake_adaptiveDebounce', '动态合批', { default: D.adaptiveDebounce }),
+  num('wake_directBaseMs', '点名基础等待', { hint: '毫秒', default: D.directBaseMs }),
+  num('wake_directMaxWaitMs', '点名最长等待', { hint: '毫秒', default: D.directMaxWaitMs }),
+  num('wake_ambientBaseMs', '普通基础等待', { hint: '毫秒', default: D.ambientBaseMs }),
+  num('wake_ambientMaxWaitMs', '普通最长等待', { hint: '毫秒', default: D.ambientMaxWaitMs }),
+  num('wake_directBudgetCapacity', '点名预算容量', { hint: '次；0 表示不限', default: D.directBudgetCapacity }),
+  num('wake_directRefillMs', '点名预算回填间隔', { hint: '毫秒', default: D.directRefillMs }),
+  num('wake_ambientBudgetCapacity', '普通预算容量', { hint: '次；0 表示不限', default: D.ambientBudgetCapacity }),
+  num('wake_ambientRefillMs', '普通预算回填间隔', { hint: '毫秒', default: D.ambientRefillMs }),
+  sw('wake_backlogEnabled', '积压触达', { default: D.backlogEnabled }),
+  num('wake_backlogWakeAfter', '积压触达阈值', { hint: '条', default: D.backlogWakeAfter }),
+  num('wake_backlogQuietMs', '积压安静窗口', { hint: '毫秒', default: D.backlogQuietMs }),
   { type: 'section', card: true, label: '发送' },
   sw('send_burstEnabled', '连发'),
   num('send_burstMaxMessages', '连发最多条数'),

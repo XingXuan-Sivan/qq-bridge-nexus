@@ -121,19 +121,34 @@ await test('R2 send-burst 失败路径不再抛 ReferenceError，并回滚发送
   } finally { await h.close(); }
 });
 
-// ── R3. 唤醒限频：延后重试而不是丢弃 ────────────────────────────────────────
-await test('R3 命中唤醒限频时安排延后重试，不丢这一枪', async () => {
-  const h = await bridgeHarness({ config: { socialV2: { wake: { maxWakePerMinute: 1 } } } });
+// ── R3. 唤醒预算：ambient 打空时搭车重试而不是丢弃 ──────────────────────────
+await test('R3 ambient 预算打空时安排搭车重试，不丢这一枪', async () => {
+  const h = await bridgeHarness({ config: { socialV2: { wake: { ambientBudgetCapacity: 1, ambientRefillMs: 60000 } } } });
   try {
     h.setMode('reserved2');
     const st = h.getSocialV2State('qq:group:456');
-    st.wakeTimes.push(Date.now()); // 占满每分钟 1 次的窗口
+    // 桶已打空：question 属 ambient 档，不得立即投递。
+    st.wakePacing = { direct: { tokens: 1, at: Date.now() }, ambient: { tokens: 0, at: Date.now() } };
     const before = h.calls.prompts.length;
-    await h.sendWakePromptV2('qq:group:456', 'timeout');
-    assert.equal(h.calls.prompts.length, before, '限频期间不得立即投递');
-    assert.ok(st.rateLimitRetryTimer, '必须安排延后重试（直接丢弃会让 timeout 唤醒永久消失）');
-    clearTimeout(st.rateLimitRetryTimer);
-    st.rateLimitRetryTimer = null;
+    await h.sendWakePromptV2('qq:group:456', 'question');
+    assert.equal(h.calls.prompts.length, before, '预算打空期间不得立即投递');
+    assert.ok(st.pendingAmbient, '必须记下待补的那一枪');
+    assert.ok(st.ambientRetryTimer, '必须安排搭车重试（直接丢弃会让这一枪永久消失）');
+    clearTimeout(st.ambientRetryTimer);
+    st.ambientRetryTimer = null;
+  } finally { await h.close(); }
+});
+
+// ── R3b. direct 桶打空是异常熔断：照常投递，不排队 ──────────────────────────
+await test('R3b direct 预算打空仍照常投递', async () => {
+  const h = await bridgeHarness({ config: { socialV2: { wake: { directBudgetCapacity: 1 } } } });
+  try {
+    h.setMode('reserved2');
+    const st = h.getSocialV2State('qq:group:456');
+    st.wakePacing = { direct: { tokens: 0, at: Date.now() }, ambient: { tokens: 6, at: Date.now() } };
+    await h.sendWakePromptV2('qq:group:456', 'atMention');
+    assert.equal(h.calls.prompts.length, 1, '点名唤醒被预算拦住就是事故');
+    assert.equal(st.wakeDirectOverflow, 1, '打空要记一笔告警');
   } finally { await h.close(); }
 });
 
@@ -143,22 +158,25 @@ await test('R4 timeout/replyCheck 类暂存唤醒按定时器语义补发', asyn
   try {
     h.setMode('reserved2');
     const st = h.getSocialV2State('qq:group:456');
-    // 模拟「回合结束、未读已全部标读」，队列里留着一条到期的 timeout 与一条已经处理过的 @
+    // 模拟「回合结束、未读已显式标读」，队列里留着一条到期的 timeout 与一条已经处理过的 @
     st.unread = [];
     st.lastUnreadSeq = 1;
+    st.lastReadThroughSeq = 1;
     st.pendingWakeReasons = [{ reason: 'timeout', seq: 1 }, { reason: 'atMention', seq: 1 }];
     st.wakeConfig.infinite = false;
     st.wakeConfig.sleepUntil = new Date(Date.now() - 1000).toISOString();
 
     const result = h.replayPendingWakeReasonsV2('qq:group:456');
     assert.equal(result?.action, 'timer', 'timeout 必须走定时器补偿，而不是按未读判断');
+    assert.equal(result?.acked, 1, '已经显式标读的那条 @ 不得重复补发');
     // 到期定时器被补偿后应立即补一次 timeout 唤醒
     for (let i = 0; i < 40 && !h.calls.prompts.length; i += 1) await sleep(25);
     assert.equal(h.calls.prompts.length, 1, '到期的有限潜水必须补发一次 timeout 唤醒');
     const text = h.calls.prompts[0].content.map((c) => String(c?.text ?? '')).join('\n');
     assert.match(text, /有限潜水时间已到|睡眠时间已到/);
 
-    // 第二条 @ 与未读无关但对应消息已被处理 → 仍然按消息语义跳过
+    // 只剩消息类且已标读 → 仍然按消息语义跳过
+    st.pendingWakeReasons = [{ reason: 'atMention', seq: 1 }];
     const second = h.replayPendingWakeReasonsV2('qq:group:456');
     assert.equal(second?.action, 'skipped', '已被当前回合处理的消息类唤醒仍然跳过');
   } finally { await h.close(); }

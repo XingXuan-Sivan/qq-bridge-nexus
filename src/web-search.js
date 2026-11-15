@@ -40,6 +40,15 @@ const CACHE_MAX_ENTRIES = 64;
 // Anthropic 兼容响应里文本块/结果块都可能有；这里只要结构化结果。
 const SEARCH_TOOL_TYPE = 'web_search_20250305';
 
+// UA 里的版本号从 package.json 读：发版只改一处，不在这里留第二个版本字面量。
+const USER_AGENT = `qq-bridge-web-search/${(() => {
+  try {
+    return String(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version ?? '0');
+  } catch {
+    return '0';
+  }
+})()}`;
+
 const defaultConfig = Object.freeze({
   provider: 'auto',
   apiKey: '',
@@ -314,7 +323,7 @@ export async function deepseekSearch(query, config = defaultConfig) {
       'anthropic-version': DEFAULT_API_VERSION,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'qq-bridge-web-search/0.2.0'
+      'user-agent': USER_AGENT
     },
     body,
     timeoutMs: config.timeoutMs || DEFAULT_TIMEOUT_MS

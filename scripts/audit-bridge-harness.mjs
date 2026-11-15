@@ -72,7 +72,7 @@ import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDir
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
 import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability } from '../src/capabilities/store.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
 import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 // 配置 v2（C2）：bridge.js 在 loadConfig 里做迁移与派生视图，夹具剥 import 后要按同名补回。
 // P2 又进了三个：写口按 id 打补丁要用扁平条目，切换默认执行体要用 setActivePlatform，
@@ -99,6 +99,8 @@ import {
 // agentPlatformMetadata 是纯注册表查询，用真实现。
 import { agentPlatformMetadata } from '../src/agent-side/metadata.mjs';
 import { createAgentPort } from '../src/agent-side/port.mjs';
+// 提示注入通道是注册表的纯查询（声明面来自 profiles/…/adapters/runtime.mjs），直接用真实现。
+import { agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 import { DSH_AGENT_CAPABILITIES, createDshPort } from '../src/agent-side/adapters/dsh/port.mjs';
 import { createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
@@ -367,6 +369,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     flushQueue, retireSession, sessions, getDshHealth, reconcileDshSessions, rebuildSession,
     profileModelOf, profileModelSignature, modelLabelForKey, sessionCanSeeImages, ensureChatModel,
     effectiveMode, passiveAllowed, proactiveAllowed,
+    runtimeOf, promptChannelOf, permissionAuthorityOf, applySessionPermission, readAgentPermission, describeAgentPermission,
     ext, handleMemberNotice, reconcileConversationMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
     setLevel(value) { currentLevel = value; },
     getMode() { return { mode: currentMode, level: currentLevel }; },
@@ -396,6 +399,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     CAPABILITIES_ROOT: path.join(temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
     // 预设编辑器读能力档时要归一（C4 起 preset 正文住在 rows 段）。
     normalizeCapability,
+    // 能力档 runtime 段的缺省值（旧会话/未迁移方案按它处理）与提示通道查询。
+    CAPABILITY_RUNTIME_DEFAULTS,
+    agentPlatformPromptChannels,
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
     AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform,

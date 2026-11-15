@@ -22,10 +22,10 @@ function builtinStore() {
   return createPlanStore({ root: path.join(path.dirname(fileURLToPath(import.meta.url)), '../profiles/plans') });
 }
 
-test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
+test('内置方案：七条，legacy 投影与旧模式一一对应', () => {
   // 用户克隆出来的方案就在同一个目录（profiles/plans/），只数内置的那几条。
   const plans = builtinStore().list().filter((plan) => plan.builtin);
-  assert.equal(plans.length, 6);
+  assert.equal(plans.length, 7);
   assert.deepEqual(plans.map((plan) => plan.id), BUILTIN_PLAN_ORDER);
   const expected = {
     chat: ['chat', 'L0'],
@@ -34,6 +34,8 @@ test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
     'agent-readonly': ['closed-agent', 'L1'],
     'agent-workspace': ['closed-agent', 'L2'],
     'agent-full': ['closed-agent', 'L3'],
+    // 直通不装预设、不改环境，旧模式里没有对应项：按「最接近」投到 chat / L0。
+    direct: ['chat', 'L0'],
   };
   for (const plan of plans) {
     assert.equal(plan.builtin, true, plan.id);
@@ -41,8 +43,13 @@ test('内置方案：六条，legacy 投影与旧模式一一对应', () => {
     assert.equal('platform' in plan, false, `${plan.id} 不应带 platform 字段`);
     assert.equal(plan.agentPlatform, 'auto', plan.id);
     assert.deepEqual([legacyModeOfPlan(plan), legacyLevelOfPlan(plan)], expected[plan.id], plan.id);
+  }
+  // 反查只对「旧模式里唯一对应」的方案成立：chat 与 direct 都投到 chat / L0，
+  // 反向只能得到一个 id（chat），把 direct 当例外显式说明，而不是放宽断言。
+  for (const plan of plans.filter((item) => item.id !== 'direct')) {
     assert.equal(planIdForLegacy(...expected[plan.id]), plan.id);
   }
+  assert.equal(planIdForLegacy('chat', 'L0'), 'chat');
 });
 
 test('归一：缺 capability 直接报错，未知行为回落 none', () => {

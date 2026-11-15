@@ -28,11 +28,20 @@ export const label = 'DeepSeek Harness';
 /**
  * 认领的能力档生效方式。
  *
- * 直通（`passthrough`）需要一条不建会话沙箱、不装 preset 的注入通道，DSH 侧尚未
- * 落地，因此这里只认 `preset`：引用直通能力档的方案会被静态校验拒绝，而不是在
- * 运行时被静默投影成别的档位。
+ * - `preset`：把能力档渲染成 agent preset 再挂到会话上；
+ * - `passthrough`：不挂 preset、不套沙箱，会话直接跑在对端原生环境里，
+ *   桥接只做追加（提示注入、会话编排）。MCP 不靠追加：它由安装期写进执行体配置。
  */
-export const RUNTIME_APPLY = Object.freeze(['preset']);
+export const RUNTIME_APPLY = Object.freeze(['preset', 'passthrough']);
+
+/**
+ * 认领的提示注入通道（能力档 `runtime.prompt` 的取值）。
+ *
+ * DSH 的 `sessions/create` 没有 system prompt 参数，因此只能用 `prefix`：首轮唤醒把
+ * 平台话术作为前缀带进去一次，后续唤醒不再重复；`tool` 是兜底——让模型自己去调
+ * `qq_get_prompt`。不在这里声明 `system`，桥接才会如实报 `passthrough_degraded`。
+ */
+export const RUNTIME_PROMPT = Object.freeze(['prefix', 'tool']);
 
 /**
  * 实现的能力面（声明顺序即控制台展示顺序）。
@@ -184,6 +193,8 @@ export function describe() {
     id,
     label,
     capabilities: [...capabilities],
+    applies: [...RUNTIME_APPLY],
+    promptChannels: [...RUNTIME_PROMPT],
     agentPresets: [...AGENT_PRESET_IDS],
     chatPresets: [...CHAT_AGENT_PRESETS],
     permissionLevels: Object.keys(LEVEL_PERMISSION_PRESET),

@@ -309,6 +309,11 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       active: String(runtime.active ?? '') === id,
       configured: String(config?.active?.agent ?? '') === id,
       capabilities: [...(impl?.capabilities ?? [])],
+      // 能力档的生效方式与提示注入通道：方案页与能力位矩阵直接读这两项，
+      // 不在前端再维护一份「哪个执行体支持什么」的清单。
+      applies: [...(impl?.applies ?? [])],
+      promptChannels: [...(impl?.promptChannels ?? [])],
+      canPinPermission: impl?.canPinPermission === true,
       conversationTypes: [],
       limits: {},
       inbound: false,
@@ -346,6 +351,9 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       active: String(runtime.active ?? '') === id,
       configured: String(config?.active?.agent ?? '') === id,
       capabilities: [...(impl.capabilities ?? [])],
+      applies: [...(impl.applies ?? [])],
+      promptChannels: [...(impl.promptChannels ?? [])],
+      canPinPermission: impl.canPinPermission === true,
       conversationTypes: [],
       limits: {},
       inbound: false,

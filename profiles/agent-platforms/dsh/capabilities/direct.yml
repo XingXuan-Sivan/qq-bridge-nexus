@@ -1,7 +1,10 @@
 # 能力档（Agent 侧，唯一档位真源）：tools = 工具面，runtime = 生效方式，
 # preset = 预设元信息（直通下只作建议值），rows = 插件行列表（直通为空）。
 #
-# 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、MCP 下发、会话编排。
+# 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、会话编排。
+# MCP 不在追加之列：四个 MCP 服务器由安装期写进执行体自己的配置
+# （`adapters/install.mjs` 的 `# === qq-bridge MCP BEGIN ===` 区块），与 preset 无关，
+# 所以不装 preset 也不会丢 MCP。
 # 因此本档没有 rows，也不产 artifacts/dsh/qq-agent-presets/presets/direct.patch.yml。
 
 version: 1
@@ -15,6 +18,8 @@ tools:
     # 工具面由对端决定，桥接在直通下给不出工具级硬边界（只能过滤经由桥接的调用）。
     host: true
   mcp:
+    # 没有 rows 就没有 `qq-tool-restrict` 行，这份工具面不会被渲染成保留名单：
+    # 直通下经由桥接的 MCP 调用由执行体自身的配置与 Hub 授权决定，这里只记录口径。
     - server: '*'
       tools: '*'
   skills:

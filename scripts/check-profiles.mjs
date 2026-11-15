@@ -12,7 +12,7 @@ import {
 import { createCapabilityStore, CAPABILITIES_ROOT } from '../src/capabilities/store.mjs';
 import { BUILTIN_CAPABILITY_IDS } from '../src/tools/catalog.mjs';
 import { createPlanStore, validatePlanReferences, BUILTIN_PLAN_ORDER } from '../src/runtime/plans.mjs';
-import { agentPlatformApplies, agentPlatformCanPinPermission } from '../src/agent-side/runtime-registry.mjs';
+import { agentPlatformApplies, agentPlatformCanPinPermission, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 import { loadBehaviorProfiles } from '../src/behaviors/index.mjs';
 import { loadBehaviorTypes } from '../src/behaviors/types.mjs';
 import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, PLANS_ROOT } from '../src/profiles/paths.mjs';
@@ -109,11 +109,14 @@ for (const platform of platforms) {
 }
 const capabilityFacts = new Map(capabilities.map((item) => [item.id, {
   apply: item.runtime.apply,
+  prompt: item.runtime.prompt,
+  permission: item.runtime.permission,
   hasRows: item.rowsCount > 0,
 }]));
 const agentPlatformFacts = new Map(dirs(AGENT_PLATFORMS_ROOT).map((id) => [id, {
   apply: agentPlatformApplies(id),
   permission: agentPlatformCanPinPermission(id),
+  promptChannels: agentPlatformPromptChannels(id),
 }]));
 for (const id of BUILTIN_PLAN_ORDER) {
   const plan = plans.find((item) => item.id === id);
@@ -130,7 +133,7 @@ for (const plan of plans) {
   });
   for (const issue of issues) {
     const message = `方案 ${plan.id}：${issue.message}`;
-    if (issue.code === 'plan_warn') warnings.push(message);
+    if (issue.code === 'plan_warn' || issue.code === 'passthrough_degraded') warnings.push(message);
     else note(message);
   }
 }

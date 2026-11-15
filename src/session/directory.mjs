@@ -17,6 +17,7 @@
 import { formatKey, parseKey } from './key.mjs';
 import { createAccessConfig, normalizeAccessConfig } from './access.mjs';
 import { readSessionRef } from './ref.mjs';
+import { normalizeSessionPermission } from './permission.mjs';
 
 export const SESSION_DIR_VERSION = 2;
 /** 旧三态模型的默认值；只用于“有档案但没有 defaults.json”的迁移读取。 */
@@ -112,6 +113,9 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
       }
       : null,
     presetId: normalizeString(raw.presetId, 80) || null,
+    // 会话级权限覆盖（`inherit` = 跟随全局）。只记「选了哪一档」，级别 → 平台预设名的映射
+    // 由 Agent 侧适配器给；权限档归执行体时它只是档案里的一条记录，不是生效值。
+    permission: normalizeSessionPermission(raw.permission),
     binding: {
       // C5 第三批：绑定的是 `{ instance, sessionId }` 而不是裸 id —— 换平台后旧引用必须判废，
       // 不能把上一个平台的会话 id 当成当前平台的（原因见 src/session/ref.mjs）。老档案把
@@ -125,6 +129,14 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     },
     // 运行态的休眠标记（模式切换期间保留）；文档 §3 未列，但重启需要恢复，放在会话文件里避免第二个索引。
     dormant: raw.dormant && typeof raw.dormant === 'object' ? raw.dormant : null,
+    // 提示注入标记（能力档 `runtime.prompt: prefix`）：这条对端会话是否已经带过平台话术。
+    // 它是运行态而不是档案配置——换了对端会话就自然重来一次，删档时一起消失。
+    promptInjected: raw.promptInjected && typeof raw.promptInjected === 'object' && raw.promptInjected.sessionId
+      ? {
+        sessionId: normalizeString(raw.promptInjected.sessionId, 120),
+        at: Number(raw.promptInjected.at) > 0 ? Number(raw.promptInjected.at) : 0,
+      }
+      : null,
     updatedAt: Number(raw.updatedAt) > 0 ? Number(raw.updatedAt) : now(),
   };
 }
@@ -145,8 +157,10 @@ export function createProfile(key, patch = {}, now = Date.now) {
     wake: { config: null },
     model: null,
     presetId: null,
+    permission: 'inherit',
     binding: { agentRef: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
     dormant: null,
+    promptInjected: null,
     updatedAt: now(),
   };
   const profile = applyPatch(base, patch, now);
@@ -175,6 +189,7 @@ export function applyPatch(profile, patch, now = Date.now) {
   for (const field of ['displayName', 'mode', 'planId', 'presetId']) {
     if (Object.hasOwn(p, field)) next[field] = p[field];
   }
+  if (Object.hasOwn(p, 'permission')) next.permission = normalizeSessionPermission(p.permission);
   if (p.persona && typeof p.persona === 'object') {
     if (Object.hasOwn(p.persona, 'mode')) next.persona.mode = p.persona.mode;
     if (Object.hasOwn(p.persona, 'name')) next.persona.name = p.persona.name;
@@ -187,6 +202,7 @@ export function applyPatch(profile, patch, now = Date.now) {
   if (Object.hasOwn(p, 'model')) next.model = p.model && typeof p.model === 'object' ? p.model : null;
   if (p.binding && typeof p.binding === 'object') next.binding = { ...next.binding, ...p.binding };
   if (Object.hasOwn(p, 'dormant')) next.dormant = p.dormant && typeof p.dormant === 'object' ? p.dormant : null;
+  if (Object.hasOwn(p, 'promptInjected')) next.promptInjected = p.promptInjected && typeof p.promptInjected === 'object' ? p.promptInjected : null;
   next.updatedAt = now();
   return next;
 }

@@ -641,6 +641,31 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
   （repo + all）、`test:preset-prompt` 16/16、`test:runtime-plans` 8/8、`test:qq-preset-contract` 10/10、
   `test-platform-prompt` 1/1、`test:audit` 132/132、`test-console-static`、`test-console-ui` 42/42。
 
+### 重构：直通运行期（P5，声明面 + 运行期接线）
+- **提示通道声明面**：能力档 `runtime.prompt` 的四个取值各自有明确语义——`none` 每次唤醒都带；
+  `prefix` 只首轮带一次；`system` 建会话时交给对端；`tool` 完全不带。执行体在 `adapters/runtime.mjs`
+  用 `RUNTIME_PROMPT` 认领，注册表 `agentPlatformPromptChannels()` 读出，在 `listAgentPlatforms()` 里
+  与 `applies` / `canPinPermission` 一样作为声明面暴露。缺声明时只给 `tool`。
+- **不新增 `prompt` 能力位**：它本来就在 `AGENT_PORT_CORE_METHODS` 里，再加一道闸门会变成两套口径。
+- **降级只有一条**：四个通道里只有 `system` 对执行体有要求，它不被认领时 `promptChannelOf()` 降为 `prefix`
+  并产 `passthrough_degraded` 审计（同一方案 + 执行体只记一次）+ 一条日志；`prefix` / `tool` 桥接侧即可完成。
+- **`promptInjected` 落盘**：会话档案新增 `promptInjected: { sessionId, at }`，按会话 id 比对，换会话
+  自然重来；不再复用 `prompt-blocks` 的 30 次唤醒 / 12 小时刷新语义（那是「定期重申」，直通要的是「一次」）。
+- **直通不挂预设**：`modePreset()` 在 `apply: passthrough` 下短路返回 `undefined`——档案里残留的 `presetId`
+  也不能挂上，否则直通等于偷偷装了个 preset。`strictPreset` 随之关掉（否则预设断言会在建会话时抛错）。
+  `closed-agent` 模式不参与直通：那个模式的权威是「级别 → preset + 权限预设」。
+- **权限权威两分落地**：`pinSessionPermission()` 在 `permission: agent` 下短路成 no-op，所有既有调用点
+  （建会话、复用重钉、full 授权回收、PATCH 档案、`/perm`）自动不再回钉；漂移 interval 同样短路，只告警。
+  新增 `readAgentPermission()` / `describeAgentPermission()` / `applySessionPermission()`：后者写完**立刻回读**，
+  不一致即记 `permission.write_failed` 并如实报错，不回滚成「假装成功」。
+- **不静默丢用户意图**：`PATCH /api/sessions/:key/profile` 在 agent 权威下写 `permission` 改为 409 明确拒绝并
+  指向新界面；`/perm` 的 describe 显示对端现状、set 返回 `ok:false` + 说明；`permissionPayload` 增 `authority`。
+- **顺带修掉一个既有缺陷**：`normalizeProfile()` 的白名单里没有 `permission`，会话级权限覆盖重启即丢
+  （writer 写了、load 时被丢）。现在 `permission` 与 `promptInjected` 都在白名单里。
+- **MCP 不在会话层下发**：四个 MCP 服务器本来由 `adapters/install.mjs` 写进执行体配置（与 preset 无关），
+  直通不装 preset 也照样有 MCP。给 DSH 再传一遍 `mcpServers` 只会把同一批 server 声明两次，因此不传；
+  `direct.yml` 头注释与 §7.1 已按这个事实改写。
+
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删
   行注释，而 `src/bridge.js` 的行注释里写了块注释开头两个字符（`// 规则都在 src/social/* 里`），于是正则从

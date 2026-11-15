@@ -22,7 +22,7 @@ import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { agentRuntime, agentRuntimeId } from './agent-side/runtime.mjs';
 // 插件提供的 Agent 平台（`agent-provider:provide`）：注册表本身就是注入给插件内核的依赖，
 // 桥接不维护第二张表，也不在插件停用后再清另一份状态。
-import { agentPlatform, agentProviderRegistry } from './agent-side/runtime-registry.mjs';
+import { agentPlatform, agentPlatformPromptChannels, agentProviderRegistry } from './agent-side/runtime-registry.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
@@ -97,7 +97,7 @@ import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
 import { PLATFORMS_ROOT } from './profiles/paths.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITIES_ROOT } from './capabilities/store.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITIES_ROOT, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
 // 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
@@ -4448,6 +4448,88 @@ async function main() {
   }
 
   /**
+   * 会话语义下的生效方式（能力档 `runtime` 段）。旧会话与未迁移方案没有能力档，
+   * 按缺省段处理：装预设、每次唤醒都带平台话术、权限归桥接。
+   */
+  function runtimeOf(key) {
+    return capabilityOf(key)?.runtime ?? CAPABILITY_RUNTIME_DEFAULTS;
+  }
+
+  /**
+   * 直通：不装预设、不套沙箱，会话跑在执行体原生环境里，桥接只做追加。
+   *
+   * closed-agent 不参与直通：那个模式的权威是「级别 → preset + 权限预设」，
+   * 跳过预设就等于把工具面交给执行体默认档，安全边界没人认账。
+   */
+  function passthroughOf(key) {
+    return currentMode !== 'closed-agent' && runtimeOf(key).apply === 'passthrough';
+  }
+
+  /** 权限档归谁：`bridge` = 桥接钉住；`agent` = 读得到、可按用户操作代改，但不回钉。 */
+  function permissionAuthorityOf(key) {
+    return runtimeOf(key).permission;
+  }
+
+  /** 这条对端会话是不是已经带过平台话术（换了会话就不算）。 */
+  function promptInjectedFor(key, sessionId = sessions.get(key)) {
+    const record = state.profiles?.[apiKey(key)]?.promptInjected;
+    return Boolean(sessionId && record && record.sessionId === sessionId);
+  }
+
+  /** 记下「这条对端会话已经带过平台话术」；按会话存，重建会话后自然重来一次。 */
+  function markPromptInjected(key, sessionId) {
+    if (!sessionId) return;
+    const profile = ensureSessionProfile(key);
+    if (!profile) return;
+    profile.promptInjected = { sessionId, at: Date.now() };
+    saveState();
+  }
+
+  /**
+   * 平台话术这次怎么进：能力档声明的通道落到当前执行体上。
+   *
+   * - `none`：每次唤醒都带（引入 `runtime` 段之前的唯一行为）；
+   * - `prefix`：只在首轮唤醒带一次，之后靠会话历史；
+   * - `system`：建会话时交给执行体的 system prompt，唤醒块不再带；
+   * - `tool`：完全不带，模型自己调 `qq_get_prompt`。
+   *
+   * `system` 要求执行体自己有入口（`RUNTIME_PROMPT` 声明）。没有就降到 `prefix`：
+   * 首轮前缀同样只进一次历史，但降级必须被看见（审计 + 日志），不能当成成功。
+   */
+  function promptChannelOf(key) {
+    const requested = runtimeOf(key).prompt;
+    if (requested !== 'system') return { channel: requested, requested, degraded: false };
+    const channels = agentPlatformPromptChannels(agentPort.id);
+    if (channels.includes('system')) return { channel: 'system', requested, degraded: false };
+    return {
+      channel: 'prefix',
+      requested,
+      degraded: true,
+      reason: `执行体 ${agentPort.id} 没有 system prompt 通道（它提供：${channels.join(' / ') || '无'}），平台话术改用首轮前缀注入`,
+    };
+  }
+
+  // 降级只记一次：这是「方案 + 执行体」的静态事实，不该每次唤醒都刷一条审计。
+  const notedPromptDegrades = new Set();
+  function notePromptDegrade(key, resolved) {
+    if (!resolved.degraded) return;
+    const id = `${key}|${resolved.requested}|${agentPort.id}`;
+    if (notedPromptDegrades.has(id)) return;
+    notedPromptDegrades.add(id);
+    ext.audit.append('passthrough_degraded', { key, requested: resolved.requested, channel: resolved.channel, reason: resolved.reason });
+    log(`⚠️ ${resolved.reason}（会话 ${key}）`);
+  }
+
+  /** 这次唤醒要不要带平台话术：`prefix` 是「首轮带一次」，所以要问这条对端会话带过没有。 */
+  function platformPromptTextFor(key) {
+    const resolved = promptChannelOf(key);
+    notePromptDegrade(key, resolved);
+    if (resolved.channel === 'none') return platformPromptFor(key);
+    if (resolved.channel === 'prefix' && !promptInjectedFor(key)) return platformPromptFor(key);
+    return '';
+  }
+
+  /**
    * 平台提示词：QQ 里怎么用工具、怎么说话、怎么等。
    * 只有新能力体系的会话才注入 —— 旧 `qq-*` 预设的 persona 里自带同段文字，重复注入会打架。
    */
@@ -4572,6 +4654,8 @@ async function main() {
 
   async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false, sessionId: explicitSessionId = null } = {}) {
     const key = apiKey(rawKey);
+    // 直通方案下档位归执行体：不回钉、不冒充。要改档走 applySessionPermission（写后核对）。
+    if (permissionAuthorityOf(key) === 'agent') return { ok: true, skipped: true, authority: 'agent' };
     // 建会话时还没 bindSession，必须把刚拿到的 sessionId 显式传进来。
     // 这里只能 `sessions.get` —— 它返回裸 id；`get(key)?.sessionId` 恒为 undefined，
     // 会让不传 explicitSessionId 的调用（授权过期回收 / 命令改级别）静默地什么也不做。
@@ -4597,11 +4681,69 @@ async function main() {
 
   const pinnedPermissions = new Map();
 
+  /**
+   * 直通方案下改档：桥接只是「代用户点一下」。写完立刻读回核对，
+   * 不一致就把对端的实际值如实报出来并记审计——不回滚成「假装成功」。
+   */
+  async function applySessionPermission(rawKey, preset, { reason = 'manual' } = {}) {
+    const key = apiKey(rawKey);
+    const sessionId = sessions.get(key);
+    if (!sessionId) return { ok: false, error: '会话还没建立，先发一条消息再改档' };
+    if (!agentPort.supports('permission')) return { ok: false, error: `执行体 ${agentPort.id} 不支持读写权限档` };
+    const wanted = String(preset ?? '').trim();
+    if (!wanted) return { ok: false, error: '权限档不能为空' };
+    try {
+      await agentPort.applyPermission(sessionId, wanted);
+    } catch (error) {
+      ext.audit.append('permission.write_failed', { key, preset: wanted, reason, error: String(error?.message ?? error) });
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+    // 写后核对：「发出了指令」不等于「对端改了」，核对不过就是失败。
+    let current = '';
+    try { ({ preset: current } = await agentPort.readPermission(sessionId)); } catch { current = ''; }
+    if (current !== wanted) {
+      ext.audit.append('permission.write_failed', { key, preset: wanted, current, reason });
+      return { ok: false, current, error: `对端回读为「${current || '读不出来'}」，与写入的「${wanted}」不一致` };
+    }
+    ext.audit.append('permission.change', { key, preset: current, by: reason, authority: 'agent' });
+    return { ok: true, preset: current };
+  }
+
+  /**
+   * 直通方案下的权限档现状：对端说什么就是什么。
+   * 读不出来不等于没改（部分平台的会话要等一次事件才有快照），文案必须把这一点说清。
+   */
+  async function readAgentPermission(key) {
+    const sessionId = sessions.get(key);
+    if (!sessionId) return { readable: false, preset: '', text: '', reason: '会话还没建立' };
+    if (!agentPort.supports('permission')) return { readable: false, preset: '', text: '', reason: `执行体 ${agentPort.id} 不支持读写权限档` };
+    try {
+      const { preset, text } = await agentPort.readPermission(sessionId);
+      return { readable: Boolean(preset), preset: preset || '', text: String(text ?? ''), reason: preset ? '' : '对端返回里没有可解析的档位' };
+    } catch (error) {
+      return { readable: false, preset: '', text: '', reason: String(error?.message ?? error) };
+    }
+  }
+
+  /** `/perm` 在直通方案下的回答：档位在对端，桥接只读。 */
+  async function describeAgentPermission(key) {
+    const now = await readAgentPermission(key);
+    const lines = [
+      '当前方案为直通：权限档由执行体自身管理，桥接只读、不自动改。',
+      now.readable ? `对端当前档位：${now.preset}` : `对端档位读不出来：${now.reason || '返回格式不符'}（读不出来不等于没改过）`,
+      '要改档请在控制台「会话详情 › 执行体与权限」里操作，写后会自动核对。',
+    ];
+    return lines.join('\n');
+  }
+
   function permissionPayload(rawKey) {
     const key = apiKey(rawKey);
     const value = normalizeSessionPermission(state.profiles?.[key]?.permission);
     return {
       value,
+      // 档位归谁：`bridge` 的 `effective` 是桥接四级算出来的，`agent` 的只是档案记录，
+      // 真正生效的值要用 readAgentPermission（会话详情）读对端。
+      authority: permissionAuthorityOf(key),
       effective: permissionLevelOf(key),
       options: SESSION_PERMISSIONS,
       labels: PERMISSION_LABEL,
@@ -5293,6 +5435,9 @@ async function main() {
       const plan = closedAgentPlan();
       return plan.ok ? (plan.agentPreset || undefined) : undefined;
     }
+    // 直通：能力档明确要求「不装预设」。档案里残留的 presetId 也不能挂上——
+    // 直通的含义就是不改执行体环境，挂上就等于偷偷装了一个。
+    if (runtimeOf(key).apply === 'passthrough') return undefined;
     // P6：会话固定的能力预设优先（全局方案的引擎已投影进 currentMode，能力仍走下面旧分支）。
     const fixedTools = sessionPlanOf(key)?.tools;
     const planPreset = fixedTools ? resolvePresetName(fixedTools, { strict: true }) : '';
@@ -8981,6 +9126,11 @@ async function main() {
               }
             }
             if (Object.hasOwn(body, 'permission')) {
+              // 直通下档位归执行体：桥接四级不生效，写进来只会变成一条没人读的记录。
+              if (permissionAuthorityOf(key) === 'agent') {
+                sendJson({ ok: false, error: '当前方案为直通：权限档由执行体自身管理，请用「执行体与权限」改档（写后自动核对）' }, 409);
+                return;
+              }
               const raw = String(body.permission ?? 'inherit').trim();
               if (!SESSION_PERMISSIONS.includes(raw)) { sendJson({ ok: false, error: `权限级别无效：${raw}` }, 400); return; }
               patch.permission = raw;
@@ -13686,7 +13836,8 @@ async function main() {
           retireSession(key);
         } else {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
-          {
+          // 直通下档位归执行体：不重钉，也不因回读不一致丢弃会话。
+          if (permissionAuthorityOf(key) === 'bridge') {
             const chatSession = !sessionPlanOf(key)?.capability;
             const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() }).preset;
             if (pinnedPermissions.get(key) !== wanted) {
@@ -13744,12 +13895,18 @@ async function main() {
       fs.mkdirSync(dir, { recursive: true });
       let sessionId;
       let lastError = null;
-      const preset = modePreset(key, effectiveMode(key), cfg);
+      // 直通：不装预设、不套沙箱，会话跑在执行体原生环境里。提示通道在这里一次算清：
+      // `system` 要求在建会话那一刻把平台话术交出去，后续唤醒块不再重复带。
+      const passthrough = passthroughOf(key);
+      const promptChannel = promptChannelOf(key);
+      notePromptDegrade(key, promptChannel);
+      const preset = passthrough ? undefined : modePreset(key, effectiveMode(key), cfg);
       // 非 closed-agent（chat / reserved / reserved2，会话可能属于 QQ 群）必须 fail-closed：
       // 拿不到内置仿真 preset 就拒绝建会话，绝不让 DSH 用默认 preset（standard）顶上——那会把
       // bash/文件读写等本地工具暴露给 QQ 群里的任何人（见 RULES.md「无本地工具」）。
       // closed-agent 仅 owner 私聊、本来就用完整工具面，回退不构成提权。
-      const strictPreset = currentMode !== 'closed-agent';
+      // 直通不挂预设，也就没有「preset 不可用」这一档：它本来就不装。
+      const strictPreset = !passthrough && currentMode !== 'closed-agent';
       // v0.3.0：closed-agent 也 fail-closed —— 级别计划不成立（未授权 / L1 的只读 preset 缺失 /
       // L3 的 qq-full-ask 缺失）就拒绝建会话，绝不退化成 DSH 默认 preset 的完整工具面。
       const agentPlan = currentMode === 'closed-agent' ? closedAgentPlan() : null;
@@ -13776,6 +13933,8 @@ async function main() {
           }
           const params = { workspaceId: workspace.workspaceId };
           if (withPreset && preset) params.agentPreset = preset;
+          // `system` 通道：平台话术作为 system prompt 交给执行体，唤醒块里不再带（避免注入两份）。
+          if (promptChannel.channel === 'system') params.systemPrompt = platformPromptFor(key);
           const value = await agentPort.ensureSession(params);
           sessionId = value.sessionId;
           markDshHealth(key, sessionId, 'online');
@@ -13796,9 +13955,12 @@ async function main() {
       }
       // 新版 DSH 事件流需要显式 follow 该会话，否则收不到 turn 事件。
       api.events.follow(sessionId);
-      // P11：按会话权限级别钉 DSH 权限预设。chat 会话恒只读（钉不上不影响聊天）；
-      // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着 DSH 默认权限运行。
-      {
+      // `system` 通道：平台话术已经在建会话时交出去了，记下来（会话详情与诊断看这件事）。
+      if (promptChannel.channel === 'system') markPromptInjected(key, sessionId);
+      // P11：按会话权限级别钉执行体权限预设。chat 会话恒只读（钉不上不影响聊天）；
+      // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着默认权限运行。
+      // 直通（permission: agent）不钉：档位归执行体，桥接只读、只按用户操作代改。
+      if (permissionAuthorityOf(key) === 'bridge') {
         // closed-agent 下定权限是硬要求：钉不上就丢弃会话；普通聊天会话钉不上不影响聊天。
         const chatSession = currentMode !== 'closed-agent' && !sessionPlanOf(key)?.capability;
         const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
@@ -13824,7 +13986,7 @@ async function main() {
         if (sessions.get(key) === sessionId) retireSession(key);
         throw new Error('会话创建期间已重置或权限已变化');
       }
-      log(`新会话 ${key} -> ${sessionId}（模式 ${effectiveMode(key)}，preset: ${modePreset(key, effectiveMode(key), cfg) ?? '默认'}）`);
+      log(`新会话 ${key} -> ${sessionId}（模式 ${effectiveMode(key)}，${passthrough ? '直通：不挂预设' : `preset: ${preset ?? '默认'}`}）`);
       return sessionId;
     })();
     sessionPromises.set(key, promise);
@@ -14617,6 +14779,8 @@ async function main() {
       void (async () => {
         if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !agentReady || !agentPort.supports('permission')) return;
         const key = ownerPrivateKey();
+        // 直通下档位归执行体：漂移只该被看见，不该被自动改回，更不能因此紧急回落。
+        if (permissionAuthorityOf(key) === 'agent') return;
         const sessionId = sessions.get(key);
         const plan = closedAgentPlan();
         if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
@@ -14989,6 +15153,8 @@ async function main() {
       }
       throw error;
     }
+    // 提示通道一次算清：唤醒块要不要带平台话术、投递成功后要不要记「已带过」都看它。
+    const promptChannel = promptChannelOf(key);
     let wakeState;
     let wakeToken;
     let wakeSnapshot;
@@ -15086,6 +15252,10 @@ async function main() {
       return { ok: false, error: `${d.code}: ${d.detail}` };
     }
     markDshHealth(key, sessionId, 'online');
+    // `prefix` 通道：这条唤醒已经把平台话术带进会话历史，记下来，后续唤醒不再重复。
+    if (opts.wakeReason && promptChannel.channel === 'prefix' && !promptInjectedFor(key, sessionId)) {
+      markPromptInjected(key, sessionId);
+    }
     // 这次唤醒提示已经带着（或本来就是）当前这一版角色卡，记下来，下次不再重复给
     if (roleFpAtBuild) roleRefresh.markSeen(key, sessionId, roleFpAtBuild);
     if (opts.wakeReason) { tokenMiss.clearNotice(key); backfillNotices.delete(key); }
@@ -16439,7 +16609,7 @@ async function main() {
       reason,
       blockPlan,
       preSleepMs,
-      platformPrompt: platformPromptFor(key),
+      platformPrompt: platformPromptTextFor(key),
       behaviorPrompt: behaviorPromptFor(key),
       roleName,
       identityText: selfIdentityTextV2(),
@@ -17233,6 +17403,8 @@ async function main() {
     },
     permission: {
       describe: (key) => {
+        // 直通：档位在对端，桥接四级在这个方案下不生效——先说清这一点，再报对端的实际值。
+        if (permissionAuthorityOf(key) === 'agent') return describeAgentPermission(key);
         const payload = permissionPayload(key);
         const labels = payload?.labels ?? {};
         const lines = [
@@ -17244,6 +17416,8 @@ async function main() {
         return lines.join('\n');
       },
       set: async (key, level) => {
+        // 直通不改环境：收到 /level、/perm 时明确回「档位由执行体自身管理」并附当前值（见直通定义）。
+        if (permissionAuthorityOf(key) === 'agent') return { ok: false, error: await describeAgentPermission(key) };
         const raw = String(level || '').trim();
         if (!SESSION_PERMISSIONS.includes(raw)) return { ok: false, error: `级别无效：${raw}` };
         try {

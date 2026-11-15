@@ -35,6 +35,24 @@ export const label = 'ACP（Agent Client Protocol）';
  */
 export const capabilities = Object.freeze(['session', 'permission', 'models', 'events']);
 
+/**
+ * 认领的能力档生效方式。
+ *
+ * `preset` 对 ACP 的含义是「用 `session/set_config_option` 选对端的 agent 档」——
+ * 没有可安装的 profile，但对端声明了 `agent` 选项时这套选择确实成立；
+ * `passthrough` 则不指定 agent，会话直接跑在对端默认环境里。
+ */
+export const RUNTIME_APPLY = Object.freeze(['preset', 'passthrough']);
+
+/**
+ * 认领的提示注入通道。
+ *
+ * ACP 的 `session/new` 带 `systemPrompt`（`append` 语义，2026-11-06 起稳定）：这是唯一
+ * 能在**会话创建时**把话术交给对端的通道。`prefix` 不声明——ACP 没有「首轮前缀」这种
+ * 概念，硬拼进第一条 prompt 会把平台规则混进用户消息。`tool` 仍是兜底。
+ */
+export const RUNTIME_PROMPT = Object.freeze(['system', 'tool']);
+
 // ── 权限档 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -122,6 +140,8 @@ export function describe() {
     id,
     label,
     capabilities: [...capabilities],
+    applies: [...RUNTIME_APPLY],
+    promptChannels: [...RUNTIME_PROMPT],
     // 两者都由对端在 session/new 的回执里给（configOptions），桥接没有静态清单。
     agentPresets: [],
     chatPresets: [],

@@ -390,8 +390,14 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 直通 = 满足全部三条，缺一条就不是直通：
 
 1. 不安装、不修改执行体的任何 profile / preset / 沙箱；
-2. 桥接只做**追加**：提示注入（提示词）、工具追加（MCP 下发）、会话编排；
+2. 桥接只做**追加**：提示注入（提示词）、会话编排；
 3. 权限档位不归桥接所有——读得到、可以替用户改，但不回钉、不冒充。
+
+MCP 不在第 2 条的「追加」里，因为它在实现面上本来就不是会话级的：DSH 的四个 MCP 服务器由
+`adapters/install.mjs` 写进执行体自己的 profile 配置（`# === qq-bridge MCP BEGIN ===` 区块，
+安装期一次、与 preset 无关），所以直通不装 preset 也不会丢 MCP。
+`AgentPort.sessions.create` 的 `mcpServers` 参数至今无人传，是**故意**的：给 DSH 再传一遍会把同一批
+server 声明两次。等有执行体只能在 `session/new` 里声明 MCP（ACP 的形态）时，才在那一家的适配器里补。
 
 ### 7.2 权威两分
 
@@ -414,10 +420,17 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 | `prefix` | DSH | 会话第一条唤醒把提示词作为首轮前缀追加，同时记 `promptInjectedAt` | 污染首轮对话历史；同一会话只做一次 |
 | `tool` | 兜底 | 只靠 `qq_get_prompt` 工具按需拉取（`prompt.md` 第 2 条已要求模型先调它） | 长度受限、依赖模型主动调用 |
 
-- 能力档声明 `prompt: system`，适配器 `describe().supportedPrompt` 声明支持面；
-  不匹配时**不静默降级**：产 `passthrough_degraded` 诊断（降级到哪一级、丢什么），方案卡显示黄条。
-  口径与 OpenClaw 一致——不支持的运行时要拒绝，而不是忽略。
-- `prompt` 同时是新的能力位（`AgentPort` 增可选组 `prompt`），缺它时控制台显示「该执行体只能靠工具拉取提示词」。
+- 落点是 `promptChannelOf()`：`none` 每次唤醒都带（既有行为）；`prefix` 只首轮带一次并写
+  `promptInjected = { sessionId, at }`（换会话自然重来）；`system` 只在建会话时交给对端，唤醒块不再带；
+  `tool` 完全不带 —— 全部由桥接侧完成，不依赖执行体额外能力。
+- **只有 `system` 会降级**：它对执行体有要求（它的 `RUNTIME_PROMPT` 里得有 `system`），不满足时降为
+  `prefix` 并产 `passthrough_degraded` 审计（降级到哪一级、丢什么）+ 一条日志，同一方案/执行体只记一次；
+  不静默降级，也不因此拒绝会话——`prefix` 只输「污染首轮」这一点，而拒会话会把直通变成不可用。
+  口径与 OpenClaw 一致：不支持的能力要说出来，而不是忽略。
+- `prompt` 不做成新的 `AgentPort` 能力位：它本来就在 `AGENT_PORT_CORE_METHODS` 里（每家执行体都必须实现），
+  再加一个能力位会变成「核心方法 + 能力闸门」两套口径。声明面落在适配器的 `RUNTIME_PROMPT`
+  （注册表 `agentPlatformPromptChannels()` 读它，`listAgentPlatforms()` 把它作为 `promptChannels` 暴露），
+  控制台的方案页与能力位矩阵直接读这里。缺声明时只给 `tool`，即「该执行体只能靠工具拉取提示词」。
 
 ### 7.4 直通下的「管理通道」怎么办
 

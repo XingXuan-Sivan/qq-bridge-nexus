@@ -17,7 +17,7 @@ import '../agent-side/builtin.mjs';
 export const AGENT_PLATFORM_AUTO = 'auto';
 export const PLAN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 export const PLAN_AUDIENCES = ['owner', 'access'];
-export const BUILTIN_PLAN_ORDER = ['chat', 'social-v1', 'social-v2', 'agent-readonly', 'agent-workspace', 'agent-full'];
+export const BUILTIN_PLAN_ORDER = ['chat', 'social-v1', 'social-v2', 'agent-readonly', 'agent-workspace', 'agent-full', 'direct'];
 
 const PLAN_FILE_HEADER = '# 运行方案：组合 behavior（行为档案）+ agentPlatform（Agent 侧平台，auto = 跟随全局）\n'
   + '# 与 capability（能力档 id，也是 Agent 侧的 preset id）。方案不绑用户平台。\n'
@@ -211,7 +211,8 @@ export function findPlan(plans, planId) {
  *
  * `capabilities` / `agentPlatforms` 可以传 id 的 Set（只查存在性），也可以传
  * id → 事实的 Map（能查「apply: preset 必须有 rows」「passthrough 必须有执行体认领」）。
- * 返回 [{code, message}]：`capability_invalid` / `plan_invalid` 是错，`plan_warn` 只是提示。
+ * 返回 [{code, message}]：`capability_invalid` / `plan_invalid` 是错，
+ * `passthrough_degraded` / `plan_warn` 只是提示（直通降级到哪一级由运行期决定）。
  *
  * 执行体侧的约束只在方案**写死了具体 id** 时才能判：`auto` 跑在哪个执行体由全局默认决定，
  * 那时留给装配期 fail-closed（无法钉权限档的执行体会在会话建立时直接报错，不静默退化）。
@@ -239,11 +240,22 @@ export function validatePlanReferences(plan, { behaviors, capabilities, agentPla
     if (agentPlatforms && !facts && !(agentPlatforms instanceof Set && agentPlatforms.has(plan.agentPlatform))) {
       fail('plan_invalid', `agentPlatform ${plan.agentPlatform} 不存在（写 auto 可跟随全局默认执行体）`);
     } else if (facts) {
-      if (capability?.apply === 'passthrough' && !facts.apply.includes('passthrough')) {
-        fail('plan_invalid', `agentPlatform ${plan.agentPlatform} 不支持 apply: passthrough（改用 auto，或换一个认领直通的执行体）`);
+      // 生效方式不认领就是配错了会话：装不上预设的平台不能承担 apply: preset，
+      // 不装环境的平台也不该被写成 passthrough（那会让「直通」变成一句假话）。
+      if (Array.isArray(facts.apply) && !facts.apply.includes(capability.apply)) {
+        fail('plan_invalid', `agentPlatform ${plan.agentPlatform} 不认领 apply: ${capability.apply}（它认领：${facts.apply.join(' / ') || '无'}）`);
       }
-      if (capability?.permission === 'bridge' && facts.permission !== true) {
+      if (capability.permission === 'bridge' && facts.permission !== true) {
         fail('plan_invalid', `agentPlatform ${plan.agentPlatform} 没有权限预设映射，无法支撑 permission: bridge（禁止静默退化成不设权限）`);
+      }
+      // 提示通道不匹配不是错：运行期会降级到工具拉取，但方案卡必须能看见「丢了什么」。
+      if (['system', 'prefix'].includes(capability.prompt)
+        && Array.isArray(facts.promptChannels)
+        && !facts.promptChannels.includes(capability.prompt)) {
+        issues.push({
+          code: 'passthrough_degraded',
+          message: `agentPlatform ${plan.agentPlatform} 没有 ${capability.prompt} 注入通道（它提供：${facts.promptChannels.join(' / ') || '无'}）：运行时降级为工具拉取提示词`,
+        });
       }
     }
   }

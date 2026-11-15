@@ -169,6 +169,11 @@ export function listAgentPlatforms() {
     id: impl.id,
     label: impl.label ?? impl.id,
     capabilities: [...(impl.capabilities ?? [])],
+    // 能力档的生效方式与提示注入通道：都是「这个执行体认领什么」的声明面，
+    // 控制台的方案页与能力位矩阵直接读这里，不再从 port 上现问。
+    applies: agentPlatformApplies(impl.id),
+    promptChannels: agentPlatformPromptChannels(impl.id),
+    canPinPermission: agentPlatformCanPinPermission(impl.id),
     // 插件平台的配置模型：控制台要靠它画表单，统一注册表要靠它校 `platforms.agents.<id>`。
     // 内置平台的这一项来自 profiles 目录（platform.yml），不从实现上取。
     configSchema: impl.configSchema ?? null,
@@ -250,4 +255,17 @@ export function agentPlatformApplies(id = '', ctx = {}) {
 /** 该平台是否认领权限预设映射（能力档 `runtime.permission: bridge` 的前提）。 */
 export function agentPlatformCanPinPermission(id = '', ctx = {}) {
   return Boolean(agentPlatform(id || ctx.agentPlatform)?.PERMISSION_PRESET_FOR_LEVEL);
+}
+
+/**
+ * 该平台认领哪些提示注入通道（能力档 `runtime.prompt` 的取值）。
+ *
+ * 未声明时只给 `tool`：没有注入通道的执行体只能靠 `qq_get_prompt` 拉取提示词，
+ * 这是直通模式下唯一不会说谎的兜底。
+ */
+export function agentPlatformPromptChannels(id = '', ctx = {}) {
+  const impl = agentPlatform(id || ctx.agentPlatform);
+  const declared = impl?.RUNTIME_PROMPT;
+  const values = Array.isArray(declared) ? declared.filter((value) => typeof value === 'string' && value.trim()) : [];
+  return values.length ? values : ['tool'];
 }

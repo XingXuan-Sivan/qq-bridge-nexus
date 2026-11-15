@@ -329,7 +329,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 ### 7.2 目标 IA
 
 ```
-运行总览 | 会话与审批 | 平台 ★ | 方案 ★ | 人格与角色 | 记忆 | 黑话 | 扩展 | 定时任务 | 运维 | 全局配置
+运行总览 | 会话与审批 | 全局配置 | 平台 ★ | 方案 ★ | 人格与角色 | 记忆 | 黑话 | 扩展 | 定时任务 | 运维
                         │
            ┌────────────┴────────────┐
         用户侧                     Agent 侧

@@ -27,6 +27,10 @@ console.log('## 视图 / 页面契约');
 const views = [...new Set([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 const pages = [...new Set([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 ok(JSON.stringify(views) === JSON.stringify(pages), 'data-view 与 data-page 一一对应', `${views.length} 个：${views.join(', ')}`);
+// 管理三页的读取顺序：先定全局默认，再看平台接得对不对，最后选方案。
+const manageOrder = ['config', 'platforms', 'plans'].map((view) => html.indexOf(`data-view="${view}"`));
+ok(manageOrder.every((at) => at > 0) && manageOrder.every((at, i) => i === 0 || at > manageOrder[i - 1]),
+  '管理导航按「全局配置 → 平台配置 → 运行方案」排列');
 
 console.log('## JS 语法');
 // 控制台脚本已全部外置为 ES 模块，index 里不再有内联 <script>，

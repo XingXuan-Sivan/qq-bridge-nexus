@@ -51,6 +51,10 @@
 - **入站在途对齐**：一条带引用的消息要等网关回 `get_msg` 才能记进未读（最长 `REPLY_INGEST_WAIT_MS`）。唤醒投递与回合结束补偿现在先等这些在途入站落地：前者不再把「刚到、还没入账」的消息跨过去，后者也不会把它误判成「没有未读」。上限同上（入站自己允许卡住的最大值），超时照常往下走；只对齐同一个会话。
 - 版本号单点：联网搜索的 `User-Agent` 不再写死，改从 `package.json` 读；`verify:repo` 核对每个 MCP server 的 `serverInfo.version` 与主包一致（本次发版补上了 `mcp-snowluma-safe.js`、`mcp-web-search-safe.js` 漏改的两处）。
 
+### 界面
+
+- 管理导航顺序改为「全局配置 → 平台配置 → 运行方案」：先定全局默认，再看平台接得对不对，最后选这套组合跑在哪条方案上。
+
 ### 门禁
 
 - 新增 `scripts/test-scheduling.mjs`（内核纯函数 + 桥接接线）；`audit-bridge-harness` 按命名空间整包注入 `src/scheduling/`；`test-audit-regressions` 的限频用例改为双桶语义，并新增「`direct` 打空照常投递」；`test-console-static` 新增三条：行为档案面板必须绑开关点击、回填必须用 `setSwitch`、回填必须认字段默认值；`test-console-ui` 的契约基线按「全量快照」重录（行为表单每次提交都带完整 `config`）。

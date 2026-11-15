@@ -665,6 +665,21 @@ B0–B8 已落地；版本身份已统一到 0.2.0（package.json / lock / 子�
 - **MCP 不在会话层下发**：四个 MCP 服务器本来由 `adapters/install.mjs` 写进执行体配置（与 preset 无关），
   直通不装 preset 也照样有 MCP。给 DSH 再传一遍 `mcpServers` 只会把同一批 server 声明两次，因此不传；
   `direct.yml` 头注释与 §7.1 已按这个事实改写。
+- **权限基线 `permissionMirror` 落盘**：桥接每次代改成功都记 `{ preset, at }`，只用来判「对端已被外部改成别的档」；
+  漂移只标不改（改回是用户点按钮的事），没有基线就不报漂移。
+- **会话详情一条给全**：`GET /api/sessions/:key/agent` 一次返回执行体、实例（含 `instanceForeign`）、方案四轴、
+  能力档、提示通道与权限现状；直通下 `permission.current` 是对端**此刻**的回读值，读不出来就如实标 `readable:false`，
+  不拿档案里的旧值充数。
+- **代改走专门写口**：`POST /api/sessions/:key/permission` 只收直通会话（桥接权威下 409 指向档案里的「权限级别」，
+  避免写了又被钉回去的假开关）；写失败/回读不一致回 502 并附对端实际档位。两个端点都只允许控制台。
+- **免审批档双保险**：`FORBIDDEN_PERMISSION_PRESETS`（`danger-full-access`）在 `src/session/permission.mjs` 单一来源，
+  列表过滤 + 写口 403 各用一次；需要高权限走 `full-ask`。
+- **其余写口对齐**：`PATCH /api/sessions/:key/profile` 在直通下写 `presetId` 改 409（不挂预设就不该假装有开关）；
+  `GET /api/sessions/:key/profile` 增 `apply`，页面靠它决定要不要显示预设/沙箱那几张卡。
+- **测试**：新增 `scripts/test-passthrough-plan.mjs`（6 条：不挂预设、`system` 降级只记一次、`prefix` 首轮一次、
+  `tool` 完全不带、写后回读失败不污染基线、两个端点的权限/漂移/409/403/502 契约）。
+  同时补上审计夹具缺的两个符号（`agentPlatform`、`user-side/prompt.mjs` 整个命名空间）——此前平台话术在夹具里
+  恒为空串，前缀通道的断言会静默变成「断言空串」。
 
 ### 修复
 - **`scripts/verify-adaptation.mjs` 的 `stripComments()` 换成最小词法扫描**：旧实现先跑块注释正则、再逐行删

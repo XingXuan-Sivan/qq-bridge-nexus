@@ -99,11 +99,15 @@ import {
 // agentPlatformMetadata 是纯注册表查询，用真实现。
 import { agentPlatformMetadata } from '../src/agent-side/metadata.mjs';
 import { createAgentPort } from '../src/agent-side/port.mjs';
-// 提示注入通道是注册表的纯查询（声明面来自 profiles/…/adapters/runtime.mjs），直接用真实现。
-import { agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
+// 提示注入通道与平台实现查询都是注册表的纯查询（声明面来自 profiles/…/adapters/runtime.mjs），直接用真实现。
+import { agentPlatform, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
+// 平台话术的读写（唤醒前缀、控制台提示词编辑器、还原出厂）：真实现，纯 fs。
+// 整体注入命名空间：以后那边新增导出不必再回来补一行，也不会出现「函数在 VM 里未定义、
+// 读话术静默变空串」这种看不出问题的夹具失真。
+import * as platformPromptLib from '../src/user-side/prompt.mjs';
 import { DSH_AGENT_CAPABILITIES, createDshPort } from '../src/agent-side/adapters/dsh/port.mjs';
 import { createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
-import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
+import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, FORBIDDEN_PERMISSION_PRESETS, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry } from '../src/platforms/adapter-registry.mjs';
 
@@ -370,6 +374,10 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     profileModelOf, profileModelSignature, modelLabelForKey, sessionCanSeeImages, ensureChatModel,
     effectiveMode, passiveAllowed, proactiveAllowed,
     runtimeOf, promptChannelOf, permissionAuthorityOf, applySessionPermission, readAgentPermission, describeAgentPermission,
+    agentPermissionOptions, sessionAgentPayload,
+    // 提示注入四条：通道解析、首轮前缀的「带过没有」、记账与档案写入。
+    // 投递路径（deliverPrompt / ensureSession）在切片点之外，测试用它们直接钉语义。
+    platformPromptTextFor, promptInjectedFor, markPromptInjected, ensureSessionProfile,
     ext, handleMemberNotice, reconcileConversationMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
     setLevel(value) { currentLevel = value; },
     getMode() { return { mode: currentMode, level: currentLevel }; },
@@ -401,7 +409,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     normalizeCapability,
     // 能力档 runtime 段的缺省值（旧会话/未迁移方案按它处理）与提示通道查询。
     CAPABILITY_RUNTIME_DEFAULTS,
+    agentPlatform,
     agentPlatformPromptChannels,
+    ...platformPromptLib,
     createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
     AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform,
@@ -463,6 +473,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createRuntimeState,
   normalizePermissionConfig,
   normalizeSessionPermission,
+  FORBIDDEN_PERMISSION_PRESETS,
   presetForLevel,
   resolvePermission,
   PERMISSION_LABEL,

@@ -16,6 +16,13 @@ export const PERMISSION_LABEL = {
   full: '完全访问 · 短时授权',
 };
 
+/**
+ * 不得从界面/QQ 直接选的对端预设：`danger-full-access` 的审批策略是 `never`，
+ * 选中它就等于把「不弹审批直接执行」交给了模型。需要高权限走 `full-ask`。
+ * 直通方案的对端档位下拉按这份名单过滤（不是隐藏——写入侧也必须拒）。
+ */
+export const FORBIDDEN_PERMISSION_PRESETS = Object.freeze(['danger-full-access']);
+
 const FULL_TTLS = [10, 30, 60];
 
 export function normalizePermissionConfig(raw = {}) {

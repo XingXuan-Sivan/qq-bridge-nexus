@@ -116,6 +116,14 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     // 会话级权限覆盖（`inherit` = 跟随全局）。只记「选了哪一档」，级别 → 平台预设名的映射
     // 由 Agent 侧适配器给；权限档归执行体时它只是档案里的一条记录，不是生效值。
     permission: normalizeSessionPermission(raw.permission),
+    // 桥接最后一次代改过的对端档位（直通专用）：只用来标「对端已被外部改成 X」，
+    // 不参与生效值计算。没写过就是 null（没基线就不该报漂移）。
+    permissionMirror: raw.permissionMirror && typeof raw.permissionMirror === 'object' && raw.permissionMirror.preset
+      ? {
+        preset: normalizeString(raw.permissionMirror.preset, 80),
+        at: Number(raw.permissionMirror.at) > 0 ? Number(raw.permissionMirror.at) : 0,
+      }
+      : null,
     binding: {
       // C5 第三批：绑定的是 `{ instance, sessionId }` 而不是裸 id —— 换平台后旧引用必须判废，
       // 不能把上一个平台的会话 id 当成当前平台的（原因见 src/session/ref.mjs）。老档案把
@@ -158,6 +166,7 @@ export function createProfile(key, patch = {}, now = Date.now) {
     model: null,
     presetId: null,
     permission: 'inherit',
+    permissionMirror: null,
     binding: { agentRef: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
     dormant: null,
     promptInjected: null,
@@ -190,6 +199,7 @@ export function applyPatch(profile, patch, now = Date.now) {
     if (Object.hasOwn(p, field)) next[field] = p[field];
   }
   if (Object.hasOwn(p, 'permission')) next.permission = normalizeSessionPermission(p.permission);
+  if (Object.hasOwn(p, 'permissionMirror')) next.permissionMirror = p.permissionMirror ?? null;
   if (p.persona && typeof p.persona === 'object') {
     if (Object.hasOwn(p.persona, 'mode')) next.persona.mode = p.persona.mode;
     if (Object.hasOwn(p.persona, 'name')) next.persona.name = p.persona.name;

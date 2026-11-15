@@ -117,6 +117,7 @@ import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } fro
 import { listPlatforms } from './platforms/index.mjs';
 import { createAdapterRegistry } from './platforms/adapter-registry.mjs';
 import {
+  FORBIDDEN_PERMISSION_PRESETS,
   PERMISSION_LABEL,
   PERMISSION_LEVELS,
   SESSION_PERMISSIONS,
@@ -4706,6 +4707,12 @@ async function main() {
       return { ok: false, current, error: `对端回读为「${current || '读不出来'}」，与写入的「${wanted}」不一致` };
     }
     ext.audit.append('permission.change', { key, preset: current, by: reason, authority: 'agent' });
+    // 记下「桥接替用户设成了哪一档」：控制台用它判断对端是否已被外部改过（漂移只标记，不改回）。
+    const profile = ensureSessionProfile(key);
+    if (profile) {
+      profile.permissionMirror = { preset: current, at: Date.now() };
+      saveState();
+    }
     return { ok: true, preset: current };
   }
 
@@ -4752,6 +4759,113 @@ async function main() {
       grantExpiresAt: fullGrants.get(key)?.expiresAt ?? null,
       ttlMin: cfg.permission.fullTtlMin,
       canPinFull: fullAllowedForKey(key),
+    };
+  }
+
+  /**
+   * 直通方案下可选的对端档位：目录来自执行体自己（`listPermissionPresets`）。
+   * `FORBIDDEN_PERMISSION_PRESETS` 里的档位不列出——它们不弹审批，列出来就是诱谁去点。
+   */
+  async function agentPermissionOptions() {
+    if (!agentPort.supports('permission')) {
+      return { options: [], defaultPreset: '', error: `执行体 ${agentPort.id} 不支持读写权限档` };
+    }
+    try {
+      const { options, defaultPreset } = await agentPort.listPermissionPresets();
+      return {
+        options: (Array.isArray(options) ? options : [])
+          .map((item) => ({
+            value: String(item?.value ?? '').trim(),
+            name: String(item?.name ?? '').trim(),
+          }))
+          .filter((item) => item.value && !FORBIDDEN_PERMISSION_PRESETS.includes(item.value))
+          .map((item) => ({ ...item, name: item.name || item.value })),
+        defaultPreset: String(defaultPreset ?? '').trim(),
+        error: '',
+      };
+    } catch (error) {
+      return { options: [], defaultPreset: '', error: String(error?.message ?? error) };
+    }
+  }
+
+  /**
+   * 会话详情 › 「执行体与权限」的唯一数据源（§7.6）：一条请求给全，页面不再为了凑一块去打四个接口。
+   *
+   * `permission.current` 的语义按权威分：`bridge` 是桥接四级算出来的生效档；
+   * `agent` 是对端此刻的档位——读不出来就如实标 `readable: false`，不拿档案里的旧值充数
+   * （「读不出来」与「没改过」不是同件事）。
+   */
+  async function sessionAgentPayload(rawKey) {
+    const key = apiKey(rawKey);
+    const profile = state.profiles?.[key] ?? null;
+    const sessionId = sessions.get(key) ?? null;
+    if (!profile && !sessionId) return null;
+    const plan = sessionPlanOf(key) ?? activePlan() ?? null;
+    const capability = capabilityOf(key);
+    const runtime = runtimeOf(key);
+    const authority = permissionAuthorityOf(key);
+    const impl = agentPlatform(agentPort.id);
+    const instance = sessions.instanceOf(key) ?? agentPort.id;
+    let permission;
+    if (authority === 'agent') {
+      const now = await readAgentPermission(key);
+      const catalog = await agentPermissionOptions();
+      const mirror = profile?.permissionMirror ?? null;
+      permission = {
+        authority,
+        current: now.preset || '',
+        readable: now.readable,
+        reason: now.reason || '',
+        options: catalog.options,
+        defaultPreset: catalog.defaultPreset,
+        catalogError: catalog.error || '',
+        // 桥接最后一次写入的档位与时间（没写过就没有基线）
+        mirror: mirror?.preset ?? null,
+        setAt: Number(mirror?.at) || 0,
+        // 漂移只是「对端被外部改过」的陈述：不自动改回（§7.2），界面给「改回」按钮。
+        drift: now.readable && mirror?.preset && now.preset !== mirror.preset
+          ? { expected: mirror.preset, actual: now.preset, at: Number(mirror.at) || 0 }
+          : null,
+      };
+    } else {
+      permission = {
+        authority,
+        current: permissionLevelOf(key),
+        readable: true,
+        reason: '',
+        options: SESSION_PERMISSIONS.map((value) => ({ value, name: PERMISSION_LABEL[value] ?? value })),
+        defaultPreset: '',
+        catalogError: '',
+        mirror: null,
+        setAt: 0,
+        drift: null,
+        fullAllowed: cfg.permission?.allowFull === true,
+        grantActive: fullGrantActive(key),
+      };
+    }
+    return {
+      key,
+      sessionId,
+      instance,
+      // 会话绑在执行体实例上：与当前活动执行体不一致时界面要标「跟随建会话时的实例」。
+      instanceForeign: instance !== agentPort.id,
+      agentPlatform: { id: agentPort.id, label: impl?.label ?? agentPort.id },
+      plan: plan
+        ? {
+          id: plan.id,
+          label: plan.label,
+          audience: plan.audience,
+          builtin: plan.builtin,
+          capability: plan.capability,
+          apply: runtime.apply,
+          authority: runtime.permission,
+          prompt: runtime.prompt,
+        }
+        : null,
+      capability: capability ? { id: capability.id, label: capability.label } : null,
+      // 话术怎么进：`degraded` 为真时界面要显示黄条（降级的理由在 reason 里）。
+      promptChannel: promptChannelOf(key),
+      permission,
     };
   }
 
@@ -9018,6 +9132,8 @@ async function main() {
               // 下拉里的「跟随全局（当前：…）」要显示全局方案的名字，所以给整份定义（与 `/api/plans` 的 activePlan 同形）。
               activePlan: activePlan() ?? null,
               permission: permissionPayload(key),
+              // 生效方式（能力档 runtime.apply）：页面靠它决定要不要显示预设/沙箱那几张卡。
+              apply: runtimeOf(key).apply,
               presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
               model: profile?.model ?? null,
@@ -9067,6 +9183,11 @@ async function main() {
               else patch.planId = raw;
             }
             if (Object.hasOwn(body, 'presetId')) {
+              // 直通不挂预设：写进来也不会被用，等于给用户一个假开关。
+              if (passthroughOf(key)) {
+                sendJson({ ok: false, error: '当前方案为直通：不向执行体装预设，preset 由执行体自己决定' }, 409);
+                return;
+              }
               const raw = String(body.presetId ?? '').trim();
               if (!raw) patch.presetId = null;
               else {
@@ -9175,6 +9296,49 @@ async function main() {
             return;
           }
           sendJson({ ok: false, error: '不支持的请求' }, 405);
+          return;
+        }
+        // P5 会话详情 › 执行体与权限（§7.6）。读、写两个端点分开：
+        // 读可以随便调，写是「代用户改执行体权限」，所以只允许控制台（AI 不能自己提权）。
+        const sessionAgentMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/agent$/);
+        if (sessionAgentMatch) {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          let key;
+          try { key = apiKey(decodeURIComponent(sessionAgentMatch[1])); }
+          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
+          if (req.method !== 'GET') { sendJson({ ok: false, error: '不支持的请求' }, 405); return; }
+          const payload = await sessionAgentPayload(key);
+          if (!payload) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
+          sendJson({ ok: true, ...payload });
+          return;
+        }
+        const sessionPermissionMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/permission$/);
+        if (sessionPermissionMatch) {
+          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
+          let key;
+          try { key = apiKey(decodeURIComponent(sessionPermissionMatch[1])); }
+          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
+          if (req.method !== 'POST') { sendJson({ ok: false, error: '不支持的请求' }, 405); return; }
+          // 桥接权威下不接这个写口：写了也会在下一个回合被钉回去，等于给用户一个假开关。
+          if (permissionAuthorityOf(key) !== 'agent') {
+            sendJson({ ok: false, error: '当前方案的权限档由桥接管理：改档请用会话档案里的「权限级别」' }, 409);
+            return;
+          }
+          const body = await readBody();
+          const preset = String(body?.preset ?? '').trim();
+          if (!preset) { sendJson({ ok: false, error: '缺少 preset' }, 400); return; }
+          // 列表里不列的档位，写入口也不接：不能靠手改请求把「不弹审批」打开。
+          if (FORBIDDEN_PERMISSION_PRESETS.includes(preset)) {
+            sendJson({ ok: false, error: `「${preset}」不弹审批直接执行，不允许从桥接写入；需要高权限请选 full-ask` }, 403);
+            return;
+          }
+          const result = await applySessionPermission(key, preset, { reason: 'console' });
+          if (!result.ok) {
+            sendJson({ ok: false, error: result.error, current: result.current ?? null }, 502);
+            return;
+          }
+          log(`控制台：会话 ${key} 的对端权限档已写入 ${result.preset}`);
+          sendJson({ ok: true, ...(await sessionAgentPayload(key)) });
           return;
         }
         // ── 挂起审批 / 提问 ───────────────────────────────────────────────────

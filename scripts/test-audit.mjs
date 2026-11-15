@@ -140,6 +140,8 @@ const tests = [
   'test-runtime-plans.mjs',
   'test-runtime-combo.mjs',
   'test-runtime-capabilities.mjs',
+  // 直通运行期（P5）：不挂预设、提示四通道、权限代改的回读与漂移、会话详情两个端点。
+  'test-passthrough-plan.mjs',
   'test-tool-catalog.mjs',
   'test-capability-unify.mjs',
   'test-permission.mjs',

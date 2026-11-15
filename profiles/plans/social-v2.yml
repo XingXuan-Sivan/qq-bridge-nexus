@@ -2,7 +2,8 @@ version: 1
 id: social-v2
 label: 二代仿真
 note: 自主阅读、发言与潜水（v2 行为）。
-builtin: true
+order: 30
+agentPlatform: auto
 behavior: social-v2
 capability: chat-v2
 audience: access

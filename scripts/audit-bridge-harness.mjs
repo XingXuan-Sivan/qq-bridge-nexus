@@ -57,7 +57,10 @@ import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs
 // P3 预设编辑器：bridge 直接 import，夹具按同名补回。
 import { createPresetStore, validateAgentYaml } from '../src/presets/store.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { engineOfKind, loadBehaviorProfiles, resolveBehavior } from '../src/behaviors/index.mjs';
+import * as behaviorProfileLib from '../src/behaviors/index.mjs';
+import * as behaviorTypeLib from '../src/behaviors/types.mjs';
+import * as behaviorEngineLib from '../src/behaviors/engines.mjs';
+import * as factoryLib from '../src/profiles/factory.mjs';
 import YAML, { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { formatKey, parseKey, platformOfConfig } from '../src/session/key.mjs';
 import { accountOfConfig, configureKeys, key as buildKey, defaultAddress, isGroupKey, isPrivateKey, idOfKey, withAddress } from '../src/session/key.mjs';
@@ -413,7 +416,23 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // bridge.js 的 `import YAML from 'yaml'` 在 VM 里被剥掉，必须按同名补回：
     // 预设编辑器读/写能力档（readPresetCapability / writePresetRows）全走这个默认导出。
     YAML,
-    loadBehaviorProfiles, resolveBehavior, engineOfKind,
+    // 行为档案、行为类型、引擎定义与出厂副本：bridge 直接 import，夹具剥 import 后按同名补回。
+    listBehaviorFiles: behaviorProfileLib.listBehaviorFiles,
+    readBehaviorDocument: behaviorProfileLib.readBehaviorDocument,
+    writeBehaviorData: behaviorProfileLib.writeBehaviorData,
+    duplicateBehavior: behaviorProfileLib.duplicateBehavior,
+    removeBehaviorFile: behaviorProfileLib.removeBehaviorFile,
+    loadBehaviorProfiles: behaviorProfileLib.loadBehaviorProfiles,
+    readBehaviorFile: behaviorProfileLib.readBehaviorFile,
+    resetBehavior: behaviorProfileLib.resetBehavior,
+    resolveBehavior: behaviorProfileLib.resolveBehavior,
+    validateBehaviorText: behaviorProfileLib.validateBehaviorText,
+    writeBehaviorFile: behaviorProfileLib.writeBehaviorFile,
+    listBehaviorTypes: behaviorTypeLib.listBehaviorTypes,
+    loadBehaviorTypes: behaviorTypeLib.loadBehaviorTypes,
+    groupDefaults: behaviorEngineLib.groupDefaults,
+    hasFactory: factoryLib.hasFactory,
+    readFactoryText: factoryLib.readFactoryText,
     console: { log() {}, error() {} },
     fetch: fakeFetch,
     // 四层模型的根目录在 src/profiles/paths.mjs 里按仓库根算；夹具把 bridge 搬到 temp 执行，

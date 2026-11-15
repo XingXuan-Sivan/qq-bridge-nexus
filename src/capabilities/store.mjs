@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML, { parseDocument } from 'yaml';
 import { AGENT_PLATFORMS_ROOT } from '../profiles/paths.mjs';
-import { capabilityCovers, capabilityDefaults, PLATFORM_TOOLS, AGENT_MODULES, BUILTIN_CAPABILITY_IDS } from '../tools/catalog.mjs';
+import { copyFactory, hasFactory } from '../profiles/factory.mjs';
+import { capabilityCovers, PLATFORM_TOOLS } from '../tools/catalog.mjs';
 
 export const CAPABILITIES_ROOT = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'capabilities');
 
@@ -178,19 +179,13 @@ export function capabilityFile(root, id) {
   return path.join(root, `${name}.yml`);
 }
 
-/** 平台工具可见集：显式写了按显式，没写按能力的默认模板（defaultOff 默认不进）。 */
+/**
+ * 平台工具可见集：只看能力档自己写的 tools.platform，缺的键就是不可见。
+ * 白名单不许猜：没写的不当成「默认开」，也不回落某条内置能力档的模板。
+ */
 export function visiblePlatformFlags(capability) {
-  const preset = capabilityDefaults(capability?.id) ?? capabilityDefaults('chat');
-  const allVisible = preset?.platform === true;
-  const defaults = new Set(Array.isArray(preset?.platform) ? preset.platform : []);
   const explicit = capability?.tools?.platform ?? {};
-  const visible = [];
-  for (const tool of PLATFORM_TOOLS) {
-    const value = explicit[tool.flag];
-    const byDefault = defaults.has(tool.flag) || (allVisible && tool.defaultOff !== true);
-    if (value === true || (value === undefined && byDefault)) visible.push(tool.flag);
-  }
-  return visible;
+  return PLATFORM_TOOLS.filter((tool) => explicit[tool.flag] === true).map((tool) => tool.flag);
 }
 
 /** 这套能力允许该工具吗？只对可收紧的副作用工具有意义（读类恒 true）。 */
@@ -219,7 +214,7 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
     const { rows, ...rest } = capability;
     return {
       ...rest,
-      builtin: BUILTIN_CAPABILITY_IDS.includes(capability.id),
+      builtin: hasFactory(root, capability.id),
       platformVisible: visiblePlatformFlags(capability),
       agentModules: agentModulesOf(capability),
       hasRows: rows.length > 0,
@@ -271,7 +266,7 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
   function save(id, patch = {}) {
     const current = get(id);
     const base = current ?? normalizeCapability({ label: id, note: '', tools: {} }, { id });
-    const builtin = BUILTIN_CAPABILITY_IDS.includes(base.id);
+    const builtin = hasFactory(root, base.id);
     const next = normalizeCapability({
       ...base,
       // 内置预设的名称/备注是固定文案，只允许改工具面。
@@ -350,14 +345,12 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
     return { id: name };
   }
 
-  /** 内置能力重置：把 .defaults/<id>.yml 抄回当前文件（自定义能力没有出厂副本）。 */
+  /** 重置：把 .defaults/<id>.yml 抄回当前文件（没有出厂副本的能力档不可重置）。 */
   function reset(id) {
     const name = String(id ?? '').trim();
-    if (!BUILTIN_CAPABILITY_IDS.includes(name)) throw new Error('只有内置能力档可以重置');
-    const factory = path.join(root, '.defaults', `${name}.yml`);
-    if (!fs.existsSync(factory)) throw new Error('缺少出厂副本，无法重置');
+    if (!hasFactory(root, name)) throw new Error('只有带出厂副本的能力档可以重置');
     fs.mkdirSync(root, { recursive: true });
-    fs.copyFileSync(factory, capabilityFile(root, name));
+    copyFactory(root, name);
     log(`[capabilities] 已重置 ${name}`);
     return get(name);
   }

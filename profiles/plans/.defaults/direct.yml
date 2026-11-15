@@ -2,7 +2,8 @@ version: 1
 id: direct
 label: 直通 · 主人
 note: 不装预设与沙箱，直接用执行体现成的工具与权限档；权限由执行体自身管理。
-builtin: true
+order: 70
+agentPlatform: auto
 behavior: none
 capability: direct
 audience: owner

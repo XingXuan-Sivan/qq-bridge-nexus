@@ -8,6 +8,7 @@ export const PROFILES_ROOT = path.join(REPO_ROOT, 'profiles');
 export const PLATFORMS_ROOT = path.join(PROFILES_ROOT, 'platforms');
 export const AGENT_PLATFORMS_ROOT = path.join(PROFILES_ROOT, 'agent-platforms');
 export const PLANS_ROOT = path.join(PROFILES_ROOT, 'plans');
+export const BEHAVIOR_ENGINES_ROOT = path.join(PROFILES_ROOT, 'behavior-engines');
 export const SCHEMAS_ROOT = path.join(PROFILES_ROOT, 'schemas');
 
 export function platformDir(platformId) {

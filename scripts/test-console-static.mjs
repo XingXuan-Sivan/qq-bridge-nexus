@@ -460,14 +460,14 @@ for (const page of consolePageDirs(ROOT)) {
 }
 ok(unboundSwitchPages.length === 0, `用开关的页面都绑了点击委托（${unboundSwitchPages.join('、') || '全部已绑'}）`);
 
-// 行为档案的字段来自后端 kind 注册表（src/behaviors/kinds/*.mjs 的 sw()），本地 fields.js 里看不到
+// 行为档案的字段来自引擎定义（profiles/behavior-engines/*.yml），本地 fields.js 里看不到
 // switch，上面那条按 fields 判定的循环会把它跳过 —— 这里单独钉一次。
 const behaviorsPanelJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'behaviors-panel.js'), 'utf8');
-const kindJs = fs.readdirSync(path.join(ROOT, 'src', 'behaviors', 'kinds'))
-  .filter((name) => name.endsWith('.mjs') && name !== 'index.mjs')
-  .map((name) => fs.readFileSync(path.join(ROOT, 'src', 'behaviors', 'kinds', name), 'utf8'))
+const engineYml = fs.readdirSync(path.join(ROOT, 'profiles', 'behavior-engines'))
+  .filter((name) => /\.ya?ml$/i.test(name))
+  .map((name) => fs.readFileSync(path.join(ROOT, 'profiles', 'behavior-engines', name), 'utf8'))
   .join('\n');
-ok(/sw\(/.test(kindJs) && /bindSwitches\(/.test(behaviorsPanelJs), '行为档案面板绑定开关点击（字段来自 kind 注册表）');
+ok(/type:\s*switch/.test(engineYml) && /bindSwitches\(/.test(behaviorsPanelJs), '行为档案面板绑定开关点击（字段来自引擎定义）');
 const behaviorFormJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'behavior-form.js'), 'utf8');
 ok(/setSwitch\(/.test(behaviorFormJs), '行为档案回填用 setSwitch（状态与文案一起改）');
 ok(/item\.default/.test(behaviorFormJs), '行为档案回填认字段声明的默认值（缺省不显示成关/空）');

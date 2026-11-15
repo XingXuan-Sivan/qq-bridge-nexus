@@ -316,7 +316,7 @@ try {
     await page.locator('#behaviorFormSave').click({ force: true });
     await page.waitForTimeout(600);
     const body = fixture.requests.filter((r) => r.method === 'PUT' && r.path.includes('/api/config/behaviors/')).at(-1)?.body;
-    assert.equal(body?.data?.kind, 'v1');
+    assert.equal(body?.data?.kind, 'social-v1');
     assert.equal(body?.data?.config?.contextWindow, 25);
   });
 

@@ -129,6 +129,7 @@ function rowHtml(plan) {
     `<span class="meta">${esc(plan.note || '')}</span>`,
     `<div class="row">
       <button class="btn small" type="button" data-plan-edit="${esc(plan.id)}">${plan.builtin ? '克隆' : '编辑'}</button>
+      ${plan.builtin ? `<button class="btn small" type="button" data-plan-reset="${esc(plan.id)}">重置</button>` : ''}
       ${plan.builtin ? '' : `<button class="btn small danger" type="button" data-plan-del="${esc(plan.id)}">删除</button>`}
     </div>`,
   ];
@@ -148,7 +149,7 @@ function tableCardHtml() {
         { label: '受众', width: '100' },
         { label: '来源', width: '80' },
         { label: '说明' },
-        { label: '操作', width: '130' },
+        { label: '操作', width: '170' },
       ],
       rows: plans.map(rowHtml),
       pageSize: 20,
@@ -356,6 +357,23 @@ async function deletePlan(planId) {
   }
 }
 
+async function resetPlan(planId) {
+  if (!planId) return;
+  const plan = planById(planId);
+  if (!(await confirmBox({
+    title: '重置运行方案',
+    message: `把方案「${plan?.label ?? planId}」恢复为出厂内容？当前的修改会丢失。`,
+    confirmText: '重置',
+  }))) return;
+  try {
+    await api(`/api/plans/${encodeURIComponent(planId)}/reset`, 'POST', {});
+    showConsoleToast('运行方案已重置为出厂内容');
+    await load();
+  } catch (error) {
+    await alertBox({ message: error?.message || '重置失败', type: 'danger' });
+  }
+}
+
 // ── 导入 / 导出 ────────────────────────────────────────────────────────────
 function jsonModal({ id, title, value, readonly, confirmLabel, onConfirm }) {
   el(id)?.remove();
@@ -379,6 +397,7 @@ function exportPlans() {
     id: plan.id,
     label: plan.label,
     note: plan.note,
+    order: plan.order,
     agentPlatform: plan.agentPlatform,
     capability: plan.capability,
     behavior: plan.behavior,
@@ -482,6 +501,8 @@ export function init() {
     }
     const delId = button.dataset.planDel;
     if (delId) void deletePlan(delId);
+    const resetId = button.dataset.planReset;
+    if (resetId) void resetPlan(resetId);
   });
   onPageRefresh('plans', () => void load());
   void load();

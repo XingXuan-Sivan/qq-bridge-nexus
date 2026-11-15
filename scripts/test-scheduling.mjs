@@ -6,8 +6,12 @@ import assert from 'node:assert/strict';
 import { batchDelayMs, tighterTier } from '../src/scheduling/batching.mjs';
 import { PACING_TIERS, createPacingState, normalizePacingState, pacingSnapshot, refundToken, takeToken } from '../src/scheduling/pacing.mjs';
 import { classifyPendingWake, clearAcknowledgedOverflow, noteOverflow } from '../src/scheduling/cursor.mjs';
-import { SCHEDULING_DEFAULTS, batchLimits, resolveSchedulingPolicy, tierOf } from '../src/scheduling/policy.mjs';
+import { batchLimits, resolveSchedulingPolicy, tierOf } from '../src/scheduling/policy.mjs';
+import { groupDefaults } from '../src/behaviors/engines.mjs';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+
+// 调度默认值的唯一真源：行为引擎定义里的 wake_* 字段（与 bridge 注入的同一份）。
+const WAKE_DEFAULTS = groupDefaults('v2', 'wake');
 
 let failures = 0;
 async function test(name, run) {
@@ -137,18 +141,18 @@ await test('溢出：多次裁剪合并成一个区间，读水位越过末条�
 });
 
 // ── 4. 策略解析：默认值、覆盖、档位归属 ─────────────────────────────────────
-await test('策略：空配置落到核心默认值，覆盖值只改自己', () => {
-  const fallback = resolveSchedulingPolicy({});
-  assert.equal(fallback.adaptiveDebounce, SCHEDULING_DEFAULTS.adaptiveDebounce);
+await test('策略：空配置落到引擎默认值，覆盖值只改自己', () => {
+  const fallback = resolveSchedulingPolicy({}, WAKE_DEFAULTS);
+  assert.equal(fallback.adaptiveDebounce, WAKE_DEFAULTS.adaptiveDebounce);
   assert.deepEqual(fallback.batching.direct, {
-    baseMs: SCHEDULING_DEFAULTS.directBaseMs,
-    maxWaitMs: SCHEDULING_DEFAULTS.directMaxWaitMs,
+    baseMs: WAKE_DEFAULTS.directBaseMs,
+    maxWaitMs: WAKE_DEFAULTS.directMaxWaitMs,
   });
-  assert.equal(fallback.pacing.ambient.capacity, SCHEDULING_DEFAULTS.ambientBudgetCapacity);
-  const tuned = resolveSchedulingPolicy({ directMaxWaitMs: 500, ambientBaseMs: 'bad', ambientBudgetCapacity: -1 });
+  assert.equal(fallback.pacing.ambient.capacity, WAKE_DEFAULTS.ambientBudgetCapacity);
+  const tuned = resolveSchedulingPolicy({ directMaxWaitMs: 500, ambientBaseMs: 'bad', ambientBudgetCapacity: -1 }, WAKE_DEFAULTS);
   assert.equal(tuned.batching.direct.maxWaitMs, 500);
-  assert.equal(tuned.batching.ambient.baseMs, SCHEDULING_DEFAULTS.ambientBaseMs, '非法值回落默认');
-  assert.equal(tuned.pacing.ambient.capacity, SCHEDULING_DEFAULTS.ambientBudgetCapacity, '越界值回落默认');
+  assert.equal(tuned.batching.ambient.baseMs, WAKE_DEFAULTS.ambientBaseMs, '非法值回落默认');
+  assert.equal(tuned.pacing.ambient.capacity, WAKE_DEFAULTS.ambientBudgetCapacity, '越界值回落默认');
 });
 
 await test('策略：档位归属 —— 点名走 direct，时钟不耗预算，其余 ambient', () => {

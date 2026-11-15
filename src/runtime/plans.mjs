@@ -1,12 +1,14 @@
 // 运行方案：组合「用户侧平台的行为档案」与「Agent 侧平台的能力档」。
 //
-// 权威源：profiles/plans/<id>.yml。内置方案带 builtin: true，控制台只读、可克隆；
-// 自定义方案同目录，删改都落文件。桥接只依赖 createPlanStore().list()/get()/save()/remove()。
+// 权威源：profiles/plans/<id>.yml。带出厂副本（plans/.defaults/<id>.yml）的方案是内置方案：
+// 控制台只读、可克隆、可重置；不带副本的是自定义方案，删改都落文件。
+// 桥接只依赖 createPlanStore().list()/get()/save()/remove()。
 // 方案**不绑用户平台**：行为档案本来就按平台走，方案只引用行为 id。
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { PLANS_ROOT } from '../profiles/paths.mjs';
+import { copyFactory, hasFactory } from '../profiles/factory.mjs';
 // 方案里的 capability 就是能力档 id，也**就是** Agent 平台托管的 preset id（C4 后不再单写 agent）。
 // 哪个 preset 属于管理通道哪一级由平台适配器声明（AGENT_PRESET_FOR_LEVEL），这里不写死任何 preset 名。
 import { agentPresetLevel } from '../agent-side/runtime-registry.mjs';
@@ -17,11 +19,10 @@ import '../agent-side/builtin.mjs';
 export const AGENT_PLATFORM_AUTO = 'auto';
 export const PLAN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 export const PLAN_AUDIENCES = ['owner', 'access'];
-export const BUILTIN_PLAN_ORDER = ['chat', 'social-v1', 'social-v2', 'agent-readonly', 'agent-workspace', 'agent-full', 'direct'];
 
 const PLAN_FILE_HEADER = '# 运行方案：组合 behavior（行为档案）+ agentPlatform（Agent 侧平台，auto = 跟随全局）\n'
   + '# 与 capability（能力档 id，也是 Agent 侧的 preset id）。方案不绑用户平台。\n'
-  + '# builtin: true 为只读方案，可克隆，不可改删。';
+  + '# order 决定控制台里的排列顺序；带出厂副本（.defaults/）的方案只读，可克隆、可重置。';
 
 function text(value, max = 120) {
   if (typeof value !== 'string') return '';
@@ -33,11 +34,14 @@ function plain(value, label) {
   return value;
 }
 
+/** 自定义方案的默认排序位置：排在内置方案之后。 */
+const PLAN_ORDER_DEFAULT = 900;
+
 /**
  * 归一并校验一份方案；字段缺失或引用非法直接报错（不做静默兜底）。
  *
  * 不再读 `platform`：方案不绑用户平台。旧文件里的这个字段由 planWarnings() 报告，
- * 保存时自然被丢掉（planText 不写它）。
+ * 保存时自然被丢掉（planText 不写它）。`builtin` 由出厂副本是否存在决定，文件里不再写。
  */
 export function normalizePlan(raw, { source = 'plan' } = {}) {
   const value = plain(raw, source);
@@ -48,12 +52,13 @@ export function normalizePlan(raw, { source = 'plan' } = {}) {
   if (!capability) throw new Error(`${source}.capability 不能为空`);
   const behavior = text(value.behavior, 80) || 'none';
   const audience = PLAN_AUDIENCES.includes(value.audience) ? value.audience : 'access';
+  const order = Number(value.order);
   return {
     id,
     label: text(value.label, 40) || id,
     note: text(value.note, 200),
     version: Number.isInteger(Number(value.version)) ? Number(value.version) : 1,
-    builtin: value.builtin === true,
+    order: Number.isInteger(order) ? order : PLAN_ORDER_DEFAULT,
     agentPlatform,
     behavior,
     capability,
@@ -62,13 +67,16 @@ export function normalizePlan(raw, { source = 'plan' } = {}) {
 }
 
 /** 旧文件里已经不生效的字段：读时报告，但不阻断加载。 */
-export function planWarnings(raw) {
+export function planWarnings(raw, { builtin = false } = {}) {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const warnings = [];
   if (Object.hasOwn(value, 'platform')) {
     warnings.push({ code: 'plan_warn', message: 'platform 字段已不生效：方案不再绑用户平台，保存后会被删除' });
   }
-  if (value.agentPlatform && String(value.agentPlatform) !== AGENT_PLATFORM_AUTO && value.builtin === true) {
+  if (Object.hasOwn(value, 'builtin')) {
+    warnings.push({ code: 'plan_warn', message: 'builtin 字段已不生效：带出厂副本即为内置，保存后会被删除' });
+  }
+  if (value.agentPlatform && String(value.agentPlatform) !== AGENT_PLATFORM_AUTO && builtin) {
     warnings.push({ code: 'plan_warn', message: '内置方案的 agentPlatform 应保持 auto，否则换全局执行体时本方案会被拉回旧平台' });
   }
   return warnings;
@@ -80,7 +88,7 @@ function planText(plan) {
     id: plan.id,
     label: plan.label,
     note: plan.note,
-    builtin: plan.builtin === true,
+    order: plan.order,
     agentPlatform: plan.agentPlatform,
     behavior: plan.behavior,
     capability: plan.capability,
@@ -90,8 +98,7 @@ function planText(plan) {
 }
 
 function orderOf(plan) {
-  const index = BUILTIN_PLAN_ORDER.indexOf(plan.id);
-  return index >= 0 ? index : BUILTIN_PLAN_ORDER.length + (plan.builtin ? 0 : 1);
+  return Number.isFinite(plan.order) ? plan.order : PLAN_ORDER_DEFAULT;
 }
 
 /**
@@ -116,8 +123,9 @@ export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
       throw new Error(`方案 ${file} YAML 解析失败：${error?.message ?? error}`);
     }
     // 旧字段不阻断加载，但要让调用方看得到：控制台与 check-profiles 都读 warnings。
-    const warnings = planWarnings(raw);
-    const plan = normalizePlan({ ...raw, id: raw?.id ?? id }, { source: `plans/${file}` });
+    const builtin = hasFactory(root, id);
+    const warnings = planWarnings(raw, { builtin });
+    const plan = { ...normalizePlan({ ...raw, id: raw?.id ?? id }, { source: `plans/${file}` }), builtin };
     return warnings.length ? { ...plan, warnings } : plan;
   }
 
@@ -137,7 +145,7 @@ export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
     const existing = get(plan.id);
     if (existing?.builtin) throw new Error('内置方案是只读的，请先克隆一份再改');
     fs.mkdirSync(root, { recursive: true });
-    fs.writeFileSync(path.join(root, `${plan.id}.yml`), planText({ ...plan, builtin: false }), 'utf8');
+    fs.writeFileSync(path.join(root, `${plan.id}.yml`), planText(plan), 'utf8');
     log(`[plans] 已保存 ${plan.id}`);
     return { ...plan, builtin: false };
   }
@@ -161,16 +169,14 @@ export function createPlanStore({ root = PLANS_ROOT, log = () => {} } = {}) {
       ...source,
       id: nextId,
       label: `${source.label}（副本）`,
-      builtin: false,
     });
   }
 
   function reset(id) {
     const plan = get(id);
-    if (!plan?.builtin) throw new Error('只有内置方案可以重置');
-    const factory = path.join(root, '.defaults', `${plan.id}.yml`);
-    if (!fs.existsSync(factory)) throw new Error('缺少出厂副本，无法重置');
-    fs.copyFileSync(factory, path.join(root, `${plan.id}.yml`));
+    if (!plan) throw new Error('没有这个方案');
+    if (!hasFactory(root, plan.id)) throw new Error('只有带出厂副本的方案可以重置');
+    copyFactory(root, plan.id);
     log(`[plans] 已重置 ${plan.id}`);
     return get(plan.id);
   }

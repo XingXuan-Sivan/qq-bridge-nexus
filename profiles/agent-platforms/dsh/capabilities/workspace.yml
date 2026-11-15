@@ -8,7 +8,44 @@ id: workspace
 label: Agent · 工作区读写
 note: 在工作区内读写与执行，越界触发审批
 tools:
-  platform: {}
+  platform:
+    getPrompt: true
+    getUnread: true
+    getRecent: true
+    getMyRecent: true
+    getMessageDetail: true
+    getImages: true
+    getForwardMsg: true
+    getActiveMembers: true
+    waitMessages: true
+    socialState: true
+    listStickers: true
+    getStickerImage: true
+    getSelfImage: true
+    personProfile: true
+    memory: true
+    slangQuery: true
+    slangSubmit: true
+    markRead: true
+    setWakeConfig: true
+    stickerNote: true
+    setStickerRemark: false
+    collectSticker: true
+    sendGroup: true
+    sendPrivate: true
+    reply: true
+    sendBurst: true
+    sendMessage: true
+    sendPoke: true
+    sendSticker: true
+    sendVoice: false
+    webImage: false
+    feedback: true
+    requestMode: true
+    crossGroup: true
+    ownerGroupAccess: false
+    ownerRelay: false
+    schedule: true
   agent:
     tool-fs: true
     tool-fs-search: true
@@ -24,7 +61,8 @@ tools:
     - '*'
 preset:
   name: 运维 Agent（L2 工作区读写）
-  description: qq-bridge 管理通道的 L2 级别：管理员私聊里的运维 Agent。工作区内可读写，执行命令每次需要管理员审批。由桥接在 owner 确认后启用（Windows）。
+  description: qq-bridge 管理通道的 L2 级别：管理员私聊里的运维 Agent。工作区内可读写，执行命令每次需要管理员审批。由桥接在
+    owner 确认后启用（Windows）。
   order: 13
 rows:
   # The `workspace` agent preset：qq-bridge 管理通道的 L2 运维 Agent（只服务 owner 私聊）。

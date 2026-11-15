@@ -1,10 +1,9 @@
 // 工具目录：平台工具与 Agent 工具的唯一定义处。
 //
-// 平台工具曾经另有一份 config.tools 的 37 个注册开关（控制台手写），和能力预设的
-// capability.yml 重复；现在收敛成这一份目录 + 能力预设里的 tools.platform：
+// 配置只有两处，职责不重叠：
 //   · 目录条目描述「这个工具是什么、来自哪一端、风险等级、默认是否注册」；
-//   · 能力预设只存 tools.platform（平台工具白名单，缺省按目录默认值）；
-//   · 注册开关由各能力预设的白名单求并集推导，config.json 不再保存工具开关。
+//   · 能力预设只存 tools.platform（平台工具白名单，必须显式写全）；
+//   · 注册开关由各能力预设的白名单求并集推导，config.json 不保存工具开关。
 //
 // 目录本身是只读投影，不存配置。宿主工具名（qq_get_unread_messages 等）保留在
 // names 里，便于报错文案与旧配置迁移。
@@ -123,57 +122,6 @@ export const CATALOG_ENTRIES = Object.freeze([
   })),
 ]);
 
-/** 内置能力：只读，可克隆但不可删除；自定义能力可以删。id 与 Agent 预设同名（C4 归一）。 */
-export const BUILTIN_CAPABILITY_IDS = Object.freeze(['chat', 'chat-v2', 'readonly', 'workspace', 'full', 'direct']);
-
-/** 内置能力的默认工具集：平台全开；Agent 按能力递增（见 SPEC §3.4）。 */
-export const CAPABILITY_DEFAULTS = Object.freeze({
-  chat: Object.freeze({
-    platform: true,
-    agent: Object.freeze(['tool-web', 'tool-ask-user', 'tool-todo']),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-  // 一代/二代仿真共用同一份工具面：区别在预设正文（rows），不在能力。
-  'chat-v2': Object.freeze({
-    platform: true,
-    agent: Object.freeze(['tool-web', 'tool-ask-user', 'tool-todo']),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-  readonly: Object.freeze({
-    platform: true,
-    agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-web', 'tool-ask-user', 'tool-todo']),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-  workspace: Object.freeze({
-    platform: true,
-    agent: Object.freeze(['tool-fs', 'tool-fs-search', 'tool-pwsh', 'tool-jobs', 'tool-web', 'tool-ask-user', 'tool-todo']),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-  full: Object.freeze({
-    platform: true,
-    agent: Object.freeze(AGENT_MODULES.map((module) => module.id)),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-  // 直通：工具面由对端决定（`tools.agent.host`），这里只声明平台侧仍是全开。
-  // 直通给不出工具级白名单，所以这份默认值不是安全承诺，只是「平台工具照常可调」。
-  direct: Object.freeze({
-    platform: true,
-    agent: Object.freeze([]),
-    mcp: Object.freeze({ allow: Object.freeze(['*']), tools: Object.freeze({ allow: Object.freeze(['*']), deny: Object.freeze([]) }) }),
-    skills: Object.freeze(['*']),
-  }),
-});
-
-/** 内置能力的默认工具集；未知 id 返回 null（调用方决定回落）。 */
-export function capabilityDefaults(id) {
-  return CAPABILITY_DEFAULTS[String(id ?? '')] ?? null;
-}
-
 /** 目录条目（id → 条目）。 */
 export function catalogEntry(id) {
   const value = String(id ?? '');
@@ -219,6 +167,11 @@ export function platformToolFlags() {
   return PLATFORM_TOOLS.map((tool) => tool.flag);
 }
 
+/** 全量平台工具白名单：新建能力档时的显式起点（键齐、值统一）。 */
+export function platformToolMap(value = false) {
+  return Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, value]));
+}
+
 /** flag → 目录条目。 */
 export function platformTool(flag) {
   return PLATFORM_TOOLS.find((tool) => tool.flag === flag) ?? null;
@@ -252,6 +205,5 @@ export function toolCatalogSnapshot() {
     platform: PLATFORM_TOOLS.map((tool) => ({ ...tool, gated: capabilityCovers(tool.flag) })),
     agent: AGENT_MODULES.map((module) => ({ ...module })),
     entries: CATALOG_ENTRIES,
-    defaultAgents: Object.fromEntries(Object.entries(CAPABILITY_DEFAULTS).map(([id, value]) => [id, value.agent])),
   };
 }

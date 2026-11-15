@@ -12,7 +12,44 @@ id: direct
 label: 直通 · 主人
 note: 不装环境，用 Agent 侧现成工具与权限；不做工具级限制
 tools:
-  platform: {}
+  platform:
+    getPrompt: true
+    getUnread: true
+    getRecent: true
+    getMyRecent: true
+    getMessageDetail: true
+    getImages: true
+    getForwardMsg: true
+    getActiveMembers: true
+    waitMessages: true
+    socialState: true
+    listStickers: true
+    getStickerImage: true
+    getSelfImage: true
+    personProfile: true
+    memory: true
+    slangQuery: true
+    slangSubmit: true
+    markRead: true
+    setWakeConfig: true
+    stickerNote: true
+    setStickerRemark: false
+    collectSticker: true
+    sendGroup: true
+    sendPrivate: true
+    reply: true
+    sendBurst: true
+    sendMessage: true
+    sendPoke: true
+    sendSticker: true
+    sendVoice: false
+    webImage: false
+    feedback: true
+    requestMode: true
+    crossGroup: true
+    ownerGroupAccess: false
+    ownerRelay: false
+    schedule: true
   agent:
     # host = 「不指定工具清单」，用对端全部。它不是「拿到全部工具」的保证：
     # 工具面由对端决定，桥接在直通下给不出工具级硬边界（只能过滤经由桥接的调用）。

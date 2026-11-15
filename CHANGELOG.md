@@ -13,7 +13,17 @@
 
 - **`src/scheduling/`（L1 内核）**：`batching.mjs`（动态合批 + 硬上限）、`pacing.mjs`（两档令牌桶）、`cursor.mjs`（游标与三态收尾）、`policy.mjs`（策略解析与默认值）。全部纯函数，不认平台、不认行为档案。
 - **`bridge.js` 只做三件事**：把当前策略解成普通对象、把事件喂给内核、把内核结论执行掉。合批窗口、预算额度、档位归属、收尾判据不再内嵌在 bridge 里。
-- **参数归属**：节奏默认值住 `policy.mjs` 的 `SCHEDULING_DEFAULTS`，平台档案只在默认值确实不同时写覆盖键。行为档案的 `wake:` 段是整段替换而非深合并，所以缺省键一律由内核兜底。
+- **参数归属**：节奏默认值住行为引擎定义 `profiles/behavior-engines/v2.yml` 的 `wake_*` 字段，`bridge.js` 用 `groupDefaults('v2', 'wake')` 取出来注入 `resolveSchedulingPolicy(wake, defaults)`，内核代码里没有第二份数字。行为档案的 `config.wake` 是整段替换而非深合并，解析只看档案这一层（保存时已铺满）。
+
+### 重构：配置资源统一
+
+- **行为引擎独立成文件**：字段清单、控件、取值域、默认值搬进 `profiles/behavior-engines/{v1,v2}.yml`；平台行为类型只写 `label` / `platform` / `engine` / `fields`（按名覆盖），不再自带整份字段表（`schema` 键废除）。`src/behaviors/kinds/*.mjs` 删除，新增 `src/behaviors/engines.mjs`（`getEngine` / `engineFields` / `groupDefaults` / `materialize` / `flattenConfig` / `buildConfig`）。
+- **行为档案存全量快照**：保存时按引擎默认值铺满，`config` 里每个字段都有值；顺带修掉三段键（`sticker_collect_…`）写回只落两段的 bug，改成按段数落嵌套。
+- **出厂副本统一判定**：新增 `src/profiles/factory.mjs`（`hasFactory` / `listFactoryIds` / `readFactoryText` / `copyFactory`）；「内置」= `<dir>/<id>.yml` 与 `<dir>/.defaults/<id>.yml` 成对存在。`BUILTIN_CAPABILITY_IDS`、`BUILTIN_PLAN_ORDER`、`CAPABILITY_DEFAULTS`、`DEFAULT_PROMPT_PRESETS` 删除，`builtin` 由副本派生、不写进文件；方案重置走 `POST /api/plans/<id>/reset`。
+- **方案排序数据化**：内置方案写显式 `order`（10…70），自定义缺省 900，控制台按它排列。
+- **工具面显式**：能力档 `tools.platform` 写全 `PLATFORM_TOOLS` 的每个 flag，`visiblePlatformFlags()` 只认显式 `true`，缺键即不可见；`platformToolMap()` 给出键齐的白名单。
+- **调度默认值注入**：删 `SCHEDULING_DEFAULTS`，`resolveSchedulingPolicy(wake, defaults)` 由调用方从引擎定义取默认值。
+- **行为类型按平台聚合**：`GET /api/behaviors/kinds` 改为每个平台各出一份类型清单，控制台按 `(platform, kind)` 索引，同名 kind 可以在不同平台各写一份。
 
 ### 手感变化
 
@@ -27,15 +37,15 @@
 ### 删除（不保留双读）
 
 - 会话态 `batchWindowMs`、`maxWakePerMinute`、`maxWakePerHour`、`wakeTimes`：节奏改由内核策略与桶状态承载，旧档案里的残留键读到即丢弃。
-- 行为档案字段表删 `wake_batchWindowMs`/`wake_maxWakePerMinute`/`wake_maxWakePerHour`，新增「投递节奏」分组 12 个两段扁平键；QQ 档案不再写节奏键（继承内核默认）。
+- 行为档案字段表删 `wake_batchWindowMs`/`wake_maxWakePerMinute`/`wake_maxWakePerHour`，新增「投递节奏」分组 12 个两段扁平键；字段清单搬进 `profiles/behavior-engines/v2.yml`，QQ 档案按默认值存全量快照。
 - `qq_set_wake_config` 的 schema 删 `batchWindowMs`：模型不再能改自己的调度窗口。
 
 ### 修复
 
-- 控制台行为档案表单：数字字段缺省留空、空值不写键。原先把缺失数字填 0 并回写，会让新增的 12 个数字键首次保存即变成 0（合批窗口归零）。
+- 控制台行为档案表单：字段值按引擎默认值回填、保存时整份写回。原先把缺失数字填 0 并回写，会让新增的 12 个数字键首次保存即变成 0（合批窗口归零）；数字框清空则回到默认值，而不是留一个空键。
 - 控制台行为档案表单：开关在这一页从来没绑过点击委托（页面没走 `createForm`），所有 `<button role="switch">` 点了没反应；回填也只改 `aria-checked` 不改文案，会出现「轨道是开、文字写关」。现在装了 `bindSwitches`、回填走 `setSwitch`。
-- 控制台行为档案表单：节奏参数的默认值随字段规格下发（`default` 透传 `SCHEDULING_DEFAULTS`），开关缺省不再显示成「关」（实际是开），数字空值在输入框里显示「默认 N」。同时开关「与默认相同就不写键」，避免在这页保存一次就把没动过的开关固化成 `false`。
-- **默认值在类型 yml 上被整体盖掉**：`GET /api/behaviors/kinds` 原先「类型 yml 有 `schema.fields` 就用它」，而 QQ 的 `behavior-types/social-v2.yml` 自带整份字段表，于是引擎字段上那 12 个 `default` 一个也到不了界面，「投递节奏」卡片依旧是空值/关。现在字段规格统一由 `src/behaviors/types.mjs` 的 `listBehaviorKinds()` 产出，按字段名把引擎默认值补回；`scripts/check-profiles.mjs` 增加一道核对：引擎声明的默认值必须全部出现在控制台实际拿到的字段规格里，缺一个就失败。
+- 控制台行为档案表单：节奏参数的默认值随字段规格下发（`default` 来自引擎定义），开关缺省不再显示成「关」（实际是开）。保存写的是界面上的值，全量快照里不会出现「没动过的开关被固化成 `false`」。
+- **默认值在类型 yml 上被整体盖掉**：`GET /api/behaviors/kinds` 原先「类型 yml 有 `schema.fields` 就用它」，而 QQ 的 `behavior-types/social-v2.yml` 自带整份字段表，于是引擎字段上那 12 个 `default` 一个也到不了界面，「投递节奏」卡片依旧是空值/关。现在字段规格统一由引擎定义 + 类型按名覆盖产出（`typeFields()`），类型文件不再自带字段表；`scripts/check-profiles.mjs` 把「类型只能写 `label/platform/engine/fields`」「行为档案 `config` 必须是全量快照」都做成门禁。
 - 积压唤醒的提示词里写明来由：`wakeTaskTextFor` 新增 `backlog` 分支（【补看积压】「无人点名，只是消息积压到阈值」），并说明可以不接话、照常收尾。
 - 会话详情「唤醒」卡：文案改指平台行为档案，并只读展示两档剩余 token、暂存条数、未读溢出条数。
 - **入站在途对齐**：一条带引用的消息要等网关回 `get_msg` 才能记进未读（最长 `REPLY_INGEST_WAIT_MS`）。唤醒投递与回合结束补偿现在先等这些在途入站落地：前者不再把「刚到、还没入账」的消息跨过去，后者也不会把它误判成「没有未读」。上限同上（入站自己允许卡住的最大值），超时照常往下走；只对齐同一个会话。
@@ -43,7 +53,8 @@
 
 ### 门禁
 
-- 新增 `scripts/test-scheduling.mjs`（内核纯函数 + 桥接接线）；`audit-bridge-harness` 按命名空间整包注入 `src/scheduling/`；`test-audit-regressions` 的限频用例改为双桶语义，并新增「`direct` 打空照常投递」；`test-console-static` 新增三条：行为档案面板必须绑开关点击、回填必须用 `setSwitch`、回填必须认字段默认值；`test-console-ui` 的契约基线按「空值不写键」重录（一代档案的 22 个零值键不再出现在保存载荷里）。
+- 新增 `scripts/test-scheduling.mjs`（内核纯函数 + 桥接接线）；`audit-bridge-harness` 按命名空间整包注入 `src/scheduling/`；`test-audit-regressions` 的限频用例改为双桶语义，并新增「`direct` 打空照常投递」；`test-console-static` 新增三条：行为档案面板必须绑开关点击、回填必须用 `setSwitch`、回填必须认字段默认值；`test-console-ui` 的契约基线按「全量快照」重录（行为表单每次提交都带完整 `config`）。
+- `scripts/check-profiles.mjs` 重写为资源契约门禁：引擎定义可解析、类型文件键集、行为档案 `config` 全量、出厂副本成对且只放文案、能力档工具面写全、方案 `order` 显式唯一、旧目录残留。
 
 ## 0.2.0 —— 2026-11-15
 

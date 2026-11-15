@@ -8,7 +8,44 @@ id: full
 label: Agent · 完全访问
 note: 跨工作区与进程管理；仅在短时授权窗口内可钉
 tools:
-  platform: {}
+  platform:
+    getPrompt: true
+    getUnread: true
+    getRecent: true
+    getMyRecent: true
+    getMessageDetail: true
+    getImages: true
+    getForwardMsg: true
+    getActiveMembers: true
+    waitMessages: true
+    socialState: true
+    listStickers: true
+    getStickerImage: true
+    getSelfImage: true
+    personProfile: true
+    memory: true
+    slangQuery: true
+    slangSubmit: true
+    markRead: true
+    setWakeConfig: true
+    stickerNote: true
+    setStickerRemark: false
+    collectSticker: true
+    sendGroup: true
+    sendPrivate: true
+    reply: true
+    sendBurst: true
+    sendMessage: true
+    sendPoke: true
+    sendSticker: true
+    sendVoice: false
+    webImage: false
+    feedback: true
+    requestMode: true
+    crossGroup: true
+    ownerGroupAccess: false
+    ownerRelay: false
+    schedule: true
   agent:
     tool-fs: true
     tool-fs-search: true

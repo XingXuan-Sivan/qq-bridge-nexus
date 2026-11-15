@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  BUILTIN_PLAN_ORDER,
   createPlanStore,
   normalizePlan,
   legacyModeOfPlan,
@@ -15,18 +14,20 @@ import {
   findPlan,
   validatePlanReferences,
 } from '../src/runtime/plans.mjs';
+import { listFactoryIds } from '../src/profiles/factory.mjs';
+import { PLANS_ROOT } from '../src/profiles/paths.mjs';
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-plans-'));
 const tmpFile = (name = 'runtime.json') => path.join(tmpRoot(), name);
 
 function builtinStore() {
-  return createPlanStore({ root: path.join(path.dirname(fileURLToPath(import.meta.url)), '../profiles/plans') });
+  return createPlanStore({ root: PLANS_ROOT });
 }
 
-test('内置方案：七条，legacy 投影与旧模式一一对应', () => {
-  // 用户克隆出来的方案就在同一个目录（profiles/plans/），只数内置的那几条。
+test('内置方案：出厂副本里各一条，legacy 投影与旧模式一一对应', () => {
+  // 用户克隆出来的方案就在同一个目录（profiles/plans/），只数带出厂副本的那几条。
   const plans = builtinStore().list().filter((plan) => plan.builtin);
-  assert.equal(plans.length, 7);
-  assert.deepEqual(plans.map((plan) => plan.id), BUILTIN_PLAN_ORDER);
+  assert.deepEqual(plans.map((plan) => plan.id).sort(), listFactoryIds(PLANS_ROOT));
+  assert.deepEqual(plans.map((plan) => plan.order), plans.map((plan) => plan.order).slice().sort((a, b) => a - b), '内置方案按 order 递增排列');
   const expected = {
     chat: ['chat', 'L0'],
     'social-v1': ['reserved', 'L0'],
@@ -59,7 +60,7 @@ test('归一：缺 capability 直接报错，未知行为回落 none', () => {
   const plan = normalizePlan({ id: 'ok-plan', capability: 'chat', behavior: '未知档案' });
   assert.equal(plan.behavior, '未知档案', '行为只存名字，是否有效由加载侧判断');
   assert.equal(plan.audience, 'access');
-  assert.equal(plan.builtin, false);
+  assert.equal('builtin' in plan, false, 'builtin 由出厂副本派生，不进归一结果');
   assert.equal('agent' in plan, false, '归一后的方案不得再有 agent 字段');
 });
 

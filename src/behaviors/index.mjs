@@ -3,20 +3,16 @@
 // 行为档案描述“这个平台里怎么说话/怎么等待”，不描述运行模式、模型、准入或安全上限。
 // 权威源：profiles/platforms/<platform>/behaviors/<id>.yml（用户侧平台自己提供），
 // 由 profiles/plans/<id>.yml 的 `behavior` 字段引用。缺失或 kind 不匹配一律失败关闭。
+//
+// 档案是「默认值 + 覆盖」的全量快照：字段清单与默认值来自行为引擎定义，写盘时铺满所有键。
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { REPO_ROOT } from '../profiles/paths.mjs';
+import { hasFactory, readFactoryText } from '../profiles/factory.mjs';
+import { findTypeIn, typeFields } from './types.mjs';
+import { buildConfig, flattenConfig } from './engines.mjs';
 
-// 行为类型 = profiles/platforms/<platform>/behavior-types/<kind>.yml 的 id；
-// 旧档案里的 `v1`/`v2` 仍按引擎别名接受（迁移期兜底）。校验与默认值由引擎模块负责。
-const ENGINE_BY_KIND = { 'social-v1': 'v1', 'social-v2': 'v2', v1: 'v1', v2: 'v2' };
-export const BEHAVIOR_KINDS = Object.keys(ENGINE_BY_KIND);
-
-/** kind → 引擎名；未知类型返回 ''，调用方据此报错。 */
-export function engineOfKind(kind) {
-  return ENGINE_BY_KIND[String(kind ?? '').trim()] ?? '';
-}
 const TOP_KEYS = new Set(['version', 'platform', 'kind', 'label', 'description', 'prompt', 'config']);
 const PROMPT_MAX = 20000;
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -30,28 +26,7 @@ function assertPlainObject(value, label) {
   return value;
 }
 
-function assertFiniteNumber(value, label) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} 必须是有限数字`);
-}
-
-function walkNumbers(value, label) {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error(`${label} 含非法数字`);
-    return;
-  }
-  if (typeof value === 'boolean' || typeof value === 'string') return;
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => walkNumbers(item, `${label}[${index}]`));
-    return;
-  }
-  if (isPlainObject(value)) {
-    for (const [key, item] of Object.entries(value)) walkNumbers(item, `${label}.${key}`);
-    return;
-  }
-  throw new Error(`${label} 含不支持的值类型`);
-}
-
-/** 校验单个行为档案。id 来自文件名，必须与内容分离。 */
+/** 校验单个行为档案，并把 config 铺成「默认值 + 覆盖」的全量快照。id 来自文件名，必须与内容分离。 */
 export function normalizeBehavior(id, raw) {
   const value = String(id ?? '').trim();
   if (!ID_RE.test(value)) throw new Error(`行为档案 id 不合法：${value || '(空)'}`);
@@ -64,19 +39,16 @@ export function normalizeBehavior(id, raw) {
   const platform = String(source.platform ?? '').trim();
   if (!/^[a-z][a-z0-9-]{0,39}$/.test(platform)) throw new Error(`${value}.platform 不合法：${platform || '(空)'}`);
   const kind = String(source.kind ?? '').trim();
-  const engine = engineOfKind(kind);
-  if (!engine) throw new Error(`${value}.kind 未注册：${kind || '(空)'}（在 behavior-types/ 里加类型）`);
+  const type = findTypeIn(platform, kind);
+  if (!type) throw new Error(`${value}.kind 未注册：${kind || '(空)'}（在 behavior-types/ 里加类型）`);
   const label = String(source.label ?? '').trim();
   if (!label) throw new Error(`${value}.label 不能为空`);
   const description = String(source.description ?? '').trim();
-  const config = assertPlainObject(source.config, `${value}.config`);
-  for (const otherKey of ['v1', 'v2']) {
-    if (otherKey !== engine && source[otherKey] !== undefined) throw new Error(`${value} 是 ${kind} 档案，旧版 ${otherKey} 段已废弃，请写进 config`);
-  }
-  walkNumbers(config, `${value}.config`);
+  const fields = typeFields(type);
+  const config = buildConfig(fields, flattenConfig(source.config ?? {}, fields), { label: `${value}.config` });
   const prompt = String(source.prompt ?? '').trim();
   if (prompt.length > PROMPT_MAX) throw new Error(`${value}.prompt 超过 ${PROMPT_MAX} 字`);
-  return { id: value, version, platform, kind, label, description, prompt, config };
+  return { id: value, version, platform, kind, engine: type.engine, label, description, prompt, config };
 }
 
 /** 读取 config/behaviors 下所有 .yml 档案；任何损坏都让启动失败。 */
@@ -128,7 +100,15 @@ export function listBehaviorFiles({ root } = {}) {
       const text = fs.readFileSync(path.join(root, entry.name), 'utf8').replace(/^\uFEFF/, '');
       let parsed = null;
       try { parsed = normalizeBehavior(id, YAML.parse(text)); } catch {}
-      return { id, file: entry.name, label: parsed?.label ?? '', kind: parsed?.kind ?? '', valid: !!parsed };
+      return {
+        id,
+        file: entry.name,
+        label: parsed?.label ?? '',
+        kind: parsed?.kind ?? '',
+        platform: parsed?.platform ?? '',
+        engine: parsed?.engine ?? '',
+        valid: !!parsed,
+      };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
 }
@@ -173,6 +153,7 @@ export function readBehaviorDocument({ root, id } = {}) {
     header,
     kind: behavior.kind,
     platform: behavior.platform,
+    engine: behavior.engine,
     label: behavior.label,
     description: behavior.description,
     prompt: behavior.prompt ?? '',
@@ -235,7 +216,7 @@ export function writeBehaviorFile({ root, id, text } = {}) {
   try { raw = YAML.parse(source); } catch (error) { throw new Error(`YAML 解析失败：${error?.message ?? error}`); }
   const normalized = normalizeBehavior(String(id), raw);
   fs.mkdirSync(root, { recursive: true });
-  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  const backupRoot = path.join(REPO_ROOT, 'state', 'behavior-backups', String(id));
   fs.mkdirSync(backupRoot, { recursive: true });
   if (fs.existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -276,11 +257,34 @@ export function duplicateBehavior({ root, fromId, toId, label } = {}) {
   return result;
 }
 
+/**
+ * 重置为出厂内容：文案取出厂副本，config 回到引擎默认值并铺成全量快照。
+ * 只有带出厂副本的档案可以重置。
+ */
+export function resetBehavior({ root, id } = {}) {
+  const value = String(id ?? '').trim();
+  if (!hasFactory(root, value)) throw new Error('只有带出厂副本的行为档案可以重置');
+  const factory = validateBehaviorText({ id: value, text: readFactoryText(root, value) });
+  return writeBehaviorData({
+    root,
+    id: value,
+    data: {
+      version: factory.version,
+      platform: factory.platform,
+      kind: factory.kind,
+      label: factory.label,
+      description: factory.description,
+      prompt: factory.prompt,
+      config: factory.config,
+    },
+  });
+}
+
 /** 删除一份行为档案；调用方负责确认没有方案在引用。 */
 export function removeBehaviorFile({ root, id } = {}) {
   const file = behaviorFile(root, id);
   if (!fs.existsSync(file)) throw new Error('没有这个行为档案');
-  const backupRoot = path.join(path.dirname(root), '..', 'state', 'behavior-backups', String(id));
+  const backupRoot = path.join(REPO_ROOT, 'state', 'behavior-backups', String(id));
   fs.mkdirSync(backupRoot, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   fs.copyFileSync(file, path.join(backupRoot, `${stamp}.yml`));

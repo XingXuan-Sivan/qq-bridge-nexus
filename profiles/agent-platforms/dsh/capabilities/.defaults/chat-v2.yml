@@ -8,7 +8,44 @@ id: chat-v2
 label: 聊天 Agent
 note: 无本地工具，只做对话与问答
 tools:
-  platform: {}
+  platform:
+    getPrompt: true
+    getUnread: true
+    getRecent: true
+    getMyRecent: true
+    getMessageDetail: true
+    getImages: true
+    getForwardMsg: true
+    getActiveMembers: true
+    waitMessages: true
+    socialState: true
+    listStickers: true
+    getStickerImage: true
+    getSelfImage: true
+    personProfile: true
+    memory: true
+    slangQuery: true
+    slangSubmit: true
+    markRead: true
+    setWakeConfig: true
+    stickerNote: true
+    setStickerRemark: false
+    collectSticker: true
+    sendGroup: true
+    sendPrivate: true
+    reply: true
+    sendBurst: true
+    sendMessage: true
+    sendPoke: true
+    sendSticker: true
+    sendVoice: false
+    webImage: false
+    feedback: true
+    requestMode: true
+    crossGroup: true
+    ownerGroupAccess: false
+    ownerRelay: false
+    schedule: true
   agent:
     tool-web: true
     tool-ask-user: true

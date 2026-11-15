@@ -10,23 +10,6 @@ prompt: |-
 config:
   triggerProbability: 0.1
   contextWindow: 20
-  activeCheckMinMs: 10000
-  activeCheckMaxMs: 30000
-  activeReplyDelayMinMs: 2000
-  activeReplyDelayMaxMs: 8000
-  activeDurationEnabled: true
-  activeDurationMinMs: 900000
-  activeDurationMaxMs: 1800000
-  idleWindowMs: 360000
-  idleRetryProbability: 0.25
-  idleRetryWaitMs: 120000
-  proactiveEnabled: true
-  proactiveIdleThresholdMs: 1800000
-  proactiveCheckMinMs: 2700000
-  proactiveCheckMaxMs: 5400000
-  proactiveProbability: 0.2
-  skipProbability: 0.15
-  surrenderProbability: 0
   maxReplyChars: 500
   mustReplyKeywords:
     - deepseek
@@ -35,9 +18,26 @@ config:
     - 鲸鱼
     - d指导
     - 在吗
+  activeCheckMinMs: 10000
+  activeCheckMaxMs: 30000
+  activeReplyDelayMinMs: 2000
+  activeReplyDelayMaxMs: 8000
+  activeDurationEnabled: true
+  activeDurationMinMs: 900000
+  activeDurationMaxMs: 1800000
+  proactiveEnabled: true
+  proactiveIdleThresholdMs: 1800000
+  proactiveCheckMinMs: 2700000
+  proactiveCheckMaxMs: 5400000
+  proactiveProbability: 0.2
+  idleWindowMs: 360000
+  idleRetryProbability: 0.25
+  idleRetryWaitMs: 120000
   burstEnabled: true
   burstIntervalMinMs: 1000
   burstIntervalMaxMs: 3000
   longGapProbability: 0.1
   longGapMinMs: 2500
   longGapMaxMs: 5000
+  skipProbability: 0.15
+  surrenderProbability: 0

@@ -1,8 +1,8 @@
 // 行为档案面板：平台详情 ›「行为」标签（仅用户侧平台、且该平台确实有档案目录时出现）。
 //
-// 权威存储：profiles/platforms/<平台>/behaviors/<id>.yml（C7 之前这里是独立整页）。
+// 权威存储：profiles/platforms/<平台>/behaviors/<id>.yml。
 // 档案是平台的子资源：列表按「档案所属平台」过滤，新建时直接落到当前平台，不再让人选平台。
-// 字段规格仍由后端 kind 注册表下发（GET /api/behaviors/kinds），页面不自带一份。
+// 字段规格由后端类型注册表下发（GET /api/behaviors/kinds），按 (平台, kind) 索引，页面不自带一份。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { renderFields, bindSwitches } from '../../components/form/form.js';
@@ -17,17 +17,12 @@ import { BEHAVIOR_FIELDS } from './fields.js';
 let behaviorDoc = null;
 let behaviorItems = [];
 let busy = false;
-let kindSpecs = new Map();
 let kindMetas = new Map();
 let kindsPromise = null;
 let promptCard = null;
 let platformId = '';
 let host = null;
 let unbindSwitches = null;
-
-function fieldsOf(kind) {
-  return kindSpecs.get(kind) ?? [];
-}
 
 function setMsg(text, tone = 'info') {
   const el = host?.querySelector('#behaviorFormMsg');
@@ -36,18 +31,33 @@ function setMsg(text, tone = 'info') {
   el.className = `meta ${tone === 'ok' ? 'ok' : tone === 'err' ? 'err' : ''}`.trim();
 }
 
-/** 档案所属平台：档案自己写了就用自己的，否则取 kind 注册表里的平台。 */
-function platformOfBehavior(item) {
-  return String(item?.platform || kindMetas.get(item?.kind)?.platform || '');
+function keyOf(platform, kind) {
+  return `${platform || ''}:${kind || ''}`;
 }
 
-/** 字段规格由后端 kind 注册表下发，页面不再自带一份（避免两处漂移）。 */
+/** 档案所属平台：档案自己写了就用自己的，否则按类型注册表反查。 */
+function platformOfBehavior(item) {
+  if (item?.platform) return String(item.platform);
+  const hit = [...kindMetas.values()].find((meta) => meta.kind === item?.kind);
+  return hit?.platform ?? '';
+}
+
+/** 某份档案的类型定义（字段规格 + 展示元信息）。 */
+function typeOf(item) {
+  return kindMetas.get(keyOf(platformOfBehavior(item), item?.kind)) ?? null;
+}
+
+function fieldsOf(item) {
+  return typeOf(item)?.fields ?? [];
+}
+
+/** 字段规格由后端类型注册表下发，页面不再自带一份（避免两处漂移）。 */
 function ensureKinds() {
   if (kindsPromise) return kindsPromise;
   kindsPromise = api('/api/behaviors/kinds')
     .then((r) => {
-      kindSpecs = new Map((Array.isArray(r?.kinds) ? r.kinds : []).map((entry) => [entry.kind, entry.fields]));
-      kindMetas = new Map((Array.isArray(r?.kinds) ? r.kinds : []).map((entry) => [entry.kind, entry]));
+      const entries = Array.isArray(r?.kinds) ? r.kinds : [];
+      kindMetas = new Map(entries.map((entry) => [keyOf(entry.platform, entry.kind), entry]));
     })
     .catch(() => {
       kindsPromise = null;
@@ -63,7 +73,7 @@ function renderBehaviorTable(items) {
     attrs: { 'data-filter-kind': item.kind || '' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
-      `<span class="meta">${esc(kindMetas.get(item.kind)?.label || item.kind || '?')}</span>`,
+      `<span class="meta">${esc(typeOf(item)?.label || item.kind || '?')}</span>`,
       Array.isArray(item.usedBy) && item.usedBy.length
         ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
         : '<span class="meta">未被方案引用</span>',
@@ -74,7 +84,9 @@ function renderBehaviorTable(items) {
       </div>`,
     ],
   }));
-  const kindOptions = [...kindSpecs.keys()].map((kind) => ({ value: kind, label: kindMetas.get(kind)?.label || kind }));
+  const kindOptions = [...kindMetas.values()]
+    .filter((meta) => !platformId || meta.platform === platformId)
+    .map((meta) => ({ value: meta.kind, label: meta.label || meta.kind }));
   tableHost.innerHTML = dataTableHtml({
     columns: [{ label: '档案' }, { label: '类型', width: '110px' }, { label: '被引用' }, { label: '操作', width: '190px' }],
     rows,
@@ -136,7 +148,7 @@ async function loadDoc(id) {
     const label = host.querySelector('#behaviorFormLabel');
     if (label) label.value = doc.data?.label ?? '';
     panel.innerHTML = '';
-    fillBehaviorForm(panel, fieldsOf(doc.kind), doc.data?.config ?? {});
+    fillBehaviorForm(panel, fieldsOf(doc), doc.data?.config ?? {});
     const cardHost = host?.querySelector('#behaviorPromptCard');
     const factory = doc.factoryPrompt ?? doc.data?.prompt ?? '';
     if (!promptCard) {
@@ -168,7 +180,7 @@ async function saveDoc() {
   if (!behaviorDoc || busy) return;
   const panel = host?.querySelector('#behaviorFormPanel');
   if (!panel) return;
-  const config = readBehaviorForm(panel, fieldsOf(behaviorDoc.kind));
+  const config = readBehaviorForm(panel, fieldsOf(behaviorDoc));
   const label = behaviorDoc.builtin
     ? behaviorDoc.data?.label || behaviorDoc.id
     : String(host.querySelector('#behaviorFormLabel')?.value ?? '').trim() || behaviorDoc.data?.label || behaviorDoc.id;
@@ -211,7 +223,9 @@ function openArchiveModal({ mode, source = null }) {
       { name: 'behaviorArchiveLabel', type: 'text', label: '备注', value: `${source?.label ?? source?.id ?? ''}（副本）` },
     ], { columns: 1, layout: 'inline' });
   } else {
-    const typeOptions = [...kindMetas.values()].map((meta) => ({ value: meta.kind, label: meta.label || meta.kind }));
+    const typeOptions = [...kindMetas.values()]
+      .filter((meta) => !platformId || meta.platform === platformId)
+      .map((meta) => ({ value: meta.kind, label: meta.label || meta.kind }));
     const templateOptions = [{ value: '', label: '空白（按类型默认值）' }, ...behaviorItems.map((item) => ({ value: item.id, label: `${item.label || item.id}（${item.id}）` }))];
     renderFields(fieldsHost, [
       { name: 'behaviorArchiveId', type: 'text', label: '档案 id', placeholder: '小写字母、数字、连字符', hint: `创建在 ${platformId || '当前平台'} 的档案目录里，创建后不可改名` },

@@ -36,15 +36,16 @@ import {
   writeBehaviorData,
   duplicateBehavior,
   removeBehaviorFile,
-  BEHAVIOR_KINDS,
-  engineOfKind,
   loadBehaviorProfiles,
   readBehaviorFile,
+  resetBehavior,
   resolveBehavior,
   validateBehaviorText,
   writeBehaviorFile,
 } from './behaviors/index.mjs';
-import { listBehaviorKinds } from './behaviors/types.mjs';
+import { listBehaviorTypes, loadBehaviorTypes } from './behaviors/types.mjs';
+import { groupDefaults } from './behaviors/engines.mjs';
+import { hasFactory, readFactoryText } from './profiles/factory.mjs';
 import { compactModelMessage } from './qq-model-view.js';
 import { safeFetch, safeFetchBuffer, looksLikeImageBuffer } from './safe-fetch.js';
 import { stickerMaxBytes } from './lib/sticker-limits.mjs';
@@ -4885,21 +4886,21 @@ async function main() {
     return !(isOwnerPrivate(key) || isAdminPrivate(key));
   }
 
-  function behaviorKindOf(behaviorId) {
+  function behaviorEngineOf(behaviorId) {
     if (!behaviorId || behaviorId === 'none') return '';
     // cfg.behaviors 是 loadBehaviorProfiles() 返回的 Map（控制台列表才用 entries()）。
     const registry = cfg.behaviors ?? null;
-    if (registry?.get) return registry.get(behaviorId)?.kind ?? '';
-    return (registry ?? []).find?.((item) => item.id === behaviorId)?.kind ?? '';
+    if (registry?.get) return registry.get(behaviorId)?.engine ?? '';
+    return (registry ?? []).find?.((item) => item.id === behaviorId)?.engine ?? '';
   }
 
-  /** 方案 → 引擎：行为 kind 决定仿真引擎，工具决定聊天 / Agent。三者都是数据，不是枚举。 */
+  /** 方案 → 引擎：行为引擎决定仿真内核，工具决定聊天 / Agent。三者都是数据，不是枚举。 */
   function planMode(plan) {
     if (!plan) return null;
     const raw = plan.behavior ?? 'none';
     const behaviorId = raw === 'inherit' ? 'none' : raw;
-    // 行为类型现在叫 social-v1/social-v2，引擎由类型注册表给出；不能再拿 kind 直接比 'v1'/'v2'。
-    const engine = engineOfKind(behaviorKindOf(behaviorId));
+    // 引擎由行为类型注册表给出（behavior-types → behavior-engines），不在这里写死 kind 名字。
+    const engine = behaviorEngineOf(behaviorId);
     if (engine === 'v2') return 'reserved2';
     if (engine === 'v1') return 'reserved';
     return legacyModeOfPlan({ ...plan, behavior: 'none' });
@@ -5592,7 +5593,7 @@ async function main() {
   function behaviorConfigFor(key) {
     const behavior = behaviorFor(key);
     if (!behavior) return {};
-    if (engineOfKind(behavior.kind) === 'v1') return behavior.config;
+    if (behavior.engine === 'v1') return behavior.config;
     return behaviorV2View(behavior);
   }
 
@@ -5626,7 +5627,7 @@ async function main() {
       return fn();
     }
     if (!behavior) return fn();
-    if (engineOfKind(behavior.kind) === 'v1') return behaviorContext.run({ social: behavior.config, socialV2: cfg.socialV2 }, fn);
+    if (behavior.engine === 'v1') return behaviorContext.run({ social: behavior.config, socialV2: cfg.socialV2 }, fn);
     return behaviorContext.run({ social: cfg.social, socialV2: behaviorV2View(behavior) }, fn);
   }
 
@@ -7612,11 +7613,9 @@ async function main() {
           }
           return;
         }
-        // 行为类型（kind）注册表：字段规格的唯一来源，控制台按它渲染表单。
+        // 行为类型注册表：字段规格与默认值的唯一来源，控制台按它渲染表单（按平台聚合）。
         if (url.pathname === '/api/behaviors/kinds' && req.method === 'GET') {
-          // 类型来自 profiles/platforms/qq/behavior-types；字段规格取类型 yml 的 schema，
-          // 缺省回落到引擎模块；两种情况都由 listBehaviorKinds 把引擎默认值补到字段上。
-          sendJson({ ok: true, kinds: listBehaviorKinds({ root: path.join(PLATFORMS_ROOT, 'qq') }) });
+          sendJson({ ok: true, kinds: listBehaviorTypes() });
           return;
         }
         // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
@@ -7631,18 +7630,19 @@ async function main() {
               const plans = planStore().list();
               const behaviors = listBehaviorFiles({ root: behaviorsRoot }).map((entry) => ({
                 ...entry,
-                builtin: fs.existsSync(path.join(behaviorsRoot, '.defaults', `${entry.id}.yml`)),
+                builtin: hasFactory(behaviorsRoot, entry.id),
                 usedBy: plans.filter((plan) => plan.behavior === entry.id).map((plan) => plan.id),
               }));
               sendJson({ ok: true, behaviors });
               return;
             }
             if (!id && req.method === 'POST') {
-              // 新建：带 cloneFrom 就克隆，否则按 kind 建一份最小可用的空档案。
+              // 新建：带 cloneFrom 就克隆，否则按类型建一份空档案（config 铺满引擎默认值）。
               const body = await readBody();
               const target = String(body?.id ?? '').trim();
               if (!target) { sendJson({ ok: false, error: '缺少行为档案 id' }, 400); return; }
               try {
+                const types = loadBehaviorTypes({ root: path.join(PLATFORMS_ROOT, 'qq') });
                 const result = body?.cloneFrom
                   ? duplicateBehavior({ root: behaviorsRoot, fromId: String(body.cloneFrom), toId: target, label: body?.label })
                   : writeBehaviorData({
@@ -7651,11 +7651,10 @@ async function main() {
                     data: {
                       version: 1,
                       platform: 'qq',
-                      kind: BEHAVIOR_KINDS.includes(body?.kind) ? body.kind : 'v2',
+                      kind: String(body?.kind ?? '').trim() || types[0]?.id,
                       label: String(body?.label ?? '').trim() || target,
                       description: String(body?.description ?? ''),
                       prompt: '',
-                      config: {},
                     },
                   });
                 ext.audit.append('config.behavior.created', { id: target, from: body?.cloneFrom ? String(body.cloneFrom) : null });
@@ -7678,11 +7677,9 @@ async function main() {
               return;
             }
             if (req.method === 'POST' && action === 'reset') {
-              const factory = path.join(behaviorsRoot, '.defaults', `${id}.yml`);
-              if (!fs.existsSync(factory)) { sendJson({ ok: false, error: '只有内置行为档案可以重置' }, 400); return; }
-              fs.copyFileSync(factory, path.join(behaviorsRoot, `${id}.yml`));
+              const result = resetBehavior({ root: behaviorsRoot, id });
               ext.audit.append('config.behavior.reset', { id });
-              sendJson({ ok: true, ...readBehaviorDocument({ root: behaviorsRoot, id }), requiresRestart: true });
+              sendJson({ ok: true, ...result, requiresRestart: true });
               return;
             }
             if (req.method === 'DELETE' && !action) {
@@ -7700,11 +7697,11 @@ async function main() {
             if (req.method === 'GET') {
               // 表单需要结构化 data；文本仍原样返回，供备份/排查使用。出厂提示词用于「还原」与一致性提示。
               const doc = readBehaviorDocument({ root: behaviorsRoot, id });
-              const builtin = fs.existsSync(path.join(behaviorsRoot, '.defaults', `${id}.yml`));
+              const builtin = hasFactory(behaviorsRoot, id);
               let factoryPrompt = null;
               if (builtin) {
                 try {
-                  factoryPrompt = readBehaviorDocument({ root: path.join(behaviorsRoot, '.defaults'), id }).data?.prompt ?? null;
+                  factoryPrompt = validateBehaviorText({ id, text: readFactoryText(behaviorsRoot, id) }).prompt || null;
                 } catch { factoryPrompt = null; }
               }
               sendJson({ ok: true, ...doc, builtin, factoryPrompt });
@@ -8263,8 +8260,8 @@ async function main() {
           return;
         }
         // 内置方案重置为出厂内容（自定义方案没有出厂副本）。
-        if (req.method === 'POST' && /^\/api\/runtime\/plans\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
-          const planId = normalizeRuntimePlanId(url.pathname.split('/')[4]);
+        if (req.method === 'POST' && /^\/api\/plans\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
+          const planId = normalizeRuntimePlanId(url.pathname.split('/')[3]);
           try {
             const plan = planStore().reset(planId);
             ensureRuntime();
@@ -14251,7 +14248,7 @@ async function main() {
   // 合批窗口、预算额度、档位归属、收尾判据全部在 src/scheduling/ 里，改手感改那里，不改这里。
 
   function schedulingPolicyV2() {
-    return resolveSchedulingPolicy(cfg.socialV2?.wake ?? {});
+    return resolveSchedulingPolicy(cfg.socialV2?.wake ?? {}, groupDefaults('v2', 'wake'));
   }
 
   /** 预算桶惰性初始化：加载期拿不到行为上下文（容量属于策略），所以首次用到时才归一。 */

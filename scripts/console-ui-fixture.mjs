@@ -15,7 +15,7 @@ import { parseKey } from '../src/session/key.mjs';
 import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
 const PLATFORM_PROMPT_SAMPLE = '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。';
 
-import { listKinds } from '../src/behaviors/kinds/index.mjs';
+import { listBehaviorTypes } from '../src/behaviors/types.mjs';
 import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
@@ -586,12 +586,12 @@ export function makeFixtureState() {
     socialStates: { 'group:123456789': { phase: 'active' }, 'group:100003': { phase: 'idle' } },
     v2: { enabled: true, agentPreset: 'chat-v2', provideRecommendations: true, tools: {} },
     behaviors: {
-      'social-v1': 'version: 1\nkind: v1\nlabel: 默认 v1\ndescription: 离线示例\nv1:\n  triggerProbability: 0.2\n',
-      'social-v2': 'version: 1\nkind: v2\nlabel: 默认 v2\ndescription: 离线示例\nv2:\n  autoReplyCheckMs: 300000\n  provideRecommendations: true\n',
+      'social-v1': 'version: 1\nplatform: qq\nkind: social-v1\nlabel: 默认 v1\ndescription: 离线示例\nconfig:\n  triggerProbability: 0.2\n  contextWindow: 20\n',
+      'social-v2': 'version: 1\nplatform: qq\nkind: social-v2\nlabel: 默认 v2\ndescription: 离线示例\nconfig:\n  wake:\n    defaultMode: diving\n  send:\n    burstEnabled: true\n',
     },
     behaviorDocs: {
-      'social-v1': { id: 'social-v1', kind: 'v1', label: '一代仿真默认行为', description: '离线示例', config: { triggerProbability: 0.2, contextWindow: 20 } },
-      'social-v2': { id: 'social-v2', kind: 'v2', label: '二代仿真默认行为', description: '离线示例', config: { autoReplyCheckMs: 300000, provideRecommendations: true, wake: { defaultMode: 'diving' }, send: { burstEnabled: true } } },
+      'social-v1': { id: 'social-v1', platform: 'qq', kind: 'social-v1', label: '一代仿真默认行为', description: '离线示例', config: { triggerProbability: 0.2, contextWindow: 20 } },
+      'social-v2': { id: 'social-v2', platform: 'qq', kind: 'social-v2', label: '二代仿真默认行为', description: '离线示例', config: { wake: { defaultMode: 'diving' }, send: { burstEnabled: true } } },
     },
     behaviorDefault: 'social-v2',
     limits: { send: { maxSendPerMinute: 8, maxSendPerHour: 60 } },
@@ -1064,7 +1064,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const ids = (kind) => allowed.filter((key) => key.includes(`:${kind}:`)).map((key) => key.split(':').pop());
             return json({ ok: true, agent: { id: 'dsh', label: 'DeepSeek Harness', mode: 'http', ready: true }, platform: 'qq', planLabel: '聊天', snowluma: { connected: true, good: true, lastPacketAgoMs: 12000 }, mode: state.mode, role: state.role, roleMode: state.roleMode, closedAgentPreset: state.closedAgentPreset, ownerQQ: state.whitelist.ownerQQ, allowGroups: ids('group'), allowPrivate: ids('private'), activity: '[08:30:00] 演示桥接已连接\n[08:30:12] group:123456789 · 已处理一条消息\n[08:30:20] 二代社交助手正在运行\n以上均为离线模拟数据。' });
           }
-          case '/api/behaviors/kinds': return json({ ok: true, kinds: listKinds() });
+          case '/api/behaviors/kinds': return json({ ok: true, kinds: listBehaviorTypes() });
           case '/api/runtime/capabilities': return json({
             ok: true,
             catalog: toolCatalogSnapshot(),
@@ -1073,8 +1073,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/config/behaviors': return json({
             ok: true,
             behaviors: [
-              { id: 'social-v1', label: '一代仿真', kind: 'v1' },
-              { id: 'social-v2', label: '二代仿真', kind: 'v2' },
+              { id: 'social-v1', file: 'social-v1.yml', label: '一代仿真', platform: 'qq', kind: 'social-v1', engine: 'v1', valid: true, builtin: true },
+              { id: 'social-v2', file: 'social-v2.yml', label: '二代仿真', platform: 'qq', kind: 'social-v2', engine: 'v2', valid: true, builtin: true },
             ],
             configDefaultBehavior: 'social-v2',
             presetBehaviors: {},

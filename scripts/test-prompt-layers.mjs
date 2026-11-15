@@ -21,7 +21,7 @@ test('行为档案带 prompt：写入、读回、列表', () => {
   const root = tmpRoot();
   writeBehaviorData({
     root, id: 'b1',
-    data: { version: 1, platform: 'qq', kind: 'v2', label: '测试行为', description: '', prompt: '【引擎】先说结论。', config: { wake: { defaultMode: 'diving' } } },
+    data: { version: 1, platform: 'qq', kind: 'social-v2', label: '测试行为', description: '', prompt: '【引擎】先说结论。', config: { wake: { defaultMode: 'diving' } } },
   });
   const doc = readBehaviorDocument({ root, id: 'b1' });
   assert.equal(doc.prompt, '【引擎】先说结论。');
@@ -29,13 +29,13 @@ test('行为档案带 prompt：写入、读回、列表', () => {
 });
 
 test('prompt 超长与未知字段被拒', () => {
-  assert.throws(() => normalizeBehavior('x', { version: 1, platform: 'qq', kind: 'v1', label: 'x', prompt: 'a'.repeat(20001), config: {} }), /prompt/);
-  assert.throws(() => normalizeBehavior('x', { version: 1, platform: 'qq', kind: 'v1', label: 'x', unknown: 1, config: {} }), /未知顶层字段/);
+  assert.throws(() => normalizeBehavior('x', { version: 1, platform: 'qq', kind: 'social-v1', label: 'x', prompt: 'a'.repeat(20001), config: {} }), /prompt/);
+  assert.throws(() => normalizeBehavior('x', { version: 1, platform: 'qq', kind: 'social-v1', label: 'x', unknown: 1, config: {} }), /未知顶层字段/);
 });
 
 test('克隆与删除：目标重名拒绝、删除后文件消失', () => {
   const root = tmpRoot();
-  writeBehaviorData({ root, id: 'src', data: { version: 1, platform: 'qq', kind: 'v2', label: '源', description: '', prompt: 'P', config: {} } });
+  writeBehaviorData({ root, id: 'src', data: { version: 1, platform: 'qq', kind: 'social-v2', label: '源', description: '', prompt: 'P', config: {} } });
   duplicateBehavior({ root, fromId: 'src', toId: 'copy' });
   assert.equal(readBehaviorDocument({ root, id: 'copy' }).prompt, 'P');
   assert.throws(() => duplicateBehavior({ root, fromId: 'src', toId: 'copy' }), /已存在/);

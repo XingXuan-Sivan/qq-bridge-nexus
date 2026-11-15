@@ -20,7 +20,8 @@ import '../agent-side/builtin.mjs';
 import {
   createCapabilityStore, normalizeExtensions, normalizePreset, CAPABILITIES_ROOT,
 } from '../capabilities/store.mjs';
-import { BUILTIN_CAPABILITY_IDS } from '../tools/catalog.mjs';
+import { platformToolMap } from '../tools/catalog.mjs';
+import { copyFactory, hasFactory } from '../profiles/factory.mjs';
 
 const execFileAsync = promisify(execFile);
 const CAPABILITY_FILE = 'capability.yml';
@@ -129,7 +130,7 @@ export function createPresetStore({
         order: item.preset.order,
         behavior: item.preset.behavior,
         editable: true,
-        builtin: BUILTIN_CAPABILITY_IDS.includes(item.id),
+        builtin: hasFactory(root, item.id),
         error: null,
         hasExtensions: Boolean(item.extensions.mcp.allow.length
           || item.extensions.mcp.tools.allow.length
@@ -256,7 +257,11 @@ export function createPresetStore({
       return { id: value, from: source };
     }
     if (!displayName) throw new Error('空白预设需要填写名称');
-    capabilities.save(value, { label: displayName, note: String(description ?? '').trim() || '手工创建', tools: {} });
+    capabilities.save(value, {
+      label: displayName,
+      note: String(description ?? '').trim() || '手工创建',
+      tools: { platform: platformToolMap() },
+    });
     capabilities.setPreset(value, {
       name: displayName,
       description: String(description ?? '').trim() || '手工创建',
@@ -267,10 +272,10 @@ export function createPresetStore({
     return { id: value, from: '' };
   }
 
-  // 删除自建预设：出厂预设只能改不能删；删前先整份备份，误删还能从备份目录恢复。
+  // 删除自建预设：带出厂副本的预设只能改不能删；删前先整份备份，误删还能从备份目录恢复。
   function deletePreset(id) {
     const name = presetId(id);
-    if (BUILTIN_CAPABILITY_IDS.includes(name)) {
+    if (hasFactory(root, name)) {
       throw new Error('系统自带预设不能删除，只能修改或还原出厂');
     }
     const backupInfo = backup(name, 'before-delete');
@@ -281,11 +286,9 @@ export function createPresetStore({
   // 还原出厂：用能力档目录里的 .defaults/<id>.yml 覆盖，覆盖前先整份备份。
   function restoreFactory(id) {
     const name = presetId(id);
-    if (!BUILTIN_CAPABILITY_IDS.includes(name)) throw new Error(`没有该预设的出厂副本：${name}`);
-    const source = path.join(root, '.defaults', `${name}.yml`);
-    if (!fs.existsSync(source)) throw new Error(`没有该预设的出厂副本：${name}`);
+    if (!hasFactory(root, name)) throw new Error(`没有该预设的出厂副本：${name}`);
     const backupInfo = backup(name, 'before-factory');
-    fs.copyFileSync(source, fileFor(name));
+    copyFactory(root, name);
     log(`控制台：${name} 已还原为出厂版本`);
     return { id: name, backup: backupInfo };
   }

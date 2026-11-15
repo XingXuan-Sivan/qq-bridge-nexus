@@ -39,9 +39,9 @@ function fixture(name, patch = '') {
   fs.copyFileSync(path.join(root, 'src/platforms/index.mjs'), path.join(repo, 'src/platforms/index.mjs'));
   fs.mkdirSync(path.join(repo, 'src/config'), { recursive: true });
   fs.copyFileSync(path.join(root, 'src/config/platforms.mjs'), path.join(repo, 'src/config/platforms.mjs'));
-  // C4 起 build.mjs 直接用能力档归一（normalizeCapability）而不是自己解析 agents/，
-  // 这条依赖链（store → profiles/paths + tools/catalog）也必须进夹具。
-  for (const rel of ['src/capabilities/store.mjs', 'src/profiles/paths.mjs', 'src/tools/catalog.mjs']) {
+  // build.mjs 直接用能力档归一（normalizeCapability）而不是自己解析 agents/，
+  // 这条依赖链（store → profiles/paths + profiles/factory + tools/catalog）也必须进夹具。
+  for (const rel of ['src/capabilities/store.mjs', 'src/profiles/paths.mjs', 'src/profiles/factory.mjs', 'src/tools/catalog.mjs']) {
     fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
     fs.copyFileSync(path.join(root, rel), path.join(repo, rel));
   }

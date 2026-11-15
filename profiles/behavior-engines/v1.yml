@@ -1,0 +1,195 @@
+# 行为引擎定义（v1）：字段清单与默认值的唯一来源。
+# 平台行为类型（profiles/platforms/<平台>/behavior-types/<kind>.yml）只写覆盖，不抄字段。
+# 实例档案（behaviors/<id>.yml）是「默认值 + 覆盖」的全量快照，可重置回这里定义的内容。
+label: 一代仿真行为
+engine: v1
+platform: qq
+fields:
+  - type: section
+    card: true
+    label: 触发与上下文
+  - name: triggerProbability
+    label: 触发概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    hint: 0–1
+    default: 0.1
+  - name: contextWindow
+    label: 上下文条数
+    type: number
+    step: any
+    min: 1
+    default: 20
+  - name: maxReplyChars
+    label: 单条最大字数
+    type: number
+    step: any
+    min: 0
+    default: 500
+  - name: mustReplyKeywords
+    label: 必回关键词
+    type: textarea
+    rows: 4
+    list: true
+    hint: 每行一个
+    default:
+      - deepseek
+      - 小鲸鱼
+      - 大肥鱼
+      - 鲸鱼
+      - d指导
+      - 在吗
+  - type: section
+    card: true
+    label: 主动检查
+  - name: activeCheckMinMs
+    label: 主动检查最小间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 10000
+  - name: activeCheckMaxMs
+    label: 主动检查最大间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 30000
+  - name: activeReplyDelayMinMs
+    label: 主动回复延迟最小
+    type: number
+    step: any
+    hint: 毫秒
+    default: 2000
+  - name: activeReplyDelayMaxMs
+    label: 主动回复延迟最大
+    type: number
+    step: any
+    hint: 毫秒
+    default: 8000
+  - name: activeDurationEnabled
+    label: 主动持续
+    type: switch
+    default: true
+  - name: activeDurationMinMs
+    label: 主动持续最小
+    type: number
+    step: any
+    hint: 毫秒
+    default: 900000
+  - name: activeDurationMaxMs
+    label: 主动持续最大
+    type: number
+    step: any
+    hint: 毫秒
+    default: 1800000
+  - type: section
+    card: true
+    label: 主动机会
+  - name: proactiveEnabled
+    label: 主动机会
+    type: switch
+    default: true
+  - name: proactiveIdleThresholdMs
+    label: 触发主动的空闲阈值
+    type: number
+    step: any
+    hint: 毫秒
+    default: 1800000
+  - name: proactiveCheckMinMs
+    label: 主动机会检查最小间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 2700000
+  - name: proactiveCheckMaxMs
+    label: 主动机会检查最大间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 5400000
+  - name: proactiveProbability
+    label: 主动机会概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    default: 0.2
+  - type: section
+    card: true
+    label: 空闲重试
+  - name: idleWindowMs
+    label: 空闲窗口
+    type: number
+    step: any
+    hint: 毫秒
+    default: 360000
+  - name: idleRetryProbability
+    label: 空闲重试概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    default: 0.25
+  - name: idleRetryWaitMs
+    label: 空闲重试等待
+    type: number
+    step: any
+    hint: 毫秒
+    default: 120000
+  - type: section
+    card: true
+    label: 连发与间隔
+  - name: burstEnabled
+    label: 连发
+    type: switch
+    default: true
+  - name: burstIntervalMinMs
+    label: 连发最小间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 1000
+  - name: burstIntervalMaxMs
+    label: 连发最大间隔
+    type: number
+    step: any
+    hint: 毫秒
+    default: 3000
+  - name: longGapProbability
+    label: 长停顿概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    default: 0.1
+  - name: longGapMinMs
+    label: 长停顿最小
+    type: number
+    step: any
+    hint: 毫秒
+    default: 2500
+  - name: longGapMaxMs
+    label: 长停顿最大
+    type: number
+    step: any
+    hint: 毫秒
+    default: 5000
+  - type: section
+    card: true
+    label: 其它
+  - name: skipProbability
+    label: 跳过概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    default: 0.15
+  - name: surrenderProbability
+    label: 放弃概率
+    type: number
+    step: 0.01
+    min: 0
+    max: 1
+    default: 0

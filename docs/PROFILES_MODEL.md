@@ -33,10 +33,10 @@
 | 层 | 回答的问题 | 存储 | 谁提供 |
 | --- | --- | --- | --- |
 | **用户侧平台**（user platform） | AI 在哪个聊天平台上做事（QQ、微信、B 站……）：怎么连、有哪些平台工具、怎么说话 | `profiles/platforms/<id>/`（`platform.yml` + `tools.yml` + `prompt.md` + `behavior-types/`） | 系统给接口与公共配置（`configSchema` / `vars`），具体工具、话术、档案类型由该平台目录提供 |
-| **行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | `profiles/platforms/<id>/behaviors/*.yml` | 档案作者（内置两份，可增删）；C7 起它是「平台 › 详情 › 行为」的子资源，不再有整页 |
+| **行为引擎 / 行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | 引擎 `profiles/behavior-engines/<engine>.yml`（字段清单 + 默认值）；档案 `profiles/platforms/<id>/behaviors/*.yml`（`config` 是保存时的全量快照） | 引擎定义由系统提供，档案作者只改取值与文案（内置两份，可增删）；在「平台 › 详情 › 行为」里改，没有整页 |
 | **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前 DSH 与 ACP） | `profiles/agent-platforms/<id>/` | 系统给 `AgentPort` 契约，具体工具 / 能力档 / 产物由该平台目录提供 |
-| **能力档**（capability） | 四个轴里的前三个：这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”——平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条，可克隆 / 新建；`.defaults/` 留出厂副本供「还原」 |
-| **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选执行体）”组合成一个可切换的档位 | `profiles/plans/*.yml` | 内置六条，可克隆成自定义方案 |
+| **能力档**（capability） | 四个轴里的前三个：这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”——平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条（`chat` / `chat-v2` / `readonly` / `workspace` / `full` / `direct`），可克隆 / 新建；`.defaults/` 有副本即为内置 |
+| **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选执行体）”组合成一个可切换的档位 | `profiles/plans/*.yml`（`order` 决定控制台顺序） | 内置七条，可克隆成自定义方案 |
 | **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话档案 `state/sessions/<platform>/<kind>/<id>.json` 的 `permission`（`inherit` = 跟随全局 `config.json` 的 `permission.default`） | 会话级，不落在档案里 |
 
 关系一句话：**方案 = 能力档 + 行为档案 + 受众**，需要时再加一个执行体（`agentPlatform`，缺省 `auto` 跟随全局默认）。
@@ -63,6 +63,9 @@
 
 ```
 profiles/
+├── behavior-engines/             # 行为引擎：字段清单与默认值的唯一真源
+│   ├── v1.yml
+│   └── v2.yml
 ├── platforms/                    # 用户侧：一层一个目录，新增平台不改内核
 │   └── qq/
 │       ├── platform.yml          # id / label / note / vars / configSchema（字段字典见 §三）
@@ -70,12 +73,12 @@ profiles/
 │       ├── prompt.md             # 平台话术（可编辑）
 │       ├── prompt.default.md     # 出厂话术（「还原」从这里取）
 │       ├── behavior-types/
-│       │   ├── social-v1.yml     # 类型：label / engine / schema.fields
+│       │   ├── social-v1.yml     # 类型：label / platform / engine / fields（按名覆盖）
 │       │   └── social-v2.yml
 │       └── behaviors/
-│           ├── .defaults/        # 出厂副本，供「还原」
-│           ├── social-v1.yml     # 一代仿真（kind: social-v1）
-│           └── social-v2.yml     # 二代仿真（kind: social-v2）
+│           ├── .defaults/        # 出厂副本：只有文案，字段默认值来自引擎
+│           ├── social-v1.yml     # 一代仿真（kind: social-v1，config 全量）
+│           └── social-v2.yml     # 二代仿真（kind: social-v2，config 全量）
 ├── agent-platforms/              # Agent 侧：一层一个目录（dsh 为默认 active）
 │   ├── dsh/
 │   │   ├── agent-platform.yml    # id / label / configSchema（字段字典见 §三）
@@ -100,7 +103,7 @@ profiles/
 │       └── adapters/runtime.mjs
 ├── plans/
 │   ├── .defaults/                # 出厂副本（还原用）
-│   ├── chat.yml                  # 内置六条：chat / social-v1 / social-v2 /
+│   ├── chat.yml                  # 内置七条：chat / social-v1 / social-v2 / direct /
 │   └── …                         #   agent-readonly / agent-workspace / agent-full
 └── schemas/                      # 五份 JSON Schema（platform / agent-platform / behavior / capability / plan）
 
@@ -126,6 +129,23 @@ artifacts/                        # 各 Agent 平台的产物根（目录名 = a
 
 ## 三、各文件字段
 
+### 行为引擎 `behavior-engines/<engine>.yml`
+
+```yaml
+engine: v2
+label: 二代仿真
+fields:
+  - name: wake_backlogEnabled        # 下划线段数 = 嵌套深度：config.wake.backlogEnabled
+    type: switch                     # switch / number / select / list / text
+    label: 堆积触达
+    default: true
+    section: 投递节奏
+```
+
+- 字段清单、控件类型、取值域、默认值只写在这里：平台行为类型按名字覆盖文案，实例档案存「默认值 + 覆盖」的全量快照。
+- 新增引擎 = 加一份 yml；新增平台行为类型 = 加一份只写 `label` / `platform` / `engine` / `fields` 的 yml，不抄字段表。
+- 调度策略的默认值也从这里取（`groupDefaults(engine, 'wake')` 注入 `resolveSchedulingPolicy`），代码里没有第二份数字。
+
 ### 行为档案 `behaviors/<id>.yml`
 
 ```yaml
@@ -136,12 +156,13 @@ label: 一代仿真
 description: 单人设、短回复，适合小群
 prompt: |             # 行为提示词（和档案同一次保存）
   …
-config: {}            # 该类型的配置（v2 与全局 socialV2 合并）
+config: {}            # 全量快照：每个字段都有值，保存时按引擎默认值补齐
 ```
 
-- `kind` 由平台提供：类型定义在 `behavior-types/<id>.yml`（`label` / `engine` / `schema.fields`），档案只引用类型 id；系统只校验 `version/platform/kind/label/description/prompt/config` 这七个顶层键。
-- 新建档案时选的是「平台 + 类型（label）」，不再出现 v1/v2；同一类型下可以有多份档案（如 `social-v1`、`social-v2` 都是内置类型各一份）。
-- 旧写法 `v1:` / `v2:` 顶层段已被拒绝（报“未知顶层字段”）；`kind: v1` 这类旧值仍能被 engine 别名解析，但归档时统一写 `social-v1`。
+- `kind` 由平台提供：类型定义在 `behavior-types/<id>.yml`（`label` / `platform` / `engine` / `fields` 覆盖），档案只引用类型 id。
+- 顶层只允许 `version/platform/kind/label/description/prompt/config`；旧写法 `v1:` / `v2:` 顶层段、`kind: v1` 这类不在类型注册表里的值一律报错，没有别名兜底。
+- 出厂副本 `.defaults/<id>.yml` 只放 `version/platform/kind/label/description/prompt`，不存 `config`——字段默认值归引擎；「重置」= 复制副本 + 按引擎材料化。
+- 新建档案时选的是「平台 + 类型」，不再出现 v1/v2；同一类型下可以有多份档案（如 `social-v1`、`social-v2` 都是内置类型各一份）。
 
 ### 能力档 `capabilities/<id>.yml`
 
@@ -154,7 +175,7 @@ version: 1
 label: 聊天 Agent
 note: 无本地工具，只做对话与问答
 tools:
-  platform: { sendGroup: true, getPrompt: true, … }   # 平台工具开关（true/false 都保留）
+  platform: { sendGroup: true, getPrompt: false, … }  # 平台工具开关：每个 flag 都显式写（缺失 = 不可见）
   agent: { tool-web: true, tool-todo: true, … }       # Agent 模块开关
   mcp: [{ server: '*', tools: '*' }]                  # MCP 服务器与工具
   skills: ['*']                                       # 技能
@@ -187,7 +208,7 @@ extensions:                                           # 可选：外部 MCP/技�
 - 保存只写回这一个 yml（yaml Document 局部更新，其它段注释不丢）；内置六条不可删除，可克隆。
 - `rows` 是 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml` 的唯一源；子插件名用
   **bundle 包名裸说明符**（如 `qq-agent-presets/qq-tool-restrict.mjs`）——`./x.mjs` 会被按 profile 目录解析而装不上。
-- 平台工具的注册面 = 所有能力档 `tools.platform` 的并集（`platformFlags()`），`config.json` 不再有 `tools`。
+- 平台工具的注册面 = 所有能力档 `tools.platform` 的并集（`platformFlags()`），`config.json` 不再有 `tools`。单条档位自己拿到哪些工具只看 `tools.platform` 里显式为 `true` 的项（`visiblePlatformFlags()`），没写的不能猜成默认开。
 
 ### 运行方案 `plans/<id>.yml`
 
@@ -195,7 +216,7 @@ extensions:                                           # 可选：外部 MCP/技�
 version: 1
 id: social-v2
 label: 二代仿真
-builtin: true
+order: 30               # 控制台排列顺序：内置 10/20/…，自定义缺省 900
 agentPlatform: auto     # 缺省 auto = 跟随全局默认执行体
 behavior: social-v2
 capability: chat-v2      # 能力档 id（同时就是预设 id）
@@ -203,7 +224,7 @@ audience: access
 note: …
 ```
 
-- 内置六条：`chat`、`social-v1`、`social-v2`、`agent-readonly`、`agent-workspace`、`agent-full`；`builtin: true` 的只能克隆，不能改/删。
+- 内置七条：`chat`、`social-v1`、`social-v2`、`direct`、`agent-readonly`、`agent-workspace`、`agent-full`；有出厂副本的就是内置，只能克隆，不能改/删。
 - 方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id。旧文件里的 `platform` 字段读时忽略并
   报 `plan_warn`，保存时不再写出——不需要手工迁移。
 - `agentPlatform` 缺省 `auto`（跟随 `platforms.active.agent`），写具体 id 表示「这套方案必须跑在该执行体上」；
@@ -212,7 +233,7 @@ note: …
   引用完整性（能力档是否存在、`preset` 档是否有 rows、执行体是否认领该 `apply`）由 `validatePlanReferences()` 判。
 - `behavior` 只存档案名；引用的档案不存在时加载侧告警并退化为“无档案”，不阻断消息处理。
 - 方案解析：会话单独设置的方案优先，没设就用全局默认方案（`config.json` 的 `runtime.defaultPlan`，缺省 `social-v2`）；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
-- 内置方案、内置行为档案、内置能力档的出厂副本放在各自目录的 `.defaults/<id>.yml`；控制台「重置」按钮复制回正式文件，改坏了可以一键还原。
+- 「内置」= 目录里同时存在 `<id>.yml` 与 `.defaults/<id>.yml`：有副本的就是内置（只能克隆、可以重置），没有副本的就是自定义（只能删）。方案、能力档、行为档案、平台话术同一套判定；控制台的重置按钮只对内置项出现，点击即把副本复制回正式文件。
 
 ### 平台 / Agent 平台
 
@@ -236,14 +257,16 @@ C2b 起两侧多了两个**声明面**字段（详见 [PLATFORM_UNIFICATION.md](
 | 平台话术 | `src/user-side/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
 | 能力档 | `src/capabilities/store.mjs`：`createCapabilityStore` / `normalizeRuntime` / `CAPABILITY_RUNTIME_DEFAULTS` / `CAPABILITY_APPLY` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
 | 运行方案 | `src/runtime/plans.mjs`：`createPlanStore`（list/get/save/remove/clone）/ `normalizePlan` / `planWarnings` / `validatePlanReferences` / `findPlan` / `legacyModeOfPlan` |
-| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
+| 出厂副本 | `src/profiles/factory.mjs`：`hasFactory`（是否内置）/ `listFactoryIds` / `readFactoryText` / `copyFactory`（目录名 `.defaults`） |
+| 行为引擎 | `src/behaviors/engines.mjs`：`listEngines` / `getEngine` / `engineFields` / `groupDefaults` / `materialize` / `flattenConfig` / `buildConfig` / `validateConfig` |
+| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `BEHAVIOR_ENGINES_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
 | 模式持久化 | `src/runtime/mode-store.mjs`：`createModeStore` / `createLocalModeFileBackend`（`state/mode.json`）/ `createDshModeBackend`（DSH `qq-mode` 命名空间）。只负责存取，模式语义（别名归一、级别、提权判定）仍在 `bridge.js` |
 | 平台适配器发现 | `scripts/agent-platform-adapters.mjs`：`ADAPTER_KINDS` / `adapterFile` / `listAgentPlatforms` / `loadAdapter` / `normalizeArtifactFiles`。**约定优于声明**：只看 `profiles/agent-platforms/<id>/adapters/<kind>.mjs` 存不存在，不读 `agent-platform.yml` |
 | 产物构建调度 | `scripts/build-artifacts.mjs`：`buildArtifacts({targets, check})`。遍历平台 → 调 `planArtifacts()` → 校验路径/去重 → 写盘；`--check` 只比对不写（漂移即非零退出） |
 | 产物安装调度 | `scripts/install-agent-platform.mjs`：`installAgentPlatform({agentPlatform, profile})`。**先 build 再 install**，避免装到旧产物 |
 | 运行期适配器 `runtime.mjs` | `profiles/agent-platforms/<id>/adapters/runtime.mjs` 是**声明面**：能力、权限映射、preset 清单、`applies` / `promptChannels` 等纯常量与纯函数，**不得 import `src/`**（否则声明面反向依赖内核，构建期无法单独打包）。协议面（RPC 客户端、鉴权、事件解包）在 `src/agent-side/adapters/<id>/`，由 `src/agent-side/builtin.mjs` 用 `createRuntime` 字段与声明面拼装后注册；内核只经 `src/agent-side/runtime.mjs` 的 `agentRuntime()` 调用（B4 / B5 / C6.5） |
 
-自检：`node scripts/check-profiles.mjs`（校验目录四件套、工具风险值、内置能力/方案、引用闭合、旧目录不得存在）。
+自检：`node scripts/check-profiles.mjs`（六条资源契约：引擎定义可解析、平台四件套、类型文件只允许 `label/platform/engine/fields`、行为档案 `config` 是引擎字段的全量快照、出厂副本成对且只放文案、能力档工具面写全所有平台工具 flag、方案 `order` 显式唯一且不写 `builtin`、旧目录不得存在）。
 产物链路自检：`npm run verify:artifacts`（产物未漂移）、`npm run test:artifact-pipeline`（发现/校验/幂等/mock 平台隔离）。
 
 ### 适配器契约（P1）

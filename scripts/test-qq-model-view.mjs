@@ -174,7 +174,8 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     await fs.copyFile(path.join(ROOT, 'src', 'capabilities', 'store.mjs'), path.join(fixture, 'src', 'capabilities', 'store.mjs'));
     await fs.copyFile(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), path.join(fixture, 'src', 'tools', 'catalog.mjs'));
     await fs.mkdir(path.join(fixture, 'src', 'profiles'), { recursive: true });
-    await fs.copyFile(path.join(ROOT, 'src', 'profiles', 'paths.mjs'), path.join(fixture, 'src', 'profiles', 'paths.mjs'));
+    await Promise.all(['paths.mjs', 'factory.mjs'].map((name) =>
+      fs.copyFile(path.join(ROOT, 'src', 'profiles', name), path.join(fixture, 'src', 'profiles', name))));
     cpSync(path.join(ROOT, 'profiles'), path.join(fixture, 'profiles'), { recursive: true });
     await Promise.all(['mcp-snowluma-safe.js', 'qq-model-view.js', 'sensitive.js'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', name), path.join(fixture, 'src', name))));

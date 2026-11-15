@@ -1,26 +1,10 @@
 // 调度策略解析：默认值 + 覆盖层 → 内核用的普通对象。
 //
-// 参数只有一条解析链：`SCHEDULING_DEFAULTS` → `config.wake.<name>`（平台行为档案 / 全局配置）
+// 参数只有一条解析链：行为引擎定义的默认值 → `config.wake.<name>`（行为档案里的覆盖）
 // → 策略对象。会话态不承载任何节奏参数：会话态是「这个群现在的状态」，不是「这个平台的手感」。
 //
 // 核心中立：这里不出现「礼貌」「拟人」「该不该回」，只出现「投递一次的成本与顺序」。
-// 换平台、换行为档案时，改的是 config 覆盖值，不是这段代码。
-
-/** 核心默认值：唯一的真源，行为档案只在「这个平台的默认值确实不同」时才写覆盖键。 */
-export const SCHEDULING_DEFAULTS = Object.freeze({
-  adaptiveDebounce: true,
-  directBaseMs: 1200,
-  directMaxWaitMs: 3000,
-  ambientBaseMs: 4000,
-  ambientMaxWaitMs: 8000,
-  directBudgetCapacity: 3,
-  directRefillMs: 20000,
-  ambientBudgetCapacity: 6,
-  ambientRefillMs: 300000,
-  backlogEnabled: true,
-  backlogWakeAfter: 3,
-  backlogQuietMs: 60000,
-});
+// 默认值不在代码里：调用方从引擎定义取（`groupDefaults(engine, 'wake')`）传进来。
 
 /** 明确冲 bot 来的原因：被别的唤醒挤掉就是事故，单独走 direct 档与 direct 桶。 */
 const DIRECT_WAKE_REASONS = new Set(['private', 'atMention', 'ownerRelay', 'speaker']);
@@ -55,9 +39,11 @@ const toInt = (value, fallback, min, max) => {
 };
 
 /**
- * 解析策略。`wake` 是 `config.wake` 段（核心默认值之上叠了平台档案与全局配置）。
+ * 解析策略。`wake` 是 `config.wake` 段（引擎默认值之上叠了档案覆盖），
+ * `defaults` 是引擎定义里 `wake_*` 字段的默认值：缺了就取不到值，所以由引擎定义充当唯一真源。
  *
  * @param {object} [wake]
+ * @param {object} [defaults]
  * @returns {{
  *   adaptiveDebounce: boolean,
  *   batching: { direct: {baseMs:number,maxWaitMs:number}, ambient: {baseMs:number,maxWaitMs:number} },
@@ -65,9 +51,9 @@ const toInt = (value, fallback, min, max) => {
  *   backlog: { enabled: boolean, wakeAfter: number, quietMs: number }
  * }}
  */
-export function resolveSchedulingPolicy(wake = {}) {
+export function resolveSchedulingPolicy(wake = {}, defaults = {}) {
   const w = wake && typeof wake === 'object' ? wake : {};
-  const d = SCHEDULING_DEFAULTS;
+  const d = defaults && typeof defaults === 'object' ? defaults : {};
   return {
     adaptiveDebounce: toBool(w.adaptiveDebounce, d.adaptiveDebounce),
     batching: {

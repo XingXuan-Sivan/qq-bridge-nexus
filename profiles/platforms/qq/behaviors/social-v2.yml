@@ -98,6 +98,18 @@ config:
       分钟内没人说话就可以设置下一次唤醒并沉睡。
     noActionLimit: 3
     maxWakeConfigReminders: 2
+    adaptiveDebounce: true
+    directBaseMs: 1200
+    directMaxWaitMs: 3000
+    ambientBaseMs: 4000
+    ambientMaxWaitMs: 8000
+    directBudgetCapacity: 3
+    directRefillMs: 20000
+    ambientBudgetCapacity: 6
+    ambientRefillMs: 300000
+    backlogEnabled: true
+    backlogWakeAfter: 3
+    backlogQuietMs: 60000
   send:
     burstEnabled: true
     burstMaxMessages: 8

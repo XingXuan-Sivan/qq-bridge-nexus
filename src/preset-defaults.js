@@ -1,9 +1,8 @@
 // 预设正文的「初始版本」：直接读能力档的出厂副本
 // profiles/agent-platforms/dsh/capabilities/.defaults/<id>.yml 的 rows 段里 persona.config.prefix。
 //
-// C4 起能力档是唯一真源，出厂快照也只剩这一份（原来的 assets/default-presets/ 是同一份内容的
-// 第二份拷贝，已删除）。「还原出厂预设」用的正是 .defaults/，所以这里的读法必须与它一致，
-// 否则控制台的「已修改 / 已还原」判断会和实际还原结果对不上。
+// 能力档是唯一真源，出厂快照也只有这一份。「还原出厂预设」用的正是 .defaults/，
+// 所以这里的读法必须与它一致，否则控制台的「已修改 / 已还原」判断会和实际还原结果对不上。
 import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
@@ -11,9 +10,6 @@ import { CAPABILITIES_ROOT } from './capabilities/store.mjs';
 
 /** 出厂副本目录（能力档目录下的 .defaults/）。 */
 export const DEFAULT_PROMPTS_DIR = path.join(CAPABILITIES_ROOT, '.defaults');
-
-/** 支持「还原初始版本」的预设（带出厂快照的仿真预设）。 */
-export const DEFAULT_PROMPT_PRESETS = ['chat', 'chat-v2'];
 
 const norm = (text) => String(text ?? '').replace(/\r\n/g, '\n').replace(/\n+$/, '');
 

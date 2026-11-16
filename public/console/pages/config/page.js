@@ -7,7 +7,7 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh, setConsolePage, setPageLeaveGuard } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
-import { getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { getSwitch, renderFields, setSelectOptions, setSwitch } from '../../components/form/form.js';
 import { initTimeFields } from '../../components/time/time.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
@@ -20,6 +20,7 @@ import { initVoiceSection } from './voice-section.js';
 import { mountCompact, compactSection } from './compact.js';
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { cardHtml } from '../../components/card/card.js';
+import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 const $ = (id) => document.getElementById(id);
 const requestStatusRefresh = () => document.dispatchEvent(new Event('console:refresh-status'));
@@ -65,17 +66,28 @@ const dshModelSection = {
   },
 };
 
+/**
+ * 默认级别下拉：full 档随「允许 full」与当前值出现/收起（选项算法在 js/permission-levels.js）。
+ * 不传 `current` 时沿用下拉现选的值，供开关翻转后重算。
+ */
+function syncPermissionDefaultOptions(current) {
+  const select = document.getElementById('permissionDefault');
+  if (!select) return;
+  const allowFull = getSwitch(document.getElementById('permissionAllowFull')) === true;
+  setSelectOptions(select, permissionLevelOptions({ allowFull, current: current ?? select.value }));
+}
+
 async function loadPermission() {
   try {
     const r = await api('/api/config/permission');
     if (r.ok === false) throw new Error(r.error || '读取失败');
     const p = r.permission ?? {};
-    const def = document.getElementById('permissionDefault');
-    if (def) def.value = p.default || 'read-only';
-    const ttl = document.getElementById('permissionTtl');
-    if (ttl) ttl.value = String(p.fullTtlMin || 30);
     const allow = document.getElementById('permissionAllowFull');
     if (allow) setSwitch(allow, p.allowFull === true);
+    // 先按「总开关 + 存着的值」重算档位再回填：总开关关着时，已存的 full 也要能显示出来。
+    syncPermissionDefaultOptions(p.default || 'read-only');
+    const ttl = document.getElementById('permissionTtl');
+    if (ttl) ttl.value = String(p.fullTtlMin || 30);
     setMsg('permissionMsg', '');
     if (saveBar) saveBar.adoptIfPristine();
   } catch (error) {
@@ -498,9 +510,9 @@ const runtimeDefaultSection = {
   },
 };
 
-// ── 执行体（默认执行体 / 当前运行 / 探活）──────────────────────────────────────
+// ── Agent 平台（默认平台 / 当前运行 / 探活）─────────────────────────────────────
 // 配置面（`runtime.defaultAgent`）与运行期（`/api/status` 的 `agent`）是两个事实：
-// 换默认只落盘，本进程装配的执行体在重启前不变。
+// 换默认只落盘，本进程装配的 Agent 平台在重启前不变。
 const CONNECT_MODE_LABEL = { http: 'HTTP', stdio: 'stdio', remote: '远程' };
 let agentState = { runtime: null, status: null };
 
@@ -520,7 +532,7 @@ function renderAgentReadout() {
   const runningHost = $('agentRunningReadout');
   if (runningHost) {
     runningHost.innerHTML = [
-      `<span class="tag">${esc(running.label || running.id || '未知执行体')}</span>`,
+      `<span class="tag">${esc(running.label || running.id || '未知平台')}</span>`,
       `<code>${esc(running.id || '')}</code>`,
       `<span class="tag">连接方式 ${esc((CONNECT_MODE_LABEL[running.mode] ?? running.mode) || '未报告')}</span>`,
       running.ready ? '<span class="tag tag--success">已就绪</span>' : '<span class="tag tag--danger">未就绪</span>',
@@ -533,20 +545,20 @@ function renderAgentReadout() {
   if (!probeHost) return;
   const probe = entry?.probe ?? null;
   probeHost.innerHTML = !probe
-    ? `<span class="meta">${esc(configured || '未设置')} 本次运行里还没探活过：在「平台 › 该执行体 › 执行体」里单独探。</span>`
+    ? `<span class="meta">${esc(configured || '未设置')} 本次运行里还没探活过：在「平台 › 该 Agent 平台 › 概览」里点「探活」。</span>`
     : probe.ok
       ? `<span class="tag tag--success">上次探活通过</span><span class="meta">${esc(probe.at || '')}${probe.url ? ` · ${esc(probe.url)}` : ''}</span>`
       : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`;
 }
 
 /**
- * 模型卡的标题跟随当前执行体，并只在它声明了 `models` 能力位时才给出模型字段：
- * 没这个能力位的执行体，模型只能在它自己的界面里改。
+ * 模型卡的标题跟随当前 Agent 平台，并只在它声明了 `models` 能力位时才给出模型字段：
+ * 没这个能力位的平台，模型只能在它自己的界面里改。
  */
 function applyAgentGates() {
   const running = runningAgentOf();
   const entry = agentEntries().find((item) => item.id === running.id) ?? null;
-  const label = running.label || running.id || '当前执行体';
+  const label = running.label || running.id || '当前 Agent 平台';
   const card = $('section-dsh');
   const heading = card?.querySelector('h2');
   if (heading) heading.textContent = `${label} 模型与思考强度`;
@@ -572,7 +584,7 @@ async function loadAgentSection() {
     select.innerHTML = entries
       .map((item) => `<option value="${esc(item.id)}">${esc(item.label || item.id)}${item.active ? '（当前运行）' : ''}</option>`)
       .join('');
-    // 配置面选的执行体已经不在注册表里（拆了目录 / 没装）/ 或注册表还没回来：把原值补进下拉，不默认成别人。
+    // 配置面选的 Agent 平台已经不在注册表里（拆了目录 / 没装）/ 或注册表还没回来：把原值补进下拉，不默认成别人。
     if (current && !entries.some((item) => item.id === current)) {
       select.insertAdjacentHTML('beforeend', `<option value="${esc(current)}">${esc(current)}（未注册）</option>`);
     }
@@ -584,15 +596,15 @@ async function loadAgentSection() {
     applyAgentGates();
     setMsg('agentSwitchMsg', '');
   } catch (error) {
-    setMsg('agentSwitchMsg', `读取执行体失败：${error?.message ?? error}`, 'err');
+    setMsg('agentSwitchMsg', `读取 Agent 平台失败：${error?.message ?? error}`, 'err');
   }
 }
 
-/** 切换默认执行体：只落盘，本进程不换装配；服务端已经先预检过。 */
+/** 切换默认 Agent 平台：只落盘，本进程不换装配；服务端已经先预检过。 */
 async function switchAgent() {
   const wanted = $('agentDefaultSelect')?.value ?? '';
   if (!wanted) {
-    setMsg('agentSwitchMsg', '先选一个执行体', 'err');
+    setMsg('agentSwitchMsg', '先选一个 Agent 平台', 'err');
     return;
   }
   const button = $('agentSwitchBtn');
@@ -604,8 +616,8 @@ async function switchAgent() {
     if (!r?.ok) throw new Error(r?.error || '切换失败');
     // 重读放在写状态位之前：loadAgentSection 会清掉上一次的状态文字。
     await loadAgentSection();
-    setMsg('agentSwitchMsg', r.requiresRestart ? `已把默认执行体改为 ${label}，重启桥接后生效` : `${label} 已经是当前执行体`);
-    showConsoleToast(r.requiresRestart ? `已设为默认执行体 ${label}，重启桥接后生效` : `当前执行体就是 ${label}`);
+    setMsg('agentSwitchMsg', r.requiresRestart ? `已把默认 Agent 平台改为 ${label}，重启桥接后生效` : `${label} 已经是当前 Agent 平台`);
+    showConsoleToast(r.requiresRestart ? `已设为默认 Agent 平台 ${label}，重启桥接后生效` : `当前 Agent 平台就是 ${label}`);
   } catch (error) {
     // 失败保留用户选的那个值（他要的就是这个），只把原因写出来。
     setMsg('agentSwitchMsg', `切换失败：${error?.message ?? error}`, 'err');
@@ -650,10 +662,10 @@ const CONFIG_CARDS = {
   configRuntimeCards: [
     {
       id: 'section-agent',
-      title: '执行体',
+      title: 'Agent 平台',
       note: '切换后重启生效',
       description: '桥接装配的 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）。'
-        + '这里改的是<b>默认执行体</b>：本进程仍装配原来那个，重启桥接后才换过去。',
+        + '这里改的是<b>默认 Agent 平台</b>：本进程仍装配原来那个，重启桥接后才换过去。',
       body: '<div data-overview-fields="agent"></div>',
     },
     {
@@ -677,7 +689,7 @@ const CONFIG_CARDS = {
       note: '下一条消息生效',
       description: '当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span>',
       body: '<div data-overview-fields="dsh"></div>'
-        + '<div id="dshModelUnsupported" hidden><p class="meta">当前执行体没有声明 <code>models</code> 能力位：模型与思考强度在它自己的界面里改。</p></div>',
+        + '<div id="dshModelUnsupported" hidden><p class="meta">当前 Agent 平台没有声明 <code>models</code> 能力位：模型与思考强度在它自己的界面里改。</p></div>',
     },
     {
       id: 'section-compact-config',
@@ -813,8 +825,12 @@ export function init() {
   $('dshVisionSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
   $('dshCatalogRefresh').addEventListener('click', () => refreshDshModel(true));
 
-  // 执行体：换了默认只落盘，重启桥接后装配。
+  // Agent 平台：换了默认只落盘，重启桥接后装配。
   $('agentSwitchBtn')?.addEventListener('click', () => void switchAgent());
+  // 权限档：full 档随「允许 full」出现/收起。开关由 bindSwitches 在父容器上翻转，等它切完再读。
+  document.getElementById('permissionAllowFull')?.addEventListener('click', () => {
+    requestAnimationFrame(() => syncPermissionDefaultOptions());
+  });
 
   // 手动静默：同一个按钮按当前状态开启或关闭
   $('silentToggle').addEventListener('click', async () => {

@@ -1,8 +1,7 @@
 // 平台注册表前端快照：页面只问这里「有哪些平台、叫什么、能不能用、哪里坏了」。
 //
-// 数据只来自 /api/platforms/registry（统一注册表，C1）—— 用户侧与 Agent 侧是**同一份响应**，
-// 前端不自己拼第二张表。C7 之前这里只留 `side === 'user'`，于是「Agent 侧接了谁、能不能跑」
-// 在界面上无处可问；现在两侧都在，调用方靠参数说明要哪一侧，缺省仍是用户侧（旧调用点零改动）。
+// 数据只来自 /api/platforms/registry（统一注册表，C1）—— 用户平台与 Agent 平台是**同一份响应**，
+// 前端不自己拼第二张表：调用方靠参数说明要哪一侧，缺省是用户平台。
 //
 // 为什么查询是同步的：页面首屏渲染不等网络。app.js 启动时预热一次，页面拿到的是
 // 上一次的快照；空快照的降级是「只显示数据里出现过的平台」，不会把页面挂住。
@@ -52,7 +51,7 @@ export async function loadPlatforms({ force = false } = {}) {
   return inflight;
 }
 
-/** 当前运行期平台 id（用户侧；未加载时为空串）。 */
+/** 当前运行期平台 id（用户平台；未加载时为空串）。 */
 export function activePlatformId() {
   return meta.active.user;
 }
@@ -195,7 +194,7 @@ const CAPABILITY_LABEL = Object.freeze({
   'member-list': '成员列表',
   'member-info': '成员详情',
   ext: '平台私有段',
-  // Agent 侧能力位（AgentPort 契约）：两侧同名时不冲突，名字本来就不同。
+  // Agent 平台能力位（AgentPort 契约）：两侧同名时不冲突，名字本来就不同。
   session: '会话',
   rename: '改名',
   permission: '权限',

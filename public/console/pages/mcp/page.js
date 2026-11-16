@@ -152,7 +152,7 @@ function detailMarkup(server) {
   const description = server.status === 'error'
     ? `读取失败：${server.error || '未知错误'}`
     : (server.description || server.note || '');
-  // 外部 server 的写操作放在属性卡里（与平台二级页的实例 / 执行端卡同一位置）：
+  // 外部 server 的写操作放在属性卡里（与平台二级页的实例 / 默认卡同一位置）：
   // 卡头只留标题，窄栏（1024 屏右栏约 330px）里标题与四个按钮不必抢同一行。
   const actions = external
     ? inlineActions({

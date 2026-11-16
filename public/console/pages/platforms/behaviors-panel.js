@@ -1,4 +1,4 @@
-// 行为档案面板：平台详情 ›「行为」标签（仅用户侧平台、且该平台确实有档案目录时出现）。
+// 行为档案面板：平台详情 ›「行为」标签（仅用户平台、且该平台确实有档案目录时出现）。
 //
 // 权威存储：profiles/platforms/<平台>/behaviors/<id>.yml。
 // 档案是平台的子资源：列表按「档案所属平台」过滤，新建时直接落到当前平台，不再让人选平台。
@@ -290,7 +290,7 @@ function markup() {
 /**
  * 在 host 里挂载某个平台的行为档案面板。
  * @param {HTMLElement} target 详情标签里的宿主
- * @param {{platformId: string}} opts 当前平台（用户侧）
+ * @param {{platformId: string}} opts 当前平台（用户平台）
  * @returns {{load: () => Promise<void>}}
  */
 export function mountBehaviorsPanel(target, { platformId: id } = {}) {

@@ -1,15 +1,15 @@
 // 全局配置页只复用总览页的字段规格，不复制一份：字段定义保留在 overview/fields.js，
 // 避免同一组 id 在两个页面源码里各写一遍，也避免两页同时加载时 id 冲突。
-// 「执行体」卡只属于全局配置（总览页不装配），所以它的字段写在这里。
+// 「Agent 平台」卡只属于全局配置（总览页不装配），所以它的字段写在这里。
 import { OVERVIEW_FIELDS } from '../overview/fields.js';
 
-// 默认执行体 + 当前运行 + 探活：配置面与运行期是两个事实，界面上分开写。
+// 默认 Agent 平台 + 当前运行 + 探活：配置面与运行期是两个事实，界面上分开写。
 const AGENT_FIELDS = {
   fields: [
     {
       name: 'agentDefaultSelect',
       type: 'select',
-      label: '默认执行体',
+      label: '默认 Agent 平台',
       options: [],
       hint: '下次启动桥接时装配它；当前运行的是下面这一行，改这里不影响本进程。',
     },

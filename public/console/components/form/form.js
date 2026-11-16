@@ -108,6 +108,24 @@ export function selectField({ id, label, options = [], value, placeholder, hint,
   return fieldShell({ id, label, required, control, hint, warn, danger, docs });
 }
 
+/**
+ * 就地替换下拉的选项（选项依赖别的字段时要重算，例如权限档随「允许 full」增删），并保住选中值。
+ * 只换 `<option>`，不重建控件本身：焦点、事件委托和同组其它字段都不受影响。
+ * @param {HTMLSelectElement} select
+ * @param {Array<{value:string, label:string}>} options
+ * @param {string} [value] 目标选中值，缺省沿用当前值；不在新选项里时浏览器会留空
+ */
+export function setSelectOptions(select, options = [], value = select?.value) {
+  if (!select) return;
+  select.replaceChildren(...options.map((option) => {
+    const el = document.createElement('option');
+    el.value = String(option.value);
+    el.textContent = option.label ?? String(option.value);
+    return el;
+  }));
+  select.value = String(value ?? '');
+}
+
 export function radioGroup({ id, label, options = [], value, inline = true, cards = false, hint, warn, danger, docs, required = false, disabled = false }) {
   const name = id;
   const items = options.map((option) => {

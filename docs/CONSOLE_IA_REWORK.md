@@ -215,7 +215,7 @@ modelCatalog:
 
 | 接口 | 语义 |
 | --- | --- |
-| `GET /api/platforms/registry` | 已有；Agent 侧条目新增 `modelCatalog`（声明部分，纯静态，随注册表一次带回） |
+| `GET /api/platforms/registry` | 已有；Agent 平台条目新增 `modelCatalog`（声明部分，纯静态，随注册表一次带回） |
 | `GET /api/platforms/registry/agent/<id>/models` | 新增；返回 `{ declared, live }`。`live` 来自该平台的 `listModels()`，30 秒内存缓存，失败为 `null` 且不影响 `declared` |
 
 `live` 单独成端点，是因为 ACP 实现会为读目录建一个探测会话（`src/agent-side/adapters/acp/port.mjs:14`），不能塞进被轮询的注册表响应里。
@@ -295,8 +295,8 @@ modelCatalog:
 
 ### 6.1 `full` 档
 
-- 选项生成改成函数式：在渲染时按 `allowFull` 动态算，**且当前值始终并入选项**（即使全局开关此刻关着，已存 `full` 的会话/配置也要能显示出来，否则下拉显示为空）。
-- 落点：`js/permission-levels.js` 增加 `permissionLevelOptionsFor({ allowFull, current })`；`pages/overview/fields.js` 的静态 `options` 改为 `optionsFor` 钩子，`renderFields` 支持函数型 `options`（这是唯一需要扩的点，扩完其他静态 `options` 不受影响）。
+- 选项生成按「总开关 + 当前值」算：`permissionLevelOptions({ allowFull, current })` 在 `allowFull` 打开时给四档，当前值本来就是 `full` 时即使开关关着也保留（否则下拉显示空白）。
+- 落点不是给 `renderFields` 加函数型 `options`：值在异步读回之后才知道，重新渲染会冲掉同组其它字段。改成组件层新增 `setSelectOptions(select, options, value)` 就地换 `<option>`，选项算法留在 `js/permission-levels.js`；`pages/config/page.js` 在读到配置后重算一次，开关翻转后用 `requestAnimationFrame` 再算一次；`pages/sessions/page.js` 直接传对象参数。
 - 同时把「关掉 `allowFull` 立刻收回授权」的既有后端行为（`src/bridge.js:9926`）在界面上显式写进字段 hint，避免用户以为只是「不显示了」。
 
 ### 6.2 人格注入块可关
@@ -317,7 +317,7 @@ modelCatalog:
 
 四批，**批内任务连续做完再停**；每批必须带着全绿门禁收尾，不留半成品跨批。每批都含「当批删除」，旧方案不推到下一批再删。
 
-**进度**：B1 ✅ 已收尾；B2 进行中（1–4 已完成：平台清单与二级页、插件二级页、MCP 两栏收口）；B3 / B4 未开始。
+**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 / B4 未开始。
 
 ### B1 底座：组件能力 + 子路由 + 令牌债
 
@@ -341,7 +341,7 @@ modelCatalog:
 | 3 | 插件详情由弹窗改为二级页 `#plugins/<id>`：概览 / 配置 / 审计三块折叠或分节，保存走该页 save-dock | `pages/plugins/{page.html,page.js,page.css}` |
 | 4 | MCP 两栏细节：工具栏下沉左栏（槽里放 `tableToolbarHtml`）、右栏分节卡、列表项信息重排（标题 + 状态徽标 + 一行摘要） | `pages/mcp/{page.html,page.js,page.css}` |
 | 5 | 名词统一：界面文案与 `consolePages` 说明里「执行体 / Agent 侧 / 用户侧」→「Agent 平台 / 用户平台」（协议字段名 `agent` / `user` 不动，它们本来就中性） | `js/router.js`、各页文案 |
-| 6 | `full` 档（§6.1） | `js/permission-levels.js`、`pages/overview/fields.js`、`pages/sessions/page.js` |
+| 6 | `full` 档（§6.1） | `js/permission-levels.js`、`components/form/form.js`、`pages/{overview/fields.js,config/page.js,sessions/page.js}` |
 | 7 | 直通去特例（§6.3） | `pages/sessions/{page.js,fields.js}` |
 
 **当批删除**：`platforms` 页的 `splitViewHtml` 用法、`.split-group`、右栏 `shell()` 内部布局；`plugins` 的详情弹窗 HTML 与打开路径；`pages/mcp/page.css` 的 `.mcp-tool-list/.mcp-tool`（与 `dataTableHtml` 重复的第二套表格样式）；`overview/fields.js` 里 `permissionLevelOptions(false)` 的静态选项。

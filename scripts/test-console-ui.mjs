@@ -331,7 +331,7 @@ try {
     await saveBarWrite('/api/config/runtime');
     assert.deepEqual(fixture.requests.at(-1).body, { defaultPlan: 'social-v1' });
 
-    // 行为档案是用户侧平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
+    // 行为档案是用户平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
     await openPlatform('user:qq');
     await page.click('[data-platform-tab="behaviors"]');
     await page.waitForSelector('#behaviorTable [data-behavior-edit="social-v1"]', { timeout: 5000 });
@@ -409,9 +409,9 @@ try {
     await openPlatform('user:qq');
     await page.click('[data-platform-tab="config"]');
     await page.waitForSelector('#platformConfigMount [data-field="cfg__wsUrl"]', { timeout: 5000 });
-    // 与 Agent 侧同一张表单：字段来自 configSchema，值来自注册表条目的那一份 config。
+    // 与 Agent 平台同一张表单：字段来自 configSchema，值来自注册表条目的那一份 config。
     assert.equal(await page.locator('#cfg__wsUrl').inputValue(), 'ws://127.0.0.1:3001');
-    // 用户侧多一个条目级开关（不在 schema 里）：它决定这条实例装配不装配。
+    // 用户平台多一个条目级开关（不在 schema 里）：它决定这条实例装配不装配。
     assert.equal(await page.locator('[role="switch"][data-field="platformEnabled"]').count(), 1, '条目开关排在表单首位');
     assert.equal(await page.locator('#platformEnabled').getAttribute('aria-checked'), 'true', '启用的实例开关是开的');
     await page.locator('#cfg__wsUrl').fill('ws://127.0.0.1:3002');
@@ -444,7 +444,7 @@ try {
     await openPlatform('agent:dsh');
     await page.waitForSelector('#platformProbe', { timeout: 5000 });
     await clickWrite('#platformProbe', '/api/platforms/registry/agent/dsh/probe');
-    // 探活结论进注册表快照（entry.probe），刷新后由「执行体」卡画出来。
+    // 探活结论进注册表快照（entry.probe），刷新后由「默认与探活」卡画出来。
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('上次探活通过'), null, { timeout: 5000 });
   });
 
@@ -454,7 +454,7 @@ try {
     await page.waitForSelector('#planEditor .modal', { timeout: 5000 });
     await page.fill('#planEditId', 'my-agent');
     await page.fill('#planEditLabel', '我的 Agent');
-    // 方案不绑用户平台，默认跟随全局执行体；钉具体 id 只在需要时（下拉只列声明了能力档的平台）。
+    // 方案不绑用户平台，默认跟随全局 Agent 平台；钉具体 id 只在需要时（下拉只列声明了能力档的平台）。
     assert.equal(await page.locator('#planEditPlatform').count(), 0, '用户侧平台字段已从方案里移除');
     assert.deepEqual(await page.$$eval('#planEditAgentPlatform option', (nodes) => nodes.map((node) => node.value)), ['auto', 'dsh']);
     assert.equal(await page.locator('#planEditAgentPlatform').inputValue(), 'auto', '新建方案默认 auto');
@@ -502,7 +502,7 @@ try {
     await openPlatform('agent:acp');
     await page.waitForSelector('#platformSetDefault', { timeout: 5000 });
     const body = await clickWrite('#platformSetDefault', '/api/config/runtime');
-    assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交执行体 id，不夹带默认方案');
+    assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交 Agent 平台 id，不夹带默认方案');
     // 切换只落盘：本进程仍装配 dsh，于是「待重启」同时出现在详情与清单，外加一条可复查的诊断。
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
     assert.equal(await page.locator('#platformSetDefault').count(), 0, '已设为默认的平台不再显示同一个按钮');
@@ -526,7 +526,7 @@ try {
     assert.deepEqual(body, { defaultUser: 'wx' }, '设为默认实例只提交实例 id');
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
     assert.equal(await page.locator('#platformSetUserDefault').count(), 0, '已设为默认的实例不再显示同一个按钮');
-    assert.match(await page.textContent('[data-platform-panel-body]'), /active_pending_restart/, '用户侧的默认实例与运行期不一致时也给一条诊断');
+    assert.match(await page.textContent('[data-platform-panel-body]'), /active_pending_restart/, '用户平台的默认实例与运行期不一致时也给一条诊断');
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {
@@ -639,7 +639,14 @@ try {
 
     await navigate('config');
     await page.locator('[data-config-section="security"]').click();
+    // 全局配置页的「默认级别」同样按总开关算档位：关着没有 full，打开后补上，选中值不被冲掉。
+    const defaultOptions = () => page.locator('#permissionDefault option').evaluateAll((nodes) => nodes.map((node) => node.value));
+    await page.waitForFunction(() => document.getElementById('permissionDefault')?.options.length >= 3);
+    assert.deepEqual(await defaultOptions(), ['read-only', 'workspace-write', 'full-ask'], '总开关关闭时「默认级别」也没有 full 档');
     await check('permissionAllowFull', true);
+    await page.waitForFunction(() => document.getElementById('permissionDefault')?.options.length === 4);
+    assert.deepEqual(await defaultOptions(), ['read-only', 'workspace-write', 'full-ask', 'full'], '总开关打开后 full 档出现在下拉里');
+    assert.equal(await page.locator('#permissionDefault').inputValue(), 'read-only', '重算选项不改变当前选中值');
     assert.deepEqual(await saveBarWrite('/api/config/permission'), { default: 'read-only', allowFull: true, fullTtlMin: 30 });
 
     await navigate('sessions');
@@ -1294,9 +1301,9 @@ try {
     await page.waitForSelector('#metricSessions');
   });
 
-  // P5：直通运行期把「谁能改权限档」摆到界面上。管理员私聊走直通方案（权限归执行体），
+  // P5：直通运行期把「谁能改权限档」摆到界面上。管理员私聊走直通方案（权限归 Agent 平台），
   // 群聊走「聊天」（桥接钉档）——两种权威都要能从同一个详情里读出来。
-  if (!original) await test('会话详情：执行体与权限按权威分两态，直通会话改档后漂移消失', async () => {
+  if (!original) await test('会话详情：Agent 平台与权限按权威分两态，直通会话改档后漂移消失', async () => {
     // 会话 key 里带冒号，请求路径里是百分号编码的：比对前先解回来。
     const pathOf = (url) => decodeURIComponent(new URL(url).pathname);
     await navigate('sessions');
@@ -1305,11 +1312,11 @@ try {
     await page.waitForSelector('#detailAgentPreset');
     const agentCard = page.locator('#sessionDetailBody [data-detail-form="agent"]');
     let text = await agentCard.textContent();
-    assert.match(text, /DeepSeek Harness/, '执行体名字要写出来');
-    assert.match(text, /权限档：执行体自身/, '直通档的权限权威是执行体自身');
+    assert.match(text, /DeepSeek Harness/, 'Agent 平台名字要写出来');
+    assert.match(text, /权限档：Agent 平台自身/, '直通档的权限权威是 Agent 平台自身');
     assert.match(text, /系统提示/, '话术按能力档声明的 system 通道注入');
     assert.match(text, /漂移：对端现在是 default/, '桥接基线与对端现值不一致要写出来');
-    assert.deepEqual(await page.locator('#detailAgentPreset option').evaluateAll((nodes) => nodes.map((node) => node.value)), ['read-only', 'workspace-write', 'default'], '档位目录来自执行体');
+    assert.deepEqual(await page.locator('#detailAgentPreset option').evaluateAll((nodes) => nodes.map((node) => node.value)), ['read-only', 'workspace-write', 'default'], '档位目录来自 Agent 平台');
     assert.equal(await page.locator('#detailAgentPreset').inputValue(), 'default');
 
     const [written] = await Promise.all([
@@ -1321,7 +1328,7 @@ try {
     await page.waitForFunction(() => document.getElementById('detailAgentPreset')?.value === 'workspace-write');
     text = await agentCard.textContent();
     assert.equal(/漂移/.test(text), false, '写后核对一致，漂移结论应消失');
-    assert.equal(await page.locator('[data-detail-agent-reopen]').count(), 1, '执行体权威给出「在新执行体上重开」');
+    assert.equal(await page.locator('.detail-danger [data-detail-agent-reopen]').count(), 1, 'Agent 平台权威给出「在新 Agent 平台上重开」，且归入危险操作卡');
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
 
     // 群聊走桥接钉档：只读展示生效档位，没有改档下拉，也不给重开按钮。
@@ -1330,7 +1337,7 @@ try {
     const bridgeText = await agentCard.textContent();
     assert.match(bridgeText, /桥接权威：这一档由桥接钉住并自动改回/);
     assert.equal(await page.locator('#detailAgentPreset').count(), 0, '桥接权威不给改档下拉');
-    assert.equal(await page.locator('[data-detail-agent-reopen]').count(), 0, '实例没换过就不给重开按钮');
+    assert.equal(await page.locator('.detail-danger [data-detail-agent-reopen]').count(), 0, '实例没换过就不给重开按钮');
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
   });
 
@@ -1341,14 +1348,14 @@ try {
     assert.match(table, /应用方式/);
     assert.match(table, /权限权威/);
     assert.match(table, /不做工具级限制/, '直通方案行要标记不做工具级限制');
-    assert.match(table, /执行体自身/);
+    assert.match(table, /Agent 平台自身/);
     assert.match(table, /桥接钉档/);
 
     await page.click('#planCard [data-plan-edit="agent-direct"]');
     await page.waitForSelector('#planRuntimeSummary');
     let summary = await page.locator('#planRuntimeSummary').textContent();
     assert.match(summary, /应用方式 直通（不装预设）/);
-    assert.match(summary, /权限权威 执行体自身/);
+    assert.match(summary, /权限权威 Agent 平台自身/);
     // 换能力档：只读块跟着重画，但不往保存体里加字段。
     await page.selectOption('#planEditTools', 'chat');
     summary = await page.locator('#planRuntimeSummary').textContent();
@@ -1365,17 +1372,17 @@ try {
     assert.match(await page.textContent('[data-platform-view="detail"] .detail-head-main h3'), /DeepSeek Harness/, '能力档属于声明它的平台');
   });
 
-  if (!original) await test('全局配置：执行体卡区分配置面与运行期，切换默认执行体只落盘', async () => {
+  if (!original) await test('全局配置：Agent 平台卡区分配置面与运行期，切换默认平台只落盘', async () => {
     await navigate('config');
     await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.options.length >= 2);
-    // 前面的用例可能已经把默认执行体改成 acp：这里跟着当前值走，结束时换回原来那个。
+    // 前面的用例可能已经把默认平台改成 acp：这里跟着当前值走，结束时换回原来那个。
     const initial = await page.locator('#agentDefaultSelect').inputValue();
-    assert.ok(['dsh', 'acp'].includes(initial), `默认执行体应来自注册表，实际 ${initial}`);
+    assert.ok(['dsh', 'acp'].includes(initial), `默认 Agent 平台应来自注册表，实际 ${initial}`);
     const running = await page.locator('#agentRunningReadout').textContent();
     assert.match(running, /DeepSeek Harness/);
     assert.match(running, /连接方式 HTTP/);
     assert.match(running, /已就绪/);
-    // 模型卡标题跟随当前运行执行体；dsh 声明了 models，替代文案不出现。
+    // 模型卡标题跟随当前运行平台；dsh 声明了 models，替代文案不出现。
     assert.match(await page.locator('#section-dsh h2').textContent(), /DeepSeek Harness 模型与思考强度/);
     assert.equal(await page.locator('#dshModelUnsupported').isHidden(), true);
 
@@ -1390,7 +1397,7 @@ try {
 
     await page.selectOption('#agentDefaultSelect', 'acp');
     assert.deepEqual(await clickWrite('#agentSwitchBtn', '/api/config/runtime'), { defaultAgent: 'acp' });
-    await page.waitForFunction(() => (document.getElementById('agentSwitchMsg')?.textContent || '').includes('已把默认执行体改为 ACP 执行体'));
+    await page.waitForFunction(() => (document.getElementById('agentSwitchMsg')?.textContent || '').includes('已把默认 Agent 平台改为 ACP 执行体'));
     const switched = await page.locator('#agentRunningReadout').textContent();
     assert.match(switched, /配置面已改为 acp，重启后生效/);
     assert.match(switched, /DeepSeek Harness/, '本进程仍在跑 dsh');

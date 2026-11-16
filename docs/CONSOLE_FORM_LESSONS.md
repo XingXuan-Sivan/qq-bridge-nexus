@@ -609,7 +609,13 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 `scripts/console-ui-fixture.mjs` 启动时把 `public/console/**` 读进内存 Map；改完 JS/CSS 直接刷新页面拿到的仍是旧文件，浏览器核对会误判「改动没生效」（白白多跑一轮）。
 
-**规则**：改 `public/console/**` 后重启 fixture（`Get-NetTCPConnection -LocalPort 4173` 找到 pid → `Stop-Process`，再 `Start-Process node scripts/console-ui-fixture.mjs`）再让浏览器核对；`npm run test:console:ui` 每次自己起新进程，不受影响。另：夹具没实现的路由会 404（例如 `POST /api/extensions/mcp/<id>/test`），要在夹具里补上正则路由而不是去改页面。
+**规则**：改 `public/console/**` 后重启 fixture（`Get-NetTCPConnection -LocalPort 4173` 找到 pid → `Stop-Process`，再 `Start-Process node scripts/console-ui-fixture.mjs`）再让浏览器核对；`npm run test:console-ui` 每次自己起新进程，不受影响。另：夹具没实现的路由会 404（例如 `POST /api/extensions/mcp/<id>/test`），要在夹具里补上正则路由而不是去改页面。
+
+### 1.102 选项随开关变的下拉：别重构控件，也别在同一拍里读开关
+
+「默认级别」的 `full` 档要跟着「允许 full 档」出现/收起。两条弯路：把 `renderFields` 的 `options` 改成函数型值、在开关变化后整段重渲染——值在异步读回之后才知道，重渲染会把同组其它字段（TTL 之类）一起冲掉；在开关的 click 监听里直接 `getSwitch()`——`bindSwitches` 的委托挂在祖先容器上，自己的监听先跑，读到的是翻转前的状态。
+
+**规则**：组件层用 `setSelectOptions(select, options, value)` 就地换 `<option>`（焦点、事件委托、同组字段都不动），选项算法留在 `js/permission-levels.js`；开关翻转后用 `requestAnimationFrame` 再算。选中的值必须显式传回，否则换 option 会把用户刚改的选择拍回第一项。
 
 ## 2. 迁移一个页面的检查清单
 

@@ -487,7 +487,7 @@ let detailKey = null;
 let detailCache = null;
 let detailDirty = false;
 let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
-// 「执行体与权限」的数据（GET /api/sessions/:key/agent）：读的是执行体此刻的状态
+// 「Agent 平台与权限」的数据（GET /api/sessions/:key/agent）：读的是 Agent 平台此刻的状态
 // （对端档位、注入通道），与上面那份桥接档案分开取，也不写回档案。
 let detailAgent = null;
 
@@ -605,9 +605,9 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
 }
 
 const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
-const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
+const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
 
-/** 提示注入通道：降级（方案要 system 但执行体没有）只说事实，不把降级当配置生效。 */
+/** 提示注入通道：降级（方案要 system 但 Agent 平台没有）只说事实，不把降级当配置生效。 */
 function promptChannelHtml(channel) {
   if (!channel) return '<span class="meta">未声明</span>';
   const channelId = channel.channel || '';
@@ -617,39 +617,39 @@ function promptChannelHtml(channel) {
     ? ` <span class="meta">方案要求 ${esc(PROMPT_CHANNEL_LABEL[channel.requested] || channel.requested)}</span>`
     : '';
   const reason = channel.degraded
-    ? `<div class="meta">${esc(channel.reason || '执行体没有这个通道，已降级')}</div>`
+    ? `<div class="meta">${esc(channel.reason || 'Agent 平台没有这个通道，已降级')}</div>`
     : '';
   return `${tag}${requested}${reason}`;
 }
 
 /**
- * 「执行体与权限」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
- * 权限档按权威分两态：桥接权威只读展示生效级别；执行体权威才给下拉，且写后由后端回读核对。
+ * 「Agent 平台与权限」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
+ * 权限档按权威分两态：桥接权威只读展示生效级别；Agent 平台权威才给下拉，且写后由后端回读核对。
+ * 「在新平台上重开」是危险动作，放在弹窗的危险操作卡里（见 renderDetail），与本卡分开。
  */
 function detailAgentFields() {
   const agent = detailAgent;
   if (!agent) {
     return [{
       name: 'detailAgentMissing', type: 'custom', span: 2,
-      html: '<span class="meta err">执行体信息读取失败：不影响上面的档案保存，重开详情再试一次。</span>',
+      html: '<span class="meta err">Agent 平台信息读取失败：不影响上面的档案保存，重开详情再试一次。</span>',
     }];
   }
   const platform = agent.agentPlatform || {};
   const permission = agent.permission || {};
   const authority = permission.authority === 'agent' ? 'agent' : 'bridge';
   const drift = permission.drift || null;
-  const canReopen = authority === 'agent' || agent.instanceForeign === true;
   const fields = [
     {
-      name: 'detailAgentInstance', type: 'custom', label: '执行体', span: 2,
+      name: 'detailAgentInstance', type: 'custom', label: 'Agent 平台', span: 2,
       html: `<strong>${esc(platform.label || platform.id || '—')}</strong>`
         + ` <code>${esc(agent.instance || '')}</code> `
         + (agent.instanceForeign
           ? '<span class="tag tag--warning">跟随建会话时的实例</span>'
-          : '<span class="tag tag--success">当前执行体</span>'),
+          : '<span class="tag tag--success">当前 Agent 平台</span>'),
       hint: agent.instanceForeign
         ? '这个会话建在切换前的实例上：历史与状态留在旧实例，只有「重开」才会在新实例上新建会话。'
-        : '会话绑在这个实例上；换执行体后旧会话不会自动迁移。',
+        : '会话绑在这个实例上；换 Agent 平台后旧会话不会自动迁移。',
     },
     {
       name: 'detailAgentPlan', type: 'custom', label: '方案', span: 2,
@@ -691,11 +691,17 @@ function detailAgentFields() {
       ? `<span class="tag tag--warning">漂移：对端现在是 ${esc(drift.actual)}</span>`
         + `<button class="btn small" type="button" data-detail-agent-revert="${esc(drift.expected)}">改回 ${esc(drift.expected)}</button>`
       : '',
-    canReopen ? '<button class="btn small" type="button" data-detail-agent-reopen>在新执行体上重开</button>' : '',
     '<span class="form-actions-status" id="detailAgentMsg" role="status"></span>',
   ].filter(Boolean).join('');
   fields.push({ name: 'detailAgentActions', type: 'custom', span: 2, html: `<div class="form-actions">${actions}</div>` });
   return fields;
+}
+
+/** 换过平台、或权限权威本来就归 Agent 平台时，才给「在新平台上重开」（动作在危险操作卡里）。 */
+function canReopenOnNewAgent() {
+  const agent = detailAgent;
+  if (!agent) return false;
+  return agent.permission?.authority === 'agent' || agent.instanceForeign === true;
 }
 
 function renderDetail(data) {
@@ -740,8 +746,8 @@ function renderDetail(data) {
       ${card('唤醒', '这里只改最常见的触发条件；合批窗口与投递预算由平台行为档案的 social-v2 决定，不在会话上。', 'wake', '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div>')}
 
       <div class="detail-card">
-        <h4>执行体与权限</h4>
-        <div class="meta">会话绑在执行体实例上；权限档归谁由运行方案的能力档决定。</div>
+        <h4>Agent 平台与权限</h4>
+        <div class="meta">会话绑在 Agent 平台的实例上；权限档归谁由运行方案的能力档决定。</div>
         <div data-detail-form="agent"></div>
       </div>
 
@@ -764,10 +770,11 @@ function renderDetail(data) {
 
       <div class="detail-card detail-danger">
         <h4>危险操作</h4>
-        <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话。</div>
+        <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话；换过 Agent 平台后可以用「在新平台上重开」把会话迁到新平台的实例。</div>
         <div class="detail-actions">
           <button class="btn small" type="button" data-detail-rebuild>重建 DSH 会话</button>
           <button class="btn small danger" type="button" data-detail-reset>重置会话状态</button>
+          ${canReopenOnNewAgent() ? '<button class="btn small" type="button" data-detail-agent-reopen>在新 Agent 平台上重开</button>' : ''}
         </div>
         ${data.sessionId ? '' : '<div class="field-hint">还没有 DSH 会话：下一条消息到达时会自动创建；也可以现在重建一次。</div>'}
       </div>
@@ -802,10 +809,10 @@ function renderDetail(data) {
     {
       name: 'detailPermission', type: 'select', label: '权限级别',
       value: data.permission?.value || 'inherit',
-      // 档位与措辞跟全局配置页共用一份；full 只在总开关打开时出现。
+      // 档位与措辞跟全局配置页共用一份；full 在总开关打开时可选，当前值本来就是 full 时也保留。
       options: [
         { value: 'inherit', label: `跟随全局（当前：${permissionLevelLabel(data.permission?.effective)}）` },
-        ...permissionLevelOptions(data.permission?.fullAllowed === true),
+        ...permissionLevelOptions({ allowFull: data.permission?.fullAllowed === true, current: data.permission?.value }),
       ],
       hint: data.permission?.grantActive
         ? `full 授权已生效，到期后自动回落 qq-full-ask；当前实际：${permissionLevelLabel(data.permission?.effective)}`
@@ -979,7 +986,7 @@ async function openDetail(key) {
   try {
     const [data, agent] = await Promise.all([
       api(`/api/sessions/${encodeURIComponent(key)}/profile`),
-      // 执行体那一块单独取：它读的是对端此刻的状态，与桥接档案不是同一份数据。
+      // Agent 平台那一块单独取：它读的是对端此刻的状态，与桥接档案不是同一份数据。
       // 读不到只影响这一块（detailAgentFields 会写出重试提示），不能连带整个详情失败。
       api(`/api/sessions/${encodeURIComponent(key)}/agent`).catch(() => null),
       ensureDetailCatalog(),
@@ -1162,14 +1169,14 @@ async function writeAgentPermission(preset) {
   }
 }
 
-/** 换过执行体后把会话在新实例上重开：归档旧会话并新建一个，历史不迁移。 */
+/** 换过 Agent 平台后把会话在新实例上重开：归档旧会话并新建一个，历史不迁移。 */
 async function detailAgentReopen() {
   if (!detailKey) return;
-  if (!window.confirm(`在新执行体上重开会归档当前会话并新建一个（${detailKey}）：历史消息不会迁移到新会话，人格/提示词/准入保留。继续？`)) return;
+  if (!window.confirm(`在新 Agent 平台上重开会归档当前会话并新建一个（${detailKey}）：历史消息不会迁移到新会话，人格/提示词/准入保留。继续？`)) return;
   try {
     const r = await api(`/api/sessions/${encodeURIComponent(detailKey)}/rebuild`, 'POST');
     if (!r?.ok) throw new Error(r?.error || '重开失败');
-    showConsoleToast('已在新执行体上重开');
+    showConsoleToast('已在新 Agent 平台上重开');
     await refreshSessions();
     await openDetail(detailKey);
   } catch (error) {

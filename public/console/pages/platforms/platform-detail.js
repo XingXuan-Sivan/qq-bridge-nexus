@@ -77,7 +77,7 @@ function tagsOf(list, render) {
 // ── 概览 ────────────────────────────────────────────────────────────────────
 
 /**
- * 能力位矩阵：能力位之外还有三个「这个执行体支不支持」的声明——
+ * 能力位矩阵：能力位之外还有三个「这个 Agent 平台支不支持」的声明——
  * 应用方式（能力档能不能不装预设）、提示注入通道（话术怎么进去）、
  * 权限权威支持面（能不能把权限档钉在桥接侧）。
  */
@@ -92,7 +92,7 @@ function capabilityMatrix(item) {
   const declared = (list, labels) => tagsOf(list ?? [], (name) => `<span class="tag">${esc(labels[name] ?? name)}</span>`);
   rows.push({ cells: ['应用方式', declared(item.applies, APPLY_KIND_LABEL)] });
   rows.push({ cells: ['提示注入通道', declared(item.promptChannels, PROMPT_CHANNEL_LABEL)] });
-  // 权限权威支持面：能钉档的执行体两种权威都能跑；不能钉的只有「执行体自身」这一种。
+  // 权限权威支持面：能钉档的平台两种权威都能跑；不能钉的只有「Agent 平台自身」这一种。
   rows.push({ cells: ['权限权威支持面', declared(item.canPinPermission ? ['bridge', 'agent'] : ['agent'], AUTHORITY_SIDE_LABEL)] });
   return rows;
 }
@@ -107,7 +107,7 @@ function runtimeStateCell(item) {
   if (item.configured) return '<span class="tag tag--warning">已设为默认，重启后生效</span>';
   const where = item.side === 'user'
     ? '在「实例」卡里设为默认'
-    : '在「执行端」卡里设为默认';
+    : '在「默认与探活」卡里设为默认';
   return `<span class="tag">非默认</span><div class="meta">${where}</div>`;
 }
 
@@ -138,7 +138,7 @@ function instanceHtml(item) {
   });
 }
 
-/** Agent 平台「执行端」：探活与设为默认都在这里，不新开数据源（写口就是注册表那个）。 */
+/** Agent 平台「默认与探活」：探活与设为默认都在这里，不新开数据源（写口就是注册表那个）。 */
 function executorHtml(item) {
   const probe = item.probe ?? null;
   const probeHtml = probe
@@ -147,7 +147,7 @@ function executorHtml(item) {
       : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`)
     : '<span class="meta">本次运行里还没探活过。</span>';
   return cardHtml({
-    title: '执行端',
+    title: '默认与探活',
     description: '默认 Agent 平台是桥接启动时装配的那个（<code>config.json</code> 的 <code>platforms.active.agent</code>）。连接层句柄在启动时就绑定了，所以换平台要重启桥接；设为默认前会先探活，探不通不落盘。',
     body: `<div class="row">${runtimeStateCell(item)}${probeHtml}</div>
       ${inlineActions({
@@ -244,7 +244,7 @@ function overviewHtml(item) {
 /**
  * 两侧的配置页：字段都是 `configSchema` 生成的，保存只发给写口。
  *
- * 用户侧多一个「启用」开关：`enabled` 是**条目级**字段（这条实例装配不装配），不在
+ * 用户平台多一个「启用」开关：`enabled` 是**条目级**字段（这条实例装配不装配），不在
  * `configSchema` 里，由页面自己渲染与读取；即使平台没声明 schema，这个开关照样能改。
  */
 function configHtml(item) {
@@ -298,7 +298,7 @@ function mountConfig(item) {
   }));
 }
 
-// ── 话术与工具（用户侧） ────────────────────────────────────────────────────
+// ── 话术与工具（用户平台） ────────────────────────────────────────────────────
 function voiceHtml(item) {
   const tools = item.assets?.tools ?? [];
   // 提示词卡自带 .prompt-card 外壳（与「行为」标签里那张同构），不再套一层 card。
@@ -353,7 +353,7 @@ async function mountVoice(item) {
   });
 }
 
-// ── 行为（用户侧，有档案目录才有） ──────────────────────────────────────────
+// ── 行为（用户平台，有档案目录才有） ──────────────────────────────────────────
 function mountBehaviors(item) {
   const host = root?.querySelector('[data-platform-panel-body]');
   if (!host) return;
@@ -363,7 +363,7 @@ function mountBehaviors(item) {
   });
 }
 
-// ── 能力（Agent 侧，有声明的能力档才有） ────────────────────────────────────
+// ── 能力（Agent 平台，有声明的能力档才有） ────────────────────────────────────
 function capabilitiesHtml(item) {
   const count = (item.assets?.capabilityProfiles ?? []).length;
   return `
@@ -410,7 +410,7 @@ async function probeCurrent() {
   onChanged?.();
 }
 
-/** 设为默认执行体：先探活（服务端预检），过关才落盘；换执行体要重启。 */
+/** 设为默认 Agent 平台：先探活（服务端预检），过关才落盘；换平台要重启。 */
 async function setDefaultCurrent() {
   if (!entry) return;
   const id = entry.id;
@@ -418,8 +418,8 @@ async function setDefaultCurrent() {
   try {
     const r = await api('/api/config/runtime', 'POST', { defaultAgent: id });
     if (!r?.ok) throw new Error(r?.error || '未知错误');
-    setStatus('platformAgentMsg', r.requiresRestart ? '已设为默认，重启桥接后装配' : '已经是当前执行体');
-    showConsoleToast(`默认执行体已改为 ${id}${r.requiresRestart ? '，重启桥接后生效' : ''}`);
+    setStatus('platformAgentMsg', r.requiresRestart ? '已设为默认，重启桥接后装配' : '已经是当前 Agent 平台');
+    showConsoleToast(`默认 Agent 平台已改为 ${id}${r.requiresRestart ? '，重启桥接后生效' : ''}`);
   } catch (error) {
     setStatus('platformAgentMsg', `设定失败：${error?.message ?? error}`);
     return;
@@ -444,7 +444,7 @@ async function setDefaultUserCurrent() {
   onChanged?.();
 }
 
-/** 保存配置：只发给写口，不直写 config.json。用户侧多一个条目级「启用」开关。 */
+/** 保存配置：只发给写口，不直写 config.json。用户平台多一个条目级「启用」开关。 */
 async function saveCurrentConfig() {
   if (!entry) return;
   const host = root?.querySelector('#platformConfigMount');

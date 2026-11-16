@@ -141,7 +141,7 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
 {
   const platformsPage = pageDirs.find((entry) => entry.id === 'platforms');
   const platformsJs = platformsPage?.js ? fs.readFileSync(platformsPage.js, 'utf8') : '';
-  ok(/SIDE_ORDER = \['user', 'agent'\]/.test(platformsJs), '平台页把用户侧与 Agent 侧都列出来');
+  ok(/SIDE_ORDER = \['user', 'agent'\]/.test(platformsJs), '平台页把用户平台与 Agent 平台两组卡片都列出来');
   ok(/platform-detail\.js/.test(platformsJs) && /mountPlatformDetail\(/.test(platformsJs), '平台二级页走 platform-detail.js');
   ok(/cardHtml\(/.test(platformsJs) && /collapseHtml\(/.test(platformsJs) && /tileHtml\(/.test(platformsJs),
     '平台清单用卡片 + 折叠分组 + 卡片网格（不用主从分栏）');
@@ -158,7 +158,7 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   const plansJs = pageDirs.find((entry) => entry.id === 'plans')?.js;
   const plansText = plansJs ? fs.readFileSync(plansJs, 'utf8') : '';
   ok(/capabilityProfiles/.test(plansText) && !/'dsh'/.test(plansText), '方案页不再硬编码 Agent 平台（只挑声明了能力档的）');
-  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时执行体取自下拉，不是写死的值');
+  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时 Agent 平台取自下拉，不是写死的值');
   ok(!/planEditPlatform|platform: el\('planEdit/.test(plansText) && !/plan\.platform/.test(plansText), '方案页不再有用户侧平台字段（方案不绑平台）');
 }
 console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 / 权限权威）');
@@ -173,15 +173,20 @@ console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 /
   ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /canPinPermission/.test(detailText),
     '平台详情的能力位矩阵写出注入通道与权限权威支持面');
   const sessionsText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
-  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染执行体与权限');
-  ok(/\/permission`, 'POST', \{ preset \}/.test(sessionsText), '执行体权威只提交目标档位（不混进整页保存）');
+  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染 Agent 平台与权限');
+  ok(/\/permission`, 'POST', \{ preset \}/.test(sessionsText), 'Agent 平台权威只提交目标档位（不混进整页保存）');
   ok(/data-detail-agent-revert/.test(sessionsText), '漂移结论带「改回」按钮');
   const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
   const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
-  ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「执行体」卡：默认执行体 + 当前运行');
-  ok(/applyAgentGates/.test(configText) && /dshModelUnsupported/.test(configText), '模型卡按运行执行体的 models 能力位门控');
-  ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), '执行体字段走 fields 规格（不手写控件）');
+  ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「Agent 平台」卡：默认平台 + 当前运行');
+  ok(/applyAgentGates/.test(configText) && /dshModelUnsupported/.test(configText), '模型卡按运行中 Agent 平台的 models 能力位门控');
+  ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), 'Agent 平台字段走 fields 规格（不手写控件）');
   ok(/fixtureSessionAgent\(/.test(fixture) && /agentMirror/.test(fixture), '离线夹具实现会话 /agent 与权限写口（含漂移）');
+  const permissionLevels = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'permission-levels.js'), 'utf8');
+  ok(/permissionLevelOptions\(\{ allowFull = false, current = '' \} = \{\}\)/.test(permissionLevels),
+    '权限档选项按「允许 full + 当前值」算：关掉总开关也不会把已存的 full 藏起来');
+  ok(/syncPermissionDefaultOptions/.test(configText) && /setSelectOptions/.test(configText),
+    '全局配置页在「允许 full」翻转后就地重算默认级别下拉');
 }
 // C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
 // 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。

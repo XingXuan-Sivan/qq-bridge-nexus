@@ -19,7 +19,7 @@ const SIDE_ORDER = ['user', 'agent'];
 const SIDE_LABEL = { user: '用户平台', agent: 'Agent 平台' };
 const SIDE_HINT = {
   user: '一条条目 = 一个实例（平台 + 账号），各有自己的入站管线。点卡片看连接、平台选项、话术与行为。',
-  agent: '桥接启动时装配的执行端平台。点卡片看能力档、平台选项与诊断。',
+  agent: '桥接启动时装配的那个 Agent 平台。点卡片看能力档、平台选项与诊断。',
 };
 const SIDE_EMPTY = {
   user: '还没有装配用户平台：在 <code>profiles/platforms</code> 下加目录后重启桥接。',

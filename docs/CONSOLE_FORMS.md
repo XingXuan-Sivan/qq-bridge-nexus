@@ -269,6 +269,8 @@ span.time-field
 - 走 `createForm`：`getValue/setValue` 已经处理好，点击委托也在组件里。
 - 不走 `createForm`（例如整页字段用 `renderFields` 渲染）：必须 `import { bindSwitches, getSwitch, setSwitch }`，在 `init()` 里 `bindSwitches(root)`，读写一律用 `getSwitch` / `setSwitch`。`test-console-static` 会检查「用了开关字段却没绑定」的页面并直接失败。
 
+下拉的选项**依赖别的字段**时（如「默认级别」随「允许 full 档」增删一档）用 `setSelectOptions(select, options, value)` 就地换 `<option>`：`renderFields` 的静态 `options` 只在渲染时算一次，重建控件会把焦点、事件委托和同组其它字段一起冲掉。`bindSwitches` 只在祖先容器上做点击委托，所以开关翻转后要用 `requestAnimationFrame` 再读状态。
+
 `.control-row` 是「一行不是字段的东西」的唯一原语：`display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-height:var(--control-h)`。角色类四个：
 
 - `.control-label`：行内小标签（如「发送目标」），不是字段标签，不占 148px 列。

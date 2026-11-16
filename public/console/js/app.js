@@ -113,9 +113,9 @@ async function refreshSessionMetrics() {
 
 function updateOverview(status, modeLabel) {
   // 这里写的节点有的常驻 index.html，有的只在 overview 片段里；逐个判空。
-  // 执行体与用户平台都由状态投影给出（`agent` / `platform`），控制台不认识具体平台名。
+  // Agent 平台与用户平台都由状态投影给出（`agent` / `platform`），控制台不认识具体平台名。
   const agent = status.agent ?? {};
-  const agentLabel = agent.label || '执行体';
+  const agentLabel = agent.label || 'Agent 平台';
   const connection = document.getElementById('statusText');
   if (connection) {
     connection.textContent = `${agentLabel} ${agent.ready ? '已连接' : '未连接'}`;

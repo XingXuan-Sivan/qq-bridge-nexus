@@ -22,7 +22,7 @@
 | `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、`parsePageHash()` / `onPageRoute()`（页面子路由）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
-| `public/console/js/registry.js` | **平台注册表**（C7，原名 `js/platforms.js`）：`loadPlatforms()` 读 `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应），对外给 `registryMeta` / `platformLabel` / `capabilityLabel` / `conversationTypeLabel` / `conversationTypeTone` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**：列名、筛选、标签、上限都从这里取；全仓库只有这一个文件打这个端点 |
+| `public/console/js/registry.js` | **平台注册表**（C7，原名 `js/platforms.js`）：`loadPlatforms()` 读 `GET /api/platforms/registry`（用户平台与 Agent 平台同一份响应），对外给 `registryMeta` / `platformLabel` / `capabilityLabel` / `conversationTypeLabel` / `conversationTypeTone` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**：列名、筛选、标签、上限都从这里取；全仓库只有这一个文件打这个端点 |
 | `public/console/components/<name>/` | 组件：`<name>.js` 与 `<name>.css` 同住 |
 | `public/console/css/*.css` | `tokens` → `base` → `layout` → `grid` → `components` → `utilities`，**顺序即层叠顺序** |
 | `public/console/pages/<name>/` | 页面片段：`page.html` + `page.js` + `page.css`，由路由按需加载 |
@@ -283,7 +283,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 ---
 
-## 9. 执行体 / 方案 / 权限的界面口径（P2–P5）
+## 9. Agent 平台 / 方案 / 权限的界面口径（P2–P5）
 
 这四块界面共用一条规矩：**值从哪来写清、写口只有一个**。四轴与存储分层见
 [PROFILES_MODEL.md](PROFILES_MODEL.md) §1.1 / §1.2，两级权限权威见
@@ -291,18 +291,18 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 | 界面 | 数据源 | 写口 | 口径 |
 | --- | --- | --- | --- |
-| 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是「诊断汇总（仅有 error 时出现）+ 用户平台 / Agent 平台两个折叠组 + 卡片网格」，路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
-| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户侧一行「能力位」；Agent 侧四行「能力位 / 应用方式 / 提示注入通道 / 权限权威支持面」。空项给「—」；权限权威支持面由 `canPinPermission` 决定（能钉档给两种，否则只有「执行体自身」） |
-| 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个执行体」由注册表回答 |
+| 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户平台与 Agent 平台同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是「诊断汇总（仅有 error 时出现）+ 用户平台 / Agent 平台两个折叠组 + 卡片网格」，路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
+| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户平台一行「能力位」；Agent 平台四行「能力位 / 应用方式 / 提示注入通道 / 权限权威支持面」。空项给「—」；权限权威支持面由 `canPinPermission` 决定（能钉档给两种，否则只有「Agent 平台自身」） |
+| 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个 Agent 平台」由注册表回答 |
 | 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器，再 `setConsolePage('platforms', { sub: 'agent:<id>', tab: 'capabilities' })` 直接落到那个平台的能力页 |
-| 会话详情›执行体与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：执行体名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉与「在新执行体上重开」；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
-| 全局配置›运行（执行体卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认执行体只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
-| 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉不列 `full`——要 full 先打开「允许 full 档」，再在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
+| 会话详情›Agent 平台与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：Agent 平台名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉，并把「在新 Agent 平台上重开」放进危险操作卡（与重建 / 重置同处，不单开区块）；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
+| 全局配置›运行（Agent 平台卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认 Agent 平台只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
+| 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉的档位由 `permissionLevelOptions({ allowFull, current })` 算：`allowFull` 开着才给 `full`，关着但当前值本来就是 `full` 时也保留（否则下拉显示空白）。开关翻转后就地重算（`setSelectOptions`，不重建控件）；要 full 还得在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
 
 三条落地细节：
 
-- **一次取全**：会话详情不为「执行体 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台清单与二级页共用一份注册表快照，切标签不重拉。
-- **写口只有一个**：权限档只走 `/permission`（不混进会话 PATCH），默认执行体只走 `/api/config/runtime`（不混进平台配置），能力档只走 `/capabilities/<id>`。同一个值出现第二个写口就是缺陷。
+- **一次取全**：会话详情不为「Agent 平台 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台清单与二级页共用一份注册表快照，切标签不重拉。
+- **写口只有一个**：权限档只走 `/permission`（不混进会话 PATCH），默认 Agent 平台只走 `/api/config/runtime`（不混进平台配置），能力档只走 `/capabilities/<id>`。同一个值出现第二个写口就是缺陷。
 - **失败写在块内**：写后回读不一致、桥接权威拦截（409）、禁用档（403）都在块内联报错，不弹全局 toast、不静默改回。
 
 ---

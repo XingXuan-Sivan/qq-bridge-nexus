@@ -1,6 +1,6 @@
 // 方案页：一次组合，决定一段对话怎么跑。
 //
-// 方案 = 能力档 + 行为档案 + 受众 +（可选）执行体。方案**不绑用户平台**：平台话术与行为档案
+// 方案 = 能力档 + 行为档案 + 受众 +（可选）Agent 平台。方案**不绑用户平台**：平台话术与行为档案
 // 天然按平台走，方案只引用它们的 id。全局默认方案在「全局配置」里，会话可以在「会话与审批 ›
 // 详情」里单独指定；本页只管方案本身，不切换全局指针（全局只留「默认方案」一个指针）。
 //
@@ -28,11 +28,11 @@ function planById(id) {
   return (payload?.plans ?? []).find((plan) => plan.id === id) ?? null;
 }
 
-// ── 执行体口径 ──────────────────────────────────────────────────────────────
-// 执行体（Agent 平台）决定「能力档从哪来」。只有真的声明了能力档的平台才能进下拉：
+// ── Agent 平台口径 ───────────────────────────────────────────────────────────
+// Agent 平台决定「能力档从哪来」。只有真的声明了能力档的平台才能进下拉：
 // plan.capability 必须是它的档，否则保存时后端会以「能力档不存在」拒掉。这不是白名单，
 // 是数据约束——平台接上 capabilities/ 目录后自动出现在下拉里。
-// 默认 auto：跟随全局 platforms.active.agent，换执行体时不会被方案拉回旧平台。
+// 默认 auto：跟随全局 platforms.active.agent，换 Agent 平台时不会被方案拉回旧平台。
 function planAgentPlatforms() {
   return (registryMeta().platforms ?? [])
     .filter((item) => item.side === 'agent' && (item.assets?.capabilityProfiles ?? []).length > 0);
@@ -44,7 +44,7 @@ function platformNameOf(side, id) {
   return found?.label || id || '未注册';
 }
 
-/** `auto` 是方案的常态：显示实际跟随的执行体，不假装它是某一侧。 */
+/** `auto` 是方案的常态：显示实际跟随的 Agent 平台，不假装它是某一侧。 */
 function agentPlatformText(plan) {
   if (!plan?.agentPlatform || plan.agentPlatform === 'auto') return `跟随全局（${platformNameFor('agent')}）`;
   return platformNameOf('agent', plan.agentPlatform);
@@ -54,7 +54,7 @@ const BEHAVIOR_LABEL = { none: '不带行为', inherit: '跟随默认行为' };
 const AUDIENCE_LABEL = { owner: '仅管理员', access: '按准入名单' };
 // 生效方式与权限权威都取自能力档的 `runtime` 段：方案只是引用能力档，不另存一份。
 const APPLY_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
-const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
+const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
 
 function capabilityOf(id) {
   return presets.find((item) => item.id === id) ?? null;
@@ -70,7 +70,7 @@ function authorityOf(plan) {
   return cap ? (cap.runtime?.permission ?? 'bridge') : '';
 }
 
-/** 声明了这套能力档的执行体（能力档是 Agent 平台的资产，改它要去那一侧）。 */
+/** 声明了这套能力档的 Agent 平台（能力档是平台的资产，改它要去那一侧）。 */
 function capabilityPlatformId(capabilityId) {
   if (!capabilityId) return '';
   const owners = planAgentPlatforms()
@@ -118,7 +118,7 @@ function rowHtml(plan) {
         ? '<span class="tag">装预设</span>'
         : '<span class="meta">—</span>',
     authority === 'agent'
-      ? '<span class="tag tag--warning">执行体自身</span>'
+      ? '<span class="tag tag--warning">Agent 平台自身</span>'
       : authority === 'bridge'
         ? '<span class="tag">桥接钉档</span>'
         : '<span class="meta">—</span>',
@@ -140,7 +140,7 @@ function tableCardHtml() {
     ? dataTableHtml({
       columns: [
         { label: '方案', width: '190' },
-        { label: '执行体', width: '170' },
+        { label: 'Agent 平台', width: '170' },
         { label: '能力档', width: '130' },
         { label: '应用方式', width: '130' },
         { label: '权限权威', width: '120' },
@@ -193,7 +193,7 @@ function runtimeSummaryHtml(capabilityId) {
       <button class="btn small" type="button" data-plan-cap-jump>改能力档</button>
     </div>
     <div class="meta">${passthrough
-    ? '直通：不装预设、使用宿主环境（不做工具级限制），权限档由执行体自身管理。'
+    ? '直通：不装预设、使用宿主环境（不做工具级限制），权限档由 Agent 平台自身管理。'
     : '装预设：能力档的插件行会渲染进 Agent 预设，权限档由桥接钉住并自动改回。'}
       两者都只读展示——改它们等于改能力档，不能在方案里各说各话。</div>`;
 }
@@ -216,7 +216,7 @@ function editorFields(plan) {
     },
     { name: 'planEditLabel', type: 'text', label: '名称', value: plan?.label || '', maxlength: 40 },
     {
-      name: 'planEditAgentPlatform', type: 'select', label: '执行体',
+      name: 'planEditAgentPlatform', type: 'select', label: 'Agent 平台',
       value: plan?.agentPlatform || 'auto',
       options: [
         { value: 'auto', label: `跟随全局（${platformNameFor('agent')}）` },
@@ -226,7 +226,7 @@ function editorFields(plan) {
         })),
       ],
       hint: agents.length
-        ? '默认跟随全局 platforms.active.agent；只有「这个方案必须跑在某个执行体上」时才钉具体 id（钉住后换全局执行体不会带走它）。'
+        ? '默认跟随全局 platforms.active.agent；只有「这个方案必须跑在某个 Agent 平台上」时才钉具体 id（钉住后换全局 Agent 平台不会带走它）。'
         : '还没有 Agent 平台声明能力档：先在 profiles/agent-platforms/<id>/capabilities 下放能力档。',
     },
     {
@@ -296,7 +296,7 @@ async function jumpToCapability() {
   const capabilityId = el('planEditTools')?.value || '';
   const platformId = capabilityPlatformId(capabilityId);
   if (!capabilityId || !platformId) {
-    setEditorMsg('还没有 Agent 平台声明这套能力档，先去「平台」里接上一个执行体。');
+    setEditorMsg('还没有 Agent 平台声明这套能力档，先去「平台」里接上一个 Agent 平台。');
     return;
   }
   if (!(await confirmBox({

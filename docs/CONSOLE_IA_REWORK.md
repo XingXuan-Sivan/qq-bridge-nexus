@@ -1,6 +1,6 @@
 # 控制台 IA 重构与平台配置归一
 
-> 状态：**B1、B2、B3 已落地**，按 §7 继续 B4。
+> 状态：**B1–B4 已落地**，本文的结论即当前实现。
 > 范围：`public/console/**`、`src/bridge.js` 的平台注册表与配置端点、`src/config/platforms.mjs`、`src/agent-side/**`、`profiles/agent-platforms/**`、`config.json` 结构版本、`docs/**`。
 > 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑记录）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
 > 本文只写**结论与边界**，不复述既有规格；与既有文档冲突时以本文为准，并在同一批里改掉旧文档的对应段落。
@@ -14,23 +14,15 @@
 
 ---
 
-## 1. 现状核查（先纠正三处认知偏差）
+## 1. 核查结论（动手前的三处认知偏差）
 
-三处都与「已经修好了」的印象不符，动手前必须先对齐事实。
+三处都与「已经修好了」的印象不符，B1–B4 按这里的结论改完。
 
-### 1.1 全局默认运行方案仍在
+### 1.1 默认运行方案要换真源，不是加一个字段
 
-`config.runtime.defaultPlan` 是活的真源，不是展示残留：
+它当时由 `config.runtime.defaultPlan` 供着：解析（`activePlan()`）、写口（`POST /api/config/runtime`）、读配置时补默认值、全局配置页的 `#runtimeDefaultSelect` 与两条测试断言，五处同源。
 
-| 位置 | 作用 |
-| --- | --- |
-| `src/bridge.js:4592` `activePlan()` | 取 `bridgeCfg.runtime.defaultPlan`，没有会话覆盖时就是它 |
-| `src/bridge.js:8158` `POST /api/config/runtime` | 校验方案存在后写回 config.json |
-| `src/bridge.js:1991` | 读配置时把缺失值补成 `social-v2` |
-| `scripts/test-console-ui.mjs:299` | 断言全局配置页 `#runtimeDefaultSelect` 存在且可写 |
-| `scripts/test-runtime-plans.mjs:134` | 断言「默认方案来自 `config.runtime.defaultPlan`」 |
-
-所以 §5 不是「加一个平台级字段」，而是**换真源 + 迁移 + 删旧键**，测试断言要同批改写。
+因此 §5 做的是**换真源 + 迁移 + 删旧键**，而不是「加一个平台级字段」——只加字段会留下两份真源，改一处、另一处不动。
 
 ### 1.2 DSH 模型与思考强度的数据层已归位，缺的是读口与界面
 
@@ -248,7 +240,6 @@ modelCatalog:
 | --- | --- | --- |
 | 默认 Agent 平台 | `POST /api/config/runtime`（`defaultAgent`） | `platforms.active.agent` |
 | 默认用户平台 | `POST /api/config/runtime`（`defaultUser`） | `platforms.active.user` |
-| 默认运行方案 | `POST /api/config/runtime`（`defaultPlan`） | `runtime.defaultPlan` |
 | 默认人格 | `POST /api/config/role-default` | `role.default` |
 | 人格卡生效方式 | `POST /api/roles/limit` | `role.saveApply` |
 | 发言上限 | `POST /api/config/send-limit` | `limits.send` |
@@ -274,7 +265,7 @@ modelCatalog:
 - `CAPABILITIES_ROOT` 里的 `dsh` 常量（已核销：能力档 root 改由 `agentCapabilitiesDir()` 解析，store 层缺 root 抛错）。
 - `src/dsh-model.js` 中供界面使用的专有分支（已核销：只给控制台用的 `selectionNotices()` 与 `FALLBACK_EFFORTS` 删除，报错文案里的平台名去掉；`buildCatalogView()` 保留 —— 它是 `/api/platforms/registry/agent/<id>/models` 的 `view` 字段）。
 - 界面文案里的「DSH 自己压缩」「DSH 模型」「运行期恒为 dsh」（已核销：压缩模式与文案改为 `early` / `agent`，模型卡标题跟平台 `label`）。
-- `docs/` 与代码注释里把「执行体」当唯一说法的段落（B4 文档全量同步时改）。
+- 界面文案里把「执行体」当平台名的地方（已在 B2 统一为「Agent 平台」；工程文档与代码注释里的「执行体」指运行期实现，保留）。
 
 ---
 
@@ -288,34 +279,34 @@ modelCatalog:
     → 内置常量 DEFAULT_PLAN_ID（'social-v2'）
 ```
 
-- 会话 key 形如 `qq:group:1054824508`，首段即用户平台 id，因此「按平台」不需要额外索引。
-- 与现状的差别：`activePlan()` 不再读 `config.runtime.defaultPlan`，改为按 key 首段查平台条目。
+- 会话 key 形如 `qq:group:1054824508`，首段即用户平台 id，因此「按平台」不需要额外索引：`planOf(key)` 取 `sessionPlanOf(key)`，落空再取 `defaultPlanFor(platformIdOf(key))`。
+- 条目上申报的方案文件被删时依次回退内置方案、目录首项——不能因为手删一个 yml 就变成「新建会话没有方案」。
 - 只影响**新建会话**；已有会话的 `planId` 覆盖行为不变。
 
 ### 5.2 配置落点
 
-`platforms.users.<id>.defaultPlan` 必须是**条目级键**，与 `enabled` 同级，不能落进 `options`：`normalizeUserEntry()`（`src/config/platforms.mjs:107`）会把未知键并入 `options` 交给适配器，`defaultPlan` 是桥接自己的语义，进 `options` 会让用户平台适配器收到一个与它无关的键。
+`platforms.users.<id>.defaultPlan` 必须是**条目级键**，与 `enabled` 同级，不能落进 `options`：`normalizeUserEntry()` 会把未知键并入 `options` 交给适配器，`defaultPlan` 是桥接自己的语义，进 `options` 会让用户平台适配器收到一个与它无关的键。
 
 ```js
 // normalizeUserEntry 的返回值
 { account, enabled, defaultPlan: normalizeRuntimePlanId(src.defaultPlan) || '', transport, options }
 ```
 
-写口复用 `patchPlatformConfig`（`src/bridge.js:1073`）的用户侧分支，不新开端点。
+写口复用平台配置写口 `PATCH /api/platforms/registry/<side>/<id>/config`，不新开端点：请求体里的 `defaultPlan` 先被摘出来单独校验（只认方案目录里真有的 id、空串表示清掉、agent 侧一律 400），余下的字段才按 `configSchema` 校。注册表条目把 `enabled` / `defaultPlan` 放在 entry 顶层、并从 `entry.config` 里剔除，页面才能像读开关一样读它。
 
 ### 5.3 版本迁移
 
-`CONFIG_VERSION` 2 → 3（`src/config/platforms.mjs:36`），迁移函数沿用现有 `migrateConfigToV2` 的位置与调用约定（返回 `{ config, migrated, notes }`，由调用方备份后写盘）：
+`CONFIG_VERSION` 2 → 3（`src/config/platforms.mjs`）。迁移只有一个入口 `migrateConfig(raw)`（返回 `{ config, migrated, notes }`，由调用方备份后写盘），v1 → v2 与 v2 → v3 串在同一次调用里，不做第二套函数：
 
 1. 把 `runtime.defaultPlan` 的值写进**当时活动的用户平台**条目的 `defaultPlan`；
 2. 删掉 `runtime.defaultPlan` 键（其余 `runtime.*` 保留）；
 3. `notes` 里记一句人话，进启动日志。
 
-**不留兼容层**：迁移完成后，`/api/config/runtime` 的 GET 响应里不再出现 `defaultPlan`，`activePlan()` 里不再有「先读全局再兜底」的双路径，`test-runtime-plans.mjs:134` 的断言改成「默认方案来自活动用户平台条目」。
+**不留兼容层**：迁移完成后 `/api/config/runtime` 的 GET 只回 `defaultAgent` / `defaultUser`，写口对 `defaultPlan` 直接 400；`planOf()` 里没有「先读全局再兜底」的双路径；`runtime.defaultPlan` 的读写、补默认值、夹具、测试断言同批删净。
 
 ### 5.4 界面落点
 
-- 平台详情页新增「默认运行方案」字段：`renderFields` + `page_defaultPlan` 规格；保存走该页 save-dock 的分区（一次 `POST /api/platforms/users/<id>`）。
+- 平台详情页（用户平台）新增「默认运行方案」字段：`renderFields` 的一个 `select`（字段名 `platformDefaultPlan`），选项来自 `/api/plans` 的方案清单，首项是「不设置（回退内置方案）」；值与条目开关一起由该页的保存按钮提交到 `PATCH /api/platforms/registry/user/<id>/config`。
 - 运行总览删掉「全局默认运行方案」卡片；概览指标格里那格「默认方案」改为显示**当前运行平台**的默认方案。
 - 全局配置页与运行方案页**都不再出现**全局默认方案控件（运行方案页只解释方案本身）。`#runtimeDefaultSelect` 随之退役，新字段 id 为 `platformDefaultPlan`，同批更新 `scripts/console-ui-legacy-ids.json` 与 `console-ui-retired-ids.json`。
 
@@ -402,7 +393,7 @@ modelCatalog:
 | --- | --- | --- |
 | 1 | 条目级 `defaultPlan`（`normalizeUserEntry`）+ 写口复用 `patchPlatformConfig` | `src/config/platforms.mjs`、`src/bridge.js` |
 | 2 | `CONFIG_VERSION` 3 + 迁移（旧 `runtime.defaultPlan` → 活动用户平台条目，删旧键） | `src/config/platforms.mjs` |
-| 3 | 解析链按会话 key 首段取平台默认；删 `activePlan()` 的全局分支 | `src/bridge.js:4592` |
+| 3 | 解析链按会话 key 首段取平台默认；删 `activePlan()` 的全局分支 | `src/bridge.js`（`planOf` / `defaultPlanFor`） |
 | 4 | 平台详情页「默认运行方案」字段（`platformDefaultPlan`） | `pages/platforms/**` |
 | 5 | 运行总览删「全局默认运行方案」卡，指标格改显示当前运行平台的默认方案 | `pages/overview/**` |
 | 6 | 契约与夹具：`--accept-contracts` 重录；`console-ui-fixture.mjs` 的 `state.defaultPlan` 改到平台条目；`legacy-ids` / `retired-ids` 收口 | `scripts/**` |
@@ -411,6 +402,8 @@ modelCatalog:
 **当批删除**：`config.runtime.defaultPlan`（读、写、补默认值、端点响应字段、fixture、测试断言全部一次清）；`#runtimeDefaultSelect` 相关字段规格。
 
 **出口**：全量门禁绿；`grep -r "defaultPlan" src/ scripts/` 只剩平台条目路径；两平台各设不同默认方案后，新建会话分别落对方案。
+
+**收尾结论**：条目级 `defaultPlan` 的读、写、迁移、报表（`/api/plans`、`/api/status`、会话详情的 `defaultPlan`）、夹具与契约 27 条均对齐；`src/runtime/active.mjs`（`state/runtime.json` 指针）与 `/api/runtime/switch` 死分支同批删除；全量门禁绿（`test-console-static` / `test-console-ui` 46 条 / `test:audit` 134 条 / `verify:repo` 103 条 / `check-profiles`）。
 
 ---
 

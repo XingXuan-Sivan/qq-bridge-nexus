@@ -13,6 +13,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
+import { CONFIG_VERSION } from '../src/config/platforms.mjs';
 import { discoverSnowLumaConnection, snowLumaHomeCandidates } from '../src/snowluma-conn.js';
 import { pathToFileURL } from 'node:url';
 // 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
@@ -126,7 +127,7 @@ test('② 控制中心管理接口平台子进程：启动、概览出现账号�
     const restored = JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8'));
     // 还原是「值」的还原：控制中心按 v2 落盘，旧顶层键不会回来。
     const restoredTransport = restored.platforms.users[restored.platforms.active.user].transport;
-    assert.equal(restored.configVersion, 2, '保存后就是 v2');
+    assert.equal(restored.configVersion, CONFIG_VERSION, '保存后落在当前配置版本');
     assert.equal(restored.ownerQQ, 12345678);
     assert.deepEqual(
       {

@@ -22,7 +22,7 @@
 
 | 不属于本文 | 归属 |
 | --- | --- |
-| 模型、执行体、权限档位 | `EXECUTION_BODY_GENERALIZATION.md` / `SESSION_SUBSYSTEM.md` |
+| 模型、Agent 平台、权限档位 | `EXECUTION_BODY_GENERALIZATION.md` / `SESSION_SUBSYSTEM.md` |
 | 准入（被动/主动两轴名单） | `SESSION_SUBSYSTEM.md` §4 |
 | 手动静默、定时静默 | 准入层与投递闸门，见 `SESSION_SUBSYSTEM.md` |
 | 提示词话术、人格、记忆注入 | 行为档案 `prompt.md` 与 `MEMORY_SUBSYSTEM.md` |
@@ -44,7 +44,7 @@
 | 术语 | 含义 |
 | --- | --- |
 | 入站 | 平台适配器把一条平台消息交给会话 |
-| 投递 / 唤醒 | 向执行体投递一次 prompt，形成一次模型回合 |
+| 投递 / 唤醒 | 向 Agent 平台投递一次 prompt，形成一次模型回合 |
 | 档位（tier） | 本次投递的优先级分类，决定合批上限与预算桶 |
 | 显式回执 | 模型带水位调用 `qq_mark_read` 或 `qq_set_wake_config`，表示「我看过这些了」 |
 | 搭车（piggyback） | 预算不足时不单独叫醒，把内容并入下一次唤醒的 prompt |

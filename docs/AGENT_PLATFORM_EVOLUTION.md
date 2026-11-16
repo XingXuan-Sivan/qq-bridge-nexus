@@ -39,7 +39,8 @@ profiles/agent-platforms/<id>/
 │                          # C4 起原 agents/<agent>/（preset.yml + agent.cordis.yml + 守卫薄壳）并入这里
 └── adapters/
     ├── build.mjs          # 源 → 产物（纯函数）
-    └── install.mjs        # 产物 → 运行时（幂等，有副作用）
+    ├── install.mjs        # 产物 → 运行时（幂等，有副作用）
+    └── runtime.mjs        # 声明面：能力位、提示注入通道、权限权威和 modelCatalog
 
 artifacts/<id>/            # 产物根，目录名 = agent 平台 id（当前只有 artifacts/dsh/）
 ```
@@ -76,6 +77,15 @@ export async function install({ repoRoot, profile, env, log }) {
 
 - **必须抛错**：安装器被别的东西调用（测试、控制台 apply/rollback），`process.exit` 会杀宿主进程。
 - 幂等：重复运行为同一结果；已存在的用户设置不覆盖。
+
+`adapters/runtime.mjs` 是平台的**声明面**：能力位（`capabilities`）、提示注入通道（`RUNTIME_PROMPT`）、
+权限权威支持面（`RUNTIME_PERMISSION`）、`apply` 认领（`RUNTIME_APPLY`），以及 B3 新增的 `modelCatalog`。
+
+`modelCatalog` 是平台自描述的只读元数据：模型清单（`models`）、思考强度可选值、压缩策略的近似 token 数、
+价目（`pricing` + `pricingPolicy`）。控制台与内核只消费它、不内置任何一家的模型名或价格——
+没有声明就不报价、只计 token，压缩阈值也不猜。它与 `configSchema` 分工明确：前者是平台作者的只读元数据，
+后者是用户可写的平台选项，混用会把作者笔误报成用户配置非法。注册表把它投影成
+`GET /api/platforms/registry/agent/<id>/models` 的 `declared`，`live` 部分由平台自己的探活会话提供。
 
 ### 2.3 调度层（零平台知识）
 

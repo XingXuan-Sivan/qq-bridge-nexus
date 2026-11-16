@@ -30,7 +30,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), loadRoleDefault(), loadPersonaSettings(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -354,29 +354,6 @@ const roleDefaultSection = {
   },
 };
 
-// ── 默认运行方案（config.json 的 runtime.defaultPlan）─────────────────────────
-async function loadRuntimeDefault() {
-  const select = $('runtimeDefaultSelect');
-  if (!select) return;
-  const r = await api('/api/config/runtime');
-  const current = r?.runtime?.defaultPlan ?? '';
-  const plans = Array.isArray(r?.plans) ? r.plans : [];
-  select.innerHTML = plans.map((plan) => `<option value="${esc(plan.id)}">${esc(plan.label || plan.id)}</option>`).join('');
-  if (current) select.value = current;
-}
-
-const runtimeDefaultSection = {
-  id: 'runtimeDefault',
-  label: '默认运行方案',
-  read: () => ({ defaultPlan: $('runtimeDefaultSelect')?.value ?? '' }),
-  save: async (value) => {
-    const r = await api('/api/config/runtime', 'POST', { defaultPlan: value?.defaultPlan ?? '' });
-    if (!r?.ok) return { ok: false, message: r?.error || '保存失败' };
-    await loadRuntimeDefault();
-    return { ok: true, message: '已保存；新建与未单独设置的会话立即使用该方案' };
-  },
-};
-
 // ── Agent 平台（默认平台 / 当前运行 / 探活）─────────────────────────────────────
 // 配置面（`runtime.defaultAgent`）与运行期（`/api/status` 的 `agent`）是两个事实：
 // 换默认只落盘，本进程装配的 Agent 平台在重启前不变。
@@ -520,8 +497,7 @@ const CONFIG_CARDS = {
       id: 'section-personabehavior',
       title: '人格与行为',
       note: '下一条消息生效',
-      body: '<div data-overview-fields="runtimeDefault"></div>'
-        + '<div data-overview-fields="roleDefault"></div>'
+      body: '<div data-overview-fields="roleDefault"></div>'
         + '<div data-overview-fields="personaSettings"></div>',
     },
     {
@@ -623,10 +599,10 @@ export function init() {
   });
   // 刷新后回到上次停留的标签页（默认「行为与模型」）；写入只在用户点击时发生。
   showConfigSection(readConfigTab(), { persist: false });
-  // 页面级保存：安全、全局准入、运行方案、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
+  // 页面级保存：安全、全局准入、默认人格、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, runtimeDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, sendLimitSection, permissionSection, tokenSection],
+    sections: [securitySection, globalAccessSection, roleDefaultSection, personaSettingsSection, compactSection, sendLimitSection, permissionSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',

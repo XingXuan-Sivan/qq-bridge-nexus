@@ -802,7 +802,7 @@ function renderDetail(data) {
     {
       name: 'detailPlan', type: 'select', label: '运行方案', value: data.planId || '',
       options: [
-        { value: '', label: `跟随全局（当前：${planLabelOf(data.activePlan) || '—'}）` },
+        { value: '', label: `跟随平台默认（当前：${planLabelOf(data.defaultPlan) || '—'}）` },
         ...(Array.isArray(data.plans) ? data.plans : []).map((p) => ({ value: p.id, label: p.label || p.id })),
       ],
       hint: '方案决定能力预设、行为档案与受众；模型与人格在下面单独设置。',

@@ -39,7 +39,6 @@ const AGENT_FIELDS = {
 export const CONFIG_FIELDS = {
   mode: OVERVIEW_FIELDS.mode,
   agent: AGENT_FIELDS,
-  runtimeDefault: OVERVIEW_FIELDS.runtimeDefault,
   roleDefault: OVERVIEW_FIELDS.roleDefault,
   personaSettings: OVERVIEW_FIELDS.personaSettings,
   permission: OVERVIEW_FIELDS.permission,

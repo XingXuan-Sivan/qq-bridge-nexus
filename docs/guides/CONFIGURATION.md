@@ -4,14 +4,15 @@
 
 原版字段（`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
 
-**平台配置（0.2.0 起为 v2）**：所有「用哪个平台、它怎么连」都收在 `config.json` 的 `platforms` 段里，
+**平台配置（当前 v3）**：所有「用哪个平台、它怎么连」都收在 `config.json` 的 `platforms` 段里，
 旧版顶层键 `platform.*` / `snowluma.*` / `dsh.*` 在首次启动时**一次性迁移并删除**（迁移前备份
-`config.json.bak-<YYYYMMDD-HHmm>`，之后不再读旧键）：
+`config.json.bak-<YYYYMMDD-HHmm>`，之后不再读旧键）。v2 → v3 只做一件事：把旧的全局默认运行方案
+`runtime.defaultPlan` 写到当时活动的用户平台条目上（`platforms.users.<id>.defaultPlan`），并删掉旧键。
 
 ```jsonc
 "platforms": {
   "active": { "user": "qq", "agent": "dsh" },      // 用哪个平台；不可用时启动直接报错并列出已注册 id
-  "users":  { "qq":  { "account": "", "enabled": true, "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
+  "users":  { "qq":  { "account": "", "enabled": true, "defaultPlan": "social-v2", "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
   "agents": { "dsh": { "endpoint":  { /* 地址与鉴权 */ }, "options": { /* 模型与行为选项 */ } } }
 }
 ```
@@ -19,22 +20,22 @@
 下文中带 `platforms.users.<id>.` / `platforms.agents.<id>.` 前缀的路径都指这个段；写散在条目里
 （不在 `transport`/`options`/`endpoint` 下）的键会被自动归位，不会丢。
 
-## `platforms.agents.<id>` —— 多实例与默认执行体
+## `platforms.agents.<id>` —— 多实例与默认 Agent 平台
 
 Agent 侧可以同时存多条平台的配置：`agents` 里每条都有自己的 `endpoint`（怎么连）与 `options`（模型与行为选项），
-`active.agent` 只决定「默认用哪一个」。没被选中的条目照样可读、可写、可探活 —— 切换默认执行体不需要先把另一条删掉。
+`active.agent` 只决定「默认用哪一个」。没被选中的条目照样可读、可写、可探活 —— 切换默认 Agent 平台不需要先把另一条删掉。
 
 | 入口 | 作用 |
 | --- | --- |
 | 平台 › Agent 侧 › 详情 › 配置 | 表单字段就是 `platforms.agents.<id>` 那一份，保存只写用户给的键（不把 schema 默认值固化成设置） |
-| 平台 › Agent 侧 › 详情 › 执行体 | 「探活」与「设为默认执行体」；后者先探活，探不通不落盘 |
+| 平台 › Agent 侧 › 详情 › Agent 平台 | 「探活」与「设为默认 Agent 平台」；后者先探活，探不通不落盘 |
 
 - **端点与选项的生效时机不同**：`endpoint.*`（`baseUrl` / `authToken` / `authTokenExplicit` / `authHeader` /
   `authPrefix` / `allowRemote`）决定「下一次连接去哪」，改了要重启桥接；`options.*`（`provider` / `model` /
   `reasoningEffort` / `vision`）由调用面每次现读，改完即生效。
-- **切换默认执行体只改 `active.agent`**，条目原样保留。运行期的连接层句柄是启动时装配的单例，所以切换后要重启桥接；
+- **切换默认 Agent 平台只改 `active.agent`**，条目原样保留。运行期的连接层句柄是启动时装配的单例，所以切换后要重启桥接；
   在那之前注册表会给一条 `active_pending_restart`（warn），控制台同时显示「已设为默认，重启后生效」与列表里的「待重启」。
-- **默认执行体没有第二份配置**：控制台「默认执行体」与 `/api/config/runtime` 的 `runtime.defaultAgent` 读的都是
+- **默认 Agent 平台没有第二份配置**：控制台「默认 Agent 平台」与 `/api/config/runtime` 的 `runtime.defaultAgent` 读的都是
   `platforms.active.agent`。两处各存一份必然漂移 —— 一个由控制台写、一个由手改 `config.json` 写。
 
 ## `platforms.users.<id>` —— 用户侧实例与启用开关
@@ -45,8 +46,10 @@ Agent 侧可以同时存多条平台的配置：`agents` 里每条都有自己�
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 条目级开关。`false` 的实例启动时直接跳过装配（不连接、不收消息），控制台标「已停用」 |
+| `defaultPlan` | `""` | 条目级默认运行方案（`profiles/plans/<id>.yml` 的 id）。这个平台新建、且没单独指定方案的会话用它；空串 = 回退内置 `social-v2` |
 | `account` | `""` | 账号名；空串 = 该平台的默认账号，会话 key 里也就不带 `@` 段 |
 
+- **`defaultPlan` 也不是平台的选项**：与 `enabled` 同级，不进 `transport` / `options`，也不在 `configSchema` 里。它由写口单独校验（只认方案目录里真有的 id），页面把它排在配置表单的条目开关旁边；Agent 侧没有这个字段，写口直接 400。
 - **`enabled` 不是平台的选项**：它不进 `transport` / `options`，也不在 `configSchema` 里 —— 控制台把它排在
   配置表单首位，保存时与平台字段一起提交；校验只针对平台字段，所以配置本身不合规时也能先把实例停掉。
 - **翻开关要重启**：装配只发生在启动期，改 `enabled` 不会断开已经连上的实例，写口固定回 `requiresRestart: true`。

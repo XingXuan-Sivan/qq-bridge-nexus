@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   createPlanStore,
   normalizePlan,
@@ -17,7 +16,6 @@ import {
 import { listFactoryIds } from '../src/profiles/factory.mjs';
 import { PLANS_ROOT } from '../src/profiles/paths.mjs';
 const tmpRoot = () => fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-plans-'));
-const tmpFile = (name = 'runtime.json') => path.join(tmpRoot(), name);
 
 function builtinStore() {
   return createPlanStore({ root: PLANS_ROOT });
@@ -131,9 +129,8 @@ test('引用校验：执行体/能力档事实不符时报错，直通进群只�
   assert.deepEqual(codes({ capability: 'direct', agentPlatform: 'auto', behavior: 'none', audience: 'access' }), ['plan_warn']);
 });
 
-test('方案解析不再有全局指针：默认方案来自 config.runtime.defaultPlan', () => {
-  // 指针（state/runtime.json）已删除；全局默认方案是配置项，内置方案仍是只读文件。
-  assert.equal(fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../state/runtime.json')), true);
+test('方案解析不再有全局指针：默认方案按用户平台条目记（`platforms.users.<id>.defaultPlan`）', () => {
+  // 指针（state/runtime.json）已删除；默认方案是条目级配置，内置方案仍是只读文件。
   const store = builtinStore();
   assert.equal(store.get('social-v2')?.id, 'social-v2');
   assert.equal(store.get('chat')?.builtin, true);

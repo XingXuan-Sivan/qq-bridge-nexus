@@ -20,7 +20,7 @@
 
 | 轴 | 取值 | 决定什么 | 住哪 |
 | --- | --- | --- | --- |
-| **应用方式** `apply` | `preset` / `passthrough` | 要不要在执行体里装一套预设（能力档 `rows` → bundle patch） | 能力档 `runtime.apply` |
+| **应用方式** `apply` | `preset` / `passthrough` | 要不要在 Agent 平台上装一套预设（能力档 `rows` → bundle patch） | 能力档 `runtime.apply` |
 | **工具面** `tools` | 平台工具 / Agent 模块 / MCP / 技能，再按会话权限级别收窄 | 发什么工具给模型 | 能力档 `tools` 段 + 会话 `permission` |
 | **权限权威** `permission` | `bridge` / `agent` | 对端权限档由谁定、谁回钉 | 能力档 `runtime.permission` |
 | **行为** `behavior` | `none` / `social-v1` / `social-v2` … | 回合怎么被驱动、话术风格 | 方案 `behavior` → `profiles/platforms/<id>/behaviors/` |
@@ -36,26 +36,28 @@
 | **行为引擎 / 行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | 引擎 `profiles/behavior-engines/<engine>.yml`（字段清单 + 默认值）；档案 `profiles/platforms/<id>/behaviors/*.yml`（`config` 是保存时的全量快照） | 引擎定义由系统提供，档案作者只改取值与文案（内置两份，可增删）；在「平台 › 详情 › 行为」里改，没有整页 |
 | **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前 DSH 与 ACP） | `profiles/agent-platforms/<id>/` | 系统给 `AgentPort` 契约，具体工具 / 能力档 / 产物由该平台目录提供 |
 | **能力档**（capability） | 四个轴里的前三个：这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”——平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条（`chat` / `chat-v2` / `readonly` / `workspace` / `full` / `direct`），可克隆 / 新建；`.defaults/` 有副本即为内置 |
-| **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选执行体）”组合成一个可切换的档位 | `profiles/plans/*.yml`（`order` 决定控制台顺序） | 内置七条，可克隆成自定义方案 |
+| **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选 Agent 平台）”组合成一个可切换的档位 | `profiles/plans/*.yml`（`order` 决定控制台顺序） | 内置七条，可克隆成自定义方案 |
 | **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话档案 `state/sessions/<platform>/<kind>/<id>.json` 的 `permission`（`inherit` = 跟随全局 `config.json` 的 `permission.default`） | 会话级，不落在档案里 |
 
-关系一句话：**方案 = 能力档 + 行为档案 + 受众**，需要时再加一个执行体（`agentPlatform`，缺省 `auto` 跟随全局默认）。
+关系一句话：**方案 = 能力档 + 行为档案 + 受众**，需要时再加一个 Agent 平台（`agentPlatform`，缺省 `auto` 跟随 `platforms.active.agent`）。
 方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id；C4 起方案不再有 `agent` 字段
 （能力档 id 就是该平台的 preset id），所以“换能力档”不会再把“换预设”忘在后面。
 方案与能力档决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
 
-### 1.3 默认解析链（两层）
+### 1.3 默认解析链（三层）
 
 会话没有单独选方案时，按下面的顺序取值，第一处有值即停：
 
 | 顺位 | 键 | 作用 |
 | --- | --- | --- |
 | 会话 | `state/sessions/<platform>/<kind>/<id>.json` 的 `planId` | 单会话覆盖（`null` = 没选） |
-| 全局 | `config.json` 的 `runtime.defaultPlan`（缺省 `social-v2`） | 兜底默认 |
+| 用户平台 | `config.json` 的 `platforms.users.<id>.defaultPlan`（空串 = 没设） | 该平台新建会话的默认 |
+| 内置常量 | `DEFAULT_PLAN_ID`（`social-v2`） | 兜底默认 |
 
-解析链**只有这两层**。设计期还留过中间一层「平台默认方案」（`platforms.users.<id>.defaultPlan`：同一用户平台的实例各有一套默认方案），
-落地时没做——平台维度已经由「每个平台一条 `active` 实例」表达，再叠一层默认方案会让「这个会话为什么是这个档」出现三个来源；
-要按平台分方案，给会话单独选即可。没有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。
+中间那层是**条目级键**，与 `enabled` 同级、不进 `options`：它描述的是「这个平台新建的会话用哪套方案」，
+不是全局唯一值。会话 key 的首段就是用户平台 id，所以「按平台」不需要额外索引。
+条目上申报的方案文件被删时依次回退内置方案、目录首项。
+没有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口，更没有全局默认方案配置项。
 
 ---
 
@@ -220,7 +222,7 @@ version: 1
 id: social-v2
 label: 二代仿真
 order: 30               # 控制台排列顺序：内置 10/20/…，自定义缺省 900
-agentPlatform: auto     # 缺省 auto = 跟随全局默认执行体
+agentPlatform: auto     # 缺省 auto = 跟随默认 Agent 平台
 behavior: social-v2
 capability: chat-v2      # 能力档 id（同时就是预设 id）
 audience: access
@@ -230,12 +232,12 @@ note: …
 - 内置七条：`chat`、`social-v1`、`social-v2`、`direct`、`agent-readonly`、`agent-workspace`、`agent-full`；有出厂副本的就是内置，只能克隆，不能改/删。
 - 方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id。旧文件里的 `platform` 字段读时忽略并
   报 `plan_warn`，保存时不再写出——不需要手工迁移。
-- `agentPlatform` 缺省 `auto`（跟随 `platforms.active.agent`），写具体 id 表示「这套方案必须跑在该执行体上」；
-  内置方案全部 `auto`，否则换全局执行体会被拉回旧平台。
+- `agentPlatform` 缺省 `auto`（跟随 `platforms.active.agent`），写具体 id 表示「这套方案必须跑在该 Agent 平台上」；
+  内置方案全部 `auto`，否则切换默认 Agent 平台后会被拉回旧平台。
 - 方案里**没有独立的 `agent` 字段**（C4 起）：能力档 id 就是预设 id，`capability` 一个字段说清「用哪套预设」；
-  引用完整性（能力档是否存在、`preset` 档是否有 rows、执行体是否认领该 `apply`）由 `validatePlanReferences()` 判。
+  引用完整性（能力档是否存在、`preset` 档是否有 rows、Agent 平台是否认领该 `apply`）由 `validatePlanReferences()` 判。
 - `behavior` 只存档案名；引用的档案不存在时加载侧告警并退化为“无档案”，不阻断消息处理。
-- 方案解析：会话单独设置的方案优先，没设就用全局默认方案（`config.json` 的 `runtime.defaultPlan`，缺省 `social-v2`）；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
+- 方案解析：会话单独设置的方案优先，没设就用会话所在**用户平台条目**上的 `platforms.users.<id>.defaultPlan`，仍没设才回退内置 `social-v2`；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
 - 「内置」= 目录里同时存在 `<id>.yml` 与 `.defaults/<id>.yml`：有副本的就是内置（只能克隆、可以重置），没有副本的就是自定义（只能删）。方案、能力档、行为档案、平台话术同一套判定；控制台的重置按钮只对内置项出现，点击即把副本复制回正式文件。
 
 ### 平台 / Agent 平台

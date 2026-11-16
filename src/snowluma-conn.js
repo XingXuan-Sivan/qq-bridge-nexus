@@ -15,7 +15,7 @@
 // 这样换账号后无需手改任何配置，工具自动跟上。
 import fs from 'node:fs';
 import path from 'node:path';
-import { CONFIG_VERSION, configViews, migrateConfigToV2, platformsForWrite, readPlatforms } from './config/platforms.mjs';
+import { CONFIG_VERSION, configViews, migrateConfig, platformsForWrite, readPlatforms } from './config/platforms.mjs';
 
 /**
  * 取「用户侧平台连接参数」的扁平视图。
@@ -201,7 +201,7 @@ export function persistToken(cfgPath, newToken) {
   if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
   // 先迁再读：磁盘上可能还是 v1（三个顶层键），直接 readPlatforms 会读到空值，
   // 把「换掉了哪个 token」报成空串。
-  const old = String(readActiveTransport(migrateConfigToV2(JSON.parse(text)).config).accessToken ?? '');
+  const old = String(readActiveTransport(migrateConfig(JSON.parse(text)).config).accessToken ?? '');
   const r = persistSnowLumaEndpoint(cfgPath, { accessToken: newToken });
   return { updated: r.updated, from: old, to: newToken };
 }
@@ -227,7 +227,7 @@ export function persistSnowLumaEndpoint(cfgPath, { accessToken, wsUrl, httpUrl }
   if (hadBom) text = text.slice(1);
   // 先迁再切：v1 文件里的连接参数还在 `snowluma` 顶层键里，直接切 platforms 会写成空表，
   // 于是「只改一个 token」变成把 wsUrl/httpUrl/homeDir 全删了。
-  const cfg = migrateConfigToV2(JSON.parse(text)).config;
+  const cfg = migrateConfig(JSON.parse(text)).config;
   const platforms = readPlatforms(cfg);
   const id = platforms.active.user;
   const entry = platforms.users[id] ?? { account: '', transport: {}, options: {} };

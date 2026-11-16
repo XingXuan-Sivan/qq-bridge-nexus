@@ -66,7 +66,7 @@ public/console/
 ### 2.2 数据新鲜度
 
 - **下拉 / 候选列表不做模块级永久缓存**：人格、平台、能力档这类可在别处增删的目录，**每次打开弹窗都重拉**（如 `pages/sessions/page.js` 的 `ensurePersonaCatalog()`）；拉取失败沿用上一次结果，别让下拉突然空掉。拿到一次就永不失效，会表现为「在人格页新建了卡，回会话详情看不到，必须刷页面」。
-- **「跟随全局（当前：…）」必须写出可读名字**：后端直接给整份定义（如 `/api/sessions` 的 `activePlan`），页面侧再兜一层兼容（`planLabelOf()`：字符串就用它，对象取 `label || id`）——不允许出现只有一个破折号的选项。
+- **「跟随平台默认（当前：…）」必须写出可读名字**：后端直接给整份定义（`/api/sessions/<key>` 的 `defaultPlan`），页面侧再兜一层（`planLabelOf()`：字符串就用它，对象取 `label || id`）——不允许出现只有一个破折号的选项。
 - 缓存只给「不常变且自己维护生命周期」的东西（参考组件里的单飞与 TTL 写法）；目录类数据一律现取。
 
 ### 2.3 页面子路由
@@ -236,7 +236,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 改样式可以，这些不能动：
 
 - **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
-- **27 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×3、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **27 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×2、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`×2（连接参数与条目级 `defaultPlan` 各一条）、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
 - **基线是改造前的快照**：录制时控制台仍是 `scripts/fixtures/console.before.html` 那一版，所以基线只认「改造前就有的写口」。改造后新加的写口（例如 `POST /api/sessions/<key>/permission`）不进基线——它们要有自己的专项用例，并由夹具的 `unknownRequests` 兜住「调了没人认领的路线」。
 - 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
@@ -297,6 +297,9 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器，再 `setConsolePage('platforms', { sub: 'agent:<id>', tab: 'capabilities' })` 直接落到那个平台的能力页 |
 | 会话详情›Agent 平台与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：Agent 平台名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉，并把「在新 Agent 平台上重开」放进危险操作卡（与重建 / 重置同处，不单开区块）；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
 | 全局配置›运行（Agent 平台卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认 Agent 平台只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
+| 平台›配置（默认运行方案） | 注册表条目的 `defaultPlan` + `GET /api/plans`（方案清单） | `PATCH /api/platforms/registry/user/<id>/config` | 字段 `#platformDefaultPlan`，首项「不设置（回退内置方案）」，与条目开关一起保存；只对用户平台出现（Agent 平台侧一律 400）。它描述「这个平台新建、且没单独指定方案的会话用哪套」，不提供全局开关 |
+| 会话详情›运行方案 | `GET /api/sessions/<key>` 的 `planId` / `plans` / `defaultPlan` | `PATCH /api/sessions/<key>`（`planId`） | 下拉首项写「跟随平台默认（当前：<方案名>）」，名字由后端的 `defaultPlan` 给（整份定义），不许只剩一个破折号 |
+| 运行总览›指标格「当前运行方案」 | `GET /api/status` 的 `planId` / `planLabel` | 无（只读） | 格子里是**当前运行用户平台**的默认方案，不是全局值；全局默认方案卡已删 |
 | 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉的档位由 `permissionLevelOptions({ allowFull, current })` 算：`allowFull` 开着才给 `full`，关着但当前值本来就是 `full` 时也保留（否则下拉显示空白）。开关翻转后就地重算（`setSelectOptions`，不重建控件）；要 full 还得在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
 
 三条落地细节：

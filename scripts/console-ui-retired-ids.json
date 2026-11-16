@@ -163,6 +163,7 @@
   "newRoleContent",
   "roleCreate",
   "roleCreateMsg",
+  "runtimeDefaultSelect",
   "modeRow",
   "closedPreset",
   "ownerQQ"

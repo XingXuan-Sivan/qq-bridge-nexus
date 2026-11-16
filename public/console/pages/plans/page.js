@@ -92,7 +92,7 @@ function platformNameFor(side) {
 // ── 渲染 ────────────────────────────────────────────────────────────────────
 function summaryHtml() {
   if (!payload) return '<span class="meta">读取中…</span>';
-  const plan = payload.activePlan ?? planById(payload.active);
+  const plan = payload.defaultPlanDef ?? planById(payload.defaultPlan);
   if (!plan) return '<span class="meta">还没有激活任何方案。</span>';
   return `
     <span class="tag tag--success">${esc(plan.label)}</span>

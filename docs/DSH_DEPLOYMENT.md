@@ -422,7 +422,7 @@ curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/status | python3 -c "
 curl -s -H "x-console-token: $T" http://127.0.0.1:3100/api/admin/status | python3 -c "import json,sys;print(json.load(sys.stdin)['text'])"
 ```
 
-预期：`mode = reserved2`、`level = L0`、`agent.ready = True`（`agent.label` 是当前执行体的显示名）；admin status 文本里有「TOTP：已配置/未配置」「人物库：N 人」，
+预期：`mode = reserved2`、`level = L0`、`agent.ready = True`（`agent.label` 是当前 Agent 平台的显示名）；admin status 文本里有「TOTP：已配置/未配置」「人物库：N 人」，
 `auditChain.ok = True`。桥接控制台：控制中心「桥接」卡片里点「打开桥接控制台 ↗」（自动带令牌）。
 
 ## 12. 功能验证（在真实 QQ 环境，由用户配合）

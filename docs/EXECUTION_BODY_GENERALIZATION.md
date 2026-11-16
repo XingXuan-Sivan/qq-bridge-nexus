@@ -1,8 +1,8 @@
-# 执行体通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
+# Agent 平台通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）、P2 已落地（配置多实例与默认执行体 §5.2 / §8.2）；P3 起各批未做。
+> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）、P2 已落地（配置多实例与默认 Agent 平台 §5.2 / §8.2）；P3 起各批未做。
 > 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
-> 也是「可换执行体」在运行时第一次成立的地方。
+> 也是「可换 Agent 平台」在运行时第一次成立的地方。
 > 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
 > 边界：AstrBot 目录只读；本文不改变已发布的 `AgentPort` 五个核心方法。
 
@@ -19,16 +19,16 @@
 
 ## 1. 结论先行
 
-1. **执行体「注册多份、同时只跑一份」**。`platforms.active.agent` 是唯一活动执行体（`/api/config/runtime` 的
+1. **Agent 平台「注册多份、同时只跑一份」**。`platforms.active.agent` 是唯一活动 Agent 平台（`/api/config/runtime` 的
    `runtime.defaultAgent` 就是它的读视图，不是第二个配置键），切的是「新会话用谁」，
-   不是「把运行中的会话搬过去」。已绑定会话保留原实例（`agentRef.instance`），并提供显式的「在新执行体上重开」。
+   不是「把运行中的会话搬过去」。已绑定会话保留原实例（`agentRef.instance`），并提供显式的「在新 Agent 平台上重开」。
 2. **现有预设不是三套体系，而是同一张表的三个轴被写死了**。把「应用方式 / 权限权威 / 行为 / 工具面」
    拆成正交四轴之后，直通只是 `apply: passthrough` 的一个取值，不再是第二套方案。
 3. **直通下权限归对端，桥接从「拥有并强制」退化为「观察、转发、可写但不回钉」**。
    界面里读写对端权限不需要新能力位——`listPermissionPresets` / `readPermission` / `applyPermission` 已经实现了。
 4. **直通给不了工具级硬边界**。桥接只能决定「发进去什么」「审批转不转」；真正的边界是对端的权限档。
    这条必须写进界面和文档，不能靠提示词假装。
-5. 界面改动集中在四处：全局配置（执行体卡）、平台配置（Agent 侧实例）、会话详情（对端权限块）、方案编辑（四轴字段）。
+5. 界面改动集中在四处：全局配置（Agent 平台卡）、平台配置（Agent 侧实例）、会话详情（对端权限块）、方案编辑（四轴字段）。
 
 ---
 
@@ -36,12 +36,12 @@
 
 改动之前的耦合点，逐条带位置。这张表是后文所有拆分的依据。
 
-### 2.1 执行体维度的缺口
+### 2.1 Agent 平台维度的缺口
 
 | 事实 | 位置 | 影响 |
 | --- | --- | --- |
 | 门面硬依赖 14 个 DSH 成员（`NodeApiClient` / `discoverDshLaunchToken` / `looksLikeDsh` …） | `src/agent-side/agent-client.mjs` `REQUIRED_PROTOCOL_MEMBERS` | ACP 声明面齐了也当不了主平台：装配期直接抛错 |
-| 连接层（地址发现 / Cookie / 探活分类 / RPC 客户端）没有归口 | 同上 + `adapters/dsh/{client,endpoint}.mjs` | 换执行体 = 重写一次连接层；`describe()` 里无法表达「怎么连」 |
+| 连接层（地址发现 / Cookie / 探活分类 / RPC 客户端）没有归口 | 同上 + `adapters/dsh/{client,endpoint}.mjs` | 换 Agent 平台 = 重写一次连接层；`describe()` 里无法表达「怎么连」 |
 | Agent 侧只有「描述」注册，没有「实现」注册 | `src/platforms/adapter-registry.mjs`（`ADAPTER_KINDS=['platform','agent']`，仅 id/label/note/vars）；`src/plugins/host-api.mjs` 的 `ctx.userPlatforms.register` 只对用户侧开放 | 用户侧可插件扩展，Agent 侧不能 |
 | 单 active | `src/config/platforms.mjs` 的 `platforms.active.{user,agent}` | 多平台并发在配置面就不成立 |
 
@@ -53,11 +53,11 @@
 | 并存点 | 证据 | 后果 |
 | --- | --- | --- |
 | 方言写在两处 | `profiles/agent-platforms/dsh/capabilities/chat.yml` 的 `persona.prefix` 自带一大段 QQ 规则；`profiles/platforms/qq/prompt.md` 又有一份 94 行的 QQ 规则 | `build.mjs` 的 `composeRows()` 把平台提示词**追加**到同一条 `persona.prefix`；两份口径有代差（前者「回复会自动转发」，后者「文本不会自动发送」），一旦给该能力档配了平台提示词，前缀里就同时存在两套发送口径 |
-| 方案钉死平台与执行体 | `profiles/plans/*.yml` 全部写 `platform: qq` / `agentPlatform: dsh`；`src/runtime/plans.mjs` 里 `agentPlatform || 'dsh'` | 换平台/换执行体要逐个改方案；`validatePlanReferences` 也把两者当必填 |
-| 能力档根目录属于 dsh（已收口） | ~~`src/capabilities/store.mjs` 的 `CAPABILITIES_ROOT = AGENT_PLATFORMS_ROOT/dsh/capabilities`~~ → 改为 `agentCapabilitiesDir(活动 Agent 平台 id)`，store 层不再带默认 root | 已解决：第二家执行体的能力档有自己的目录 |
+| 方案钉死平台与 Agent 平台 | `profiles/plans/*.yml` 全部写 `platform: qq` / `agentPlatform: dsh`；`src/runtime/plans.mjs` 里 `agentPlatform || 'dsh'` | 换平台/换 Agent 平台要逐个改方案；`validatePlanReferences` 也把两者当必填 |
+| 能力档根目录属于 dsh（已收口） | ~~`src/capabilities/store.mjs` 的 `CAPABILITIES_ROOT = AGENT_PLATFORMS_ROOT/dsh/capabilities`~~ → 改为 `agentCapabilitiesDir(活动 Agent 平台 id)`，store 层不再带默认 root | 已解决：第二家 Agent 平台的能力档有自己的目录 |
 | 方案是日常编辑对象 | 仓库里已有用户克隆出来的 `profiles/plans/agent-full-copy.yml` | 重构必须让克隆方案自动继承新字段，不能要求用户重建 |
 
-前三条（方言两处并存、方案钉平台与执行体、克隆方案继承）已按 §6.1–§6.3 收口：平台话术只剩 `prompt.md` 一份，
+前三条（方言两处并存、方案钉平台与 Agent 平台、克隆方案继承）已按 §6.1–§6.3 收口：平台话术只剩 `prompt.md` 一份，
 方案不再写 `platform`、`agentPlatform` 缺省 `auto`，能力档多了 `runtime` 段。能力档根目录已按活动 Agent 平台解析
 （`agentCapabilitiesDir(platforms.active.agent)`），`src/capabilities/store.mjs` 与预设出厂副本都不再内置 `dsh`：缺 root 直接报错，
 不静默回退到别家目录。
@@ -86,7 +86,7 @@
 
 | 轴 | 取值 | 决定什么 | 住哪 |
 | --- | --- | --- | --- |
-| **应用方式** `apply` | `preset` / `passthrough` | 要不要给执行体装环境（能力档 rows → bundle patch） | 能力档 `runtime` 段 |
+| **应用方式** `apply` | `preset` / `passthrough` | 要不要给 Agent 平台装环境（能力档 rows → bundle patch） | 能力档 `runtime` 段 |
 | **工具面** `tools` | 能力档的 `tools` 段（platform / agent / mcp / skills） | 发什么工具给模型 | 能力档 `tools` 段（已有） |
 | **权限权威** `permission` | `bridge` / `agent` | 档位由谁定、谁回钉 | 能力档 `runtime` 段 |
 | **行为** `behavior` | `none` / `social-v1` / `social-v2` | 回合怎么被驱动（自主发言、等待、潜水） | 用户侧平台 `behaviors/`（已有） |
@@ -106,26 +106,27 @@ capability: direct          # 能力档 id；其 runtime.apply 决定 preset / p
 # platform / agentPlatform 不再必填：缺省跟随全局默认（见 §5）
 ```
 
-### 3.2 两层默认
+### 3.2 三层默认
 
 | 层 | 键 | 作用 |
 | --- | --- | --- |
 | 会话 | `state/sessions/<platform>/<kind>/<id>.json` 的 `planId` | 单会话覆盖 |
-| 全局 | `runtime.defaultPlan` | 兜底默认（缺省 `social-v2`） |
+| 用户平台 | `platforms.users.<id>.defaultPlan` | 该平台新建会话的默认（空串 = 没设） |
+| 内置常量 | `DEFAULT_PLAN_ID` | 兜底默认（`social-v2`） |
 
-解析链只有这两层：会话有 `planId` 就用它，否则用全局默认。设计期还计划过中间一层「平台默认方案」
-（`platforms.users.<id>.defaultPlan`），落地（P2/P3/P5）时没做：平台维度已经由「每个平台一条 `active` 实例」表达，
-再叠一层默认方案会让「这个会话为什么是这个档」出现三个来源；要按平台分方案，给会话单独选即可。
+会话 key 的首段就是用户平台 id，所以「按平台」不需要额外索引：`planOf(key)` 先看会话固定，
+再取 `defaultPlanFor(platformIdOf(key))`；条目上申报的方案文件被删时依次回退内置方案、目录首项。
+没有全局「切换方案」接口，也没有全局默认方案配置项。
 
 ### 3.3 为什么不做「组合自由」
 
-方案允许自由组合四轴会导致组合爆炸（4 轴 × 用户侧 N 平台 × 执行体 M），且每一种组合都要有审计口径。
+方案允许自由组合四轴会导致组合爆炸（4 轴 × 用户侧 N 平台 × Agent 平台 M），且每一种组合都要有审计口径。
 约束：**内置方案是模板，自定义方案只能从模板克隆后改参数**，不能凭空新造轴组合。
 `src/runtime/plans.mjs` 的 `validatePlanReferences()` 负责拒绝非法组合（见 §6.4）。
 
 ---
 
-## 4. 执行体契约 v2（P0 的地基）
+## 4. Agent 平台契约 v2（P0 的地基）
 
 ### 4.1 连接层下沉
 
@@ -146,22 +147,22 @@ export function createRuntime({ config, log, onBaseUrlChange }) {
 `src/agent-side/runtime.mjs` 的 `agentRuntime({config, log, onBaseUrlChange})` 是内核唯一的连接入口：
 按 `platforms.active.agent` 取已注册实现 → 调 `createRuntime` → 按成员表校验 → 缓存。
 进程内同一时刻只有一个句柄；缓存键是**实现对象本身**（不是 id），注册表重置后重新装配同一平台不会复用旧句柄。
-`resetAgentRuntime()` 丢弃句柄并 `close()`，切换执行体后下一次调用按新平台重建。
+`resetAgentRuntime()` 丢弃句柄并 `close()`，切换 Agent 平台后下一次调用按新平台重建。
 
 | 成员 | 谁用 | 说明 |
 | --- | --- | --- |
 | `prepareAuth(config)` | bridge / self-test / 启动器 | 连接前补全凭据，返回 `{ authToken, tokenExplicit }`；不发请求 |
-| `prepareEndpoint(config)` | 同上 | 连接前补全地址，返回 `{ baseUrl, auto, discovered, reachable }`；stdio 执行体返回空串 + `auto: false` |
+| `prepareEndpoint(config)` | 同上 | 连接前补全地址，返回 `{ baseUrl, auto, discovered, reachable }`；stdio Agent 平台返回空串 + `auto: false` |
 | `client()` | 连接层内部 / 诊断 | 懒建底层客户端 |
 | `events()` | bridge | 事件流订阅面（`follow` / `forget` / `mux`） |
 | `port()` | bridge / 工具面 | 懒建 `AgentPort`，能力位由 `createAgentPort` 装配 |
 | `collector()` | bridge | 按本平台的事件口径把一条流收成「一轮」 |
 | `health({threshold})` | bridge | 连续失败计数：`ok()` / `fail(err)`（阈值策略归调用方） |
-| `probe()` | bridge / 启动器 | `check()` → `{ ok, error, rediscovered, url }`；HTTP 执行体自带重识别与节流 |
+| `probe()` | bridge / 启动器 | `check()` → `{ ok, error, rediscovered, url }`；HTTP Agent 平台自带重识别与节流 |
 | `authHint(err)` | bridge | 401 诊断文本；不是凭据问题或在限频窗口内返回 `null` |
 | `authRecentlyFailed()` | bridge | 「连上就断」日志的归因依据 |
 | `resetAuthHint()` | bridge | 恢复后清空限频与计数 |
-| `close()` | 切换执行体 / 退出 | 断开连接或结束子进程 |
+| `close()` | 切换 Agent 平台 / 退出 | 断开连接或结束子进程 |
 
 - **fail-closed 在装配期**：`RUNTIME_MEMBERS` 缺任一成员，或未声明 `id` / `label` / `mode`，`agentRuntime()` 直接抛错：
   不允许「少一个方法先跑起来」，也不允许内核按 `undefined` 分支猜行为。
@@ -201,8 +202,8 @@ ACL：TCK 通过是「可注册」的前置条件；插件注册的 Agent 平台
 | --- | --- |
 | 新权限 | `agent-provider:provide`（与 `transport:provide` / `adapters:provide` 并列） |
 | host-api | `ctx.agentPlatforms = { register(def), list() }`；内核在 `disposeEntry` 里调 `unregisterAgentPlatformsByOwner(owner)` |
-| 注册形状 | `{ id, label, capabilities, configSchema?, resolveLevelPlan(level, ctx), createRuntime(opts) }`，连接层成员同 §4.1。`resolveLevelPlan` 与 `createRuntime` 缺任一即拒：能被选为当前执行体是个承诺，注册时就验 |
-| 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active 要重启桥接 —— 正在当执行体的平台不允许随插件注销（会话落盘里的 `agentRef.instance` 指着它） |
+| 注册形状 | `{ id, label, capabilities, configSchema?, resolveLevelPlan(level, ctx), createRuntime(opts) }`，连接层成员同 §4.1。`resolveLevelPlan` 与 `createRuntime` 缺任一即拒：能被选为当前 Agent 平台是个承诺，注册时就验 |
+| 懒建与缓存 | 沿用 `agentRuntime()` 的进程内单例；换 active 要重启桥接 —— 正在当 Agent 平台的实例不允许随插件注销（会话落盘里的 `agentRef.instance` 指着它） |
 | 安全边界 | 插件**不能自证能力**：`capabilities` 只是描述，闸门在 `createAgentPort` 的装配校验（未知能力位 / 声明了却漏实现 / 缺核心方法）；权限决策权只在内核 |
 | 诊断 | `issue.code` 由注册表记，由统一注册表翻成诊断码：`capability_overclaimed`（自证失败，error）/ `agent_provider_invalid`（实现不合契约，error）/ `agent_instance_offline`（此刻没连上，warn） |
 
@@ -223,7 +224,7 @@ P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` �
 
 | 位置 | 归一前的依赖 | 为什么必须归一 |
 | --- | --- | --- |
-| `pumpMux()`（约 17667 起，700 余行） | `frame.type` 取 `session/snapshot` / `session/event` / `question/requested` / `approval/requested`；`frame.event.type` 取 `turn/start` / `tool/call` / `tool/result` | 换执行体 = 重写这 700 行；ACP 的归一事件在这套判别值上一格都对不上 |
+| `pumpMux()`（约 17667 起，700 余行） | `frame.type` 取 `session/snapshot` / `session/event` / `question/requested` / `approval/requested`；`frame.event.type` 取 `turn/start` / `tool/call` / `tool/result` | 换 Agent 平台 = 重写这 700 行；ACP 的归一事件在这套判别值上一格都对不上 |
 | `recordSessionUsage()` / `recordSessionSnapshot()` / `rebuildInFlightCollector()` | 事件体是 DSH wire 形状（`data.usage`、`turn`、`assistant/message`）与快照的 `projections.tokenUsage` / `records` | 用量账本与「断线重建进行中回合」都绑在 DSH 上 |
 | `agentPort.respondPermission({ clientId, eventId })` | 审批回执引用是 DSH 事件标识的形状 | ACP 用 `requestId`（`pendingPermissions`），审批转发要各自分叉 |
 
@@ -260,23 +261,23 @@ P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` �
 
 ---
 
-## 5. 执行体切换机制（补充一）
+## 5. Agent 平台切换机制（补充一）
 
 ### 5.1 语义
 
-- **同一时刻只有一个活动执行体**：`platforms.active.agent` 保持单值，语义从「唯一存在的」变成「默认的」。
+- **同一时刻只有一个活动 Agent 平台**：`platforms.active.agent` 保持单值，语义从「唯一存在的」变成「默认的」。
 - **多个实例可注册、可配置、可探活**：`platforms.agents.<id>` 每条都保留端点与选项；未激活的实例不参与收流。
 - **切换只影响新会话**：已建立的会话继续用建会话时的实例（`agentRef.instance`）。
   理由：会话归属（审批回执 `requestId`、preset 所有权、漂移核对）都是**实例级**语义，
   把运行中的会话跨实例迁移等于迁移一段对话历史，而历史在对端——桥接做不到，假装做不到更糟。
-- **提供显式「在新执行体上重开」**：归档旧会话 + 在新实例建新会话 + 迁移桥接侧元数据（方案、人格、准入），
+- **提供显式「在新 Agent 平台上重开」**：归档旧会话 + 在新实例建新会话 + 迁移桥接侧元数据（方案、人格、准入），
   界面上明写「对话历史不会随之迁移」。
 
 ### 5.2 切换前置与失败处理
 
 | 步骤 | 规则 |
 | --- | --- |
-| 1. 选目标 | 入口在「平台 › Agent 侧 › 详情」：每条注册表条目带「设为默认执行体」（已经是默认的不重复显示按钮）。写配置与切默认互相独立 —— 没配过端点的平台也可以先存配置再切 |
+| 1. 选目标 | 入口在「平台 › Agent 侧 › 详情」：每条注册表条目带「设为默认 Agent 平台」（已经是默认的不重复显示按钮）。写配置与切默认互相独立 —— 没配过端点的平台也可以先存配置再切 |
 | 2. 预检 | 同一请求里先探活：active 复用后台轮询的结论，其余建临时 `createRuntime()` 探完 `close()`。失败回 409 且**不落盘**；结论留在快照的 `entry.probe` 里，控制台能看出「为什么没切成功」 |
 | 3. 落盘 | 只改 `platforms.active.agent`，条目原样保留；响应带 `requiresRestart: true`，审计记 `runtime.defaultAgent`（旧 → 新） |
 | 4. 运行期 | 这一版**不换**：`agentEvents` / `agentPort` / `agentProbe` 在启动期捕获的是单例，换掉只会得到「旧的事件面 + 新的调用面」。重启桥接才装配新平台 |
@@ -286,8 +287,8 @@ P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` �
 
 | 入口 | 位置 | 状态 |
 | --- | --- | --- |
-| 平台配置 › Agent 侧 › 详情 | 「执行体」卡：探活 + 「设为默认执行体」+ 上次结论 | 已落地（P2） |
-| 全局配置 › 行为与模型 | 新增卡片「执行体」：默认执行体下拉 + 连接方式徽标 + 当前运行（已就绪 / 待重启）+ 「切换」 | 已落地（P5） |
+| 平台配置 › Agent 侧 › 详情 | 「Agent 平台」卡：探活 + 「设为默认 Agent 平台」+ 上次结论 | 已落地（P2） |
+| 全局配置 › 行为与模型 | 新增卡片「Agent 平台」：默认 Agent 平台下拉 + 连接方式徽标 + 当前运行（已就绪 / 待重启）+ 「切换」 | 已落地（P5） |
 
 两处都读同一份 `/api/platforms/registry`，按钮都打 `POST /api/config/runtime`。**不新开第二个数据源**——第二个入口只是同一端点上的另一个视图，补卡时不需要新接口。
 
@@ -329,7 +330,7 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 - `apply: passthrough` 的能力档 `rows: []` 合法，`build.mjs` 跳过它，`verify:artifacts` 也不为它产文件。
 - `runtime` 段缺省等价于 `{ apply: preset, prompt: none, permission: bridge, narrow: [] }`——老能力档不用改。
 - 取值非法直接报错，不猜默认值：把「不装预设」悄悄装成预设会同时错掉安全边界与档位权威。
-- 执行体用 `RUNTIME_APPLY` 声明自己认领哪些 `apply`；DSH 与 ACP 都认 `preset` 与 `passthrough`。只认 `preset` 的执行体
+- Agent 平台用 `RUNTIME_APPLY` 声明自己认领哪些 `apply`；DSH 与 ACP 都认 `preset` 与 `passthrough`。只认 `preset` 的 Agent 平台
   一旦被引用直通档，静态校验出 `capability_invalid` / `plan_invalid` 拒绝，而不是在运行期被静默投影成别的档位。
 
 ### 6.2 内置方案收敛表
@@ -349,7 +350,7 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 - **群聊直通不内置**：需要的人从 `direct` 克隆，把 `audience` 改 access、`behavior` 改 social-v2。
   这是「一套体系」的检验点——直通复用同一批轴，不是另一条代码路径。
 - `social-v1` 保留为一代行为的内置方案（行为档案本身没变，只是不再和能力档的 `preset.behavior` 纠缠）。
-- P4 落地的是 `direct` **能力档**与执行体 `RUNTIME_APPLY` 声明；`direct` **方案**与直通运行期在 P5 一并落地，
+- P4 落地的是 `direct` **能力档**与 Agent 平台 `RUNTIME_APPLY` 声明；`direct` **方案**与直通运行期在 P5 一并落地，
   从没让一个「选中就报错」的内置方案出去过。
 
 ### 6.3 方言上移
@@ -374,7 +375,7 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 | `audience: access` + `apply: passthrough` | `plan_warn`：允许，但控制台在方案卡上标「群聊直通：对端工具对群友可见」 |
 
 落地位置是 `src/runtime/plans.mjs`：`validatePlanReferences()` 产出引用类诊断（`capability_invalid` / `plan_invalid`），
-`planWarnings()` 产出非阻断提示（旧 `platform` 字段、内置方案写死执行体）。`check-profiles` 在门禁里跑这两份结论，
+`planWarnings()` 产出非阻断提示（旧 `platform` 字段、内置方案写死 Agent 平台）。`check-profiles` 在门禁里跑这两份结论，
 `test-runtime-plans` 逐条钉住诊断码。
 
 ### 6.5 `tools.agent.host` 的诚实含义
@@ -390,15 +391,15 @@ rows: []                       # 允许为空——这是与 preset 模式唯一
 
 直通 = 满足全部三条，缺一条就不是直通：
 
-1. 不安装、不修改执行体的任何 profile / preset / 沙箱；
+1. 不安装、不修改 Agent 平台的任何 profile / preset / 沙箱；
 2. 桥接只做**追加**：提示注入（提示词）、会话编排；
 3. 权限档位不归桥接所有——读得到、可以替用户改，但不回钉、不冒充。
 
 MCP 不在第 2 条的「追加」里，因为它在实现面上本来就不是会话级的：DSH 的四个 MCP 服务器由
-`adapters/install.mjs` 写进执行体自己的 profile 配置（`# === qq-bridge MCP BEGIN ===` 区块，
+`adapters/install.mjs` 写进 Agent 平台自己的 profile 配置（`# === qq-bridge MCP BEGIN ===` 区块，
 安装期一次、与 preset 无关），所以直通不装 preset 也不会丢 MCP。
 `AgentPort.sessions.create` 的 `mcpServers` 参数至今无人传，是**故意**的：给 DSH 再传一遍会把同一批
-server 声明两次。等有执行体只能在 `session/new` 里声明 MCP（ACP 的形态）时，才在那一家的适配器里补。
+server 声明两次。等有 Agent 平台只能在 `session/new` 里声明 MCP（ACP 的形态）时，才在那一家的适配器里补。
 
 ### 7.2 权威两分
 
@@ -423,21 +424,21 @@ server 声明两次。等有执行体只能在 `session/new` 里声明 MCP（ACP
 
 - 落点是 `promptChannelOf()`：`none` 每次唤醒都带（既有行为）；`prefix` 只首轮带一次并写
   `promptInjected = { sessionId, at }`（换会话自然重来）；`system` 只在建会话时交给对端，唤醒块不再带；
-  `tool` 完全不带 —— 全部由桥接侧完成，不依赖执行体额外能力。
-- **只有 `system` 会降级**：它对执行体有要求（它的 `RUNTIME_PROMPT` 里得有 `system`），不满足时降为
-  `prefix` 并产 `passthrough_degraded` 审计（降级到哪一级、丢什么）+ 一条日志，同一方案/执行体只记一次；
+  `tool` 完全不带 —— 全部由桥接侧完成，不依赖 Agent 平台额外能力。
+- **只有 `system` 会降级**：它对 Agent 平台有要求（它的 `RUNTIME_PROMPT` 里得有 `system`），不满足时降为
+  `prefix` 并产 `passthrough_degraded` 审计（降级到哪一级、丢什么）+ 一条日志，同一方案/Agent 平台只记一次；
   不静默降级，也不因此拒绝会话——`prefix` 只输「污染首轮」这一点，而拒会话会把直通变成不可用。
   口径与 OpenClaw 一致：不支持的能力要说出来，而不是忽略。
-- `prompt` 不做成新的 `AgentPort` 能力位：它本来就在 `AGENT_PORT_CORE_METHODS` 里（每家执行体都必须实现），
+- `prompt` 不做成新的 `AgentPort` 能力位：它本来就在 `AGENT_PORT_CORE_METHODS` 里（每家 Agent 平台都必须实现），
   再加一个能力位会变成「核心方法 + 能力闸门」两套口径。声明面落在适配器的 `RUNTIME_PROMPT`
   （注册表 `agentPlatformPromptChannels()` 读它，`listAgentPlatforms()` 把它作为 `promptChannels` 暴露），
-  控制台的方案页与能力位矩阵直接读这里。缺声明时只给 `tool`，即「该执行体只能靠工具拉取提示词」。
+  控制台的方案页与能力位矩阵直接读这里。缺声明时只给 `tool`，即「该 Agent 平台只能靠工具拉取提示词」。
 
 ### 7.4 直通下的「管理通道」怎么办
 
 | 现状 | 直通下 |
 | --- | --- |
-| `/level L1/L2/L3` 切 preset + 权限档 | **不适用**：直通不改环境。收到命令时明确回「当前方案为直通，档位由执行体自身管理」，并附当前档位 |
+| `/level L1/L2/L3` 切 preset + 权限档 | **不适用**：直通不改环境。收到命令时明确回「当前方案为直通，档位由 Agent 平台自身管理」，并附当前档位 |
 | L3 的 TOTP 与确认码 | 保留，但用途收窄为「允许写对端权限档」 |
 | 群友请求提权 | 不变：一律拒绝，指向 owner 在控制台操作 |
 | 审批闸门（`qq-approval-gate`） | 直通下不装闸门。审批由对端的 `permission` 事件驱动，桥接**照常转发到 QQ**，owner 回复即回执 |
@@ -457,7 +458,7 @@ server 声明两次。等有执行体只能在 `session/new` 里声明 MCP（ACP
 
 因此直通方案的 `audience` 默认 `owner`，界面在两处写明这件事：方案列表的直通行是「直通」徽标 +
 「不做工具级限制」；方案编辑器的「生效方式」只读块写「直通：不装预设、使用宿主环境（不做工具级限制），
-权限档由执行体自身管理」。两处都在读同一套能力档事实，不各存一份文案。
+权限档由 Agent 平台自身管理」。两处都在读同一套能力档事实，不各存一份文案。
 
 ### 7.6 界面内读写对端权限（可直接复用现有能力位）
 
@@ -497,37 +498,37 @@ POST /api/sessions/:key/permission  { preset }
 
 | 变更 | 内容 |
 | --- | --- |
-| 新增卡片「执行体」 | 当前默认执行体下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 「切换」；切换前预检、失败提示保留原值 |
-| 既有「人格与行为」卡 | `runtimeDefaultSelect` 文案从「默认方案」改为「默认方案（无平台/会话覆盖时生效）」，位置不变 |
+| 新增卡片「Agent 平台」 | 当前默认 Agent 平台下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 「切换」；切换前预检、失败提示保留原值 |
+| 既有「人格与行为」卡 | 默认运行方案控件已退役（`#runtimeDefaultSelect` 与全局默认方案卡均删）；它现在是用户平台条目的 `defaultPlan`，在「平台 › 详情 › 配置」里改 |
 | 既有「DSH 模型与思考强度」卡 | 已落地（B3）：模型与思考强度搬到 Agent 平台详情页，标题用该平台的 `label`，选项来自平台声明的 `modelCatalog`；全局配置页不再有这张卡 |
 
 ### 8.2 平台配置 › Agent 侧详情
 
 | 变更 | 内容 |
 | --- | --- |
-| 新增动作 | 「设为默认执行体」（同一端点）+ 当前是否 active 的徽标（「当前启用」/「已设为默认，重启后生效」/「未启用」） |
+| 新增动作 | 「设为默认 Agent 平台」（同一端点）+ 当前是否 active 的徽标（「当前启用」/「已设为默认，重启后生效」/「未启用」） |
 | 能力位矩阵 | 补三行：应用方式（preset / passthrough）、提示注入通道（system / prefix / tool）、权限权威支持面（bridge / agent） |
 | 配置编辑 | 两侧同一个写口（`PATCH /api/platforms/registry/{agent,user}/:id/config`），字段由该条目的 `configSchema` 生成。用户侧多一个条目级开关 `enabled`：它不在 schema 里、不参与校验，翻它一律回 `requiresRestart: true` |
 | 探活 | `POST /api/platforms/registry/agent/:id/probe`，结论写进注册表快照（`entry.probe`）供详情与切换预检复用 |
 
 ### 8.3 会话与审批 › 会话详情
 
-新增一块「执行体与权限」，插在现有详情字段之后：
+新增一块「Agent 平台与权限」，插在现有详情字段之后：
 
 | 行 | 内容 |
 | --- | --- |
-| 执行体 | 实例 + 平台 label；与全局默认不一致时标「跟随建会话时的实例」 |
-| 方案 | 方案名 + 能力档 + 权限权威徽标（桥接 / 执行体自身） |
+| Agent 平台 | 实例 + 平台 label；与全局默认不一致时标「跟随建会话时的实例」 |
+| 方案 | 方案名 + 能力档 + 权限权威徽标（桥接 / Agent 平台自身） |
 | 提示注入 | 生效通道（`none` / `prefix` / `system` / `tool`）与「只做一次 / 每次带」的语义，降级如实标出 |
 | 权限档 | `bridge`：只读展示生效级别 + 「桥接权威：这一档由桥接钉住并自动改回」，改档走「运行 › 权限级别」；`agent`：下拉可写 + 「最近核对 时间」+ 漂移标记 + 「改回」 |
-| 重开 | 「在新执行体上重开」按钮（执行体权威或会话建在旧实例上时出现，需二次确认并写明历史不迁移） |
+| 重开 | 「在新 Agent 平台上重开」按钮（Agent 平台权威或会话建在旧实例上时出现，需二次确认并写明历史不迁移） |
 
 ### 8.4 运行方案 › 编辑
 
 | 字段 | 控件 | 说明 |
 | --- | --- | --- |
-| 生效方式 | 只读块：应用方式 + 权限权威两枚徽标 + 「改能力档」按钮 | 两者都来自能力档 `runtime` 段（`apply` / `permission`）；点「改能力档」跳到声明这套档的执行体的「能力」标签。只读是有意的——方案与能力档各说各话就会分叉 |
-| 执行体 | 下拉 `auto` + 已注册平台 | 默认 `auto`（显示为「跟随全局（当前：…）」）；钉具体 id 时提示「钉住后换全局执行体不会带走它」 |
+| 生效方式 | 只读块：应用方式 + 权限权威两枚徽标 + 「改能力档」按钮 | 两者都来自能力档 `runtime` 段（`apply` / `permission`）；点「改能力档」跳到声明这套档的 Agent 平台的「能力」标签。只读是有意的——方案与能力档各说各话就会分叉 |
+| Agent 平台 | 下拉 `auto` + 已注册平台 | 默认 `auto`（显示为「跟随全局（当前：…）」）；钉具体 id 时提示「钉住后换全局 Agent 平台不会带走它」 |
 | 能力档 | 现有下拉 | 换档时上面的只读块跟着重画：它展示的是所选能力档的事实，不是方案里存的字段 |
 | 平台 | **已移除** | 方案不再绑平台；遗留值读取时忽略并给 `plan_warn`，保存时自然丢弃 |
 
@@ -545,16 +546,16 @@ POST /api/sessions/:key/permission  { preset }
 | 探活 | 用户侧没有主动探活：`POST .../user/:id/probe` 固定 400，连接结论只看 `inboundState` |
 
 多实例（`enabled` + `defaultUser`）、每实例一条入站管线、出站解析可见在这一批落地。
-这一块与执行体切换无耦合，放同一批只是为了「多平台并发」一次收口。
+这一块与 Agent 平台切换无耦合，放同一批只是为了「多平台并发」一次收口。
 
 ### 8.6 概览与诊断
 
-概览顶部五格指标卡按「执行体 / 用户平台 / 当前运行方案 / 会话 / 待处理」定义语义：前两格读 `/api/status` 的
-平台身份投影（`agent` / `platform`），标题写死的是「位置」而不是平台名，换执行体或换用户平台时格子仍成立。
+概览顶部五格指标卡按「Agent 平台 / 用户平台 / 当前运行方案 / 会话 / 待处理」定义语义：前两格读 `/api/status` 的
+平台身份投影（`agent` / `platform`），标题写死的是「位置」而不是平台名，换 Agent 平台或换用户平台时格子仍成立。
 
 | 格 | 标题 | 值 | 副行 |
 | --- | --- | --- | --- |
-| 1 | 执行体 | `agent.label` + 连接态（未就绪标红） | 连接方式（`http` / `stdio`）+ 连接态 |
+| 1 | Agent 平台 | `agent.label` + 连接态（未就绪标红） | 连接方式（`http` / `stdio`）+ 连接态 |
 | 2 | 用户平台 | `platform` 的显示名 | 上游摘要（该平台上报了 `snowluma` 才有：正常 / 连不上网关 / 连着但收不到数据） |
 | 3 | 当前运行方案 | 模式名 | 角色（`state/profiles/<key>.role`） |
 | 4 | 已建立会话 | 会话数（可点） | 查看会话映射 |
@@ -576,16 +577,16 @@ POST /api/sessions/:key/permission  { preset }
 
 | 批 | 目标 | 主要文件 | 门禁 |
 | --- | --- | --- | --- |
-| **P0** ✅ | 执行体可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
+| **P0** ✅ | Agent 平台可换（分四段）：**P0a** 连接层下沉 + 删 `REQUIRED_PROTOCOL_MEMBERS`；**P0b** 事件面 / 审批引用 / 用量账本归一（§4.4）；**P0c** ACP 当主平台 + TCK（§4.2）；**P0d** 概览指标卡按位置命名（§8.6） | `src/agent-side/runtime.mjs`、`adapters/{dsh,acp}/`、`src/bridge.js`（`pumpMux` / 账本 / `agentStatusSummary`）、`scripts/test-agent-port-tck.mjs`、`public/console/pages/overview/fields.js` | `verify:repo` 101/0、`test:audit` 全绿、`test:tck` 两家全绿、`test-console-{static,ui}` |
 | **P1** ✅ | Agent 侧插件化：`agent-provider:provide` + `ctx.agentPlatforms` + owner 清理 + 三条装配诊断（§4.3） | `src/agent-side/runtime-registry.mjs`、`src/agent-side/runtime.mjs`、`src/plugins/{manifest,host-api,kernel}.mjs`、`src/platforms/registry.mjs`、`PLUGIN_KERNEL.md` | `test-agent-provider` 新增、`test:audit` / `verify:repo` 全绿 |
-| **P2** ✅ | 配置：`platforms.agents.<id>` 多实例可写、默认执行体（`platforms.active.agent`）、agent 侧 probe/config 端点与注册表的 `configured`/`probe` 读视图 | `src/config/platforms.mjs`、`src/platforms/registry.mjs`、`src/bridge.js`（注册表写口与 `/api/config/runtime`）、`public/console/pages/platforms/`、`public/console/components/form/schema.js`、`guides/CONFIGURATION.md` | `verify:repo`、`test:audit`（含新增 `test-platform-config`）、`test-console-{static,ui}` |
+| **P2** ✅ | 配置：`platforms.agents.<id>` 多实例可写、默认 Agent 平台（`platforms.active.agent`）、agent 侧 probe/config 端点与注册表的 `configured`/`probe` 读视图 | `src/config/platforms.mjs`、`src/platforms/registry.mjs`、`src/bridge.js`（注册表写口与 `/api/config/runtime`）、`public/console/pages/platforms/`、`public/console/components/form/schema.js`、`guides/CONFIGURATION.md` | `verify:repo`、`test:audit`（含新增 `test-platform-config`）、`test-console-{static,ui}` |
 | **P3** ✅ | 多入站：每实例一条管线、`enabled` 条目开关、出站解析、用户侧实例 UI（§8.5） | `src/bridge.js`（逐实例装配 `startUserPlatformInbound` + 平台写口）、`src/user-side/{inbound,metadata,user-platform,runtime-registry}.mjs`、`src/config/platforms.mjs`（`userInstances`）、`src/platforms/registry.mjs`、`public/console/pages/platforms/`、`guides/CONFIGURATION.md` | `test:audit`（含新增 `test-user-instances`）、`test-console-{static,ui}`、`test-unified-inbound`、`verify:repo` |
 | **P4** ✅ | 能力档 `runtime` 段 + 方案解绑（去 `platform`、`agentPlatform` 默认 `auto`）+ 方言上移（能力档只留安全边界与送达方式）+ `direct` 能力档 | `src/runtime/plans.mjs`、`src/capabilities/store.mjs`、`profiles/**`、`adapters/dsh/adapters/build.mjs` | `check-profiles`、`verify:artifacts`、`test:artifact-pipeline`、`test:preset-prompt`、`test:runtime-plans`、`test:audit` 132/132、`test-console-{static,ui}` |
-| **P5** ✅ | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局执行体卡、方案页生效方式、能力位矩阵 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`RUNTIME_PROMPT` 声明面）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-passthrough-plan` 6/6、`test-console-static`、`test-console-ui` 45/45、`check-profiles`、`test:audit`、`verify:persona` |
+| **P5** ✅ | 直通运行期：提示注入三通道、权限读写与漂移、会话详情块、全局 Agent 平台卡、方案页生效方式、能力位矩阵 | `src/runtime/prompt-compose.mjs`（新增运行期入口）、`src/agent-side/port.mjs`（`RUNTIME_PROMPT` 声明面）、`public/console/pages/{config,sessions,plans,platforms}/` | `test-passthrough-plan` 6/6、`test-console-static`、`test-console-ui` 45/45、`check-profiles`、`test:audit`、`verify:persona` |
 | **P6** ✅ | 收口：文档同步（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE）、`PLATFORM_UNIFICATION.md` C6.5 核销、口径统一到「四轴 + 存储分层」、清掉「方案带 `tools`」的残留分支 | `docs/**`、`README.md`、`src/bridge.js` | `verify:repo` 103/0、`test:audit` 133/133、`test-console-ui` 45/45、`test-console-static` |
 
 回滚：P0 的连接层下沉与删门面是同一版内的替换，不存在「先留着旧路径以后删」的中间态；
-要换执行体就换 `createRuntime` 的实现，要退只能整批退回上一个可运行提交。
+要换 Agent 平台就换 `createRuntime` 的实现，要退只能整批退回上一个可运行提交。
 P2（配置）带 `configVersion` 递增；P4 不动方案 `version`——旧文件里的 `platform` 字段读时忽略并提示，保存时自然丢弃，不需要迁移；
 P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 
@@ -595,7 +596,7 @@ P1（Agent 侧插件化）是纯增量，单独回滚不影响运行。
 
 | 不做 | 理由 |
 | --- | --- |
-| 同会话跨执行体热迁移 | 历史在对端，迁不了；只能「在新实例上重开」 |
+| 同会话跨 Agent 平台热迁移 | 历史在对端，迁不了；只能「在新实例上重开」 |
 | 直通下的工具级白名单 | 技术上给不了（§7.5）；给了就是假安全 |
 | 把桥接四级权限强行映射到任意对端 | ACP 只有逐次 allow/reject，映射出来的「只读」是假话 |
 | 会话级 `agentPlatform` 覆盖 | 实例是会话归属的单位，再加一层覆盖只会让审批回执更难对账 |

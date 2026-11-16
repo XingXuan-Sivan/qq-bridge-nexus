@@ -561,6 +561,8 @@ export function makeFixtureState() {
       qq: { account: '', httpUrl: 'http://127.0.0.1:3000', wsUrl: 'ws://127.0.0.1:3001', accessToken: '', followDiscoveredEndpoint: true, viaPlatform: false, silenceWarnMs: 600000 },
     },
     userEnabled: { qq: true, wx: false },
+    // 条目级默认运行方案（`platforms.users.<id>.defaultPlan`）：空串 = 不设置，回退内置方案。
+    userDefaultPlans: { qq: 'social-v2', wx: '' },
     userInbound: {
       qq: { state: 'open', detail: '', at: timestamp },
       wx: { state: 'disabled', detail: '配置里停用了这条实例', at: timestamp },
@@ -942,16 +944,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (method === 'GET') {
           return json({
             ok: true,
-            runtime: { defaultPlan: state.defaultPlan ?? 'social-v2', defaultAgent: state.defaultAgent, defaultUser: state.defaultUser },
+            // 默认运行方案不在这个端点上：它是用户平台的条目级键。
+            runtime: { defaultAgent: state.defaultAgent, defaultUser: state.defaultUser },
             // 运行期恒为 dsh / qq：切换默认只落盘，本进程不换装配。
             runningAgent: 'dsh',
             runningUser: 'qq',
-            plans: [
-              { id: 'chat', label: '聊天' },
-              { id: 'social-v1', label: '一代仿真' },
-              { id: 'social-v2', label: '二代仿真' },
-              { id: 'agent-readonly', label: 'Agent · 只读' },
-            ],
           });
         }
         // 默认执行体 / 默认用户实例：设置即落盘，重启后装配（与真实桥接同一语义：
@@ -965,9 +962,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           state.defaultAgent = String(body.defaultAgent);
           return json({ ok: true, requiresRestart: true, runtime: { defaultAgent: state.defaultAgent }, runningAgent: 'dsh' });
         }
-        const value = typeof body?.defaultPlan === 'string' ? body.defaultPlan.trim() : '';
-        state.defaultPlan = value || 'social-v2';
-        return json({ ok: true, runtime: { defaultPlan: state.defaultPlan } });
+        return json({ ok: false, error: '没有可改的项（defaultAgent / defaultUser）' }, 400);
       }
       // 平台写口与探活（两侧同一条路径文法）。保存改 state 里的那一份（下一次拉注册表就能
       // 读回来），探活结论记在 state.agentProbes —— 控制台要验的是「按钮发对了请求、结论画出来了」。
@@ -992,14 +987,20 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         // 用户实例没有主动探活：入站通不通由装配过程记录，只有连接本身知道。
         if (action === 'probe') return json({ ok: false, error: '用户实例没有主动探活：入站结论见注册表的 inboundState' }, 400);
         if (method !== 'PATCH') return json({ ok: false, error: '不支持的方法' }, 405);
-        const { enabled, ...fields } = patch;
+        const { enabled, defaultPlan, ...fields } = patch;
         state.userConfigs[platformId] = { ...(state.userConfigs[platformId] ?? {}), ...fields };
+        // 条目级默认方案：空串 = 清掉（回退内置方案），与写口的取值一样不做“补默认值”。
+        if (defaultPlan !== undefined) state.userDefaultPlans[platformId] = String(defaultPlan ?? '');
         if (enabled !== undefined) {
-          state.userEnabled[platformId] = enabled !== false;
-          // 停用的实例不再装配：入站结论跟着改，注册表与详情页读到的就是这一份。
-          state.userInbound[platformId] = state.userEnabled[platformId]
-            ? { state: 'closed', detail: '已启用，重启桥接后重新连接', at: timestamp }
-            : { state: 'disabled', detail: '配置里停用了这条实例', at: timestamp };
+          const next = enabled !== false;
+          const changed = state.userEnabled[platformId] !== next;
+          state.userEnabled[platformId] = next;
+          // 条目开关只在真的翻了面时改变装配：改完重启才生效，勾着不改不该把在跑的连接写成“已断开”。
+          if (changed) {
+            state.userInbound[platformId] = next
+              ? { state: 'closed', detail: '已启用，重启桥接后重新连接', at: timestamp }
+              : { state: 'disabled', detail: '配置里停用了这条实例', at: timestamp };
+          }
         }
         const transportKeys = ['wsUrl', 'httpUrl', 'accessToken', 'followDiscoveredEndpoint', 'viaPlatform', 'silenceWarnMs', 'launcherPath', 'homeDir'];
         const restart = enabled !== undefined || Object.keys(patch).some((key) => transportKeys.includes(key));
@@ -1065,7 +1066,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             sessionId: `demo-${key.replace(/[^a-z0-9]+/gi, '-')}`,
             dsh: { label: 'DSH 已连接' },
             access: { passiveMode: state.access.passive.mode, proactiveMode: state.access.proactive.mode },
-            plans: [], planId: '', activePlan: { id: planId, label: plan?.label || planId },
+            plans: [], planId: '', defaultPlan: { id: planId, label: plan?.label || planId },
             persona: { mode: 'inherit' },
             prompt: { maxChars: 2000, text: '' },
             wake: { triggers: { atMention: true } },
@@ -1124,11 +1125,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           });
           case '/api/plans': return json({
             ok: true,
-            platform: 'qq',
-            active: state.planId || 'social-v2',
-            activePlan: { id: state.planId || 'social-v2', label: '二代仿真', platform: 'qq', agentPlatform: 'dsh', capability: 'chat-v2', behavior: 'social-v2', audience: 'access' },
-            defaultPlan: state.defaultPlan ?? 'social-v2',
             plans: fixturePlans(),
+            // 默认方案按用户平台各一份：这里给当前运行平台的那份。
+            platform: 'qq',
+            defaultPlan: state.userDefaultPlans.qq || null,
+            defaultPlanDef: fixturePlans().find((plan) => plan.id === state.userDefaultPlans.qq) ?? null,
           });
           // C1：平台统一注册表。控制台只读这一个端点回答「接了哪些平台、能不能用」。
           // 两侧都列（user / agent），诊断与汇总与真实桥接同形。C3 起 qq 有 connect()
@@ -1154,6 +1155,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 inbound: true,
                 rawEvent: true,
                 enabled: state.userEnabled.qq,
+                // 条目级默认方案：详情页的「默认运行方案」下拉读它。
+                defaultPlan: state.userDefaultPlans.qq,
                 // 这条实例此刻的入站结论（open / closed / error / disabled / send-only / unregistered）。
                 inboundState: state.userInbound.qq ?? null,
                 // 插件 transport 优先、其次适配器：qq 只有内置适配器。
@@ -1195,6 +1198,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 active: false,
                 configured: state.defaultUser === 'wx',
                 enabled: state.userEnabled.wx,
+                defaultPlan: state.userDefaultPlans.wx,
                 capabilities: ['group', 'direct', 'reply'],
                 conversationTypes: ['group', 'private'],
                 limits: { chunkChars: 2000, markdown: false },
@@ -1788,7 +1792,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             state.customPlans[body.id] = { ...body };
             return json({ ok: true, plan: body });
           }
-          case '/api/runtime/switch': state.planId = body.planId; return json({ ok: true, active: body.planId, plan: { id: body.planId }, mode: state.mode, level: state.level || 'L0', dshSynced: true });
           case '/api/mode': state.mode = body.mode; state.closedAgentPreset = body.closedAgentPreset; return json({ ok: true, dshSynced: true });
           case '/api/persona/external/card': {
             const card = state.externalPersonas[body.name];

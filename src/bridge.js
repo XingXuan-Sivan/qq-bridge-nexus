@@ -220,7 +220,7 @@ import { createExtensionHub } from './extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from './extensions/hub-token.mjs';
 import { accountOfConfig, configureKeys, defaultAddress, formatKey, key as buildKey, parseKey, platformOfConfig, idOfKey, isGroupKey, isPrivateKey, withAddress } from './session/key.mjs';
 // 配置 v2（`platforms` 段）：平台配置的唯一真源。迁移与派生视图都在这里，见 docs/PLATFORM_UNIFICATION.md §八。
-import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances } from './config/platforms.mjs';
+import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfig, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances } from './config/platforms.mjs';
 // `platforms.active` 的落地（启动期切换运行期平台，两侧 fail-closed）。
 import { activatePlatforms } from './platforms/activate.mjs';
 
@@ -1458,7 +1458,7 @@ function loadConfig() {
   // 「用哪个平台 + 它怎么连」，新增一个平台就等于往内核里加一段顶层键。v2 把它们收进
   // 按 id 索引的 `platforms` 段。迁完立刻写回（先备份），于是磁盘上只有一份形状，
   // 下面所有读取都不需要兼容两套。
-  const migration = migrateConfigToV2(raw);
+  const migration = migrateConfig(raw);
   if (migration.migrated) {
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12).replace(/^(\d{8})(\d{4})$/, '$1-$2');
     try {
@@ -1892,10 +1892,6 @@ function loadConfig() {
     let changed = false;
     if (fresh.behavior && 'default' in fresh.behavior) { delete fresh.behavior.default; changed = true; }
     if (fresh.runtime && 'plans' in fresh.runtime) { delete fresh.runtime.plans; changed = true; }
-    if (!fresh.runtime?.defaultPlan) {
-      fresh.runtime = { ...(fresh.runtime ?? {}), defaultPlan: normalizeRuntimePlanId(fresh.runtime?.defaultPlan) || 'social-v2' };
-      changed = true;
-    }
     if (changed) {
       try {
         atomicWriteJson(configFile, fresh);
@@ -2003,14 +1999,13 @@ function loadConfig() {
     promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
 
-  // 运行方案（P4）：定义在 profiles/plans/*.yml，全局默认在 config.runtime.defaultPlan；
-  // 具体会话可以用自己的 planId 覆盖（state/profiles），没有覆盖才用全局默认。
+  // 运行方案（P4）：定义在 profiles/plans/*.yml；默认方案是**用户平台条目级**的键
+  // （`platforms.users.<id>.defaultPlan`），会话自己的 planId 优先，都没设才回退内置常量。
   cfg.runtime = {
-    defaultPlan: normalizeRuntimePlanId(file.runtime?.defaultPlan) || 'social-v2',
     idleMinutes: Number(file.runtime?.idleMinutes) > 0 ? Number(file.runtime.idleMinutes) : 10,
     resetOnRestart: file.runtime?.resetOnRestart !== false,
   };
-  // 方案定义在 profiles/plans/*.yml，config.json 只留全局指针与回退 id。
+  // 方案定义在 profiles/plans/*.yml，config.json 只留运行期参数。
 
   // 行为档案来自用户侧平台（QQ）自己的目录；方案直接引用档案 id，不再由预设绑定。
   cfg.behaviors = loadBehaviorProfiles({ root: path.join(PLATFORMS_ROOT, 'qq', 'behaviors'), log });
@@ -4324,7 +4319,7 @@ async function main() {
     log,
   });
   let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
-  // 运行方案（P4）：定义来自 profiles/plans/*.yml，全局默认来自 config.runtime.defaultPlan。
+  // 运行方案（P4）：定义来自 profiles/plans/*.yml，默认方案存在用户平台条目上。
   let runtimePlans = [];
   let runtimePlansSource = null;
   let lastMode = currentMode;
@@ -4472,7 +4467,7 @@ async function main() {
     }
     return keys.filter(Boolean);
   }
-  /** 运行方案：文件仓库是定义源（profiles/plans/*.yml），全局默认在 config.runtime.defaultPlan。 */
+  /** 运行方案：文件仓库是定义源（profiles/plans/*.yml）；默认方案存在用户平台条目上。 */
   function ensureRuntime() {
     runtimePlans = planStore().list();
     return runtimePlans;
@@ -4614,10 +4609,28 @@ async function main() {
     return capabilityAllowsFlag(capabilityOf(key), flag);
   }
 
-  function activePlan() {
+  /**
+   * 内置回落方案：用户平台没设默认方案时用它。内置文件只读、不会缺失，
+   * 用常量兜底比「没有默认」可预期。
+   */
+  const DEFAULT_PLAN_ID = 'social-v2';
+
+  /** 某个用户平台条目上申报的默认方案 id；没申报时回退内置方案。 */
+  function platformDefaultPlanId(platformId) {
+    const id = normalizeRuntimePlanId(bridgeCfg?.platforms?.users?.[platformId]?.defaultPlan);
+    return id || DEFAULT_PLAN_ID;
+  }
+
+  /**
+   * 某个用户平台的默认方案定义。条目上的方案文件不在时依次回退内置方案、目录首项，
+   * 免得手删了方案文件后新建会话直接没有方案。
+   */
+  function defaultPlanFor(platformId) {
     const plans = ensureRuntime();
-    const id = bridgeCfg?.runtime?.defaultPlan || 'social-v2';
-    return findPlan(plans, id) ?? plans[0] ?? null;
+    return findPlan(plans, platformDefaultPlanId(platformId))
+      ?? findPlan(plans, DEFAULT_PLAN_ID)
+      ?? plans[0]
+      ?? null;
   }
 
   /** 某会话固定的方案（只看档案，不看全局指针）。 */
@@ -4629,10 +4642,10 @@ async function main() {
   }
 
   /**
-   * 某会话当前生效的方案：会话固定优先，否则全局默认。
+   * 某会话当前生效的方案：会话固定优先，否则取它所在用户平台的默认方案。
    */
   function planOf(key) {
-    return sessionPlanOf(key) ?? activePlan();
+    return sessionPlanOf(key) ?? defaultPlanFor(platformIdOf(key));
   }
 
   /** 受众为 owner 的方案只允许管理员私聊使用（取代旧 closed-agent 全局排他）。 */
@@ -4836,7 +4849,7 @@ async function main() {
     const profile = state.profiles?.[key] ?? null;
     const sessionId = sessions.get(key) ?? null;
     if (!profile && !sessionId) return null;
-    const plan = sessionPlanOf(key) ?? activePlan() ?? null;
+    const plan = planOf(key) ?? null;
     const capability = capabilityOf(key);
     const runtime = runtimeOf(key);
     const authority = permissionAuthorityOf(key);
@@ -6232,7 +6245,7 @@ async function main() {
           const r = await ext.controller.initialize(actualMode);
           const c = ext.controller.current();
           if (c.mode && c.mode !== currentMode && r.action !== 'fallback') currentMode = c.mode;
-          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: activePlan()?.id ?? null });
+          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: defaultPlanFor(runningUserPlatformId())?.id ?? null });
         } catch (error) {
           log(`⚠️ 管理控制器启动校验失败：${error?.message ?? error}；按安全模式运行`);
           if (currentMode === 'closed-agent') { currentMode = L0_MODES.includes(cfg.admin?.safeMode) ? cfg.admin.safeMode : 'reserved2'; }
@@ -6960,7 +6973,8 @@ async function main() {
             });
             return;
           }
-          const statusPlan = activePlan();
+          // 全局状态里的方案是「当前运行用户平台」的默认方案（界面指标格就这么读）。
+          const statusPlan = defaultPlanFor(runningUserPlatformId());
           sendJson({
             mode: currentMode,
             level: currentLevel,
@@ -7845,13 +7859,26 @@ async function main() {
               }
               // 校验与诊断共用一个函数（`vetPlatformConfig`）：控制台接受的值不能比诊断宽。
               // 校的是「合完的整份」：补丁只带改动的字段，必填项得靠旧值补齐。
-              // `enabled` 是条目级开关（装配不装配），不是平台选项，所以不进校验：
-              // 否则「配置本身不合规」时反而无法停用它 —— 而那正是最想停用的时候。
-              const { enabled: _enabled, ...fields } = body;
+              // `enabled` 是条目级开关（装配不装配）、`defaultPlan` 是条目级默认方案（用户平台才有），
+              // 两者都不是平台选项，所以不进 schema 校验：否则「配置本身不合规」时反而无法停用它。
+              const { enabled: _enabled, defaultPlan, ...fields } = body;
               const vet = Object.keys(fields).length
                 ? vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...fields })
                 : { error: '' };
               if (vet.error) { sendJson({ ok: false, error: vet.error }, 400); return; }
+              // 默认运行方案：只认方案目录里真有的 id（空串 = 清掉，回退内置方案）。
+              if (defaultPlan !== undefined) {
+                if (side !== 'user') {
+                  sendJson({ ok: false, error: '默认运行方案是用户平台的条目级设置' }, 400);
+                  return;
+                }
+                const wantedPlan = normalizeRuntimePlanId(defaultPlan);
+                if (defaultPlan && (!wantedPlan || !findPlan(ensureRuntime(), wantedPlan))) {
+                  sendJson({ ok: false, error: '没有这个运行方案' }, 400);
+                  return;
+                }
+                body.defaultPlan = wantedPlan;
+              }
               // 模型选择：平台声明了 models 能力位时，按它自己的实时目录校。保存一个对端不认的
               // 模型，要到下一条消息的 selectModel 上才会失败（还带着重试与刷屏），所以在这里拦住。
               // 目录取不到就不拦 —— 能校验才校验，不阻塞配置修改。
@@ -8200,26 +8227,28 @@ async function main() {
           sendJson({ ok: true, mode: currentMode, level: currentLevel, closedAgentPreset, dshSynced: lastObservedDshMode === currentMode });
           return;
         }
-        // 运行方案（P4）：读定义与全局默认。控制台用它渲染方案页与会话下拉。
+        // 运行方案（P4）：读定义与「当前运行用户平台」的默认方案。控制台用它渲染方案页与会话下拉。
         // C8 起路径从 `/api/runtime/plans` 改成 `/api/plans`：方案不是运行期临时物，
         // 它跟 `/api/platforms/registry` 一样是“配置面”，不该挤在 `runtime/` 下面。
         if (req.method === 'GET' && url.pathname === '/api/plans') {
           const plans = ensureRuntime();
-          const plan = activePlan();
+          const platform = runningUserPlatformId();
+          const plan = defaultPlanFor(platform);
           sendJson({
             ok: true,
             plans,
-            active: plan?.id ?? null,
-            activePlan: plan,
-            defaultPlan: cfg.runtime?.defaultPlan ?? '',
+            // 默认方案按用户平台各一份；这里给的是当前运行平台的，页面只拿它做摘要。
+            platform,
+            defaultPlan: plan?.id ?? null,
+            defaultPlanDef: plan,
             legacy: { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) },
             resetOnRestart: cfg.runtime?.resetOnRestart !== false,
             idleMinutes: cfg.runtime?.idleMinutes ?? 10,
           });
           return;
         }
-        // 全局默认（P4 / P2）：默认运行方案与默认执行体。两者都是「开工时的默认值」，
-        // 会话自己的 planId 与平台侧的 `platforms.active` 优先。
+        // 默认平台（P2）：默认 Agent 平台与默认用户实例。会话自己的 planId 与
+        // 平台侧的 `platforms.active` 优先；默认运行方案不在这个端点上（它是条目级键）。
         if (url.pathname === '/api/config/runtime') {
           // 默认执行体与默认用户实例都没有单独一份配置：它们读的就是 `platforms.active`，
           // 与注册表同源。
@@ -8228,16 +8257,15 @@ async function main() {
           if (req.method === 'GET') {
             sendJson({
               ok: true,
-              runtime: { defaultPlan: cfg.runtime?.defaultPlan ?? '', defaultAgent, defaultUser },
+              runtime: { defaultAgent, defaultUser },
               runningAgent: runningAgentPlatformId(),
               runningUser: runningUserPlatformId(),
-              plans: ensureRuntime(),
             });
             return;
           }
           if (req.method === 'POST') {
             const body = await readBody();
-            // 一个请求只改一项：同时改方案与执行体时，「预检没过」到底哪项没落盘说不清楚。
+            // 一个请求只改一项：同时改两个平台时，「探活没过」到底哪项没落盘说不清楚。
             // 用户实例同理：它没有主动探活可做，能给人看的是注册表里的 `inboundState`。
             if (body?.defaultUser !== undefined) {
               const wanted = String(body.defaultUser ?? '').trim().toLowerCase();
@@ -8280,18 +8308,7 @@ async function main() {
               sendJson({ ok: true, requiresRestart: true, probe, runtime: { defaultAgent: wanted }, runningAgent: running });
               return;
             }
-            const defaultPlan = normalizeRuntimePlanId(body.defaultPlan);
-            if (!defaultPlan || !findPlan(ensureRuntime(), defaultPlan)) {
-              sendJson({ ok: false, error: '没有这个运行方案' }, 400);
-              return;
-            }
-            // 只改这一个键：runtime 段其余值原样留在文件里，不给没设过的键补默认值。
-            const configFile = path.join(ROOT, 'config.json');
-            const current = readConfigObject(configFile);
-            atomicWriteJson(configFile, { ...current, runtime: { ...(current.runtime ?? {}), defaultPlan } });
-            cfg.runtime.defaultPlan = defaultPlan;
-            ext.audit.append('runtime.defaultPlan', { plan: defaultPlan });
-            sendJson({ ok: true, runtime: { defaultPlan }, plans: ensureRuntime() });
+            sendJson({ ok: false, error: '没有可改的项（defaultAgent / defaultUser）' }, 400);
             return;
           }
         }
@@ -8399,11 +8416,14 @@ async function main() {
           }
           return;
         }
-        // 删除一套自定义方案；正在作为全局默认或内置的方案不允许删。
+        // 删除一套自定义方案；正被任何用户平台当默认方案、或是内置方案的都不允许删。
         if (req.method === 'DELETE' && url.pathname.startsWith('/api/plans/')) {
           const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/plans/'.length)));
-          if (planId && activePlan()?.id === planId) {
-            sendJson({ ok: false, error: '这套方案正作为全局默认，先换一个默认方案再删' }, 409);
+          const holders = Object.entries(bridgeCfg?.platforms?.users ?? {})
+            .filter(([, item]) => item?.defaultPlan === planId)
+            .map(([id]) => id);
+          if (planId && holders.length) {
+            sendJson({ ok: false, error: `${holders.join('、')} 正把它当默认方案，先换一个默认方案再删` }, 409);
             return;
           }
           try {
@@ -9245,11 +9265,11 @@ async function main() {
               wake,
               mode: profile?.mode ?? 'inherit',
               effectiveMode: effectiveMode(key),
-              // 会话级的运行方案下拉（跟随全局 = null）；presetId 是会话级的预设覆盖，与方案无关。
+              // 会话级的运行方案下拉（跟随平台默认 = null）；presetId 是会话级的预设覆盖，与方案无关。
               planId: profile?.planId ?? null,
               plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, audience: p.audience, builtin: p.builtin })),
-              // 下拉里的「跟随全局（当前：…）」要显示全局方案的名字，所以给整份定义（与 `/api/plans` 的 activePlan 同形）。
-              activePlan: activePlan() ?? null,
+              // 下拉里的「跟随平台默认（当前：…）」要显示那个方案的名字，所以给整份定义（与 `/api/plans` 的 defaultPlanDef 同形）。
+              defaultPlan: defaultPlanFor(platformIdOf(key)) ?? null,
               permission: permissionPayload(key),
               // 生效方式（能力档 runtime.apply）：页面靠它决定要不要显示预设/沙箱那几张卡。
               apply: runtimeOf(key).apply,

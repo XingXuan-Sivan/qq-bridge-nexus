@@ -55,17 +55,6 @@ const SILENCE_RANGES = `<div class="silence-block">
 export const OVERVIEW_FIELDS = {
   // 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），不能再套 .card 或字段外壳。
   metrics: { bare: true, html: METRICS_HTML },
-  runtimeDefault: {
-    fields: [
-      {
-        name: 'runtimeDefaultSelect',
-        type: 'select',
-        label: '默认方案（无平台/会话覆盖时生效）',
-        options: [],
-        hint: '新建、未单独设置和重建的会话都用这个方案；某个会话要换方案，在「会话与审批 › 详情」里单独指定。',
-      },
-    ],
-  },
   roleDefault: {
     fields: [
       {

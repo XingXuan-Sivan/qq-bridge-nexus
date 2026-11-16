@@ -23,17 +23,18 @@
  *
  * 三条约束：
  *   1. 本文件只有纯函数和数据形状；读写盘留给调用方（桥接与控制中心各有一套写盘工具）；
- *   2. 迁移是**一次性**的：迁完删掉三个旧顶层键并写 `configVersion: 2`，不留别名双读；
+ *   2. 迁移是**一次性**的：迁完删掉旧键并写当前 `configVersion`，不留别名双读；
  *   3. `active` 指向不存在的 id 时**不静默回退**：保留原值，由统一注册表的
  *      `active_unregistered` 诊断和启动期的明确报错把它暴露出来。
  *
- * 版本仍是 2：「默认执行体」不是第二个配置键，它就是 `platforms.active.agent`
- * （控制台与 `/api/config/runtime` 读的是同一个值）。两处各存一份必然漂移 —— 一个由
- * 控制台写、一个由手改 config.json 写，而装配时只能有一个赢家。
+ * v3 把「默认运行方案」从 `runtime.defaultPlan` 挪到用户平台条目上
+ * （`platforms.users.<id>.defaultPlan`）：它描述的是「这个平台新建的会话用哪套方案」，
+ * 不是全局唯一值。它是**条目级键**，与 `enabled` 同级，不进 `options` ——
+ * 适配器收到一个与它无关的键只会在自己那里报未知字段。
  */
 
-/** 当前配置结构版本。缺失或小于它即视为 v1，需要迁移。 */
-export const CONFIG_VERSION = 2;
+/** 当前配置结构版本。缺失或小于它即视为旧结构，需要迁移。 */
+export const CONFIG_VERSION = 3;
 
 /** v1 没有「Agent 平台选择」这一项：`dsh.*` 段就是 DSH 自己的。 */
 export const DEFAULT_USER_PLATFORM = 'qq';
@@ -57,8 +58,10 @@ export const AGENT_ENDPOINT_KEYS = Object.freeze([
 /** 平台 id 与会话 key 同一套文法（见 src/session/key.mjs），避免「配置能用、key 写不出」。 */
 const PLATFORM_ID_RE = /^[a-z][a-z0-9-]{0,15}$/;
 const ACCOUNT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+/** 运行方案 id 与会话 key 同一套文法（`profiles/plans/*.yml` 文件名）。 */
+const PLAN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 /** 平台目录里每个平台自己的几个键；其余键视为「想写 transport/options 但写散了」。 */
-const ENTRY_KEYS = Object.freeze(['account', 'enabled', 'transport', 'options', 'endpoint']);
+const ENTRY_KEYS = Object.freeze(['account', 'enabled', 'defaultPlan', 'transport', 'options', 'endpoint']);
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -66,6 +69,12 @@ const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && 
 function platformId(raw, fallback) {
   const id = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
   return PLATFORM_ID_RE.test(id) ? id : fallback;
+}
+
+/** 方案 id：不合法一律归成空串（= 该平台没设默认方案，由内核回退内置方案）。 */
+function planId(raw) {
+  const id = typeof raw === 'string' ? raw.trim() : '';
+  return PLAN_ID_RE.test(id) ? id : '';
 }
 
 /** 账号名：不合法或空都归成空串（= 该平台的默认账号）。 */
@@ -115,8 +124,11 @@ function normalizeUserEntry(entry) {
   // 写进 options 里会让适配器收到一个与它无关的键。缺省即启用。
   const wanted = src.enabled !== undefined ? src.enabled : merged.enabled;
   delete merged.enabled;
+  // `defaultPlan` 同理：「这个平台新建的会话默认用哪套方案」是桥接自己的语义。
+  const plan = planId(src.defaultPlan) || planId(merged.defaultPlan);
+  delete merged.defaultPlan;
   const { connection, options } = splitByKeys(merged, USER_TRANSPORT_KEYS);
-  return { account: accountName(src.account), enabled: wanted !== false, transport: connection, options };
+  return { account: accountName(src.account), enabled: wanted !== false, defaultPlan: plan, transport: connection, options };
 }
 
 function normalizeAgentEntry(entry) {
@@ -143,7 +155,8 @@ function normalizeCollection(raw, normalizeEntry) {
 }
 
 /**
- * v1 → v2 迁移（纯函数，不读写盘）。
+ * 旧结构迁移（纯函数，不读写盘）。两步按顺序走：v1 → v2 收平台段，v2 → v3 把
+ * 全局默认方案搬到活动用户平台条目上。
  *
  * `raw` 是**已经 `JSON.parse` 过的配置对象**，不是文件路径：传路径会被当成空配置，
  * 一声不响地（不报错）返回空表 —— 这类静默失败正是本模块要消灭的。
@@ -151,7 +164,7 @@ function normalizeCollection(raw, normalizeEntry) {
  * @returns {{config: object, migrated: boolean, notes: string[]}}
  *   `migrated: true` 时调用方负责备份 + 写盘；`notes` 是要打到日志里的人话。
  */
-export function migrateConfigToV2(raw) {
+export function migrateConfig(raw) {
   const src = isPlainObject(raw) ? raw : {};
   if (Number(src.configVersion) >= CONFIG_VERSION && isPlainObject(src.platforms)) {
     return { config: src, migrated: false, notes: [] };
@@ -159,28 +172,52 @@ export function migrateConfigToV2(raw) {
 
   const notes = [];
   const next = { ...src };
-  const legacyPlatform = isPlainObject(next.platform) ? next.platform : {};
-  const legacyUser = isPlainObject(next.snowluma) ? next.snowluma : {};
-  const legacyAgent = isPlainObject(next.dsh) ? next.dsh : {};
+  if (Number(next.configVersion) < 2 || !isPlainObject(next.platforms)) {
+    const legacyPlatform = isPlainObject(next.platform) ? next.platform : {};
+    const legacyUser = isPlainObject(next.snowluma) ? next.snowluma : {};
+    const legacyAgent = isPlainObject(next.dsh) ? next.dsh : {};
 
-  const userId = platformId(legacyPlatform.id, DEFAULT_USER_PLATFORM);
-  const agentId = DEFAULT_AGENT_PLATFORM;
+    const userId = platformId(legacyPlatform.id, DEFAULT_USER_PLATFORM);
+    const agentId = DEFAULT_AGENT_PLATFORM;
 
-  const users = {};
-  const agents = {};
-  // 空段落也照搬一个空壳：`active` 指向的平台必须在 users/agents 里出现，否则注册表会报
-  // `active_unregistered` —— 而这里迁出来的恰恰就是「当前平台」。
-  users[userId] = normalizeUserEntry({ account: legacyPlatform.account, ...legacyUser });
-  agents[agentId] = normalizeAgentEntry(legacyAgent);
-  if (Object.keys(legacyUser).length) notes.push(`snowluma.* → platforms.users.${userId}`);
-  if (Object.keys(legacyAgent).length) notes.push(`dsh.* → platforms.agents.${agentId}`);
-  if (legacyPlatform.id || legacyPlatform.account) notes.push(`platform.* → platforms.active.user + platforms.users.${userId}`);
+    const users = {};
+    const agents = {};
+    // 空段落也照搬一个空壳：`active` 指向的平台必须在 users/agents 里出现，否则注册表会报
+    // `active_unregistered` —— 而这里迁出来的恰恰就是「当前平台」。
+    users[userId] = normalizeUserEntry({ account: legacyPlatform.account, ...legacyUser });
+    agents[agentId] = normalizeAgentEntry(legacyAgent);
+    if (Object.keys(legacyUser).length) notes.push(`snowluma.* → platforms.users.${userId}`);
+    if (Object.keys(legacyAgent).length) notes.push(`dsh.* → platforms.agents.${agentId}`);
+    if (legacyPlatform.id || legacyPlatform.account) notes.push(`platform.* → platforms.active.user + platforms.users.${userId}`);
 
-  next.configVersion = CONFIG_VERSION;
-  next.platforms = { active: { user: userId, agent: agentId }, users, agents };
-  delete next.platform;
-  delete next.snowluma;
-  delete next.dsh;
+    next.configVersion = 2;
+    next.platforms = { active: { user: userId, agent: agentId }, users, agents };
+    delete next.platform;
+    delete next.snowluma;
+    delete next.dsh;
+  }
+
+  // v2 → v3：默认运行方案改成条目级。旧全局值只引给当时活动的用户平台——
+  // 那是它当时真正在服务的那些会话；其他平台保持未设置，回退内置方案。
+  if (Number(next.configVersion) < CONFIG_VERSION) {
+    const base = readPlatforms(next);
+    const legacyPlan = planId(next.runtime?.defaultPlan);
+    if (legacyPlan) {
+      const target = base.users[base.active.user] ?? normalizeUserEntry({});
+      if (!target.defaultPlan) {
+        base.users[base.active.user] = { ...target, defaultPlan: legacyPlan };
+        notes.push(`runtime.defaultPlan (${legacyPlan}) → platforms.users.${base.active.user}.defaultPlan`);
+      }
+    }
+    next.platforms = platformsForWrite(base);
+    if (next.runtime && 'defaultPlan' in next.runtime) {
+      const runtime = { ...next.runtime };
+      delete runtime.defaultPlan;
+      if (Object.keys(runtime).length) next.runtime = runtime; else delete next.runtime;
+      notes.push('runtime.defaultPlan 已删除');
+    }
+    next.configVersion = CONFIG_VERSION;
+  }
   return { config: next, migrated: true, notes };
 }
 
@@ -250,7 +287,7 @@ export function platformViews(platforms) {
  * 凡是「自己读 config.json」的地方都走这里，不要各自忘记那一步。
  */
 export function configViews(raw) {
-  return platformViews(readPlatforms(migrateConfigToV2(raw).config));
+  return platformViews(readPlatforms(migrateConfig(raw).config));
 }
 
 /**
@@ -258,7 +295,7 @@ export function configViews(raw) {
  * `profiles/agent-platforms/<id>/`，不必自己重做一遍迁移与归一。
  */
 export function activeAgentPlatformId(raw) {
-  return readPlatforms(migrateConfigToV2(raw).config).active.agent;
+  return readPlatforms(migrateConfig(raw).config).active.agent;
 }
 
 /**
@@ -276,9 +313,11 @@ export function flatPlatformEntry(platforms, side, id) {
   }
   const raw = platforms?.users?.[wanted];
   const entry = normalizeUserEntry(raw);
-  // `account` / `enabled` 都是条目级字段，但它们只对**存在的条目**有意义：
+  // `account` / `enabled` / `defaultPlan` 都是条目级字段，但它们只对**存在的条目**有意义：
   // 缺条目时给空段，不编一个「已启用」让调用方以为这条实例在用。
-  const own = raw === undefined ? { account: entry.account } : { account: entry.account, enabled: entry.enabled };
+  const own = raw === undefined
+    ? { account: entry.account }
+    : { account: entry.account, enabled: entry.enabled, defaultPlan: entry.defaultPlan };
   return { ...own, ...entry.transport, ...entry.options };
 }
 

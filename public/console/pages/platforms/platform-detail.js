@@ -44,6 +44,8 @@ const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix
 const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
 /** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
 const ENABLED_FIELD = 'platformEnabled';
+/** 默认运行方案在表单里的字段名：同样不是 configSchema 的字段（用户平台条目级）。 */
+const DEFAULT_PLAN_FIELD = 'platformDefaultPlan';
 /** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
 const CONFIG_MOUNT = '<div id="platformConfigMount"></div>';
 /** 模型卡的挂载点：只有声明了 models 能力位的 Agent 平台才有这张卡。 */
@@ -306,15 +308,41 @@ function mountConfig(item) {
       onLabel: '开',
       offLabel: '关',
     });
+    // 默认方案：这条平台新建的会话用哪套（条目级，与配置选项不同层）。
+    fields.push({
+      name: DEFAULT_PLAN_FIELD,
+      type: 'select',
+      label: '默认运行方案',
+      value: item.defaultPlan || '',
+      options: [],
+      hint: '这个平台新建、且没单独指定方案的会话用它；某个会话要换方案，在「会话与审批 › 详情」里单独指定。',
+    });
   }
   fields.push(...schemaFields(item.configSchema, item.config ?? {}));
   renderFields(host, fields, { columns: 1 });
   bindSwitches(host);
+  if (item.side === 'user') void fillDefaultPlanOptions(item);
   // 动作条不参与取值：保存按钮与状态位跟在最后一个字段后面（与插件详情同构）。
   host.insertAdjacentHTML('beforeend', inlineActions({
     items: [{ id: 'platformConfigSave', label: '保存配置', variant: 'primary' }],
     status: 'platformConfigMsg',
   }));
+}
+
+/** 默认运行方案下拉：选项来自方案目录；空值 = 不设置，回退内置方案。 */
+async function fillDefaultPlanOptions(item) {
+  const select = root?.querySelector(`#${DEFAULT_PLAN_FIELD}`);
+  if (!select) return;
+  let plans = [];
+  try {
+    plans = (await api('/api/plans'))?.plans ?? [];
+  } catch (error) {
+    setStatus('platformConfigMsg', `方案目录读取失败：${error?.message ?? error}`);
+  }
+  setSelectOptions(select, [
+    { value: '', label: '不设置（回退内置方案）' },
+    ...plans.map((plan) => ({ value: plan.id, label: plan.label || plan.id })),
+  ], item.defaultPlan || '');
 }
 
 // ── 模型与思考强度（Agent 平台，声明了 models 能力位才有） ────────────────────
@@ -700,6 +728,8 @@ async function saveCurrentConfig() {
   if (entry.side === 'user') {
     const el = host?.querySelector(`[data-field="${ENABLED_FIELD}"]`);
     if (el) patch.enabled = getSwitch(el);
+    const planSelect = host?.querySelector(`#${DEFAULT_PLAN_FIELD}`);
+    if (planSelect) patch.defaultPlan = planSelect.value;
   }
   setStatus('platformConfigMsg', '保存中…');
   try {

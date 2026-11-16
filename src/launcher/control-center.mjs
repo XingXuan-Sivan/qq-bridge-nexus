@@ -34,7 +34,7 @@ import { pickDialog } from './pick-dialog.mjs';
 // NapCat 是否已在别处运行：看它的 WebUI 端口（默认 6099，可在设置 napcatWebuiPort 改）
 import { atomicWriteJsonFile, readJsonFile } from '../lib/json-store.js';
 // 配置 v2：控制中心改的是同一份 config.json，读写口径必须与桥接完全一致。
-import { CONFIG_VERSION, migrateConfigToV2, platformViews, platformsForWrite, readPlatforms } from '../config/platforms.mjs';
+import { CONFIG_VERSION, migrateConfig, platformViews, platformsForWrite, readPlatforms } from '../config/platforms.mjs';
 import { agentRuntime } from '../agent-side/runtime.mjs';
 // 静态资源守卫与控制台共用一套：解码一次、拒绝穿越/盘符/符号链接/白名单外扩展名。
 import { resolveStaticPath, serveStaticFile } from '../http/static.mjs';
@@ -136,11 +136,11 @@ function consolePort(cfg) { return Number(cfg?.consolePort) > 0 ? Number(cfg.con
  * config.json 的平台段（配置 v2）。
  *
  * 控制中心可能比桥接先跑：读到的可能还是 v1（`platform` / `snowluma` / `dsh` 三个顶层键）。
- * 所以这里先统一走一次 `migrateConfigToV2()` —— 否则控制中心会把 `platforms` 写进去、
+ * 所以这里先统一走一次 `migrateConfig()` —— 否则控制中心会把 `platforms` 写进去、
  * 旧键留在旁边，桥接启动后再迁移一次就会盖掉刚改的值。
  */
 function platformConfigOf(value) {
-  const migrated = migrateConfigToV2(value ?? {});
+  const migrated = migrateConfig(value ?? {});
   const platforms = readPlatforms(migrated.config);
   return { file: migrated.config, platforms, views: platformViews(platforms) };
 }

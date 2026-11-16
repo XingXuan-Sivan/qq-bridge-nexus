@@ -307,11 +307,11 @@ MCP 两张表在工具栏传了 `meta: '2 个 server · 2 个工具 · 1 个技�
 
 **规则**：组件只覆盖自己生成的 meta；调用方传了固定统计时，在 meta 元素上打 `data-table-meta-fixed`，组件检测到就不再改写。页面侧不要靠「刷新后再手动写一次」补救，否则每次翻页/搜索都会回退。
 
-### 1.53 同一语义的标签混用 `.status-badge` 与 `.pill`
+### 1.53 同一语义的标签要分两类：`tag` 当标签、`status-badge` 当运行态
 
-MCP 页来源/状态最初用 `.status-badge is-pill`，其他表格用 `.pill`，圆角、底色、字重都不一致；内置来源还是纯文本。用户一眼就看出「和别的表不一样」。
+MCP 页来源/状态最初用 `.status-badge is-pill`，其他表格用另一套自造徽标，圆角、底色、字重都不一致；内置来源还是纯文本。用户一眼就看出「和别的表不一样」。
 
-**规则**：表格内的状态/来源/权限标签统一用 `.pill`（中性 `.pill n`、主色 `.pill b`、成功 `.pill g`、危险 `.pill r`）；不要再造页面私有的 badge 样式。新增 `.pill.n` 时要确认 `components.css` 里已有定义，否则 class 存在但样式是空的（静态门禁只查 class 是否有定义，不查视觉效果）。
+**规则**：表格里的来源/权限/版本这类**标签**统一用 `tag`（`tag()` / `tag tag--*`）；运行状态用 `statusBadge()` 的 `status-badge`。不要自造页面私有的徽标类；旧 `.pill` 系列已删除，写 `class="pill"` 不会有任何样式。
 
 ### 1.54 `section card:true` 必须切到 `<section>` 并自己闭合
 
@@ -425,7 +425,7 @@ MCP 页把「刷新 / 新增 MCP」放在右侧、搜索在最左；预设页的
 
 外部人格卡的删除按钮被隐藏、默认卡被加了高亮底色，用户两轮都点名了：「没让你隐藏的按钮不要隐藏，应该置灰」「人格卡片被设为默认的不再显示特殊样式，只显示默认的标签」。
 
-**规则**：按钮集合对所有同类实体保持一致（编辑 / 设为默认 / 删除，再按能力追加重置、另存为内部）；能力不足时渲染 `disabled` + `title` 说明原因，不删 DOM。状态只用 `.pill` 表达，不要给卡片加 `active` / 边框 / 底色。
+**规则**：按钮集合对所有同类实体保持一致（编辑 / 设为默认 / 删除，再按能力追加重置、另存为内部）；能力不足时渲染 `disabled` + `title` 说明原因，不删 DOM。状态用 `statusBadge()` 表达，不要给卡片加 `active` / 边框 / 底色。
 
 ### 1.73 合并卡片时删掉重复说明，语义只留一处
 
@@ -433,11 +433,11 @@ MCP 页把「刷新 / 新增 MCP」放在右侧、搜索在最左；预设页的
 
 **规则**：字段的取值/范围/生效方式写进字段 `hint`；卡片头只写「影响范围 + 生效时机」一句，不与 hint 重复。合并卡片时先删说明段落，再考虑加分隔，不要靠 `<h3>` 堆标题。
 
-### 1.74 标签（徽标）只用一组 `.pill`，不要再发明 `.persona-badge` 之类的别名
+### 1.74 标签只用 `tag`、运行态只用 `status-badge`，不要再发明 `.persona-badge` 之类的别名
 
-人格卡原本用 `status-badge is-pill` 再加自定义 `.persona-badge`，插件卡用 `<span class="pill g">已加载</span>` / `<span class="pill b">v0.2.0</span>`，两页并排就能看出字号、内边距、圆角不一致。用户的原话是「去看看插件卡片的标签是什么样的」。
+人格卡原本用 `status-badge is-pill` 再加自定义 `.persona-badge`，插件卡用 `tag tag--success` / `tag tag--primary`，两页并排就能看出字号、内边距、圆角不一致。用户的原话是「去看看插件卡片的标签是什么样的」。
 
-**规则**：状态/来源/版本/计数一律用 `.pill`（`g` 成功、`b` 信息、`r` 危险、无修饰为中性），语义靠颜色位表达；新增页面时先搜 `class="pill` 找同类标签，不新建徽标类，也不在页面 CSS 里覆盖 pill 的尺寸。
+**规则**：来源/版本/计数/静态结论一律用 `tag()`（`type` = default / primary / success / warning / danger / info），实时运行态用 `statusBadge()`；新增页面时先搜 `tag tag--` 找同类标签，不新建徽标类，也不在页面 CSS 里改它们的尺寸。
 
 ### 1.75 弹窗统一：底栏按钮顺序固定，整行控件用「标签在上」的字段变体
 
@@ -501,7 +501,7 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 - 弹窗里只要字段能拆成 text / number / textarea / select / radio / switch / custom 中的一种，就用 `renderFields`，不要手写 `.field-block`；
 - 组件渲染后 DOM id 会落在控件上，但外层的「块」没有旧 id。需要兼容既有测试/脚本时，用 `[data-field-wrap]` 把旧 id 补回外层，**不要**为了兼容把控件搬回手写；
 - 同一间距只留一个来源：`.form-cols` 的 `row-gap` 已统一走 `--form-row-gap`（14px），页面不要再写 `row-gap:14px` 覆盖；
-- 徽标统一 `.pill`（`pill g/r/n/b`），`status-badge` 只用于弹窗底栏那种纯文本状态位；按钮统一 `class="btn small"`，`class="small"` 是历史写法。
+- 徽标用 `tag()`（`tag tag--*`），运行态用 `statusBadge()`；按钮统一 `class="btn small"`，`class="small"` 是历史写法。
 
 ### 1.86 `pageSize: rows.length` 等于「永远只有一页」
 

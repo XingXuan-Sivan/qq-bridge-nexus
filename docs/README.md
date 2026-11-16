@@ -14,9 +14,9 @@
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
-| [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) | **平台统一与 Agent 通用化（总纲）**：统一平台注册表、`AgentPort` 窄契约 + DSH/ACP 双实现、用户侧入站、界面 IA 重构（平台配置页 + 运行方案页）、配置 v2、C0–C8 批次与验收；§9.5 记 C9「控制台文案与人格生效口径」 | ✅ C0–C8 已完成，C9 补充与 C6.5 ACP 接线均已收口；动平台/Agent/平台页之前先读这份 |
-| [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) | **执行体通用化与运行方案重构**：执行体切换（`runtime.defaultAgent`，单活动 + 多实例）、四轴方案模型（应用方式 / 工具面 / 权限权威 / 行为）、能力档 `runtime` 段、直通模式的提示注入与权限权威、界面改造清单、P0–P6 批次；接 PLATFORM_UNIFICATION 的 C6.5 | ✅ P0 已落地（连接层下沉 / 三处归一 / ACP 事件流出口与 TCK / 概览指标卡按位置命名）、P1 已落地（Agent 侧插件化）、P2 已落地（Agent 平台配置写口 / 探活 / 默认执行体）、P3 已落地（多入站实例 / 条目开关 / 用户侧配置写口与默认实例）、P4 已落地（能力档 `runtime` 段 / 方案去 `platform` / 方言上移 / `direct` 能力档）、P5 已落地（直通运行期三通道注入 / 权限读写与漂移 / 会话详情块与全局执行体卡）、P6 已落地（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE 三份文档同步，`PLATFORM_UNIFICATION` 的 C6.5 核销，清掉「方案带 `tools`」的残留分支）；动方案 / 权限档 / 执行体之前先读 |
-| [PROFILES_MODEL.md](PROFILES_MODEL.md) | **配置模型**：四轴（应用方式 / 工具面 / 权限权威 / 行为）+ 存储分层（用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别）+ 两层默认解析链；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
+| [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) | **平台统一与 Agent 通用化（总纲）**：统一平台注册表、`AgentPort` 窄契约 + DSH/ACP 双实现、用户侧入站、界面 IA 重构（平台配置页 + 运行方案页）、配置 v2 / v3、C0–C8 批次与验收；§9.5 记 C9「控制台文案与人格生效口径」 | ✅ C0–C8 已完成，C9 补充与 C6.5 ACP 接线均已收口；动平台/Agent/平台页之前先读这份 |
+| [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) | **Agent 平台通用化与运行方案重构**：Agent 平台切换（`platforms.active.agent`，单活动 + 多实例）、四轴方案模型（应用方式 / 工具面 / 权限权威 / 行为）、能力档 `runtime` 段、直通模式的提示注入与权限权威、界面改造清单、P0–P6 批次；接 PLATFORM_UNIFICATION 的 C6.5 | ✅ P0 已落地（连接层下沉 / 三处归一 / ACP 事件流出口与 TCK / 概览指标卡按位置命名）、P1 已落地（Agent 侧插件化）、P2 已落地（Agent 平台配置写口 / 探活 / 默认 Agent 平台）、P3 已落地（多入站实例 / 条目开关 / 用户侧配置写口与默认实例）、P4 已落地（能力档 `runtime` 段 / 方案去 `platform` / 方言上移 / `direct` 能力档）、P5 已落地（直通运行期三通道注入 / 权限读写与漂移 / 会话详情块与全局 Agent 平台卡）、P6 已落地（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE 三份文档同步，`PLATFORM_UNIFICATION` 的 C6.5 核销，清掉「方案带 `tools`」的残留分支）；动方案 / 权限档 / Agent 平台之前先读 |
+| [PROFILES_MODEL.md](PROFILES_MODEL.md) | **配置模型**：四轴（应用方式 / 工具面 / 权限权威 / 行为）+ 存储分层（用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别）+ 三层默认解析链（会话 → 用户平台条目 → 内置）；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | **Agent 平台适配层**：P0 目录迁移 / P1 build-install 分离 / P3 模式持久化的现状与不变式；P2 中立 Agent IR 的规划、触发条件与反模式 | ✅ P0/P1/P3 已落地；P2 已纳入 PLATFORM_UNIFICATION 的 C4 |
 | [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) | **两侧解耦规格**：地址模型（`platform[@account]:type:id`、多平台并存防串号）、`UserPlatform` / `AgentPlatform` 运行期契约、中立消息段与降级规则、`interface-platform` 合并取舍、插件接管连接的安全边界、B0–B8 迁移批次与验收 | ✅ B0–B8 已落地；B8 之后的缺口由 PLATFORM_UNIFICATION 接管 |
 | [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md) | **注入块与提示词拼接**：块模型（slot / timing / profiles / scope）、注入块页、预算与上限迁移 | ✅ §2、§7 现行；§3–§5 已由 PROFILES_MODEL 取代 |
@@ -27,7 +27,7 @@
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |
-| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：`state/sessions/` 档案目录、准入、运行方案（`planId`）、人格、提示词、唤醒、模型、执行体与权限（两权威 + 漂移）；被动/主动每轴一条全局名单；DSH 自愈/对账/命名 | ✅ 现行 |
+| [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md) | **会话子系统**：`state/sessions/` 档案目录、准入、运行方案（`planId`）、人格、提示词、唤醒、模型、Agent 平台与权限（两权威 + 漂移）；被动/主动每轴一条全局名单；DSH 自愈/对账/命名 | ✅ 现行 |
 | [MESSAGE_PACING.md](MESSAGE_PACING.md) | **消息调度（合批 / 预算 / 档位 / 收尾）**：L0 平台 / L1 调度内核 / L2 行为档案三层归属、两档分级与双桶预算、动态合批硬上限、游标 `explicitAck` 三态收尾与溢出交代、堆积触达、参数唯一真源与 N0–N5 批次；改唤醒节奏或收尾判据前先读这份 | 🧪 0.2.1 已落地 N0–N5（含 N4b 入站在途对齐） |
 | [MEMORY_SUBSYSTEM.md](MEMORY_SUBSYSTEM.md) | **记忆子系统**：采集、写入、召回与注入的边界，与 soulkit 的联动 | ✅ 现行 |
 
@@ -38,7 +38,7 @@
 | [CONSOLE.md](CONSOLE.md) | **控制台单一入口**：零构建结构、目录六条规则、设计令牌与栅格、组件 API（card / collapse / tag / alert / message / message-box / tile / table / search-box）、必须不变的契约、门禁、长页重排实测、Agent 平台 / 方案 / 权限的界面口径 | ✅ 现行（改 `public/console/` 前先读） |
 | [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂、`createForm()` 内核（类型化取值、校验、条件显示、脏值守卫）、字段注解、两步迁移法 | ✅ 规格已定 |
 | [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 表单迁移踩坑与检查清单 | ✅ 迁页面前先读 |
-| [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) | **控制台 IA 重构与平台配置归一**：既有结构/风格基线（§2）、组件增量（tile 图标、split-view 宽度变量与工具栏槽、页面子路由）、平台页与插件页的两级 IA、平台自描述 `modelCatalog`、默认运行方案三级链与 config v3、B1–B4 批次与验收 | 🚧 B1 / B2 已收尾，按 §7 继续 B3（配置归一） |
+| [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) | **控制台 IA 重构与平台配置归一**：既有结构/风格基线（§2）、组件增量（tile 图标、split-view 宽度变量与工具栏槽、页面子路由）、平台页与插件页的两级 IA、平台自描述 `modelCatalog`、默认运行方案三级链与 config v3、B1–B4 批次与验收 | ✅ B1–B4 已落地 |
 
 ### 扩展与插件
 
@@ -123,7 +123,7 @@
 | 加一个 Agent 平台 / 改产物链路 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) |
 | 加上一个用户侧平台（微信、B 站…）/ 多平台并存 / 让插件接管连接 | [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md)、[PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §六 |
 | 决定「平台页 / 方案页 / 行为档案 / 能力档」四类界面资产各去哪 | [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §7.3 |
-| 换执行体、加直通方案、在界面里改对端权限档 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) |
+| 换 Agent 平台、加直通方案、在界面里改对端权限档 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) |
 | 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
 | 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
 | 把卡片页改成二级详情页 / 加页面子路由 / 左栏宽度 | [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) §3 |

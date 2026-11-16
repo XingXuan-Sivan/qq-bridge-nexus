@@ -1,4 +1,4 @@
-// 配置 v2（`platforms` 段）：迁移、读归一、派生视图、补丁写回。
+// 配置 v2/v3（`platforms` 段 + 条目级默认方案）：迁移、读归一、派生视图、补丁写回。
 //
 // 这一层不碰磁盘，所以全部用例都是纯函数。迁移只跑一次是**硬要求**：
 // 它删掉 `platform` / `snowluma` / `dsh` 三个顶层键，重复跑会把空壳覆盖到用户数据上。
@@ -12,7 +12,7 @@ import {
   agentPlatformConfig,
   flatPlatformEntry,
   flatPlatforms,
-  migrateConfigToV2,
+  migrateConfig,
   patchPlatformConfig,
   platformViews,
   platformsForWrite,
@@ -28,8 +28,8 @@ const V1 = {
   consolePort: 3100,
 };
 
-test('v1 → v2：三个顶层键搬进 platforms，旧键删除，版本号写 2', () => {
-  const { config, migrated, notes } = migrateConfigToV2(V1);
+test('v1 → 当前版本：三个顶层键搬进 platforms，旧键删除，版本号写当前值', () => {
+  const { config, migrated, notes } = migrateConfig(V1);
   assert.equal(migrated, true);
   assert.equal(config.configVersion, CONFIG_VERSION);
   assert.equal(config.platform, undefined);
@@ -51,22 +51,41 @@ test('v1 → v2：三个顶层键搬进 platforms，旧键删除，版本号写 
 });
 
 test('迁移幂等：迁完再跑一次是 no-op，不会把空壳盖回去', () => {
-  const first = migrateConfigToV2(V1).config;
-  const second = migrateConfigToV2(first);
+  const first = migrateConfig(V1).config;
+  const second = migrateConfig(first);
   assert.equal(second.migrated, false);
   assert.deepEqual(second.config, first);
   assert.deepEqual(second.notes, []);
 });
 
-test('已是 v2 的配置不动（哪怕少了 active/条目）', () => {
-  const v2 = { configVersion: 2, platforms: { users: { qq: { transport: { wsUrl: 'w' } } } } };
-  const { config, migrated } = migrateConfigToV2(v2);
+test('v2 → 当前版本：全局默认方案搬到活动用户平台条目，旧键删除', () => {
+  const v2 = {
+    configVersion: 2,
+    runtime: { defaultPlan: 'social-v1', idleMinutes: 20 },
+    platforms: { active: { user: 'qq', agent: 'dsh' }, users: { qq: { wsUrl: 'w' } }, agents: { dsh: {} } },
+  };
+  const { config, migrated, notes } = migrateConfig(v2);
+  assert.equal(migrated, true);
+  assert.equal(config.configVersion, CONFIG_VERSION);
+  assert.equal(config.platforms.users.qq.defaultPlan, 'social-v1');
+  assert.equal('defaultPlan' in (config.runtime ?? {}), false, '旧全局键删除，不留双读');
+  assert.equal(config.runtime.idleMinutes, 20, 'runtime 的其余键不动');
+  assert.ok(notes.some((line) => line.includes('defaultPlan')), '迁移要说清楚搬了什么');
+
+  // 条目上已经写过的值优先：条目是唯一事实源。
+  const both = migrateConfig({ ...v2, platforms: { ...v2.platforms, users: { qq: { defaultPlan: 'social-v2' } } } });
+  assert.equal(both.config.platforms.users.qq.defaultPlan, 'social-v2');
+});
+
+test('已是当前版本的配置不动（哪怕少了 active/条目）', () => {
+  const current = { configVersion: CONFIG_VERSION, platforms: { users: { qq: { transport: { wsUrl: 'w' } } } } };
+  const { config, migrated } = migrateConfig(current);
   assert.equal(migrated, false);
-  assert.deepEqual(config, v2);
+  assert.deepEqual(config, current);
 });
 
 test('空配置：迁出 qq/dsh 空壳，active 指向它们', () => {
-  const { config } = migrateConfigToV2({});
+  const { config } = migrateConfig({});
   assert.deepEqual(config.platforms.active, { user: 'qq', agent: 'dsh' });
   assert.ok(config.platforms.users.qq);
   assert.ok(config.platforms.agents.dsh);
@@ -106,7 +125,7 @@ test('readPlatforms：非法平台 id 的条目被丢弃，不污染整份配置
 test('userPlatformConfig / agentPlatformConfig：缺条目给空段，account 归一', () => {
   const platforms = readPlatforms({ platforms: { active: { user: 'qq', agent: 'dsh' } } });
   const user = userPlatformConfig(platforms);
-  assert.deepEqual(user, { id: 'qq', account: '', enabled: true, transport: {}, options: {} });
+  assert.deepEqual(user, { id: 'qq', account: '', enabled: true, defaultPlan: '', transport: {}, options: {} });
   const agent = agentPlatformConfig(platforms);
   assert.deepEqual(agent, { id: 'dsh', endpoint: {}, options: {} });
 
@@ -115,7 +134,7 @@ test('userPlatformConfig / agentPlatformConfig：缺条目给空段，account �
 });
 
 test('platformViews：连接参数与选项拍平，内核只认平台中立的两个视图', () => {
-  const platforms = readPlatforms(migrateConfigToV2(V1).config);
+  const platforms = readPlatforms(migrateConfig(V1).config);
   const views = platformViews(platforms);
   assert.deepEqual(views.platform, { id: 'qq', account: 'napcat' });
   assert.equal(views.userPlatform.accessToken, 'tok');
@@ -125,7 +144,7 @@ test('platformViews：连接参数与选项拍平，内核只认平台中立的�
 });
 
 test('patchPlatformConfig：按白名单分到 endpoint/options，不改变其它平台', () => {
-  const base = readPlatforms(migrateConfigToV2(V1).config);
+  const base = readPlatforms(migrateConfig(V1).config);
   const patched = patchPlatformConfig(base, 'agent', '', { model: 'deepseek-v4', authToken: 'next' });
   assert.equal(patched.agents.dsh.options.model, 'deepseek-v4');
   assert.equal(patched.agents.dsh.endpoint.authToken, 'next');
@@ -139,7 +158,7 @@ test('patchPlatformConfig：按白名单分到 endpoint/options，不改变其�
 });
 
 test('patchPlatformConfig：可以写非当前的那一条（多实例），非法 id 不写', () => {
-  const base = readPlatforms(migrateConfigToV2(V1).config);
+  const base = readPlatforms(migrateConfig(V1).config);
   const patched = patchPlatformConfig(base, 'agent', 'acp', { command: 'acp-server', allowRemote: true });
   assert.equal(patched.agents.acp.options.command, 'acp-server', '新条目按白名单分字段');
   assert.equal(patched.agents.acp.endpoint.allowRemote, true);
@@ -153,7 +172,7 @@ test('patchPlatformConfig：可以写非当前的那一条（多实例），非�
 });
 
 test('setActivePlatform：只改指向，缺条目时补空壳', () => {
-  const base = readPlatforms(migrateConfigToV2(V1).config);
+  const base = readPlatforms(migrateConfig(V1).config);
   const switched = setActivePlatform(base, 'agent', 'acp');
   assert.equal(switched.active.agent, 'acp');
   // `active` 必须能在目录里找到：空壳条目的存在就是为了不让注册表报 active_unregistered。
@@ -169,8 +188,8 @@ test('platformsForWrite：只回写三段结构，不把读时的推断带进文
   const platforms = readPlatforms({ platforms: { active: { user: 'qq' }, users: { qq: { wsUrl: 'w' } } } });
   assert.deepEqual(platformsForWrite(platforms), {
     active: { user: 'qq', agent: 'dsh' },
-    // `account` 与 `enabled` 是条目级的字段（与连接参数同层），归一化后都是显式值。
-    users: { qq: { account: '', enabled: true, transport: { wsUrl: 'w' }, options: {} } },
+    // `account` / `enabled` / `defaultPlan` 是条目级的字段（与连接参数同层），归一化后都是显式值。
+    users: { qq: { account: '', enabled: true, defaultPlan: '', transport: { wsUrl: 'w' }, options: {} } },
     agents: {},
   });
 });
@@ -184,11 +203,12 @@ test('白名单本身是封闭集合：连接参数只能是列出来的那几�
 });
 
 test('flatPlatformEntry：段内三段（transport/options/endpoint）对调用方不可见', () => {
-  const platforms = readPlatforms(migrateConfigToV2(V1).config);
+  const platforms = readPlatforms(migrateConfig(V1).config);
   assert.deepEqual(flatPlatformEntry(platforms, 'user', 'qq'), {
     account: 'napcat',
-    // 条目开关也在扁平投影里：控制台与注册表都按实例读它。
+    // 条目级开关与默认方案也在扁平投影里：控制台与注册表都按实例读它。
     enabled: true,
+    defaultPlan: '',
     wsUrl: 'ws://127.0.0.1:3001',
     accessToken: 'tok',
     viaPlatform: true,
@@ -206,7 +226,7 @@ test('flatPlatformEntry：段内三段（transport/options/endpoint）对调用�
 });
 
 test('flatPlatforms：整份投影保留 active 与全部 id，值都是扁平的', () => {
-  const platforms = readPlatforms(migrateConfigToV2(V1).config);
+  const platforms = readPlatforms(migrateConfig(V1).config);
   const flat = flatPlatforms(platforms);
   assert.deepEqual(flat.active, { user: 'qq', agent: 'dsh' });
   assert.deepEqual(Object.keys(flat.users), ['qq']);

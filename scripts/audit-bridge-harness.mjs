@@ -74,13 +74,12 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
 import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan } from '../src/runtime/plans.mjs';
-import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
 import { listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 // 配置 v2（C2）：bridge.js 在 loadConfig 里做迁移与派生视图，夹具剥 import 后要按同名补回。
 // P2 又进了三个：写口按 id 打补丁要用扁平条目，切换默认执行体要用 setActivePlatform，
 // 「改完要不要重启」靠端点白名单判定 —— 都是纯函数，用真实现。
-import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform } from '../src/config/platforms.mjs';
+import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfig, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances } from '../src/config/platforms.mjs';
 // 发送调用构造与后端称呼（B5）：bridge.js 只经 src/user-side/user-platform.mjs 门面调用，
 // 夹具剥 import 后必须按门面的名字补回。实现本身在 adapters/qq/ 里。
 // B6 又从这里进了三个名字：统一出站、后端配置注入、插件平台注册表。
@@ -462,7 +461,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ...platformPromptLib,
     createPlanStore, listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
-    AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform,
+    AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfig, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances,
     // `platforms.active` 的落地要真注册表；VM 里没有装配内置平台，桩掉。
     // 激活语义（fail-closed、可用 id 列表）由 scripts/test-platform-activate.mjs 覆盖。
     activatePlatforms: () => {},
@@ -523,7 +522,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     legacyLevelOfPlan,
     planIdForLegacy,
     findPlan,
-    createRuntimeState,
   normalizePermissionConfig,
   normalizeSessionPermission,
   FORBIDDEN_PERMISSION_PRESETS,

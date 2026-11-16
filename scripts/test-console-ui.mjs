@@ -322,17 +322,22 @@ try {
     assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('默认运行方案在全局配置，行为档案在平台详情', async () => {
+  await test('默认运行方案挂在用户平台条目上，行为档案在平台详情', async () => {
     await hydrate('config');
     assert.equal(await page.locator('[data-config-section="behavior"]').count(), 0);
-    await page.waitForFunction(() => document.getElementById('runtimeDefaultSelect')?.options.length >= 2);
-    assert.equal(await page.locator('#runtimeDefaultSelect').inputValue(), 'social-v2');
-    await page.selectOption('#runtimeDefaultSelect', 'social-v1');
-    await saveBarWrite('/api/config/runtime');
-    assert.deepEqual(fixture.requests.at(-1).body, { defaultPlan: 'social-v1' });
+    // 默认方案不是全局配置项：它按用户平台（实例）各一份，字段在平台详情 › 配置里。
+    assert.equal(await page.locator('#runtimeDefaultSelect').count(), 0, '全局配置不再有默认方案下拉');
+
+    await openPlatform('user:qq');
+    await page.click('[data-platform-tab="config"]');
+    await page.waitForSelector('#platformDefaultPlan', { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('platformDefaultPlan')?.options.length >= 2);
+    assert.equal(await page.locator('#platformDefaultPlan').inputValue(), 'social-v2', '下拉回填条目上的默认方案');
+    await page.selectOption('#platformDefaultPlan', 'chat');
+    const patch = await clickWrite('#platformConfigSave', '/api/platforms/registry/user/qq/config', 'PATCH');
+    assert.equal(patch.defaultPlan, 'chat', '默认方案随条目保存一起提交');
 
     // 行为档案是用户平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
-    await openPlatform('user:qq');
     await page.click('[data-platform-tab="behaviors"]');
     await page.waitForSelector('#behaviorTable [data-behavior-edit="social-v1"]', { timeout: 5000 });
     await page.click('#behaviorTable [data-behavior-edit="social-v1"]');
@@ -360,7 +365,7 @@ try {
     assert.equal(await page.locator('#behaviorPromptSave').count(), 0, '提示词卡不再有独立保存按钮');
     // 平台话术只在另一个标签里；行为标签里不应再出现它。
     assert.equal(await page.locator('#platformPromptCard').count(), 0, '行为标签不再混入平台话术卡');
-    assert.ok(await page.locator('#behaviorPromptCard .prompt-card-body').count() > 0, '提示词编辑在独立卡片里');
+    await page.waitForSelector('#behaviorPromptCard .prompt-card-body', { timeout: 5000 });
     assert.ok(await page.locator('#behaviorPromptCard [data-prompt-edit], #behaviorPromptCard [data-prompt-save]').count() > 0, '提示词卡有编辑/保存按钮');
   });
 
@@ -784,7 +789,7 @@ try {
 
     await openDetail();
     const planLabel = await page.locator('#detailPlan option').first().textContent();
-    assert.match(planLabel, /跟随全局（当前：聊天）/, '跟随全局要写出方案名，不能只显示一个破折号');
+    assert.match(planLabel, /跟随平台默认（当前：聊天）/, '跟随项要写出平台默认方案的名字，不能只显示一个破折号');
     const before = await personaNames();
     await closeDetail();
 

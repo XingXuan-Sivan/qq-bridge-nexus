@@ -15,10 +15,18 @@
     }
   },
   {
-    "method": "POST",
-    "path": "/api/config/runtime",
+    "method": "PATCH",
+    "path": "/api/platforms/registry/user/qq/config",
     "body": {
-      "defaultPlan": "social-v1"
+      "account": "",
+      "httpUrl": "http://127.0.0.1:3000",
+      "wsUrl": "ws://127.0.0.1:3001",
+      "accessToken": "",
+      "followDiscoveredEndpoint": true,
+      "viaPlatform": false,
+      "silenceWarnMs": 600000,
+      "enabled": true,
+      "defaultPlan": "chat"
     }
   },
   {
@@ -81,7 +89,8 @@
       "followDiscoveredEndpoint": true,
       "viaPlatform": false,
       "silenceWarnMs": 600000,
-      "enabled": true
+      "enabled": true,
+      "defaultPlan": "chat"
     }
   },
   {

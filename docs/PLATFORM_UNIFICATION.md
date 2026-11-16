@@ -1,7 +1,7 @@
 # 平台统一与 Agent 通用化（PLATFORM_UNIFICATION）
 
 > **状态**：C0–C9 已完成（C8 收尾于 2026-11-14，结果见 §9.4；C9 见 §9.5）。C6.5「把 ACP 接成主平台」已收口 ——
-> 见 §9.2 的「接线状态」：ACP 自带连接层与 `createRuntime`，与 DSH 同过 `RUNTIME_MEMBERS` 成员表校验，可在「全局配置 › 运行」里切成默认执行体。衔接并取代两份旧规划中"只做了一半"的部分：
+> 见 §9.2 的「接线状态」：ACP 自带连接层与 `createRuntime`，与 DSH 同过 `RUNTIME_MEMBERS` 成员表校验，可在「全局配置 › 运行」里切成默认 Agent 平台。衔接并取代两份旧规划中"只做了一半"的部分：
 > [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) 的 B0–B8 已完成（本方案不推翻，只补齐 B8 之后的缺口）；
 > [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) 的 P2「中立 Agent IR」**触发条件已满足**（要接第二个 Agent 平台），纳入本方案 C4。
 >
@@ -419,14 +419,15 @@ P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `act
 
 ---
 
-## 八、配置模型 v2
+## 八、配置模型（当前 v3）
 
 ```jsonc
 {
-  "configVersion": 2,
+  "configVersion": 3,
   "platforms": {
     "active": { "user": "qq", "agent": "dsh" },
-    "users":  { "qq":  { "account": "", "transport": { "wsUrl": "", "httpUrl": "", "accessToken": "", "followDiscoveredEndpoint": true,
+    "users":  { "qq":  { "account": "", "enabled": true, "defaultPlan": "social-v2",
+                          "transport": { "wsUrl": "", "httpUrl": "", "accessToken": "", "followDiscoveredEndpoint": true,
                                                     "viaPlatform": false, "silenceWarnMs": 600000, "launcherPath": "", "homeDir": "" },
                                 "options": {} } },
     "agents": { "dsh": { "endpoint":  { "baseUrl": "", "authToken": "", "authTokenExplicit": false, "authHeader": "authorization",
@@ -441,7 +442,7 @@ P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `act
 | 导出 | 职责 |
 | --- | --- |
 | `USER_TRANSPORT_KEYS` / `AGENT_ENDPOINT_KEYS` | 白名单：「怎么连上」的键。白名单外一律进 `options` —— 加一个业务选项不需要改这个文件 |
-| `migrateConfigToV2(raw)` | 一次性迁移（纯函数，入参是 `JSON.parse` 后的配置对象、不是文件路径）。迁完删 `platform` / `snowluma` / `dsh` 三个顶层键并写 `configVersion: 2`，返回 `{ config, migrated, notes }`；调用方负责备份 + 落盘 |
+| `migrateConfig(raw)` | 一次性迁移（纯函数，入参是 `JSON.parse` 后的配置对象、不是文件路径）。v1 → v2：删 `platform` / `snowluma` / `dsh` 三个顶层键；v2 → v3：把 `runtime.defaultPlan` 写到当时活动的用户平台条目上并删掉旧键。两段串在同一次调用里，写当前 `configVersion`，返回 `{ config, migrated, notes }`；调用方负责备份 + 落盘 |
 | `readPlatforms(raw)` | 读 `platforms` 段并对脏输入宽容（写散的键按白名单归位）；`active` 缺省时按「目录里唯一 id → 内置默认」推断，**指向不存在的 id 时原样保留**（交给 `active_unregistered` 诊断） |
 | `platformViews(platforms)` | 内核派生视图：`{ platform: {id, account}, userPlatform, agentPlatform }`，后两者是**扁平**的（连接参数在前、选项在后） |
 | `configViews(raw)` | 从**尚未迁移的原始配置对象**取派生视图（先迁移）。凡自己 `JSON.parse` config.json 的地方（独立脚本、`mcp-*` 侧进程、探针、控制中心）都走这个入口，否则 v1 文件会被读成空表 |
@@ -450,9 +451,9 @@ P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `act
 
 **`active` 真的生效**：`src/platforms/activate.mjs` 的 `activatePlatforms(cfg)` 在 `main()` 里、`configureKeys` 之前调用，两侧各自 `use*Platform(id)`；id 不可用时 **fail-closed** 并列出已注册的 id（不静默回退到内置平台）。历史上 `platformOfConfig(cfg)` 只用于拼会话 key，从未 `useUserPlatform()` —— 于是「改配置换平台」是没有效果的。
 
-**写配置的三条路**（控制台模型选择 / token 自愈 / 控制中心目录切换）形状不同、语义相同，全部经 `patchPlatformConfig` + `platformsForWrite`，不允许各自拼 `file.dsh = {...}` 把 v2 结构写坏；写前一律 `migrateConfigToV2`（否则「只改一个 token」会变成把 `wsUrl` / `homeDir` 全删掉）。
+**写配置的三条路**（控制台模型选择 / token 自愈 / 控制中心目录切换）形状不同、语义相同，全部经 `patchPlatformConfig` + `platformsForWrite`，不允许各自拼 `file.dsh = {...}` 把分段结构写坏；写前一律 `migrateConfig`（否则「只改一个 token」会变成把 `wsUrl` / `homeDir` 全删掉）。
 
-**不留别名双读**（与 B8 的兼容策略相反：v2 从 0.2.0 起生效、没有需要长期兼容的外部配置；留着就是债）：`snowluma.*` / `dsh.*` / `platform.*` 只在 `migrateConfigToV2` 里出现一次，其余读取点一律经扁平视图；`src/snowluma-conn.js` 的 `userTransportView()` 也不再认旧 `snowluma` 段。
+**不留别名双读**：`snowluma.*` / `dsh.*` / `platform.*` 只在 `migrateConfig` 里出现一次，其余读取点一律经扁平视图；`runtime.defaultPlan` 同理——只在 v2 → v3 迁移里出现一次，运行期读的是 `platforms.users.<id>.defaultPlan`；`src/snowluma-conn.js` 的 `userTransportView()` 也不再认旧 `snowluma` 段。
 
 ---
 
@@ -659,7 +660,7 @@ acp 的连接层已建立（`src/agent-side/adapters/acp/runtime.mjs`：按 `com
 | --- | --- |
 | `PROFILES_MODEL.md` | 顶部横幅指向本方案；§一 层级表按 C2/C4/C7 的事实重写（能力预设 → 能力档，Agent 平台写「当前 DSH 与 ACP」，关系句写明方案不再有 `agent` 字段）；§二 目录树补 `behaviors/.defaults/`、`capabilities/.defaults/`、`plans/.defaults/`、`adapters/runtime.mjs`、`acp/` 平台 |
 | `FOLDER_MAP.md` | 新增 `src/platforms/` 与 `src/config/` 两行；`src/agent-side/` 补 `adapters/acp/`；`src/user-side/metadata.mjs` 的端点改注册表；adapters 行区分 dsh 三份 / acp 一份；scripts 计数改 208；docs 树补本文件 |
-| `CONSOLE.md` | §4 数据源改 `js/registry.js`；§6/§7 的过期数字改为事实（契约 27 条、导航 15 个、截图页 `sessions` / `platforms` / `plans` / `persona` / `overview`）；契约清单里的方案端点随改名更新；P6 已补 §9「执行体 / 方案 / 权限的界面口径」 |
+| `CONSOLE.md` | §4 数据源改 `js/registry.js`；§6/§7 的过期数字改为事实（契约 27 条、导航 15 个、截图页 `sessions` / `platforms` / `plans` / `persona` / `overview`）；契约清单里的方案端点随改名更新；P6 已补 §9「Agent 平台 / 方案 / 权限的界面口径」 |
 | `PLATFORM_DECOUPLING.md` | §6.1 加「已收口为 `GET /api/platforms/registry`」横幅，该节保留作设计演进记录 |
 | `README.md` / `CHANGELOG.md` | 索引状态改「C0–C8 已完成」；CHANGELOG 新增 C8 段 |
 
@@ -691,7 +692,7 @@ C0–C8 验收后，用户报了三类「界面文案与人格生效时机」的
 | `/role` 切不了外部人格 | 命令层只认 `roles/*.md`，与「默认人格下拉」两套解析 | 抽 `resolvePersonaTarget()` 作为唯一入口（本地卡 → `provider:id` → 裸名唯一匹配），命令层依赖从 `sanitize/exists` 改为 `resolve/refresh` |
 | 切换人格后不重新注入 | `applyRoleChange` 是 HTTP 处理函数内的 `const`，命令层调用会 `ReferenceError` 被吞 | 搬到 `main()` 作用域并写成函数声明（`server.listen` 更早执行，`const` 会踩 TDZ） |
 | 重置后不重新注入（`/new`、控制台重置） | 注入入口对 `bootstrap` 豁免；重置没清「已读哪一版卡」 | 去掉 `bootstrap` 豁免、`roleFpAtBuild` 无条件记录；重置序列新增 `forgetRoleSeen`；`resetSession(key,{notify})` 透传（顺手修掉控制台重置也往群里发回执） |
-| 会话详情「跟随全局（当前：—）」 | `/api/sessions` 的 `activePlan` 只给 id，前端直接拼进文案 | 后端返回整份定义（`activePlan() ?? null`），前端 `planLabelOf()` 兼容旧写法 |
+| 会话详情「跟随平台默认（当前：—）」 | 会话详情只给方案 id，前端直接拼进文案 | 后端返回整份定义（`defaultPlan` = `defaultPlanFor(platformIdOf(key))`），前端 `planLabelOf()` 兼容只给 id 的写法 |
 
 **口径**（以后改人格相关的地方照这个来）：
 

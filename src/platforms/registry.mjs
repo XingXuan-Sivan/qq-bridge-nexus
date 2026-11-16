@@ -105,11 +105,14 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
   const live = new Map();
   const stateOf = (id) => inbound?.[id] ?? null;
   const enabledOf = (id) => config?.users?.[id]?.enabled !== false;
-  // 条目开关已经单独给 `entry.enabled`，配置面（`entry.config`）只留平台选项面：
-  // 写口拿它与补丁合并后校 schema，多一个平台不认识的键会让严格 schema 拒掉整次保存。
+  const defaultPlanOf = (id) => String(config?.users?.[id]?.defaultPlan ?? '');
+  // 条目开关与条目默认方案已经单独给 `entry.enabled` / `entry.defaultPlan`，配置面
+  // （`entry.config`）只留平台选项面：写口拿它与补丁合并后校 schema，多一个平台不认识的
+  // 键会让严格 schema 拒掉整次保存。
   const configOf = (id) => {
     const flat = clone(config?.users?.[id] ?? {}) ?? {};
     delete flat.enabled;
+    delete flat.defaultPlan;
     return flat;
   };
   // 出站解析与 src/user-side/outbound.mjs 同序：插件 transport 优先，其次适配器。
@@ -165,6 +168,8 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       configured: String(config?.active?.user ?? '') === id,
       // 条目级开关：停用的实例照样在这里列出（能改回去），但不会装配。
       enabled: enabledOf(id),
+      // 条目级默认运行方案：这个实例上新建、且没单独指定方案的会话用它（空串 = 回退内置）。
+      defaultPlan: defaultPlanOf(id),
       capabilities: [...(impl?.capabilities ?? [])],
       conversationTypes: [...(impl?.conversationTypes ?? [])],
       limits: { ...(impl?.limits ?? {}) },
@@ -211,6 +216,7 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       active: String(runtime.active ?? '') === id,
       configured: String(config?.active?.user ?? '') === id,
       enabled: enabledOf(id),
+      defaultPlan: defaultPlanOf(id),
       capabilities: [...(impl.capabilities ?? [])],
       conversationTypes: [...(impl.conversationTypes ?? [])],
       limits: { ...(impl.limits ?? {}) },
@@ -244,6 +250,7 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       active: String(runtime.active ?? '') === id,
       configured: String(config?.active?.user ?? '') === id,
       enabled: enabledOf(id),
+      defaultPlan: defaultPlanOf(id),
       capabilities: [],
       conversationTypes: [],
       limits: {},

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { inspectSnowLumaDir, compareVersions, migrateSnowLumaData, checkSnowLumaUpdate, snowlumaLaunchSpec, migrationWarning, snowlumaDataSummary } from '../src/launcher/snowluma-install.mjs';
 import { createManagedProcess } from '../src/launcher/managed-process.mjs';
 import { startControlCenter } from '../src/launcher/control-center.mjs';
+import { CONFIG_VERSION } from '../src/config/platforms.mjs';
 // 不碰真实 NapCat 目录（macOS 上读 QQ 沙盒容器会弹授权窗并卡住测试）
 process.env.QQ_BRIDGE_NAPCAT_HOME ||= path.join(os.tmpdir(), 'qq-bridge-test-no-napcat');
 
@@ -263,15 +264,15 @@ test('控制中心：选择 SnowLuma 目录不会启动它；无效目录拒绝�
   });
 });
 
-test('控制中心：选择目录时同步 config.json 的用户侧平台 homeDir（落成配置 v2、保留其他字段）', async () => {
+test('控制中心：选择目录时同步 config.json 的用户侧平台 homeDir（落成当前配置版本、保留其他字段）', async () => {
   await withCenter(async ({ d, port, T }) => {
     const sl = fakeSnowLuma(path.join(d, 'SnowLuma'), '1.14.22', { files: { 'config/runtime.json': JSON.stringify({ webuiPort: 1 }) } });
     const r = await req(port, 'POST', '/api/snowluma/select', { body: { dir: sl }, headers: T });
     assert.equal(r.body.homeDirSynced, true);
     const cfg = JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8'));
-    // 夹具给的是 v1（snowluma 顶层键）：控制中心得自己迁到 v2 再写，
+    // 夹具给的是 v1（snowluma 顶层键）：控制中心得自己迁到当前版本再写，
     // 否则「platforms 已存在 + 旧键还在」会让桥接启动后的迁移盖掉刚改的值。
-    assert.equal(cfg.configVersion, 2);
+    assert.equal(cfg.configVersion, CONFIG_VERSION);
     assert.equal(cfg.snowluma, undefined, '旧顶层键不再保留（一次性迁移）');
     assert.deepEqual(cfg.platforms.active, { user: 'qq', agent: 'dsh' });
     assert.equal(cfg.platforms.users.qq.transport.homeDir, sl);

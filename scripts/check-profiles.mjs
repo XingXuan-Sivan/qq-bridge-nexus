@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// profiles/ 资源契约自检：平台、行为引擎、行为类型、行为档案、能力档、运行方案。
+// profiles/ 资源契约自检：平台、行为引擎、行为类型、行为档案、能力档。
 //
 // 统一契约在这里变成可执行的门禁：
 //   1. `<dir>/<id>.yml` 与 `<dir>/.defaults/<id>.yml` 成对：副本存在即内置，副本悬空即失败；
-//   2. 出厂副本只放内容：行为副本不写 config，方案副本不写 builtin；
+//   2. 出厂副本只放内容：行为副本不写 config；
 //   3. 字段表与默认值只有引擎定义一份，行为类型只写按名覆盖；
 //   4. 行为档案写全量快照（config 键集 = 引擎字段集）；
 //   5. 能力档的 tools.platform 显式写全（缺键即不可见，不许猜默认）；
-//   6. 方案 order 显式且唯一，引用必须能解析。
+//   6. 能力档 audience 只认 access / owner，Agent 平台申报的 defaultCapability 必须真实存在。
 // 用法：node scripts/check-profiles.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,13 +18,11 @@ import {
 } from '../src/platforms/index.mjs';
 import { createCapabilityStore } from '../src/capabilities/store.mjs';
 import { PLATFORM_TOOLS } from '../src/tools/catalog.mjs';
-import { createPlanStore, validatePlanReferences } from '../src/runtime/plans.mjs';
-import { agentPlatformApplies, agentPlatformCanPinPermission, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 import { loadBehaviorProfiles, validateBehaviorText } from '../src/behaviors/index.mjs';
 import { loadBehaviorTypes, typeFields } from '../src/behaviors/types.mjs';
 import { flattenConfig, getEngine, listEngines } from '../src/behaviors/engines.mjs';
 import { factoryDir, listFactoryIds, readFactoryText } from '../src/profiles/factory.mjs';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, PLANS_ROOT, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
 
 const problems = [];
 const warnings = [];
@@ -182,12 +180,20 @@ for (const id of agentPlatformIds) {
   }
 }
 
-// 3) 能力档：工具面显式写全，出厂副本成对（每个 Agent 平台各一批）
+// 3) 能力档：工具面显式写全，audience 取值合法，出厂副本成对（每个 Agent 平台各一批）
 const capabilities = [];
+const declaredCapabilities = new Map();
 for (const agentId of agentPlatformIds) {
   const capsRoot = agentCapabilitiesDir(agentId);
   const list = createCapabilityStore({ root: capsRoot }).list();
   capabilities.push(...list);
+  declaredCapabilities.set(agentId, new Set(list.map((item) => item.id)));
+  for (const name of ymlFiles(capsRoot)) {
+    const raw = readYaml(path.join(capsRoot, name));
+    if (raw.audience !== undefined && !['access', 'owner'].includes(String(raw.audience))) {
+      note(`能力档 ${agentId}/${name} 的 audience 只能是 access 或 owner（现在 ${raw.audience}）`);
+    }
+  }
   for (const capability of list) {
     const explicit = capability.tools?.platform ?? {};
     for (const tool of PLATFORM_TOOLS) {
@@ -199,56 +205,14 @@ for (const agentId of agentPlatformIds) {
   }
 }
 
-// 4) 运行方案：内置方案齐全、order 显式唯一、引用可解析
-//    执行体认领什么，从注册表问——与运行期同一份声明，静态检查不另建一套判断依据。
+// 4) 引用面：Agent 平台申报的默认能力档必须真实存在。
+//    声明面与运行期同一份 agent-platform.yml，静态检查不另建一套判断依据。
 await import('../src/agent-side/builtin.mjs');
-const plans = createPlanStore({ root: PLANS_ROOT }).list();
-const behaviorIds = new Set();
-for (const platform of platforms) {
-  const root = path.join(PLATFORMS_ROOT, platform.id, 'behaviors');
-  if (!fs.existsSync(root)) continue;
-  for (const behavior of loadBehaviorProfiles({ root }).keys()) behaviorIds.add(behavior);
-}
-const capabilityFacts = new Map(capabilities.map((item) => [item.id, {
-  apply: item.runtime.apply,
-  prompt: item.runtime.prompt,
-  permission: item.runtime.permission,
-  hasRows: item.rowsCount > 0,
-}]));
-const agentPlatformFacts = new Map(agentPlatformIds.map((id) => [id, {
-  apply: agentPlatformApplies(id),
-  permission: agentPlatformCanPinPermission(id),
-  promptChannels: agentPlatformPromptChannels(id),
-}]));
-
-const builtinPlans = listFactoryIds(PLANS_ROOT);
-if (!builtinPlans.length) note('profiles/plans/.defaults 为空：没有出厂副本就没有内置方案');
-const orders = new Map();
-for (const name of ymlFiles(PLANS_ROOT)) {
-  const id = name.replace(/\.ya?ml$/i, '');
-  const raw = readYaml(path.join(PLANS_ROOT, name));
-  if (!Number.isInteger(Number(raw.order))) note(`方案 ${id} 缺显式 order（决定控制台排列顺序）`);
-  const order = Number(raw.order);
-  if (Number.isInteger(order)) {
-    if (orders.has(order)) note(`方案 ${id} 与 ${orders.get(order)} 的 order 重复：${order}`);
-    else orders.set(order, id);
-  }
-  if (Object.hasOwn(raw, 'builtin')) note(`方案 ${id} 不应写 builtin：带出厂副本即为内置，保存时会删掉这个键`);
-}
-for (const id of builtinPlans) {
-  if (!plans.some((plan) => plan.id === id)) note(`出厂副本 ${id} 没有对应的生效方案`);
-}
-for (const plan of plans) {
-  for (const warning of plan.warnings ?? []) note(`方案 ${plan.id}：${warning.message}`);
-  const issues = validatePlanReferences(plan, {
-    behaviors: behaviorIds,
-    capabilities: capabilityFacts,
-    agentPlatforms: agentPlatformFacts,
-  });
-  for (const issue of issues) {
-    const message = `方案 ${plan.id}：${issue.message}`;
-    if (issue.code === 'plan_warn' || issue.code === 'passthrough_degraded') warnings.push(message);
-    else note(message);
+for (const agentId of agentPlatformIds) {
+  const declared = String(readYaml(path.join(AGENT_PLATFORMS_ROOT, agentId, 'agent-platform.yml')).defaultCapability ?? '').trim();
+  if (!declared) continue;
+  if (!(declaredCapabilities.get(agentId) ?? new Set()).has(declared)) {
+    note(`Agent 平台 ${agentId} 的 defaultCapability「${declared}」不是已申报的能力档`);
   }
 }
 
@@ -268,4 +232,4 @@ if (warnings.length) {
   console.warn(`⚠️ profiles 自检提示（${warnings.length} 项，不阻断）：`);
   for (const warning of warnings) console.warn(`  - ${warning}`);
 }
-console.log(`✅ profiles 自检通过：${platforms.length} 个平台、${capabilities.length} 个能力档、${plans.length} 个方案、${builtinPlans.length} 个内置方案。`);
+console.log(`✅ profiles 自检通过：${platforms.length} 个平台、${capabilities.length} 个能力档。`);

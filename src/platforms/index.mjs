@@ -194,6 +194,9 @@ export function listAgentPlatformDirs({ root } = {}) {
         label: String(meta.label ?? meta.name ?? id),
         source: path.join('profiles', 'agent-platforms', id),
         capabilities: listYamlIds(path.join(dir, 'capabilities')),
+        // 该平台给「没单独指定能力档的会话」用的默认档（空串 = 由内核按聊天处理）。
+        // 它是平台作者的声明，与用户配置无关，所以与 modelCatalog 同在声明面。
+        defaultCapability: String(meta.defaultCapability ?? '').trim(),
         hasRuntime: fs.existsSync(path.join(dir, 'adapters', 'runtime.mjs')),
         modelCatalog: normalizeModelCatalog(meta.modelCatalog),
         configSchema: meta.configSchema ?? null,

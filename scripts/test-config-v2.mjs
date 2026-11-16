@@ -58,7 +58,7 @@ test('迁移幂等：迁完再跑一次是 no-op，不会把空壳盖回去', ()
   assert.deepEqual(second.notes, []);
 });
 
-test('v2 → 当前版本：全局默认方案搬到活动用户平台条目，旧键删除', () => {
+test('v2 → 当前版本：默认方案变成平台条目的默认行为，旧键删除', () => {
   const v2 = {
     configVersion: 2,
     runtime: { defaultPlan: 'social-v1', idleMinutes: 20 },
@@ -67,14 +67,15 @@ test('v2 → 当前版本：全局默认方案搬到活动用户平台条目，�
   const { config, migrated, notes } = migrateConfig(v2);
   assert.equal(migrated, true);
   assert.equal(config.configVersion, CONFIG_VERSION);
-  assert.equal(config.platforms.users.qq.defaultPlan, 'social-v1');
+  assert.equal(config.platforms.users.qq.defaultBehavior, 'social-v1');
+  assert.equal('defaultPlan' in (config.platforms.users.qq ?? {}), false, '旧键删除，不留双读');
   assert.equal('defaultPlan' in (config.runtime ?? {}), false, '旧全局键删除，不留双读');
   assert.equal(config.runtime.idleMinutes, 20, 'runtime 的其余键不动');
-  assert.ok(notes.some((line) => line.includes('defaultPlan')), '迁移要说清楚搬了什么');
+  assert.ok(notes.some((line) => line.includes('默认行为')), '迁移要说清楚搬了什么');
 
   // 条目上已经写过的值优先：条目是唯一事实源。
   const both = migrateConfig({ ...v2, platforms: { ...v2.platforms, users: { qq: { defaultPlan: 'social-v2' } } } });
-  assert.equal(both.config.platforms.users.qq.defaultPlan, 'social-v2');
+  assert.equal(both.config.platforms.users.qq.defaultBehavior, 'social-v2');
 });
 
 test('已是当前版本的配置不动（哪怕少了 active/条目）', () => {
@@ -125,7 +126,7 @@ test('readPlatforms：非法平台 id 的条目被丢弃，不污染整份配置
 test('userPlatformConfig / agentPlatformConfig：缺条目给空段，account 归一', () => {
   const platforms = readPlatforms({ platforms: { active: { user: 'qq', agent: 'dsh' } } });
   const user = userPlatformConfig(platforms);
-  assert.deepEqual(user, { id: 'qq', account: '', enabled: true, defaultPlan: '', transport: {}, options: {} });
+  assert.deepEqual(user, { id: 'qq', account: '', enabled: true, defaultBehavior: '', transport: {}, options: {} });
   const agent = agentPlatformConfig(platforms);
   assert.deepEqual(agent, { id: 'dsh', endpoint: {}, options: {} });
 
@@ -188,8 +189,8 @@ test('platformsForWrite：只回写三段结构，不把读时的推断带进文
   const platforms = readPlatforms({ platforms: { active: { user: 'qq' }, users: { qq: { wsUrl: 'w' } } } });
   assert.deepEqual(platformsForWrite(platforms), {
     active: { user: 'qq', agent: 'dsh' },
-    // `account` / `enabled` / `defaultPlan` 是条目级的字段（与连接参数同层），归一化后都是显式值。
-    users: { qq: { account: '', enabled: true, defaultPlan: '', transport: { wsUrl: 'w' }, options: {} } },
+    // `account` / `enabled` / `defaultBehavior` 是条目级的字段（与连接参数同层），归一化后都是显式值。
+    users: { qq: { account: '', enabled: true, defaultBehavior: '', transport: { wsUrl: 'w' }, options: {} } },
     agents: {},
   });
 });
@@ -206,9 +207,9 @@ test('flatPlatformEntry：段内三段（transport/options/endpoint）对调用�
   const platforms = readPlatforms(migrateConfig(V1).config);
   assert.deepEqual(flatPlatformEntry(platforms, 'user', 'qq'), {
     account: 'napcat',
-    // 条目级开关与默认方案也在扁平投影里：控制台与注册表都按实例读它。
+    // 条目级开关与默认行为也在扁平投影里：控制台与注册表都按实例读它。
     enabled: true,
-    defaultPlan: '',
+    defaultBehavior: '',
     wsUrl: 'ws://127.0.0.1:3001',
     accessToken: 'tok',
     viaPlatform: true,

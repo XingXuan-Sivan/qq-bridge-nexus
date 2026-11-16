@@ -95,7 +95,6 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
-import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
 import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, agentCapabilitiesDir } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
@@ -1302,12 +1301,6 @@ async function externalPersonaTarget(providerId, id, rawLabel) {
   return { ok: true, uid: `${providerId}:${id}`, label: cached.name || id, source: 'provider' };
 }
 
-// 运行方案文件仓库（profiles/plans/*.yml）：方案的唯一定义处，config.json 只留指针。
-let planFileStore = null;
-function planStore() {
-  planFileStore ??= createPlanStore({ root: path.join(ROOT, 'profiles', 'plans'), log });
-  return planFileStore;
-}
 // 只改全局人格 / 手动静默：各会话单独的设置原样保留（现在保存在会话档案里）。
 // silent 不传时沿用当前值；mode 改回 active 时自动清掉 silent。
 // P3：手动静默策略存 config.json 的 silence.manual；state/current-role.json 只留 role/byKey（mode 作兼容标记）。
@@ -1409,13 +1402,6 @@ function normalizePromptBlockLimits(raw) {
     if (Number.isInteger(value) && value >= 0 && value <= 200000) out[key] = value;
   }
   return out;
-}
-
-/** 运行方案 id：只接受与注册表同形的短横线小写 id，非法值一律视为「没配」。 */
-function normalizeRuntimePlanId(value) {
-  if (typeof value !== 'string') return '';
-  const id = value.trim();
-  return /^[a-z][a-z0-9-]{1,39}$/.test(id) ? id : '';
 }
 
 /**
@@ -1884,8 +1870,9 @@ function loadConfig() {
       }
     }
   }
-  // 结构迁移：默认行为档案并入运行方案（chat 方案引用具体档案），方案定义搬进 profiles/plans。
-  // 旧键留在文件里只会让人以为还能改，启动时自愈删除一次。
+  // 结构迁移：早期版本把默认行为档案存在 config.behavior.default、把方案定义指针存在 config.runtime.plans。
+  // 两者现在分别由会话档案的 behavior 与平台条目的 defaultBehavior 承担；旧键留在文件里
+  // 只会让人以为还能改，启动时自愈删除一次。
   {
     const configFile = path.join(ROOT, 'config.json');
     const fresh = readConfigObject(configFile);
@@ -1895,7 +1882,7 @@ function loadConfig() {
     if (changed) {
       try {
         atomicWriteJson(configFile, fresh);
-        log('config.json：已移除 behavior.default（并入 chat 方案）与 runtime.plans（改存 profiles/plans）');
+        log('config.json：已移除 behavior.default 与 runtime.plans 两项废弃键');
       } catch (error) {
         log(`⚠️ 迁移 config.json 失败：${error?.message ?? error}`);
       }
@@ -1999,22 +1986,17 @@ function loadConfig() {
     promptBlocks: normalizePromptBlockLimits(file.limits?.promptBlocks),
   };
 
-  // 运行方案（P4）：定义在 profiles/plans/*.yml；默认方案是**用户平台条目级**的键
-  // （`platforms.users.<id>.defaultPlan`），会话自己的 planId 优先，都没设才回退内置常量。
+  // 运行期参数（空转回收、重启是否清零），与行为/能力档无关。
   cfg.runtime = {
     idleMinutes: Number(file.runtime?.idleMinutes) > 0 ? Number(file.runtime.idleMinutes) : 10,
     resetOnRestart: file.runtime?.resetOnRestart !== false,
   };
-  // 方案定义在 profiles/plans/*.yml，config.json 只留运行期参数。
 
-  // 行为档案来自用户侧平台（QQ）自己的目录；方案直接引用档案 id，不再由预设绑定。
+  // 行为档案来自用户侧平台（QQ）自己的目录；会话直接引用档案 id，不再经预设绑定。
   cfg.behaviors = loadBehaviorProfiles({ root: path.join(PLATFORMS_ROOT, 'qq', 'behaviors'), log });
-  const behaviorOfPlan = (planId) => {
-    const plan = planStore().get(planId);
-    return plan && plan.behavior !== 'none' ? cfg.behaviors.get(plan.behavior) : null;
-  };
-  const chatV1Behavior = behaviorOfPlan('social-v1');
-  const chatV2Behavior = behaviorOfPlan('social-v2');
+  const behaviorById = (id) => cfg.behaviors?.get?.(id) ?? null;
+  const chatV1Behavior = behaviorById('social-v1');
+  const chatV2Behavior = behaviorById('social-v2');
 
   // 默认 v1/v2 视图：没有会话上下文时（启动、全局 API）使用内置仿真方案的档案。
   const legacyV2 = cfg.socialV2;
@@ -2627,6 +2609,12 @@ async function main() {
     root: capabilitiesRoot(),
     log: (line) => log(line),
   });
+  // 会话没单独指定能力档时用哪一档：当前 Agent 平台在 agent-platform.yml 里申报的默认档。
+  // 声明面在进程生命周期内不变（改了要重启），所以只读一次。
+  const DECLARED_DEFAULT_CAPABILITY = String(
+    listAgentPlatformDirs({ root: AGENT_PLATFORMS_ROOT })
+      .find((item) => item.id === String(cfg.platforms?.active?.agent ?? ''))?.defaultCapability ?? '',
+  );
   const presetPolicy = createPresetPolicy({ capabilities: capabilityStore, log });
   const presetStore = createPresetStore({
     root: capabilitiesRoot(),
@@ -4318,10 +4306,19 @@ async function main() {
     }),
     log,
   });
-  let currentMode = 'chat'; // chat | closed-agent | reserved（仿真模式，由 DSH settings / state/mode.json 驱动）
-  // 运行方案（P4）：定义来自 profiles/plans/*.yml，默认方案存在用户平台条目上。
-  let runtimePlans = [];
-  let runtimePlansSource = null;
+  /** 行为档案的引擎 → 会话模式拼写（内部比较仍用历史拼写）。 */
+  function modeOfBehavior(behavior) {
+    const engine = behavior?.engine ?? '';
+    if (engine === 'v2') return 'reserved2';
+    if (engine === 'v1') return 'reserved';
+    return 'chat';
+  }
+  // 无会话上下文的默认引擎：由当前用户平台条目的 defaultBehavior 决定（没设就是聊天）。
+  // closed-agent 仍由管理控制器与 state/mode.json 覆盖（见 noteObservedMode）。
+  const bootBehavior = cfg.behaviors?.get?.(String(
+    cfg.platforms?.users?.[String(cfg.platforms?.active?.user ?? '')]?.defaultBehavior ?? '',
+  )) ?? null;
+  let currentMode = modeOfBehavior(bootBehavior); // chat | closed-agent | reserved | reserved2
   let lastMode = currentMode;
   // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
   // 旧版本这里硬编码 'router-standard'，但 DSH 0.1.5 已移除该 preset，硬编码会导致
@@ -4467,15 +4464,12 @@ async function main() {
     }
     return keys.filter(Boolean);
   }
-  /** 运行方案：文件仓库是定义源（profiles/plans/*.yml）；默认方案存在用户平台条目上。 */
-  function ensureRuntime() {
-    runtimePlans = planStore().list();
-    return runtimePlans;
-  }
-
-  /** 会话语义下的能力；解析不到返回 null（旧会话/未迁移方案按宽松处理）。 */
+  /**
+   * 会话的能力档：档案显式指定优先，否则用 Agent 平台申报的默认档。
+   * 解析不到返回 null（平台没申报、或档位文件被删），按缺省运行时处理。
+   */
   function capabilityOf(key) {
-    const id = sessionPlanOf(key)?.capability;
+    const id = state.profiles?.[key]?.capability || DECLARED_DEFAULT_CAPABILITY;
     return id ? capabilityStore.get(id) : null;
   }
 
@@ -4610,45 +4604,14 @@ async function main() {
   }
 
   /**
-   * 内置回落方案：用户平台没设默认方案时用它。内置文件只读、不会缺失，
-   * 用常量兜底比「没有默认」可预期。
+   * 会话的行为引用：档案显式值优先；`inherit` = 该用户平台配置的默认行为；`none` = 不挂。
    */
-  const DEFAULT_PLAN_ID = 'social-v2';
-
-  /** 某个用户平台条目上申报的默认方案 id；没申报时回退内置方案。 */
-  function platformDefaultPlanId(platformId) {
-    const id = normalizeRuntimePlanId(bridgeCfg?.platforms?.users?.[platformId]?.defaultPlan);
-    return id || DEFAULT_PLAN_ID;
+  function behaviorRefOf(key) {
+    const own = state.profiles?.[key]?.behavior;
+    if (own && own !== 'inherit') return own;
+    return String(bridgeCfg?.platforms?.users?.[platformIdOf(key)]?.defaultBehavior ?? '') || 'none';
   }
 
-  /**
-   * 某个用户平台的默认方案定义。条目上的方案文件不在时依次回退内置方案、目录首项，
-   * 免得手删了方案文件后新建会话直接没有方案。
-   */
-  function defaultPlanFor(platformId) {
-    const plans = ensureRuntime();
-    return findPlan(plans, platformDefaultPlanId(platformId))
-      ?? findPlan(plans, DEFAULT_PLAN_ID)
-      ?? plans[0]
-      ?? null;
-  }
-
-  /** 某会话固定的方案（只看档案，不看全局指针）。 */
-  function sessionPlanOf(key) {
-    const planId = state.profiles?.[key]?.planId;
-    if (!planId) return null;
-    ensureRuntime(); // 方案清单是懒建的：先确保 runtimePlans 已按当前 config 归一。
-    return findPlan(runtimePlans, planId);
-  }
-
-  /**
-   * 某会话当前生效的方案：会话固定优先，否则取它所在用户平台的默认方案。
-   */
-  function planOf(key) {
-    return sessionPlanOf(key) ?? defaultPlanFor(platformIdOf(key));
-  }
-
-  /** 受众为 owner 的方案只允许管理员私聊使用（取代旧 closed-agent 全局排他）。 */
   // ---- 会话权限级别（P11）----
   const fullGrants = new Map(); // key -> { expiresAt, timer }
 
@@ -4667,7 +4630,8 @@ async function main() {
   function permissionLevelOf(rawKey) {
     const key = apiKey(rawKey);
     const profile = state.profiles?.[key];
-    const chat = !sessionPlanOf(key)?.capability;
+    // 纯聊天会话（没有任何能力档）恒只读：权限档只对拿到工具的会话有意义。
+    const chat = !capabilityOf(key);
     const explicit = profile?.permission && profile.permission !== 'inherit' ? profile.permission : null;
     // closed-agent 期间权限由管理通道的级别决定（旧语义保留）；其余模式走全局默认 + 会话覆盖。
     if (!explicit && currentMode === 'closed-agent') {
@@ -4704,7 +4668,7 @@ async function main() {
 
   async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false, sessionId: explicitSessionId = null } = {}) {
     const key = apiKey(rawKey);
-    // 直通方案下档位归执行体：不回钉、不冒充。要改档走 applySessionPermission（写后核对）。
+    // 直通能力档下档位归执行体：不回钉、不冒充。要改档走 applySessionPermission（写后核对）。
     if (permissionAuthorityOf(key) === 'agent') return { ok: true, skipped: true, authority: 'agent' };
     // 建会话时还没 bindSession，必须把刚拿到的 sessionId 显式传进来。
     // 这里只能 `sessions.get` —— 它返回裸 id；`get(key)?.sessionId` 恒为 undefined，
@@ -4712,18 +4676,18 @@ async function main() {
     const sessionId = explicitSessionId || sessions.get(key);
     if (!sessionId || !agentPort.supports('permission')) return { ok: true, skipped: true };
     const level = permissionLevelOf(key);
-    const plan = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() });
+    const picked = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() });
     try {
       // port 交回的是已解包的回执；「这份回执算不算成功」由平台档的纯函数判定。
-      const { value } = await agentPort.applyPermission(sessionId, plan.preset);
-      const ok = permissionCommandSucceeded(value, plan.preset);
-      if (ok) pinnedPermissions.set(key, plan.preset);
+      const { value } = await agentPort.applyPermission(sessionId, picked.preset);
+      const ok = permissionCommandSucceeded(value, picked.preset);
+      if (ok) pinnedPermissions.set(key, picked.preset);
       else pinnedPermissions.delete(key);
-      ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason });
-      if (!ok && throwOnError) throw new Error(`权限预设 ${plan.preset} 结果不符合预期`);
-      return { ok, level: plan.level, preset: plan.preset };
+      ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: picked.level, preset: picked.preset, reason });
+      if (!ok && throwOnError) throw new Error(`权限预设 ${picked.preset} 结果不符合预期`);
+      return { ok, level: picked.level, preset: picked.preset };
     } catch (error) {
-      ext.audit.append('permission.pin_failed', { key, level: plan.level, preset: plan.preset, reason, error: String(error?.message ?? error) });
+      ext.audit.append('permission.pin_failed', { key, level: picked.level, preset: picked.preset, reason, error: String(error?.message ?? error) });
       if (throwOnError) throw error;
       return { ok: false, error: String(error?.message ?? error) };
     }
@@ -4849,7 +4813,6 @@ async function main() {
     const profile = state.profiles?.[key] ?? null;
     const sessionId = sessions.get(key) ?? null;
     if (!profile && !sessionId) return null;
-    const plan = planOf(key) ?? null;
     const capability = capabilityOf(key);
     const runtime = runtimeOf(key);
     const authority = permissionAuthorityOf(key);
@@ -4899,28 +4862,29 @@ async function main() {
       // 会话绑在执行体实例上：与当前活动执行体不一致时界面要标「跟随建会话时的实例」。
       instanceForeign: instance !== agentPort.id,
       agentPlatform: { id: agentPort.id, label: impl?.label ?? agentPort.id },
-      plan: plan
+      // 会话生效的能力档（含受众与生效方式）与行为档案：界面直接用它渲染两张卡，
+      // 不再单独拉方案定义。
+      capability: capability
         ? {
-          id: plan.id,
-          label: plan.label,
-          audience: plan.audience,
-          builtin: plan.builtin,
-          capability: plan.capability,
+          id: capability.id,
+          label: capability.label,
+          note: capability.note,
+          audience: capability.audience,
           apply: runtime.apply,
           authority: runtime.permission,
           prompt: runtime.prompt,
         }
         : null,
-      capability: capability ? { id: capability.id, label: capability.label } : null,
+      behavior: behaviorRefOf(key),
       // 话术怎么进：`degraded` 为真时界面要显示黄条（降级的理由在 reason 里）。
       promptChannel: promptChannelOf(key),
       permission,
     };
   }
 
-  function planAudienceBlocks(key) {
-    const plan = planOf(key);
-    if (!plan || plan.audience !== 'owner') return false;
+  /** 能力档的受众是 owner 时，只允许主人与管理员私聊使用。 */
+  function capabilityBlocks(key) {
+    if ((capabilityOf(key)?.audience ?? 'access') !== 'owner') return false;
     return !(isOwnerPrivate(key) || isAdminPrivate(key));
   }
 
@@ -4932,33 +4896,18 @@ async function main() {
     return (registry ?? []).find?.((item) => item.id === behaviorId)?.engine ?? '';
   }
 
-  /** 方案 → 引擎：行为引擎决定仿真内核，工具决定聊天 / Agent。三者都是数据，不是枚举。 */
-  function planMode(plan) {
-    if (!plan) return null;
-    const raw = plan.behavior ?? 'none';
-    const behaviorId = raw === 'inherit' ? 'none' : raw;
-    // 引擎由行为类型注册表给出（behavior-types → behavior-engines），不在这里写死 kind 名字。
-    const engine = behaviorEngineOf(behaviorId);
-    if (engine === 'v2') return 'reserved2';
-    if (engine === 'v1') return 'reserved';
-    return legacyModeOfPlan({ ...plan, behavior: 'none' });
-  }
-
+  /**
+   * 会话的有效运行模式。引擎由行为档案决定（v1/v2），没挂行为就是普通聊天；
+   * closed-agent 是全局独占引擎，开启时覆盖一切（随管理通道退役）。
+   */
   function effectiveMode(key) {
-    const profile = state.profiles?.[key];
-    // 会话固定了方案：引擎完全由该方案决定（行为 kind → 仿真引擎，工具 → 聊天/Agent）。
-    if (profile?.planId) {
-      const plan = sessionPlanOf(key);
-      if (plan) return planMode(plan) ?? currentMode;
-    }
-    // 否则用全局方案；老档案的 mode 覆盖仍然生效（迁移期兼容）。
-    return resolveEffectiveMode(currentMode, profile?.mode);
+    if (currentMode === 'closed-agent') return 'closed-agent';
+    return modeOfBehavior(behaviorFor(key));
   }
-  /** 是否还有任何会话会跑二代仿真（全局 v2，或有人固定 v2）。用于全局接口的总开关。 */
+  /** 是否还有任何会话会跑二代仿真（全局接口的总开关用）。 */
   function anyV2Session() {
     if (currentMode === 'closed-agent') return false;
-    if (currentMode === 'reserved2') return true;
-    return Object.values(state.profiles ?? {}).some((p) => p?.mode === 'reserved2');
+    return Object.keys(state.profiles ?? {}).some((key) => effectiveMode(key) === 'reserved2');
   }
   /** 两态单源名单的生效值；不再有 owner/管理员豁免，也没有旧白名单兜底。 */
   function profileAccessAllowed(axis, key) {
@@ -4972,7 +4921,7 @@ async function main() {
   }
   function passiveAllowed(key) {
     if (!isUsableMode(effectiveMode(key))) return false;
-    if (planAudienceBlocks(key)) return false;
+    if (capabilityBlocks(key)) return false;
     return profileAccessAllowed('passive', key);
   }
   /** 当前生效的会话 key（供控制台下拉、定时目标、群成员对账等枚举用）。 */
@@ -4994,7 +4943,7 @@ async function main() {
   function proactiveAllowed(key) {
     const mode = effectiveMode(key);
     if (mode === 'inactive' || mode === 'closed-agent') return false;
-    if (planAudienceBlocks(key)) return false;
+    if (capabilityBlocks(key)) return false;
     return profileAccessAllowed('proactive', key);
   }
   function schedulerTargetAllowed(key) {
@@ -5065,8 +5014,8 @@ async function main() {
       if (dshPresetIds.length === 0) await refreshPresetList();
       if (level === 'L3' || permissionCatalog === null) await refreshPermissionCatalog();
       if (level === 'L3' && permissionCatalog === null) throw new Error('无法确认 DSH 是否提供 qq-full-ask 预设（权限目录读取失败），按安全策略拒绝开启 L3');
-      const plan = resolveLevelPlan(level, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
-      if (!plan.ok) throw new Error(plan.error);
+      const resolved = resolveLevelPlan(level, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
+      if (!resolved.ok) throw new Error(resolved.error);
     }
     // 本地文件必写：远端（DSH）挂掉时降级/关闭仍要生效，重启后也不会回到旧模式。
     const existing = modeStore.readLocal() ?? {};
@@ -5590,39 +5539,31 @@ async function main() {
     return dshDefaultPreset || '';
   }
 
-  /** 当前模式下的会话预设；返回 undefined 表示「该模式下没有可安全使用的 preset」 */
+  /** 会话的 Agent 预设；返回 undefined 表示「该会话没有可安全使用的 preset」 */
   function modePreset(key, mode, cfg) {
     if (mode === 'closed-agent') {
-      // v0.3.0：closed-agent 的 preset 由权限级别决定（L1 = 只读工具白名单 preset）。
+      // closed-agent 的 preset 由权限级别决定（L1 = 只读工具白名单 preset）。
       // 级别未知/计划不成立时返回 undefined，由 ensureSession fail-closed。
-      const plan = closedAgentPlan();
-      return plan.ok ? (plan.agentPreset || undefined) : undefined;
+      const resolved = closedAgentPlan();
+      return resolved.ok ? (resolved.agentPreset || undefined) : undefined;
     }
-    // 直通：能力档明确要求「不装预设」。档案里残留的 presetId 也不能挂上——
-    // 直通的含义就是不改执行体环境，挂上就等于偷偷装了一个。
+    // 直通：能力档明确要求「不装预设」——直通的含义就是不改执行体环境。
     if (runtimeOf(key).apply === 'passthrough') return undefined;
-    // 会话档案可以固定 preset；否则按模式推导（方案不带工具面，能力档只决定档位）。
-    const override = state.profiles?.[key]?.presetId;
-    if (override && mode !== 'closed-agent') {
-      const picked = resolvePresetName(override, { strict: true });
-      if (picked) return picked;
-    }
     const wanted = mode === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
     return resolvePresetName(wanted, { strict: true }) || undefined;
   }
 
   /**
-   * 会话当前使用的行为档案。P6 起只看方案：none = 不带行为，其余按档案 id 解析。
-   * 是否「有仿真引擎」由行为 kind 决定（planMode），不再看模式枚举。
+   * 会话当前使用的行为档案：`inherit` 取平台默认行为，`none` = 不带行为，其余按档案 id 解析。
+   * 是否「有仿真引擎」由档案自己的 engine 决定（见 effectiveMode）。
    */
   function behaviorFor(key) {
-    const plan = planOf(key);
-    const raw = plan?.behavior ?? 'none';
-    if (!raw || raw === 'none' || raw === 'inherit') return null;
+    const raw = behaviorRefOf(key);
+    if (!raw || raw === 'none') return null;
     try {
       return resolveBehavior(cfg.behaviors, raw);
     } catch (error) {
-      log(`⚠️ 方案 ${plan?.id ?? key} 引用的行为档案不可用：${error?.message ?? error}`);
+      log(`⚠️ 会话 ${key} 引用的行为档案「${raw}」不可用：${error?.message ?? error}`);
       return null;
     }
   }
@@ -6245,7 +6186,7 @@ async function main() {
           const r = await ext.controller.initialize(actualMode);
           const c = ext.controller.current();
           if (c.mode && c.mode !== currentMode && r.action !== 'fallback') currentMode = c.mode;
-          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action, plan: defaultPlanFor(runningUserPlatformId())?.id ?? null });
+          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action });
         } catch (error) {
           log(`⚠️ 管理控制器启动校验失败：${error?.message ?? error}；按安全模式运行`);
           if (currentMode === 'closed-agent') { currentMode = L0_MODES.includes(cfg.admin?.safeMode) ? cfg.admin.safeMode : 'reserved2'; }
@@ -6973,13 +6914,12 @@ async function main() {
             });
             return;
           }
-          // 全局状态里的方案是「当前运行用户平台」的默认方案（界面指标格就这么读）。
-          const statusPlan = defaultPlanFor(runningUserPlatformId());
+          // 全局状态里的行为是「当前运行用户平台」配置的默认行为（行为未指定的会话用它）。
+          const statusBehavior = String(bridgeCfg?.platforms?.users?.[runningUserPlatformId()]?.defaultBehavior ?? '') || null;
           sendJson({
             mode: currentMode,
             level: currentLevel,
-            planId: statusPlan?.id ?? null,
-            planLabel: statusPlan?.label ?? null,
+            defaultBehavior: statusBehavior,
             closedAgentPreset,
             adminPendingRequests: ext.controller.pendingRequests().length,
             botAccount,
@@ -7712,6 +7652,13 @@ async function main() {
           sendJson({ ok: true, kinds: listBehaviorTypes() });
           return;
         }
+        /** 行为档案被谁引用：显式挂了它的会话 + 把它设为默认行为的用户平台。 */
+        const behaviorRefs = (behaviorId) => ({
+          sessions: Object.keys(state.profiles ?? {}).filter((key) => state.profiles[key]?.behavior === behaviorId),
+          platforms: Object.entries(cfg.platforms?.users ?? {})
+            .filter(([, entry]) => String(entry?.defaultBehavior ?? '') === behaviorId)
+            .map(([id]) => id),
+        });
         // 全局配置：行为档案 YAML 直接编辑；原样保存，保存前按 schema 校验。
         const behaviorRoute = url.pathname.match(/^\/api\/config\/behaviors(?:\/([a-z0-9][a-z0-9._-]{0,63})(?:\/(clone|validate|reset))?)?$/);
         if (behaviorRoute) {
@@ -7720,12 +7667,11 @@ async function main() {
           const behaviorsRoot = path.join(PLATFORMS_ROOT, 'qq', 'behaviors');
           try {
             if (!id && req.method === 'GET') {
-              // 「被引用」= 哪些运行方案把这个档案当作行为；换行为时先看这里再删。
-              const plans = planStore().list();
+              // 「被引用」= 哪些会话显式挂了它、哪些用户平台把它设为默认；换行为时先看这里再删。
               const behaviors = listBehaviorFiles({ root: behaviorsRoot }).map((entry) => ({
                 ...entry,
                 builtin: hasFactory(behaviorsRoot, entry.id),
-                usedBy: plans.filter((plan) => plan.behavior === entry.id).map((plan) => plan.id),
+                usedBy: behaviorRefs(entry.id),
               }));
               sendJson({ ok: true, behaviors });
               return;
@@ -7777,10 +7723,10 @@ async function main() {
               return;
             }
             if (req.method === 'DELETE' && !action) {
-              const plans = planStore().list();
-              const usedBy = plans.filter((plan) => plan.behavior === id).map((plan) => plan.id);
-              if (usedBy.length) {
-                sendJson({ ok: false, error: `这套行为正被方案引用（${usedBy.join('、')}），先换掉再删` }, 409);
+              const usedBy = behaviorRefs(id);
+              if (usedBy.sessions.length || usedBy.platforms.length) {
+                const where = [...usedBy.sessions, ...usedBy.platforms.map((pid) => `${pid}（默认行为）`)];
+                sendJson({ ok: false, error: `这套行为正被引用（${where.join('、')}），先换掉再删` }, 409);
                 return;
               }
               removeBehaviorFile({ root: behaviorsRoot, id });
@@ -7859,25 +7805,25 @@ async function main() {
               }
               // 校验与诊断共用一个函数（`vetPlatformConfig`）：控制台接受的值不能比诊断宽。
               // 校的是「合完的整份」：补丁只带改动的字段，必填项得靠旧值补齐。
-              // `enabled` 是条目级开关（装配不装配）、`defaultPlan` 是条目级默认方案（用户平台才有），
+              // `enabled` 是条目级开关（装配不装配）、`defaultBehavior` 是条目级默认行为（用户平台才有），
               // 两者都不是平台选项，所以不进 schema 校验：否则「配置本身不合规」时反而无法停用它。
-              const { enabled: _enabled, defaultPlan, ...fields } = body;
+              const { enabled: _enabled, defaultBehavior, ...fields } = body;
               const vet = Object.keys(fields).length
                 ? vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...fields })
                 : { error: '' };
               if (vet.error) { sendJson({ ok: false, error: vet.error }, 400); return; }
-              // 默认运行方案：只认方案目录里真有的 id（空串 = 清掉，回退内置方案）。
-              if (defaultPlan !== undefined) {
+              // 默认行为：只认行为档案目录里真有的 id（空串 = 不挂默认行为）。
+              if (defaultBehavior !== undefined) {
                 if (side !== 'user') {
-                  sendJson({ ok: false, error: '默认运行方案是用户平台的条目级设置' }, 400);
+                  sendJson({ ok: false, error: '默认行为是用户平台的条目级设置' }, 400);
                   return;
                 }
-                const wantedPlan = normalizeRuntimePlanId(defaultPlan);
-                if (defaultPlan && (!wantedPlan || !findPlan(ensureRuntime(), wantedPlan))) {
-                  sendJson({ ok: false, error: '没有这个运行方案' }, 400);
+                const wanted = String(defaultBehavior ?? '').trim();
+                if (wanted && wanted !== 'none' && !cfg.behaviors?.has?.(wanted)) {
+                  sendJson({ ok: false, error: '没有这个行为档案' }, 400);
                   return;
                 }
-                body.defaultPlan = wantedPlan;
+                body.defaultBehavior = wanted === 'none' ? '' : wanted;
               }
               // 模型选择：平台声明了 models 能力位时，按它自己的实时目录校。保存一个对端不认的
               // 模型，要到下一条消息的 selectModel 上才会失败（还带着重试与刷屏），所以在这里拦住。
@@ -8227,28 +8173,8 @@ async function main() {
           sendJson({ ok: true, mode: currentMode, level: currentLevel, closedAgentPreset, dshSynced: lastObservedDshMode === currentMode });
           return;
         }
-        // 运行方案（P4）：读定义与「当前运行用户平台」的默认方案。控制台用它渲染方案页与会话下拉。
-        // C8 起路径从 `/api/runtime/plans` 改成 `/api/plans`：方案不是运行期临时物，
-        // 它跟 `/api/platforms/registry` 一样是“配置面”，不该挤在 `runtime/` 下面。
-        if (req.method === 'GET' && url.pathname === '/api/plans') {
-          const plans = ensureRuntime();
-          const platform = runningUserPlatformId();
-          const plan = defaultPlanFor(platform);
-          sendJson({
-            ok: true,
-            plans,
-            // 默认方案按用户平台各一份；这里给的是当前运行平台的，页面只拿它做摘要。
-            platform,
-            defaultPlan: plan?.id ?? null,
-            defaultPlanDef: plan,
-            legacy: { mode: legacyModeOfPlan(plan), level: legacyLevelOfPlan(plan) },
-            resetOnRestart: cfg.runtime?.resetOnRestart !== false,
-            idleMinutes: cfg.runtime?.idleMinutes ?? 10,
-          });
-          return;
-        }
-        // 默认平台（P2）：默认 Agent 平台与默认用户实例。会话自己的 planId 与
-        // 平台侧的 `platforms.active` 优先；默认运行方案不在这个端点上（它是条目级键）。
+        // 默认平台（P2）：默认 Agent 平台与默认用户实例。会话行为、能力档都在会话与平台条目上，
+        // 这里只回答「默认装配哪一个」。
         if (url.pathname === '/api/config/runtime') {
           // 默认执行体与默认用户实例都没有单独一份配置：它们读的就是 `platforms.active`，
           // 与注册表同源。
@@ -8313,16 +8239,21 @@ async function main() {
           }
         }
         // 能力预设的桥接侧补丁（工具可见集 / 平台提示词）：只读列表 + 单条保存。
+        /** 能力档被哪些会话显式引用；是否当前 Agent 平台的默认档。 */
+        const capabilityInUse = (capabilityId) => ({
+          sessions: Object.keys(state.profiles ?? {}).filter((key) => state.profiles[key]?.capability === capabilityId),
+          isDefault: DECLARED_DEFAULT_CAPABILITY === capabilityId,
+        });
         if (req.method === 'GET' && (url.pathname === '/api/runtime/capabilities' || url.pathname === '/api/capabilities')) {
-          const plans = planStore().list();
           // Agent 模块的勾选状态直接由能力档的 rows 段算（C4 起 agents/ 已删除，能力档 id 就是
           // Agent 预设 id）；前端仍按目录里的模块 id 做交集展示（只读）。
           const capabilities = capabilityStore.list().map((entry) => {
-            const usedBy = plans.filter((plan) => plan.capability === entry.id);
+            const used = capabilityInUse(entry.id);
             const rows = capabilityStore.get(entry.id)?.rows ?? [];
             return {
               ...entry,
-              usedBy: usedBy.map((plan) => plan.id),
+              usedBy: used.sessions,
+              isDefault: used.isDefault,
               agentModules: rows.map((row) => String(row?.id ?? '')).filter(Boolean),
             };
           });
@@ -8354,8 +8285,9 @@ async function main() {
         if (req.method === 'DELETE' && url.pathname.startsWith('/api/runtime/capabilities/')) {
           const capabilityId = decodeURIComponent(url.pathname.slice('/api/runtime/capabilities/'.length));
           try {
-            const usedBy = planStore().list().filter((plan) => plan.capability === capabilityId).map((plan) => plan.id);
-            if (usedBy.length) throw new Error(`这套能力正被方案引用（${usedBy.join('、')}），先换掉再删`);
+            const used = capabilityInUse(capabilityId);
+            if (used.sessions.length) throw new Error(`这套能力正被会话引用（${used.sessions.join('、')}），先换掉再删`);
+            if (used.isDefault) throw new Error('这套能力是当前 Agent 平台的默认档，不能删');
             const removed = capabilityStore.remove(capabilityId);
             ext.audit.append('capability.remove', { id: capabilityId });
             sendJson({ ok: true, removed, capabilities: capabilityStore.list() });
@@ -8388,50 +8320,6 @@ async function main() {
             sendJson({ ok: true, capability: saved, capabilities: capabilityStore.list() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '保存失败' }, 400);
-          }
-          return;
-        }
-        // 保存 / 更新一套自定义方案：写 profiles/plans/<id>.yml；内置方案只读，要改先克隆。
-        if (req.method === 'POST' && url.pathname === '/api/plans') {
-          const body = await readBody();
-          try {
-            const plan = planStore().save(body);
-            ensureRuntime();
-            sendJson({ ok: true, plan, plans: runtimePlans });
-          } catch (error) {
-            sendJson({ ok: false, error: error?.message || '保存失败' }, 400);
-          }
-          return;
-        }
-        // 内置方案重置为出厂内容（自定义方案没有出厂副本）。
-        if (req.method === 'POST' && /^\/api\/plans\/[a-z][a-z0-9-]{1,39}\/reset$/.test(url.pathname)) {
-          const planId = normalizeRuntimePlanId(url.pathname.split('/')[3]);
-          try {
-            const plan = planStore().reset(planId);
-            ensureRuntime();
-            ext.audit.append('runtime.plan.reset', { plan: planId });
-            sendJson({ ok: true, plan, plans: runtimePlans });
-          } catch (error) {
-            sendJson({ ok: false, error: error?.message || '重置失败' }, 400);
-          }
-          return;
-        }
-        // 删除一套自定义方案；正被任何用户平台当默认方案、或是内置方案的都不允许删。
-        if (req.method === 'DELETE' && url.pathname.startsWith('/api/plans/')) {
-          const planId = normalizeRuntimePlanId(decodeURIComponent(url.pathname.slice('/api/plans/'.length)));
-          const holders = Object.entries(bridgeCfg?.platforms?.users ?? {})
-            .filter(([, item]) => item?.defaultPlan === planId)
-            .map(([id]) => id);
-          if (planId && holders.length) {
-            sendJson({ ok: false, error: `${holders.join('、')} 正把它当默认方案，先换一个默认方案再删` }, 409);
-            return;
-          }
-          try {
-            planStore().remove(planId);
-            ensureRuntime();
-            sendJson({ ok: true, plans: runtimePlans });
-          } catch (error) {
-            sendJson({ ok: false, error: error?.message || '删除失败' }, 400);
           }
           return;
         }
@@ -8503,12 +8391,6 @@ async function main() {
             }
             return;
           }
-        }
-        // 全局配置页的「默认行为档案」下拉：预设没有 behavior 绑定时用它兜底（绑定仍以 preset.yml 为准）。
-        // 默认行为档案已并入运行方案（chat 方案引用具体档案），这里只剩 410。
-        if (url.pathname === '/api/config/behavior-default') {
-          sendJson({ ok: false, error: '默认行为档案已并入运行方案（profiles/plans/chat.yml）' }, 410);
-          return;
         }
         const roleUsedAnywhere = (name) => roleInUse(readRoleState(), name, sessions.keys());
         // 按会话设置人格卡（逻辑在 src/role-per-key.js）：use = default（跟全局）/ off（不挂卡）/ role（用 role 这张卡）
@@ -9263,17 +9145,17 @@ async function main() {
                 maxChars: Number(cfg.socialV2?.initialPromptMaxChars) || 2000,
               },
               wake,
-              mode: profile?.mode ?? 'inherit',
+              // 会话级选择：`behavior` 的 inherit = 用平台默认行为；`capability` 空 = 用平台默认能力档。
+              behavior: profile?.behavior ?? 'inherit',
+              defaultBehavior: String(bridgeCfg?.platforms?.users?.[platformIdOf(key)]?.defaultBehavior ?? '') || null,
+              behaviors: [...(cfg.behaviors?.keys?.() ?? [])],
               effectiveMode: effectiveMode(key),
-              // 会话级的运行方案下拉（跟随平台默认 = null）；presetId 是会话级的预设覆盖，与方案无关。
-              planId: profile?.planId ?? null,
-              plans: runtimePlans.map((p) => ({ id: p.id, label: p.label, audience: p.audience, builtin: p.builtin })),
-              // 下拉里的「跟随平台默认（当前：…）」要显示那个方案的名字，所以给整份定义（与 `/api/plans` 的 defaultPlanDef 同形）。
-              defaultPlan: defaultPlanFor(platformIdOf(key)) ?? null,
+              capability: profile?.capability ?? null,
+              defaultCapability: DECLARED_DEFAULT_CAPABILITY || null,
+              capabilities: capabilityStore.list().map((entry) => ({ id: entry.id, label: entry.label, audience: entry.audience })),
               permission: permissionPayload(key),
               // 生效方式（能力档 runtime.apply）：页面靠它决定要不要显示预设/沙箱那几张卡。
               apply: runtimeOf(key).apply,
-              presetId: profile?.presetId ?? null,
               presets: dshPresetIds.slice(),
               model: profile?.model ?? null,
               effectiveModel: profileModelOf(key) ?? {
@@ -9311,30 +9193,18 @@ async function main() {
                 patch.model = { provider: selection.provider, model: selection.model, reasoning: selection.reasoningEffort || null };
               }
             }
-            if (Object.hasOwn(body, 'mode')) {
-              if (!['inherit', 'chat', 'reserved', 'reserved2'].includes(body.mode)) { sendJson({ ok: false, error: '运行模式取值无效' }, 400); return; }
-              patch.mode = body.mode;
+            if (Object.hasOwn(body, 'behavior')) {
+              const raw = String(body.behavior ?? '').trim();
+              if (!raw) patch.behavior = 'inherit';
+              else if (raw === 'inherit' || raw === 'none') patch.behavior = raw;
+              else if (!cfg.behaviors?.has?.(raw)) { sendJson({ ok: false, error: '没有这个行为档案' }, 400); return; }
+              else patch.behavior = raw;
             }
-            if (Object.hasOwn(body, 'planId')) {
-              const raw = String(body.planId ?? '').trim();
-              if (!raw) patch.planId = null;
-              else if (!findPlan(runtimePlans, normalizeRuntimePlanId(raw))) { sendJson({ ok: false, error: '没有这个运行方案' }, 400); return; }
-              else patch.planId = raw;
-            }
-            if (Object.hasOwn(body, 'presetId')) {
-              // 直通不挂预设：写进来也不会被用，等于给用户一个假开关。
-              if (passthroughOf(key)) {
-                sendJson({ ok: false, error: '当前方案为直通：不向执行体装预设，preset 由执行体自己决定' }, 409);
-                return;
-              }
-              const raw = String(body.presetId ?? '').trim();
-              if (!raw) patch.presetId = null;
-              else {
-                if (raw.length > 80) { sendJson({ ok: false, error: 'preset 名过长' }, 400); return; }
-                if (dshPresetIds.length === 0) { sendJson({ ok: false, error: 'DSH preset 清单还没就绪，请等 DSH 连接后再保存' }, 409); return; }
-                if (!dshPresetIds.includes(raw)) { sendJson({ ok: false, error: `preset "${raw}" 不在 DSH 可用清单里` }, 400); return; }
-                patch.presetId = raw;
-              }
+            if (Object.hasOwn(body, 'capability')) {
+              const raw = String(body.capability ?? '').trim();
+              if (!raw) patch.capability = null;
+              else if (!capabilityStore.get(raw)) { sendJson({ ok: false, error: '没有这个能力档' }, 400); return; }
+              else patch.capability = raw;
             }
             if (body.access && typeof body.access === 'object') {
               const current = normalizeAccessConfig(state.defaults);
@@ -14041,7 +13911,7 @@ async function main() {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
           // 直通下档位归执行体：不重钉，也不因回读不一致丢弃会话。
           if (permissionAuthorityOf(key) === 'bridge') {
-            const chatSession = !sessionPlanOf(key)?.capability;
+            const chatSession = !capabilityOf(key);
             const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() }).preset;
             if (pinnedPermissions.get(key) !== wanted) {
               const repinned = await pinSessionPermission(key, { reason: 'mode-change', throwOnError: false, sessionId: existing });
@@ -14165,7 +14035,7 @@ async function main() {
       // 直通（permission: agent）不钉：档位归执行体，桥接只读、只按用户操作代改。
       if (permissionAuthorityOf(key) === 'bridge') {
         // closed-agent 下定权限是硬要求：钉不上就丢弃会话；普通聊天会话钉不上不影响聊天。
-        const chatSession = currentMode !== 'closed-agent' && !sessionPlanOf(key)?.capability;
+        const chatSession = currentMode !== 'closed-agent' && !capabilityOf(key);
         const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
         if (!pinned.ok && !chatSession) {
           log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);

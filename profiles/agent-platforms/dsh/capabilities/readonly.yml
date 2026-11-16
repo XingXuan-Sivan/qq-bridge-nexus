@@ -7,6 +7,7 @@ version: 1
 id: readonly
 label: Agent · 只读
 note: 只读文件与检索，不改任何东西
+audience: owner
 tools:
   platform:
     getPrompt: true

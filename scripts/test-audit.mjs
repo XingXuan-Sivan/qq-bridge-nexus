@@ -139,8 +139,7 @@ const tests = [
   'test-prompt-registry.mjs',
   // 配置归一（P3）：定时任务/定时静默/插件配置的设置存 config，状态文件只留运行态，旧文件首读迁移。
   'test-config-unify.mjs',
-  // 运行方案（P4）：定义归一、legacy 投影、激活指针的一次性迁移。
-  'test-runtime-plans.mjs',
+  // 运行期组合语义：引擎由行为决定、能力由能力档决定、受众由能力档申报。
   'test-runtime-combo.mjs',
   'test-runtime-capabilities.mjs',
   // 直通运行期（P5）：不挂预设、提示四通道、权限代改的回读与漂移、会话详情两个端点。

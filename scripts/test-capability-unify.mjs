@@ -3,7 +3,7 @@
 // 这里守的是**方向**而不是某个字段：
 //   - 服务端/前端都只能读 capabilities/<id>.yml，不许再有第二份能力定义；
 //   - 能力档的元信息（tools/label/note/preset）不许混进平台话术（那是平台侧的职责）；
-//   - plan 只说「用哪个能力档」，不许再叠加 agent 字段（C4 起两者是同一个 id）；
+//   - 方案层已退役：能力档与行为档案分别由会话档案/平台条目直接引用，不得再长出中间层；
 //   - agents/ 目录已并入 capabilities/，任何残留都说明有地方还在写第二份正文。
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -67,14 +67,9 @@ for (const name of fs.readdirSync(capDir)) {
   }
 }
 
-// 5) plan 只说能力档：不得再有 agent 字段。
-const planDir = path.join(ROOT, 'profiles/plans');
-for (const name of fs.readdirSync(planDir)) {
-  if (!name.endsWith('.yml')) continue;
-  const doc = parseYaml(fs.readFileSync(path.join(planDir, name), 'utf8')) ?? {};
-  assert.equal(doc.agent, undefined, `plans/${name} 仍带 agent 字段（C4 起与 capability 合一）`);
-  assert.ok(capabilityIds.includes(doc.capability), `plans/${name} 的 capability「${doc.capability}」不是已存在的能力档`);
-}
+// 5) 方案层已退役：不得再出现方案目录或方案仓库。
+assert.ok(!fs.existsSync(path.join(ROOT, 'profiles/plans')), 'profiles/plans/ 仍存在（方案层已退役）');
+assert.ok(!fs.existsSync(path.join(ROOT, 'src/runtime/plans.mjs')), 'src/runtime/plans.mjs 仍存在（方案层已退役）');
 
 // 6) agents/ 目录已并入 capabilities/：任何残留都说明还有第二份正文在写。
 assert.ok(
@@ -82,8 +77,7 @@ assert.ok(
   'profiles/agent-platforms/dsh/agents/ 仍存在（C4 起已并入 capabilities/）',
 );
 
-// 7) 运行方案与执行侧都以 capability 为准。
+// 7) 执行侧以 capability 为准。
 assert.ok(read('src/bridge.js').includes('capabilityAllowsFlag'), 'bridge 未按 capability 收紧工具');
-assert.ok(read('src/runtime/plans.mjs').includes('capability'), 'plans 未接 capability');
 
-console.log('capability unify red lines: 17 checks passed');
+console.log('capability unify red lines: 15 checks passed');

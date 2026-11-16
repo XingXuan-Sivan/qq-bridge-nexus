@@ -19,12 +19,24 @@ import { createAccessConfig, normalizeAccessConfig } from './access.mjs';
 import { readSessionRef } from './ref.mjs';
 import { normalizeSessionPermission } from './permission.mjs';
 
-export const SESSION_DIR_VERSION = 2;
+export const SESSION_DIR_VERSION = 3;
 /** 旧三态模型的默认值；只用于“有档案但没有 defaults.json”的迁移读取。 */
 export const DEFAULT_ACCESS = { passive: 'deny', proactive: 'deny' };
 
-const MODE_VALUES = new Set(['inherit', 'chat', 'reserved', 'reserved2']);
 const AXES = ['passive', 'proactive'];
+
+/** 会话引用的 id（行为档案 / 能力档）：与会话 key 同一套短横线小写文法。 */
+function normalizeRef(value, max = 40) {
+  const id = normalizeString(value, max);
+  return /^[a-z][a-z0-9-]{1,39}$/.test(id) ? id : '';
+}
+
+/** 行为字段：`inherit` = 用用户平台默认行为，`none` = 不挂行为，其余是行为档案 id。 */
+function normalizeBehavior(value) {
+  const id = normalizeString(value, 40);
+  if (id === 'inherit' || id === 'none') return id;
+  return normalizeRef(id) || 'inherit';
+}
 
 /**
  * 会话 key → 相对路径（`qq/group/123.json`、`qq@napcat/group/123.json`）；不合法返回 null。
@@ -99,9 +111,10 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     key: canonical,
     displayName: normalizeString(raw.displayName, 120),
     ...(legacyAccess ? { legacyAccess } : {}),
-    mode: MODE_VALUES.has(raw.mode) ? raw.mode : 'inherit',
-    // 运行方案覆盖（P4）：与 mode 二选一，planId 优先；保留 mode 兼容旧数据。
-    planId: normalizeString(raw.planId, 40) || null,
+    // 运行时选择：能力档决定工具面 / 生效方式 / 权限权威，行为档案决定仿真内核。
+    // null = 跟随 Agent 平台申报的默认能力档；inherit = 跟随用户平台的默认行为。
+    capability: normalizeRef(raw.capability) || null,
+    behavior: normalizeBehavior(raw.behavior),
     persona: { mode: personaMode, name: personaMode === 'card' ? personaName || null : null },
     prompt: { initialText, updatedAt: Number(promptRaw.updatedAt) > 0 ? Number(promptRaw.updatedAt) : 0 },
     wake: { config: wakeRaw.config && typeof wakeRaw.config === 'object' ? wakeRaw.config : null },
@@ -112,7 +125,6 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
         reasoning: normalizeString(modelRaw.reasoning, 40) || null,
       }
       : null,
-    presetId: normalizeString(raw.presetId, 80) || null,
     // 会话级权限覆盖（`inherit` = 跟随全局）。只记「选了哪一档」，级别 → 平台预设名的映射
     // 由 Agent 侧适配器给；权限档归执行体时它只是档案里的一条记录，不是生效值。
     permission: normalizeSessionPermission(raw.permission),
@@ -158,13 +170,12 @@ export function createProfile(key, patch = {}, now = Date.now) {
     version: SESSION_DIR_VERSION,
     key: canonical,
     displayName: '',
-    mode: 'inherit',
-    planId: null,
+    capability: null,
+    behavior: 'inherit',
     persona: { mode: 'inherit', name: null },
     prompt: { initialText: '', updatedAt: 0 },
     wake: { config: null },
     model: null,
-    presetId: null,
     permission: 'inherit',
     permissionMirror: null,
     binding: { agentRef: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
@@ -195,7 +206,7 @@ export function createProfile(key, patch = {}, now = Date.now) {
 export function applyPatch(profile, patch, now = Date.now) {
   const next = structuredClone(profile);
   const p = patch && typeof patch === 'object' ? patch : {};
-  for (const field of ['displayName', 'mode', 'planId', 'presetId']) {
+  for (const field of ['displayName', 'capability', 'behavior']) {
     if (Object.hasOwn(p, field)) next[field] = p[field];
   }
   if (Object.hasOwn(p, 'permission')) next.permission = normalizeSessionPermission(p.permission);

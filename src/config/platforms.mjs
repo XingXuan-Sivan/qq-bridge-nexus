@@ -27,14 +27,14 @@
  *   3. `active` 指向不存在的 id 时**不静默回退**：保留原值，由统一注册表的
  *      `active_unregistered` 诊断和启动期的明确报错把它暴露出来。
  *
- * v3 把「默认运行方案」从 `runtime.defaultPlan` 挪到用户平台条目上
- * （`platforms.users.<id>.defaultPlan`）：它描述的是「这个平台新建的会话用哪套方案」，
- * 不是全局唯一值。它是**条目级键**，与 `enabled` 同级，不进 `options` ——
- * 适配器收到一个与它无关的键只会在自己那里报未知字段。
+ * v4 的用户平台条目带 `defaultBehavior`：该平台新建、或行为未指定的会话挂哪份行为档案。
+ * 它是**条目级键**，与 `enabled` 同级，不进 `options` —— 适配器收到一个与它无关的键
+ * 只会在自己那里报未知字段。空串表示不挂行为。能力档的默认值不在这里：它由 Agent
+ * 平台自己在 `agent-platform.yml` 里申报（`defaultCapability`）。
  */
 
 /** 当前配置结构版本。缺失或小于它即视为旧结构，需要迁移。 */
-export const CONFIG_VERSION = 3;
+export const CONFIG_VERSION = 4;
 
 /** v1 没有「Agent 平台选择」这一项：`dsh.*` 段就是 DSH 自己的。 */
 export const DEFAULT_USER_PLATFORM = 'qq';
@@ -58,10 +58,10 @@ export const AGENT_ENDPOINT_KEYS = Object.freeze([
 /** 平台 id 与会话 key 同一套文法（见 src/session/key.mjs），避免「配置能用、key 写不出」。 */
 const PLATFORM_ID_RE = /^[a-z][a-z0-9-]{0,15}$/;
 const ACCOUNT_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;
-/** 运行方案 id 与会话 key 同一套文法（`profiles/plans/*.yml` 文件名）。 */
-const PLAN_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
+/** 行为档案 id 与会话 key 同一套文法（`profiles/platforms/<id>/behaviors/*.yml` 文件名）。 */
+const BEHAVIOR_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 /** 平台目录里每个平台自己的几个键；其余键视为「想写 transport/options 但写散了」。 */
-const ENTRY_KEYS = Object.freeze(['account', 'enabled', 'defaultPlan', 'transport', 'options', 'endpoint']);
+const ENTRY_KEYS = Object.freeze(['account', 'enabled', 'defaultBehavior', 'transport', 'options', 'endpoint']);
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -71,10 +71,11 @@ function platformId(raw, fallback) {
   return PLATFORM_ID_RE.test(id) ? id : fallback;
 }
 
-/** 方案 id：不合法一律归成空串（= 该平台没设默认方案，由内核回退内置方案）。 */
-function planId(raw) {
+/** 行为档案 id：不合法一律归成空串（= 该平台不挂默认行为）。`none` 显式表示不挂。 */
+function behaviorRef(raw) {
   const id = typeof raw === 'string' ? raw.trim() : '';
-  return PLAN_ID_RE.test(id) ? id : '';
+  if (id === 'none') return 'none';
+  return BEHAVIOR_ID_RE.test(id) ? id : '';
 }
 
 /** 账号名：不合法或空都归成空串（= 该平台的默认账号）。 */
@@ -124,11 +125,13 @@ function normalizeUserEntry(entry) {
   // 写进 options 里会让适配器收到一个与它无关的键。缺省即启用。
   const wanted = src.enabled !== undefined ? src.enabled : merged.enabled;
   delete merged.enabled;
-  // `defaultPlan` 同理：「这个平台新建的会话默认用哪套方案」是桥接自己的语义。
-  const plan = planId(src.defaultPlan) || planId(merged.defaultPlan);
+  // `defaultBehavior` 同理：「这个平台新建的会话默认挂哪份行为」是桥接自己的语义。
+  const behavior = behaviorRef(src.defaultBehavior) || behaviorRef(merged.defaultBehavior);
+  delete merged.defaultBehavior;
+  // 已退役的方案指针不能再落在 options 里：那是内核私有语义，不是平台选项。
   delete merged.defaultPlan;
   const { connection, options } = splitByKeys(merged, USER_TRANSPORT_KEYS);
-  return { account: accountName(src.account), enabled: wanted !== false, defaultPlan: plan, transport: connection, options };
+  return { account: accountName(src.account), enabled: wanted !== false, defaultBehavior: behavior, transport: connection, options };
 }
 
 function normalizeAgentEntry(entry) {
@@ -155,8 +158,8 @@ function normalizeCollection(raw, normalizeEntry) {
 }
 
 /**
- * 旧结构迁移（纯函数，不读写盘）。两步按顺序走：v1 → v2 收平台段，v2 → v3 把
- * 全局默认方案搬到活动用户平台条目上。
+ * 旧结构迁移（纯函数，不读写盘）。v1 → v2 收平台段；v2/v3 → v4 把默认方案换成默认行为
+ * 并删掉两处旧存放点。
  *
  * `raw` 是**已经 `JSON.parse` 过的配置对象**，不是文件路径：传路径会被当成空配置，
  * 一声不响地（不报错）返回空表 —— 这类静默失败正是本模块要消灭的。
@@ -197,25 +200,27 @@ export function migrateConfig(raw) {
     delete next.dsh;
   }
 
-  // v2 → v3：默认运行方案改成条目级。旧全局值只引给当时活动的用户平台——
-  // 那是它当时真正在服务的那些会话；其他平台保持未设置，回退内置方案。
+  // 方案层退役（v2/v3 → v4）：默认方案的两个旧存放点（`runtime.defaultPlan`、
+  // `platforms.users.<id>.defaultPlan`）换成行为档案 id。旧值语义是方案 id，
+  // 只有两份仿真方案本身就是行为档案，工具型方案一律变成「不挂行为」。
   if (Number(next.configVersion) < CONFIG_VERSION) {
     const base = readPlatforms(next);
-    const legacyPlan = planId(next.runtime?.defaultPlan);
-    if (legacyPlan) {
-      const target = base.users[base.active.user] ?? normalizeUserEntry({});
-      if (!target.defaultPlan) {
-        base.users[base.active.user] = { ...target, defaultPlan: legacyPlan };
-        notes.push(`runtime.defaultPlan (${legacyPlan}) → platforms.users.${base.active.user}.defaultPlan`);
-      }
+    const rawUsers = isPlainObject(next.platforms?.users) ? next.platforms.users : {};
+    for (const [id, entry] of Object.entries(base.users)) {
+      const legacy = String(rawUsers[id]?.defaultPlan ?? '').trim()
+        || (id === base.active.user ? String(next.runtime?.defaultPlan ?? '').trim() : '');
+      if (!legacy) continue;
+      const mapped = /^social-v[12]$/.test(legacy) ? legacy : '';
+      base.users[id] = { ...entry, defaultBehavior: mapped };
+      notes.push(`默认方案 ${legacy}（${id}）→ 默认行为 ${mapped || '不挂行为'}`);
     }
-    next.platforms = platformsForWrite(base);
     if (next.runtime && 'defaultPlan' in next.runtime) {
       const runtime = { ...next.runtime };
       delete runtime.defaultPlan;
       if (Object.keys(runtime).length) next.runtime = runtime; else delete next.runtime;
       notes.push('runtime.defaultPlan 已删除');
     }
+    next.platforms = platformsForWrite(base);
     next.configVersion = CONFIG_VERSION;
   }
   return { config: next, migrated: true, notes };
@@ -313,11 +318,11 @@ export function flatPlatformEntry(platforms, side, id) {
   }
   const raw = platforms?.users?.[wanted];
   const entry = normalizeUserEntry(raw);
-  // `account` / `enabled` / `defaultPlan` 都是条目级字段，但它们只对**存在的条目**有意义：
+  // `account` / `enabled` / `defaultBehavior` 都是条目级字段，但它们只对**存在的条目**有意义：
   // 缺条目时给空段，不编一个「已启用」让调用方以为这条实例在用。
   const own = raw === undefined
     ? { account: entry.account }
-    : { account: entry.account, enabled: entry.enabled, defaultPlan: entry.defaultPlan };
+    : { account: entry.account, enabled: entry.enabled, defaultBehavior: entry.defaultBehavior };
   return { ...own, ...entry.transport, ...entry.options };
 }
 

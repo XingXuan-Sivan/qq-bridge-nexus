@@ -1,12 +1,13 @@
 // Agent 侧能力档：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml。
 //
-// 一个能力档是**唯一档位真源**，四段各管一件事：
+// 一个能力档是**唯一档位真源**，五段各管一件事：
 //   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
 //   runtime    怎么生效（装不装预设 / 提示怎么注入 / 谁定权限档）
+//   audience   谁能用（`access` = 受准入名单约束的普通会话，`owner` = 仅主人与管理员私聊）
 //   preset     Agent 平台预设的元信息（名字 / 描述 / 顺序 / 绑定行为）
 //   rows       预设正文（Agent 平台的插件行列表，由该平台的 build 适配器渲染成产物）
 //   extensions 扩展授权（MCP / 技能白名单，Hub 读取）
-// 能力档 id 与 Agent 预设 id 同名：plan 只引用能力，不再另写 preset 名。
+// 能力档 id 与 Agent 预设 id 同名：会话只引用能力，不再另写 preset 名。
 // `runtime.apply: passthrough` 的能力档不装预设（rows 允许为空），
 // 此时 preset 段只作为「建议值」供界面展示，不参与构建。
 import fs from 'node:fs';
@@ -24,7 +25,7 @@ function requireRoot(root) {
   return root;
 }
 
-const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，runtime = 生效方式，preset = 预设元信息，rows = 插件行列表。\n'
+const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，runtime = 生效方式，audience = 可用受众，preset = 预设元信息，rows = 插件行列表。\n'
   + '# 由控制台平台详情的「能力」维护；保存 tools 不会重写 preset / rows。';
 
 const PRESET_KEYS = Object.freeze(['name', 'description', 'order', 'behavior']);
@@ -35,6 +36,8 @@ export const CAPABILITY_APPLY = Object.freeze(['preset', 'passthrough']);
 export const CAPABILITY_PROMPT = Object.freeze(['none', 'system', 'prefix', 'tool']);
 /** 权限档归谁：桥接钉住（preset），还是读执行体自己的档位（passthrough）。 */
 export const CAPABILITY_PERMISSION = Object.freeze(['bridge', 'agent']);
+/** 可用受众：普通准入会话，还是仅主人 / 管理员私聊。 */
+export const CAPABILITY_AUDIENCE = Object.freeze(['access', 'owner']);
 
 const RUNTIME_KEYS = Object.freeze(['apply', 'prompt', 'permission', 'narrow']);
 
@@ -45,6 +48,9 @@ export const CAPABILITY_RUNTIME_DEFAULTS = Object.freeze({
   permission: 'bridge',
   narrow: [],
 });
+
+/** `audience` 段缺省值：不写时等于「受准入名单约束」，与引入前一致。 */
+export const CAPABILITY_AUDIENCE_DEFAULT = 'access';
 
 function boolMap(value) {
   const out = {};
@@ -147,6 +153,9 @@ export function normalizeCapability(raw, { id, source = 'capability' } = {}) {
       skills: stringList(value.tools?.skills),
     },
     runtime: normalizeRuntime(value.runtime),
+    audience: CAPABILITY_AUDIENCE.includes(String(value.audience ?? '').trim())
+      ? String(value.audience).trim()
+      : CAPABILITY_AUDIENCE_DEFAULT,
     preset: normalizePreset(value.preset),
     extensions: normalizeExtensions(value.extensions),
     rows: normalizeRows(value.rows),
@@ -171,6 +180,7 @@ function capabilityText(capability) {
   if (RUNTIME_KEYS.some((key) => JSON.stringify(runtime[key]) !== JSON.stringify(CAPABILITY_RUNTIME_DEFAULTS[key]))) {
     body.runtime = Object.fromEntries(RUNTIME_KEYS.map((key) => [key, runtime[key]]));
   }
+  if (capability.audience && capability.audience !== CAPABILITY_AUDIENCE_DEFAULT) body.audience = capability.audience;
   if (capability.preset) {
     body.preset = Object.fromEntries(PRESET_KEYS.filter((key) => capability.preset[key] !== '').map((key) => [key, capability.preset[key]]));
   }

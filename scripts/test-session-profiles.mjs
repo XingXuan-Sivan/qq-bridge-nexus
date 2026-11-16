@@ -52,7 +52,8 @@ test('profile：无档案 404；建绑后返回默认档案与并集列表', asy
       assert.equal(got.status, 200);
       assert.equal(got.json.key, KEY);
       assert.equal(got.json.sessionId, sessionId);
-      assert.equal(got.json.mode, 'inherit');
+      assert.equal(got.json.behavior, 'inherit');
+      assert.equal(got.json.effectiveMode, 'chat');
       assert.equal(got.json.access.passive, 'allow');
       assert.equal(got.json.access.passiveMode, 'allow');
       assert.equal(got.json.access.proactive, 'allow');

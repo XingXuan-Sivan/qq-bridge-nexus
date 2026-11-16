@@ -1,9 +1,0 @@
-version: 1
-id: chat
-label: 聊天模式
-note: 白名单内，随时对话。
-order: 10
-agentPlatform: auto
-behavior: none
-capability: chat
-audience: access

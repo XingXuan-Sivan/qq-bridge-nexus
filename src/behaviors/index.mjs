@@ -2,7 +2,7 @@
 //
 // 行为档案描述“这个平台里怎么说话/怎么等待”，不描述运行模式、模型、准入或安全上限。
 // 权威源：profiles/platforms/<platform>/behaviors/<id>.yml（用户侧平台自己提供），
-// 由 profiles/plans/<id>.yml 的 `behavior` 字段引用。缺失或 kind 不匹配一律失败关闭。
+// 由会话档案的 `behavior` 字段或平台条目的 `defaultBehavior` 引用。缺失或 kind 不匹配一律失败关闭。
 //
 // 档案是「默认值 + 覆盖」的全量快照：字段清单与默认值来自行为引擎定义，写盘时铺满所有键。
 import fs from 'node:fs';

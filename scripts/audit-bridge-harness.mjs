@@ -73,7 +73,6 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
-import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan } from '../src/runtime/plans.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
 import { listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 // 配置 v2（C2）：bridge.js 在 loadConfig 里做迁移与派生视图，夹具剥 import 后要按同名补回。
@@ -155,7 +154,7 @@ import * as schedulingCursor from '../src/scheduling/cursor.mjs';
 import * as schedulingPolicy from '../src/scheduling/policy.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, plans = [],
+export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, capabilities = [],
   // fetchDelay：按网关动作人为拖慢一条请求（目前只用于 get_msg），构造「入站还在解析」的窗口。
   fetchDelay = {} } = {}) {
   // 取 realpath：macOS 默认的 /var/folders 是 /private/var/folders 的软链接，而语音库解析会返回 realpath（挡 symlink 逃逸），
@@ -209,12 +208,12 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     doc.tools = { ...(doc.tools ?? {}), platform: { ...(doc.tools?.platform ?? {}), ...platformTools } };
     fs.writeFileSync(file, stringifyYaml(doc));
   }
-  // 自定义方案：写进同一套 profiles/plans，内置方案继续只读。
-  for (const plan of plans) {
-    if (!plan?.id) continue;
+  // 自定义能力档：写进同一个 Agent 平台的 capabilities 目录，内置档继续只读。
+  for (const capability of capabilities) {
+    if (!capability?.id) continue;
     fs.writeFileSync(
-      path.join(temp, 'profiles/plans', `${plan.id}.yml`),
-      stringifyYaml({ version: 1, builtin: false, platform: 'qq', agentPlatform: 'dsh', behavior: 'none', audience: 'access', ...plan }),
+      path.join(temp, 'profiles/agent-platforms/dsh/capabilities', `${capability.id}.yml`),
+      stringifyYaml({ version: 1, builtin: false, note: capability.id, ...capability }),
     );
   }
   // r4：额外状态文件（用于测试"启动时读到损坏/旧版文件"这类路径）。
@@ -408,7 +407,17 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     getMode() { return { mode: currentMode, level: currentLevel }; },
     voiceCfg, voiceLibrary, resolveVoicePathForV2, resolveVoicePathForOperator,
     voiceBudgetCheck, sendVoiceV2, sendVoiceForV2, assertOutboundAuditOk,
-    setMode(value) { currentMode = value; },
+    // 引擎由「会话行为 → 平台条目 defaultBehavior」决定，全局 mode 只剩 closed-agent。
+    // 旧用例用 setMode('chat'/'reserved'/'reserved2') 切引擎：映射成改平台默认行为。
+    setMode(value) {
+      if (value !== 'closed-agent') {
+        const behavior = value === 'reserved2' ? 'social-v2' : value === 'reserved' ? 'social-v1' : '';
+        cfg.platforms = cfg.platforms ?? {};
+        cfg.platforms.users = cfg.platforms.users ?? {};
+        cfg.platforms.users.qq = { ...(cfg.platforms.users.qq ?? {}), defaultBehavior: behavior };
+      }
+      currentMode = value;
+    },
     setReady(value) { agentReady = value; },
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
@@ -443,7 +452,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 这里注入 temp 版本，避免测试写到真实 profiles/ 或读到不存在的目录。
     PLATFORMS_ROOT: path.join(temp, 'profiles', 'platforms'),
     AGENT_PLATFORMS_ROOT: path.join(temp, 'profiles', 'agent-platforms'),
-    PLANS_ROOT: path.join(temp, 'profiles', 'plans'),
     SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
     // 能力档目录跟着活动 Agent 平台走；真实现按模块级 AGENT_PLATFORMS_ROOT 拼，
     // 这里改成 temp 版本，读写的仍然是夹具复制过去的 capabilities。
@@ -459,7 +467,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ...schedulingCursor,
     ...schedulingPolicy,
     ...platformPromptLib,
-    createPlanStore, listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
+    listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
     AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfig, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances,
     // `platforms.active` 的落地要真注册表；VM 里没有装配内置平台，桩掉。
@@ -515,14 +523,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     resolveAccess,
     resolveAccessSummary,
     wakeAccessAxis,
-    BUILTIN_PLANS: undefined,
-    normalizePlans: undefined,
-    normalizePlan,
-    legacyModeOfPlan,
-    legacyLevelOfPlan,
-    planIdForLegacy,
-    findPlan,
-  normalizePermissionConfig,
+    normalizePermissionConfig,
   normalizeSessionPermission,
   FORBIDDEN_PERMISSION_PRESETS,
   presetForLevel,

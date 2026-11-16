@@ -11,6 +11,8 @@ version: 1
 id: direct
 label: 直通 · 主人
 note: 不装环境，用 Agent 侧现成工具与权限；不做工具级限制
+# 直通把环境交给执行体自己，里面是 Agent 侧的本机工具：只对主人与管理员私聊开放。
+audience: owner
 tools:
   platform:
     getPrompt: true

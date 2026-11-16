@@ -1,9 +1,0 @@
-version: 1
-id: social-v1
-label: 一代仿真
-note: 按策略自然参与群聊（v1 行为）。
-order: 20
-agentPlatform: auto
-behavior: social-v1
-capability: chat
-audience: access

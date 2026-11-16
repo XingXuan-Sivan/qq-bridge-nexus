@@ -7,6 +7,7 @@ version: 1
 id: workspace
 label: Agent · 工作区读写
 note: 在工作区内读写与执行，越界触发审批
+audience: owner
 tools:
   platform:
     getPrompt: true

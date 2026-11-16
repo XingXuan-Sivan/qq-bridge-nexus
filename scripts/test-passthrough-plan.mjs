@@ -11,7 +11,7 @@ import { bridgeHarness } from './audit-bridge-harness.mjs';
 const PRIVATE = 'qq:private:123';
 const GROUP = 'qq:group:456';
 const CONSOLE = { 'x-console-token': 'fixture-console-token' };
-const DIRECT = { planId: 'direct', mode: 'inherit' };
+const DIRECT = { capability: 'direct' };
 
 // 只有一条「完全不带」的能力档：用来验证 `tool` 通道不是 `none` 的别名。
 const TOOL_CAPABILITY = `version: 1
@@ -37,8 +37,6 @@ preset:
   behavior: none
 rows: []
 `;
-
-const TOOL_PLAN = { id: 'pt-tool', label: '直通 · 工具拉取', capability: 'pt-tool', audience: 'owner' };
 
 // 夹具只抄平台声明，不抄平台话术（那份是给人改的内容）。用到话术的两条用例自己给一份，
 // 否则 `platformPromptFor` 读不到文件会退回空串，前缀通道的断言就变成了「断言空串」。
@@ -73,7 +71,7 @@ async function withServer(h, run) {
 const sessionPath = (suffix) => `/api/sessions/${encodeURIComponent(PRIVATE)}${suffix}`;
 
 test('直通建会话：不挂 preset，system 通道降级为首轮前缀并只记一条审计', async () => {
-  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'direct' } }, files: PROMPT_FILE });
+  const h = await bridgeHarness({ files: PROMPT_FILE });
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
@@ -104,7 +102,7 @@ test('直通建会话：不挂 preset，system 通道降级为首轮前缀并只
 });
 
 test('prefix 通道：首轮带一次平台话术，重建会话后重新带', async () => {
-  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'direct' } }, files: PROMPT_FILE });
+  const h = await bridgeHarness({ files: PROMPT_FILE });
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     const sessionId = await h.ensureSession(PRIVATE);
@@ -128,12 +126,10 @@ test('prefix 通道：首轮带一次平台话术，重建会话后重新带', a
 
 test('tool 通道：完全不带平台话术，靠模型自己调 qq_get_prompt', async () => {
   const h = await bridgeHarness({
-    config: { runtime: { defaultPlan: 'pt-tool' } },
-    plans: [TOOL_PLAN],
     files: { 'profiles/agent-platforms/dsh/capabilities/pt-tool.yml': TOOL_CAPABILITY },
   });
   try {
-    h.state.profiles[PRIVATE] = { planId: 'pt-tool', mode: 'inherit' };
+    h.state.profiles[PRIVATE] = { capability: 'pt-tool' };
     assert.equal(h.runtimeOf(PRIVATE).apply, 'passthrough');
     assert.equal(h.runtimeOf(PRIVATE).prompt, 'tool');
 
@@ -148,7 +144,7 @@ test('tool 通道：完全不带平台话术，靠模型自己调 qq_get_prompt'
 });
 
 test('权限代改：写后回读一致才算成功，不一致时报错且不覆盖基线', async () => {
-  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'direct' } } });
+  const h = await bridgeHarness();
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
@@ -174,7 +170,7 @@ test('权限代改：写后回读一致才算成功，不一致时报错且不�
 });
 
 test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批档并标出漂移', async () => {
-  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'direct' } } });
+  const h = await bridgeHarness();
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
@@ -188,11 +184,10 @@ test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批�
       assert.equal(payload.instanceForeign, false);
       assert.equal(payload.agentPlatform.id, 'dsh');
 
-      assert.equal(payload.plan.id, 'direct');
-      assert.equal(payload.plan.apply, 'passthrough');
-      assert.equal(payload.plan.authority, 'agent');
-      assert.equal(payload.plan.prompt, 'system');
       assert.equal(payload.capability.id, 'direct');
+      assert.equal(payload.capability.apply, 'passthrough');
+      assert.equal(payload.capability.authority, 'agent');
+      assert.equal(payload.capability.prompt, 'system');
 
       assert.equal(payload.promptChannel.requested, 'system');
       assert.equal(payload.promptChannel.channel, 'prefix');
@@ -227,12 +222,12 @@ test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批�
 });
 
 test('POST /api/sessions/:key/permission：直通可代改，桥接权威下拒绝，免审批档一律不接', async () => {
-  const h = await bridgeHarness({ config: { runtime: { defaultPlan: 'direct' } } });
+  const h = await bridgeHarness();
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
     // 桥接权威的会话：没有能力档 ⇒ runtime 段按缺省（permission: bridge）。
-    h.state.profiles[GROUP] = { mode: 'inherit' };
+    h.state.profiles[GROUP] = { behavior: 'none' };
 
     await withServer(h, async (port) => {
       const groupPath = `/api/sessions/${encodeURIComponent(GROUP)}/permission`;

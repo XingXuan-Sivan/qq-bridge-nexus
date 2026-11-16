@@ -101,9 +101,9 @@ test('全局配置页：每个分区都写 config.json 顶层段，准入与会�
   try {
     // [分区, 方法, 路径, 载荷, config.json 里的落点断言]
     const sections = [
-      // 默认运行方案是用户平台的条目级键：写口与平台详情同一个（`platforms.users.<id>.defaultPlan`）。
-      ['默认运行方案', 'PATCH', '/api/platforms/registry/user/qq/config', { defaultPlan: 'social-v2' },
-        (c) => c.platforms?.users?.qq?.defaultPlan === 'social-v2'],
+      // 默认行为是用户平台的条目级键：写口与平台详情同一个（`platforms.users.<id>.defaultBehavior`）。
+      ['默认行为', 'PATCH', '/api/platforms/registry/user/qq/config', { defaultBehavior: 'social-v2' },
+        (c) => c.platforms?.users?.qq?.defaultBehavior === 'social-v2'],
       ['默认人格', 'POST', '/api/config/role-default', { value: '审计卡' },
         (c) => c.role?.default === '审计卡'],
       ['人格卡生效方式', 'POST', '/api/roles/limit', { saveApply: 'immediate' },

@@ -176,18 +176,20 @@ test('②③ 二代 → agent L2 → 回落：聊天会话休眠后原样复用�
   });
 });
 
-test('④ 作废：回到的模式不同、过期、/reset、关掉开关', async () => {
-  // 回落到 chat（preset 不同）→ 归档，不复用
+test('④ 作废：回到的引擎不同、过期、/reset、关掉开关', async () => {
+  // 回落到 chat（平台默认行为为空）→ 归档，不复用
   await withHarness({ admin: { consoleEscalationCooldownMs: 0, safeMode: 'chat' } }, async (h) => {
     h.setMode('reserved2');
     const sid = await h.ensureSession(GROUP_KEY);
     await h.ext.controller.consoleSet({ mode: 'closed-agent', level: 'L1' });
     await settle();
     assert.ok(h.state.dormantSessions[GROUP_KEY]);
+    // 引擎由平台默认行为决定：客服聊天（空行为）与休眠前的二代仿真不同，不能复用旧会话。
+    h.setMode('chat');
     await h.ext.controller.panic();
     await settle();
     assert.equal(h.getMode().mode, 'chat');
-    assert.ok(h.calls.archived.includes(sid), '回到的模式 / preset 不同 → 归档');
+    assert.ok(h.calls.archived.includes(sid), '回到的引擎 / preset 不同 → 归档');
     assert.notEqual(await h.ensureSession(GROUP_KEY), sid);
   });
   // 过期

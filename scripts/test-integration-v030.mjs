@@ -484,6 +484,8 @@ await test('审计 F2：/panic 无条件退役运维会话并作废其审批；�
   assert.equal(h.state.sessions[key], undefined, '运维会话已退役');
   assert.ok(h.calls.cancelled.includes(sid), 'DSH 侧旧回合被停止');
   assert.equal(h.ext.approvals.pendingFor(key).length, 0);
+  // 清单恢复后再让 owner 说话：panic 之后的这条消息会建新会话，能建出来才测得到旧审批。
+  h.setPresets(['standard', 'chat', 'chat-v2', 'readonly', 'workspace', 'full']);
   await h.handleIncoming('private', OWNER, ownerPm('通过'), h.cfg);
   await settle();
   assert.ok(!h.calls.responds.some((r) => r.eventId === 'e-old' && r.outcome?.value === 'allowed-once'), '旧审批不能在 panic 后被批准');

@@ -4,6 +4,8 @@ label: DeepSeek Harness
 tools: tools.yml
 # C4 起能力档就是预设列表（capabilities/<id>.yml 的 preset + rows），不再有并列的 agents/ 目录。
 capabilities: capabilities
+# 未单独指定能力档的会话用哪一档（会话档案里的 capability 为空时）。
+defaultCapability: chat-v2
 # 运行期适配器：能力声明与权限/agent preset 映射（内核只经 src/agent-side/registry 读）。
 runtime: adapters/runtime.mjs
 # 产物目录不在这里声明：约定为 <仓库根>/artifacts/<id>/，

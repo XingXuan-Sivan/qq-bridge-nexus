@@ -95,7 +95,7 @@ import { createRoleRefreshTracker, roleFingerprint, buildRoleRefreshBlock, norma
 import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCandidateStore, createImageHourlyLimiter, IMAGE_SEARCH_PER_HOUR, IMAGE_SEND_PER_HOUR, IMAGE_PREVIEW_MAX_BYTES, IMAGE_SEND_MAX_BYTES } from './web-image.js';
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, agentCapabilitiesDir } from './profiles/paths.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, SHARED_CAPABILITIES_DIR, agentCapabilitiesDir } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
@@ -1969,6 +1969,7 @@ function loadConfig() {
   // 唯一源是当前 Agent 平台的 capabilities/<id>.yml；单会话仍由 capabilityAllows 收紧副作用工具。
   cfg.tools = platformFlags({
     root: activeCapabilitiesDir,
+    sharedRoot: SHARED_CAPABILITIES_DIR,
     log: (message) => log(`⚠️ ${message}`),
   });
   // 旧的读点（webImage / ownerRelay / ownerGroupAccess / sendVoice / setStickerRemark）
@@ -2607,6 +2608,7 @@ async function main() {
   // 能力档 id 就是 Agent 预设 id（C4），所以 presetPolicy / presetStore 都指向同一个目录。
   const capabilityStore = createCapabilityStore({
     root: capabilitiesRoot(),
+    sharedRoot: SHARED_CAPABILITIES_DIR,
     log: (line) => log(line),
   });
   // 会话没单独指定能力档时用哪一档：当前 Agent 平台在 agent-platform.yml 里申报的默认档。

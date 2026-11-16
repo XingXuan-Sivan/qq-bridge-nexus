@@ -22,7 +22,7 @@ import { loadBehaviorProfiles, validateBehaviorText } from '../src/behaviors/ind
 import { loadBehaviorTypes, typeFields } from '../src/behaviors/types.mjs';
 import { flattenConfig, getEngine, listEngines } from '../src/behaviors/engines.mjs';
 import { factoryDir, listFactoryIds, readFactoryText } from '../src/profiles/factory.mjs';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, SHARED_CAPABILITIES_DIR, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
 
 const problems = [];
 const warnings = [];
@@ -174,35 +174,46 @@ for (const id of agentPlatformIds) {
   }
   const capsDir = path.join(dir, 'capabilities');
   if (!fs.existsSync(capsDir)) note(`Agent 平台 ${id} 缺 capabilities/`);
-  else checkFactoryPairs(capsDir, `Agent 平台 ${id} 的 capabilities`);
   if (fs.existsSync(path.join(dir, 'agents'))) {
     note(`Agent 平台 ${id} 还留着 agents/（能力档已吸收预设，正文由 build 适配器渲染）`);
   }
 }
 
-// 3) 能力档：工具面显式写全，audience 取值合法，出厂副本成对（每个 Agent 平台各一批）
+// 3) 能力档：工具面显式写全，audience 取值合法，出厂副本成对（各 Agent 平台一批 + 一批跨平台共用）
 const capabilities = [];
+const capabilityIds = new Set();
 const declaredCapabilities = new Map();
-for (const agentId of agentPlatformIds) {
-  const capsRoot = agentCapabilitiesDir(agentId);
-  const list = createCapabilityStore({ root: capsRoot }).list();
-  capabilities.push(...list);
-  declaredCapabilities.set(agentId, new Set(list.map((item) => item.id)));
+
+/** 一批能力档的字段约定；返回这批档的 id 集合。 */
+function checkCapabilityDir(capsRoot, label) {
+  checkFactoryPairs(capsRoot, label);
   for (const name of ymlFiles(capsRoot)) {
     const raw = readYaml(path.join(capsRoot, name));
     if (raw.audience !== undefined && !['access', 'owner'].includes(String(raw.audience))) {
-      note(`能力档 ${agentId}/${name} 的 audience 只能是 access 或 owner（现在 ${raw.audience}）`);
+      note(`能力档 ${label}/${name} 的 audience 只能是 access 或 owner（现在 ${raw.audience}）`);
     }
   }
+  const list = createCapabilityStore({ root: capsRoot }).list();
   for (const capability of list) {
     const explicit = capability.tools?.platform ?? {};
     for (const tool of PLATFORM_TOOLS) {
-      if (typeof explicit[tool.flag] !== 'boolean') note(`能力档 ${agentId}/${capability.id} 的 tools.platform 缺 ${tool.flag}（必须显式写全）`);
+      if (typeof explicit[tool.flag] !== 'boolean') note(`能力档 ${label}/${capability.id} 的 tools.platform 缺 ${tool.flag}（必须显式写全）`);
     }
     for (const flag of Object.keys(explicit)) {
-      if (!PLATFORM_TOOLS.some((tool) => tool.flag === flag)) note(`能力档 ${agentId}/${capability.id} 的 tools.platform 含未知工具 ${flag}`);
+      if (!PLATFORM_TOOLS.some((tool) => tool.flag === flag)) note(`能力档 ${label}/${capability.id} 的 tools.platform 含未知工具 ${flag}`);
     }
+    if (capabilityIds.has(capability.id)) continue;
+    capabilityIds.add(capability.id);
+    capabilities.push(capability);
   }
+  return new Set(list.map((item) => item.id));
+}
+
+// 跨平台共用的能力档：任何 Agent 平台都能选，平台目录里的同名档优先。
+const sharedCapabilities = checkCapabilityDir(SHARED_CAPABILITIES_DIR, '共用能力档');
+for (const agentId of agentPlatformIds) {
+  const own = checkCapabilityDir(agentCapabilitiesDir(agentId), `Agent 平台 ${agentId}`);
+  declaredCapabilities.set(agentId, new Set([...own, ...sharedCapabilities]));
 }
 
 // 4) 引用面：Agent 平台申报的默认能力档必须真实存在。

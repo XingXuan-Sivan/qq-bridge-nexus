@@ -1,7 +1,8 @@
-# 能力档（Agent 侧，唯一档位真源）：tools = 工具面，runtime = 生效方式，
-# preset = 预设元信息（直通下只作建议值），rows = 插件行列表（直通为空）。
+# 能力档（跨 Agent 平台共用）：放在 profiles/capabilities/ 下，所有 Agent 平台都能选。
 #
-# 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、会话编排。
+# 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、会话编排、平台工具。
+# 它和 full / workspace 是同一类档位（同一套接口、同样可以被会话随便选），
+# 唯一差别是不改执行体的环境 —— 会话跑在该 Agent 平台「手动新建一个会话」时的默认环境里。
 # MCP 不在追加之列：四个 MCP 服务器由安装期写进执行体自己的配置
 # （`adapters/install.mjs` 的 `# === qq-bridge MCP BEGIN ===` 区块），与 preset 无关，
 # 所以不装 preset 也不会丢 MCP。
@@ -9,10 +10,8 @@
 
 version: 1
 id: direct
-label: 直通 · 主人
-note: 不装环境，用 Agent 侧现成工具与权限；不做工具级限制
-# 直通把环境交给执行体自己，里面是 Agent 侧的本机工具：只对主人与管理员私聊开放。
-audience: owner
+label: 直通
+note: 不装环境，用 Agent 平台现成的会话环境、工具与权限；只附加本平台工具
 tools:
   platform:
     getPrompt: true
@@ -71,8 +70,8 @@ runtime:
   # 投递侧 deny 名单（可选）。直通下它不是硬边界，只拦「经由桥接」的调用。
   narrow: []
 preset:
-  name: 直通 · 主人
-  description: 不装 preset 与沙箱，直接使用 Agent 侧的会话、工具与权限档。
+  name: 直通
+  description: 不装 preset 与沙箱，直接使用 Agent 平台的会话环境、工具与权限档。
   order: 20
   behavior: none
 rows: []

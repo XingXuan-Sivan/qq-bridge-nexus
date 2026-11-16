@@ -9,6 +9,8 @@ export const PLATFORMS_ROOT = path.join(PROFILES_ROOT, 'platforms');
 export const AGENT_PLATFORMS_ROOT = path.join(PROFILES_ROOT, 'agent-platforms');
 export const BEHAVIOR_ENGINES_ROOT = path.join(PROFILES_ROOT, 'behavior-engines');
 export const SCHEMAS_ROOT = path.join(PROFILES_ROOT, 'schemas');
+/** 与 Agent 平台无关的能力档（直通档等）：所有 Agent 平台都能取到，平台目录里的同名档优先。 */
+export const SHARED_CAPABILITIES_DIR = path.join(PROFILES_ROOT, 'capabilities');
 
 export function platformDir(platformId) {
   return path.join(PLATFORMS_ROOT, platformId);

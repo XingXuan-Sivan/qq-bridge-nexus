@@ -452,6 +452,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 这里注入 temp 版本，避免测试写到真实 profiles/ 或读到不存在的目录。
     PLATFORMS_ROOT: path.join(temp, 'profiles', 'platforms'),
     AGENT_PLATFORMS_ROOT: path.join(temp, 'profiles', 'agent-platforms'),
+    SHARED_CAPABILITIES_DIR: path.join(temp, 'profiles', 'capabilities'),
     SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
     // 能力档目录跟着活动 Agent 平台走；真实现按模块级 AGENT_PLATFORMS_ROOT 拼，
     // 这里改成 temp 版本，读写的仍然是夹具复制过去的 capabilities。

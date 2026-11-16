@@ -1,4 +1,5 @@
-// Agent 侧能力档：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml。
+// Agent 侧能力档：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml，
+// 外加跨平台共用的 profiles/capabilities/<id>.yml（直通档这类与执行体无关的档位）。
 //
 // 一个能力档是**唯一档位真源**，五段各管一件事：
 //   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
@@ -19,6 +20,7 @@ import { capabilityCovers, PLATFORM_TOOLS } from '../tools/catalog.mjs';
 /**
  * 能力档目录只属于某个 Agent 平台（`agentCapabilitiesDir(id)`），这里不自带默认值：
  * 缺 root 就报错，免得下一个平台的工具面被默默读成别的平台的。
+ * `sharedRoot` 是跨平台共用目录：平台目录里的同名档优先，共用档只读。
  */
 function requireRoot(root) {
   if (!root) throw new Error('能力档目录未指定：调用方要传当前 Agent 平台的 capabilities 目录');
@@ -216,22 +218,45 @@ export function agentModulesOf() {
   return [];
 }
 
-export function createCapabilityStore({ root, log = () => {} } = {}) {
+export function createCapabilityStore({ root, sharedRoot = null, log = () => {} } = {}) {
   requireRoot(root);
-  function files() {
-    if (!fs.existsSync(root)) return [];
-    return fs.readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /\.ya?ml$/i.test(entry.name))
-      .map((entry) => entry.name)
-      .filter((name) => name !== 'example.yml')
-      .sort();
+  /**
+   * 能力档来源：先平台目录、后共用目录，同一个 id 只认第一个 —— 平台可以覆盖共用档，
+   * 但共用档自身不会被写成两份。返回顺序即列表顺序。
+   */
+  function sources() {
+    const out = new Map();
+    for (const [dir, shared] of [[root, false], [sharedRoot, true]]) {
+      if (!dir || !fs.existsSync(dir)) continue;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isFile() || !/\.ya?ml$/i.test(entry.name)) continue;
+        const id = entry.name.replace(/\.ya?ml$/i, '');
+        if (id === 'example' || out.has(id)) continue;
+        out.set(id, { dir, file: entry.name, id, shared });
+      }
+    }
+    return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  function decorate(capability, { withRows = false } = {}) {
+  function sourceOf(id) {
+    const name = String(id ?? '').trim();
+    return sources().find((item) => item.id === name) ?? null;
+  }
+
+  /** 共用档只读：改动会波及所有 Agent 平台，只能克隆到平台目录后再改。 */
+  function writableSource(id) {
+    const source = sourceOf(id);
+    if (!source) throw new Error(`没有这个能力档：${id}`);
+    if (source.shared) throw new Error(`${source.id} 是跨 Agent 平台共用的能力档（只读）：请先克隆一份到当前平台再改`);
+    return source;
+  }
+
+  function decorate(capability, source, { withRows = false } = {}) {
     const { rows, ...rest } = capability;
     return {
       ...rest,
-      builtin: hasFactory(root, capability.id),
+      builtin: hasFactory(source.dir, capability.id),
+      shared: source.shared === true,
       platformVisible: visiblePlatformFlags(capability),
       agentModules: agentModulesOf(capability),
       hasRows: rows.length > 0,
@@ -240,31 +265,28 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     };
   }
 
-  function readFile(file) {
-    const id = file.replace(/\.ya?ml$/i, '');
-    const raw = YAML.parse(fs.readFileSync(path.join(root, file), 'utf8').replace(/^\uFEFF/, ''));
+  function readFile({ dir, file, id }) {
+    const raw = YAML.parse(fs.readFileSync(path.join(dir, file), 'utf8').replace(/^\uFEFF/, ''));
     return normalizeCapability(raw, { id, source: `capabilities/${file}` });
   }
 
   /** 列表不带 rows（一个预设正文就是几千字符，5 份一起回会把控制台接口撞到几百 KB）。 */
   function list() {
-    return files().map(readFile).map((capability) => decorate(capability)).sort((a, b) => a.id.localeCompare(b.id));
+    return sources().map((source) => decorate(readFile(source), source));
   }
 
   function get(id) {
-    const name = String(id ?? '').trim();
-    if (!name) return null;
-    const file = `${name}.yml`;
-    if (!files().includes(file)) return null;
-    return decorate(readFile(file), { withRows: true });
+    const source = sourceOf(id);
+    if (!source) return null;
+    return decorate(readFile(source), source, { withRows: true });
   }
 
   function docFor(id) {
-    const file = capabilityFile(root, id);
-    if (!fs.existsSync(file)) throw new Error(`没有这个能力档：${id}`);
+    const source = writableSource(id);
+    const file = path.join(source.dir, source.file);
     const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
     const doc = parseDocument(text);
-    if (doc.errors.length) throw new Error(`capabilities/${id}.yml 不是合法 YAML：${doc.errors[0].message}`);
+    if (doc.errors.length) throw new Error(`capabilities/${source.id}.yml 不是合法 YAML：${doc.errors[0].message}`);
     return { file, doc };
   }
 
@@ -282,8 +304,9 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
    */
   function save(id, patch = {}) {
     const current = get(id);
+    if (current?.shared) throw new Error(`${current.id} 是跨 Agent 平台共用的能力档（只读）：请先克隆一份到当前平台再改`);
     const base = current ?? normalizeCapability({ label: id, note: '', tools: {} }, { id });
-    const builtin = hasFactory(root, base.id);
+    const builtin = current?.builtin === true;
     const next = normalizeCapability({
       ...base,
       // 内置预设的名称/备注是固定文案，只允许改工具面。
@@ -296,10 +319,9 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
         skills: patch.tools?.skills ?? base.tools.skills,
       },
     }, { id });
-    fs.mkdirSync(root, { recursive: true });
-    const file = capabilityFile(root, id);
-    if (!fs.existsSync(file)) {
-      fs.writeFileSync(file, capabilityText(next), 'utf8');
+    if (!current) {
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(capabilityFile(root, id), capabilityText(next), 'utf8');
       log(`[capabilities] 已创建 ${id}`);
       return get(id);
     }
@@ -351,23 +373,25 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
     });
   }
 
-  /** 删除自定义能力；内置能力档不允许删（只能克隆改）。 */
+  /** 删除自定义能力；内置与跨平台共用的能力档不允许删（只能克隆改）。 */
   function remove(id) {
     const name = String(id ?? '').trim();
     const current = get(name);
     if (!current) throw new Error('没有这个能力档');
+    if (current.shared) throw new Error('跨 Agent 平台共用的能力档不能删除');
     if (current.builtin) throw new Error('内置能力档只读：请先克隆一份再改');
     fs.rmSync(capabilityFile(root, name), { force: true });
     log(`[capabilities] 已删除 ${name}`);
     return { id: name };
   }
 
-  /** 重置：把 .defaults/<id>.yml 抄回当前文件（没有出厂副本的能力档不可重置）。 */
+  /** 重置：把所在目录的 .defaults/<id>.yml 抄回当前文件（没有出厂副本的能力档不可重置）。 */
   function reset(id) {
     const name = String(id ?? '').trim();
-    if (!hasFactory(root, name)) throw new Error('只有带出厂副本的能力档可以重置');
-    fs.mkdirSync(root, { recursive: true });
-    copyFactory(root, name);
+    const source = sourceOf(name);
+    if (!source) throw new Error('没有这个能力档');
+    if (!hasFactory(source.dir, name)) throw new Error('只有带出厂副本的能力档可以重置');
+    copyFactory(source.dir, name);
     log(`[capabilities] 已重置 ${name}`);
     return get(name);
   }
@@ -379,11 +403,11 @@ export function createCapabilityStore({ root, log = () => {} } = {}) {
  * 平台工具注册开关：所有能力预设 platformVisible 的并集。
  * 桥接与 MCP 脚本共用这一个函数，避免两份配置产生分歧。
  */
-export function platformFlags({ root, log = () => {} } = {}) {
+export function platformFlags({ root, sharedRoot = null, log = () => {} } = {}) {
   requireRoot(root);
   const flags = Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, false]));
   try {
-    const capabilities = createCapabilityStore({ root, log }).list();
+    const capabilities = createCapabilityStore({ root, sharedRoot, log }).list();
     if (!capabilities.length) {
       for (const tool of PLATFORM_TOOLS) flags[tool.flag] = tool.defaultOff !== true;
       log('[capabilities] 没有能力预设，平台工具按目录默认值注册');

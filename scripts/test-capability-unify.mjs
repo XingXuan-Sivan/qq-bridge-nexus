@@ -50,22 +50,37 @@ for (const file of consoleFiles) {
 //    C4 起 rows（预设正文）与 preset.name/description（DSH 预设列表的展示名）都随平台走，
 //    它们含「QQ」是产品文案，不算漂移；但 tools / label / note 描述的是「这个能力档能做什么」，
 //    将来换平台还得能用，所以这三处必须平台无关。
-const capDir = path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities');
+//    直通档是**跟 Agent 平台无关的一档**（profiles/capabilities/direct.yml）：任何 Agent 平台
+//    都能选，跟 full / workspace 同类，不得在某个平台目录里再存一份，也不得用 audience 锁进私聊。
+const capDirs = [
+  path.join(ROOT, 'profiles/capabilities'),
+  path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities'),
+];
 const capabilityIds = [];
-for (const name of fs.readdirSync(capDir)) {
-  if (!name.endsWith('.yml')) continue;
-  const id = name.replace(/\.yml$/, '');
-  capabilityIds.push(id);
-  const doc = parseYaml(fs.readFileSync(path.join(capDir, name), 'utf8')) ?? {};
-  const metaText = JSON.stringify({ label: doc.label, note: doc.note, tools: doc.tools });
-  assert.ok(!/QQ|群聊|群友/.test(metaText), `${name} 的 tools/label/note 里混入平台话术（能力语义要跨平台可复用）`);
-  // 直通档不装预设（rows 必须为空），其余档的预设正文跟着能力档走（不能空）。
-  if ((doc.runtime?.apply ?? 'preset') === 'passthrough') {
-    assert.ok(Array.isArray(doc.rows) && doc.rows.length === 0, `${name} 是直通档，rows 必须为空（不装预设）`);
-  } else {
-    assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${name} 必须带非空 rows 段（预设正文跟着能力档走）`);
+for (const capDir of capDirs) {
+  for (const name of fs.readdirSync(capDir)) {
+    if (!name.endsWith('.yml')) continue;
+    const id = name.replace(/\.yml$/, '');
+    capabilityIds.push(id);
+    const doc = parseYaml(fs.readFileSync(path.join(capDir, name), 'utf8')) ?? {};
+    const metaText = JSON.stringify({ label: doc.label, note: doc.note, tools: doc.tools });
+    assert.ok(!/QQ|群聊|群友/.test(metaText), `${name} 的 tools/label/note 里混入平台话术（能力语义要跨平台可复用）`);
+    // 直通档不装预设（rows 必须为空），其余档的预设正文跟着能力档走（不能空）。
+    if ((doc.runtime?.apply ?? 'preset') === 'passthrough') {
+      assert.ok(Array.isArray(doc.rows) && doc.rows.length === 0, `${name} 是直通档，rows 必须为空（不装预设）`);
+    } else {
+      assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${name} 必须带非空 rows 段（预设正文跟着能力档走）`);
+    }
   }
 }
+assert.ok(capabilityIds.includes('direct'), '缺少跨平台共用的直通档 profiles/capabilities/direct.yml');
+assert.ok(
+  !fs.existsSync(path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities/direct.yml')),
+  '直通档只能有共用目录一份，dsh 目录里不许再存',
+);
+const directDoc = parseYaml(fs.readFileSync(path.join(ROOT, 'profiles/capabilities/direct.yml'), 'utf8')) ?? {};
+assert.equal(directDoc.runtime?.apply, 'passthrough', '直通档必须 apply: passthrough');
+assert.equal(directDoc.audience, undefined, '直通档不设受众限制：和 full / workspace 一样由会话自己选');
 
 // 5) 方案层已退役：不得再出现方案目录或方案仓库。
 assert.ok(!fs.existsSync(path.join(ROOT, 'profiles/plans')), 'profiles/plans/ 仍存在（方案层已退役）');
@@ -80,4 +95,4 @@ assert.ok(
 // 7) 执行侧以 capability 为准。
 assert.ok(read('src/bridge.js').includes('capabilityAllowsFlag'), 'bridge 未按 capability 收紧工具');
 
-console.log('capability unify red lines: 15 checks passed');
+console.log('capability unify red lines: passed');

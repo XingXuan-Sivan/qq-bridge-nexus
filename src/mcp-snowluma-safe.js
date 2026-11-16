@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import { configureKeys, key as skillKey, platformOfConfig } from './session/key.mjs';
 // 配置 v2：平台端点经扁平视图读，不直接认 `snowluma` 段。
 import { activeAgentPlatformId, configViews } from './config/platforms.mjs';
-import { agentCapabilitiesDir } from './profiles/paths.mjs';
+import { agentCapabilitiesDir, SHARED_CAPABILITIES_DIR } from './profiles/paths.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,6 +47,7 @@ configureKeys({ platform: platformOfConfig(cfg) });
 // 注册发生在模块加载期，因此改能力预设后要重启 Agent 平台才会刷新工具清单。
 cfg.tools = platformFlags({
   root: agentCapabilitiesDir(activeAgentPlatformId(cfg)),
+  sharedRoot: SHARED_CAPABILITIES_DIR,
   log: (message) => console.error(message),
 });
 

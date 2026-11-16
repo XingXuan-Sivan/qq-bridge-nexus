@@ -18,3 +18,8 @@ export function platformDir(platformId) {
 export function agentPlatformDir(agentPlatformId) {
   return path.join(AGENT_PLATFORMS_ROOT, agentPlatformId);
 }
+
+/** 某个 Agent 平台自己的能力档目录（capabilities/<id>.yml）。 */
+export function agentCapabilitiesDir(agentPlatformId) {
+  return path.join(agentPlatformDir(agentPlatformId), 'capabilities');
+}

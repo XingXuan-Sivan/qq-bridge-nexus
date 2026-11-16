@@ -121,6 +121,9 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     serializeModelData: (value) => JSON.stringify(value),
     // 真实模块从能力预设推导注册面；vm 里剥掉了 import，用夹具的工具表代替。
     platformFlags: () => (fixtureConfig?.tools ?? {}),
+    // 能力档目录按活动 Agent 平台算：上面的 platformFlags 已桩掉，这里只要不报错即可。
+    activeAgentPlatformId: () => 'dsh',
+    agentCapabilitiesDir: (id) => `/fixture/profiles/agent-platforms/${id}/capabilities`,
     // 会话 key 与准入：模块加载期就会跑 configureKeys，白名单判定用同一个 key 构造出口。
     configureKeys,
     platformOfConfig,

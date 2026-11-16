@@ -443,7 +443,9 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     AGENT_PLATFORMS_ROOT: path.join(temp, 'profiles', 'agent-platforms'),
     PLANS_ROOT: path.join(temp, 'profiles', 'plans'),
     SCHEMAS_ROOT: path.join(temp, 'profiles', 'schemas'),
-    CAPABILITIES_ROOT: path.join(temp, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
+    // 能力档目录跟着活动 Agent 平台走；真实现按模块级 AGENT_PLATFORMS_ROOT 拼，
+    // 这里改成 temp 版本，读写的仍然是夹具复制过去的 capabilities。
+    agentCapabilitiesDir: (id) => path.join(temp, 'profiles', 'agent-platforms', String(id), 'capabilities'),
     // 预设编辑器读能力档时要归一（C4 起 preset 正文住在 rows 段）。
     normalizeCapability,
     // 能力档 runtime 段的缺省值（旧会话/未迁移方案按它处理）与提示通道查询。

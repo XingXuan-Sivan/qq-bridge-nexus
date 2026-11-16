@@ -1,6 +1,6 @@
 # 控制台 IA 重构与平台配置归一
 
-> 状态：**B1 与 B2-1–B2-4 已落地**，按 §7 继续 B2-5 → B3 → B4。
+> 状态：**B1、B2、B3-1–B3-6 已落地**，按 §7 继续 B3-7 → B3-8 → B4。
 > 范围：`public/console/**`、`src/bridge.js` 的平台注册表与配置端点、`src/config/platforms.mjs`、`src/agent-side/**`、`profiles/agent-platforms/**`、`config.json` 结构版本、`docs/**`。
 > 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑记录）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
 > 本文只写**结论与边界**，不复述既有规格；与既有文档冲突时以本文为准，并在同一批里改掉旧文档的对应段落。
@@ -234,6 +234,8 @@ modelCatalog:
 | 上下文压缩 | `config.socialV2.compact`（与顶层 `config.compact` 双存储），模式值 `early` / `dsh`，文案写死「交给 DSH 自己压缩」 | `config.compact` 单存储，模式值 `early` / `agent`，阈值留空即取 `modelCatalog.compact.approxTokens`（也是阈值上限） |
 | 能力档 / 工具面展示 | `CAPABILITIES_ROOT` 硬编码 `dsh` | 按当前活动的 Agent 平台 id 取目录 |
 
+能力档目录不再自带默认值：`agentCapabilitiesDir(platforms.active.agent)` 决定 root，`createCapabilityStore()` / `platformFlags()` 缺 root 直接抛错；预设出厂副本（`.defaults/`）与 MCP 子进程（`activeAgentPlatformId(cfg)`）同步按活动平台解析。
+
 价目**只来自平台声明**：`priceTableFromCatalog()` 把 `modelCatalog` 折算成价目表，一个模型都没申报单价时返回 `null`。`src/model-prices.js` 保留纯算术（峰谷判定、桶计价），删掉内置默认表与 `resolvePriceTable()`，`config.pricing` 覆盖项同批删除。没申报的模型不估算：账本用 `unpriced` / `unpricedTokens` 表达「只计 token、不计钱」，金额显示 `—`，**不做兜底猜测**。
 
 ### 4.5 全局配置页只剩通用项
@@ -244,7 +246,7 @@ modelCatalog:
 
 ### 4.6 去硬编码清单（当批核销）
 
-- `CAPABILITIES_ROOT` 里的 `dsh` 常量。
+- `CAPABILITIES_ROOT` 里的 `dsh` 常量（已核销：能力档 root 改由 `agentCapabilitiesDir()` 解析，store 层缺 root 抛错）。
 - `src/dsh-model.js` 中供界面使用的专有分支（纯文本解析工具保留）。
 - 界面文案里的「DSH 自己压缩」「DSH 模型」「运行期恒为 dsh」（后者若是测试 fixture 的注释，改成「运行期平台固定」）。
 - `docs/` 与代码注释里把「执行体」当唯一说法的段落（改写范围见 §7 B2 第 5 条）。
@@ -320,7 +322,7 @@ modelCatalog:
 
 四批，**批内任务连续做完再停**；每批必须带着全绿门禁收尾，不留半成品跨批。每批都含「当批删除」，旧方案不推到下一批再删。
 
-**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 / B4 未开始。
+**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 进行中（1–6 已收尾，剩人格注入块可关与全局配置逐项核对）；B4 未开始。
 
 ### B1 底座：组件能力 + 子路由 + 令牌债
 

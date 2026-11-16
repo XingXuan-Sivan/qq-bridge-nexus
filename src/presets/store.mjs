@@ -1,6 +1,6 @@
 // 预设视图的读写层（P3 预设编辑器，C4 起数据源是能力档）。
 //
-// 权威源只有一份：profiles/agent-platforms/dsh/capabilities/<id>.yml
+// 权威源只有一份：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml
 //   preset      元信息（name / description / order / behavior）
 //   extensions  扩展授权（mcp / skills）
 //   rows        插件行列表（人格、工具面、compaction）
@@ -18,7 +18,7 @@ import { agentPresetIds } from '../agent-side/runtime-registry.mjs';
 // 副作用：确保内置 Agent 平台已注册（agentPresetIds() 未注册时抛错）。
 import '../agent-side/builtin.mjs';
 import {
-  createCapabilityStore, normalizeExtensions, normalizePreset, CAPABILITIES_ROOT,
+  createCapabilityStore, normalizeExtensions, normalizePreset,
 } from '../capabilities/store.mjs';
 import { platformToolMap } from '../tools/catalog.mjs';
 import { copyFactory, hasFactory } from '../profiles/factory.mjs';
@@ -106,7 +106,7 @@ const BLANK_ROWS = [
 ];
 
 export function createPresetStore({
-  root = CAPABILITIES_ROOT, backupRoot, scriptsDir, nodeExecutable = process.execPath, log = () => {}, now = Date.now,
+  root, backupRoot, scriptsDir, nodeExecutable = process.execPath, log = () => {}, now = Date.now,
 } = {}) {
   const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
   const capabilities = createCapabilityStore({ root, log });

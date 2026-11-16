@@ -9,7 +9,8 @@
 import fs from 'node:fs';
 import { configureKeys, key as skillKey, platformOfConfig } from './session/key.mjs';
 // 配置 v2：平台端点经扁平视图读，不直接认 `snowluma` 段。
-import { configViews } from './config/platforms.mjs';
+import { activeAgentPlatformId, configViews } from './config/platforms.mjs';
+import { agentCapabilitiesDir } from './profiles/paths.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,10 +43,10 @@ const cfg = loadConfig();
 // 本文件是 DSH 拉起的独立进程，拿不到桥接进程的 configureKeys 状态：
 // 平台要自己从 config.json 读一次，否则这里会静默退回内置的 qq。
 configureKeys({ platform: platformOfConfig(cfg) });
-// 平台工具的注册开关只认能力预设（capabilities/*.yml 的平台工具表并集），config.json 不再保存这份开关。
-// 注册发生在模块加载期，因此改能力预设后要重启 DSH 才会刷新工具清单。
+// 平台工具的注册开关只认能力预设（当前 Agent 平台的 capabilities/*.yml 平台工具表并集），config.json 不再保存这份开关。
+// 注册发生在模块加载期，因此改能力预设后要重启 Agent 平台才会刷新工具清单。
 cfg.tools = platformFlags({
-  root: path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities'),
+  root: agentCapabilitiesDir(activeAgentPlatformId(cfg)),
   log: (message) => console.error(message),
 });
 

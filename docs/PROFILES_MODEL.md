@@ -209,6 +209,9 @@ extensions:                                           # 可选：外部 MCP/技�
 - `rows` 是 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml` 的唯一源；子插件名用
   **bundle 包名裸说明符**（如 `qq-agent-presets/qq-tool-restrict.mjs`）——`./x.mjs` 会被按 profile 目录解析而装不上。
 - 平台工具的注册面 = 所有能力档 `tools.platform` 的并集（`platformFlags()`），`config.json` 不再有 `tools`。单条档位自己拿到哪些工具只看 `tools.platform` 里显式为 `true` 的项（`visiblePlatformFlags()`），没写的不能猜成默认开。
+- 能力档目录跟着活动 Agent 平台走（`agentCapabilitiesDir(platforms.active.agent)`，即 `profiles/agent-platforms/<id>/capabilities/`）。
+  `createCapabilityStore()` / `platformFlags()` / 预设出厂副本都要求调用方传 root，不内置任何平台 id：缺目录直接报错，
+  免得下一家平台的能力档被默默读成别家的。
 
 ### 运行方案 `plans/<id>.yml`
 

@@ -1,4 +1,4 @@
-// Agent 侧能力档：profiles/agent-platforms/dsh/capabilities/<id>.yml。
+// Agent 侧能力档：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml。
 //
 // 一个能力档是**唯一档位真源**，四段各管一件事：
 //   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
@@ -12,11 +12,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML, { parseDocument } from 'yaml';
-import { AGENT_PLATFORMS_ROOT } from '../profiles/paths.mjs';
 import { copyFactory, hasFactory } from '../profiles/factory.mjs';
 import { capabilityCovers, PLATFORM_TOOLS } from '../tools/catalog.mjs';
 
-export const CAPABILITIES_ROOT = path.join(AGENT_PLATFORMS_ROOT, 'dsh', 'capabilities');
+/**
+ * 能力档目录只属于某个 Agent 平台（`agentCapabilitiesDir(id)`），这里不自带默认值：
+ * 缺 root 就报错，免得下一个平台的工具面被默默读成别的平台的。
+ */
+function requireRoot(root) {
+  if (!root) throw new Error('能力档目录未指定：调用方要传当前 Agent 平台的 capabilities 目录');
+  return root;
+}
 
 const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，runtime = 生效方式，preset = 预设元信息，rows = 插件行列表。\n'
   + '# 由控制台平台详情的「能力」维护；保存 tools 不会重写 preset / rows。';
@@ -200,7 +206,8 @@ export function agentModulesOf() {
   return [];
 }
 
-export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {} } = {}) {
+export function createCapabilityStore({ root, log = () => {} } = {}) {
+  requireRoot(root);
   function files() {
     if (!fs.existsSync(root)) return [];
     return fs.readdirSync(root, { withFileTypes: true })
@@ -362,7 +369,8 @@ export function createCapabilityStore({ root = CAPABILITIES_ROOT, log = () => {}
  * 平台工具注册开关：所有能力预设 platformVisible 的并集。
  * 桥接与 MCP 脚本共用这一个函数，避免两份配置产生分歧。
  */
-export function platformFlags({ root = CAPABILITIES_ROOT, log = () => {} } = {}) {
+export function platformFlags({ root, log = () => {} } = {}) {
+  requireRoot(root);
   const flags = Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, false]));
   try {
     const capabilities = createCapabilityStore({ root, log }).list();

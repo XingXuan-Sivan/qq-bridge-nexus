@@ -16,7 +16,7 @@ import YAML from 'yaml';
 import {
   listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
 } from '../src/platforms/index.mjs';
-import { createCapabilityStore, CAPABILITIES_ROOT } from '../src/capabilities/store.mjs';
+import { createCapabilityStore } from '../src/capabilities/store.mjs';
 import { PLATFORM_TOOLS } from '../src/tools/catalog.mjs';
 import { createPlanStore, validatePlanReferences } from '../src/runtime/plans.mjs';
 import { agentPlatformApplies, agentPlatformCanPinPermission, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
@@ -24,7 +24,7 @@ import { loadBehaviorProfiles, validateBehaviorText } from '../src/behaviors/ind
 import { loadBehaviorTypes, typeFields } from '../src/behaviors/types.mjs';
 import { flattenConfig, getEngine, listEngines } from '../src/behaviors/engines.mjs';
 import { factoryDir, listFactoryIds, readFactoryText } from '../src/profiles/factory.mjs';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, PLANS_ROOT } from '../src/profiles/paths.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, PLANS_ROOT, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
 
 const problems = [];
 const warnings = [];
@@ -182,16 +182,20 @@ for (const id of agentPlatformIds) {
   }
 }
 
-// 3) 能力档：工具面显式写全，出厂副本成对
-const capabilities = createCapabilityStore({ root: CAPABILITIES_ROOT }).list();
-if (!fs.existsSync(CAPABILITIES_ROOT)) note(`能力档目录不存在：${CAPABILITIES_ROOT}`);
-for (const capability of capabilities) {
-  const explicit = capability.tools?.platform ?? {};
-  for (const tool of PLATFORM_TOOLS) {
-    if (typeof explicit[tool.flag] !== 'boolean') note(`能力档 ${capability.id} 的 tools.platform 缺 ${tool.flag}（必须显式写全）`);
-  }
-  for (const flag of Object.keys(explicit)) {
-    if (!PLATFORM_TOOLS.some((tool) => tool.flag === flag)) note(`能力档 ${capability.id} 的 tools.platform 含未知工具 ${flag}`);
+// 3) 能力档：工具面显式写全，出厂副本成对（每个 Agent 平台各一批）
+const capabilities = [];
+for (const agentId of agentPlatformIds) {
+  const capsRoot = agentCapabilitiesDir(agentId);
+  const list = createCapabilityStore({ root: capsRoot }).list();
+  capabilities.push(...list);
+  for (const capability of list) {
+    const explicit = capability.tools?.platform ?? {};
+    for (const tool of PLATFORM_TOOLS) {
+      if (typeof explicit[tool.flag] !== 'boolean') note(`能力档 ${agentId}/${capability.id} 的 tools.platform 缺 ${tool.flag}（必须显式写全）`);
+    }
+    for (const flag of Object.keys(explicit)) {
+      if (!PLATFORM_TOOLS.some((tool) => tool.flag === flag)) note(`能力档 ${agentId}/${capability.id} 的 tools.platform 含未知工具 ${flag}`);
+    }
   }
 }
 

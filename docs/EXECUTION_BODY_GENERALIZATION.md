@@ -54,12 +54,13 @@
 | --- | --- | --- |
 | 方言写在两处 | `profiles/agent-platforms/dsh/capabilities/chat.yml` 的 `persona.prefix` 自带一大段 QQ 规则；`profiles/platforms/qq/prompt.md` 又有一份 94 行的 QQ 规则 | `build.mjs` 的 `composeRows()` 把平台提示词**追加**到同一条 `persona.prefix`；两份口径有代差（前者「回复会自动转发」，后者「文本不会自动发送」），一旦给该能力档配了平台提示词，前缀里就同时存在两套发送口径 |
 | 方案钉死平台与执行体 | `profiles/plans/*.yml` 全部写 `platform: qq` / `agentPlatform: dsh`；`src/runtime/plans.mjs` 里 `agentPlatform || 'dsh'` | 换平台/换执行体要逐个改方案；`validatePlanReferences` 也把两者当必填 |
-| 能力档根目录属于 dsh | `src/capabilities/store.mjs` 的 `CAPABILITIES_ROOT = AGENT_PLATFORMS_ROOT/dsh/capabilities`（`src/profiles/paths.mjs` 其实已有 `agentPlatformDir()` 未使用） | 第二家执行体的能力档没有地方放 |
+| 能力档根目录属于 dsh（已收口） | ~~`src/capabilities/store.mjs` 的 `CAPABILITIES_ROOT = AGENT_PLATFORMS_ROOT/dsh/capabilities`~~ → 改为 `agentCapabilitiesDir(活动 Agent 平台 id)`，store 层不再带默认 root | 已解决：第二家执行体的能力档有自己的目录 |
 | 方案是日常编辑对象 | 仓库里已有用户克隆出来的 `profiles/plans/agent-full-copy.yml` | 重构必须让克隆方案自动继承新字段，不能要求用户重建 |
 
 前三条（方言两处并存、方案钉平台与执行体、克隆方案继承）已按 §6.1–§6.3 收口：平台话术只剩 `prompt.md` 一份，
-方案不再写 `platform`、`agentPlatform` 缺省 `auto`，能力档多了 `runtime` 段。能力档根目录仍只有 `dsh`，
-等第二家执行体真要存能力档时再按 `agentPlatformDir()` 挪。
+方案不再写 `platform`、`agentPlatform` 缺省 `auto`，能力档多了 `runtime` 段。能力档根目录已按活动 Agent 平台解析
+（`agentCapabilitiesDir(platforms.active.agent)`），`src/capabilities/store.mjs` 与预设出厂副本都不再内置 `dsh`：缺 root 直接报错，
+不静默回退到别家目录。
 
 ### 2.3 权限链路（现状，直通要复用）
 

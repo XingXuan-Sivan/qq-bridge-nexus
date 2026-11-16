@@ -254,6 +254,14 @@ export function configViews(raw) {
 }
 
 /**
+ * 当前活动的 Agent 平台 id：自己读 config.json 的独立进程（MCP 脚本等）用它定位
+ * `profiles/agent-platforms/<id>/`，不必自己重做一遍迁移与归一。
+ */
+export function activeAgentPlatformId(raw) {
+  return readPlatforms(migrateConfigToV2(raw).config).active.agent;
+}
+
+/**
  * 某个平台条目的**扁平**形状：连接参数在前、选项在后。
  *
  * 为什么需要：`configSchema` / 控制台表单 / 迁移前的 `snowluma.*` 都是扁平字段，

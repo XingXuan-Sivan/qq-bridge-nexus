@@ -12,7 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { extractPresetPrefix, locatePresetPromptBlock, presetPromptBlockers, presetPromptWarnings, renderPresetPromptYaml } from './preset-prompt.js';
-import { defaultPromptState, readDefaultPrompt } from './preset-defaults.js';
+import { defaultPromptState, defaultPromptsDir, readDefaultPrompt } from './preset-defaults.js';
 import { GEN1_ROLE_LINE_RE, parseRoleSections, roleCharStats, roleSectionReport, selectRoleText } from './role-card.js';
 import { fileURLToPath } from 'node:url';
 import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
@@ -96,8 +96,8 @@ import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCand
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
-import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITIES_ROOT, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT, agentCapabilitiesDir } from './profiles/paths.mjs';
+import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
 // 发送调用的构造与后端称呼：实现是平台专属的（OneBot 动作名、NapCat 程序名），
@@ -768,9 +768,24 @@ function presetKind(name) {
  * `profiles/agent-platforms/dsh/agents/<id>/agent.cordis.yml` 已删除：预设正文住在
  * `capabilities/<id>.yml` 的 `rows` 段，`artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`
  * 是它渲染出来的产物，不再可手改。
+ *
+ * 目录跟着当前 Agent 平台走（`profiles/agent-platforms/<active>/capabilities/`），
+ * 由 loadConfig() 按活动平台定下；顶层助手函数经 capabilitiesRoot() 取。
  */
+let capabilitiesDir = '';
+
+function capabilitiesRoot() {
+  if (!capabilitiesDir) throw new Error('能力档目录尚未确定：loadConfig() 还没跑');
+  return capabilitiesDir;
+}
+
+/** 预设的出厂副本目录：能力档目录下的 .defaults/。 */
+function promptDefaultsDir() {
+  return defaultPromptsDir(capabilitiesRoot());
+}
+
 function presetSourceYaml(name) {
-  return path.join(CAPABILITIES_ROOT, `${name}.yml`);
+  return path.join(capabilitiesRoot(), `${name}.yml`);
 }
 
 /** 读一份能力档（能力档 id 就是预设 id，两者同源）。 */
@@ -1452,6 +1467,9 @@ function loadConfig() {
   }
   const file = migration.config;
   const platforms = readPlatforms(file);
+  // 能力档（工具面 + 预设正文）跟着当前 Agent 平台走，内核不认识具体平台 id。
+  const activeCapabilitiesDir = agentCapabilitiesDir(platforms.active.agent);
+  capabilitiesDir = activeCapabilitiesDir;
   const views = platformViews(platforms);
   const platform = normalizePlatform(views.platform);
   // owner 优先读结构化 `owner`，回落旧的 `ownerQQ`（裸数字按当前平台解释）。
@@ -1958,9 +1976,9 @@ function loadConfig() {
 
   // 系统级 v2 配置：从旧 socialV2 拆出，迁移后只保留 config.* 这些新键。
   // 平台工具的注册开关不再单独配置：由各能力预设「平台工具」表的并集推导，
-  // 唯一源是 profiles/agent-platforms/dsh/capabilities/<id>.yml；单会话仍由 capabilityAllows 收紧副作用工具。
+  // 唯一源是当前 Agent 平台的 capabilities/<id>.yml；单会话仍由 capabilityAllows 收紧副作用工具。
   cfg.tools = platformFlags({
-    root: CAPABILITIES_ROOT,
+    root: activeCapabilitiesDir,
     log: (message) => log(`⚠️ ${message}`),
   });
   // 旧的读点（webImage / ownerRelay / ownerGroupAccess / sendVoice / setStickerRemark）
@@ -2601,15 +2619,15 @@ async function main() {
     log,
     now: Date.now,
   });
-  // 能力档目录（profiles/agent-platforms/dsh/capabilities/<id>.yml）是工具面 + 预设正文的唯一源；
+  // 能力档目录（当前 Agent 平台的 capabilities/<id>.yml）是工具面 + 预设正文的唯一源；
   // 能力档 id 就是 Agent 预设 id（C4），所以 presetPolicy / presetStore 都指向同一个目录。
   const capabilityStore = createCapabilityStore({
-    root: CAPABILITIES_ROOT,
+    root: capabilitiesRoot(),
     log: (line) => log(line),
   });
   const presetPolicy = createPresetPolicy({ capabilities: capabilityStore, log });
   const presetStore = createPresetStore({
-    root: CAPABILITIES_ROOT,
+    root: capabilitiesRoot(),
     backupRoot: path.join(STATE_DIR, 'preset-editor-backups'),
     scriptsDir: path.join(ROOT, 'scripts'),
     log,
@@ -7942,7 +7960,7 @@ async function main() {
           return;
         }
         // 预设编辑（P3）：结构化元数据/扩展授权 + 完整 YAML 高级编辑。
-        // 权威源是能力档 profiles/agent-platforms/dsh/capabilities/<id>.yml（C4），
+        // 权威源是能力档 profiles/agent-platforms/<active>/capabilities/<id>.yml（C4），
         // 应用前备份，apply 负责 build + setup-dsh。
         if (req.method === 'POST' && url.pathname === '/api/extensions/presets/create') {
           try {
@@ -8650,7 +8668,7 @@ async function main() {
           if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
           try {
             const { prefix } = readPresetPromptText(preset);
-            const initial = defaultPromptState(preset, prefix);
+            const initial = defaultPromptState(preset, prefix, promptDefaultsDir());
             sendJson({
               ok: true,
               content: prefix,
@@ -8662,7 +8680,7 @@ async function main() {
               // 初始版本：控制台用它做「已还原 / 已修改」判断与一键还原。
               hasDefault: initial.hasDefault,
               modified: initial.modified,
-              defaultContent: initial.hasDefault ? readDefaultPrompt(preset) : '',
+              defaultContent: initial.hasDefault ? readDefaultPrompt(preset, promptDefaultsDir()) : '',
               defaultChars: initial.chars,
             });
           } catch (error) {
@@ -8722,7 +8740,7 @@ async function main() {
           const body = await readBody();
           const preset = editablePresetName(body.preset);
           if (!preset) { sendJson({ ok: false, error: `未知预设（capabilities/ 里没有带 rows 段的能力档）` }, 400); return; }
-          const initial = readDefaultPrompt(preset);
+          const initial = readDefaultPrompt(preset, promptDefaultsDir());
           if (initial === null) { sendJson({ ok: false, error: '这个预设没有内置的初始版本' }, 404); return; }
           const side = presetKind(preset);
           let nextText;

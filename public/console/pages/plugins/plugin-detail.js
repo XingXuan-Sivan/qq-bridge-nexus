@@ -88,6 +88,7 @@ function shellHtml(item) {
       columns: [{ label: '项目', width: '120px' }, { label: '值' }],
       rows: propertyRows(item).map(([label, value]) => ({ cells: [esc(label), value] })),
       pageSize: 20,
+      fit: true,
     }),
   })}
     ${configCard(item)}

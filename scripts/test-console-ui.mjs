@@ -217,8 +217,12 @@ try {
     await navigate('mcp');
     // 主从布局：左栏是 server 列表，右栏是选中 server 的详情与工具清单。
     await page.waitForFunction(() => document.querySelectorAll('#mcpSplit .split-item').length >= 2);
-    // 工具区由表格组件渲染（分页 + 工具栏搜索），不再是手写清单。
-    assert.equal(await page.locator('#mcpList [data-table]').count(), 1, 'MCP 工具区应使用表格组件');
+    // 右栏是两节卡（属性 / 工具），两节都由表格组件渲染（分页与筛选也在组件里）。
+    assert.equal(await page.locator('#mcpSplit [data-split-detail] > .card').count(), 2, 'MCP 详情是属性与工具两张卡');
+    assert.equal(await page.locator('#mcpSplit [data-split-detail] [data-table]').count(), 2, 'MCP 详情应使用表格组件');
+    // 工具栏在左栏：筛选与搜索只作用于这份清单，页面级不再有一整条工具栏。
+    assert.equal(await page.locator('#mcpSplit .split-toolbar #mcpServerSearch').count(), 1, '工具栏在 split-view 的工具栏槽里');
+    assert.match(await page.locator('#mcpSplit .split-item').first().innerText(), /个工具/, '列表项带一行摘要');
     const summary = await page.locator('#mcpSummary').innerText();
     assert.match(summary, /2 个 server · 2 个工具 · 1 个技能/);
     assert.ok(await page.locator('#mcpSplit .split-item').first().getAttribute('aria-selected') === 'true', '默认选中第一个 server');

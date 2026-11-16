@@ -201,6 +201,7 @@ export function tableToolbarHtml({ refresh = false, filters = [], search = null,
  * @param {string} [options.actions] 工具栏右侧的动作按钮 HTML（例如「新增」）
  * @param {string} [options.empty] 无数据/无匹配时的提示
  * @param {boolean} [options.pager=true]
+ * @param {boolean} [options.fit=false] 键值表等短表用：不要 1000px 的最小宽度，按容器宽度铺满
  * @param {{label?:string, width?:number|string, attrs?:object}} [options.select] 给了就在最前面加一列多选（表头即全选）
  *   多选列默认 60px（复选框 + 「允许」这类两字表头不折行）。表体是 table-layout:fixed，若所有列都写了 width，
  *   剩余宽度会按比例摊到每一列，把多选列也撑宽——所以用了 select 的表要留一列不写 width 来吸收剩余宽度。
@@ -217,6 +218,7 @@ export function dataTableHtml({
   actions = '',
   empty = '没有匹配的数据。',
   pager = true,
+  fit = false,
   select = null,
 }) {
   const toolbar = tableToolbarHtml({ refresh, filters, search, meta, actions });
@@ -233,7 +235,7 @@ export function dataTableHtml({
   const allColumns = select
     ? [{ label: select.label || '全选', width: select.width || '60px', select: true, selectAttrs: select.attrs || {} }, ...columns]
     : columns;
-  return `<div class="data-table" data-table data-page-size="${esc(String(pageSize))}" data-empty="${esc(empty)}">
+  return `<div class="data-table${fit ? ' data-table--fit' : ''}" data-table data-page-size="${esc(String(pageSize))}" data-empty="${esc(empty)}">
   ${toolbar}
   <div class="table-wrap">${tableHtml(allColumns, rows)}<div class="table-empty" data-table-empty hidden>${esc(empty)}</div></div>
   ${footer}

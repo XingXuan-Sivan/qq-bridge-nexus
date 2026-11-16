@@ -1,85 +1,11 @@
-/* MCP 页：server 概览、工具清单、外部 MCP 编辑/日志的少量页面级样式。 */
-.mcp-section-title {
-  margin: 22px 0 10px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-#mcpList .table-toolbar {
-  margin-bottom: 14px;
-}
-#mcpList .table-toolbar .search-box,
-#mcpList #mcpServerSearch {
-  flex: 0 1 320px;
-  max-width: 320px;
-}
-.mcp-status-cell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  align-items: center;
-}
-.mcp-row-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-}
-.mcp-row-actions .btn {
-  white-space: nowrap;
+/* MCP 页：清单在左栏（工具栏也在左栏），详情是右栏的分节卡。
+   卡片、表格、标签都由组件产出，本页只留两栏特有的一处：左栏行尾的删除按钮。 */
+
+#mcpList .split-view {
+  /* 列表项有标题、两个徽标与一行摘要，比平台清单的卡片更吃宽度。 */
+  --split-list-w: minmax(300px, 360px);
 }
 
-/* 右栏：server 详情 */
-.mcp-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-.mcp-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.mcp-detail-title {
-  min-width: 0;
-}
-.mcp-detail-title h3 {
-  margin: 0 0 4px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-strong);
-}
-.mcp-detail-sub {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.mcp-detail-sub code {
-  font-size: 12px;
-}
-.mcp-detail-note {
-  margin: 0;
-}
-.mcp-detail-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-/* 徽标贴着 server 名字，不再单占右侧一列。 */
-.mcp-title-tags {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 8px;
-  vertical-align: middle;
-}
 /* 左栏行尾的删除按钮：平时不占视线，悬停或键盘聚焦时才露出来。 */
 .mcp-split-row {
   position: relative;
@@ -110,54 +36,4 @@
 .mcp-split-del:hover {
   color: var(--err);
   border-color: var(--danger-border);
-}
-.mcp-tools {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.mcp-tool-list {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border: 1px solid var(--border-chip);
-  border-radius: 10px;
-  overflow: hidden;
-}
-.mcp-tool {
-  display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-  gap: 12px;
-  align-items: baseline;
-  padding: 9px 12px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--surface-subtle);
-}
-.mcp-tool:first-child {
-  border-top: 0;
-}
-.mcp-tool code {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.mcp-tool .meta {
-  overflow-wrap: anywhere;
-}
-.mcp-tool[hidden] {
-  display: none;
-}
-
-.log-pre {
-  margin: 0;
-  max-height: 420px;
-  overflow: auto;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
 }

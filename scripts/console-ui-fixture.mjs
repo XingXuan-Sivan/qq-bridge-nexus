@@ -881,6 +881,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         if (method === 'PATCH' && suffix === 'config') return json({ ok: true, config: body?.config ?? {}, reloaded: true });
         if (method === 'POST' && suffix === 'test') return json({ ok: true, valid: true, config: body?.config ?? {} });
       }
+      // 外部 MCP 的连接测试：弹窗里的草稿（/test）与已存条目的测试（/<id>/test）同一形状。
+      if (method === 'POST' && /^\/api\/extensions\/mcp\/(?:[a-z0-9-]+\/)?test$/.test(path)) {
+        return json({ ok: true, tools: [{ name: 'demo_tool', description: '外部测试工具' }] });
+      }
       if (method === 'DELETE' && path.startsWith('/api/extensions/mcp/')) {
         return json({ ok: true, id: decodeURIComponent(path.split('/').pop()) });
       }

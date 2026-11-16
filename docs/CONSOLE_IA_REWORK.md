@@ -1,8 +1,8 @@
 # 控制台 IA 重构与平台配置归一
 
-> 状态：**方案定稿，待按 §7 批次执行**。
+> 状态：**B1 与 B2-1–B2-4 已落地**，按 §7 继续 B2-5 → B3 → B4。
 > 范围：`public/console/**`、`src/bridge.js` 的平台注册表与配置端点、`src/config/platforms.mjs`、`src/agent-side/**`、`profiles/agent-platforms/**`、`config.json` 结构版本、`docs/**`。
-> 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑 92 条）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
+> 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑记录）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
 > 本文只写**结论与边界**，不复述既有规格；与既有文档冲突时以本文为准，并在同一批里改掉旧文档的对应段落。
 
 四条线一次收口：
@@ -317,7 +317,7 @@ modelCatalog:
 
 四批，**批内任务连续做完再停**；每批必须带着全绿门禁收尾，不留半成品跨批。每批都含「当批删除」，旧方案不推到下一批再删。
 
-**进度**：B1 ✅ 已收尾；B2 进行中（1–3 已完成：平台清单与二级页、插件二级页）；B3 / B4 未开始。
+**进度**：B1 ✅ 已收尾；B2 进行中（1–4 已完成：平台清单与二级页、插件二级页、MCP 两栏收口）；B3 / B4 未开始。
 
 ### B1 底座：组件能力 + 子路由 + 令牌债
 

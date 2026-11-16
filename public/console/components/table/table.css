@@ -62,6 +62,12 @@
 .data-table > .table-wrap:first-child {
   margin-top: 0;
 }
+/* 键值表（属性 / 开关这类短表）：列少，不要 1000px 的最小宽度——
+   否则分栏里的详情卡会出现一条没必要的卡内横向滚动，右缘还被硬切。 */
+.data-table--fit > .table-wrap table {
+  min-width: 0;
+  width: 100%;
+}
 
 .table-toolbar {
   display: flex;

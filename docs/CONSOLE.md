@@ -204,8 +204,8 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 | 组件 | 导出 | 说明 |
 | --- | --- | --- |
-| `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏，组件只管间距；窄屏 ≤900px 自动上下堆叠。**现仅 MCP 页使用**：平台页已改为「卡片网格清单 + 二级页」（见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) §4），不再适合塞进两栏 |
-| `table` | `tableHtml(...)` | 页面不许手写表格骨架；分页见页面实现 |
+| `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏（槽内搜索框按整栏撑开、工具栏不再留表格的上边距）；`split-detail` 是一列分节卡（flex column，卡间距 16px），多张 `cardHtml()` 直接放进去，不再另套容器；窄屏 ≤900px 自动上下堆叠。**现仅 MCP 页使用**，并把 `--split-list-w` 重设为 `minmax(300px, 360px)`：平台页已改为「卡片网格清单 + 二级页」（见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) §4），不再适合塞进两栏 |
+| `table` | `tableHtml(columns, rows)` / `dataTableHtml({ columns, rows, …, fit })` / `tableToolbarHtml({ … })` | 页面不许手写表格骨架；工具栏 + 表体 + 分页的完整表格用 `dataTableHtml`。键值表（属性 / 开关这类两三列的短表）传 `fit: true` 去掉 1000px 最小宽度，否则会在分栏右栏、窄卡片里溢出并被硬切 |
 | `detail-head` | `detailHeadHtml({ title, code, meta, badges, backLabel })` | 二级页页头：返回按钮（`data-detail-back`，点击由页面的事件委托接住）+ 标题 + 可选的 `code` 次级标识 + 一行说明 + 右侧徽标。`title` / `code` / `backLabel` 由组件转义，`meta` 与 `badges` 是已渲染的片段（调用方转义）。样式 `components/detail-head/detail-head.css` 已写 `grid-column: 1 / -1`，直接放进 `display:contents` 的二级页外壳即可；平台详情与插件详情共用 |
 | `search-box` | `searchBoxHtml({ id, placeholder, value, label, className })` / `bindSearchBox(input, onQuery, { onEnter })` | 固定产出 `type="search"` + `class="search-box"`，宽度用 `input.search-box--w240` 而不是工具类 |
 | `modal` | 三段式弹窗 | 被 `message-box` 复用 |

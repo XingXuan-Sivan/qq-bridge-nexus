@@ -3,12 +3,14 @@
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { cardHtml } from '../../components/card/card.js';
+import { bindSwitches, getSwitch, inlineActions, renderFields, setSwitch } from '../../components/form/form.js';
 import { attachTextareaEditor } from '../../components/code-editor/code-editor.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { initSplitView, splitItemHtml, splitViewHtml } from '../../components/split-view/split-view.js';
 import { dataTableHtml, initDataTables, tableToolbarHtml } from '../../components/table/table.js';
+import { tag } from '../../components/tag/tag.js';
 import { MCP_FIELDS } from './fields.js';
 import { renderTerminalLines, terminalHtml, textToLines } from '../../components/terminal/terminal.js';
 
@@ -49,14 +51,14 @@ function toolDescription(tool) {
 
 function sourceTag(server) {
   const external = server.source === 'external';
-  return `<span class="tag${external ? ' tag--primary' : ' tag--info'}">${external ? '外部' : '内置'}</span>`;
+  return tag(external ? '外部' : '内置', { type: external ? 'primary' : 'info' });
 }
 
 function statusTag(server) {
-  if (server.status === 'error') return '<span class="tag tag--danger">读取失败</span>';
-  if (server.status === 'running' || server.status === 'online') return '<span class="tag tag--success">在线</span>';
-  if (server.status === 'disabled') return '<span class="tag">已停用</span>';
-  return `<span class="tag">${esc(server.status === 'stopped' ? '已停止' : server.status ?? '已停止')}</span>`;
+  if (server.status === 'error') return tag('读取失败', { type: 'danger' });
+  if (isOnline(server)) return tag('在线', { type: 'success' });
+  if (server.status === 'disabled') return tag('已停用');
+  return tag(server.status === 'stopped' ? '已停止' : server.status || '已停止');
 }
 
 // 列表筛选与选中态都放在这里：refresh 只换数据，不重置用户的筛选与选择。
@@ -89,7 +91,7 @@ function visibleServers() {
 function toolbarMarkup(servers, summary) {
   const toolCount = Number(summary.tools) || servers.reduce((sum, server) => sum + (Number(server.toolCount) || (server.tools ?? []).length), 0);
   const errors = Number(summary.errors) || servers.filter((server) => server.status === 'error').length;
-  const warning = errors ? `<span class="tag tag--danger" title="部分 server 连接失败；打开详情可查看原因">${errors} 个读取失败</span>` : '';
+  const warning = errors ? tag(`${errors} 个读取失败`, { type: 'danger', title: '部分 server 连接失败；打开详情可查看原因' }) : '';
   return tableToolbarHtml({
     refresh: true,
     filters: [
@@ -124,43 +126,74 @@ function toolbarMarkup(servers, summary) {
   });
 }
 
+/** 详情栏的键值行：列表只留标题、徽标与一行摘要，其余事实都摊在这里。 */
+function propertyRows(server) {
+  const tools = Array.isArray(server.tools) ? server.tools : [];
+  const count = Number(server.toolCount) || tools.length;
+  const rows = [
+    ['ID', `<code>${esc(server.id)}</code>`],
+    ['来源', sourceTag(server)],
+    ['状态', statusTag(server)],
+    ['工具数', `${count} 个`],
+  ];
+  if (server.transport) rows.push(['连接方式', esc(TRANSPORT_LABEL[server.transport] ?? server.transport)]);
+  if (server.file) rows.push(['清单文件', `<code>${esc(server.file)}</code>`]);
+  return rows;
+}
+
+/**
+ * 详情栏：属性与工具两节卡。
+ * 属性用表格组件摊平事实；工具节自带筛选与分页，不再另起标题。
+ */
 function detailMarkup(server) {
   if (!server) return '<div class="split-empty">从左侧选一个 server 查看工具清单</div>';
   const tools = Array.isArray(server.tools) ? server.tools : [];
   const external = server.source === 'external';
-  const description = server.status === 'error' ? (server.error || '读取失败') : (server.description || '');
+  const description = server.status === 'error'
+    ? `读取失败：${server.error || '未知错误'}`
+    : (server.description || server.note || '');
+  // 外部 server 的写操作放在属性卡里（与平台二级页的实例 / 执行端卡同一位置）：
+  // 卡头只留标题，窄栏（1024 屏右栏约 330px）里标题与四个按钮不必抢同一行。
   const actions = external
-    ? `<button class="btn small" type="button" data-mcp-act="edit" data-id="${esc(server.id)}">编辑</button>
-       <button class="btn small" type="button" data-mcp-act="test" data-id="${esc(server.id)}">测试</button>
-       <button class="btn small" type="button" data-mcp-act="logs" data-id="${esc(server.id)}">日志</button>
-       <button class="btn small danger" type="button" data-mcp-act="delete" data-id="${esc(server.id)}">删除</button>`
+    ? inlineActions({
+      items: [
+        { label: '删除', variant: 'danger', attrs: { 'data-mcp-act': 'delete', 'data-id': server.id } },
+        { label: '日志', attrs: { 'data-mcp-act': 'logs', 'data-id': server.id } },
+        { label: '测试', attrs: { 'data-mcp-act': 'test', 'data-id': server.id } },
+        { label: '编辑', variant: 'primary', attrs: { 'data-mcp-act': 'edit', 'data-id': server.id } },
+      ],
+      status: 'mcpDetailMsg',
+    })
     : '';
-  const toolRows = tools.map((tool) => ({
-    cells: [
-      `<code>${esc(toolName(tool))}</code>`,
-      esc(toolDescription(tool) || '—'),
-    ],
-  }));
-  return `<div class="mcp-detail" data-mcp-detail="${esc(server.id)}">
-    <header class="mcp-detail-head">
-      <div class="mcp-detail-title">
-        <h3>${esc(server.name || server.id)}<span class="mcp-title-tags">${sourceTag(server)}${statusTag(server)}</span></h3>
-        <div class="mcp-detail-sub"><code>${esc(server.id)}</code><span class="meta">${esc(server.file || TRANSPORT_LABEL[server.transport] || '')}</span></div>
-      </div>
-      <div class="mcp-detail-actions">${actions}</div>
-    </header>
-    ${description ? `<p class="meta mcp-detail-note">${esc(description)}</p>` : ''}
-    <section class="mcp-tools">
-      ${dataTableHtml({
+  return [
+    cardHtml({
+      title: server.name || server.id,
+      description: description ? esc(description) : '',
+      body: `${actions}${dataTableHtml({
+        columns: [{ label: '项目', width: '120px' }, { label: '值' }],
+        rows: propertyRows(server).map(([label, value]) => ({ cells: [esc(label), value] })),
+        pageSize: 20,
+        fit: true,
+      })}`,
+    }),
+    cardHtml({
+      title: '工具',
+      description: '工具名与说明来自这个 server 的 <code>tools/list</code>；连接失败时这里没有行。',
+      body: dataTableHtml({
         columns: [{ label: '工具', width: 260 }, { label: '说明' }],
-        rows: toolRows,
+        rows: tools.map((tool) => ({
+          cells: [
+            `<code>${esc(toolName(tool))}</code>`,
+            esc(toolDescription(tool) || '—'),
+          ],
+        })),
         pageSize: 10,
         search: { placeholder: '筛选工具名或说明…' },
         meta: `共 ${tools.length} 个工具`,
         empty: tools.length ? '没有匹配的工具。' : '没有注册工具。',
-      })}
-    </section>
-  </div>`;
+      }),
+    }),
+  ].join('');
 }
 
 function paintList() {
@@ -175,7 +208,8 @@ function paintList() {
     const online = isOnline(server);
     const badges = `${sourceTag(server)}${statusTag(server)}`;
     const count = Number(server.toolCount) || (server.tools ?? []).length;
-    const meta = [server.file || TRANSPORT_LABEL[server.transport] || '', `${count} 个工具`].filter(Boolean).join(' · ');
+    // 一行摘要只留「怎么连 + 有多少工具」：清单文件这类长字段挪到详情页的属性表。
+    const meta = [TRANSPORT_LABEL[server.transport] ?? '', `${count} 个工具`].filter(Boolean).join(' · ');
     const item = splitItemHtml({
       key: server.id,
       title: server.name || server.id,
@@ -215,8 +249,13 @@ function render(data) {
     MCP_STATE.selected = servers[0]?.id ?? null;
     MCP_STATE.toolQuery = '';
   }
-  host.innerHTML = toolbarMarkup(servers, MCP_STATE.summary)
-    + splitViewHtml({ id: 'mcpSplit', listLabel: 'MCP 服务器', listHtml: '', detailHtml: '', empty: '从左侧选一个 server 查看工具清单' });
+  // 工具栏是左栏的一部分：筛选与搜索只作用于这份清单，统计与新增也跟在这里。
+  host.innerHTML = splitViewHtml({
+    id: 'mcpSplit',
+    listLabel: 'MCP 服务器',
+    toolbar: toolbarMarkup(servers, MCP_STATE.summary),
+    empty: '从左侧选一个 server 查看工具清单',
+  });
   paintList();
   paintDetail();
   initSplitView(document.getElementById('mcpSplit'), { onSelect: selectServer });
@@ -425,8 +464,16 @@ async function handleAction(action, id) {
       return;
     }
     if (action === 'test') {
-      const data = await api(`/api/extensions/mcp/${encodeURIComponent(id)}/test`, 'POST', {});
-      showConsoleToast(data.ok !== false ? `测试通过：${(data.tools ?? []).length} 个工具` : `测试失败：${data.error ?? '未知错误'}`);
+      // 结果写在卡片里的状态位：换一个 server 就会重画，不会与下一个 server 的结论搞混。
+      const status = document.getElementById('mcpDetailMsg');
+      if (status) status.textContent = '测试中…';
+      try {
+        const data = await api(`/api/extensions/mcp/${encodeURIComponent(id)}/test`, 'POST', {});
+        const text = data.ok !== false ? `测试通过：${(data.tools ?? []).length} 个工具` : `测试失败：${data.error ?? '未知错误'}`;
+        if (status) status.textContent = text; else showConsoleToast(text);
+      } catch (error) {
+        if (status) status.textContent = `测试失败：${error.message}`; else showConsoleToast(`操作失败：${error.message}`);
+      }
       return;
     }
     if (action === 'delete') {

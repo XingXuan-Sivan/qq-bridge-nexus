@@ -19,9 +19,18 @@
   min-width: 0;
 }
 
-/* 工具栏槽：里面放的是调用方用 tableToolbarHtml 生成的工具栏，这里只管它和列表的间距。 */
+/* 工具栏槽：里面放的是调用方用 tableToolbarHtml 生成的工具栏，这里只管间距与宽度。
+   槽在窄栏里，所以工具栏的第一行与右栏顶端对齐（表格工具栏默认给卡片里的表格留了上边距）。 */
 .split-toolbar {
   min-width: 0;
+}
+.split-toolbar .table-toolbar {
+  margin-top: 0;
+}
+/* 表格工具栏的搜索框默认最大 240px（给宽表用）：在窄栏里按整栏撑开，占满自己一行。 */
+.split-toolbar .search-box {
+  flex: 1 1 100%;
+  max-width: none;
 }
 
 .split-list {
@@ -90,6 +99,10 @@
 }
 
 .split-detail {
+  /* 详情是一列分节：调用方把若干 card 直接放进来，间距由组件负责。 */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
   min-width: 0;
 }
 .split-empty {

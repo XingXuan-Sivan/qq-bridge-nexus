@@ -4,7 +4,7 @@
 > 用途：迁 `scheduler` / `persona` / `social-v1` / `overview` / `slang` / `behaviors` 之前先读这一页，按第 2 节的流水线走、用第 3 节自检。
 > 关联：`CONSOLE_FORMS.md`（组件与规格 API）、`CONSOLE_UI.md`（目录与加载顺序）、`CONSOLE_UI_REWORK.md`（基础层）。
 
-## 1. 五十八个真实踩过的坑
+## 1. 真实踩过的坑
 
 ### 1.1 标签垂直不居中：`margin` 是继承来的
 全局 `label { margin: 17px 0 7px }` 会进到字段标签里，flex/grid 怎么调都偏 5px。
@@ -592,6 +592,24 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 插件详情页头与平台详情页头现在都是 `.detail-head`；浏览器用例里直接 `page.textContent('.detail-head-main h3')` 会命中**先出现在 DOM 里**的那一个（平台页的详情虽然 `hidden`，节点还在），断言随机失败。
 
 **规则**：二级页的用例先收窄到视图容器（`[data-plugins-view="detail"] …` / `[data-platform-view="detail"] …`）再取文本；不要依赖「当前只有一处匹配」。
+
+### 1.99 键值表在分栏右栏里被 1000px 的最小宽度撞破卡片
+
+`.table-wrap table{ min-width: 1000px }` 是给宽表横向滚动用的；属性 / 开关这类两三列的短表也继承它后，右栏 633px（1440 屏）甚至 285px（1024 屏）的内容区里表格自己横向滚，卡右缘被硬切。
+
+**规则**：短表一律 `dataTableHtml({ ..., fit: true })`（`.data-table--fit` 把表体 `min-width` 归零、铺满容器）；只在列多到必须横滚的宽表上保留默认。静态断言拦不住这个，靠视觉核对（表体 `scrollWidth === clientWidth`）。
+
+### 1.100 窄栏里卡头同时放标题和四个按钮会折行
+
+1024 屏右栏内容区约 285px：卡头 h2 与「删除 / 日志 / 测试 / 编辑」抢同一行，卡头从 26.4px 涨到 70.4px，且换行位置随 DPR 变（同一屏 1 与 1.5 两次截图一个换一个不换）。
+
+**规则**：卡头只放标题与徽标；写操作放进正文的 `inlineActions()`，按钮靠 item 的 `attrs` 带 `data-xxx`、由页面的事件委托接（也给 `inlineActions` 新增了 `attrs` 入参，不要再手写这行按钮）。信息卡 + 动作的位置在平台二级页的实例卡、MCP 的属性卡上一致。
+
+### 1.101 离线 fixture 会缓存静态文件，改完必须重启预览
+
+`scripts/console-ui-fixture.mjs` 启动时把 `public/console/**` 读进内存 Map；改完 JS/CSS 直接刷新页面拿到的仍是旧文件，浏览器核对会误判「改动没生效」（白白多跑一轮）。
+
+**规则**：改 `public/console/**` 后重启 fixture（`Get-NetTCPConnection -LocalPort 4173` 找到 pid → `Stop-Process`，再 `Start-Process node scripts/console-ui-fixture.mjs`）再让浏览器核对；`npm run test:console:ui` 每次自己起新进程，不受影响。另：夹具没实现的路由会 404（例如 `POST /api/extensions/mcp/<id>/test`），要在夹具里补上正则路由而不是去改页面。
 
 ## 2. 迁移一个页面的检查清单
 

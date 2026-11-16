@@ -370,13 +370,19 @@ for (const id of ['skills', 'behaviors']) {
   const module = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', id, 'page.js'), 'utf8');
   ok(/from '\.\.\/\.\.\/components\/table\/table\.js'/.test(module) && /tableHtml\(|dataTableHtml\(|groupedTableHtml\(/.test(module), `${id} 页改用 components/table/table.js 的表格组件`);
 }
-// MCP 页是主从布局（server 列表 → 工具清单），复用 split-view 组件而不是表格。
+// MCP 页是主从布局（server 列表 → 详情），复用 split-view 组件而不是表格；
+// 工具栏进左栏的槽，右栏是两节卡（属性 / 工具）。
 const mcpModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'mcp', 'page.js'), 'utf8');
 ok(
   /from '\.\.\/\.\.\/components\/split-view\/split-view\.js'/.test(mcpModule)
   && /splitViewHtml\(|splitItemHtml\(/.test(mcpModule),
   'mcp 页改用 components/split-view 的主从布局组件',
 );
+ok(/splitViewHtml\(\{[\s\S]{0,200}?toolbar: toolbarMarkup\(/.test(mcpModule), 'MCP 工具栏下沉到左栏（split-view 的工具栏槽）');
+ok(/cardHtml\(/.test(mcpModule) && !/mcp-detail-head|mcp-tool-list|class="tag tag--/.test(mcpModule),
+  'MCP 右栏是分节卡，徽标与工具栏一律走组件');
+const mcpCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'mcp', 'page.css'), 'utf8');
+ok(!/\.mcp-tool-list|\.mcp-tool(\.|\s|\{)| \.mcp-detail\b/.test(mcpCss), 'MCP 页不再自带第二套表格与详情样式');
 // 表单组件：16 个工厂 + createForm 内核 + 字段注解，缺一个都会让页面迁移时踩空。
 const formModule = fs.readFileSync(path.join(componentDir, 'form', 'form.js'), 'utf8');
 for (const fn of ['textField', 'numberField', 'passwordField', 'textareaField', 'selectField', 'radioGroup', 'checkboxGroup', 'checkboxField', 'switchField', 'fileField', 'dateField', 'timeField', 'datetimeField', 'timeRangeField', 'readonlyField', 'formActions', 'formCallout', 'customField', 'checkListField', 'checkTableField', 'statusBadge', 'inlineActions', 'createForm', 'renderFields']) {

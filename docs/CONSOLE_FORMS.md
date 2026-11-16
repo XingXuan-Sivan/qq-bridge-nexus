@@ -233,7 +233,7 @@ span.time-field
 | `custom` | `customField({ id, label, html })` | 一段复合控件（语音库面板、key + 按钮 + 状态位） | 内部排版用 `.control-row`；`label` 仍参与左列对齐 |
 | `checkList` | `checkListField({ id, label, options, columns })` | 一组复选框清单（权限项、少量选项） | 取值为**字符串数组**（`readField` 对多 checkbox 有专门分支）；清单项是 `<label>`，必须清掉全局 `label` 的 `margin`；`id` 落在清单容器上（旧页面的 `#v2Tools` 就是这么保住的）；字段要写 `span: 2`，否则会缩在半宽格里；**清单很长时标签顶对齐**（`align-self:start`），这是刻意设计，几何断言只量单行字段 |
 | `checkTable` | `checkTableField({ id, label, options, nameHeader, descHeader, search, refresh, pageSize })` | 条目多、需要逐条扫读的开关清单（工具清单） | 复用 `components/table` 的 `dataTableHtml()`（工具栏 + 表体 + 分页都在组件里，表单不自带表格样式）；取值同样为字符串数组；`id` 落在容器 `div` 上；字段写 `span: 2`；表格行同样顶对齐 |
-| `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；`status` 是同一行的状态位；**默认标准档 40px**，卡片头 / 表格行这类紧凑位置才写 `small: true`（32px） |
+| `action` | `inlineActions({ items, status })` | 一行按钮（暂停 / 恢复 / 重置 / 保存） | 按钮变体 `danger` / `primary`；item 的 `attrs` 落到按钮上（页面用事件委托按 `data-xxx` 认按钮）；`status` 是同一行的状态位；**默认标准档 40px**，卡片头 / 表格行这类紧凑位置才写 `small: true`（32px） |
 | `status` | `statusBadge({ text, tone, pill })` | 只读状态（`运行中`） | 页头固定高度位置用 `pill: true` |
 
 ### 一个「表格整体」的固定结构（2026-11-06 落地）
@@ -242,7 +242,7 @@ span.time-field
 
 - **只有表体**：`tableHtml(columns, rows)`，适合卡片里嵌一张小表、或日志这类只读短表。样式仍来自 `components/table/table.css`，页面不要自己写 `<table>` 的边框/表头样式。
 - **分组可折叠**：`groupedTableHtml({ columns, groups, openIndex })` + `initGroupedTables(root)`。`groups` 是 `[{ label, key, rows }]`，每个组产出一行 `<tr class="group-row">`（整行 colspan、可点、可回车/空格）加若干 `<tr class="group-child" hidden>`；`initGroupedTables` 用事件委托绑一次即可（重新渲染 innerHTML 不用重绑），调用方不要再自己写 `tr.group-row` 的点击/样式。
-- **完整表格**：`dataTableHtml({ columns, rows, search, refresh, filters, pageSize, meta, empty })`，出一个自上而下的固定骨架，页面只提供数据：
+- **完整表格**：`dataTableHtml({ columns, rows, search, refresh, filters, pageSize, meta, empty, fit })`，出一个自上而下的固定骨架，页面只提供数据：
 
 ```
 .table-toolbar        ← 左侧：刷新(.btn) / 筛选(select) / 搜索(.search-box--w240)；右侧：meta 统计
@@ -260,6 +260,7 @@ span.time-field
 6. 表格在折叠的 `<details>` 里时，行有布局但被祖先裁掉——浏览器回归里点击前必须先展开分组（`reveal('#id')`），这不是组件问题。
 7. **分栏页（tab）的标签条要和它的内容在同一张卡里**，且标签条紧贴内容顶部（`slang` 页的 `.card > .slang-tabs { margin: 10px 0 0 }`）。标签留在页头卡、表格在下一张卡时，视觉上会被卡片边界切断，用户会当成「标签和内容断开」。
 8. 分栏切换、批量操作条这类**页面结构**也算「控件」：它们写在 `fields.js` 的 `html` 规格里、由 `renderFields` 注入（`SLANG_FIELDS.tabs` / `barCandidate` …），`page.html` 只留 `<div data-slang-fields="...">` 宿主，手写控件棘轮才会归零。
+9. **键值表传 `fit: true`**：属性 / 开关这类两三列的短表不要 1000px 的最小宽度（那是给宽表横向滚动用的），否则在分栏右栏、窄卡片里表体会自己在卡内横滚、右缘被硬切。
 
 开关（`switch`）**不再走「标签贴控件」的行内变体**：它和输入框共用 148px 标签列，这样两列栅格里的开关才和上下行对齐。只有页头 `.form-inline-bar` 里的开关收成紧凑的 `auto auto`（`.form-inline-bar .field-block--switch > .field-row`）。
 
@@ -360,6 +361,31 @@ span.time-field
 5. 外壳用 `display: contents` 时，**需要跨满两列的块自己写 `grid-column: 1 / -1`**（`.detail-head` / `.platform-stack`；`.page-tabs` 的已在 `components.css` 里）。漏写会掉进 `main` 网格的第一列。
 6. 详情自己拉数据（`/api/platforms/registry` 的快照、`/api/plugins/<id>`）时用加载令牌：换了 id 或已卸载就把在途响应丢掉，不要在已清空的宿主上画。写成功后**不重挂详情**（会冲掉状态位与刚敲的值），只刷新清单。
 7. 深链不等清单接口：`paint(sub)` 在有 `sub` 时直接挂详情，清单接口回来再画清单；指向不存在的 id 时平台页把地址栏归一回清单，插件页在详情里给出“读取失败”与返回。
+
+### 主从页：左右分栏（2026-11-16 落地，`mcp` 为样板）
+
+「清单与详情要同屏对照」的页面才用左右分栏（目前只有 MCP）：左栏是可点清单 + 工具栏，右栏是选中项的分节卡。外壳、选中态、上下键都在 `components/split-view` 里，页面只提供条目与详情。
+
+```html
+<div id="mcpList">                               <!-- 宿主；page.css 在这层重设 --split-list-w -->
+  <div class="split-view" id="mcpSplit" data-split-view>
+    <div class="split-side">
+      <div class="split-toolbar">…</div>         <!-- splitViewHtml({ toolbar }) 的槽 -->
+      <div class="split-list" role="listbox">…</div>   <!-- splitItemHtml({...}) 生成的条目 -->
+    </div>
+    <div class="split-detail">…</div>             <!-- 若干 cardHtml() 直接放进来 -->
+  </div>
+</div>
+```
+
+约定：
+
+1. 工具栏进 `toolbar` 槽，内容仍由 `tableToolbarHtml({ refresh, filters, search, meta, actions })` 生成；不要再单独拼一行「刷新 + 筛选 + 搜索」，槽内搜索框由组件按整栏撑开。
+2. 右栏每一节都是 `cardHtml()` 的一张卡（MCP 是「属性」+「工具」两张），`split-detail` 已是 flex column 并给 16px 间距，页面 css 不再写详情样式。
+3. **卡头只放标题**：1024 屏右栏内容区约 285px，标题与三四个按钮抢同一行会折行；写操作放进正文的 `inlineActions({ items })`，按钮用 item 的 `attrs` 带上 `data-xxx` 与条目 id。
+4. 键值类小表传 `fit: true`（见上节约定 9），否则 1000px 最小宽度会把卡撑破。
+5. 左栏条目的信息顺序固定为「标题 + 徽标 + 一行摘要」（`transport · N 个工具`）；清单文件名这类标识性字段归右栏属性表，不要塞进摘要。
+6. 左栏宽度只在宿主上重设 `--split-list-w`（MCP 是 `minmax(300px, 360px)`），组件不接收宽度参数。
 
 ## 5. 现有复杂表单的迁移
 

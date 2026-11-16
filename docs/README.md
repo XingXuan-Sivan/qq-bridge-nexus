@@ -38,6 +38,7 @@
 | [CONSOLE.md](CONSOLE.md) | **控制台单一入口**：零构建结构、目录六条规则、设计令牌与栅格、组件 API（card / collapse / tag / alert / message / message-box / tile / table / search-box）、必须不变的契约、门禁、长页重排实测、执行体 / 方案 / 权限的界面口径 | ✅ 现行（改 `public/console/` 前先读） |
 | [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂、`createForm()` 内核（类型化取值、校验、条件显示、脏值守卫）、字段注解、两步迁移法 | ✅ 规格已定 |
 | [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 表单迁移踩坑与检查清单 | ✅ 迁页面前先读 |
+| [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) | **控制台 IA 重构与平台配置归一**：既有结构/风格基线（§2）、组件增量（tile 图标、split-view 宽度变量与工具栏槽、页面子路由）、平台页与插件页的两级 IA、平台自描述 `modelCatalog`、默认运行方案三级链与 config v3、B1–B4 批次与验收 | 🚧 方案定稿，按 §7 批次执行 |
 
 ### 扩展与插件
 
@@ -125,6 +126,9 @@
 | 换执行体、加直通方案、在界面里改对端权限档 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) |
 | 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
 | 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
+| 把卡片页改成二级详情页 / 加页面子路由 / 左栏宽度 | [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) §3 |
+| 让核心与全局配置不再认识具体 Agent 平台 | [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) §4 |
+| 默认运行方案现在从哪来 | [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) §5 |
 | 改会话准入、方案、人格 | [SESSION_SUBSYSTEM.md](SESSION_SUBSYSTEM.md)、[PERSONA_PROVIDER.md](PERSONA_PROVIDER.md) |
 | 消息回得慢 / 被略过 / 调合批与唤醒预算 | [MESSAGE_PACING.md](MESSAGE_PACING.md)（准入部分见 SESSION_SUBSYSTEM.md §4） |
 | 写 / 改插件 | [PLUGIN_KERNEL.md](PLUGIN_KERNEL.md) |

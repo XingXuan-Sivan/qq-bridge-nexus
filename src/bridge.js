@@ -8285,6 +8285,8 @@ async function main() {
               sendJson({ ok: false, error: '没有这个运行方案' }, 400);
               return;
             }
+            // 只改这一个键：runtime 段其余值原样留在文件里，不给没设过的键补默认值。
+            const configFile = path.join(ROOT, 'config.json');
             const current = readConfigObject(configFile);
             atomicWriteJson(configFile, { ...current, runtime: { ...(current.runtime ?? {}), defaultPlan } });
             cfg.runtime.defaultPlan = defaultPlan;

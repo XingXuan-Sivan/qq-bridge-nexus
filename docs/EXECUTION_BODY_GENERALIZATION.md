@@ -499,7 +499,7 @@ POST /api/sessions/:key/permission  { preset }
 | --- | --- |
 | 新增卡片「执行体」 | 当前默认执行体下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 「切换」；切换前预检、失败提示保留原值 |
 | 既有「人格与行为」卡 | `runtimeDefaultSelect` 文案从「默认方案」改为「默认方案（无平台/会话覆盖时生效）」，位置不变 |
-| 既有「DSH 模型与思考强度」卡 | 标题里的 `DSH` 换成当前执行体的 `label`；该卡只在执行体声明 `models` 能力位时出现，否则显示「当前执行体没有声明 `models` 能力位：模型与思考强度在它自己的界面里改」 |
+| 既有「DSH 模型与思考强度」卡 | 已落地（B3）：模型与思考强度搬到 Agent 平台详情页，标题用该平台的 `label`，选项来自平台声明的 `modelCatalog`；全局配置页不再有这张卡 |
 
 ### 8.2 平台配置 › Agent 侧详情
 

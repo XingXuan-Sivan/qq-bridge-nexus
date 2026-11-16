@@ -92,11 +92,15 @@ export function normalizeRoleState(raw) {
   return { role: safeRoleValue(r.role), mode, silent, byKey };
 }
 
-/** 写盘用：没有 byKey / silent 时不写这些字段，保持老格式。 */
+/**
+ * 写盘用：没有 byKey 时不写这个字段；手动静默策略只在调用方显式传入时写。
+ * 策略的唯一事实源是 config.json 的 `silence.manual`（bridge 的 persistManualSilence），
+ * 这里传 `silent: null` 表示「只记 mode 标记」，没传才按 normalizeRoleState 的旧数据补默认值。
+ */
 export function serializeRoleState(state) {
   const s = normalizeRoleState(state);
   const out = { role: s.role, mode: s.mode };
-  if (s.mode === 'silent' && s.silent) out.silent = s.silent;
+  if (s.mode === 'silent' && state?.silent) out.silent = normalizeManualSilence(state.silent);
   if (Object.keys(s.byKey).length) out.byKey = s.byKey;
   return out;
 }

@@ -85,6 +85,7 @@ import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigTo
 // 夹具剥 import 后必须按门面的名字补回。实现本身在 adapters/qq/ 里。
 // B6 又从这里进了三个名字：统一出站、后端配置注入、插件平台注册表。
 // B7 再加两个：控制台的平台元数据与 HTTP 发送端点的目标解析。
+// B3 再加一个：/api/config/runtime 读「当前运行平台」时问的就是 activeUserPlatformId。
 import {
   buildSendCall,
   describeBackend,
@@ -94,6 +95,7 @@ import {
   transportRegistry,
   userPlatformMetadata,
   resolveSendTarget,
+  activeUserPlatformId,
 } from '../src/user-side/user-platform.mjs';
 // Agent 侧的连接层在 VM 里换成离线桩（见下面的 runtimeStub）：真实的地址发现会查本机进程
 // （lsof/netstat），装了 DSH 的机器上会摸到真 DSH。
@@ -398,6 +400,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     effectiveMode, passiveAllowed, proactiveAllowed,
     runtimeOf, promptChannelOf, permissionAuthorityOf, applySessionPermission, readAgentPermission, describeAgentPermission,
     agentPermissionOptions, sessionAgentPayload,
+    saveActiveAgentPlatform,
     // 提示注入四条：通道解析、首轮前缀的「带过没有」、记账与档案写入。
     // 投递路径（deliverPrompt / ensureSession）在切片点之外，测试用它们直接钉语义。
     platformPromptTextFor, promptInjectedFor, markPromptInjected, ensureSessionProfile,
@@ -470,6 +473,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     dispatchSend, configureUserPlatformBackend, transportRegistry,
     // 平台元数据与发送目标解析（B7）：都是纯注册表查询，真实现即可。
     userPlatformMetadata, resolveSendTarget, agentPlatformMetadata,
+    activeUserPlatformId,
     // 平台注册表：声明面读模块级 root（真实 profiles），配置面由 VM 传入，与 bridge.js 的调用一致。
     findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；

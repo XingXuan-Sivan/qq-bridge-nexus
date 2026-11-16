@@ -203,8 +203,8 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 
 ## `platforms.agents.<id>.options`：`provider` / `model` / `reasoningEffort` / `vision` —— 模型选择
 
-推荐在桥接控制台「运行总览 → DSH 模型与思考强度」里选：提供方、模型、思考强度三个下拉联动，选项全部来自 DSH 的模型目录（`session.modelCatalog`），
-保存后对已有会话的下一条消息生效，不用重启桥接。手改 `config.json` 也可以，重启桥接后生效。
+推荐在桥接控制台的 Agent 平台 › DSH 详情的「模型与思考强度」里选：提供方、模型、思考强度、看图能力四个控件联动，选项来自该平台声明的模型目录
+（`modelCatalog` 声明 + 实时目录，见 `GET /api/platforms/registry/agent/<id>/models`），保存后对已有会话的下一条消息生效，不用重启桥接。手改 `config.json` 也可以，重启桥接后生效。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -214,7 +214,7 @@ AI **收藏**群友的表情、**发送**收藏表情时，桥接会先自己下
 | `options.vision` | `auto` | 看图能力：`auto` = 只有核实过能看图的模型（目前是 DeepSeek 的 `deepseek-flash`）才把 QQ 图片交给它，其余模型把图片、表情改成文字占位（避免整条消息被拒）；`yes` / `no` = 手动指定 |
 
 - 控制台保存时由服务端按目录硬校验：提供方 / 模型不在目录里、档位不在该模型的列表里都会拒绝；目录读不到时**不保存**（返回 503），聊天照常按原配置进行。
-- 价格表（`src/model-prices.js`）只收录 DeepSeek 自家的价目；换到其它模型后，「令牌与花费」的金额按 DeepSeek-V4.1-Flash 估算并标「估算」。
+- 价目只来自平台声明（`modelCatalog.models[].pricing` + `pricingPolicy`）：平台没申报单价的模型不报价，账本只计 token、金额显示 `—`，不做兜底估算。
 - 只有控制台能改模型：AI 的令牌调不了这些接口，QQ 私聊管理通道也没有改模型的命令。
 - 和思考强度一样，切换会同时写入 DSH 的全局默认（`~/.dsh/settings.yaml` 的 `agent-default-model`），Web GUI 里新建会话的默认模型也会跟着变。
 

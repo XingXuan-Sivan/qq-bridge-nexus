@@ -111,6 +111,8 @@ await test('role state：旧 silent 补默认策略；active 不写 silent；序
   assert.equal(legacy.silent.startedAt, 0);
   assert.equal(legacy.silent.stages.passive, true);
   assert.deepEqual(Object.keys(serializeRoleState({ role: 'x', mode: 'active' })), ['role', 'mode']);
+  // 策略的唯一事实源是 config.json 的 silence.manual：显式传 null 时状态文件只记 mode 标记。
+  assert.deepEqual(Object.keys(serializeRoleState({ role: 'x', mode: 'silent', silent: null })), ['role', 'mode']);
   const silent = normalizeManualSilence({ startedAt: 123, mode: 'sendOnly', stages: { passive: false } });
   const out = serializeRoleState({ role: 'x', mode: 'silent', silent });
   assert.equal(out.mode, 'silent');

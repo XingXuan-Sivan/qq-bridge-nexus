@@ -1,6 +1,6 @@
 # 控制台 IA 重构与平台配置归一
 
-> 状态：**B1、B2、B3-1–B3-6 已落地**，按 §7 继续 B3-7 → B3-8 → B4。
+> 状态：**B1、B2、B3 已落地**，按 §7 继续 B4。
 > 范围：`public/console/**`、`src/bridge.js` 的平台注册表与配置端点、`src/config/platforms.mjs`、`src/agent-side/**`、`profiles/agent-platforms/**`、`config.json` 结构版本、`docs/**`。
 > 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑记录）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
 > 本文只写**结论与边界**，不复述既有规格；与既有文档冲突时以本文为准，并在同一批里改掉旧文档的对应段落。
@@ -242,14 +242,39 @@ modelCatalog:
 
 `POST /api/dsh/model` 与其全部引用（24 处）当批删除，替换为 4.4 的读口。
 
-删完后逐项核对：全局配置页每个分区都必须是 `config.json` 的顶层段（`saveConfigSection()` 写回）。当前已满足的有 `permission`、`limits.send`、`role.default`、`runtime.*`、`socialV2.*`、`security.*`；改造后新增的项若落在 `state/*.json`，一律改到 `config.json`，不留第二种存储。
+逐项核对的结果：全局配置页的每个分区都写 `config.json` 的顶层段，没有第二种存储。
+
+| 分区 | 写口 | `config.json` 落点 |
+| --- | --- | --- |
+| 默认 Agent 平台 | `POST /api/config/runtime`（`defaultAgent`） | `platforms.active.agent` |
+| 默认用户平台 | `POST /api/config/runtime`（`defaultUser`） | `platforms.active.user` |
+| 默认运行方案 | `POST /api/config/runtime`（`defaultPlan`） | `runtime.defaultPlan` |
+| 默认人格 | `POST /api/config/role-default` | `role.default` |
+| 人格卡生效方式 | `POST /api/roles/limit` | `role.saveApply` |
+| 发言上限 | `POST /api/config/send-limit` | `limits.send` |
+| 上下文压缩 | `POST /api/compact/config` | `compact` |
+| 所有者与管理员 | `POST /api/whitelist` | `owner` / `admins` |
+| 权限级别 | `POST /api/config/permission` | `permission` |
+| 安全拦截 | `POST /api/security` | `security` |
+| 定时静默 | `POST /api/silence` | `silence.schedule` |
+| 手动静默 | `POST /api/role-mode` | `silence.manual`（关闭写 `null`） |
+| 注入块 | `PATCH /api/config/promptBlocks` | `promptBlocks` |
+| 控制台令牌 | `POST /api/console/token` | `consoleToken` |
+
+三类不进 `config.json`，各有明确理由，都不算「第二种存储」：
+
+- **准入名单**（`PATCH /api/access`）：与会话档案同住 `state/sessions/defaults.json` —— 它回答的是「这个群 / 这个人能不能进」，生命周期跟着会话档案走，不跟全局配置。
+- **控制台令牌的随机值密文**：`consoleToken` 写令牌本身；首次启动自动生成的那份密文在 `state/console-token`，那是凭据文件，不是配置。
+- **运行态**：`state/current-role.json` 只留 `role` / `mode` 标记，手动静默的策略在 `silence.manual`，两处不再各写一份。
+
+门禁：`scripts/test-config-unify.mjs` 末尾一条用例用桥接夹具把上表逐个打一遍写口，再读回 `config.json` 断言落点；同时钉住默认 Agent 平台只写 `platforms.active.agent`、准入不进 `config.json`、手动静默只在 `silence.manual`。
 
 ### 4.6 去硬编码清单（当批核销）
 
 - `CAPABILITIES_ROOT` 里的 `dsh` 常量（已核销：能力档 root 改由 `agentCapabilitiesDir()` 解析，store 层缺 root 抛错）。
-- `src/dsh-model.js` 中供界面使用的专有分支（纯文本解析工具保留）。
-- 界面文案里的「DSH 自己压缩」「DSH 模型」「运行期恒为 dsh」（后者若是测试 fixture 的注释，改成「运行期平台固定」）。
-- `docs/` 与代码注释里把「执行体」当唯一说法的段落（改写范围见 §7 B2 第 5 条）。
+- `src/dsh-model.js` 中供界面使用的专有分支（已核销：只给控制台用的 `selectionNotices()` 与 `FALLBACK_EFFORTS` 删除，报错文案里的平台名去掉；`buildCatalogView()` 保留 —— 它是 `/api/platforms/registry/agent/<id>/models` 的 `view` 字段）。
+- 界面文案里的「DSH 自己压缩」「DSH 模型」「运行期恒为 dsh」（已核销：压缩模式与文案改为 `early` / `agent`，模型卡标题跟平台 `label`）。
+- `docs/` 与代码注释里把「执行体」当唯一说法的段落（B4 文档全量同步时改）。
 
 ---
 
@@ -322,7 +347,7 @@ modelCatalog:
 
 四批，**批内任务连续做完再停**；每批必须带着全绿门禁收尾，不留半成品跨批。每批都含「当批删除」，旧方案不推到下一批再删。
 
-**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 进行中（1–6 已收尾，剩人格注入块可关与全局配置逐项核对）；B4 未开始。
+**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 ✅ 已收尾（1–9 全部完成：平台自描述模型目录与读口、模型卡搬到平台详情页、价目只按声明折算、压缩 `early` / `agent`、能力档 root 去硬编码、人格注入块可关、全局配置逐项核对）；B4 未开始。
 
 ### B1 底座：组件能力 + 子路由 + 令牌债
 

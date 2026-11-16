@@ -197,7 +197,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 - `badges` / `tags` / `actions` 是 HTML 片段（调用方转义文本）。
 - `icon` 是 `{ glyph | src, tone }`（`tone` = `accent`/`ok`/`warn`/`danger`）；**不传也渲染图标位**，内容取标题首字（`.tile-icon.is-default`）。这样 DOM 结构不因有无自定义图标而分叉，作者将来补图标只需传参。
 - 给了 `body` 就不再输出默认的标题/描述/标签行（此时图标也由调用方自己放）。
-- `interactive: true` 让整张卡可点：输出 `role="button"` + `tabindex="0"`，配合页面的点击委托（排除卡内的 `button` / `a`）与 `Enter` / 空格键进二级页。平台清单就是这么用的。
+- `interactive: true` 让整张卡可点：输出 `role="button"` + `tabindex="0"`，配合页面的点击委托（排除卡内的 `button` / `a`）与 `Enter` / 空格键进二级页。平台清单与插件清单就是这么用的。
 - 插件页、人格页与平台清单的列表都用它，样式 `.tile` / `.tile-head` / `.tile-icon` / `.tile-head-body` / `.tile-actions` 共享（均在 `css/components.css`）。
 
 ### 4.8 其它
@@ -206,6 +206,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | --- | --- | --- |
 | `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏，组件只管间距；窄屏 ≤900px 自动上下堆叠。**现仅 MCP 页使用**：平台页已改为「卡片网格清单 + 二级页」（见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) §4），不再适合塞进两栏 |
 | `table` | `tableHtml(...)` | 页面不许手写表格骨架；分页见页面实现 |
+| `detail-head` | `detailHeadHtml({ title, code, meta, badges, backLabel })` | 二级页页头：返回按钮（`data-detail-back`，点击由页面的事件委托接住）+ 标题 + 可选的 `code` 次级标识 + 一行说明 + 右侧徽标。`title` / `code` / `backLabel` 由组件转义，`meta` 与 `badges` 是已渲染的片段（调用方转义）。样式 `components/detail-head/detail-head.css` 已写 `grid-column: 1 / -1`，直接放进 `display:contents` 的二级页外壳即可；平台详情与插件详情共用 |
 | `search-box` | `searchBoxHtml({ id, placeholder, value, label, className })` / `bindSearchBox(input, onQuery, { onEnter })` | 固定产出 `type="search"` + `class="search-box"`，宽度用 `input.search-box--w240` 而不是工具类 |
 | `modal` | 三段式弹窗 | 被 `message-box` 复用 |
 | `form` | 见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | 表单控件工厂与 `createForm()` |

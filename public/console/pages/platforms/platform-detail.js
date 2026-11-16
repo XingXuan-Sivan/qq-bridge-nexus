@@ -12,10 +12,12 @@
 //     会走的实现；`active` 只是默认实例（出站没有地址上下文时的兜底）；
 //   · Agent 平台装配的是同一个单例，`active` 就是当前在跑的那个。
 //
-// 版面：页头（返回 + 平台名 + 徽标）/ 标签条 / 面板，面板里每一段是一张 card。
+// 版面：页头（返回 + 平台名 + 徽标，components/detail-head）/ 标签条 / 面板，
+// 面板里每一段是一张 card。
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { cardHtml } from '../../components/card/card.js';
+import { detailHeadHtml } from '../../components/detail-head/detail-head.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { bindSwitches, getSwitch, inlineActions, renderFields } from '../../components/form/form.js';
 import { hasSchemaFields, readSchemaPatch, schemaFields } from '../../components/form/schema.js';
@@ -471,7 +473,7 @@ async function saveCurrentConfig() {
 /** 写口按钮的事件委托：面板重画后不需要重新绑定。 */
 function onActionClick(event) {
   if (!(event.target instanceof Element)) return;
-  if (event.target.closest('[data-platform-back]')) { onBack?.(); return; }
+  if (event.target.closest('[data-detail-back]')) { onBack?.(); return; }
   if (event.target.closest('#platformProbe')) { void probeCurrent(); return; }
   if (event.target.closest('#platformSetDefault')) { void setDefaultCurrent(); return; }
   if (event.target.closest('#platformSetUserDefault')) { void setDefaultUserCurrent(); return; }
@@ -501,14 +503,13 @@ function shell(item) {
   ].filter(Boolean).join(' · ');
   return `
     <div class="platform-detail">
-      <header class="platform-head">
-        <div class="platform-head-main">
-          <button class="btn small platform-back" type="button" data-platform-back>← 返回平台清单</button>
-          <h3>${esc(item.label || item.id)} <code>${esc(item.id)}</code></h3>
-          <p class="meta">${headMeta}</p>
-        </div>
-        <div class="row">${stateTag}${enabledTag}${sourceTag}</div>
-      </header>
+      ${detailHeadHtml({
+      title: item.label || item.id,
+      code: item.id,
+      meta: headMeta,
+      badges: [stateTag, enabledTag, sourceTag],
+      backLabel: '返回平台清单',
+    })}
       <div class="page-tabs" role="tablist">
         ${tabs.map((t) => `<button class="page-tab${t.id === tab ? ' active' : ''}" type="button" role="tab" aria-selected="${t.id === tab}" data-platform-tab="${t.id}">${esc(t.label)}</button>`).join('')}
       </div>

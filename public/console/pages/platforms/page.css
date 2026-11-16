@@ -1,30 +1,9 @@
 /* 平台页：清单是两个折叠组里的卡片网格，详情是同页二级路由（#platforms/<side>:<id>）。
    下面全部是 page.js / platform-detail.js 生成内容的样式。 */
 
-/* 详情铺满网格：页头、标签条、面板三块都是 main .grid 的直接网格项。
-   .page-tabs 自带 grid-column:1/-1（css/components.css），这里只管页头与面板。 */
+/* 详情铺满网格：页头（components/detail-head）、标签条、面板三块都是 main .grid
+   的直接网格项。.page-tabs 自带 grid-column:1/-1（css/components.css），这里只管面板。 */
 .platform-detail { display: contents; }
-
-.platform-head {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.platform-head-main { min-width: 0; }
-.platform-head-main h3 {
-  margin: 0 0 6px;
-  font-size: 16px;
-}
-.platform-head-main h3 code {
-  font-size: 12px;
-  color: var(--muted);
-}
-.platform-head-main .meta { margin: 0; }
-/* 返回清单是页头的一部分：在标题上方，与标题同列。 */
-.platform-back { margin-bottom: 10px; }
 
 /* 标签条在页面里：.page-tabs 的默认外边距是给页首用的，这里收窄。 */
 .platform-detail .page-tabs {

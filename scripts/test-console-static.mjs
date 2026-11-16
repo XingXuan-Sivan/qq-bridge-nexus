@@ -302,10 +302,17 @@ ok(/prefers-color-scheme/.test(favicon), 'favicon 跟随系统深浅色切换颜
 const ccFavicon = fs.readFileSync(path.join(ROOT, 'public', 'control-center', 'favicon.svg'), 'utf8');
 ok(ccFavicon === favicon, '控制中心与桥接控制台用同一个图标文件');
 
-console.log('## 片段页的浮层归属');
-const pluginsModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'page.js'), 'utf8');
-ok(/document\.body\.appendChild\(overlay\)/.test(pluginsModule), '插件详情遮罩会被挂到 body（.card 的动画/滤镜会给 fixed 造包含块）');
-ok(/wireModal\(document\.getElementById\('pluginDetailOverlay'\)/.test(pluginsModule), '插件详情弹窗走 components/modal.js 的 wireModal（Esc / 点遮罩统一）');
+console.log('## 插件二级页');
+const pluginsPageJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'page.js'), 'utf8');
+const pluginDetailJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'plugin-detail.js'), 'utf8');
+ok(/plugin-detail\.js/.test(pluginsPageJs) && /mountPluginDetail\(/.test(pluginsPageJs), '插件二级页走 plugin-detail.js');
+ok(!/pluginDetailOverlay|wireModal|document\.body\.appendChild/.test(pluginsPageJs + pluginDetailJs),
+  '插件详情不再是弹窗（没有遮罩，也不往 body 搬节点）');
+ok(/onPageRoute\('plugins'/.test(pluginsPageJs) && /setConsolePage\('plugins', \{ sub:/.test(pluginsPageJs),
+  '插件详情由子路由 #plugins/<id> 驱动（返回写空 sub）');
+ok(/interactive: true/.test(pluginsPageJs), '清单卡片整卡可点进详情');
+ok(/cardHtml\(/.test(pluginDetailJs) && /dataTableHtml\(/.test(pluginDetailJs) && /detailHeadHtml\(/.test(pluginDetailJs),
+  '详情每一段是一张卡，属性表用表格组件，页头用 detail-head');
 
 console.log('## 组件层（3.2）');
 const componentDir = path.join(ROOT, 'public', 'console', 'components');

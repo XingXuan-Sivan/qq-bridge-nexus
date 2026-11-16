@@ -1,0 +1,25 @@
+/* 二级页页头：组件入口 public/console/components/detail-head/detail-head.js。
+   页头是 main 网格的整行块——二级页外壳通常是 display:contents。 */
+.detail-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.detail-head-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.detail-head-main h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.detail-head-main h3 code {
+  font-size: 12px;
+  color: var(--muted);
+}
+.detail-head-main .meta { margin: 0; }
+/* 返回清单是页头的一部分：在标题上方，与标题同列。 */
+.detail-back { margin-bottom: 10px; }

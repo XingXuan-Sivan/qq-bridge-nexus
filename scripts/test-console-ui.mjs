@@ -265,10 +265,11 @@ try {
 
   await test('Plugin detail renders its configSchema form and posts a draft test', async () => {
     await navigate('plugins');
-    await page.waitForSelector('#pluginsList [data-plugin-action="detail"]');
-    await page.click('#pluginsList [data-plugin-action="detail"]');
-    await page.waitForFunction(() => document.getElementById('pluginDetailOverlay')?.classList.contains('open'));
-    await page.waitForSelector('#cfg__baseUrl');
+    await page.waitForSelector('#pluginsList [data-tile-id="demo-plugin"]');
+    // 插件详情是二级页：整卡可点，地址栏落到 #plugins/<id>。
+    await page.click('#pluginsList [data-tile-id="demo-plugin"]');
+    await page.waitForFunction(() => location.hash === '#plugins/demo-plugin');
+    await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
     assert.equal(await page.locator('#cfg__baseUrl').inputValue(), 'http://127.0.0.1:3110');
     assert.equal(await page.locator('#cfg__timeoutMs').inputValue(), '1200');
     assert.equal(await page.locator('#pluginConfigTest').count(), 1, '配置区应有测试按钮');
@@ -278,7 +279,10 @@ try {
     const call = recorded.requests.find((entry) => entry.method === 'POST' && entry.path === '/api/plugins/demo-plugin/test');
     assert.ok(call, '测试按钮应 POST /api/plugins/demo-plugin/test');
     assert.equal(call.body.config.timeoutMs, 1200);
-    await page.click('#pluginDetailClose');
+    // 返回清单写空 sub：地址栏回到 #plugins，详情视图拆掉、清单重新可见。
+    await page.click('[data-detail-back]');
+    await page.waitForFunction(() => location.hash === '#plugins');
+    assert.equal(await page.locator('[data-plugins-view="detail"]').isHidden(), true, '返回后回到清单');
   });
 
 
@@ -501,7 +505,7 @@ try {
     // 诊断结论写在本平台的概览里（清单的诊断卡只收 error，这条是 warning）。
     assert.match(await page.textContent('[data-platform-panel-body]'), /active_pending_restart/, '配置面与运行期不一致时给一条诊断');
     // 徽标在清单页：返回后卡片应同时标出待重启与诊断。
-    await page.click('[data-platform-back]');
+    await page.click('[data-detail-back]');
     await page.waitForSelector('[data-platform-view="list"]:not([hidden])');
     assert.equal(await page.locator('[data-tile-id="agent:acp"] .tag').filter({ hasText: '待重启' }).count(), 1, '清单里标出待重启');
     assert.equal(await page.locator('[data-tile-id="agent:acp"] .tag').filter({ hasText: '警告' }).count(), 1, '清单卡片标出诊断结论');
@@ -740,6 +744,20 @@ try {
   } else await test('All submitted payloads exactly match the pre-redesign console baseline', async () => {
     const expected = JSON.parse(await readFile(baselinePath, 'utf8'));
     assert.deepEqual(fixture.requests, expected);
+  });
+
+  // 插件详情是子路由：深链直接落到 #plugins/<id>，前进/后退跟得上。
+  // 这里会多发两次 GET，所以放在契约基线比对之后。
+  await test('Plugin detail restores from a deep link and steps back', async () => {
+    await navigate('plugins');
+    await page.evaluate(() => { location.hash = '#plugins/demo-plugin'; });
+    await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
+    assert.match(await page.textContent('[data-plugins-view="detail"] .detail-head-main h3'), /演示插件/, '页头写出插件名');
+    await page.evaluate(() => history.back());
+    await page.waitForSelector('[data-plugins-view="list"]:not([hidden])', { timeout: 5000 });
+    assert.equal(await page.locator('[data-plugins-view="detail"]').isHidden(), true, '后退回清单');
+    await page.evaluate(() => history.forward());
+    await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
   });
 
   // 会话详情：“运行方案”要写出全局方案的名字（不能只有一个破折号）；
@@ -1340,7 +1358,7 @@ try {
     await page.waitForSelector('[data-platform-tab="capabilities"].active');
     await page.waitForSelector('#platformCapabilityList [data-cap-edit]');
     assert.equal(await page.locator('#planEditor').count(), 0, '跳转前先关掉方案编辑器');
-    assert.match(await page.textContent('.platform-head-main h3'), /DeepSeek Harness/, '能力档属于声明它的平台');
+    assert.match(await page.textContent('[data-platform-view="detail"] .detail-head-main h3'), /DeepSeek Harness/, '能力档属于声明它的平台');
   });
 
   if (!original) await test('全局配置：执行体卡区分配置面与运行期，切换默认执行体只落盘', async () => {

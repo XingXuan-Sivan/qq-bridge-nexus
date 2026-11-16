@@ -1,6 +1,7 @@
-// 桥接插件：工具行、插件卡片列表、注入块/运行设置/安装三块设置、插件详情弹窗。
-// 页面只留三折说明与宿主；控件全在这里生成，id 与迁移前保持一致（page.js 按 id 取值）。
+// 桥接插件：工具行、插件卡片列表、运行设置与安装两块设置，以及详情页的启用开关。
+// 页面只留三张卡的说明与宿主；控件全在这里生成，id 与迁移前保持一致（page.js 按 id 取值）。
 // 开关是 <button role="switch">，渲染后由页面统一 bindSwitches，读写走 getSwitch/setSwitch。
+import { tag } from '../../components/tag/tag.js';
 
 const TOOLBAR = [
   {
@@ -41,30 +42,23 @@ const INSTALL_PATH_FIELDS = [
   },
 ];
 
-const DETAIL_HTML = `<div class="modal-overlay" id="pluginDetailOverlay">
-  <div class="modal u-maxw-860" data-modal-panel role="dialog" aria-modal="true" aria-labelledby="pluginDetailTitle" tabindex="-1">
-    <header class="modal-head">
-      <h3 id="pluginDetailTitle">插件详情</h3>
-      <button class="modal-close" type="button" data-modal-close aria-label="关闭">×</button>
-    </header>
-    <div class="modal-body">
-      <div class="meta plugin-detail-summary" id="pluginDetailBody"></div>
-      <div id="pluginConfigMount"></div>
-      <div class="plugin-log-head">最近审计</div>
-      <pre class="plugin-log-pre" id="pluginDetailLogs">—</pre>
-      <div id="pluginPersistMount"></div>
-    </div>
-    <footer class="modal-foot">
-      <span class="modal-status" id="pluginPersistMsg"></span>
-      <button id="pluginDetailClose" class="btn" type="button">关闭</button>
-      <button id="pluginPersistSave" class="btn" type="button">保存启用状态</button>
-    </footer>
-  </div>
-</div>`;
-
-const PERSIST_FIELDS = [
-  { type: 'switch', name: 'pluginPersistEnabled', label: '写入 plugins.json', hint: '打开并保存后重启仍生效；只改本次运行请用卡片上的启用/停用。' },
+export const PERSIST_FIELDS = [
+  { type: 'switch', name: 'pluginPersistEnabled', label: '写入 plugins.json', hint: '打开并保存后重启仍生效；只改本次运行请用清单卡片上的启用/停用。' },
 ];
+
+/** 插件状态的说法与配色：清单卡片与详情页头共用同一份。 */
+const PLUGIN_STATUS = {
+  active: { label: '已加载', type: 'success' },
+  disabled: { label: '已禁用' },
+  invalid: { label: '清单无效', type: 'danger' },
+  failed: { label: '加载失败', type: 'danger' },
+  stopped: { label: '已停止' },
+};
+
+export function pluginStatusTag(status) {
+  const meta = PLUGIN_STATUS[status] ?? { label: status || '未知' };
+  return tag(meta.label, { type: meta.type });
+}
 
 export const PLUGINS_FIELDS = {
   toolbar: { fields: TOOLBAR },
@@ -72,5 +66,4 @@ export const PLUGINS_FIELDS = {
   runtime: { fields: RUNTIME_FIELDS },
   install: { html: INSTALL_HTML },
   installPath: { fields: INSTALL_PATH_FIELDS },
-  detail: { html: DETAIL_HTML, fields: PERSIST_FIELDS, mount: 'pluginPersistMount', columns: 1 },
 };

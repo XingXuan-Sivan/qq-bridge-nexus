@@ -1,37 +1,7 @@
-/* 插件页私有样式；通用表格与表单在 components/ 下，这里只补「注入块」表的紧凑排布。 */
-.table-block-settings {
-  width: 100%;
-}
-.table-block-settings th,
-.table-block-settings td {
-  padding: 8px 12px;
-  vertical-align: middle;
-}
-.table-block-settings th {
-  white-space: nowrap;
-}
-.table-block-settings td code {
-  font-size: 12px;
-}
-.table-block-settings td .meta {
-  margin-top: 2px;
-}
-.table-block-settings input[type="number"] {
-  width: 100%;
-  min-width: 88px;
-}
-.table-block-settings .field-switch {
-  margin: 0;
-}
-.plugin-detail-summary {
-  white-space: pre-wrap;
-  line-height: 1.7;
-}
-.plugin-log-head {
-  margin: 18px 0 8px;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
+/* 插件页：清单是三张卡（桥接插件 / 运行设置 / 安装插件），详情是同页二级路由（#plugins/<id>）。
+   这里只写详情里那两块「不是卡片」的内容：审计正文与空配置提示。 */
+
+/* 审计正文与原始配置：等宽、限高可滚动，长行折行而不是横向拖。 */
 .plugin-log-pre {
   margin: 0;
   padding: 12px;
@@ -45,6 +15,8 @@
   line-height: 1.6;
   white-space: pre-wrap;
 }
+
+/* 没有配置项时的说明块：与表格 / 空态的虚线框同一视觉。 */
 .plugin-config-none {
   padding: 12px 14px;
   border: 1px dashed var(--border-dashed);

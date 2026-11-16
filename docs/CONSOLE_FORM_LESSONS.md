@@ -564,7 +564,7 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 二级页外壳 `.platform-detail` 用 `display:contents` 把页头、标签条、分节栈直接交给 `main` 的两列网格；页头与分节栈没写 `grid-column` 时会掉进第一列，被挤成半宽（`.page-tabs` 的已在 `components.css` 里）。
 
-**规则**：凡是用 `display:contents` 的页面外壳，里层每个「应整行」的块都显式写 `grid-column: 1 / -1`；不要靠父容器 `flex` 堆叠——那会让整块掉进网格的一列。
+**规则**：凡是用 `display:contents` 的页面外壳，里层每个「应整行」的块都显式写 `grid-column: 1 / -1`；不要靠父容器 `flex` 堆叠——那会让整块掉进网格的一列。页头（`components/detail-head`）的这条已写进组件自己的 CSS：多个二级页共用一份，不再各页复写。
 
 ### 1.95 折叠组与卡片网格共存：刷新只重画内容，不重建 `details`
 
@@ -577,6 +577,21 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 `onPageRoute(page, fn)` 是页面在 `init()` 里注册的，而 `hydratePage()` 是异步的；路由在 hydrate 之前就查 `pageRoutes` 会拿到空表，首屏深链（`#platforms/agent:dsh/config`）的 `sub` / `tab` 直接丢掉，刷新后才变成清单页。
 
 **规则**：`applyRoute(page, …)` 写成 `hydratePage(page).then(() => pageRoutes.get(page)?.(路由))`；新增子路由时把「刷新能还原深链」当成必测项。
+
+### 1.97 弹窗改成二级页：异步加载要带令牌，保存后不要重挂详情
+
+插件详情从弹窗搬到 `#plugins/<id>` 后，「点详情 → 拼一段文本 → 挂配置表单」变成了「先画空壳 → 拉 `/api/plugins/<id>` → 再画」。两个坑：
+
+- **在途响应会画到空壳上**：用户在加载没回来前就返回清单（或连点两个插件），回调里 `root` 已经被 `innerHTML = ''`，轻则白画一次，重则把 A 插件的属性表画进 B 的页头。
+- **保存后重挂会把反馈冲掉**：配置保存的状态位（“已保存并重载”）与用户刚敲的值都在刚画出来的 DOM 里，整页重画一次就全没了。
+
+**规则**：`load(id)` 开头 `const mine = ++loadToken`，回来后再判 `mine === loadToken && root` 才落 DOM；`unmount` 里 `loadToken += 1`。写成功后只刷新清单（`onChanged`），详情保持原样。
+
+### 1.98 跨页共用的选择器要带视图作用域
+
+插件详情页头与平台详情页头现在都是 `.detail-head`；浏览器用例里直接 `page.textContent('.detail-head-main h3')` 会命中**先出现在 DOM 里**的那一个（平台页的详情虽然 `hidden`，节点还在），断言随机失败。
+
+**规则**：二级页的用例先收窄到视图容器（`[data-plugins-view="detail"] …` / `[data-platform-view="detail"] …`）再取文本；不要依赖「当前只有一处匹配」。
 
 ## 2. 迁移一个页面的检查清单
 

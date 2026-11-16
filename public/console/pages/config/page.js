@@ -18,7 +18,6 @@ import { init as initAccessPage, loadSecurity, securitySection, tokenSection } f
 import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobalAccess } from '../sessions/page.js';
 import { initVoiceSection } from './voice-section.js';
 import { mountCompact, compactSection } from './compact.js';
-import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { cardHtml } from '../../components/card/card.js';
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
@@ -31,7 +30,7 @@ let compactPanel = null;
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
-  await Promise.allSettled([loadSecurity(), loadSendLimit(), refreshDshModel(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
+  await Promise.allSettled([loadSecurity(), loadSendLimit(), loadRoleDefault(), loadPersonaSettings(), loadRuntimeDefault(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
@@ -40,32 +39,6 @@ async function reloadConfigSections() {
 // ── 页面级保存分区 ──────────────────────────────────────────────────────────
 // 只有「改完该整页一起保存」的表单才注册到这里；表格型数据（管理员、定时静默、
 // 工具开关、行为档案）单独保存，不跟页面级保存绑在一起——否则一项失败就得全部重来。
-const dshModelSection = {
-  id: 'dshModel',
-  label: 'DSH 模型',
-  read: () => ({
-    provider: $('dshProviderSelect').value,
-    model: $('dshModelSelect').value,
-    reasoningEffort: $('dshEffortSelect').value,
-    vision: $('dshVisionSelect').value,
-  }),
-  save: async (payload) => {
-    // 第一次换到第三方提供方：保存前再确认一次隐私（与按钮时代同一道闸）。
-    if (!DSH_FIRST_PARTY.includes(payload.provider) && payload.provider !== dshModelState?.provider
-      && !(await confirmBox({
-        title: '切换第三方提供方',
-        message: `${payload.provider} 不是 DeepSeek 自家的提供方。保存后，会话里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`,
-        confirmText: '切换',
-      }))) {
-      return { ok: true, skipped: true, message: '已取消（未切换提供方）' };
-    }
-    const r = await api('/api/dsh/model', 'POST', payload);
-    if (!r.ok) return { ok: false, message: r.error || '保存失败' };
-    await refreshDshModel();
-    return { ok: true, message: `已设为 ${r.provider}/${r.model}（${r.reasoningEffort || '模型默认强度'}），下一条消息生效` };
-  },
-};
-
 /**
  * 默认级别下拉：full 档随「允许 full」与当前值出现/收起（选项算法在 js/permission-levels.js）。
  * 不传 `current` 时沿用下拉现选的值，供开关翻转后重算。
@@ -150,112 +123,6 @@ function renderOverviewFieldGroups() {
     if (spec.bare) { host.innerHTML = spec.html; return; }
     renderFields(host, spec.fields, { columns: 1 });
   });
-}
-
-// ── DSH 模型与思考强度 ──────────────────────────────────────────────────────
-// 提供方 / 模型 / 思考强度三个下拉联动，选项全部来自桥接转发的 DSH 模型目录（GET /api/dsh/model 的 providers）；
-// 目录取不到时只显示当前配置（保存会被服务端拒绝）。服务端会再校验一次，页面只负责好用。
-const DSH_FIRST_PARTY = ['deepseek-official', 'deepseek-account'];
-let dshModelState = null;
-function dshProviders() { return Array.isArray(dshModelState?.providers) ? dshModelState.providers : []; }
-function dshSelectedProvider() { return dshProviders().find((p) => p.id === $('dshProviderSelect').value) || null; }
-function dshSelectedEntry() {
-  const p = dshSelectedProvider();
-  return p ? (p.models || []).find((m) => m.id === $('dshModelSelect').value) || null : null;
-}
-function dshFillSelect(select, items, value) {
-  select.replaceChildren();
-  for (const item of items) {
-    const el = document.createElement('option');
-    el.value = item.value;
-    el.textContent = item.label;
-    if (item.title) el.title = item.title;
-    select.appendChild(el);
-  }
-  if (items.some((x) => x.value === value)) select.value = value;
-}
-function dshFillModels(preferred) {
-  const r = dshModelState || {};
-  const p = dshSelectedProvider();
-  const models = p ? (p.models || []) : [];
-  const items = models.length
-    ? models.map((m) => ({ value: m.id, label: `${m.name}${m.name !== m.id ? `（${m.id}）` : ''}${m.vision === 'yes' ? ' · 能看图' : ''}${m.priced ? '' : ' · 价格未覆盖'}`, title: m.description || '' }))
-    : [{ value: r.model || '', label: r.model || '-' }];
-  dshFillSelect($('dshModelSelect'), items, preferred ?? r.model);
-}
-function dshFillEfforts(preferred) {
-  const r = dshModelState || {};
-  const select = $('dshEffortSelect');
-  const entry = dshSelectedEntry();
-  if (entry && !(entry.efforts || []).length) {
-    // 无档位模型：强度下拉置灰，保存时不带档位
-    dshFillSelect(select, [{ value: '', label: '该模型没有思考档位' }], '');
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  const efforts = entry ? entry.efforts : (r.options || []).map((id) => ({ id, name: r.labels?.[id]?.name || id, description: r.labels?.[id]?.description || '' }));
-  const def = entry ? entry.defaultEffort : (r.providerDefault || null);
-  const items = efforts.map((e) => ({ value: e.id, label: `${e.id}${e.id === def ? '（默认）' : ''}${e.id === 'off' ? ' · 关闭思考' : ''}`, title: e.description || '' }));
-  const want = [preferred, r.reasoningEffort, def].find((v) => v && items.some((x) => x.value === v));
-  dshFillSelect(select, items, want || items[0]?.value);
-}
-// 保存前的预览提示（措辞与服务端 selectionNotices 一致；保存后以服务端返回的为准）
-function dshPreviewNotices() {
-  const provider = $('dshProviderSelect').value;
-  const entry = dshSelectedEntry();
-  const effort = $('dshEffortSelect').value;
-  const vision = $('dshVisionSelect').value;
-  const notices = [];
-  if (provider && !DSH_FIRST_PARTY.includes(provider)) notices.push({ level: 'warn', text: `${provider} 不是 DeepSeek 自家的提供方：会话里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理，请先确认它的隐私政策。` });
-  if (effort === 'off') notices.push({ level: 'warn', text: '思考已关闭：回复更快，但二代仿真里的工具调用、读群判断和人格一致性可能变差。' });
-  const sees = vision === 'yes' || (vision === 'auto' && entry?.vision === 'yes') || (vision === 'auto' && !entry && dshModelState?.visionKnown === 'yes');
-  if (!sees) notices.push({ level: 'info', text: vision === 'no'
-    ? '已设为不能看图：会话里的图片、表情会改成文字占位（例如「[图片1：当前模型不能看图，已省略]」）。'
-    : '这个模型能不能看图未知：按不能看图处理，图片、表情会改成文字占位；确认它能看图的话，把「看图能力」改成「能看图」。' });
-  const priced = entry ? entry.priced : dshModelState?.priced;
-  if (priced === false) notices.push({ level: 'info', text: '价格表没有覆盖这个模型：令牌与花费页的金额按 DeepSeek-V4.1-Flash 估算，并标「估算」。' });
-  return notices;
-}
-function dshRenderNotices(notices) {
-  const box = $('dshModelNotices');
-  box.replaceChildren();
-  for (const n of notices || []) {
-    const el = document.createElement('div');
-    el.className = n.level === 'warn' ? 'dsh-notice warn' : 'dsh-notice';
-    el.textContent = (n.level === 'warn' ? '⚠️ ' : 'ℹ️ ') + n.text;
-    box.appendChild(el);
-  }
-}
-async function refreshDshModel(force = false) {
-  try {
-    const r = await api('/api/dsh/model' + (force ? '?refresh=1' : ''));
-    dshModelState = r;
-    $('dshModelText').textContent = r.model || '-';
-    $('dshProviderText').textContent = r.provider || '-';
-    const providers = dshProviders();
-    const providerItems = providers.length
-      ? providers.map((p) => ({ value: p.id, label: `${p.name}${p.name !== p.id ? `（${p.id}）` : ''}${p.thirdParty ? ' · 第三方' : ''}` }))
-      : [{ value: r.provider || '', label: r.provider || '-' }];
-    dshFillSelect($('dshProviderSelect'), providerItems, r.provider);
-    dshFillModels(r.model);
-    dshFillEfforts(r.reasoningEffort);
-    $('dshVisionSelect').value = r.vision || 'auto';
-    dshRenderNotices(r.notices || dshPreviewNotices());
-    const modelCount = providers.reduce((n, p) => n + (p.models || []).length, 0);
-    const parts = [];
-    if (r.catalogSource === 'dsh') parts.push(`选项取自 DSH 的模型目录（${providers.length} 个提供方 / ${modelCount} 个模型）`);
-    else parts.push(`目录不可用${r.catalogError ? '（' + r.catalogError + '）' : ''}：只显示当前配置和内置档位，暂时不能切换模型`);
-    if (r.providerDefault) parts.push(`当前模型的默认强度是 ${r.providerDefault}`);
-    if ((r.failures || []).length) parts.push('读取失败的提供方：' + r.failures.map((f) => `${f.name || f.id}（${f.message}）`).join('、'));
-    $('dshEffortNote').textContent = parts.join('；') + '。';
-    $('dshEffortSideEffect').textContent = r.globalSideEffect
-      ? '注意：切换会同时写入 DSH 的全局默认（~/.dsh/settings.yaml 的 agent-default-model），也就是 Web GUI 里新建会话的默认模型和强度也会跟着变。'
-      : '';
-    $('dshEffortMsg').textContent = '';
-  } catch (error) {
-    $('dshEffortMsg').textContent = '读取失败：' + (error?.message ?? error);
-  }
 }
 
 // ── 定时静默（运行总览 → 静默开关） ─────────────────────────────────────────
@@ -551,24 +418,6 @@ function renderAgentReadout() {
       : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`;
 }
 
-/**
- * 模型卡的标题跟随当前 Agent 平台，并只在它声明了 `models` 能力位时才给出模型字段：
- * 没这个能力位的平台，模型只能在它自己的界面里改。
- */
-function applyAgentGates() {
-  const running = runningAgentOf();
-  const entry = agentEntries().find((item) => item.id === running.id) ?? null;
-  const label = running.label || running.id || '当前 Agent 平台';
-  const card = $('section-dsh');
-  const heading = card?.querySelector('h2');
-  if (heading) heading.textContent = `${label} 模型与思考强度`;
-  const supported = (entry?.capabilities ?? []).includes('models');
-  const fieldsHost = card?.querySelector('[data-overview-fields="dsh"]');
-  if (fieldsHost) fieldsHost.hidden = !supported;
-  const notice = $('dshModelUnsupported');
-  if (notice) notice.hidden = supported;
-}
-
 async function loadAgentSection() {
   const select = $('agentDefaultSelect');
   if (!select) return;
@@ -593,7 +442,6 @@ async function loadAgentSection() {
     const button = $('agentSwitchBtn');
     if (button) button.disabled = !entries.length;
     renderAgentReadout();
-    applyAgentGates();
     setMsg('agentSwitchMsg', '');
   } catch (error) {
     setMsg('agentSwitchMsg', `读取 Agent 平台失败：${error?.message ?? error}`, 'err');
@@ -684,14 +532,6 @@ const CONFIG_CARDS = {
       body: '<div data-overview-fields="sendLimit"></div>',
     },
     {
-      id: 'section-dsh',
-      title: 'DSH 模型与思考强度',
-      note: '下一条消息生效',
-      description: '当前：<span id="dshProviderText">-</span> / <span id="dshModelText">-</span>',
-      body: '<div data-overview-fields="dsh"></div>'
-        + '<div id="dshModelUnsupported" hidden><p class="meta">当前 Agent 平台没有声明 <code>models</code> 能力位：模型与思考强度在它自己的界面里改。</p></div>',
-    },
-    {
       id: 'section-compact-config',
       title: '上下文压缩',
       note: '保存后下一轮结束时生效',
@@ -710,7 +550,7 @@ const CONFIG_CARDS = {
       id: 'section-permission',
       title: '权限级别',
       note: '保存后立即生效',
-      description: '级别到 DSH 预设只有一份映射：只读 → read-only、工作区读写 → workspace-write、'
+      description: '级别到 Agent 平台预设只有一份映射：只读 → read-only、工作区读写 → workspace-write、'
         + '完全访问 · 每次确认 → qq-full-ask、完全访问 · 短时授权 → danger-full-access。'
         + 'full 档只有总开关打开、且该会话拿到一次性授权时才真的钉上去。',
       body: '<div data-overview-fields="permission"></div>',
@@ -783,10 +623,10 @@ export function init() {
   });
   // 刷新后回到上次停留的标签页（默认「行为与模型」）；写入只在用户点击时发生。
   showConfigSection(readConfigTab(), { persist: false });
-  // 页面级保存：安全、全局准入、DSH 模型、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
+  // 页面级保存：安全、全局准入、运行方案、发言上限、令牌。令牌放最后——它换的是后续请求的凭据。
   saveBar = createSaveDock({
     page: 'config',
-    sections: [securitySection, globalAccessSection, runtimeDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, dshModelSection, sendLimitSection, permissionSection, tokenSection],
+    sections: [securitySection, globalAccessSection, runtimeDefaultSection, roleDefaultSection, personaSettingsSection, compactSection, sendLimitSection, permissionSection, tokenSection],
     actions: [{
       id: 'discard',
       label: '撤销未保存的修改',
@@ -817,13 +657,6 @@ export function init() {
   compactPanel = mountCompact(document.querySelector('[data-config-compact]'));
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
-
-  // DSH 模型与思考强度
-  $('dshProviderSelect').addEventListener('change', () => { dshFillModels(); dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
-  $('dshModelSelect').addEventListener('change', () => { dshFillEfforts(); dshRenderNotices(dshPreviewNotices()); });
-  $('dshEffortSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
-  $('dshVisionSelect').addEventListener('change', () => dshRenderNotices(dshPreviewNotices()));
-  $('dshCatalogRefresh').addEventListener('click', () => refreshDshModel(true));
 
   // Agent 平台：换了默认只落盘，重启桥接后装配。
   $('agentSwitchBtn')?.addEventListener('click', () => void switchAgent());

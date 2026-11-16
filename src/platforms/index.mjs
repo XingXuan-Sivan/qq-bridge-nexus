@@ -93,6 +93,82 @@ export function loadPlatform({ root, id } = {}) {
 }
 
 /**
+ * 模型目录的规范化：平台作者写的**只读元数据**（有哪些模型、怎么计费、能压到多少）。
+ *
+ * 它与 `configSchema` 是两套语义 —— 后者校验用户可写的平台选项（`vetPlatformConfig`），
+ * 前者不进任何校验器：作者写错目录只该让界面少显示一项，不该让用户配置变成「非法」。
+ * 全部字段可缺省；整段不声明时返回 `null`，界面按无该能力降级，不阻塞聊天。
+ */
+function normalizeModelCatalog(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const num = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+  const models = (Array.isArray(raw.models) ? raw.models : [])
+    .map((item) => {
+      const id = String(item?.id ?? item?.model ?? '').trim();
+      if (!id) return null;
+      const given = item?.pricing && typeof item.pricing === 'object' ? item.pricing : {};
+      const pricing = {
+        cacheHit: num(given.cacheHit),
+        cacheMiss: num(given.cacheMiss),
+        cacheWrite: num(given.cacheWrite),
+        output: num(given.output),
+      };
+      return {
+        id,
+        label: String(item?.label ?? id).trim() || id,
+        contextWindow: num(item?.contextWindow),
+        vision: item?.vision === true,
+        // 四个桶一个都没写 = 不报单价，界面显示「未声明」而不是拿兜底价猜。
+        pricing: Object.values(pricing).some((rate) => rate !== null) ? pricing : null,
+      };
+    })
+    .filter(Boolean);
+  const efforts = (Array.isArray(raw.efforts) ? raw.efforts : [])
+    .map((item) => {
+      const id = String(item?.id ?? '').trim();
+      return id ? { id, label: String(item?.label ?? id).trim() || id } : null;
+    })
+    .filter(Boolean);
+  const approxTokens = num(raw.compact?.approxTokens);
+  const catalog = {
+    models,
+    pricingPolicy: normalizePricingPolicy(raw.pricingPolicy),
+    efforts,
+    effortFallback: (Array.isArray(raw.effortFallback) ? raw.effortFallback : [])
+      .map((id) => String(id ?? '').trim())
+      .filter(Boolean),
+    compact: approxTokens > 0 ? { approxTokens: Math.round(approxTokens) } : null,
+  };
+  // 既没模型也没档位 = 平台什么都没声明，按「没有目录」处理，不含部分空壳。
+  return models.length || efforts.length ? catalog : null;
+}
+
+/** 计费口径：货币、单位、峰谷倍数与窗口（平台商业条款；节假日表是日历事实，不在这里）。 */
+function normalizePricingPolicy(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const windows = (Array.isArray(raw.peakWindows) ? raw.peakWindows : [])
+    .map((item) => (Array.isArray(item) && item.length === 2 ? item.map(Number) : null))
+    .filter((item) => item && item.every(Number.isFinite) && item[0] >= 0 && item[1] <= 24 && item[0] < item[1]);
+  const weekdays = (Array.isArray(raw.peakWeekdays) ? raw.peakWeekdays : [])
+    .map(Number)
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+  const unit = Number(raw.unit);
+  const peakMultiplier = Number(raw.peakMultiplier);
+  return {
+    version: String(raw.version ?? '').trim(),
+    currency: String(raw.currency ?? '').trim() || 'CNY',
+    symbol: String(raw.symbol ?? '').trim() || '¥',
+    unit: Number.isFinite(unit) && unit > 0 ? unit : 1e6,
+    peakMultiplier: Number.isFinite(peakMultiplier) && peakMultiplier > 0 ? peakMultiplier : 1,
+    peakWindows: windows,
+    peakWeekdays: weekdays,
+  };
+}
+
+/**
  * Agent 平台声明目录：profiles/agent-platforms/<id>/ 是唯一源。
  *
  * 与 listPlatforms 同一个理由：控制台要能列出「配置面声明了哪些 Agent 平台」，
@@ -119,6 +195,7 @@ export function listAgentPlatformDirs({ root } = {}) {
         source: path.join('profiles', 'agent-platforms', id),
         capabilities: listYamlIds(path.join(dir, 'capabilities')),
         hasRuntime: fs.existsSync(path.join(dir, 'adapters', 'runtime.mjs')),
+        modelCatalog: normalizeModelCatalog(meta.modelCatalog),
         configSchema: meta.configSchema ?? null,
       };
     });

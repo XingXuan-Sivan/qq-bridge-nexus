@@ -9,9 +9,60 @@ runtime: adapters/runtime.mjs
 # 产物目录不在这里声明：约定为 <仓库根>/artifacts/<id>/，
 # 由同目录的 adapters/build.mjs（planArtifacts）与 adapters/install.mjs 决定。
 #
-# 配置面（C2b）：Agent 平台的连接与模型选项。字段是**扁平**的 —— 配置 v2 把
+# 模型目录（只读元数据）：这个平台有哪些模型、怎么计费、能压到多少。
+# 与下方 configSchema 是两套语义 —— 那份校验用户可写的平台选项，这份是平台作者写的声明，
+# 都不进 vetPlatformConfig（作者写错目录不该让用户配置变成「非法」）。
+# 全部字段可缺省：缺省即「本平台不声明」，界面按无该能力降级，不阻塞聊天。
+modelCatalog:
+  # pricing 里写的是**空闲时段**单价；高峰时段 = 空闲 × pricingPolicy.peakMultiplier。
+  # 桶与 DSH 报的 token 桶一一对应（互不重叠）：命中 / 未命中 / 写缓存 / 输出。
+  models:
+    - id: deepseek-flash
+      label: DeepSeek-V4.1-Flash
+      contextWindow: 1000000
+      vision: true
+      pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
+    - id: deepseek-v4-flash
+      label: DeepSeek-V4.1-Flash（旧模型名）
+      pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
+    - id: deepseek-v4-flash-vision-exp
+      label: DeepSeek-V4.1-Flash（视觉实验名）
+      pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
+    - id: deepseek-v4-pro
+      label: DeepSeek-V4-Pro-0813
+      pricing: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
+    - id: deepseek-pro
+      label: DeepSeek-V4-Pro-0813（旧模型名）
+      pricing: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
+  # 计费口径（平台的商业条款）：货币、单位、峰谷倍数与窗口。
+  # 节假日表不在这里 —— 它是日历事实、与平台无关，留在 src/model-prices.js。
+  pricingPolicy:
+    version: '2026-11-04'
+    currency: CNY
+    symbol: ¥
+    unit: 1000000
+    peakMultiplier: 2
+    peakWindows: [[9, 12], [14, 18]]
+    peakWeekdays: [1, 2, 3, 4, 5]
+  # 思考强度档位：全集用于校验，effortFallback 是目录取不到时的内置档。
+  efforts:
+    - { id: off, label: 关闭 }
+    - { id: minimal, label: 极低 }
+    - { id: low, label: 低 }
+    - { id: medium, label: 中 }
+    - { id: high, label: 高 }
+    - { id: xhigh, label: 极高 }
+    - { id: max, label: 最高 }
+  effortFallback: [low, high, max]
+  # 平台自己压缩的近似触发点（DSH 取模型窗口的 80%）。
+  compact:
+    approxTokens: 800000
+#
+# 配置面（C2b）：Agent 平台的连接选项。字段是**扁平**的 —— 配置 v2 把
 # baseUrl/authToken/authHeader/authPrefix/allowRemote 存进 platforms.agents.<id>.endpoint，
-# 其余（provider/model/reasoningEffort…）进 .options，校验前由 flatPlatformEntry() 拍平。
+# 其余进 .options，校验前由 flatPlatformEntry() 拍平。
+# 模型选择（provider / model / reasoningEffort / vision）不在这里：它由控制台的
+# 模型卡按上面的 modelCatalog 写同一份配置，不进 schema 就不会被当成「手写选项」校验。
 # 与用户侧同一套校验规则（src/plugins/config-schema.mjs），没有 schema 的平台不校验。
 # additionalProperties: true —— DSH 的选项还在长，不在 schema 里穷举就不会误报。
 configSchema:
@@ -43,19 +94,3 @@ configSchema:
       type: boolean
       title: 允许远程连接
       description: 默认只连本机；打开后 baseUrl 可以指向另一台机器。
-    provider:
-      type: string
-      title: 模型凭据方式
-      description: 与 DSH 里的登录方式必须一致（deepseek-official 按量计费 / deepseek-account 账号登录），不一致会报 MISSING_CREDENTIAL。
-    model:
-      type: string
-      title: 模型
-      description: 会话默认模型；能力预设或会话可以再覆盖。
-    reasoningEffort:
-      type: string
-      title: 推理强度
-      description: 低 / 中 / 高；具体取值取决于模型。
-    vision:
-      type: string
-      title: 视觉模型
-      description: 处理图片时用的模型；留空表示不看图。

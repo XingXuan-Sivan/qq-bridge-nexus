@@ -102,6 +102,8 @@ import {
 // agentPlatformMetadata 是纯注册表查询，用真实现。
 import { agentPlatformMetadata } from '../src/agent-side/metadata.mjs';
 import { createAgentPort } from '../src/agent-side/port.mjs';
+// 平台注册表：快照拼装、单条查找、写口校验都是纯函数，用真实现。
+import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } from '../src/platforms/registry.mjs';
 // 提示注入通道与平台实现查询都是注册表的纯查询（声明面来自 profiles/…/adapters/runtime.mjs），直接用真实现。
 import { agentPlatform, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 // 平台话术的读写（唤醒前缀、控制台提示词编辑器、还原出厂）：真实现，纯 fs。
@@ -466,6 +468,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     dispatchSend, configureUserPlatformBackend, transportRegistry,
     // 平台元数据与发送目标解析（B7）：都是纯注册表查询，真实现即可。
     userPlatformMetadata, resolveSendTarget, agentPlatformMetadata,
+    // 平台注册表：声明面读模块级 root（真实 profiles），配置面由 VM 传入，与 bridge.js 的调用一致。
+    findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig,
     // 锁文件探测用（bridge.js 顶层的 consolePortInUse）；
     // 固定桩掉：测试不应该真去 netstat 宿主机。
     execFileSync: () => '',
@@ -475,6 +479,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; },
     clearTimeout, setInterval: () => ({ unref() {} }), clearInterval: () => {},
     agentRuntime,
+    // 当前执行体 id：与上面的 runtimeStub 同一份事实（真实现会建连接层句柄，夹具不需要）。
+    agentRuntimeId: () => runtimeStub.id,
     // 假对端本身：测试直接改它的方法（h.api.sessions.prompt = …）来模拟服务端行为。
     api,
     SnowLumaWebSocketClient: FakeBot, text: (s) => s,

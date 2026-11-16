@@ -1,5 +1,5 @@
 // 运行总览的字段规格：静态块全部搬进来，页面只留卡片与宿主 div。
-// 动态部分（模型目录等）仍由 page.js 渲染；活动日志已移到「调试与运维」首张卡。
+// 动态条状（活动日志等）不进这里：那是页面自己画的。
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 // 五格指标：「Agent 平台 / 用户平台 / 当前运行方案 / 会话 / 待处理」。
@@ -51,11 +51,6 @@ const SILENCE_RANGES = `<div class="silence-block">
   <div class="meta" id="silencePeakNote">高峰时段：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</div>
   <div class="meta" id="silenceMsg" role="status"></div>
 </div>`;
-
-
-const DSH_NOTES = `<div id="dshModelNotices"></div>
-<div class="meta" id="dshEffortNote"></div>
-<div class="meta" id="dshEffortSideEffect"></div>`;
 
 export const OVERVIEW_FIELDS = {
   // 摘要指标自带卡片外观（.overview-summary 本身就是一张卡），不能再套 .card 或字段外壳。
@@ -181,40 +176,6 @@ export const OVERVIEW_FIELDS = {
         html: `<select id="silenceTz" aria-label="定时静默的时区"></select>`,
       },
       { name: 'overviewSilenceRanges', type: 'custom', span: 2, html: SILENCE_RANGES },
-    ],
-  },
-  dsh: {
-    fields: [
-      {
-        name: 'dshProviderSelect',
-        type: 'select',
-        label: '提供方',
-        options: [],
-        hint: '下一条消息生效。当前：见下方说明。',
-      },
-      { name: 'dshModelSelect', type: 'select', label: '模型', options: [] },
-      { name: 'dshEffortSelect', type: 'select', label: '思考强度', options: [] },
-      {
-        name: 'dshVisionSelect',
-        type: 'select',
-        label: '看图能力',
-        value: 'auto',
-        options: [
-          { value: 'auto', label: '自动（未知的按不能看图）' },
-          { value: 'yes', label: '能看图' },
-          { value: 'no', label: '不能看图' },
-        ],
-        hint: 'DSH 的模型目录不说明模型能不能看图：自动 = 只有核实过的模型才把图片交给它，其余把图片改成文字占位。',
-      },
-      {
-        type: 'action',
-        id: 'dshActions',
-        items: [
-          { id: 'dshCatalogRefresh', label: '刷新目录' },
-        ],
-        status: 'dshEffortMsg',
-      },
-      { name: 'overviewDshNotes', type: 'custom', span: 2, html: DSH_NOTES },
     ],
   },
 };

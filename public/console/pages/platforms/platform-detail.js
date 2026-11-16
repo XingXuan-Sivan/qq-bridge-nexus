@@ -19,11 +19,13 @@ import { api } from '../../js/api.js';
 import { cardHtml } from '../../components/card/card.js';
 import { detailHeadHtml } from '../../components/detail-head/detail-head.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
-import { bindSwitches, getSwitch, inlineActions, renderFields } from '../../components/form/form.js';
+import { bindSwitches, getSwitch, inlineActions, renderFields, setSelectOptions } from '../../components/form/form.js';
 import { hasSchemaFields, readSchemaPatch, schemaFields } from '../../components/form/schema.js';
+import { mountAlert } from '../../components/alert/alert.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
 import { mountPromptCard } from '../../components/prompt-card/prompt-card.js';
 import { createCapabilityPanel } from '../../components/capability-panel/capability-panel.js';
-import { capabilityLabel, conversationTypeLabel, conversationTypeTone, inboundStateLabel, inboundStateTone, outboundViaLabel } from '../../js/registry.js';
+import { capabilityLabel, conversationTypeLabel, conversationTypeTone, declaredModelCatalog, inboundStateLabel, inboundStateTone, loadModelCatalog, outboundViaLabel } from '../../js/registry.js';
 import { mountBehaviorsPanel } from './behaviors-panel.js';
 
 const SIDE_LABEL = { user: '用户平台', agent: 'Agent 平台' };
@@ -44,6 +46,8 @@ const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自�
 const ENABLED_FIELD = 'platformEnabled';
 /** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
 const CONFIG_MOUNT = '<div id="platformConfigMount"></div>';
+/** 模型卡的挂载点：只有声明了 models 能力位的 Agent 平台才有这张卡。 */
+const MODEL_MOUNT = '<div id="platformModelMount"></div>';
 
 let root = null; // 详情根节点（[data-platform-view="detail"]）
 let entry = null; // 当前平台条目（注册表快照里的一份）
@@ -54,6 +58,7 @@ let onBack = null; // 返回清单：由 page.js 切回 #platforms
 let promptCard = null; // 平台提示词卡，只属于「话术与工具」
 let behaviorsPanel = null; // 行为档案面板，只属于「行为」
 let capabilityPanel = null; // 能力档面板，只属于「能力」
+let modelCatalog = null; // 模型目录（声明 + 实时），只属于「配置」里的模型卡
 
 /** 这一侧该有哪些标签：判断依据是注册表条目里有没有对应资产，不是平台 id。 */
 function tabsOf(item) {
@@ -241,18 +246,32 @@ function overviewHtml(item) {
 }
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
+/** 模型与思考强度只属于声明了 `models` 能力位的 Agent 平台：没声明的平台在它自己的界面里改。 */
+function hasModels(item) {
+  return item.side === 'agent' && (item.capabilities ?? []).includes('models');
+}
+
 /**
  * 两侧的配置页：字段都是 `configSchema` 生成的，保存只发给写口。
  *
  * 用户平台多一个「启用」开关：`enabled` 是**条目级**字段（这条实例装配不装配），不在
  * `configSchema` 里，由页面自己渲染与读取；即使平台没声明 schema，这个开关照样能改。
+ * Agent 平台的模型选择（提供方 / 模型 / 档位 / 看图）单独一张卡：它的选项来自模型目录，
+ * 不是静态 schema 能表达的。
  */
 function configHtml(item) {
   const file = item.side === 'user' ? 'profiles/platforms' : 'profiles/agent-platforms';
   const where = `<code>${file}/${esc(item.id)}/${item.side === 'user' ? 'platform.yml' : 'agent-platform.yml'}</code>`;
   const hasFields = hasSchemaFields(item.configSchema);
+  const model = hasModels(item)
+    ? cardHtml({
+      title: '模型与思考强度',
+      description: '选项取自平台自己声明的模型目录（实时目录优先）。改完下一条消息生效：已经在跑的会话会在下一条消息重新选模型。',
+      body: MODEL_MOUNT,
+    })
+    : '';
   if (item.side === 'agent' && !hasFields) {
-    return cardHtml({
+    return model + cardHtml({
       title: '配置',
       description: `这个平台没有声明 <code>configSchema</code>，因此没有可编辑的配置项。平台参数写在 ${where}，改完重启桥接生效。`,
     });
@@ -262,13 +281,13 @@ function configHtml(item) {
       title: '配置',
       description: `这个平台没有声明 <code>configSchema</code>：只能改「启用」与条目字段（账号）。平台参数写在 ${where}，改完重启桥接生效。`,
       body: CONFIG_MOUNT,
-    });
+    }) + model;
   }
   return cardHtml({
     title: '配置',
     description: `表单字段就是 <code>config.json</code> 里 <code>platforms.${item.side === 'user' ? 'users' : 'agents'}.${esc(item.id)}</code> 那一份：连接参数（地址、令牌…）改完要重启桥接才重新连接，其余选项下一次调用就生效。配置文件 ${where} 只声明字段，不再存值。`,
     body: CONFIG_MOUNT,
-  });
+  }) + model;
 }
 
 /** 挂载可写表单：字段由 configSchema 生成，保存只发给写口。 */
@@ -296,6 +315,229 @@ function mountConfig(item) {
     items: [{ id: 'platformConfigSave', label: '保存配置', variant: 'primary' }],
     status: 'platformConfigMsg',
   }));
+}
+
+// ── 模型与思考强度（Agent 平台，声明了 models 能力位才有） ────────────────────
+/**
+ * 选项来自平台自己声明的模型目录，两处来源分工不同：
+ *   · `view`（从实时目录整理）给出提供方 → 模型 → 各模型支持的思考档位；
+ *   · `declared`（agent-platform.yml 的 modelCatalog）给出档位中文名与看图声明。
+ * 读不到实时目录时只把当前配置画成只读并写明原因，`declared` 仍参与提示。
+ * 写口与「配置」同一个（PATCH …/config），模型类选项只是那一份配置的一部分。
+ */
+const MODEL_FIELDS = [
+  {
+    name: 'platformModelProvider',
+    type: 'select',
+    label: '提供方',
+    options: [],
+    hint: '模型凭据方式：要与 Agent 平台里的登录方式一致，不一致会报缺少凭据。',
+  },
+  { name: 'platformModel', type: 'select', label: '模型', options: [] },
+  { name: 'platformModelEffort', type: 'select', label: '思考强度', options: [] },
+  {
+    name: 'platformModelVision',
+    type: 'select',
+    label: '看图能力',
+    value: 'auto',
+    options: [
+      { value: 'auto', label: '自动（按目录判断）' },
+      { value: 'yes', label: '能看图' },
+      { value: 'no', label: '不能看图' },
+    ],
+    hint: '自动 = 只有目录里标明能看图的模型才把图片交给它，其余改成文字占位，不去下载。',
+  },
+  {
+    type: 'action',
+    id: 'platformModelActions',
+    items: [
+      { id: 'platformModelRefresh', label: '刷新目录' },
+      { id: 'platformModelSave', label: '保存模型设置', variant: 'primary' },
+    ],
+    status: 'platformModelMsg',
+  },
+  { name: 'platformModelNotices', type: 'custom', span: 2, html: '<div id="platformModelNotices"></div>' },
+];
+
+const modelControl = (id) => root?.querySelector(`#${id}`) ?? null;
+
+/** 当前选中的提供方 / 模型在目录里的条目（目录取不到时是 null）。 */
+function selectedModel() {
+  const providers = modelCatalog?.view?.providers ?? [];
+  const provider = providers.find((p) => p.id === modelControl('platformModelProvider')?.value) ?? null;
+  const entryOfProvider = provider?.models?.find((m) => m.id === modelControl('platformModel')?.value) ?? null;
+  return { provider, model: entryOfProvider };
+}
+
+/** 模型下拉：选项随提供方变，保住能保住的选中值。 */
+function fillModelOptions(preferred = '') {
+  const select = modelControl('platformModel');
+  const { provider } = selectedModel();
+  const items = (provider?.models ?? []).map((m) => ({
+    value: m.id,
+    label: `${m.name}${m.name !== m.id ? `（${m.id}）` : ''}${m.vision === 'yes' ? ' · 能看图' : ''}`,
+  }));
+  const want = [preferred, select?.value, provider?.models?.[0]?.id].find((v) => v && items.some((x) => x.value === v)) ?? '';
+  setSelectOptions(select, items, want);
+}
+
+/** 档位下拉：档位是模型的属性，目录取不到时用声明里的内置档。 */
+function fillEffortOptions(preferred = '') {
+  const select = modelControl('platformModelEffort');
+  if (!select) return;
+  const { model } = selectedModel();
+  const fallback = modelCatalog?.declared?.effortFallback ?? [];
+  const efforts = model ? (model.efforts ?? []) : fallback.map((id) => ({ id, name: id }));
+  if (!efforts.length) {
+    setSelectOptions(select, [{ value: '', label: model ? '该模型没有思考档位' : '目录不可用' }], '');
+    select.disabled = true;
+    return;
+  }
+  select.disabled = false;
+  const labels = new Map((modelCatalog?.declared?.efforts ?? []).map((item) => [item.id, item.label]));
+  const items = efforts.map((effort) => ({
+    value: effort.id,
+    label: `${labels.get(effort.id) || effort.name || effort.id}${effort.id === model?.defaultEffort ? '（默认）' : ''}${effort.id === 'off' ? ' · 关闭思考' : ''}`,
+  }));
+  const want = [preferred, select.value, model?.defaultEffort, items[0]?.value].find((v) => v && items.some((x) => x.value === v)) ?? '';
+  setSelectOptions(select, items, want);
+}
+
+/** 提示条：目录状态、第三方提供方、关思考、看图降级——都是「改之前该知道」的事实。 */
+function renderModelNotices() {
+  const host = modelControl('platformModelNotices');
+  if (!host) return;
+  host.replaceChildren();
+  const { provider, model } = selectedModel();
+  const vision = modelControl('platformModelVision')?.value ?? 'auto';
+  const effort = modelControl('platformModelEffort')?.value ?? '';
+  const declared = modelCatalog?.declared ?? null;
+  if (modelCatalog?.error) {
+    mountAlert(host, {
+      type: 'warning',
+      title: '实时目录不可用',
+      description: `${modelCatalog.error}。模型与档位暂时改不了，看图能力照常可改。`,
+    });
+  }
+  if ((modelCatalog?.view?.failures ?? []).length) {
+    mountAlert(host, {
+      type: 'info',
+      title: '有提供方没读到',
+      description: modelCatalog.view.failures.map((item) => `${item.name || item.id}（${item.message || '未说明'}）`).join('、'),
+    });
+  }
+  if (provider?.thirdParty) {
+    mountAlert(host, {
+      type: 'warning',
+      title: '第三方提供方',
+      description: `${provider.name || provider.id} 不是平台自己的提供方：会话内容（群友消息、图片、人格卡、记忆）会发给它处理，切换前先确认它的隐私政策。`,
+    });
+  }
+  if (effort === 'off') {
+    mountAlert(host, { type: 'warning', title: '思考已关闭', description: '回复更快，但工具调用、读群判断和人格一致性可能变差。' });
+  }
+  const declaredVision = (declared?.models ?? []).find((item) => item.id === (model?.id ?? entry?.config?.model))?.vision === true;
+  const sees = vision === 'yes' || (vision === 'auto' && (model?.vision === 'yes' || (!model && declaredVision)));
+  if (!sees) {
+    mountAlert(host, {
+      type: 'info',
+      title: '图片会变成文字占位',
+      description: vision === 'no'
+        ? '已设为不能看图：会话里的图片、表情会改成文字占位。'
+        : '这个模型能不能看图未知，按不能看图处理：图片、表情会改成文字占位；确认它能看图就选「能看图」。',
+    });
+  }
+}
+
+/** 用目录重新铺一遍四个控件；目录取不到时前三个只读，只有看图能力还能改。 */
+function fillModelFields(catalog, config) {
+  const providerSelect = modelControl('platformModelProvider');
+  const modelSelect = modelControl('platformModel');
+  const visionSelect = modelControl('platformModelVision');
+  if (!providerSelect || !modelSelect || !visionSelect) return;
+  const providers = catalog?.view?.providers ?? [];
+  const wantProvider = String(config.provider ?? '');
+  providerSelect.disabled = !providers.length;
+  modelSelect.disabled = !providers.length;
+  if (!providers.length) {
+    setSelectOptions(providerSelect, [{ value: wantProvider, label: wantProvider || '（未设置）' }], wantProvider);
+    setSelectOptions(modelSelect, [{ value: String(config.model ?? ''), label: String(config.model ?? '') || '（未设置）' }], String(config.model ?? ''));
+  } else {
+    setSelectOptions(providerSelect, providers.map((p) => ({
+      value: p.id,
+      label: `${p.name}${p.name !== p.id ? `（${p.id}）` : ''}${p.thirdParty ? ' · 第三方' : ''}`,
+    })), providers.some((p) => p.id === wantProvider) ? wantProvider : providers[0].id);
+    fillModelOptions(String(config.model ?? ''));
+  }
+  fillEffortOptions(String(config.reasoningEffort ?? ''));
+  const vision = String(config.vision ?? 'auto');
+  visionSelect.value = ['yes', 'no', 'auto'].includes(vision) ? vision : 'auto';
+  renderModelNotices();
+}
+
+/** 拉（或强制刷新）模型目录：读不到也是结论，靠提示条说明原因。 */
+async function refreshModelCatalog({ announce = true } = {}) {
+  if (!entry) return;
+  if (announce) setStatus('platformModelMsg', '读取目录中…');
+  try {
+    modelCatalog = await loadModelCatalog(entry.id, { force: announce });
+  } catch (error) {
+    modelCatalog = { declared: declaredModelCatalog(entry.id), live: null, view: null, error: String(error?.message ?? error), unsupported: false };
+  }
+  // 等网络回来时面板可能已经被重画（切标签 / 换平台）：那时不再改 DOM。
+  if (!root?.querySelector('#platformModelMount')) return;
+  fillModelFields(modelCatalog, entry.config ?? {});
+  if (announce) setStatus('platformModelMsg', modelCatalog.live ? '目录已刷新' : '目录不可用');
+}
+
+async function mountModel(item) {
+  const host = root?.querySelector('#platformModelMount');
+  if (!host) return;
+  modelCatalog = { declared: declaredModelCatalog(item.id), live: null, view: null, error: '', unsupported: false };
+  renderFields(host, MODEL_FIELDS, { columns: 1 });
+  // 声明面先画（档位中文名、看图声明立即有），实时目录回来再补提供方与模型。
+  fillModelFields(modelCatalog, item.config ?? {});
+  setStatus('platformModelMsg', '读取目录中…');
+  await refreshModelCatalog({ announce: false });
+  setStatus('platformModelMsg', '');
+}
+
+/** 保存模型选项：与「配置」同一个写口，服务端按实时目录再校验一次。 */
+async function saveModelSettings() {
+  if (!entry) return;
+  const provider = modelControl('platformModelProvider');
+  const model = modelControl('platformModel');
+  const effort = modelControl('platformModelEffort');
+  const vision = modelControl('platformModelVision');
+  const patch = {
+    provider: provider?.value ?? '',
+    model: model?.value ?? '',
+    // 无档位的模型不带 reasoningEffort：空值就是「用模型默认」。
+    reasoningEffort: effort?.disabled ? '' : (effort?.value ?? ''),
+    vision: vision?.value ?? 'auto',
+  };
+  // 换到第三方提供方：保存前再确认一次（会话内容会发给它处理）。
+  const thirdParty = (modelCatalog?.view?.providers ?? []).find((p) => p.id === patch.provider)?.thirdParty === true;
+  if (thirdParty && patch.provider !== String(entry.config?.provider ?? '')
+    && !(await confirmBox({
+      title: '切换第三方提供方',
+      message: `${patch.provider} 不是平台自己的提供方。保存后，会话里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理。确定要切换吗？`,
+      confirmText: '切换',
+    }))) {
+    setStatus('platformModelMsg', '已取消（未切换提供方）');
+    return;
+  }
+  setStatus('platformModelMsg', '保存中…');
+  try {
+    const r = await api(`/api/platforms/registry/agent/${encodeURIComponent(entry.id)}/config`, 'PATCH', patch);
+    if (!r?.ok) throw new Error(r?.error || '未知错误');
+    setStatus('platformModelMsg', `已设为 ${patch.provider}/${patch.model}（${patch.reasoningEffort || '模型默认强度'}），下一条消息生效`);
+    showConsoleToast('模型设置已保存');
+  } catch (error) {
+    setStatus('platformModelMsg', `保存失败：${error?.message ?? error}`);
+    return;
+  }
+  onChanged?.();
 }
 
 // ── 话术与工具（用户平台） ────────────────────────────────────────────────────
@@ -479,7 +721,18 @@ function onActionClick(event) {
   if (event.target.closest('#platformProbe')) { void probeCurrent(); return; }
   if (event.target.closest('#platformSetDefault')) { void setDefaultCurrent(); return; }
   if (event.target.closest('#platformSetUserDefault')) { void setDefaultUserCurrent(); return; }
+  if (event.target.closest('#platformModelRefresh')) { void refreshModelCatalog(); return; }
+  if (event.target.closest('#platformModelSave')) { void saveModelSettings(); return; }
   if (event.target.closest('#platformConfigSave')) void saveCurrentConfig();
+}
+
+/** 模型卡里的下拉联动：换提供方重算模型与档位，换模型重算档位，其余只重算提示条。 */
+function onModelChange(event) {
+  const select = event.target instanceof HTMLSelectElement ? event.target : null;
+  if (!select) return;
+  if (select.id === 'platformModelProvider') { fillModelOptions(); fillEffortOptions(); renderModelNotices(); }
+  else if (select.id === 'platformModel') { fillEffortOptions(); renderModelNotices(); }
+  else if (select.id === 'platformModelEffort' || select.id === 'platformModelVision') renderModelNotices();
 }
 
 // ── 挂载 / 切换 ────────────────────────────────────────────────────────────
@@ -524,6 +777,7 @@ function resetPanels() {
   promptCard = null;
   behaviorsPanel = null;
   capabilityPanel = null;
+  modelCatalog = null;
 }
 
 function paintPanel() {
@@ -536,6 +790,7 @@ function paintPanel() {
   } else if (tab === 'config') {
     host.innerHTML = configHtml(entry);
     mountConfig(entry);
+    if (hasModels(entry)) void mountModel(entry);
   } else if (tab === 'voice') {
     host.innerHTML = voiceHtml(entry);
     void mountVoice(entry).catch((error) => {
@@ -573,6 +828,7 @@ export function mountPlatformDetail(target, item, options = {}) {
   root.innerHTML = shell(item);
   root.addEventListener('click', onTabClick);
   root.addEventListener('click', onActionClick);
+  root.addEventListener('change', onModelChange);
   paintPanel();
 }
 
@@ -590,6 +846,7 @@ export function unmountPlatformDetail() {
   if (!root) return;
   root.removeEventListener('click', onTabClick);
   root.removeEventListener('click', onActionClick);
+  root.removeEventListener('change', onModelChange);
   resetPanels();
   root.innerHTML = '';
   root = null;

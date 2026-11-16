@@ -88,15 +88,12 @@
     "method": "PATCH",
     "path": "/api/platforms/registry/agent/dsh/config",
     "body": {
-      "baseUrl": "",
+      "baseUrl": "http://127.0.0.1:3080",
       "authToken": "",
       "authTokenExplicit": false,
       "authHeader": "authorization",
       "authPrefix": "Bearer",
-      "allowRemote": false,
-      "provider": "deepseek-official",
-      "model": "deepseek-pro",
-      "reasoningEffort": "max"
+      "allowRemote": false
     }
   },
   {

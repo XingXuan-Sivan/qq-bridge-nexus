@@ -81,6 +81,24 @@ test('Agent 侧条目带能力档（C4 起能力档 id 就是预设 id，一张�
   assert.equal(dsh.inbound, false, 'Agent 侧没有「收消息」这个概念');
 });
 
+test('Agent 侧条目带模型目录：声明随注册表一次带回，价目 / 档位 / 压缩点都在里面', () => {
+  const snapshot = platformRegistrySnapshot();
+  const dsh = findRegistryPlatform(snapshot, 'agent', 'dsh');
+  const catalog = dsh.modelCatalog;
+  assert.ok(catalog, 'dsh 的 agent-platform.yml 声明了 modelCatalog');
+  const flash = catalog.models.find((item) => item.id === 'deepseek-flash');
+  assert.deepEqual(flash.pricing, { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 });
+  assert.equal(flash.vision, true);
+  assert.equal(catalog.pricingPolicy.peakMultiplier, 2);
+  assert.deepEqual(catalog.pricingPolicy.peakWindows, [[9, 12], [14, 18]]);
+  assert.deepEqual(catalog.efforts.map((item) => item.id), ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(catalog.effortFallback, ['low', 'high', 'max']);
+  assert.equal(catalog.compact.approxTokens, 800_000);
+  // 没声明的平台给 null（不是空壳对象）：界面靠这个判「本平台没有目录」。
+  assert.equal(findRegistryPlatform(snapshot, 'agent', 'acp').modelCatalog, null);
+  assertPlainJson(catalog, 'dsh.modelCatalog');
+});
+
 test('配置面有目录、运行期没实现 → profile_only（warn），条目仍然出现在表里', () => {
   const snapshot = buildPlatformRegistry({
     profilePlatforms: [

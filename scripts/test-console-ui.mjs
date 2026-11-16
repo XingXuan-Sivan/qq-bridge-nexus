@@ -394,7 +394,7 @@ try {
     await navigate('platforms');
     // 深链直接带 sub 与 tab：刷新后应该落到同一个平台的同一个标签。
     await page.evaluate(() => { location.hash = '#platforms/agent:dsh/config'; });
-    await page.waitForSelector('[data-platform-view="detail"]:not([hidden]) #platformConfigMount [data-field="cfg__model"]', { timeout: 5000 });
+    await page.waitForSelector('[data-platform-view="detail"]:not([hidden]) #platformConfigMount [data-field="cfg__baseUrl"]', { timeout: 5000 });
     assert.equal(await page.locator('[data-platform-tab="config"].active').count(), 1, '深链还原到配置标签');
     // 标签与返回都写地址栏：后退回清单，前进回同一个标签。
     await page.evaluate(() => history.back());
@@ -422,22 +422,20 @@ try {
     await page.waitForFunction(() => document.getElementById('cfg__wsUrl')?.value === 'ws://127.0.0.1:3002', null, { timeout: 5000 });
   });
 
-  await test('Agent platform config form saves through the registry write endpoint', async () => {
+  await test('Agent platform config form covers connection fields only', async () => {
     await openPlatform('agent:dsh');
     await page.click('[data-platform-tab="config"]');
-    await page.waitForSelector('#platformConfigMount [data-field="cfg__model"]', { timeout: 5000 });
-    // 字段由 configSchema 生成，值来自注册表条目的 config：与插件详情同构。
-    assert.equal(await page.locator('#cfg__model').inputValue(), 'deepseek-flash');
-    assert.equal(await page.locator('[data-field="cfg__reasoningEffort"]').evaluate((el) => el.tagName), 'INPUT', '字符串字段渲染成输入框');
+    await page.waitForSelector('#platformConfigMount [data-field="cfg__baseUrl"]', { timeout: 5000 });
+    // 连接面由 configSchema 生成；模型选择搬到了同一页的模型卡，不再混进这张表单。
+    assert.equal(await page.locator('[data-field="cfg__provider"], [data-field="cfg__model"], [data-field="cfg__reasoningEffort"]').count(), 0, '模型字段不再由 configSchema 生成');
     assert.equal(await page.locator('[role="switch"][data-field="cfg__allowRemote"]').count(), 1, '布尔字段走开关');
-    await page.locator('#cfg__model').fill('deepseek-pro');
+    await page.locator('#cfg__baseUrl').fill('http://127.0.0.1:3080');
     const patch = await clickWrite('#platformConfigSave', '/api/platforms/registry/agent/dsh/config', 'PATCH');
     // 补丁是整张表单的现值：写口按 schema 校验合并后的整份，只落盘这里给的键。
-    assert.equal(patch.model, 'deepseek-pro', '保存应提交改过的模型');
-    assert.equal(patch.provider, 'deepseek-official', '未改动的字段照旧提交现值');
-    assert.equal(patch.reasoningEffort, 'max');
+    assert.equal(patch.baseUrl, 'http://127.0.0.1:3080', '保存应提交改过的连接地址');
+    assert.equal(patch.authPrefix, 'Bearer', '未改动的字段照旧提交现值');
     // 保存成功后重新拉快照：标签保留在配置页，字段显示刚写进去的值。
-    await page.waitForFunction(() => document.getElementById('cfg__model')?.value === 'deepseek-pro', null, { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('cfg__baseUrl')?.value === 'http://127.0.0.1:3080', null, { timeout: 5000 });
   });
 
   await test('Agent platform probe reports its conclusion in the overview', async () => {
@@ -1207,42 +1205,57 @@ try {
     await page.evaluate(() => document.getElementById('pbSave').click());
   });
 
-  if (!original) await test('DSH 模型：提供方 / 模型 / 思考强度联动、来自目录、明示全局副作用与第三方隐私', async () => {
-    await navigate('config');
-    await page.locator('[data-config-section="runtime"]').click();
-    await page.waitForFunction(() => document.getElementById('dshEffortSelect')?.options.length > 0);
-    const efforts = async () => page.locator('#dshEffortSelect option').evaluateAll((nodes) => nodes.map((n) => n.value));
-    assert.deepEqual(await efforts(), ['off', 'low', 'high', 'max'], `档位应来自 DSH 目录，实际 ${(await efforts()).join(',')}`);
-    assert.equal(await page.locator('#dshEffortSelect').inputValue(), 'max', '默认应为 max');
-    assert.match(await page.locator('#dshEffortSideEffect').textContent(), /全局默认/, '必须说明会连带改 DSH 全局默认');
-    // 选 off：提示可能影响质量
-    await page.locator('#dshEffortSelect').selectOption('off');
-    assert.match(await page.locator('#dshModelNotices').textContent(), /思考已关闭/);
-    // 换到第三方提供方：模型联动、无档位模型置灰、提示隐私和价格未覆盖、看图未知
-    await page.locator('#dshProviderSelect').selectOption('example-cloud');
-    assert.equal(await page.locator('#dshModelSelect').inputValue(), 'example-chat');
-    assert.equal(await page.locator('#dshEffortSelect').isDisabled(), true, '无档位模型的强度下拉置灰');
-    const notices = await page.locator('#dshModelNotices').textContent();
-    assert.match(notices, /不是 DeepSeek 自家的提供方/);
-    assert.match(notices, /价格表没有覆盖/);
-    assert.match(notices, /能不能看图未知/);
-    await page.locator('#dshModelSelect').selectOption('example-reasoner');
+  if (!original) await test('平台模型卡：提供方 / 模型 / 思考强度取自平台目录，第三方先确认再写', async () => {
+    await openPlatform('agent:dsh');
+    await page.click('[data-platform-tab="config"]');
+    await page.waitForSelector('#platformModelMount #platformModelProvider', { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('platformModelProvider')?.options.length > 1);
+    // 已配置的提供方 / 模型原样回填；档位中文名来自声明面，选项来自实时目录。
+    assert.equal(await page.locator('#platformModelProvider').inputValue(), 'deepseek-official');
+    assert.equal(await page.locator('#platformModel').inputValue(), 'deepseek-flash');
+    const efforts = async () => page.locator('#platformModelEffort option').evaluateAll((nodes) => nodes.map((n) => n.value));
+    assert.deepEqual(await efforts(), ['off', 'low', 'high', 'max'], `档位应来自平台目录，实际 ${(await efforts()).join(',')}`);
+    assert.equal(await page.locator('#platformModelEffort').inputValue(), 'max', '已配置的档位应回填');
+    assert.match(await page.locator('#platformModelEffort option:checked').textContent(), /最高/, '档位名用声明里的中文');
+    // 换成第三方提供方：模型联动、无档位模型置灰、提示第三方（会话内容会发给它）。
+    await page.locator('#platformModelProvider').selectOption('example-cloud');
+    assert.equal(await page.locator('#platformModel').inputValue(), 'example-chat');
+    assert.equal(await page.locator('#platformModelEffort').isDisabled(), true, '无档位模型的强度下拉置灰');
+    assert.match(await page.locator('#platformModelNotices').textContent(), /第三方提供方/);
+    await page.locator('#platformModel').selectOption('example-reasoner');
     assert.deepEqual(await efforts(), ['minimal', 'medium', 'xhigh'], '档位跟着模型变');
-    // 全局 handler 已经统一 accept 弹窗（见文件上方的 page.on('dialog')），这里再挂一个
-    // 会二次 accept 同一个 dialog 而抛错，所以只等响应，不重复处理。
-    const [saved] = await Promise.all([
-      page.waitForResponse(r => new URL(r.url()).pathname === '/api/dsh/model' && r.request().method() === 'POST'),
-      (async () => { await saveBarWrite('/api/dsh/model'); })(),
-    ]);
+    // 切到第三方提供方要再确认一次；写口与「配置」同一个（PATCH …/config）。
+    // 确认框由测试的 init 脚本自动点掉，这里挂观察器记下弹过什么，再等同一个写请求。
+    await page.evaluate(() => {
+      window.__boxTexts = [];
+      new MutationObserver((records) => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node instanceof Element && node.querySelector('[data-box-confirm]')) window.__boxTexts.push(node.textContent);
+          }
+        }
+      }).observe(document.body, { childList: true });
+    });
+    const savedPromise = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/platforms/registry/agent/dsh/config' && r.request().method() === 'PATCH');
+    await page.click('#platformModelSave');
+    const saved = await savedPromise;
     assert.equal(saved.status(), 200);
     assert.deepEqual(saved.request().postDataJSON(), { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'medium', vision: 'auto' });
-    await page.waitForFunction(() => /example-reasoner/.test(document.getElementById('actionDockResults')?.textContent || ''));
-    // 改回默认，避免影响后续断言
-    await page.locator('#dshProviderSelect').selectOption('deepseek-official');
-    await page.locator('#dshModelSelect').selectOption('deepseek-flash');
-    await page.locator('#dshEffortSelect').selectOption('max');
-    await saveBarWrite('/api/dsh/model');
-    await page.waitForFunction(() => document.getElementById('dshProviderText').textContent === 'deepseek-official' && document.getElementById('dshEffortSelect').value === 'max');
+    const boxes = await page.evaluate(() => window.__boxTexts);
+    assert.ok(boxes.some((text) => text.includes('切换第三方提供方')), `切第三方应先弹确认，实际 ${JSON.stringify(boxes)}`);
+    // 写成功后重拉注册表：卡片重画成刚写进去的那一份配置。
+    await page.waitForFunction(() => document.getElementById('platformModelProvider')?.value === 'example-cloud' && document.getElementById('platformModel')?.value === 'example-reasoner');
+    // 改回第一方：切回来不需要确认。
+    await page.locator('#platformModelProvider').selectOption('deepseek-official');
+    await page.locator('#platformModel').selectOption('deepseek-flash');
+    await page.locator('#platformModelEffort').selectOption('max');
+    const restoredPromise = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/platforms/registry/agent/dsh/config' && r.request().method() === 'PATCH');
+    await page.click('#platformModelSave');
+    const restored = await restoredPromise;
+    assert.equal(restored.status(), 200);
+    const boxesAfter = await page.evaluate(() => window.__boxTexts.length);
+    assert.equal(boxesAfter, boxes.length, '切回第一方不再弹确认');
+    await page.waitForFunction(() => document.getElementById('platformModelProvider')?.value === 'deepseek-official' && document.getElementById('platformModel')?.value === 'deepseek-flash');
   });
 
   await test('Form component: typed values, depends, cross-field validation, switch and reset', async () => {
@@ -1382,9 +1395,8 @@ try {
     assert.match(running, /DeepSeek Harness/);
     assert.match(running, /连接方式 HTTP/);
     assert.match(running, /已就绪/);
-    // 模型卡标题跟随当前运行平台；dsh 声明了 models，替代文案不出现。
-    assert.match(await page.locator('#section-dsh h2').textContent(), /DeepSeek Harness 模型与思考强度/);
-    assert.equal(await page.locator('#dshModelUnsupported').isHidden(), true);
+    // 模型与思考强度只属于平台详情的「配置」标签：全局配置页不再有模型卡。
+    assert.equal(await page.locator('#platformModelMount, #dshProviderSelect, #section-dsh').count(), 0, '全局配置页不再有模型卡');
 
     // 先归位到运行中的 dsh：这条用例只验证「切到另一个 → 待重启」，不依赖前面的用例怎么收场。
     if (initial !== 'dsh') {

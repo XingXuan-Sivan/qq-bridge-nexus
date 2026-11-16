@@ -175,8 +175,10 @@ export function listAgentPlatforms() {
     promptChannels: agentPlatformPromptChannels(impl.id),
     canPinPermission: agentPlatformCanPinPermission(impl.id),
     // 插件平台的配置模型：控制台要靠它画表单，统一注册表要靠它校 `platforms.agents.<id>`。
-    // 内置平台的这一项来自 profiles 目录（platform.yml），不从实现上取。
+    // 内置平台的这一项来自 profiles 目录（agent-platform.yml），不从实现上取。
     configSchema: impl.configSchema ?? null,
+    // 模型目录：平台自己声明有哪些模型、怎么计费、能压到多少（只读元数据，与 configSchema 两套语义）。
+    modelCatalog: impl.modelCatalog ?? null,
     owner: impl.owner,
     source: impl.source,
     issues: agentPlatformIssues(impl.id),

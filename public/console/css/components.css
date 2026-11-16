@@ -736,19 +736,6 @@ tr:last-child td {
 .page-panel[hidden] {
   display:none
 }
-.dsh-notice {
-  margin-top:8px;
-  padding:8px 10px;
-  border:1px solid var(--card-border);
-  border-radius:8px;
-  font-size:13px;
-  color:var(--muted)
-}
-.dsh-notice.warn {
-  background:var(--warn-bg);
-  border-color:var(--warn-border);
-  color:var(--warn-fg)
-}
 .sched-limits {
   display:grid;
   grid-template-columns:repeat(4,minmax(0,1fr));

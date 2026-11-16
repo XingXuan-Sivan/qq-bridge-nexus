@@ -318,6 +318,9 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       limits: {},
       inbound: false,
       configSchema: schema,
+      // 模型目录（只读元数据）：声明目录与实现自身任一处给出即可。
+      // 平台作者改价目 / 压缩点只改 agent-platform.yml，不碰任何代码。
+      modelCatalog: impl?.modelCatalog ?? profile.modelCatalog ?? null,
       config: clone(config?.agents?.[id] ?? {}),
       // 最近一次显式探活（控制台按钮 / 切换预检）的结论；null = 没探过。
       // 与 `agentConnected` 分工不同：后者是后台轮询的「现在能不能用」，这里只回答「刚才探了一次」。
@@ -358,6 +361,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       limits: {},
       inbound: false,
       configSchema: schema,
+      modelCatalog: impl.modelCatalog ?? null,
       config: clone(config?.agents?.[id] ?? {}),
       probe: probeOf(id),
       assets: { prompt: { active: false, hasDefault: false }, tools: [], behaviors: [], capabilityProfiles: [] },

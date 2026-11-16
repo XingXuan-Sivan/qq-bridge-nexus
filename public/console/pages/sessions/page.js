@@ -16,9 +16,11 @@ import { cardHtml } from '../../components/card/card.js';
 // 平台名、会话类型与上限都从运行期元数据读（B7）：这里是唯一一处「页面认识平台」的地方，
 // 而且认识的方式是查表，不是写死 qq。
 import {
+  activeAgentPlatformId,
   conversationTypeLabel,
   conversationTypeTone,
   listPlatforms,
+  loadModelCatalog,
   platformFilterOptions,
   platformLabel,
 } from '../../js/registry.js';
@@ -498,16 +500,15 @@ function detailDshLabel(health, sessionId) {
   return `<span class="${status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag'}">${esc(label)}</span>`;
 }
 
-// 详情弹窗的 DSH 模型目录：打开时取一次，供运行卡的提供方/模型/思考强度下拉使用。
-let detailCatalog = null;
+// 详情弹窗的模型目录：与平台详情页同一个读口（声明 + 实时），打开时取一次，
+// 供运行卡的提供方 / 模型 / 思考强度下拉使用。
+let detailCatalog = [];
+let detailCatalogError = '';
 async function ensureDetailCatalog() {
-  if (detailCatalog) return detailCatalog;
-  try {
-    const r = await api('/api/dsh/model');
-    detailCatalog = Array.isArray(r?.providers) ? r.providers : [];
-  } catch {
-    detailCatalog = [];
-  }
+  const id = activeAgentPlatformId();
+  const catalog = id ? await loadModelCatalog(id) : null;
+  detailCatalog = catalog?.view?.providers ?? [];
+  detailCatalogError = catalog?.error ?? '';
   return detailCatalog;
 }
 
@@ -585,9 +586,9 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
   if (!providerEl || !modelEl || !reasonEl) return;
   const providerId = providerEl.value;
   if (!providerId) {
-    modelEl.innerHTML = '<option value="">跟随全局</option>';
+    modelEl.innerHTML = '<option value="">跟随平台默认</option>';
     modelEl.disabled = true;
-    reasonEl.innerHTML = '<option value="">跟随全局</option>';
+    reasonEl.innerHTML = '<option value="">跟随平台默认</option>';
     reasonEl.disabled = true;
     return;
   }
@@ -830,14 +831,20 @@ function renderDetail(data) {
     },
     {
       name: 'detailModelProvider', type: 'select', label: '模型', value: data.model?.provider || '',
-      options: [{ value: '', label: '跟随全局' }, ...(detailCatalog || []).map((p) => ({ value: p.id, label: p.name || p.id }))],
-      hint: `当前生效：${data.effectiveModel?.provider || '—'} / ${data.effectiveModel?.model || '—'}`,
+      options: [
+        { value: '', label: '跟随平台默认' },
+        ...(detailCatalog || []).map((p) => ({ value: p.id, label: p.name || p.id })),
+      ],
+      hint: [
+        `当前生效：${data.effectiveModel?.provider || '—'} / ${data.effectiveModel?.model || '—'}`,
+        detailCatalogError ? `平台模型目录读取失败：${detailCatalogError}` : '',
+      ].filter(Boolean).join('；'),
     },
-    { name: 'detailModel', type: 'select', label: '具体模型', value: data.model?.model || '', options: [{ value: '', label: '跟随全局' }] },
+    { name: 'detailModel', type: 'select', label: '具体模型', value: data.model?.model || '', options: [{ value: '', label: '跟随平台默认' }] },
     {
       name: 'detailModelReasoning', type: 'select', label: '思考强度', value: data.model?.reasoning || '',
-      options: [{ value: '', label: '跟随全局' }],
-      hint: '保存会话模型会同步写 DSH 全局默认，Web GUI 里新建会话也会用这个模型；本会话按自己的模型能力决定能否看图。',
+      options: [{ value: '', label: '跟随平台默认' }],
+      hint: '只作用于这个会话：平台默认模型在「平台 › 该 Agent 平台 › 配置」里改；本会话按自己的模型能力决定能否看图。',
     },
   ], { columns: 2 });
 

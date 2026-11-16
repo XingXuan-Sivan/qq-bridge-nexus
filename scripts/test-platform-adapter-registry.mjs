@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ADAPTER_KINDS, createAdapterRegistry, normalizeAdapter } from '../src/platforms/adapter-registry.mjs';
@@ -80,6 +81,43 @@ test('平台声明面：两侧 configSchema 都能被同一套校验器解析', 
     assert.ok(normalized.ok, `${profile.id} 的 configSchema 不合法：${normalized.errors.join('；')}`);
     assert.ok(normalized.schema, `${profile.id} 缺 configSchema`);
   }
+});
+
+test('模型目录：作者写错的部分按缺省降级，不炸也不原样透出', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-platforms-'));
+  const dir = path.join(root, 'demo');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'agent-platform.yml'), [
+    'id: demo',
+    'label: 演示',
+    'modelCatalog:',
+    '  models:',
+    '    - { id: free-model }',
+    '    - { label: 没有 id 的条目 }',
+    '  efforts:',
+    '    - { id: low }',
+    '  effortFallback: [low, 42]',
+    '  compact: { approxTokens: 0 }',
+    '  pricingPolicy:',
+    '    peakWindows: [[9, 12], [12, 9], [1]]',
+    '    peakWeekdays: [1, 8, 0]',
+    '    unit: -5',
+    '    peakMultiplier: 0',
+  ].join('\n'));
+  const [demo] = listAgentPlatformDirs({ root });
+  fs.rmSync(root, { recursive: true, force: true });
+  const catalog = demo.modelCatalog;
+  assert.ok(catalog, '有模型或档位就算声明了目录');
+  assert.deepEqual(catalog.models, [
+    { id: 'free-model', label: 'free-model', contextWindow: null, vision: false, pricing: null },
+  ], '没写 id 的条目丢掉；没写价目的模型 pricing=null，不拿兜底价猜');
+  assert.deepEqual(catalog.efforts, [{ id: 'low', label: 'low' }]);
+  assert.deepEqual(catalog.effortFallback, ['low', '42']);
+  assert.equal(catalog.compact, null, '0 不是合法的触发点');
+  assert.deepEqual(catalog.pricingPolicy.peakWindows, [[9, 12]], '倒置与残缺的窗口丢掉');
+  assert.deepEqual(catalog.pricingPolicy.peakWeekdays, [1], '1-7 之外的星期丢掉');
+  assert.equal(catalog.pricingPolicy.unit, 1e6, '非法单位回落百万');
+  assert.equal(catalog.pricingPolicy.peakMultiplier, 1, '非法倍数回落 1（即不分峰谷）');
 });
 
 test('内核不再持有内置平台清单', () => {

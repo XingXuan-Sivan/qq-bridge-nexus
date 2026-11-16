@@ -399,7 +399,8 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       ['POST', '/api/roles/rename'], ['POST', '/api/roles/delete'],
       ['GET', '/api/preset/sim-prompt'], ['POST', '/api/preset/sim-prompt'],
       ['GET', '/api/preset/sim-prompt/backups'], ['POST', '/api/preset/sim-prompt/restore'],
-      ['GET', '/api/dsh/model'], ['POST', '/api/dsh/model'], ['POST', '/api/dsh/effort'],
+      ['GET', '/api/platforms/registry/agent/dsh/models'], ['PATCH', '/api/platforms/registry/agent/dsh/config'],
+      ['GET', '/api/platforms/registry'],
       ['GET', '/api/whitelist'], ['POST', '/api/whitelist'], ['POST', '/api/restart'],
       ['POST', '/api/console/token'], ['GET', '/api/role'], ['POST', '/api/role'],
     ];
@@ -416,8 +417,8 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     const allowed = await call('/api/status', 'GET', asAgent);
     assert.equal(allowed.status, 200, '/api/status 应对 agent token 放行');
     // 同一批管理端点，管理员（仅控制台令牌）应可正常访问
-    const adminOk = await call('/api/dsh/model', 'GET', adminOnly);
-    assert.equal(adminOk.status, 200, '管理员应能访问 /api/dsh/model');
+    const adminOk = await call('/api/platforms/registry/agent/dsh/models', 'GET', adminOnly);
+    assert.equal(adminOk.status, 200, '管理员应能访问模型目录读口');
     console.log('PASS agent token cannot reach persona/prompt/effort/whitelist admin endpoints');
   } catch (error) { failures++; console.error('FAIL agent token admin isolation:', error.message); }
   finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }

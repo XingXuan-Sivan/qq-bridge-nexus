@@ -179,7 +179,11 @@ console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 /
   const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
   const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
   ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「Agent 平台」卡：默认平台 + 当前运行');
-  ok(/applyAgentGates/.test(configText) && /dshModelUnsupported/.test(configText), '模型卡按运行中 Agent 平台的 models 能力位门控');
+  ok(/hasModels/.test(detailText) && /capabilities \?\? \[\]\)\.includes\('models'\)/.test(detailText),
+    '模型与思考强度卡挂在平台详情，按该平台声明的 models 能力位门控');
+  ok(/loadModelCatalog/.test(detailText) && /platformModelSave/.test(detailText),
+    '模型卡的选项来自平台模型目录读口，写走平台配置写口');
+  ok(!/applyAgentGates|dshModelUnsupported/.test(configText), '全局配置页不再保留模型卡与它的门控');
   ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), 'Agent 平台字段走 fields 规格（不手写控件）');
   ok(/fixtureSessionAgent\(/.test(fixture) && /agentMirror/.test(fixture), '离线夹具实现会话 /agent 与权限写口（含漂移）');
   const permissionLevels = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'permission-levels.js'), 'utf8');

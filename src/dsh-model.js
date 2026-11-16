@@ -1,23 +1,19 @@
-// DSH 模型选择：提供方 / 模型 / 思考强度 / 看图能力。
+// 模型选择：提供方 / 模型 / 思考强度 / 看图能力。
 //
 // 职责（bridge.js 只负责接线）：
-// - session.modelCatalog 的缓存（60 秒 TTL、并发去重、超时）；
+// - 模型目录的缓存（60 秒 TTL、并发去重、超时）；
 // - 把目录整理成控制台的三个联动下拉需要的形状；
 // - 服务端硬校验：提供方 / 模型不在目录里、档位不在该模型公布的列表里都拒绝；
-// - 生成 session.selectModel 的参数（无档位模型不带 reasoningEffort）；
-// - 看图能力判断与「不能看图时把图片降级成文字」；
-// - 第三方提供方的隐私提示、价格表是否覆盖。
+// - 生成 selectModel 的参数（无档位模型不带 reasoningEffort）；
+// - 看图能力判断与「不能看图时把图片降级成文字」。
 //
-// 目录形状（DSH 0.2.x 实测）：
+// 目录形状由 adapters 统一成同一种（DSH 原生形状，ACP 适配器也照它拼）：
 //   { default: { provider, model, reasoningEffort }, routableProviders: [...],
 //     groups: [{ id, name, models: [{ id, name, description?, reasoning?: { efforts: [{ id, name, description? }], defaultEffort? } }] }],
 //     failures: [{ id, name, message }] }
-// 目录条目**不含** inputModalities（只有各 provider 插件自己知道），所以看图能力用「已知表 + 未知」表达。
 
 /** DSH 已知的全部思考档位。config.json 里的值先按它校验，具体模型支持哪些以目录为准。 */
 export const KNOWN_EFFORTS = Object.freeze(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
-/** 目录取不到时的内置档位（DeepSeek 自家模型的常用档）。 */
-export const FALLBACK_EFFORTS = Object.freeze(['low', 'high', 'max']);
 export const DEFAULT_PROVIDER = 'deepseek-official';
 export const DEFAULT_MODEL = 'deepseek-flash';
 export const DEFAULT_EFFORT = 'max';
@@ -109,9 +105,9 @@ export function createModelCatalogCache({ fetchCatalog, ttlMs = 60_000, timeoutM
     try {
       const catalog = await Promise.race([
         Promise.resolve().then(() => fetchCatalog()),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`读取 DSH 模型目录超时（${timeoutMs}ms）`)), timeoutMs); }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`读取模型目录超时（${timeoutMs}ms）`)), timeoutMs); }),
       ]);
-      if (!catalog || !Array.isArray(catalog.groups)) throw new Error('DSH 模型目录格式不对（缺少 groups）');
+      if (!catalog || !Array.isArray(catalog.groups)) throw new Error('模型目录格式不对（缺少 groups）');
       cached = { at: now(), catalog };
       return { ok: true, catalog };
     } catch (error) {
@@ -140,8 +136,8 @@ export function validateModelSelection(catalog, { provider, model, reasoningEffo
   const m = clean(model);
   if (!p || !m) throw new Error('请选择提供方和模型');
   const { group, entry } = findCatalogModel(catalog, p, m);
-  if (!group) throw new Error(`DSH 的模型目录里没有提供方 ${p}`);
-  if (!entry) throw new Error(`DSH 的模型目录里没有 ${p}/${m}`);
+  if (!group) throw new Error(`模型目录里没有提供方 ${p}`);
+  if (!entry) throw new Error(`模型目录里没有 ${p}/${m}`);
   const supported = catalogEfforts(entry);
   let effort = normalizeEffortId(reasoningEffort);
   if (!supported.length) {
@@ -196,26 +192,6 @@ export function buildCatalogView(catalog, { priceTable } = {}) {
   }));
   const failures = (catalog?.failures ?? []).map((f) => ({ id: String(f?.id ?? ''), name: String(f?.name ?? f?.id ?? ''), message: String(f?.message ?? '') }));
   return { providers, failures };
-}
-
-/** 给管理员的提示（控制台与接口共用，保证措辞一致）。 */
-export function selectionNotices({ provider, model, reasoningEffort, vision, priced }) {
-  const notices = [];
-  if (!isFirstPartyProvider(provider)) {
-    notices.push({ level: 'warn', code: 'third-party', text: `${provider} 不是 DeepSeek 自家的提供方：QQ 里的聊天内容（群友消息、图片、人格卡、记忆）会发给它处理，请先确认它的隐私政策。` });
-  }
-  if (reasoningEffort === 'off') {
-    notices.push({ level: 'warn', code: 'effort-off', text: '思考已关闭：回复更快，但二代仿真里的工具调用、读群判断和人格一致性可能变差。' });
-  }
-  if (!canSeeImages({ provider, model, vision })) {
-    notices.push({ level: 'info', code: 'no-vision', text: normalizeVisionSetting(vision) === 'no'
-      ? '已设为不能看图：QQ 里的图片、表情会改成文字占位（例如「[图片1：当前模型不能看图，已省略]」）。'
-      : '这个模型能不能看图未知：按不能看图处理，图片、表情会改成文字占位；确认它能看图的话，把「看图能力」改成「能看图」。' });
-  }
-  if (!priced) {
-    notices.push({ level: 'info', code: 'unpriced', text: '价格表没有覆盖这个模型：令牌与花费页的金额按 DeepSeek-V4.1-Flash 估算，并标「估算」。' });
-  }
-  return notices;
 }
 
 /** 不能看图时，聊天消息里的图片 / 表情改成文字占位（不去下载图片）。 */

@@ -142,10 +142,10 @@ test('控制台可见的平台列表不泄漏连接层对象', () => {
   // owner / source 是「谁注册的、来自内置还是插件」，configSchema / issues 是
   // 插件平台要的配置模型与装配结论 —— 与用户侧描述对象同一口径（B7、P1）。
   // applies / promptChannels / canPinPermission 是能力档 runtime 段的三条声明面（P5）：
-  // 控制台直接读它们，不在运行期从 port 上现问。
+  // 控制台直接读它们，不在运行期从 port 上现问；modelCatalog 同理（B3）。
   for (const item of listAgentPlatforms()) {
     assert.deepEqual(Object.keys(item).sort(),
-      ['applies', 'canPinPermission', 'capabilities', 'configSchema', 'id', 'issues', 'label', 'owner', 'promptChannels', 'source']);
+      ['applies', 'canPinPermission', 'capabilities', 'configSchema', 'id', 'issues', 'label', 'modelCatalog', 'owner', 'promptChannels', 'source']);
   }
 });
 

@@ -132,18 +132,11 @@ import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescri
 import {
   normalizeEffortId,
   normalizeVisionSetting,
-  FALLBACK_EFFORTS,
   createModelCatalogCache,
   validateModelSelection,
   resolveSelectModelParams,
   buildCatalogView,
-  findCatalogModel,
-  catalogEfforts,
   canSeeImages,
-  knownVision,
-  isPriced,
-  isFirstPartyProvider,
-  selectionNotices,
   mediaTextParts,
   mediaTextEntries,
 } from './dsh-model.js';
@@ -951,13 +944,15 @@ function forgetAgentToken(key) {
   CONVERSATION_TOKENS.delete(key);
 }
 
-// DSH 思考强度（reasoningEffort）热切换代号。
-// 控制台改强度后递增它，让已在运行的会话在下一条消息重新 selectModel；
+// 模型选择（提供方 / 模型 / 思考强度 / 看图）热切换代号。
+// 平台配置写口改了这几项就递增它，让已在运行的会话在下一条消息重新 selectModel；
 // 放在模块级是为了不依赖 main() 内部声明的执行顺序（避免 TDZ）。
 let modelSelectionEpoch = 0;
-// 思考档位：具体模型支持哪些以 DSH 模型目录为准（见 src/dsh-model.js）；
-// 这里只按 DSH 已知的全部档位做初步校验，空值表示「用模型默认」。
-// 'off'（关闭思考）现在也放开，控制台选它时会提示可能影响工具调用和回复质量。
+// 属于「模型选择」的配置键：改它们要递代号，平台声明了 models 能力位时还要按目录校验。
+const AGENT_MODEL_KEYS = Object.freeze(['provider', 'model', 'reasoningEffort', 'vision']);
+// 思考档位：具体模型支持哪些以平台目录为准（见 src/dsh-model.js）；
+// 这里只按已知的全部档位做初步校验，空值表示「用模型默认」。
+// 'off'（关闭思考）也放开，控制台选它时会提示可能影响工具调用和回复质量。
 const REASONING_EFFORT_DEFAULT = 'max';
 const normalizeReasoningEffort = (value) => normalizeEffortId(value);
 
@@ -4049,9 +4044,8 @@ async function main() {
     log(`已为 ${adoptedRefs} 条会话映射补记平台标识（${agentPortId}）`);
     saveState();
   }
-  // 模型目录缓存（60 秒 TTL、并发去重、3 秒超时）：控制台下拉、保存校验、会话 selectModel 共用。
+  // 模型目录缓存（60 秒 TTL、并发去重、3 秒超时）：会话 selectModel 与平台详情页共用。
   // 版本差（session/modelCatalog → session/models）由适配器内部处理，内核看到的只是 catalog。
-  const modelCatalogErrorLogged = new Set(); // 同一条目录读取错误只写一次日志（避免 5 秒轮询刷屏）
   const modelCatalogCache = createModelCatalogCache({
     fetchCatalog: async () => (await agentPort.listModels()).catalog,
   });
@@ -5994,6 +5988,11 @@ async function main() {
   // 那个是后台轮询持续维护的「现在能不能用」，这里只回答「刚才有人点过一次，结果是什么」。
   const agentProbes = new Map();
 
+  // 实时模型目录的缓存（按平台 id）：30 秒 TTL。ACP 读目录要建探测会话，
+  // 连续刷新详情页不该每刷一次就起一个。
+  const AGENT_MODEL_LIVE_TTL_MS = 30_000;
+  const agentModelLiveCache = new Map();
+
   /**
    * 各用户实例的入站结论（按实例 id 索引）：`open` / `closed` / `error` / `disabled` /
    * `send-only` / `unregistered`。声明得早于装配是为了注册表快照能在任何时刻读它 ——
@@ -6064,6 +6063,52 @@ async function main() {
     }
     agentProbes.set(id, result);
     return result;
+  }
+
+  /**
+   * 某 Agent 平台的实时模型目录（`declared` 不在这里 —— 它随注册表静态带回）。
+   *
+   * 为什么单独一个函数、还带缓存：ACP 实现会为读目录建一个探测会话，因此它不能塞进
+   * 被轮询的注册表响应里。30 秒缓存让连续打开详情页不重复建会话；失败降级 `live: null`，
+   * 调用方仍能用 `declared` 画表单。
+   */
+  async function readAgentModelCatalog(id, { force = false } = {}) {
+    const cached = agentModelLiveCache.get(id);
+    if (!force && cached && Date.now() - cached.at < AGENT_MODEL_LIVE_TTL_MS) return cached.value;
+    const value = { live: null, view: null, error: '', unsupported: false };
+    const impl = agentPlatform(id);
+    if (!impl) {
+      value.error = `${id} 没有运行期实现，读不到实时目录（等它的插件装上并重启）`;
+      return value;
+    }
+    // 没声明 models 能力位就不去问：没有能力位的平台要么不实现方法，要么一调就抛，
+    // 而「没有模型目录」本身就是有效结论（声明面里的 `declared` 仍然照常返回）。
+    if (![...(impl.capabilities ?? [])].includes('models')) {
+      value.unsupported = true;
+      value.error = `${id} 没有声明 models 能力位`;
+      agentModelLiveCache.set(id, { at: Date.now(), value });
+      return value;
+    }
+    let temp = null;
+    let runtime = null;
+    try {
+      // 当前正在跑的平台复用后台轮询那份连接：另开一条客户端会多一份凭据与事件流。
+      try { runtime = agentRuntime(); } catch { runtime = null; }
+      if (!runtime || runtime.id !== id) {
+        temp = impl.createRuntime({ config: flatPlatformEntry(cfg.platforms, 'agent', id), log });
+        runtime = temp;
+      }
+      const got = await withTimeout(runtime.port().listModels(), 10_000, 'listModels');
+      value.live = got?.catalog ?? null;
+      // 三个下拉要的是整理后的形状（每个模型带档位 / 看图 / 价目覆盖），不在控制台重算。
+      value.view = value.live ? buildCatalogView(value.live, { priceTable }) : null;
+    } catch (error) {
+      value.error = String(error?.message ?? error);
+    } finally {
+      if (temp) { try { await temp.close(); } catch {} }
+    }
+    agentModelLiveCache.set(id, { at: Date.now(), value });
+    return value;
   }
 
   const checkDsh = async () => {
@@ -7772,8 +7817,32 @@ async function main() {
                 ? vetPlatformConfig(known.configSchema, { ...(known.config ?? {}), ...fields })
                 : { error: '' };
               if (vet.error) { sendJson({ ok: false, error: vet.error }, 400); return; }
+              // 模型选择：平台声明了 models 能力位时，按它自己的实时目录校。保存一个对端不认的
+              // 模型，要到下一条消息的 selectModel 上才会失败（还带着重试与刷屏），所以在这里拦住。
+              // 目录取不到就不拦 —— 能校验才校验，不阻塞配置修改。
+              let modelSelection = null;
+              if (side === 'agent' && AGENT_MODEL_KEYS.some((key) => key in fields)
+                && (known.capabilities ?? []).includes('models')) {
+                const catalog = await readAgentModelCatalog(platformId);
+                if (catalog.live) {
+                  try {
+                    modelSelection = validateModelSelection(catalog.live, { ...(known.config ?? {}), ...fields });
+                  } catch (error) {
+                    sendJson({ ok: false, error: error?.message ?? '模型选择无效' }, 400);
+                    return;
+                  }
+                  // 只写规范化后的选择：目录会补齐缺省（如无档位模型不带 reasoningEffort）。
+                  for (const key of AGENT_MODEL_KEYS) delete body[key];
+                  Object.assign(body, modelSelection);
+                }
+              }
               // 只落盘用户给的补丁：校验结果里带着 schema 默认值，写进去等于把默认值固化成设置。
               savePlatformPatch(side, body, platformId);
+              if (modelSelection) {
+                // 已在运行的会话靠这个代号失效，在下一条消息重新 selectModel（不用重启）。
+                modelSelectionEpoch += 1;
+                log(`控制台：${platformId} 的模型已设为 ${modelSelection.provider}/${modelSelection.model}（思考强度 ${modelSelection.reasoningEffort || '模型默认'}，看图 ${modelSelection.vision}），对已有会话于下一条消息生效`);
+              }
               // 连接参数决定「下一次连接去哪」，正在跑的那条改了要重启才生效；选项由调用面
               // 每次现读，改完即生效。两侧白名单不同（endpoint vs transport），判据是同一条。
               // 用户侧「正在跑」是按实例算的：每条条目都有自己的入站管线，改哪条就影响哪条。
@@ -7804,6 +7873,27 @@ async function main() {
             sendJson({ ok: true, probe, registry: currentPlatformRegistry() });
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '平台操作失败' }, 400);
+          }
+          return;
+        }
+        // 模型目录读口：`declared` 是平台声明（随注册表静态带回），`live` 现问平台。
+        // 为什么单独成端点：ACP 会为读目录建一个探测会话，而注册表是被轮询的。
+        // 「读不到」也是结论（没实现 / 没声明 models 能力位 / 对端报错）：一律 200，
+        // 靠 `error` 与 `unsupported` 说明原因，`declared` 照常可用。
+        const platformModelsRoute = url.pathname.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/models$/);
+        if (platformModelsRoute) {
+          if (req.method !== 'GET') { sendJson({ ok: false, error: '不支持的方法' }, 405); return; }
+          const platformId = platformModelsRoute[1];
+          try {
+            const entry = findRegistryPlatform(currentPlatformRegistry(), 'agent', platformId);
+            if (!entry) {
+              sendJson({ ok: false, error: `没有这个 Agent 平台：${platformId}` }, 404);
+              return;
+            }
+            const live = await readAgentModelCatalog(platformId, { force: url.searchParams.get('refresh') === '1' });
+            sendJson({ ok: true, agent: platformId, declared: entry.modelCatalog ?? null, ...live });
+          } catch (error) {
+            sendJson({ ok: false, error: error?.message ?? '读取模型目录失败' }, 500);
           }
           return;
         }
@@ -9461,105 +9551,6 @@ async function main() {
           reconcileSessionPolicies();
           log(`控制台：管理员已更新（所有者: ${owner ? addressKey(owner) : '未设置'}，子管理员: ${admins.length}）`);
           sendJson({ ok: true, owner, ownerQQ: cfg.ownerQQ, admins });
-          return;
-        }
-
-        // ── DSH 模型与思考强度 ───────────────────────────────────────────────
-        if (req.method === 'GET' && url.pathname === '/api/dsh/model') {
-          const provider = String(cfg.agentPlatform?.provider || 'deepseek-official');
-          const model = String(cfg.agentPlatform?.model || 'deepseek-flash');
-          const reasoningEffort = String(cfg.agentPlatform?.reasoningEffort ?? '');
-          const vision = normalizeVisionSetting(cfg.agentPlatform?.vision);
-          // 选项全部取自 DSH 的模型目录（不另维护硬编码清单）；目录取不到时退化到「当前值 + 内置档位」，
-          // 控制台标注「目录不可用」。
-          const got = await modelCatalogCache.get({ force: url.searchParams.get('refresh') === '1' });
-          let options = FALLBACK_EFFORTS.slice();
-          let labels = {};
-          let providerDefault = null;
-          let catalogSource = 'fallback';
-          let view = { providers: [], failures: [] };
-          let catalogError = null;
-          if (got.ok) {
-            view = buildCatalogView(got.catalog, { priceTable });
-            const { entry } = findCatalogModel(got.catalog, provider, model);
-            if (entry) {
-              options = catalogEfforts(entry);
-              labels = Object.fromEntries((entry.reasoning?.efforts ?? []).map((e) => [String(e.id), { name: e.name ?? '', description: e.description ?? '' }]));
-              providerDefault = entry.reasoning?.defaultEffort ?? null;
-              catalogSource = 'dsh';
-            } else {
-              catalogError = `DSH 的模型目录里没有当前配置的 ${provider}/${model}`;
-            }
-          } else {
-            catalogError = got.error;
-            // 同一条失败原因只记一次：控制台每次刷新都会打这条接口，否则日志会被刷爆。
-            if (!modelCatalogErrorLogged.has(got.error)) {
-              modelCatalogErrorLogged.add(got.error);
-              log(`读取 DSH 模型目录失败，控制台暂用当前配置和内置档位：${got.error}`);
-            }
-          }
-          if (catalogSource === 'fallback' && reasoningEffort && !options.includes(reasoningEffort)) options.push(reasoningEffort);
-          const priced = isPriced(provider, model, priceTable);
-          sendJson({
-            provider,
-            model,
-            reasoningEffort,
-            vision,
-            visionKnown: knownVision(provider, model),
-            canSeeImages: modelCanSeeImages(),
-            thirdParty: !isFirstPartyProvider(provider),
-            priced,
-            notices: selectionNotices({ provider, model, reasoningEffort, vision, priced }),
-            options,
-            labels,
-            default: REASONING_EFFORT_DEFAULT,
-            providerDefault,
-            catalogSource,
-            catalogError,
-            providers: view.providers,
-            failures: view.failures,
-            // selectModel 会同时写会话级与 DSH 全局默认（~/.dsh/settings.yaml 的 agent-default-model），
-            // 控制台要把这点明确告诉管理员，避免「只想调 QQ 助手却改了 Web GUI 新会话默认」的意外。
-            globalSideEffect: true,
-          });
-          return;
-        }
-        // 保存提供方 / 模型 / 思考强度 / 看图能力。只有控制台能调（agent token 默认拒绝，见上面的白名单），
-        // QQ 里的 AI 和私聊管理通道都改不了。校验以 DSH 模型目录为准：目录取不到就拒绝保存（不能校验就不写）。
-        if (req.method === 'POST' && url.pathname === '/api/dsh/model') {
-          const body = await readBody();
-          const got = await modelCatalogCache.get({ force: true });
-          if (!got.ok) { sendJson({ ok: false, error: `读取 DSH 模型目录失败，无法校验，未保存：${got.error}` }, 503); return; }
-          let selection;
-          try { selection = validateModelSelection(got.catalog, { ...body, vision: body.vision ?? cfg.agentPlatform?.vision }); }
-          catch (error) { sendJson({ ok: false, error: error?.message ?? '选择无效' }, 400); return; }
-          // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
-          savePlatformPatch('agent', selection);
-          // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
-          modelSelectionEpoch += 1;
-          const priced = isPriced(selection.provider, selection.model, priceTable);
-          log(`控制台：DSH 模型已设为 ${selection.provider}/${selection.model}（思考强度 ${selection.reasoningEffort || '模型默认'}，看图 ${selection.vision}），对已有会话于下一条消息生效`);
-          sendJson({ ok: true, ...selection, canSeeImages: modelCanSeeImages(), priced, notices: selectionNotices({ ...selection, priced }) });
-          return;
-        }
-        // 旧接口：只改思考强度。保留给旧版控制台；目录可用时同样按当前模型公布的档位校验。
-        if (req.method === 'POST' && url.pathname === '/api/dsh/effort') {
-          const body = await readBody();
-          let effort;
-          try { effort = normalizeReasoningEffort(body.reasoningEffort); }
-          catch (error) { sendJson({ ok: false, error: error?.message ?? '思考强度无效' }, 400); return; }
-          const got = await modelCatalogCache.get();
-          if (got.ok) {
-            try {
-              effort = validateModelSelection(got.catalog, { provider: cfg.agentPlatform?.provider, model: cfg.agentPlatform?.model, reasoningEffort: effort, vision: cfg.agentPlatform?.vision }).reasoningEffort;
-            } catch (error) { sendJson({ ok: false, error: error?.message ?? '思考强度无效' }, 400); return; }
-          }
-          // fail-fast：配置损坏时直接 500，绝不回写（与白名单接口同语义）
-          savePlatformPatch('agent', { reasoningEffort: effort });
-          // 递增代号：已在运行的会话在下一条消息会重新 selectModel（无需重启桥接或 DSH）
-          modelSelectionEpoch += 1;
-          log(`控制台：DSH 思考强度已设为 ${effort || '模型默认'}（对已有会话于下一条消息生效）`);
-          sendJson({ ok: true, reasoningEffort: effort });
           return;
         }
 

@@ -45,5 +45,4 @@ export const CONFIG_FIELDS = {
   permission: OVERVIEW_FIELDS.permission,
   sendLimit: OVERVIEW_FIELDS.sendLimit,
   silence: OVERVIEW_FIELDS.silence,
-  dsh: OVERVIEW_FIELDS.dsh,
 };

@@ -1,8 +1,8 @@
-// 控制台选择 DSH 模型（提供方 / 模型 / 思考强度 / 看图能力）。全部离线、假数据（虚构的提供方与模型）。
+// 控制台选择模型（提供方 / 模型 / 思考强度 / 看图能力）。全部离线、假数据（虚构的提供方与模型）。
 //   ① 模块：档位规范化、目录校验（不在目录 → 拒绝；档位不在该模型列表 → 拒绝并列出支持的档位；无档位模型忽略档位）；
 //   ② 模块：selectModel 参数（无档位不带 reasoningEffort、不支持的档位交给模型默认、目录不可用按配置原样）；
-//   ③ 模块：目录缓存（TTL、并发去重、超时、失败不缓存）、看图能力、第三方与价格提示、图片降级成文字；
-//   ④ 桥接接口：GET 返回目录、POST 校验后写 config.json 并热生效、目录不可用拒绝保存、agent token 拒绝；
+//   ③ 模块：目录缓存（TTL、并发去重、超时、失败不缓存）、看图能力、目录视图、图片降级成文字；
+//   ④ 接口：模型目录读口给出声明与实时目录；平台配置写口校验后写 config.json 并热生效；AI 令牌调不了；
 //   ⑤ 桥接运行时：会话按目录 selectModel；不能看图时聊天图片与工具图片都降级成文字、表情图 / 形象图拒绝返回。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,7 +11,7 @@ import http from 'node:http';
 import path from 'node:path';
 import {
   normalizeEffortId, validateModelSelection, resolveSelectModelParams, createModelCatalogCache,
-  buildCatalogView, canSeeImages, knownVision, isFirstPartyProvider, isPriced, selectionNotices,
+  buildCatalogView, canSeeImages, knownVision, isFirstPartyProvider, isPriced,
   mediaTextParts, mediaTextEntries, KNOWN_EFFORTS,
 } from '../src/dsh-model.js';
 import { DEFAULT_PRICE_TABLE } from '../src/model-prices.js';
@@ -110,11 +110,6 @@ test('③ 目录缓存、看图能力、提示与图片降级', async () => {
   assert.equal(view.providers[0].models[0].vision, 'yes');
   assert.equal(view.failures[0].id, 'example-broken');
 
-  const codes = (x) => selectionNotices(x).map((n) => n.code).sort();
-  assert.deepEqual(codes({ provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max', vision: 'auto', priced: true }), [], '默认配置没有提示');
-  assert.deepEqual(codes({ provider: 'example-cloud', model: 'example-chat', reasoningEffort: 'off', vision: 'auto', priced: false }), ['effort-off', 'no-vision', 'third-party', 'unpriced']);
-  assert.match(selectionNotices({ provider: 'example-cloud', model: 'm', vision: 'yes', priced: true })[0].text, /隐私/);
-
   const media = [{ kind: 'image', file: 'a.jpg' }, { kind: 'sticker', summary: '开心' }, { kind: 'face', faceId: '14' }, null];
   const parts = mediaTextParts(media, 'example-cloud/example-chat');
   assert.deepEqual(parts.map((p) => p.type), ['text', 'text', 'text']);
@@ -139,7 +134,7 @@ function request(port, pathName, method = 'GET', headers = {}, body) {
 }
 const listenPort = (server) => new Promise((resolve) => { if (server.listening) resolve(server.address().port); else server.once('listening', () => resolve(server.address().port)); });
 
-test('④ 接口：GET 给出目录；POST 校验后写 config.json 并热生效；目录不可用拒绝保存；AI 令牌调不了', async () => {
+test('④ 接口：目录读口给出声明与实时目录；平台配置写口校验后落盘并热生效', async () => {
   const h = await bridgeHarness();
   const selected = [];
   let catalogUp = true;
@@ -151,38 +146,42 @@ test('④ 接口：GET 给出目录；POST 校验后写 config.json 并热生效
   h.api.sessions.selectModel = async (p) => { selected.push(JSON.parse(JSON.stringify(p))); return { result: { ok: true, value: { selected: { provider: p.provider, model: p.model, reasoningEffort: p.reasoningEffort } } } }; };
   const server = h.startConsoleServer();
   const admin = { 'x-console-token': 'fixture-console-token' };
+  const modelsPath = '/api/platforms/registry/agent/dsh/models';
+  const configPath = '/api/platforms/registry/agent/dsh/config';
   try {
     const port = await listenPort(server);
-    const got = await request(port, '/api/dsh/model', 'GET', admin);
-    assert.equal(got.status, 200);
-    assert.equal(got.json.catalogSource, 'dsh');
-    assert.equal(got.json.provider, 'deepseek-official', '默认值不变');
-    assert.equal(got.json.model, 'deepseek-flash');
-    assert.deepEqual(got.json.options, ['off', 'low', 'high', 'max'], 'off 不再被过滤');
-    assert.equal(got.json.providers.length, 2);
-    assert.equal(got.json.canSeeImages, true);
-    assert.equal(got.json.globalSideEffect, true);
-    assert.deepEqual(got.json.notices, []);
+    const listed = await request(port, modelsPath, 'GET', admin);
+    assert.equal(listed.status, 200, JSON.stringify(listed.json));
+    assert.equal(listed.json.agent, 'dsh');
+    assert.ok(listed.json.declared, '声明面（agent-platform.yml 的 modelCatalog）随条目带出');
+    assert.ok(listed.json.declared.models.some((m) => m.id === 'deepseek-flash'));
+    assert.equal(listed.json.declared.compact.approxTokens, 800_000);
+    assert.equal(listed.json.live.groups.length, 2, '实时目录来自平台的 listModels');
+    assert.equal(listed.json.view.providers.length, 2, '三个下拉要的是整理后的视图');
+    assert.equal(listed.json.error, '');
+
+    const ghost = await request(port, '/api/platforms/registry/agent/ghost/models', 'GET', admin);
+    assert.equal(ghost.status, 404, '不存在的平台不造空壳');
 
     // 先建一个会话，记下它用的模型
     await h.ensureSession('group:456');
     assert.deepEqual(selected.at(-1), { sessionId: 'fixture-1', provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' });
 
-    const bad = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'no-such-model' });
+    // 模型不在目录里 / 档位不被该模型支持：写口拒绝
+    const bad = await request(port, configPath, 'PATCH', admin, { provider: 'example-cloud', model: 'no-such-model' });
     assert.equal(bad.status, 400); assert.match(bad.json.error, /没有 example-cloud\/no-such-model/);
-    const badEffort = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'minimal' });
+    const badEffort = await request(port, configPath, 'PATCH', admin, { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'minimal' });
     assert.equal(badEffort.status, 400); assert.match(badEffort.json.error, /只支持思考强度 low \/ high \/ max/);
 
-    const ok = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'example-chat', reasoningEffort: 'low', vision: 'auto' });
-    assert.equal(ok.status, 200);
-    assert.equal(ok.json.reasoningEffort, '', '无档位模型归一为空');
-    assert.equal(ok.json.canSeeImages, false);
-    assert.deepEqual(ok.json.notices.map((n) => n.code).sort(), ['no-vision', 'third-party', 'unpriced']);
+    // 合法：归一后落盘（无档位模型不带 reasoningEffort）+ 热生效
+    const ok = await request(port, configPath, 'PATCH', admin, { provider: 'example-cloud', model: 'example-chat', reasoningEffort: 'low', vision: 'auto' });
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    assert.equal(ok.json.requiresRestart, false, '模型选项改完即生效，不用重启');
     const saved = JSON.parse(fs.readFileSync(path.join(h.temp, 'config.json'), 'utf8'));
     // 配置 v2：模型类选项在 platforms.agents.<active>.options，连接参数在 .endpoint。
     const agent = saved.platforms.agents.dsh;
     assert.deepEqual({ p: agent.options.provider, m: agent.options.model, e: agent.options.reasoningEffort, v: agent.options.vision },
-      { p: 'example-cloud', m: 'example-chat', e: '', v: 'auto' }, 'config.json 落盘');
+      { p: 'example-cloud', m: 'example-chat', e: '', v: 'auto' }, 'config.json 落盘，档位归一为空');
     assert.equal(agent.endpoint.authToken, 'fixture-only', '其它连接字段原样保留');
     assert.equal(saved.dsh, undefined, '不再有 dsh 顶层键（一次性迁移）');
 
@@ -190,30 +189,21 @@ test('④ 接口：GET 给出目录；POST 校验后写 config.json 并热生效
     await h.ensureSession('group:456');
     assert.deepEqual(selected.at(-1), { sessionId: 'fixture-1', provider: 'example-cloud', model: 'example-chat' });
 
-    // 只改档位的旧接口：同样按当前模型的目录校验
-    await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'high' });
-    const oldBad = await request(port, '/api/dsh/effort', 'POST', admin, { reasoningEffort: 'minimal' });
-    assert.equal(oldBad.status, 400);
-    const keepVision = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'max', vision: 'yes' });
-    assert.equal(keepVision.json.vision, 'yes');
-    const noVisionField = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'example-cloud', model: 'example-reasoner', reasoningEffort: 'max' });
-    assert.equal(noVisionField.json.vision, 'yes', '没传 vision 时保留原设置');
-
-    // 目录不可用：不能校验就不保存
+    // 目录不可用：读口说明原因，写口不拦（配置面不依赖对端在线）
     catalogUp = false;
-    const before = fs.readFileSync(path.join(h.temp, 'config.json'), 'utf8');
-    const down = await request(port, '/api/dsh/model', 'POST', admin, { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' });
-    assert.equal(down.status, 503);
-    assert.equal(fs.readFileSync(path.join(h.temp, 'config.json'), 'utf8'), before, '目录不可用时 config.json 不变');
-    const fallback = await request(port, '/api/dsh/model?refresh=1', 'GET', admin);
-    assert.equal(fallback.json.catalogSource, 'fallback');
-    assert.ok(fallback.json.catalogError, '页面要能标注「目录不可用」');
-    assert.ok(fallback.json.options.includes('max'), '退化到当前值 + 内置档位');
+    const down = await request(port, `${modelsPath}?refresh=1`, 'GET', admin);
+    assert.equal(down.status, 200, '读不到目录也是结论，不是请求错误');
+    assert.equal(down.json.live, null);
+    assert.ok(down.json.error, '读口要能说明「目录不可用」');
+    assert.ok(down.json.declared, '声明部分不受影响');
+    const offline = await request(port, configPath, 'PATCH', admin, { provider: 'deepseek-official', model: 'deepseek-flash', vision: 'yes' });
+    assert.equal(offline.status, 200, '不能校验就不拦，配置照常可写');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(h.temp, 'config.json'), 'utf8')).platforms.agents.dsh.options.vision, 'yes');
 
-    // AI 的令牌（MCP 同时带控制台令牌和 agent 令牌）改不了模型
+    // AI 的令牌（MCP 同时带控制台令牌和 agent 令牌）读不到也改不了
     const asAgent = { ...admin, 'x-agent-token': 'fixture-agent-token' };
-    for (const [method, p] of [['GET', '/api/dsh/model'], ['POST', '/api/dsh/model'], ['POST', '/api/dsh/effort']]) {
-      const res = await request(port, p, method, asAgent, method === 'POST' ? { provider: 'deepseek-official', model: 'deepseek-flash' } : undefined);
+    for (const [method, p] of [['GET', modelsPath], ['PATCH', configPath]]) {
+      const res = await request(port, p, method, asAgent, method === 'PATCH' ? { provider: 'deepseek-official', model: 'deepseek-flash' } : undefined);
       assert.equal(res.status, 403, `${method} ${p} 必须对 agent token 拒绝`);
     }
   } finally {

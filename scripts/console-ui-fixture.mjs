@@ -525,10 +525,8 @@ export function makeFixtureState() {
       'demo-agent': '',
     },
     roleInjectMax: 6000,
-    dshEffort: 'max',
     dshProvider: 'deepseek-official',
     dshModel: 'deepseek-flash',
-    dshVision: 'auto',
     // Agent 平台的配置面与最近一次显式探活（P2 写口 / probe 的落点）：初值与注册表里的 config 一致。
     agentConfigs: {
       dsh: {
@@ -541,6 +539,7 @@ export function makeFixtureState() {
         provider: 'deepseek-official',
         model: 'deepseek-flash',
         reasoningEffort: 'max',
+        vision: 'auto',
       },
       acp: { command: 'npx @zed-industries/agent', args: ['--stdio'], timeoutMs: 120000 },
     },
@@ -635,9 +634,21 @@ const FIXTURE_DSH_PROVIDERS = [
     { id: 'example-reasoner', name: 'Example Reasoner', description: '', efforts: [{ id: 'minimal', name: 'Minimal' }, { id: 'medium', name: 'Medium' }, { id: 'xhigh', name: 'XHigh' }], defaultEffort: 'medium', vision: 'unknown', priced: false },
   ] },
 ];
-function fixtureDshModel(provider, model) {
-  return FIXTURE_DSH_PROVIDERS.find((p) => p.id === provider)?.models.find((m) => m.id === model) || null;
-}
+// 平台声明面（profiles/agent-platforms/dsh/agent-platform.yml 的 modelCatalog）：
+// 档位中文名、看图声明与价目覆盖都从这里来，与实时目录分开。
+const FIXTURE_DSH_DECLARED = {
+  models: [
+    { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash', contextWindow: 1000000, vision: true, pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 } },
+    { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro-0813', pricing: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 } },
+  ],
+  pricingPolicy: { version: '2026-11-04', currency: 'CNY', symbol: '¥', unit: 1000000, peakMultiplier: 2, peakWindows: [[9, 12], [14, 18]], peakWeekdays: [1, 2, 3, 4, 5] },
+  efforts: [
+    { id: 'off', label: '关闭' }, { id: 'minimal', label: '极低' }, { id: 'low', label: '低' },
+    { id: 'medium', label: '中' }, { id: 'high', label: '高' }, { id: 'xhigh', label: '极高' }, { id: 'max', label: '最高' },
+  ],
+  effortFallback: ['low', 'high', 'max'],
+  compact: { approxTokens: 800000 },
+};
 
 // ── 定时任务夹具（假数据；发送不会真的发出去） ──────────────────────────────
 let fixtureScheduler = null;
@@ -1056,6 +1067,25 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         }
         const sessionAgentMatch = path.match(/^\/api\/sessions\/([^/]+)\/agent$/);
         if (sessionAgentMatch) return json(fixtureSessionAgent(state, decodeURIComponent(sessionAgentMatch[1])));
+        // 模型目录读口：`declared` 随注册表带回，这里只补实时目录整理出的 `view`。
+        // 与真实桥接同一条语义：读不到也是结论（一律 200，靠 error / unsupported 说明）。
+        const agentModelsMatch = path.match(/^\/api\/platforms\/registry\/agent\/([a-z][a-z0-9-]{0,15})\/models$/);
+        if (agentModelsMatch) {
+          const platformId = agentModelsMatch[1];
+          if (!state.agentConfigs[platformId]) return json({ ok: false, error: `没有这个 Agent 平台：${platformId}` }, 404);
+          if (platformId !== 'dsh') {
+            return json({ ok: true, agent: platformId, declared: null, live: null, view: null, error: `${platformId} 没有声明 models 能力位`, unsupported: true });
+          }
+          return json({
+            ok: true,
+            agent: platformId,
+            declared: FIXTURE_DSH_DECLARED,
+            live: { groups: FIXTURE_DSH_PROVIDERS, failures: [] },
+            view: { providers: FIXTURE_DSH_PROVIDERS, failures: [] },
+            error: '',
+            unsupported: false,
+          });
+        }
         switch (path) {
           case '/api/roles/limit':
             return json({
@@ -1196,11 +1226,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                     authHeader: { type: 'string', title: '鉴权头名称', description: '默认 Authorization；换成反代自己的头名时改这里。' },
                     authPrefix: { type: 'string', title: '鉴权前缀', description: '令牌前面的修饰词，默认 Bearer。' },
                     allowRemote: { type: 'boolean', title: '允许远程连接', description: '默认只连本机；打开后 baseUrl 可以指向另一台机器。' },
-                    provider: { type: 'string', title: '模型凭据方式', description: '与 DSH 里的登录方式必须一致，不一致会报 MISSING_CREDENTIAL。' },
-                    model: { type: 'string', title: '模型', description: '会话默认模型；能力预设或会话可以再覆盖。' },
-                    reasoningEffort: { type: 'string', title: '推理强度', description: '低 / 中 / 高；具体取值取决于模型。' },
                   },
                 },
+                // 声明面（agent-platform.yml 的 modelCatalog）：模型、价目、档位与压缩点。
+                // 配置页的模型卡先按它画出档位中文名，实时目录回来再补提供方与模型。
+                modelCatalog: FIXTURE_DSH_DECLARED,
                 // 写口（PATCH .../config）存的就是这一份：控制台改完再拉快照要能读回来。
                 config: { ...state.agentConfigs.dsh },
                 // 最近一次显式探活（POST .../probe）；null = 本次运行里还没探过。
@@ -1239,6 +1269,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                     timeoutMs: { type: 'integer', title: '超时（毫秒）', description: '单轮调用的总时长上限。' },
                   },
                 },
+                // 没有声明 models 能力位的平台也就没有模型目录（声明面与实时都为空）。
+                modelCatalog: null,
                 config: { ...state.agentConfigs.acp },
                 probe: state.agentProbes.acp ?? null,
                 assets: {
@@ -1590,26 +1622,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             const preset = String(url.searchParams.get('preset') || 'chat-v2');
             return json({ ok: true, backups: [{ file: `${preset}.capability.yml.fixture`, mtime: Date.parse(timestamp) }] });
           }
-          case '/api/dsh/model': {
-            const entry = fixtureDshModel(state.dshProvider, state.dshModel);
-            return json({
-              provider: state.dshProvider,
-              model: state.dshModel,
-              reasoningEffort: state.dshEffort,
-              vision: state.dshVision,
-              visionKnown: entry?.vision || 'unknown',
-              priced: !!entry?.priced,
-              options: (entry?.efforts || []).map((e) => e.id),
-              labels: Object.fromEntries((entry?.efforts || []).map((e) => [e.id, { name: e.name, description: e.description }])),
-              default: 'max',
-              providerDefault: entry?.defaultEffort || null,
-              catalogSource: 'dsh',
-              catalogError: null,
-              providers: FIXTURE_DSH_PROVIDERS,
-              failures: [],
-              globalSideEffect: true,
-            });
-          }
           case '/api/memory/entries': return json({ ok: true, provider: 'local-digest', key: url.searchParams.get('key') || '', data: memoryEntryList(state, url.searchParams.get('key') || '') });
         case '/api/memory/sessions': return json({ ok: true, provider: 'local-digest', sessions: memorySessions(state) });
           case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
@@ -1903,15 +1915,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/preset/sim-prompt/restore': {
             const preset = String(body.preset || 'chat-v2');
             return json({ ok: true, restoredFrom: `${preset}.capability.yml.fixture`, requiresRestart: true });
-          }
-          case '/api/dsh/effort': state.dshEffort = body.reasoningEffort; return json({ ok: true, reasoningEffort: body.reasoningEffort });
-          case '/api/dsh/model': {
-            const entry = fixtureDshModel(body.provider, body.model);
-            if (!entry) return json({ ok: false, error: `DSH 的模型目录里没有 ${body.provider}/${body.model}` }, 400);
-            const ids = entry.efforts.map((e) => e.id);
-            if (ids.length && body.reasoningEffort && !ids.includes(body.reasoningEffort)) return json({ ok: false, error: `${body.provider}/${body.model} 只支持思考强度 ${ids.join(' / ')}` }, 400);
-            Object.assign(state, { dshProvider: body.provider, dshModel: body.model, dshEffort: ids.length ? (body.reasoningEffort || '') : '', dshVision: body.vision || 'auto' });
-            return json({ ok: true, provider: state.dshProvider, model: state.dshModel, reasoningEffort: state.dshEffort, vision: state.dshVision });
           }
           case '/api/memory/entries': {
             const key = String(body.key || '');

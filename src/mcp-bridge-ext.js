@@ -69,7 +69,7 @@ function textResult(value) {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
-const server = new McpServer({ name: 'bridge-ext', version: '0.2.1' });
+const server = new McpServer({ name: 'bridge-ext', version: '0.3.0' });
 
 server.tool(
   'ext_list',

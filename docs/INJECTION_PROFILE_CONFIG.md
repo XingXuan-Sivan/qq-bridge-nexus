@@ -66,7 +66,7 @@
 ```
 
 - 覆盖：`config.promptBlocks[id] = { enabled, maxChars, priority, scope, settings }`。
-- `core-persona` 是「不进注册表」的虚拟块：人格卡始终注入，覆盖只接受 `maxChars`（1000~20000，缺省 8000）；控制台注入块页把它显示成「常开」，只留上限输入。`config.role.maxInjectChars` 与 `limits.personaInjectChars` 已在启动迁移时删除。
+- `core-persona` 是「不进注册表」的虚拟块：人格卡默认注入，覆盖接受 `enabled`（关掉后人格正文不进提示词，也不再排「读卡」唤醒，取卡接口返回空）与 `maxChars`（1000~20000，缺省 8000）；控制台注入块页把它列在表里，开关与上限都能改，关闭态直接标「已关闭」。`config.role.maxInjectChars` 与 `limits.personaInjectChars` 已在启动迁移时删除。
 - 总预算：`config.limits.promptAppendChars`（从 `plugins.json` 迁入）。
 - 投递记账：`state/prompt-blocks.json` 只记录“这次投递了哪些块、各多少字、指纹”，不存配置。
 - 插件 manifest 只能声明 `owner/slot/timing/scopes/settings`，内核校验（非法 slot/scope 拒绝注册并记日志）。
@@ -78,7 +78,7 @@
 | `core-wake-identity` | head / 0 | every-wake | 无（locked） |
 | `core-wake-token` | head / 1 | every-wake | 无（locked，仅 agent/v2 出现） |
 | `core-now` | head / 2 | every-wake | 时区格式、是否带日期 |
-| `core-persona` | persona / 10 | on-change | 全文/一行的文案模板、`briefLine`、上限 |
+| `core-persona` | persona / 10 | on-change | 开关、全文/一行的文案模板、`briefLine`、上限 |
 | `core-anti-ai` | behavior / 20 | every-wake | 开关、措辞档位 |
 | `core-proactivity` | behavior / 21 | every-wake | 开关、档位 |
 | `core-reply-rhythm` | behavior / 22 | every-wake | 默认 `quietMs`、是否强制短静默 |

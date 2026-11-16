@@ -530,6 +530,8 @@ export function makeFixtureState() {
       'demo-agent': '',
     },
     roleInjectMax: 6000,
+    // 人格卡虚拟块的开关（promptBlocks['core-persona'].enabled）。
+    personaEnabled: true,
     dshProvider: 'deepseek-official',
     dshModel: 'deepseek-flash',
     // Agent 平台的配置面与最近一次显式探活（P2 写口 / probe 的落点）：初值与注册表里的 config 一致。
@@ -1339,8 +1341,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               { id: 'core-stickers', pluginId: 'core', owner: 'core', label: '表情包策略', priority: 170, slot: 'resources', timing: 'every-wake', reasons: [], profiles: ['wake'], enabled: false, maxChars: 1200, calls: 8, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 0, lastStatus: 'off' },
               { id: 'core-wake-task', pluginId: 'core', owner: 'core', label: '这次要做什么', priority: 100, slot: 'action', timing: 'reason', reasons: ['bootstrap', 'timeout', 'replyCheck'], profiles: ['wake'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 640, lastStatus: 'injected' },
               { id: 'core-slang', pluginId: 'core', owner: 'core', label: '群聊黑话表', priority: 110, slot: 'tail', timing: 'on-change', reasons: [], profiles: ['context'], enabled: true, maxChars: null, calls: 12, failures: 0, lastError: null, lastRunAt: Date.parse(timestamp), lastChars: 96, lastStatus: 'injected' },
-              // 人格卡不经过注册表，由 /api/prompt-blocks 追加成虚拟块：只用来配上限，没有开关。
-              { id: 'core-persona', pluginId: 'core', owner: 'core', label: '人格卡（人格提示词正文）', priority: 0, slot: 'head', timing: 'every-wake', reasons: ['persona'], profiles: ['wake', 'reminder'], enabled: true, maxChars: 6000, calls: 0, lastChars: 0, lastError: null, lastRunAt: null, lastStatus: 'injected', synthetic: true },
+              // 人格卡不经过注册表，由 /api/prompt-blocks 追加成虚拟块：开关与上限都在这里管。
+              { id: 'core-persona', pluginId: 'core', owner: 'core', label: '人格卡（人格提示词正文）', priority: 0, slot: 'head', timing: 'every-wake', reasons: ['persona'], profiles: ['wake', 'reminder'], enabled: state.personaEnabled !== false, maxChars: 6000, calls: 0, lastChars: 0, lastError: null, lastRunAt: null, lastStatus: state.personaEnabled !== false ? 'injected' : 'off', synthetic: true },
             ],
           });
           case '/api/prompt-preview': return json({
@@ -1748,6 +1750,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           state.promptBlockPatches = body;
           const personaMax = Number(body.promptBlocks?.['core-persona']?.maxChars);
           if (personaMax >= 1000) state.roleInjectMax = personaMax;
+          if (typeof body.promptBlocks?.['core-persona']?.enabled === 'boolean') state.personaEnabled = body.promptBlocks['core-persona'].enabled;
           return json({ ok: true, promptBlocks: body.promptBlocks ?? {}, limits: { total: body.limits?.total ?? 0, perBlockDefault: body.limits?.perBlockDefault ?? 0, roleInjectMaxChars: state.roleInjectMax }, coreBlocks: { total: 0, maxTotalChars: 0 } });
         }
         return json({ ok: false, error: 'not found' }, 404);

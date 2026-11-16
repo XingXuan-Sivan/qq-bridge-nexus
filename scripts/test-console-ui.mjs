@@ -1169,10 +1169,10 @@ try {
     await page.locator('input[name="personaSaveApply"][value="nextWake"]').check();
     await saveBarWrite('/api/roles/limit');
 
-    // 注入块页：人格卡作为虚拟块「常开」，只暴露上限。
+    // 注入块页：人格卡作为虚拟块，开关与上限都在这里。
     await navigate('prompt-blocks');
     await page.waitForFunction(() => !!document.querySelector('[data-block-max="core-persona"]'), null, { timeout: 8000 });
-    assert.equal(await page.locator('[data-block-enabled="core-persona"]').count(), 0, '人格卡不提供开关');
+    assert.equal(await page.locator('[data-block-enabled="core-persona"]').count(), 1, '人格卡也要能给开关');
     // 注入块表要能按槽位 / 来源筛选；人格卡虚拟块单独成一类。
     assert.equal(await page.locator('#pbTable [data-filter="slot"]').count(), 1, '应有槽位筛选');
     assert.equal(await page.locator('#pbTable [data-filter="source"]').count(), 1, '应有来源筛选');
@@ -1185,24 +1185,42 @@ try {
     assert.match(await page.locator('#pbSummaryRow').textContent(), /人格卡注入上限/);
     const input = page.locator('[data-block-max="core-persona"]');
     const previous = await input.inputValue();
+    // 保存后 load() 会重绘表格：等这次 GET 回来，否则下一次点击会落在旧的 DOM 上。
+    const saveBlocks = async () => {
+      const [req] = await Promise.all([
+        page.waitForRequest((r) => r.url().includes('/api/config/promptBlocks') && r.method() !== 'GET'),
+        page.waitForResponse((r) => r.url().endsWith('/api/prompt-blocks') && r.request().method() === 'GET'),
+        page.evaluate(() => document.getElementById('pbSave').click()),
+      ]);
+      await page.waitForTimeout(200);
+      return req.postDataJSON();
+    };
     // 表格可能正在重绘：直接写 DOM 再触发 change，避免 Playwright 的可见性等待。
     await input.evaluate((el, next) => {
       el.value = next;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }, '9000');
-    const [req] = await Promise.all([
-      page.waitForRequest((r) => r.url().includes('/api/config/promptBlocks') && r.method() !== 'GET'),
-      page.evaluate(() => document.getElementById('pbSave').click()),
-    ]);
-    const saved = req.postDataJSON();
+    const saved = await saveBlocks();
     assert.equal(saved.promptBlocks['core-persona'].maxChars, 9000, '上限应写进 core-persona 块');
-    await input.evaluate((el, next) => {
+
+    // 关掉人格卡：载荷带 enabled:false，摘要卡片直接提示「已关闭」。
+    await page.locator('[data-block-enabled="core-persona"]').click();
+    const off = await saveBlocks();
+    assert.equal(off.promptBlocks['core-persona'].enabled, false, '关掉人格卡要写进 enabled');
+    await page.waitForFunction(() => /人格卡已关闭/.test(document.getElementById('pbSummaryRow')?.textContent || ''), null, { timeout: 5000 });
+    assert.match(await page.locator('#pbTable tbody tr[data-filter-source="persona"]').textContent(), /已关闭/, '关闭态直接标在行里');
+
+    // 开回来并还原上限，别把关闭状态和测试值留给后面的用例。
+    await page.locator('[data-block-enabled="core-persona"]').click();
+    await page.locator('[data-block-max="core-persona"]').evaluate((el, next) => {
       el.value = next;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     }, previous);
-    await page.evaluate(() => document.getElementById('pbSave').click());
+    const back = await saveBlocks();
+    assert.equal(back.promptBlocks['core-persona'].enabled, true, '开关能改回去');
+    await page.waitForFunction(() => !/人格卡已关闭/.test(document.getElementById('pbSummaryRow')?.textContent || ''), null, { timeout: 5000 });
   });
 
   if (!original) await test('平台模型卡：提供方 / 模型 / 思考强度取自平台目录，第三方先确认再写', async () => {

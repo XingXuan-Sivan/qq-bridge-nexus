@@ -3,6 +3,8 @@
 //   ② 端到端：会话读过卡后不重复给；换人格 / 改内容 / 清除人格 → 下一次唤醒把新卡放在最前面，投递后记下、之后不再给；
 //      引导唤醒也带（新建 / 重置后就是新上下文，不能靠 AI 自己去读）；
 //   ③「立即」：只唤醒还没读到新卡的会话，原因是 roleRefresh；已读到的跳过；非二代模式不唤醒。
+//   ④⑤ 接口：qq_get_prompt 记为已读；改人格内容 / 切人格的生效方式与唤醒口径。
+//   ⑥ 开关：注入块页关掉人格卡后不注入、不排读卡唤醒，重新打开后卡回到提示词。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -191,6 +193,39 @@ test('④ 接口：qq_get_prompt 记为已读；/api/role 下次唤醒 / 立即'
       assert.equal(back.json.refresh.woke, 0, '切回会话已经读过的那张卡：不用唤醒');
     } finally { await new Promise((r) => server.close(r)); }
   });
+});
+
+// ── 人格卡总开关：注入块页关掉 core-persona 后，人格卡不参与对话侧的注入与读卡 ──
+test('⑥ 关掉人格卡：不注入、不发「已清除角色」、不排读卡唤醒；打开后恢复', async () => {
+  const h = await bridgeHarness({
+    files: {
+      'roles/测试鱼.md': CARD_A,
+      'state/current-role.json': { role: '测试鱼', mode: 'active' },
+    },
+    config: { promptBlocks: { 'core-persona': { enabled: false } } },
+  });
+  try {
+    h.setMode('reserved2');
+    await h.ensureSession(GROUP_KEY);
+    assert.equal(h.currentRoleHint(), '', '一代取卡口不给卡');
+    assert.equal(h.currentRoleHintV2(), '', '二代取卡口不给卡');
+    assert.equal(h.roleRefreshBlockV2(), '', '不推新卡');
+    const wake = h.buildWakePromptV2(GROUP_KEY, 'atMention');
+    assert.ok(!wake.includes(CARD_A), '唤醒提示词里没有人格正文');
+    assert.ok(!wake.includes('【角色卡已更新'), '也不发「已清除角色」');
+    assert.ok(!wake.includes('【当前角色】'), '不再提示去读卡');
+    assert.equal(h.refreshRoleNowV2().skipped, 'personaOff', '不排读卡唤醒');
+
+    // 重新打开：同一个会话按「还没读到这一版」把卡完整给回。
+    const server = h.startConsoleServer();
+    if (!server.listening) await new Promise((r) => server.once('listening', r));
+    const port = server.address().port;
+    try {
+      const on = await call(port, '/api/config/promptBlocks', { method: 'PATCH', body: { promptBlocks: { 'core-persona': { enabled: true } } } });
+      assert.equal(on.status, 200, on.json?.error ?? on.body);
+    } finally { await new Promise((r) => server.close(r)); }
+    assert.ok(h.buildWakePromptV2(GROUP_KEY, 'atMention').includes(CARD_A), '打开后卡回到唤醒提示词');
+  } finally { await h.close(); }
 });
 
 test('⑤ 接口：保存人格内容也能选生效方式；改的不是当前人格就不唤醒', async () => {

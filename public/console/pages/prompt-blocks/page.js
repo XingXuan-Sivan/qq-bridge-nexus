@@ -32,7 +32,7 @@ const STATUS_LABEL = {
   truncated: ['截断', 'tag tag--danger'],
   budget: ['超预算跳过', 'tag tag--danger'],
   error: ['失败', 'tag tag--danger'],
-  off: ['已关闭', 'tag'],
+  off: ['已关闭', 'tag tag--warning'],
   empty: ['空', 'tag'],
   idle: ['未调用', 'tag'],
 };
@@ -61,8 +61,10 @@ function summaryHtml() {
   const budget = Number(limits.total) > 0 ? `${Number(limits.total)} 字` : '不限';
   const blockBudget = Number(limits.perBlockDefault) > 0 ? `${Number(limits.perBlockDefault)} 字` : '不限';
   const stats = payload?.stats ?? {};
+  const persona = blocks.find((block) => block.id === 'core-persona');
   return `${perProfile}
     <span class="tag">启用 ${enabled}/${blocks.length}</span>
+    ${persona && !persona.enabled ? '<span class="tag tag--warning">人格卡已关闭</span>' : ''}
     <span class="tag">总预算 ${esc(budget)}</span>
     <span class="tag">单块默认 ${esc(blockBudget)}</span>
     <span class="tag">人格卡注入上限 ${Number(limits.roleInjectMaxChars) || 0} 字</span>
@@ -81,10 +83,8 @@ function rowHtml(block) {
     : (TIMING_LABEL[block.timing] || block.timing || '每次唤醒');
   const profiles = (block.profiles ?? ['wake']).map((profile) => `<span class="tag">${esc(PROFILE_LABEL[profile] || profile)}</span>`).join('');
   const title = detail ? ` title="${esc(detail)}"` : '';
-  // 人格卡这类「不经过注册表」的虚拟块没有真正的开关键：人格卡始终注入，只让它配上限。
-  const enabledCell = block.synthetic
-    ? '<span class="tag">常开</span>'
-    : `<button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button>`;
+  // 人格卡是「不经过注册表」的虚拟块，但开关与上限同样归这份配置：关掉后不再注入人格正文。
+  const enabledCell = `<button class="field-switch" type="button" role="switch" data-field data-block-enabled="${esc(block.id)}" aria-checked="${block.enabled ? 'true' : 'false'}"><span class="field-switch-track"></span><span>${block.enabled ? '开' : '关'}</span></button>`;
   return {
     // 行属性给工具栏的两个筛选器用：槽位 + 来源（核心 / 插件 / 人格卡虚拟块）。
     attrs: {
@@ -155,7 +155,6 @@ function renderTable() {
   const host = el('pbTable');
   if (!host) return;
   host.innerHTML = tableMarkup();
-  bindSwitches(host);
   initDataTables(host, { onRefresh: () => { void load(); } });
 }
 
@@ -289,7 +288,7 @@ function renderCards() {
   host.innerHTML = [
     cardHtml({
       title: '注入块',
-      description: '每次唤醒的提示词由这些块按「槽位 → 优先级」拼成，块之间统一空一行。关掉一块，当轮就不带它、预算立即回收；单块上限留空表示跟随「单块默认上限」（0 = 不限）。改完点「保存修改」，下一轮唤醒生效。',
+      description: '每次唤醒的提示词由这些块按「槽位 → 优先级」拼成，块之间统一空一行。关掉一块，当轮就不带它、预算立即回收；人格卡关掉后不再注入人格正文，也不再排读卡唤醒。单块上限留空表示跟随「单块默认上限」（0 = 不限）。改完点「保存修改」，下一轮唤醒生效。',
       body: '<div data-prompt-blocks-fields="summary"></div>',
     }),
     cardHtml({
@@ -320,8 +319,10 @@ export function init() {
   renderCards();
   renderAll();
   // 表格每轮 load() 都会重建内部 DOM，所以监听挂在不重建的容器上。
+  // 开关的点击委托也挂在这里：挂在会被 innerHTML 重建的表格上，重绘时要反复解绑。
   const host = hostFor('table');
   if (host) {
+    bindSwitches(host);
     host.addEventListener('click', (event) => {
       if (event.target.closest('#pbSave')) { void save(); }
     });

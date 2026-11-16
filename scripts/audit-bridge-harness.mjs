@@ -128,7 +128,7 @@ import { createSnowlumaHealth } from '../src/upstream/snowluma-health.mjs';
 // 上游编排的纯策略（P7 第四步）：bridge 的 import 会被本夹具剥掉，必须逐个注入。
 import { resolveConnectionUpdate } from '../src/upstream/snowluma-conn-update.mjs';
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
-import { createPromptBlockRegistry } from '../src/plugins/prompt-blocks.mjs';
+import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
 import * as voiceLib from '../src/send-voice-lib.js';
 import * as presetPrompt from '../src/preset-prompt.js';
@@ -552,6 +552,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     createSnowlumaHealth,
     resolveConnectionUpdate,
 createPromptBlockRegistry,
+PROMPT_BLOCK_ID_RE,
 createSkillIndex,
 createSkillStore,
 validateSkillText,

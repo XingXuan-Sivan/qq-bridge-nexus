@@ -528,6 +528,8 @@ const ROLE_CONTENT_MAX_BYTES = 64 * 1024;
 const ROLE_INJECT_MAX_CHARS_DEFAULT = 8000;
 const PERSONA_BLOCK_ID = 'core-persona';
 let roleInjectMaxChars = ROLE_INJECT_MAX_CHARS_DEFAULT;
+// 人格正文总开关：注入块页关掉 `core-persona` 后，人格卡不再自动进提示词（读卡工具仍可用）。
+let roleInjectEnabled = true;
 // 保存人格卡后怎么生效：null/nextWake = 下次唤醒读卡；immediate = 立即唤醒读卡。
 // 这是全局默认值（config.json role.saveApply），编辑人格时不再逐次选择。
 let roleSaveApplyDefault = 'nextWake';
@@ -540,6 +542,10 @@ function applyRoleInjectLimit(value) {
 function personaInjectCharsFromBlocks(promptBlocks) {
   const value = Number(promptBlocks?.[PERSONA_BLOCK_ID]?.maxChars);
   return Number.isInteger(value) && value > 0 ? applyRoleInjectLimit(value) : ROLE_INJECT_MAX_CHARS_DEFAULT;
+}
+/** 人格卡是否启用：只认 `promptBlocks['core-persona'].enabled`，没配过按启用处理。 */
+function personaInjectEnabledFromBlocks(promptBlocks) {
+  return promptBlocks?.[PERSONA_BLOCK_ID]?.enabled !== false;
 }
 // off / clear / default 是 /role 命令的关键字（本会话不挂卡 / 回到全局默认），不能当人格名
 const ROLE_RESERVED_NAMES = new Set(['README', 'off', 'clear', 'default']);
@@ -568,7 +574,7 @@ function roleWarnings(content, mode = 'v2') {
   const warnings = [];
   const stats = roleCharStats(text);
   const injected = mode === 'v1' ? stats.v1 : stats.v2;
-  if (injected > roleInjectMaxChars) {
+  if (roleInjectEnabled && injected > roleInjectMaxChars) {
     warnings.push(`超出注入上限：当前模式实际注入 ${injected} 字符，只有前 ${roleInjectMaxChars} 字符会进入提示词（可在「注入块」页调人格卡上限）`);
   }
   // 只在「没有用模式标记分开」的小节上提示兜底过滤，避免对已正确标记的卡片误报。
@@ -1926,6 +1932,7 @@ function loadConfig() {
       }
     }
     roleInjectMaxChars = personaInjectCharsFromBlocks(cfg.promptBlocks);
+    roleInjectEnabled = personaInjectEnabledFromBlocks(cfg.promptBlocks);
     cfg.role = { ...(file.role ?? {}), saveApply: file.role?.saveApply === 'immediate' ? 'immediate' : 'nextWake' };
     roleSaveApplyDefault = cfg.role.saveApply;
   }
@@ -7053,7 +7060,7 @@ async function main() {
         // 注入块：读配置与运行状态、预览渲染（写配置仍走 /api/config/promptBlocks）。
         if (req.method === 'GET' && url.pathname === '/api/prompt-blocks') {
           const status = corePromptBlocks.status();
-          // 人格卡不经过注册表（它由唤醒流程直接拼进提示词），但它的上限和块级配置同源，
+          // 人格卡不经过注册表（它由唤醒流程直接拼进提示词），但它的开关、上限和块级配置同源，
           // 所以在这里补一行「虚拟块」，让控制台用同一张表管它。
           const personaLimit = Number(cfg.promptBlocks[PERSONA_BLOCK_ID]?.maxChars);
           const personaLimitValue = Number.isInteger(personaLimit) && personaLimit > 0 ? personaLimit : null;
@@ -7075,7 +7082,7 @@ async function main() {
                 slot: 'head',
                 timing: 'every-wake',
                 profiles: ['wake', 'reminder'],
-                enabled: true,
+                enabled: roleInjectEnabled,
                 maxChars: personaLimitValue,
                 lastChars: 0,
                 calls: 0,
@@ -7129,6 +7136,7 @@ async function main() {
               : normalizePromptBlockLimits(raw.limits?.promptBlocks);
             cfg.promptBlocks = normalized;
             roleInjectMaxChars = personaInjectCharsFromBlocks(normalized);
+            roleInjectEnabled = personaInjectEnabledFromBlocks(normalized);
             cfg.limits.promptBlocks = limits;
             registerCoreBlocks();
             atomicWriteJson(file, { ...raw, promptBlocks: normalized, limits: { ...(raw.limits ?? {}), promptBlocks: limits } });
@@ -10075,10 +10083,11 @@ async function main() {
             try { await syncStickerLibrary(false); } catch {}
           }
           // 按这个会话取卡：各会话可以单独指定人格、不挂卡，或由 provider 提供
-          const roleNameForPrompt = currentRoleName(key);
-          const roleHintForPrompt = effectiveMode(key) === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key);
+          const roleNameForPrompt = roleInjectEnabled ? currentRoleName(key) : null;
+          const roleHintForPrompt = !roleInjectEnabled ? ''
+            : (effectiveMode(key) === 'reserved2' ? currentRoleHintV2(key) : currentRoleHint(key));
           // AI 自己读了卡：记下这一版（只认带令牌的调用，控制台查看不算）
-          if (req.headers['x-agent-token'] && effectiveMode(key) === 'reserved2' && sessions.get(key)) {
+          if (req.headers['x-agent-token'] && roleInjectEnabled && effectiveMode(key) === 'reserved2' && sessions.get(key)) {
             roleRefresh.markSeen(key, sessions.get(key), currentRoleFingerprintV2(key));
           }
           const toolMap = {
@@ -15913,6 +15922,8 @@ async function main() {
   // 按仿真模式取用：先用标题里的 〔一代〕/〔二代〕 标记筛掉另一模式的专属小节，
   // **再**按上限截断——这样另一模式的内容不会白白占掉本次的注入预算。
   function roleHintForMode(mode, key) {
+    // 注入块页关掉人格卡：整段不出现（不是给空串占位）。
+    if (!roleInjectEnabled) return '';
     const selected = selectRoleText(roleRawContent(key), mode);
     if (!selected) return '';
     return selected.length > roleInjectMaxChars ? truncateText(selected, roleInjectMaxChars) : selected;
@@ -16046,6 +16057,7 @@ async function main() {
   }
 
   function currentRoleHintV2(key) {
+    if (!roleInjectEnabled) return '';
     // 优先级与 off 的处理都在 persona-resolve 里；这里只负责清洗与截断。
     const resolved = personaResolver.resolve(key);
     if (resolved?.kind !== 'card' || !resolved.text) return '';
@@ -16722,6 +16734,8 @@ async function main() {
    * 以前只靠引导唤醒里的 qq_get_prompt 兜底，一旦 AI 没调就整场没有卡。
    */
   function roleRefreshBlockV2(key) {
+    // 人格卡关掉时不推卡，也不发「已清除角色」这类文案（那不是关闭开关的意思）。
+    if (!roleInjectEnabled) return '';
     const sid = sessions.get(key);
     if (!sid || !roleRefresh.needsRefresh(key, sid, currentRoleFingerprintV2(key))) return '';
     return buildRoleRefreshBlock({ name: currentRoleName(key), hint: currentRoleHintV2(key) });
@@ -16734,6 +16748,7 @@ async function main() {
    */
   function refreshRoleNowV2(onlyKeys = null) {
     if (cfg.socialV2?.enabled === false || socialV2.paused) return { woke: [], skipped: 'notV2' };
+    if (!roleInjectEnabled) return { woke: [], skipped: 'personaOff' };
     if (!anyV2Session()) return { woke: [], skipped: 'notV2' };
     const keys = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k)));
     const woke = [];
@@ -16758,6 +16773,8 @@ async function main() {
   // 声明函数在作用域入口就初始化好，不会在中间那段时间里踩到 TDZ。
   function applyRoleChange(apply, onlyKeys = null) {
     const mode = normalizeApplyMode(apply);
+    // 人格卡关着：换卡没有注入可言，不排读卡唤醒，也不把待读计数报给控制台。
+    if (!roleInjectEnabled) return { apply: mode, mode: currentMode, woke: 0, pending: 0 };
     const v2Active = currentMode === 'reserved2' || (onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session());
     if (!v2Active) return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
     if (mode !== 'immediate') {
@@ -16910,7 +16927,7 @@ async function main() {
     const notes = scheduledNotes.peek(key);
     if (reason === 'scheduled' && !notes.length) reason = '定时任务的说明已过期，按平常判断即可';
 
-    const roleName = currentRoleName(key);
+    const roleName = roleInjectEnabled ? currentRoleName(key) : null;
     const st = getSocialV2State(key);
     const preSleepMs = Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000);
     const replyTiming = replyTimingV2(st);
@@ -16982,7 +16999,7 @@ async function main() {
   function buildWakeReminderPromptV2(key) {
     const st = getSocialV2State(key);
     return corePromptBlocks.renderProfileSync('reminder', {
-      roleName: currentRoleName(key),
+      roleName: roleInjectEnabled ? currentRoleName(key) : null,
       identityText: selfIdentityTextV2(),
       agentToken: st.agentToken,
       preSleepMs: Math.max(0, Number(cfg.socialV2?.wake?.preSleepWaitMs) || 300000),
@@ -17054,8 +17071,10 @@ async function main() {
       log(`[reserved2] 跳过唤醒 ${key}（${reason}）：会话未授权主动行为`);
       return;
     }
-    // 「立即读卡」唤醒排队期间会话可能已经读到新卡（AI 自己调了 qq_get_prompt / 别的唤醒带上了），不用再叫
-    if (reason === 'roleRefresh' && !roleRefresh.needsRefresh(key, sessions.get(key), currentRoleFingerprintV2(key))) {
+    // 「立即读卡」唤醒排队期间会话可能已经读到新卡（AI 自己调了 qq_get_prompt / 别的唤醒带上了），不用再叫；
+    // 人格卡关掉时根本没有卡要推，这类唤醒一律跳过。
+    if (reason === 'roleRefresh'
+      && (!roleInjectEnabled || !roleRefresh.needsRefresh(key, sessions.get(key), currentRoleFingerprintV2(key)))) {
       log(`[reserved2] ${key} 已读到当前角色卡，跳过读卡唤醒`);
       return;
     }

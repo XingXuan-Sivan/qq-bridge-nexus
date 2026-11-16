@@ -1,6 +1,7 @@
 // 主从布局（左右分栏）：左边是可选列表，右边是选中项的详情。
-// 只提供「外壳 + 选中态 + 键盘」三件事，条目与详情的内容由页面自己决定；
-// 默认不限高（内容多就整页滚动），需要固定高度时给 height 参数。
+// 只提供「外壳 + 选中态 + 键盘」三件事，条目与详情的内容由页面自己决定。
+// 左栏宽度的唯一开关是 CSS 变量 --split-list-w（默认在 split-view.css 里给），
+// 页面在自己的 page.css 里对宿主作用域重设即可，组件不接收宽度参数。
 import { esc } from '../../js/ui.js';
 
 /**
@@ -10,13 +11,15 @@ import { esc } from '../../js/ui.js';
  * @param {string} [opts.listHtml] 列表条目 HTML（一般用 splitItemHtml 生成）
  * @param {string} [opts.detailHtml] 右侧详情 HTML
  * @param {string} [opts.empty] 没有选中项时的占位文案
- * @param {string} [opts.height] 固定高度（如 '520px'）；不传则随内容
+ * @param {string} [opts.toolbar] 列表上方的工具栏 HTML（用 tableToolbarHtml 生成，组件只管间距）
  * @param {string} [opts.className]
  */
-export function splitViewHtml({ id, listLabel = '列表', listHtml = '', detailHtml = '', empty = '从左侧选择一个条目', height = '', className = '' } = {}) {
-  const dims = height ? ` style="--split-height:${esc(height)}" data-fixed-height="1"` : '';
-  return `<div class="split-view${className ? ' ' + className : ''}" id="${esc(id)}" data-split-view${dims}>
-  <div class="split-list" role="listbox" aria-label="${esc(listLabel)}">${listHtml}</div>
+export function splitViewHtml({ id, listLabel = '列表', listHtml = '', detailHtml = '', empty = '从左侧选择一个条目', toolbar = '', className = '' } = {}) {
+  return `<div class="split-view${className ? ' ' + className : ''}" id="${esc(id)}" data-split-view>
+  <div class="split-side">
+    ${toolbar ? `<div class="split-toolbar">${toolbar}</div>` : ''}
+    <div class="split-list" role="listbox" aria-label="${esc(listLabel)}">${listHtml}</div>
+  </div>
   <div class="split-detail" data-split-detail>${detailHtml || `<div class="split-empty">${esc(empty)}</div>`}</div>
 </div>`;
 }

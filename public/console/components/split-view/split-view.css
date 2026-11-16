@@ -1,11 +1,26 @@
-/* 主从布局：左列表 + 右详情。默认随内容高度，不设固定滚动区；
-   只有传了 height 时（data-fixed-height）才把两栏各自限制在 --split-height 内滚动。
-   窄屏（<=900px）改为上下堆叠，列表限制高度，避免把详情挤到屏幕外。 */
+/* 主从布局：左列表 + 右详情。
+   左栏宽度只有一个开关：--split-list-w。页面在自己的 page.css 里对宿主作用域
+   （如 `.mcp-page .split-view`）重设它即可，组件不接收宽度参数。
+   高度随内容，不设固定滚动区；窄屏（<=900px）改为上下堆叠，列表横排，
+   避免把详情挤到屏幕外。 */
 .split-view {
+  --split-list-w: minmax(272px, 348px);
   display: grid;
-  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: var(--split-list-w) minmax(0, 1fr);
+  gap: var(--space-6);
   align-items: start;
+  min-width: 0;
+}
+
+.split-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* 工具栏槽：里面放的是调用方用 tableToolbarHtml 生成的工具栏，这里只管它和列表的间距。 */
+.split-toolbar {
   min-width: 0;
 }
 
@@ -16,14 +31,8 @@
   min-width: 0;
   padding: 6px;
   border: 1px solid var(--border-chip);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--surface-subtle);
-}
-
-.split-view[data-fixed-height] .split-list,
-.split-view[data-fixed-height] .split-detail {
-  max-height: var(--split-height);
-  overflow: auto;
 }
 
 .split-item {
@@ -33,7 +42,7 @@
   width: 100%;
   padding: 9px 11px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: none;
   color: inherit;
   font: inherit;
@@ -86,7 +95,7 @@
 .split-empty {
   padding: 28px 18px;
   border: 1px dashed var(--border-chip);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--muted);
   text-align: center;
   font-size: 13px;

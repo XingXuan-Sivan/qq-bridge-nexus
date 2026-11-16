@@ -38,6 +38,15 @@ export const consolePages = {
 
 const PAGE_STORAGE_KEY = 'qqb-console-page';
 let currentConsolePage = 'overview';
+// 页面子段：sub 选二级条目（如 `agent:dsh`），tab 选页内分段。对路由器是不透明字符串。
+let currentSub = '';
+let currentTab = '';
+
+/** hash 形状：#<page>[/<sub>[/<tab>]]；没有 sub 时不写尾斜杠。 */
+function hashOf(page, sub = '', tab = '') {
+  if (!sub) return '#' + page;
+  return '#' + [page, sub, tab].filter(Boolean).join('/');
+}
 
 // 页面片段：每页的 DOM 都在 public/console/pages/<id>/page.html，由路由器按需注入。
 // C7 起 index.html 里只剩空 section —— 不再有「静态页 / 片段页」两种渲染方式。
@@ -54,6 +63,7 @@ export function onPageRefresh(page, fn) { pageRefreshers.set(page, fn); }
 
 // 「切页前」拦截：页面有未保存修改时自己弹确认，返回 false 取消本次切页。
 // 只做同步判断——异步确认（如「保存并离开」）由页面在弹窗回调里再调一次 setConsolePage。
+// 同页换子段也算一次离开，第三参数 `{ fromSub, toSub }` 给二级页判断要不要拦。
 let pageLeaveGuard = null;
 export function setPageLeaveGuard(fn) { pageLeaveGuard = typeof fn === 'function' ? fn : null; }
 
@@ -147,13 +157,33 @@ function hydratePage(page) {
   return load;
 }
 
-/** 切页：只做展示层与 URL，数据加载交给各页面注册的回调。 */
-export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true, skipGuard = false } = {}) {
+/** 页面子段回调：页面注册「子段变了要做什么」，路由器在片段就绪后触发。 */
+const pageRoutes = new Map();
+export function onPageRoute(page, fn) {
+  if (typeof fn === 'function') pageRoutes.set(page, fn);
+}
+
+/** 把当前子段交给页面；片段还没就绪时等 hydrate 完再交（页面模块在 init 里才注册）。 */
+function applyRoute(page, sub, tab) {
+  const fn = pageRoutes.get(page);
+  if (typeof fn !== 'function') return;
+  void hydratePage(page).then(() => fn({ page, sub, tab }));
+}
+
+/** 切页（含子段）：只做展示层与 URL，数据加载交给各页面注册的回调。 */
+export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true, skipGuard = false, sub = '', tab = '' } = {}) {
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
-  // 离开当前页前让页面自己确认（未保存修改）；返回 false 表示用户取消了这次切页。
-  if (!skipGuard && page !== currentConsolePage && pageLeaveGuard && pageLeaveGuard(currentConsolePage, page) === false) return false;
+  const nextSub = String(sub ?? '');
+  const nextTab = nextSub ? String(tab ?? '') : '';
+  // 离开当前页（或同页换子段）前让页面自己确认（未保存修改）；返回 false 表示用户取消了这次切页。
+  const routeChanged = page !== currentConsolePage || nextSub !== currentSub;
+  if (!skipGuard && routeChanged && pageLeaveGuard
+    && pageLeaveGuard(currentConsolePage, page, { fromSub: currentSub, toSub: nextSub }) === false) return false;
   const previousPage = currentConsolePage;
+  const previousSub = currentSub;
   currentConsolePage = page;
+  currentSub = nextSub;
+  currentTab = nextTab;
   if (persist) rememberPage(page);
   // 只切「页面宿主」（main 里的 section）的显隐：分页器按钮也带 data-page 的数字属性，
   // 不能用全局 [data-page] 选择器，否则点过一次分页后按钮会被当成页面宿主隐藏。
@@ -161,9 +191,10 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
     el.hidden = el.dataset.page !== page;
   });
   void hydratePage(page);
+  applyRoute(page, currentSub, currentTab);
   // 导航按钮走的是 pushState，不会触发 hashchange/popstate；挂在 body 上的浮动组件
   // （如右下角操作组）只能靠这个事件知道自己该不该显示，否则会跨页残留。
-  document.dispatchEvent(new CustomEvent('console:page-change', { detail: { page, from: previousPage } }));
+  document.dispatchEvent(new CustomEvent('console:page-change', { detail: { page, sub: currentSub, tab: currentTab, from: previousPage, fromSub: previousSub } }));
   document.querySelectorAll('#mainNav [data-view]').forEach((button) => {
     const selected = button.dataset.view === page;
     button.classList.toggle('active', selected);
@@ -174,7 +205,7 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   document.getElementById('pageTitle').textContent = consolePages[page][1];
   document.getElementById('pageDescription').textContent = consolePages[page][2];
   document.title = consolePages[page][0] + ' · QQ 桥接控制台';
-  if (updateHash && location.hash !== '#' + page) history.pushState({}, '', '#' + page);
+  if (updateHash && location.hash !== hashOf(page, currentSub, currentTab)) history.pushState({}, '', hashOf(page, currentSub, currentTab));
   searchCloser();
   // 页面自己的刷新节奏（语音库按需探测、人格页重读、插件/技能/MCP 重新拉取等）都由页面注册。
   const refreshPage = pageRefreshers.get(page);
@@ -201,18 +232,26 @@ function normalizePageHash(page) {
   return PAGE_ALIASES[page] ?? page;
 }
 
+/** 解析 `#<page>[/<sub>[/<tab>]]`；页面不认识时返回空 page，由调用方决定回落。 */
+export function parsePageHash(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '');
+  if (!raw) return { page: '', sub: '', tab: '' };
+  const [rawPage, ...rest] = raw.split('/');
+  const page = normalizePageHash(rawPage);
+  if (!Object.hasOwn(consolePages, page)) return { page: '', sub: '', tab: '' };
+  return { page, sub: rest[0] ?? '', tab: rest[1] ?? '' };
+}
+
 /** 首屏恢复：hash（深链）→ sessionStorage（同标签页刷新）→ overview。 */
 function restoreInitialPage() {
   // 旧书签（#reference、#behavior）先归一，再按现行页面表判定，不当成无效页面。
-  const hashPage = normalizePageHash(location.hash.slice(1));
+  const route = parsePageHash(location.hash);
   const storedPage = readStoredPage();
-  const initialPage = Object.hasOwn(consolePages, hashPage) ? hashPage
-    : Object.hasOwn(consolePages, storedPage ?? '') ? storedPage
-      : 'overview';
-  const badHash = hashPage && !Object.hasOwn(consolePages, hashPage);
-  setConsolePage(initialPage, { updateHash: false });
-  if (location.hash.slice(1) !== initialPage) history.replaceState({}, '', '#' + initialPage);
-  if (badHash) showConsoleToast('没有这个页面，已回到上次停留的位置');
+  const initialPage = route.page || (Object.hasOwn(consolePages, storedPage ?? '') ? storedPage : 'overview');
+  const initialHash = hashOf(initialPage, route.sub, route.tab);
+  setConsolePage(initialPage, { updateHash: false, sub: route.sub, tab: route.tab });
+  if (location.hash !== initialHash) history.replaceState({}, '', initialHash);
+  if (location.hash.length > 1 && !route.page) showConsoleToast('没有这个页面，已回到上次停留的位置');
 }
 
 /** 绑定导航、hash、popstate 与首屏恢复；入口脚本在所有页面模块加载后调一次。 */
@@ -225,23 +264,27 @@ export function initRouter() {
     setConsolePage(button.dataset.view, { focus: true, target: button.dataset.target });
   });
   window.addEventListener('hashchange', () => {
-    const page = normalizePageHash(location.hash.slice(1));
-    if (!page) { setConsolePage(readStoredPage() ?? 'overview', { updateHash: false }); return; }
-    if (Object.hasOwn(consolePages, page)) {
+    const route = parsePageHash(location.hash);
+    if (route.page) {
       // 页面拦下了这次切页（未保存修改）：地址栏已经变了，得改回当前页，否则刷新会跳到没去的页。
-      if (setConsolePage(page, { updateHash: false }) === false) history.replaceState({}, '', '#' + currentConsolePage);
-      else if (location.hash !== '#' + page) history.replaceState({}, '', '#' + page);
+      if (setConsolePage(route.page, { updateHash: false, sub: route.sub, tab: route.tab }) === false) {
+        history.replaceState({}, '', hashOf(currentConsolePage, currentSub, currentTab));
+      } else if (location.hash !== hashOf(route.page, route.sub, route.tab)) {
+        history.replaceState({}, '', hashOf(route.page, route.sub, route.tab));
+      }
       return;
     }
-    // 未知 hash：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
+    // 空 hash 或未知页面：回落到上次停留页/首页，并把地址栏改回来，避免 URL 与页面长期不一致。
     setConsolePage(readStoredPage() ?? 'overview', { updateHash: false });
-    history.replaceState({}, '', '#' + currentConsolePage);
+    history.replaceState({}, '', hashOf(currentConsolePage, currentSub, currentTab));
   });
   // 前进/后退时 hash 也会变，hashchange 已覆盖；这里兜住「只改了 history.state」的情况。
   window.addEventListener('popstate', () => {
-    const page = normalizePageHash(location.hash.slice(1));
-    if (!Object.hasOwn(consolePages, page)) return;
-    if (setConsolePage(page, { updateHash: false }) === false) history.replaceState({}, '', '#' + currentConsolePage);
+    const route = parsePageHash(location.hash);
+    if (!route.page) return;
+    if (setConsolePage(route.page, { updateHash: false, sub: route.sub, tab: route.tab }) === false) {
+      history.replaceState({}, '', hashOf(currentConsolePage, currentSub, currentTab));
+    }
   });
   document.querySelector('.skip-link')?.addEventListener('click', (event) => {
     event.preventDefault();

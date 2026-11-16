@@ -37,7 +37,7 @@
   padding: 12px;
   max-height: 30vh;
   overflow: auto;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
   color: var(--text-secondary);
@@ -47,7 +47,7 @@
 }
 .plugin-config-none {
   padding: 12px 14px;
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--border-dashed);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 12px;

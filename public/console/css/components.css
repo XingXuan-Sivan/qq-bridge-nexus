@@ -1354,6 +1354,44 @@ tr:last-child td {
   gap:8px;
   flex-wrap:wrap
 }
+/* 图标位：没传自定义图标时显示标题首字（.is-default），结构不因有无图标而分叉。 */
+.tile-icon {
+  flex:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:36px;
+  height:36px;
+  overflow:hidden;
+  border:1px solid var(--border-chip);
+  border-radius:var(--radius-sm);
+  background:var(--surface);
+  color:var(--text-strong);
+  font-size:14px;
+  font-weight:600;
+  line-height:1
+}
+.tile-icon.is-default {
+  color:var(--muted);
+  background:var(--surface-chip)
+}
+.tile-icon img {
+  display:block;
+  width:100%;
+  height:100%;
+  object-fit:cover
+}
+.tile-icon--accent { color:var(--accent); border-color:var(--accent-border-hover) }
+.tile-icon--ok { color:var(--ok) }
+.tile-icon--warn { color:var(--warn-fg) }
+.tile-icon--danger { color:var(--err) }
+.tile-head-body {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  min-width:0
+}
 .tile-head strong {
   font-size:13px;
   color:var(--text-strong);

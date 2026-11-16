@@ -97,7 +97,8 @@ ok(fixture.includes("case '/api/voice/send'"), 'fixture mock 了 /api/voice/send
 
 console.log('## 路由与面包屑（B1–B3）');
 ok(/PAGE_STORAGE_KEY/.test(html) && /sessionStorage\.getItem\(PAGE_STORAGE_KEY\)/.test(html) && /sessionStorage\.setItem\(PAGE_STORAGE_KEY/.test(html), '当前页写入 sessionStorage（刷新兜底）');
-ok(/const hashPage = normalizePageHash\(location\.hash\.slice\(1\)\)/.test(html) && /readStoredPage\(\)/.test(html), '首屏三层恢复：hash → sessionStorage → overview（旧 hash 先归一）');
+ok(/parsePageHash\(location\.hash\)/.test(html) && /readStoredPage\(\)/.test(html) && /normalizePageHash\(rawPage\)/.test(html), '首屏三层恢复：hash → sessionStorage → overview（旧 hash 先归一）');
+ok(/export function parsePageHash\(hash\)/.test(html) && /export function onPageRoute\(page, fn\)/.test(html), '页面子路由：parsePageHash 与 onPageRoute 由路由器导出');
 // 删页只允许「一次性重定向」：别名表就是全部兼容面，不允许长成第二套页面表。
 ok(/const PAGE_ALIASES = Object\.freeze\(\{[\s\S]{0,300}?behavior: 'platforms'[\s\S]{0,300}?\}\)/.test(html), '旧页面 id 走一次性别名表（#behavior → #platforms）');
 ok(!/reference: 'mcp',[\s\S]{0,80}?plans:/.test(html), '别名表只登记已删页，不新增跳转');

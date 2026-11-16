@@ -96,7 +96,7 @@
   border: 1px solid var(--border);
   border-radius: 50%;
   background: var(--surface);
-  color: var(--text-2);
+  color: var(--text-secondary);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -108,8 +108,8 @@
   opacity: 1;
 }
 .mcp-split-del:hover {
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--err);
+  border-color: var(--danger-border);
 }
 .mcp-tools {
   display: flex;
@@ -152,8 +152,8 @@
   max-height: 420px;
   overflow: auto;
   padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--surface-sunken);
   font-family: var(--font-mono);
   font-size: 12px;

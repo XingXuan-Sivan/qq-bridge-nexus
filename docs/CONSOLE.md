@@ -19,7 +19,7 @@
 | --- | --- |
 | `public/console/index.html` | 唯一入口：侧栏、顶栏、全局搜索、各页 `<section>` 占位、弹窗 |
 | `public/console/js/app.js` | 启动：加载页面片段、初始化路由、绑定全局交互 |
-| `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、hash 恢复、`onPageRefresh` |
+| `public/console/js/router.js` | `consolePages` 路由表、`hydratePage()`（按需 fetch `pages/<name>/page.html` 与 `page.css`）、`parsePageHash()` / `onPageRoute()`（页面子路由）、hash 恢复、`onPageRefresh` |
 | `public/console/js/api.js` | 所有 `/api/*` 调用与错误归一 |
 | `public/console/js/ui.js` | `esc`、`showConsoleToast`、`setMsg` 等小工具 |
 | `public/console/js/registry.js` | **平台注册表**（C7，原名 `js/platforms.js`）：`loadPlatforms()` 读 `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应），对外给 `registryMeta` / `platformLabel` / `capabilityLabel` / `conversationTypeLabel` / `conversationTypeTone` / `platformFilterOptions` / `platformLimits` 等查表函数与中文标签表。**页面不得再写死平台名**：列名、筛选、标签、上限都从这里取；全仓库只有这一个文件打这个端点 |
@@ -68,6 +68,15 @@ public/console/
 - **下拉 / 候选列表不做模块级永久缓存**：人格、平台、能力档这类可在别处增删的目录，**每次打开弹窗都重拉**（如 `pages/sessions/page.js` 的 `ensurePersonaCatalog()`）；拉取失败沿用上一次结果，别让下拉突然空掉。拿到一次就永不失效，会表现为「在人格页新建了卡，回会话详情看不到，必须刷页面」。
 - **「跟随全局（当前：…）」必须写出可读名字**：后端直接给整份定义（如 `/api/sessions` 的 `activePlan`），页面侧再兜一层兼容（`planLabelOf()`：字符串就用它，对象取 `label || id`）——不允许出现只有一个破折号的选项。
 - 缓存只给「不常变且自己维护生命周期」的东西（参考组件里的单飞与 TTL 写法）；目录类数据一律现取。
+
+### 2.3 页面子路由
+
+hash 形状是 `#<page>[/<sub>[/<tab>]]`：`page` 必须在 `consolePages` 里，`sub` / `tab` 对路由器是**不透明字符串**（`agent:dsh`、插件 id、页内分段名）。
+
+- 页面用 `onPageRoute(page, ({ sub, tab }) => …)` 注册「子段变了要做什么」；路由器在片段 hydrate 完成后才调，所以注册写在 `init()` 里。
+- 二级页的返回用 `setConsolePage(page, { sub: '' })`，**不用 `history.back()`** —— 从外部深链进来时栈里没有上一页，`back()` 会把用户送出控制台。
+- 面包屑不参与子段：二级页自带标题与返回按钮，`consolePages` 不长第三列标题。
+- 同页换子段也算一次离开，`setPageLeaveGuard()` 的第三参数 `{ fromSub, toSub }` 用来判断要不要拦未保存修改。
 
 ---
 
@@ -179,20 +188,22 @@ await alertBox({ title, message, type })                                    // �
 
 替代浏览器原生 `confirm/alert`（401 门页除外）；内部复用 `components/modal` 的三段式弹窗，按钮带 `[data-box-confirm]` / `[data-box-cancel]`，UI 回归测试按这两个选择器自动确认。
 
-### 4.7 插件/人格卡片 `tile`
+### 4.7 卡片 `tile`
 
 ```js
-tileHtml({ id, title, badges, description, tags, error, actions, body, interactive, className })
+tileHtml({ id, title, icon, badges, description, tags, error, actions, body, interactive, className })
 ```
 
 - `badges` / `tags` / `actions` 是 HTML 片段（调用方转义文本）。
-- 给了 `body` 就不再输出默认的标题/描述/标签行。
-- 插件页与人格页的列表都用它，样式 `.tile` / `.tile-head` / `.tile-actions` 共享。
+- `icon` 是 `{ glyph | src, tone }`（`tone` = `accent`/`ok`/`warn`/`danger`）；**不传也渲染图标位**，内容取标题首字（`.tile-icon.is-default`）。这样 DOM 结构不因有无自定义图标而分叉，作者将来补图标只需传参。
+- 给了 `body` 就不再输出默认的标题/描述/标签行（此时图标也由调用方自己放）。
+- 插件页与人格页的列表都用它，样式 `.tile` / `.tile-head` / `.tile-icon` / `.tile-head-body` / `.tile-actions` 共享（均在 `css/components.css`）。
 
 ### 4.8 其它
 
 | 组件 | 导出 | 说明 |
 | --- | --- | --- |
+| `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏，组件只管间距；窄屏 ≤900px 自动上下堆叠 |
 | `table` | `tableHtml(...)` | 页面不许手写表格骨架；分页见页面实现 |
 | `search-box` | `searchBoxHtml({ id, placeholder, value, label, className })` / `bindSearchBox(input, onQuery, { onEnter })` | 固定产出 `type="search"` + `class="search-box"`，宽度用 `input.search-box--w240` 而不是工具类 |
 | `modal` | 三段式弹窗 | 被 `message-box` 复用 |

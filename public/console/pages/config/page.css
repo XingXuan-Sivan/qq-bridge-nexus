@@ -167,7 +167,7 @@
   padding: 18px;
   border: 1px dashed var(--border);
   border-radius: 8px;
-  color: var(--text-2);
+  color: var(--text-secondary);
   font-size: 13px;
   text-align: center;
 }

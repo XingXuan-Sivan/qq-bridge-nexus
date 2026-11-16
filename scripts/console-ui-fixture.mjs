@@ -600,6 +600,8 @@ export function makeFixtureState() {
     behaviorDefault: 'social-v2',
     limits: { send: { maxSendPerMinute: 8, maxSendPerHour: 60 } },
     tools: { getPrompt: true, getUnread: true, getRecent: true, socialState: true, sendMessage: true, sendVoice: true },
+    // 上下文压缩（config.compact）：和真 bridge 一样，阈值留空 = 跟随平台申报点。
+    compact: { mode: 'early', thresholdTokens: 300000 },
     // 会话初始提示词（离线示例）：整段内容都是虚构的演示文本。
     initPrompt: '离线示例：这是一个演示用的群聊环境说明，不会写进任何真实配置。',
     slangConfig: { enabled: true, extractMinMessages: 10, extractCooldownMs: 300000, inferenceThresholds: [2, 4, 8], injectMax: 8, learnerPreset: 'chat', workspaceTitle: 'QQ 黑话学习', autoResearch: true },
@@ -1673,7 +1675,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             hint: '用 qq_send_voice 传 name 即可把其中一个当语音发出去',
           });
           case '/api/slang': return json({ ok: true, entries: state.slang, config: state.slangConfig });
-          case '/api/compact/config': return json({ ok: true, mode: state.compactMode || 'early', thresholdTokens: state.compactThreshold || 300000, cooldownMinutes: 120, min: 50000, max: 800000, dshApprox: 800000, sessions: [{ key: 'group:10001', inputTokens: 680000, lastAttemptAt: null }, { key: 'group:10002', inputTokens: 120000, lastAttemptAt: null }] });
+          case '/api/compact/config': return json({ ok: true, ...state.compact, cooldownMinutes: 120, idleDelayMs: 20000, approxTokens: FIXTURE_DSH_DECLARED.compact.approxTokens, min: 50000, sessions: [{ key: 'group:10001', inputTokens: 680000, lastAttemptAt: null }, { key: 'group:10002', inputTokens: 120000, lastAttemptAt: null }] });
           case '/api/roles/defaults': return json({ ok: true, current: '小鲸鱼', defaults: [{ name: '傲娇助手', exists: !!state.restoredTsundere, modified: false }, { name: '小鲸鱼', exists: true, modified: !state.restoredWhale }] });
           case '/api/stickers/describe': return json({ ok: true, total: 21, undescribed: state.stickerDescribed ? 0 : 10, running: false, progress: { done: 0, total: 0 }, last: state.stickerDescribed ? { ok: true, text: '补好 10 张，其中 2 张偏凶或带粗口，已标「慎用」，所有表情都有说明了' } : null, blocker: '', model: 'deepseek-flash', max: 20 });
           // state/ 的 ACL 收紧结果：用离线示例值演示「未收紧」的告警条（Windows 上未提权时的真实情况）
@@ -1757,9 +1759,11 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/config/promptBlocks':
             return json({ ok: true, promptBlocks: body.promptBlocks ?? {}, limits: body.limits ?? { total: 0, perBlockDefault: 0 }, coreBlocks: { blocks: [], total: 0, maxTotalChars: 0 } });
           case '/api/compact/config': {
-            if (body.mode === 'early' && !(Number(body.thresholdWan) >= 5 && Number(body.thresholdWan) <= 80)) return json({ ok: false, error: '压缩阈值要在 5～80 万 token 之间' }, 400);
-            state.compactMode = body.mode; if (body.mode === 'early') state.compactThreshold = Number(body.thresholdWan) * 10000;
-            return json({ ok: true, mode: body.mode, thresholdTokens: state.compactThreshold || 300000 });
+            if (!['early', 'agent'].includes(body.mode)) return json({ ok: false, error: '压缩方式只能是「提前压缩」或「交给 Agent 平台」' }, 400);
+            const blank = body.thresholdWan === undefined || body.thresholdWan === null || body.thresholdWan === '';
+            if (body.mode === 'early' && !blank && !(Number(body.thresholdWan) >= 5 && Number(body.thresholdWan) <= 80)) return json({ ok: false, error: '压缩阈值要在 5～80 万 token 之间（平台自己在 80 万左右压）' }, 400);
+            state.compact = { mode: body.mode, thresholdTokens: body.mode === 'early' && !blank ? Math.round(Number(body.thresholdWan) * 10000) : null };
+            return json({ ok: true, ...state.compact, approxTokens: FIXTURE_DSH_DECLARED.compact.approxTokens });
           }
           case '/api/roles/assign': {
             if (!/^(?:[a-z][a-z0-9-]{0,15}:)?(group|private):[1-9]\d*$/.test(String(body.key ?? ''))) return json({ ok: false, error: '会话格式应为 qq:group:群号 或 qq:private:QQ号' }, 400);

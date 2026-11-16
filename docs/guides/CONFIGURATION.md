@@ -135,15 +135,17 @@ TOTP 秘密**不在** `config.json` 里：用 `npm run admin:totp-setup` 写入 
 | `webImage`（**默认 `false`**） | `qq_search_images` / `qq_preview_image` / `qq_send_web_image` | 管理员私聊里搜图并发送：只能发搜到且看过的候选，图片由桥接安全下载；搜索词会发给 Bing。必须显式设为 `true`，改后重启 DSH |
 | `handoverMemory` | —（不是工具） | 切到 agent 时，把二代仿真里 AI 在管理员私聊记下的长期记忆（最多 1500 字，只取管理员私聊）一起交接；`false` = 只交接最近的私聊往来 |
 
-## `socialV2.compact` —— 会话太长时自动压缩
+## `compact` —— 会话太长时自动压缩
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `enabled` | `true` | 桥接提前压缩的总开关；`false` = 交给 DSH 自己压缩（deepseek-flash 窗口 100 万，DSH 约 80 万时压） |
-| `thresholdTokens` | `300000` | 某个二代会话最近一步读的 token 超过它，就在这一轮结束、会话空闲后执行一次 DSH 的 `/compact`（范围 5 万～80 万；再往上 DSH 自己会先压） |
+| `mode` | `early` | `early` = 桥接提前压缩；`agent` = 交给 Agent 平台自己压（它按模型窗口的比例触发，窗口大的模型要到很晚才压） |
+| `thresholdTokens` | `null` | 某个二代会话最近一步读的 token 超过它，就在这一轮结束、会话空闲后执行一次 Agent 平台的 `/compact`。`null` = 跟随平台申报的 `modelCatalog.compact.approxTokens`；自己填也不接受晚于申报点的值（再往上平台自己会先压） |
 | `cooldownMinutes` | `120` | 同一个会话两次自动压缩的最小间隔（失败也算） |
 
-控制台「令牌与花费 → 上下文压缩」可以直接改：选「提前压缩」并填几万 token（5～80），或选「交给 DSH 自己压缩」；卡片里还列出每个会话上一步读了多少。
+控制台「全局配置 → 行为与模型 → 上下文压缩」可以直接改：选「提前压缩」并填几万 token（5 万起，上限取平台申报点），或选「交给 Agent 平台自己压缩」；卡片里还列出每个会话上一步读了多少。
+
+“平台自己什么时候压”由平台在 `profiles/agent-platforms/<id>/platform.yml` 的 `modelCatalog.compact.approxTokens` 申报，桥接不内置任何平台的数字。
 
 压缩只把较早的历史换成摘要，桥接自己的记忆（群规则、话题、印象）不受影响；压缩后下一次唤醒会重新完整给黑话表、表情块和角色卡。
 

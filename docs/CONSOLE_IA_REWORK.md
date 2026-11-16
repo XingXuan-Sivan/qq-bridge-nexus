@@ -231,7 +231,7 @@ modelCatalog:
 | --- | --- | --- |
 | 全局配置页的模型 / 思考强度卡 | `POST /api/dsh/model` | 移到平台详情页；写 `platforms.agents.<id>.options`，走 `models` 能力位的 `selectModel(ref, params)` |
 | 运行总览价目表 | 内置的 DeepSeek 专属价目表 | `modelCatalog.models[].pricing` + `pricingPolicy` 折算；没声明就不报价 |
-| 上下文压缩 | `config.socialV2.compact`，模式值 `early` / `dsh`，文案写死「交给 DSH 自己压缩」 | 模式值 `early` / `agent`，阈值缺省取 `modelCatalog.compact.approxTokens` |
+| 上下文压缩 | `config.socialV2.compact`（与顶层 `config.compact` 双存储），模式值 `early` / `dsh`，文案写死「交给 DSH 自己压缩」 | `config.compact` 单存储，模式值 `early` / `agent`，阈值留空即取 `modelCatalog.compact.approxTokens`（也是阈值上限） |
 | 能力档 / 工具面展示 | `CAPABILITIES_ROOT` 硬编码 `dsh` | 按当前活动的 Agent 平台 id 取目录 |
 
 价目**只来自平台声明**：`priceTableFromCatalog()` 把 `modelCatalog` 折算成价目表，一个模型都没申报单价时返回 `null`。`src/model-prices.js` 保留纯算术（峰谷判定、桶计价），删掉内置默认表与 `resolvePriceTable()`，`config.pricing` 覆盖项同批删除。没申报的模型不估算：账本用 `unpriced` / `unpricedTokens` 表达「只计 token、不计钱」，金额显示 `—`，**不做兜底猜测**。
@@ -365,7 +365,7 @@ modelCatalog:
 | 8 | 人格注入块可关（§6.2） | `pages/prompt-blocks/**`、`src/bridge.js` |
 | 9 | 全局配置页逐项核对：每个分区都写 `config.json` 顶层段 | `pages/config/**` |
 
-**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；内置的 DeepSeek 价目表、`resolvePriceTable()` 与 `config.pricing` 覆盖项；`config.socialV2.compact` 的 `dsh` 模式值（迁移到 `agent`，不留双写）；`src/dsh-model.js` 的界面专有分支。
+**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；内置的 DeepSeek 价目表、`resolvePriceTable()` 与 `config.pricing` 覆盖项；`config.socialV2.compact` 整段（压缩设置只住顶层 `config.compact`）、`enabled` 开关（换 `mode`：`early` / `agent`）与 `DSH_COMPACT_APPROX` / `COMPACT_THRESHOLD_MAX` 这类平台专属数字；`src/dsh-model.js` 的界面专有分支。
 
 **出口**：把 Agent 平台切到 ACP（config 里改 active）后，全局配置页与运行总览**不显示任何 DSH 专属内容**，且不报错；`test-audit`、`test-token-usage`、`test-dsh-model` 同批改写通过。
 

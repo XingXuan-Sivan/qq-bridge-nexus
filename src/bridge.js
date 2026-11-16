@@ -127,7 +127,7 @@ import {
   resolvePermission,
 } from './session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
-import { decideCompact, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, COMPACT_THRESHOLD_MIN, COMPACT_THRESHOLD_MAX, DSH_COMPACT_APPROX } from './auto-compact.js';
+import { decideCompact, effectiveCompactThreshold, inputTokensOf, normalizeCompactConfig, compactConfigFromConsole, declaredCompactPoint, COMPACT_THRESHOLD_MIN } from './auto-compact.js';
 import { pickUndescribed, isUndescribed, chunk, buildDescribePrompt, parseDescribeOutput, describeSummary, DESCRIBE_BATCH, DESCRIBE_MAX } from './sticker-describe.js';
 import {
   normalizeEffortId,
@@ -1966,7 +1966,7 @@ function loadConfig() {
   // 旧的读点（webImage / ownerRelay / ownerGroupAccess / sendVoice / setStickerRemark）
   // 仍看 socialV2.tools；把它对齐到推导后的注册开关，避免两套开关各说各话。
   cfg.socialV2.tools = { ...cfg.socialV2.tools, ...cfg.tools };
-  cfg.compact = normalizeCompactConfig(file.compact ?? cfg.socialV2.compact);
+  cfg.compact = normalizeCompactConfig(file.compact);
   cfg.voice = { ...cfg.socialV2.voice, ...(file.voice ?? {}) };
   cfg.media = { ...cfg.socialV2.media, ...(file.media ?? {}) };
   cfg.limits = {
@@ -4115,6 +4115,9 @@ async function main() {
   const declaredAgentCatalog = (id) => listAgentPlatformDirs({ root: AGENT_PLATFORMS_ROOT })
     .find((item) => item.id === id)?.modelCatalog ?? null;
   const priceTable = priceTableFromCatalog(declaredAgentCatalog(String(cfg.platforms?.active?.agent ?? '')));
+  // 「平台自己什么时候压上下文」同样由平台申报（modelCatalog.compact）：
+  // 它既是压缩阈值的缺省值，也是阈值上限 —— 桥接不内置任何平台的数字。
+  const declaredCompactApprox = () => declaredAgentCatalog(String(cfg.platforms?.active?.agent ?? ''))?.compact?.approxTokens ?? null;
   const tokenLedger = createTokenLedger({
     file: TOKEN_USAGE_FILE,
     log: (...args) => log(...args),
@@ -5231,13 +5234,13 @@ async function main() {
   }
 
   /**
-   * 压缩一个 QQ 会话的上下文：让 DSH 执行 /compact（把较早的历史换成一条摘要，近期对话原样保留）。
+   * 压缩一个 QQ 会话的上下文：让 Agent 平台执行 /compact（把较早的历史换成一条摘要，近期对话原样保留）。
    * 成功后让黑话表、表情块、角色卡在下一次唤醒时重新完整给一次（原来那份可能被压进了摘要）。
-   * 会话正在跑回合时不压（DSH 也会拒绝）。返回 { ok, text } 或 { ok:false, error }。
+   * 会话正在跑回合时不压（平台也会拒绝）。返回 { ok, text } 或 { ok:false, error }。
    */
   async function compactConversation(key, reason) {
     const sessionId = sessions.get(key);
-    if (!sessionId) return { ok: false, error: '这个会话还没有 DSH 会话' };
+    if (!sessionId) return { ok: false, error: '这个会话还没有 Agent 会话' };
     if (isConversationBusyV2(key, getSocialV2State(key))) return { ok: false, error: '会话正忙，等这一轮结束再压缩' };
     try {
       const compacted = await withTimeout(agentPort.compactSession(sessionId), 300000, 'compactSession');
@@ -5285,8 +5288,8 @@ async function main() {
   /** 一轮结束后调用：超过阈值就在会话空闲后压缩一次。 */
   function maybeAutoCompact(key, sessionId) {
     if (effectiveMode(key) !== 'reserved2' || compactTimers.has(key)) return;
-    const config = cfg.socialV2?.compact;
-    const d = decideCompact({ inputTokens: sessionLastInput.get(sessionId) ?? 0, lastAttemptAt: compactAttemptAt.get(key) ?? 0, config });
+    const config = cfg.compact;
+    const d = decideCompact({ inputTokens: sessionLastInput.get(sessionId) ?? 0, lastAttemptAt: compactAttemptAt.get(key) ?? 0, config, approxTokens: declaredCompactApprox() });
     if (!d.compact) return;
     const { idleDelayMs } = normalizeCompactConfig(config);
     const timer = setTimeout(async () => {
@@ -5600,7 +5603,7 @@ async function main() {
       ...base,
       ...behavior.config,
       tools: base.tools ?? {},
-      compact: base.compact,
+      compact: cfg.compact,
       voice: base.voice,
       media: base.media,
       initialPromptMaxChars: base.initialPromptMaxChars,
@@ -12823,27 +12826,31 @@ async function main() {
           return;
         }
         // ── 清除上下文 / 清空工作区 ──────────────────────────────────────────
-        // 控制台：手动压缩某个 QQ 会话的上下文（DSH 的 /compact）。仅控制台可用（带 agent token 的调用在前面已被拒绝）。
-        // 上下文压缩设置（逻辑在 src/auto-compact.js）：提前压缩的阈值，或者交给 DSH 自己压
+        // 控制台：手动压缩某个 QQ 会话的上下文（Agent 平台的 /compact）。仅控制台可用（带 agent token 的调用在前面已被拒绝）。
+        // 上下文压缩设置（逻辑在 src/auto-compact.js）：桥接提前压的阈值，或者交给 Agent 平台自己压。
         if (req.method === 'GET' && url.pathname === '/api/compact/config') {
-          const c = normalizeCompactConfig(cfg.socialV2?.compact);
+          const c = normalizeCompactConfig(cfg.compact);
+          const approxTokens = declaredCompactApprox();
           const rows = sessions.entries()
             .filter(([k, sid]) => Boolean(parseKey(k)) && sessionLastInput.has(sid))
             .map(([k, sid]) => ({ key: k, inputTokens: sessionLastInput.get(sid), lastAttemptAt: compactAttemptAt.get(k) ?? null }));
-          sendJson({ ok: true, mode: c.enabled ? 'early' : 'dsh', thresholdTokens: c.thresholdTokens, cooldownMinutes: c.cooldownMinutes, min: COMPACT_THRESHOLD_MIN, max: COMPACT_THRESHOLD_MAX, dshApprox: DSH_COMPACT_APPROX, sessions: rows });
+          sendJson({ ok: true, ...c, approxTokens, min: COMPACT_THRESHOLD_MIN, sessions: rows });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/compact/config') {
           const body = await readBody();
+          const approxTokens = declaredCompactApprox();
           let next;
-          try { next = compactConfigFromConsole(cfg.socialV2?.compact, body); } catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
-          const configFile = path.join(ROOT, 'config.json');
-          const file = readConfigObject(configFile);
-          file.socialV2 = { ...(file.socialV2 ?? {}), compact: next };
-          atomicWriteJson(configFile, file);
-          cfg.socialV2 = { ...(cfg.socialV2 ?? {}), compact: next };
-          log(`控制台：上下文压缩改为${next.enabled ? `提前压缩（上一步读到 ${Math.round(next.thresholdTokens / 10_000)} 万 token 时）` : '交给 DSH 自己压缩（约 80 万 token 时）'}`);
-          sendJson({ ok: true, mode: next.enabled ? 'early' : 'dsh', thresholdTokens: next.thresholdTokens });
+          try { next = compactConfigFromConsole(cfg.compact, body, { approxTokens }); } catch (error) { sendJson({ ok: false, error: error.message }, 400); return; }
+          saveConfigSection('compact', next);
+          cfg.compact = next;
+          const point = declaredCompactPoint(approxTokens);
+          const threshold = effectiveCompactThreshold(next, approxTokens);
+          const label = next.mode === 'early'
+            ? `提前压缩（${threshold ? `上一步读到 ${Math.round(threshold / 10_000)} 万 token 时` : '跟随平台申报点'}）`
+            : `交给 Agent 平台自己压缩${point ? `（平台申报约 ${Math.round(point / 10_000)} 万 token）` : ''}`;
+          log(`控制台：上下文压缩改为${label}`);
+          sendJson({ ok: true, ...next, approxTokens });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/session/compact') {

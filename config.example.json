@@ -214,8 +214,8 @@
     "timeoutMs": 35000
   },
   "compact": {
-    "enabled": false,
-    "thresholdTokens": 80000,
+    "mode": "early",
+    "thresholdTokens": null,
     "cooldownMinutes": 120,
     "idleDelayMs": 20000
   },

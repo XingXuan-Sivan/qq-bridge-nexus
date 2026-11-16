@@ -111,8 +111,7 @@ profiles/
 
 artifacts/                        # 各 Agent 平台的产物根（目录名 = agent 平台 id）
 └── dsh/
-    ├── qq-agent-presets/         # DSH bundle：生成出来的 presets/*.patch.yml + 手写守卫 mjs
-    └── qq-mode-console/          # DSH bundle：qq-mode 设置命名空间插件（只有 host 半）
+    └── qq-agent-presets/         # DSH bundle：生成出来的 presets/*.patch.yml + 手写守卫 mjs
 ```
 
 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 由 **DSH 平台的 build 适配器**

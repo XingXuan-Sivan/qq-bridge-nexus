@@ -85,14 +85,14 @@ export function createSeenMessageIds({ max = 500 } = {}) {
 }
 
 /**
- * 补收时不能照常处理的消息：管理命令、确认码 / 动态码、审批回复。
- * 这些消息补收时一律不执行、也不交给 AI（迟到的「确认」「/level L3」照样执行很危险）。
+ * 补收时不能照常处理的消息：管理命令、审批回复。
+ * 这些消息补收时一律不执行、也不交给 AI（迟到的批准确认照样执行很危险）。
  */
 export function isCommandLike(text) {
   const t = String(text ?? '').trim();
   if (!t) return false;
   if (t.startsWith('/')) return true;
-  if (/^\d{4,8}$/.test(t)) return true; // 确认码 / TOTP
+  if (/^\d{4,8}$/.test(t)) return true; // 审批编号 / 管理指令的裸数字回复
   if (/^#?\d{0,4}\s*(同意|批准|允许|拒绝|驳回|取消|确认|yes|no|y|n|ok)\s*[。.!！]?$/i.test(t)) return true;
   return false;
 }

@@ -111,7 +111,7 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
   const h = await bridgeHarness({ config: { admin: { consoleEscalationCooldownMs: 0 } } });
   const server = h.startConsoleServer();
   try {
-    await h.initControllerOnce('reserved2');
+    h.startOnce();
     h.setMode('reserved2');
     h.scheduler.updateSettings({ limits: { quietEnabled: false } }, { source: 'console' });
     const port = await listen(server);
@@ -178,7 +178,6 @@ test('② 桥接：静默时不唤醒、消息照记、私聊不受影响、定�
     assert.equal(bad.status, 400);
   } finally {
     h.scheduler.stop();
-    h.ext.controller.stop();
     await new Promise((r) => server.close(r));
     await h.close();
   }
@@ -215,7 +214,7 @@ test('④ 「只在被 @ 或私聊时唤醒」档位', async () => {
   const h = await bridgeHarness({ config: { admin: { consoleEscalationCooldownMs: 0 } } });
   const server = h.startConsoleServer();
   try {
-    await h.initControllerOnce('reserved2');
+    h.startOnce();
     h.setMode('reserved2');
     h.scheduler.updateSettings({ limits: { quietEnabled: false } }, { source: 'console' });
     const port = await listen(server);
@@ -248,7 +247,6 @@ test('④ 「只在被 @ 或私聊时唤醒」档位', async () => {
     assert.ok(h.scheduledSilenceFor('qq:group:789'), '别的群照样静默');
   } finally {
     h.scheduler.stop();
-    h.ext.controller.stop();
     await new Promise((r) => server.close(r));
     await h.close();
   }

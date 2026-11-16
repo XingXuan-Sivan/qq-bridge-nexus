@@ -38,10 +38,9 @@ const SOURCE_HINT = {
 };
 const LEVEL_LABEL = { error: '错误', warn: '警告' };
 const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
-/** 能力位矩阵里的三个声明面：应用方式、提示注入通道、权限权威支持面。 */
+/** 能力位矩阵里的三个声明面：应用方式、提示注入通道、对端权限档。 */
 const APPLY_KIND_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
 const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
-const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
 /** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
 const ENABLED_FIELD = 'platformEnabled';
 /** 默认运行方案在表单里的字段名：同样不是 configSchema 的字段（用户平台条目级）。 */
@@ -86,7 +85,7 @@ function tagsOf(list, render) {
 /**
  * 能力位矩阵：能力位之外还有三个「这个 Agent 平台支不支持」的声明——
  * 应用方式（能力档能不能不装预设）、提示注入通道（话术怎么进去）、
- * 权限权威支持面（能不能把权限档钉在桥接侧）。
+ * 对端权限档（能力档能把它钉成哪些值；空 = 由对端决定）。
  */
 function capabilityMatrix(item) {
   const rows = [{
@@ -99,8 +98,8 @@ function capabilityMatrix(item) {
   const declared = (list, labels) => tagsOf(list ?? [], (name) => `<span class="tag">${esc(labels[name] ?? name)}</span>`);
   rows.push({ cells: ['应用方式', declared(item.applies, APPLY_KIND_LABEL)] });
   rows.push({ cells: ['提示注入通道', declared(item.promptChannels, PROMPT_CHANNEL_LABEL)] });
-  // 权限权威支持面：能钉档的平台两种权威都能跑；不能钉的只有「Agent 平台自身」这一种。
-  rows.push({ cells: ['权限权威支持面', declared(item.canPinPermission ? ['bridge', 'agent'] : ['agent'], AUTHORITY_SIDE_LABEL)] });
+  // 对端权限档：取值域由平台声明；空表示「由对端决定」，建立会话后现读现校。
+  rows.push({ cells: ['对端权限档', item.peerPermissions?.length ? declared(item.peerPermissions) : '<span class="muted">由对端决定</span>'] });
   return rows;
 }
 

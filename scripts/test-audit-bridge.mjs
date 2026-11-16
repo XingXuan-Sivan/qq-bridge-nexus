@@ -9,14 +9,17 @@ async function test(name, run) {
   catch (error) { failures++; console.error('FAIL', name, error.message); }
   finally { await h.close(); }
 }
-await test('closed-agent session is not reused after switching to chat', async (h) => {
-  h.setMode('closed-agent'); h.setLevel('L2'); // v0.3.0：closed-agent 必须先经管理通道授权到某个级别
-  const privileged = await h.ensureSession('private:123');
-  h.setMode('chat');
-  const restricted = await h.ensureSession('private:123');
-  assert.notEqual(restricted, privileged);
+await test('switching the platform default behavior retires the old session', async (h) => {
+  // 平台默认行为是配置项（config.json 的 platforms.users.<id>.defaultBehavior），换掉它会改变
+  // 会话指纹（引擎 + preset）：旧会话必须退役重建，否则模型会带着旧 preset 继续跑。
+  h.setMode('reserved2');
+  const before = await h.ensureSession('private:123');
+  assert.equal(h.calls.created.at(-1).agentPreset, 'chat-v2');
+  h.setMode('');
+  const after = await h.ensureSession('private:123');
+  assert.notEqual(after, before);
   assert.equal(h.calls.created.at(-1).agentPreset, 'chat');
-  assert.ok(h.calls.cancelled.includes(privileged));
+  assert.ok(h.calls.cancelled.includes(before));
 });
 await test('unavailable preset catalogue fails closed for QQ and learner sessions', async (h) => {
   h.setPresets([]);
@@ -25,8 +28,8 @@ await test('unavailable preset catalogue fails closed for QQ and learner session
   await assert.rejects(h.ensureSlangLearnerSession());
   assert.equal(h.calls.created.length, 0);
 });
-await test('session creation crossing a mode change never accepts stale permissions', async (h) => {
-  h.setMode('closed-agent'); h.setLevel('L2'); // v0.3.0：closed-agent 必须先经管理通道授权到某个级别
+await test('session creation crossing a behavior change never accepts the stale session', async (h) => {
+  h.setMode('reserved2');
   let release;
   const original = h.api.sessions.create;
   h.api.sessions.create = async (params) => {
@@ -36,7 +39,8 @@ await test('session creation crossing a mode change never accepts stale permissi
   };
   const pending = h.ensureSession('private:123');
   while (!release) await new Promise((resolve) => setImmediate(resolve));
-  h.setMode('chat');
+  // 创建途中换掉默认行为：指纹对不上，新会话不得登记成当前映射。
+  h.setMode('');
   release();
   await assert.rejects(pending);
   assert.equal(h.state.sessions['qq:private:123'], undefined);

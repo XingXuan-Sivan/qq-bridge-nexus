@@ -18,6 +18,8 @@ import {
   platformDiagnostics,
   platformRegistrySnapshot,
 } from '../src/platforms/registry.mjs';
+import { createCapabilityStore } from '../src/capabilities/store.mjs';
+import { SHARED_CAPABILITIES_DIR, agentCapabilitiesDir } from '../src/profiles/paths.mjs';
 
 /** 这个对象会原样进 HTTP 响应：函数会变成 undefined 并静默丢字段。 */
 function assertPlainJson(value, label) {
@@ -76,9 +78,20 @@ test('Agent 侧条目带能力档（C4 起能力档 id 就是预设 id，一张�
   const dsh = findRegistryPlatform(snapshot, 'agent', 'dsh');
   assert.ok(dsh);
   assert.equal(dsh.source, 'builtin');
-  assert.deepEqual(dsh.assets.capabilityProfiles, ['chat', 'chat-v2', 'direct', 'full', 'readonly', 'workspace']);
+  // 条目里的能力档只来自本平台目录；跨平台共用的档（直通档）不进任一平台条目。
+  assert.deepEqual(dsh.assets.capabilityProfiles, ['chat', 'chat-v2', 'full', 'readonly', 'workspace']);
   assert.equal('agentPresets' in dsh.assets, false, '不再保留平行的预设清单字段');
   assert.equal(dsh.inbound, false, 'Agent 侧没有「收消息」这个概念');
+});
+
+test('直通档由共用目录提供，不挂到具体 Agent 平台上', () => {
+  const shared = createCapabilityStore({
+    root: agentCapabilitiesDir('dsh'),
+    sharedRoot: SHARED_CAPABILITIES_DIR,
+  }).list().find((item) => item.id === 'direct');
+  assert.ok(shared, '直通档必须出现在合并后的能力档列表里');
+  assert.equal(shared.shared, true);
+  assert.equal(shared.runtime.apply, 'passthrough');
 });
 
 test('Agent 侧条目带模型目录：声明随注册表一次带回，价目 / 档位 / 压缩点都在里面', () => {

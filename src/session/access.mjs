@@ -123,8 +123,8 @@ export function resolveAccessSummary(key, snapshot) {
  * 一次唤醒要不要过主动轴；表是唯一分类处，新增唤醒原因必须登记（`test-session-proactive`
  * 会扫描 `src/bridge.js` 里的原因字面量，漏登记直接失败）。
  *
- * - `passive`：由别人发来的消息/动作触发。被动轴在闸门里由 `isSessionAllowedInCurrentMode`
- *   （= `passiveAllowed`）统一拦截，这里登记是为了让分类完整、便于阅读与测试。
+ * - `passive`：由别人发来的消息/动作触发。被动轴在闸门里由 `passiveAllowed` 统一拦截，
+ *   这里登记是为了让分类完整、便于阅读与测试。
  * - `proactive`：没有新消息、由 bot 自己或定时器发起 —— 产品定义见控制台「主动行为」：
  *   主动冒泡、潜水超时、回复检查等无人触发的唤醒。
  * - `operator`：操作者/系统通道，不受会话准入约束。定时任务在调度器里已按目标会话的主动轴

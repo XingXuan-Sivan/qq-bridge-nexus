@@ -545,7 +545,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       }
       for (const { definition, pluginId } of desc.agentProviders ?? []) {
         try {
-          // 注册表自己校三件事：id 文法、resolveLevelPlan、createRuntime；
+          // 注册表自己校两件事：id 文法、createRuntime；
           // 被顶掉的 id（内置或别的插件）在这里抛，拒绝后插件其余部分照常跑。
           const registered = deps.agentRegistry?.register?.(definition, pluginId);
           if (registered) entry.agentProviders.push(registered.id);

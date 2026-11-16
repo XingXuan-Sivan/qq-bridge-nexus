@@ -322,7 +322,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       // 不在前端再维护一份「哪个执行体支持什么」的清单。
       applies: [...(impl?.applies ?? [])],
       promptChannels: [...(impl?.promptChannels ?? [])],
-      canPinPermission: impl?.canPinPermission === true,
+      peerPermissions: [...(impl?.peerPermissions ?? [])],
       conversationTypes: [],
       limits: {},
       inbound: false,
@@ -366,7 +366,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       defaultCapability: String(impl.defaultCapability ?? ''),
       applies: [...(impl.applies ?? [])],
       promptChannels: [...(impl.promptChannels ?? [])],
-      canPinPermission: impl.canPinPermission === true,
+      peerPermissions: [...(impl.peerPermissions ?? [])],
       conversationTypes: [],
       limits: {},
       inbound: false,

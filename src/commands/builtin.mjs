@@ -44,23 +44,13 @@ let depsRef = null;
 
 export function createBuiltinCommands(deps) {
   depsRef = deps;
-  const { send, session, acl, role, permission } = deps;
+  const { send, session, role, permission } = deps;
   depsRef = deps;
   const log = deps.log ?? (() => {});
 
   async function commandReset(ctx) {
     const result = await session.reset(ctx.key);
     return result ?? { ok: true };
-  }
-
-  async function commandStatus(ctx) {
-    const rs = role.read();
-    const source = role.sourceFor(rs, ctx.key);
-    const name = role.nameFor(rs, ctx.key) ?? '无';
-    const suffix = source === 'global' ? '' : '（本会话单独设置）';
-    const whitelist = acl.allowed(ctx.kind, ctx.id, ctx.cfg) ? '通过' : '拦截';
-    await send(ctx.key, `会话 ${session.current(ctx.key) ?? '未创建'}；白名单 ${whitelist}；角色 ${name}${suffix}；模式 ${rs.mode}`);
-    return { ok: true };
   }
 
   // /role 只对当前所在的会话生效（在群里发切本群，私聊发切这个私聊）；全局默认人格在控制台改。
@@ -125,10 +115,6 @@ export function createBuiltinCommands(deps) {
       group: '会话', help: '重置本会话上下文，下次消息开新会话', handler: commandReset,
     },
     {
-      id: 'status', name: '/status', scope: 'all', permission: 'owner',
-      group: '会话', help: '查看本会话的会话、白名单、角色与模式', handler: commandStatus,
-    },
-    {
       id: 'role', name: '/role', scope: 'all', permission: 'owner',
       group: '人格', help: '查看/切换本会话的人格卡（off 不挂卡，default 回全局）', handler: commandRole,
     },
@@ -141,8 +127,8 @@ export function createBuiltinCommands(deps) {
       group: '会话', help: '退出静默模式', handler: commandActive,
     },
     {
-      id: 'perm', name: '/perm', scope: 'all', permission: 'owner',
-      group: '会话', help: '查看/切换本会话的 DSH 权限级别（read-only|workspace-write|full-ask|full）', handler: commandPermission,
+      id: 'perm', name: '/perm', scope: 'all', permission: 'admin',
+      group: '会话', help: '查看/切换本会话的权限级别（read-only|workspace-write|full-ask|full）', handler: commandPermission,
     },
   ];
 }

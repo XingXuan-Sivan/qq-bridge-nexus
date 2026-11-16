@@ -17,31 +17,31 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { PRESETS, bundleDir, planArtifacts } from './build.mjs';
-import { AGENT_PRESET_ALIASES, BRIDGE_OWNED_PRESETS, PERMISSION_PRESETS } from './runtime.mjs';
+import { AGENT_PRESET_ALIASES, PEER_PERMISSIONS, PERMISSION_PRESETS } from './runtime.mjs';
 
 export const agentPlatform = 'dsh';
 
 /** 要注册进 profile 的 bundle 包名（目录名即包名，见 artifacts/dsh/<name>/package.json）。 */
-const BUNDLE_NAMES = ['qq-mode-console', 'qq-agent-presets'];
+const BUNDLE_NAMES = ['qq-agent-presets'];
 
 /** 由桥接托管的 MCP 条目 id：脚本对这些 id 拥有所有权，可安全地按 id 增删。 */
 const MANAGED_MCP_IDS = ['mcp-snowluma', 'mcp-snowluma-host', 'mcp-web-search-safe', 'mcp-bridge-ext'];
 
 /**
- * v0.3.0 管理通道的权限预设（DSH 0.2.0-rc.2：预设表只能在 profile patch 里覆盖 `id: permission` 行的 config）。
+ * 权限预设（DSH 0.2.0-rc.2：预设表只能在 profile patch 里覆盖 `id: permission` 行的 config）。
  *
  * 具体取值与「桥接拥有哪几项」都在 adapters/runtime.mjs（PERMISSION_PRESETS /
- * BRIDGE_OWNED_PRESETS）：安装适配器不再自带一份副本，避免两处真相分叉。
+ * PEER_PERMISSIONS）：安装适配器不再自带一份副本，避免两处真相分叉。
  *
- * 加入 qq-full-ask = danger-full-access + **ask**（L3：完全访问但每次越权都要 owner 审批）。
+ * 加入 qq-full-ask = danger-full-access + **ask**（完全访问但每次越权都要 owner 审批）。
  * DSH 内置的 danger-full-access 是 approval: never（不弹审批直接执行），桥接**绝不**使用它；
  * 这里保留内置三项只是为了不改变 DSH Web UI 里用户原有的选择。
  * 已有用户自定义的 permission 覆盖时：只补缺失的预设，不改用户已有的条目（幂等）。
  */
 
 // 桥接会用到的三个预设：名字与取值都由桥接「拥有」——用户把它们改宽（例如 approval: never）会让
-// L1/L2/L3 的承诺失效，所以这里强制改回（只会收紧，不会放宽）。
-// （清单在 adapters/runtime.mjs 的 BRIDGE_OWNED_PRESETS，已在上方 import。）
+// 能力档 runtime.peerPermission 的承诺失效，所以这里强制改回（只会收紧，不会放宽）。
+// （清单在 adapters/runtime.mjs 的 PEER_PERMISSIONS，已在上方 import。）
 
 /**
  * 没有指定 profile 时自动识别。
@@ -82,7 +82,7 @@ function yamlSingleQuote(s) {
  *   1. 从仓库权威源重新生成 qq-agent-presets 的 preset patch（人格正文/工具面改了就必须重跑）
  *   2. 在 profile 的 cordis.patch.yml 中挂载四个 MCP server + 桥接拥有的权限预设
  *   3. 在 profile package.json 中注册两个 bundle（link: 依赖 + dsh.profile.bundles + junction）
- *   4. 建 state/mode.json 兜底文件；尝试执行 dsh plugin install
+ *   4. 尝试执行 dsh plugin install
  *
  * @param {{repoRoot: string, runtimeHome?: string, profile?: string, env?: NodeJS.ProcessEnv, log?: (msg: string) => void}} ctx
  */
@@ -245,14 +245,14 @@ export async function install(ctx = {}) {
     const changes = [];
     // 新建覆盖行时：补齐 DSH 内置的三项（覆盖 config 会替换整张表，不补的话用户在 DSH Web UI 里原有的选项会消失）。
     // 用户已有自己的覆盖行时：**不**替用户加回 danger-full-access（用户可能有意删掉了它）。
-    const wanted = created ? Object.keys(PERMISSION_PRESETS) : BRIDGE_OWNED_PRESETS;
+    const wanted = created ? Object.keys(PERMISSION_PRESETS) : PEER_PERMISSIONS;
     for (const name of wanted) {
       if (!presets[name] || typeof presets[name] !== 'object' || Array.isArray(presets[name])) {
         presets[name] = { ...PERMISSION_PRESETS[name] };
         changes.push(`+${name}`);
       }
     }
-    for (const name of BRIDGE_OWNED_PRESETS) {
+    for (const name of PEER_PERMISSIONS) {
       const want = PERMISSION_PRESETS[name];
       const have = presets[name];
       if (have.sandbox !== want.sandbox) { have.sandbox = want.sandbox; changes.push(`${name}.sandbox→${want.sandbox}`); }
@@ -374,9 +374,7 @@ export async function install(ctx = {}) {
    * （qq-agent-presets/qq-tool-restrict.mjs），缺了它 preset 会整条挂载失败。
    */
   function ensureBundle(name) {
-    const repoDir = name === 'qq-agent-presets'
-      ? bundleDir(REPO_ROOT)
-      : path.join(REPO_ROOT, 'artifacts', 'dsh', name);
+    const repoDir = bundleDir(REPO_ROOT);
     const linkDir = ensureDirLink(path.join(DSH_HOME, 'plugins', name), repoDir, `bundle ${name} link`);
     ensureDirLink(path.join(DSH_HOME, 'profiles', PROFILE, 'node_modules', name), linkDir, `bundle ${name} node_modules link`);
     return linkDir;
@@ -415,22 +413,8 @@ export async function install(ctx = {}) {
     log(`profile package.json ensured: ${pkgFile}`);
   }
 
-  function ensureLocalModeFile() {
-    const stateDir = path.join(REPO_ROOT, 'state');
-    const modeFile = path.join(stateDir, 'mode.json');
-    if (fs.existsSync(modeFile)) {
-      log(`state/mode.json already exists; leave as-is (current mode may be user-configured)`);
-      return;
-    }
-    ensureDir(stateDir);
-    // DSH 0.1.5 起不再有 'router-standard' preset；留空表示「用 DSH 自己声明的默认 preset」，
-    // 由 bridge.js 的 resolvePresetName() 兜底（硬编码已下线的名字只会换来每次启动的误导性告警）。
-    fs.writeFileSync(modeFile, `${JSON.stringify({ mode: 'reserved2', closedAgentPreset: '' }, null, 2)}\n`, 'utf8');
-    log(`state/mode.json created with mode=reserved2 (fallback if DSH settings are not available)`);
-  }
-
-  // qq-mode-console / qq-agent-presets 以 link: 依赖注册进 profile package.json 后，DSH 首次启动
-  // 需要先安装一次才能解析这些 bundle（否则 cold start 报 "cannot resolve profile bundle"）。
+  // bundle 以 link: 依赖注册进 profile package.json 后，DSH 首次启动
+  // 需要先安装一次才能解析它（否则 cold start 报 "cannot resolve profile bundle"）。
   // dsh CLI 可用时自动执行。
   function autoInstallProfileBundles() {
     if (env.QQ_BRIDGE_SKIP_DSH_INSTALL === '1') {
@@ -482,7 +466,6 @@ export async function install(ctx = {}) {
   patchProfilePackage(links);
   reportLegacyPresetDir();
   reportRenamedPresets();
-  ensureLocalModeFile();
   autoInstallProfileBundles();
   log('Done. Restart DSH (or reload the profile) so the new presets/MCP take effect.');
   return { profile: PROFILE, runtimeHome: DSH_HOME, bundles: [...BUNDLE_NAMES] };

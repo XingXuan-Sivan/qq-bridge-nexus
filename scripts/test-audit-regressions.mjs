@@ -2,12 +2,10 @@
 // 防止以后有人在不知情的情况下改回去。
 //
 // 覆盖（对应体检报告里的编号）：
-//   R1  无令牌智能体调用：closed-agent 的发送/状态探测必须可用；v2 面必须仍然拒绝
 //   R2  分条发送失败时 st/now 越界（ReferenceError）→ 额度不回滚 / 报错不可读
 //   R3  唤醒限频命中时不得直接丢弃（timeout 会留下无定时器的静默态）
 //   R4  繁忙期间暂存的 timeout/replyCheck 不得因「未读被标读」被丢弃
 //   R5  turn/end 没有对应 turn/start 时不得留下永久 collector（会话永久繁忙）
-//   R6  DSH 设置里的空 ownerQQ 不得覆盖 config.json
 //   R7  预设名必须先校验再拼路径（DSH 未连接时 resolvePresetName 会原样放行）
 //   R8  wake-config 的 triggers 只允许已知字段（防状态文件/提示词被垃圾键撑大）
 //   R9  memory-update 不得凭空建条目、不得写穿原型链
@@ -65,38 +63,6 @@ async function withServer(h, run) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// ── R1. 无令牌智能体调用（closed-agent 的发送面） ────────────────────────────
-await test('R1 无令牌智能体调用：closed-agent 可发送/探测，v2 面仍拒绝', async () => {
-  const h = await bridgeHarness();
-  try {
-    h.setMode('closed-agent');
-    await withServer(h, async (port) => {
-      // 状态探测（legacyReadToolAllowed 走这条），必须回最小对象且不含管理字段
-      const status = await call(port, '/api/status', { headers: { 'x-agent-call': '1' } });
-      assert.equal(status.status, 200, '不带会话令牌的状态探测必须放行');
-      assert.equal(status.json.ownerQQ, undefined, '智能体视图不得暴露 ownerQQ');
-      assert.equal(status.json.allowGroups, undefined, '智能体视图不得暴露白名单');
-      assert.equal(status.json.mode, 'closed-agent');
-
-      // closed-agent 的私聊发送（管理员私聊）必须可用
-      const sent = await call(port, '/api/send/private', {
-        method: 'POST', headers: { 'x-agent-call': '1' }, body: { userId: '123', message: '你好' }
-      });
-      assert.equal(sent.status, 200, `closed-agent 无令牌发送应放行，实际 ${sent.status} ${sent.body}`);
-      assert.equal(sent.json?.sent, 1, '应当真的发出一条');
-      assert.ok(h.calls.http.some((c) => String(c.url).endsWith('/send_private_msg')), '发送应走 OneBot send_private_msg');
-
-      // v2 会话面绝不能因为「无令牌」退化成管理端
-      const v2 = await call(port, '/api/socialV2/prompt?key=group%3A456', { headers: { 'x-agent-call': '1' } });
-      assert.equal(v2.status, 403, '无令牌智能体调用不得进入 /api/socialV2/*');
-      const v2send = await call(port, '/api/socialV2/send-message', {
-        method: 'POST', headers: { 'x-agent-call': '1' }, body: { key: 'qq:group:456', messages: ['hi'] }
-      });
-      assert.equal(v2send.status, 403, '无令牌智能体调用不得走 v2 发送');
-    });
-  } finally { await h.close(); }
-});
 
 // ── R2. 分条发送失败：错误必须可读，且预占额度要回滚 ─────────────────────────
 await test('R2 send-burst 失败路径不再抛 ReferenceError，并回滚发送额度', async () => {
@@ -205,24 +171,6 @@ await test('R5 未跟踪的 turn-end 不留下 collector（否则会话永久繁
     const done = h.trackTurnEvent(sid, { kind: 'turn-end', turn: 9, reason: { kind: 'completed' } });
     assert.equal(done.ended?.text, '回复内容', '正常回合的文本必须被收集');
     assert.equal(h.collectors.has(sid), false, '正常回合结束后 collector 必须清理');
-  } finally { await h.close(); }
-});
-
-// ── R6. DSH 设置里的空 ownerQQ 不覆盖 config.json ───────────────────────────
-await test('R6 DSH 设置 ownerQQ 留空时保留 config.json 的值', async () => {
-  const h = await bridgeHarness();
-  try {
-    h.api.settings.describe = async () => ({
-      result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'reserved2', ownerQQ: '' } }] } }
-    });
-    await h.refreshMode();
-    assert.equal(h.cfg.ownerQQ, 123, '空串表示「不覆盖」，不能把 ownerQQ 抹成 null');
-
-    h.api.settings.describe = async () => ({
-      result: { ok: true, value: { namespaces: [{ ns: 'qq-mode', value: { mode: 'reserved2', ownerQQ: 456 } }] } }
-    });
-    await h.refreshMode();
-    assert.equal(h.cfg.ownerQQ, 456, '非空值仍然要能覆盖');
   } finally { await h.close(); }
 });
 
@@ -410,8 +358,7 @@ await test('R14 淘汰桶被新基线覆盖后不再重复累加', async () => {
 });
 
 // ── R15. /api/send/* 失败路径：catch 里的 st/now 必须真的在作用域内 ──────────
-// 与 R2 同型（send-burst 当年整段踩过），但残留在这条 **MCP 旧发送工具真正走的** 端点上：
-// `const st/now` 写在 try 内、catch 里使用 ⇒ 任何发送失败都抛 ReferenceError，
+// R15 的教训同 R2：`const st/now` 写在 try 内、catch 里使用 ⇒ 任何发送失败都抛 ReferenceError，
 // 于是 ① 模型看到的错误是「st is not defined」而不是网关原因；
 // ② 预占的发送额度不回滚 ⇒ 接下来一分钟全是假 429；③ 部分成功的已发消息不入账。
 await test('R15 /api/send/* 失败路径不抛作用域错误，并回滚发送额度', async () => {
@@ -421,8 +368,8 @@ await test('R15 /api/send/* 失败路径不抛作用域错误，并回滚发送�
     }
   });
   try {
-    // closed-agent = 管理员私聊通道：这条路径不需要会话令牌（正是旧工具的使用方式）。
-    h.setMode('closed-agent');
+    // 会话要有能力档，/api/send/* 才对它开放（发送工具的准入按能力档算）。
+    h.state.profiles['qq:private:123'] = { capability: 'chat' };
     const st = h.getSocialV2State('qq:private:123');
     const before = st.sendTimes.length;
     await withServer(h, async (port) => {

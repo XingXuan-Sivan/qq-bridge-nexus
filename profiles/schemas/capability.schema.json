@@ -55,7 +55,7 @@
     },
     "runtime": {
       "type": "object",
-      "description": "缺省等价于 { apply: preset, prompt: none, permission: bridge, narrow: [] }。",
+      "description": "缺省等价于 { apply: preset, prompt: none, peerPermission: '', narrow: [] }。",
       "properties": {
         "apply": {
           "enum": [
@@ -73,12 +73,9 @@
           ],
           "description": "提示注入通道。"
         },
-        "permission": {
-          "enum": [
-            "bridge",
-            "agent"
-          ],
-          "description": "权限档归谁：桥接钉住，还是读执行体自己的档位。"
+        "peerPermission": {
+          "type": "string",
+          "description": "执行体那一侧的权限档名：建会话时钉一次；空 = 不碰，用平台默认。"
         },
         "narrow": {
           "type": "array",

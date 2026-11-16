@@ -41,7 +41,6 @@ tools:
     sendVoice: false
     webImage: false
     feedback: true
-    requestMode: true
     crossGroup: true
     ownerGroupAccess: false
     ownerRelay: false

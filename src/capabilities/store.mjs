@@ -3,7 +3,7 @@
 //
 // 一个能力档是**唯一档位真源**，五段各管一件事：
 //   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
-//   runtime    怎么生效（装不装预设 / 提示怎么注入 / 谁定权限档）
+//   runtime    怎么生效（装不装预设 / 提示怎么注入 / 建会话时要不要钉对端权限档）
 //   audience   谁能用（`access` = 受准入名单约束的普通会话，`owner` = 仅主人与管理员私聊）
 //   preset     Agent 平台预设的元信息（名字 / 描述 / 顺序 / 绑定行为）
 //   rows       预设正文（Agent 平台的插件行列表，由该平台的 build 适配器渲染成产物）
@@ -36,18 +36,16 @@ const PRESET_KEYS = Object.freeze(['name', 'description', 'order', 'behavior']);
 export const CAPABILITY_APPLY = Object.freeze(['preset', 'passthrough']);
 /** 提示注入通道：不注入 / 系统提示 / 首轮前缀 / 只靠工具拉取。 */
 export const CAPABILITY_PROMPT = Object.freeze(['none', 'system', 'prefix', 'tool']);
-/** 权限档归谁：桥接钉住（preset），还是读执行体自己的档位（passthrough）。 */
-export const CAPABILITY_PERMISSION = Object.freeze(['bridge', 'agent']);
 /** 可用受众：普通准入会话，还是仅主人 / 管理员私聊。 */
 export const CAPABILITY_AUDIENCE = Object.freeze(['access', 'owner']);
 
-const RUNTIME_KEYS = Object.freeze(['apply', 'prompt', 'permission', 'narrow']);
+const RUNTIME_KEYS = Object.freeze(['apply', 'prompt', 'peerPermission', 'narrow']);
 
 /** `runtime` 段缺省值：不写这一段的能力档行为与引入前完全一致。 */
 export const CAPABILITY_RUNTIME_DEFAULTS = Object.freeze({
   apply: 'preset',
   prompt: 'none',
-  permission: 'bridge',
+  peerPermission: '',
   narrow: [],
 });
 
@@ -100,6 +98,9 @@ export function normalizeExtensions(raw) {
 /**
  * 生效方式（`runtime` 段）。任何一项取值非法都直接报错 —— 猜一个默认值会把
  * 「不装预设」的能力悄悄装成预设，安全边界与档位权威都会跟着错位。
+ *
+ * `peerPermission` 是**执行体那一侧**的权限档名（空 = 不碰，用平台默认）：只在建会话时
+ * 钉一次，之后随能力档走。它与会话权限级别无关 —— 那个只过滤桥接自己的工具。
  */
 export function normalizeRuntime(raw) {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
@@ -107,13 +108,7 @@ export function normalizeRuntime(raw) {
   if (!CAPABILITY_APPLY.includes(apply)) throw new Error(`runtime.apply 只能是 ${CAPABILITY_APPLY.join(' / ')}：${apply}`);
   const prompt = value.prompt === undefined || value.prompt === '' ? CAPABILITY_RUNTIME_DEFAULTS.prompt : String(value.prompt).trim();
   if (!CAPABILITY_PROMPT.includes(prompt)) throw new Error(`runtime.prompt 只能是 ${CAPABILITY_PROMPT.join(' / ')}：${prompt}`);
-  const permission = value.permission === undefined || value.permission === ''
-    ? CAPABILITY_RUNTIME_DEFAULTS.permission
-    : String(value.permission).trim();
-  if (!CAPABILITY_PERMISSION.includes(permission)) {
-    throw new Error(`runtime.permission 只能是 ${CAPABILITY_PERMISSION.join(' / ')}：${permission}`);
-  }
-  return { apply, prompt, permission, narrow: stringList(value.narrow) };
+  return { apply, prompt, peerPermission: String(value.peerPermission ?? '').trim(), narrow: stringList(value.narrow) };
 }
 
 /** 预设元信息：没有 name = 该能力档不渲染 Agent 预设（纯工具档）。 */

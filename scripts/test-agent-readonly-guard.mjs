@@ -1,6 +1,7 @@
-// L1「本地只读 Agent」（readonly 能力档）的硬边界：
+// 运维 Agent 三个能力档（readonly / workspace / full）的硬边界：
 //   · 能力档的 rows 里没有任何 shell / 子代理 / 工作流 / 任务类行；
-//   · 守卫以 profile: readonly-agent 运行，只多放行只读工具，写入/执行一律拒绝；
+//   · 守卫按能力档分别以 profile: readonly-agent / operator 运行；
+//   · 审批闸门按 policy: workspace / full 决策，缺少配置时按更严的 full 处理；
 //   · 不带 profile 时守卫行为与原版完全一致（群友会话不因此多出读文件能力）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,49 +71,49 @@ test('不带 profile 时守卫与原版一致：群友会话依旧不能读文�
   assert.deepEqual([...mod.READONLY_AGENT_TOOLS].sort(), ['glob', 'grep', 'read', 'read_image', 'web_fetch', 'web_search']);
 });
 
-test('桥接的 L1 映射指向这个 preset，L3 不映射到免审批预设', async () => {
-  // 权限映射的权威源已下沉到 Agent 侧适配器（B4）：内核 src/ 不再认识任何平台名。
+test('桥接的对端权限档预设与能力档一致，完全访问仍保留审批', async () => {
+  // 对端权限档的取值域由能力档 runtime.peerPermission 选用，三项都在安装期写进 DSH profile。
   const runtime = await import(pathToFileURL(path.join(root, 'profiles', 'agent-platforms', 'dsh', 'adapters', 'runtime.mjs')).href);
-  const { LEVEL_PERMISSION_PRESET, FULL_ASK_PRESET: QQ_FULL_ASK_PRESET } = runtime;
-  const L1_AGENT_PRESET = runtime.AGENT_PRESET_FOR_LEVEL.L1;
-  assert.equal(L1_AGENT_PRESET, 'readonly');
-  assert.equal(LEVEL_PERMISSION_PRESET.L1, 'read-only');
-  assert.equal(QQ_FULL_ASK_PRESET.approval, 'ask', 'L3 预设必须保留审批');
-  assert.notEqual(LEVEL_PERMISSION_PRESET.L3, 'danger-full-access');
+  assert.deepEqual([...runtime.PEER_PERMISSIONS], ['read-only', 'workspace-write', 'qq-full-ask']);
+  assert.equal(runtime.PERMISSION_PRESETS['qq-full-ask'].approval, 'ask', '完全访问必须保留审批');
+  assert.equal(runtime.PERMISSION_PRESETS['qq-full-ask'].sandbox, 'danger-full-access');
+  // preset id 不带用户平台前缀：同一个 readonly 对任何用户侧平台都成立；旧名归一即可。
+  assert.ok(runtime.AGENT_PRESET_IDS.includes('readonly'));
+  assert.equal(runtime.normalizeAgentPreset('qq-agent-readonly'), 'readonly');
 });
 
-// ── L2/L3 运维 preset 的审批闸门与凭据保护（独立安全审查后新增）──────────────────
+// ── workspace / full 运维 preset 的审批闸门与凭据保护（独立安全审查后新增）─────────
 const gateUrl = pathToFileURL(path.join(root, 'artifacts/dsh', 'qq-agent-presets', 'qq-approval-gate.mjs')).href;
 const ppUrl = pathToFileURL(path.join(root, 'artifacts/dsh', 'qq-agent-presets', 'protected-paths.mjs')).href;
 
-test('审批闸门：L2 执行命令要审批、工作区写入放行；L3 除只读外全部要审批；派生类直接拒绝', async () => {
+test('审批闸门：workspace 执行命令要审批、工作区写入放行；full 除只读外全部要审批；派生类直接拒绝', async () => {
   const { decide } = await import(gateUrl);
-  assert.equal(decide({ name: 'pwsh', arguments: { command: 'dir' } }, 'L2'), 'ask');
-  assert.equal(decide({ name: 'write', arguments: { file_path: 'C:/work/a.txt' } }, 'L2'), 'allow');
-  assert.equal(decide({ name: 'write', arguments: { file_path: 'C:/work/a.txt' } }, 'L3'), 'ask');
-  assert.equal(decide({ name: 'pwsh', arguments: { command: 'dir' } }, 'L3'), 'ask');
-  assert.equal(decide({ name: 'read', arguments: { file_path: 'C:/work/a.txt' } }, 'L3'), 'allow');
-  assert.equal(decide({ name: 'mcp__snowluma__qq_status' }, 'L3'), 'allow');
-  assert.equal(decide({ name: 'brand_new_tool' }, 'L2'), 'ask', '未知工具按需审批处理');
-  for (const t of ['subagent', 'workflow', 'plugin_manager', 'schedule_create']) assert.ok(decide({ name: t }, 'L3').deny, t);
+  assert.equal(decide({ name: 'pwsh', arguments: { command: 'dir' } }, 'workspace'), 'ask');
+  assert.equal(decide({ name: 'write', arguments: { file_path: 'C:/work/a.txt' } }, 'workspace'), 'allow');
+  assert.equal(decide({ name: 'write', arguments: { file_path: 'C:/work/a.txt' } }, 'full'), 'ask');
+  assert.equal(decide({ name: 'pwsh', arguments: { command: 'dir' } }, 'full'), 'ask');
+  assert.equal(decide({ name: 'read', arguments: { file_path: 'C:/work/a.txt' } }, 'full'), 'allow');
+  assert.equal(decide({ name: 'mcp__snowluma__qq_status' }, 'full'), 'allow');
+  assert.equal(decide({ name: 'brand_new_tool' }, 'workspace'), 'ask', '未知工具按需审批处理');
+  for (const t of ['subagent', 'workflow', 'plugin_manager', 'schedule_create']) assert.ok(decide({ name: t }, 'full').deny, t);
 });
 
 test('审批闸门：apply 注册 tools/pre-execute，返回 ask；上游拒绝时不放宽', async () => {
   const mod = await import(gateUrl);
   let handler;
-  mod.apply({ on: (ev, fn) => { assert.equal(ev, 'tools/pre-execute'); handler = fn; } }, { level: 'L3' });
+  mod.apply({ on: (ev, fn) => { assert.equal(ev, 'tools/pre-execute'); handler = fn; } }, { policy: 'full' });
   assert.equal((await handler({ name: 'pwsh', arguments: { command: 'x' } }, async () => ({ kind: 'allow' }))).kind, 'ask');
   assert.equal((await handler({ name: 'read', arguments: { file_path: 'C:/w/a' } }, async () => ({ kind: 'allow' }))).kind, 'allow');
   assert.equal((await handler({ name: 'pwsh' }, async () => ({ kind: 'deny', reason: 'sandbox' }))).kind, 'deny');
   let h2;
   mod.apply({ on: (ev, fn) => { h2 = fn; } }, {});
-  assert.equal((await h2({ name: 'write', arguments: { file_path: 'C:/w/a' } }, async () => ({ kind: 'allow' }))).kind, 'ask', '缺省 level 按更严的 L3');
+  assert.equal((await h2({ name: 'write', arguments: { file_path: 'C:/w/a' } }, async () => ({ kind: 'allow' }))).kind, 'ask', '缺省 policy 按更严的 full');
 });
 
 test('凭据保护：桥接 state/、config.json、DSH 凭据与向上跳出的相对路径都被拒绝', async () => {
   const { touchesProtected, protectedFileReason, PROTECTED_PATHS } = await import(ppUrl);
   for (const p of PROTECTED_PATHS) assert.equal(touchesProtected(p), true, p);
-  assert.equal(touchesProtected(path.join(root, 'state', 'admin', 'totp.json')), true);
+  assert.equal(touchesProtected(path.join(root, 'state', 'admin', 'audit.jsonl')), true);
   assert.equal(touchesProtected('../console-token'), true);
   assert.equal(touchesProtected(['..', '..', 'config.json'].join(path.sep)), true);
   assert.equal(touchesProtected('D:/anything/.credentials.yaml'), true);
@@ -131,10 +132,10 @@ test('operator 守卫：拒绝派生/编排类与凭据读取，其余交给审�
   assert.ok(!restricted.includes('pwsh'));
 });
 
-test('L2/L3 能力档：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
-  for (const [id, level] of [['workspace', 'L2'], ['full', 'L3']]) {
+test('workspace / full 能力档：挂了闸门与 operator 守卫，没有子代理/工作流/插件管理行', () => {
+  for (const [id, policy] of [['workspace', 'workspace'], ['full', 'full']]) {
     const rows = capabilityRows(id);
-    assert.equal(rows.find((r) => r.id === 'qq-approval-gate')?.config?.level, level, id);
+    assert.equal(rows.find((r) => r.id === 'qq-approval-gate')?.config?.policy, policy, id);
     assert.equal(rows.find((r) => r.id === 'qq-tool-restrict')?.config?.profile, 'operator', id);
     for (const forbidden of ['dsh-tool-subagent', 'dsh-tool-workflow', 'dsh-workflow-ptc', 'dsh-plugin-manager', 'dsh-tool-skill', 'dsh-plan-mode', 'dsh-tool-goal']) {
       assert.ok(!rows.some((r) => String(r.name).includes(forbidden)), `${id} 不应挂 ${forbidden}`);

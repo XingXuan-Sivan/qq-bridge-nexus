@@ -45,7 +45,6 @@ export const PLATFORM_TOOLS = Object.freeze([
   { flag: 'sendVoice', label: '发语音', names: ['qq_send_voice', 'qq_list_voices'], risk: 'send', defaultOff: true },
   { flag: 'webImage', label: '搜索/发送网图', names: ['qq_search_images', 'qq_preview_image', 'qq_send_web_image'], risk: 'send', defaultOff: true },
   { flag: 'feedback', label: '向管理端反馈', names: ['qq_report_feedback'], risk: 'admin' },
-  { flag: 'requestMode', label: '申请切换模式', names: ['qq_request_mode_change'], risk: 'admin' },
   { flag: 'crossGroup', label: '跨群查询', names: ['qq_cross_group_query'], risk: 'admin' },
   { flag: 'ownerGroupAccess', label: 'owner 群权限管理', names: ['qq_owner_peek_group', 'qq_owner_group_rule'], risk: 'admin', defaultOff: true },
   { flag: 'ownerRelay', label: '让群会话代为转达', names: ['qq_ask_group_session'], risk: 'admin', defaultOff: true },
@@ -77,7 +76,7 @@ export const LEVEL_ALLOWS = Object.freeze({
   full: Object.freeze(['read', 'send', 'state', 'write', 'exec', 'admin']),
 });
 
-/** 每一级额外需要确认的风险类别（审批由 DSH 权限预设或桥接审批闸门负责）。 */
+/** 每级额外需要确认的风险类别：由执行体自己的权限档/审批策略执行，桥接这一侧只做 allow/deny。 */
 export const LEVEL_ASKS = Object.freeze({
   'read-only': Object.freeze([]),
   'workspace-write': Object.freeze([]),
@@ -187,6 +186,15 @@ export function platformToolAllowedAt(level, flag) {
   const allowed = LEVEL_ALLOWS[level];
   if (!allowed) return false;
   return allowed.includes(platformToolRisk(flag));
+}
+
+/**
+ * 会话权限闸门：返回 `allow` / `deny`。
+ * 权限级别是**过滤器**——不改变会话已注入的能力，只决定这一级还能不能调用这类工具。
+ * 未知级别一律 deny（失败关闭）。
+ */
+export function platformToolGateAt(level, flag) {
+  return platformToolAllowedAt(level, flag) ? 'allow' : 'deny';
 }
 
 /** 能力预设是否覆盖这个工具（读类不在能力覆盖范围内）。 */

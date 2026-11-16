@@ -1,13 +1,12 @@
-// v0.3.0 新功能的组装点：人物库、管理审计、模式/权限控制器、审批登记表、owner 管理命令。
+// v0.3.0 新功能的组装点：人物库、管理审计、审批登记表、owner / 管理员管理命令。
 //
 // bridge.js 只负责接线（在消息入口、事件流、控制台路由里调用这里的函数），
 // 业务规则都在 src/social/* 与 src/admin/* 里，便于离线测试。
 //
 // 状态文件（都在 state/ 下，随 state ACL 一起收紧，不入库）：
-//   state/social/people.json     人物库（含各会话显示名、成员关系、分层记忆）
-//   state/admin/control.json     当前模式/级别、待确认申请、TOTP 防重放计数
-//   state/admin/audit.jsonl      管理审计（哈希链）
-//   state/admin/totp.json        TOTP 秘密（npm run admin:totp-setup 生成；也可用环境变量）
+//   state/social/people.json        人物库（含各会话显示名、成员关系、分层记忆）
+//   state/admin/audit.jsonl         管理审计（哈希链）
+//   state/admin/approval-seq.json   审批编号游标（编号跨重启不复用）
 //
 // 词汇：0.2.0 起社交模型的容器词是「会话」（conversation）。这里是对 bridge 暴露的**唯一门面**，
 // 所以名下函数一律用中性词；`bridge.js` 内部还叫 group 的变量都是 OneBot 协议面或会话类型，
@@ -20,39 +19,25 @@ import { createPeopleRegistry, normalizeQQ, normalizeConversationId } from './so
 import { buildPersonView, renderPeopleBlock } from './social/memory-policy.js';
 import { conversationRecordable as conversationRecordableIn } from './social/conversation-config.js';
 import { createAuditLog } from './admin/audit-log.js';
-import { createModeController, LEVEL_TEXT, MODE_TEXT } from './admin/mode-control.js';
 import { createApprovalRegistry, describeToolArgs } from './admin/approvals.js';
 import { parseOwnerCommand, ADMIN_HELP } from './admin/owner-commands.js';
-import { canOpenLevel } from './admin/admins.mjs';
+// 副作用：确保内置 Agent 平台已注册（preset 名归一需要平台的别名表）。
+import './agent-side/builtin.mjs';
 
 // bridge.js 只 import 这一个模块（测试夹具按名字注入绑定，入口越少越不容易漂移）。
 export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/conversation-events.js';
 export { checkCrossConversation, queryPresence, queryActivity } from './social/cross-conversation.js';
-export { resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, levelPermissionMap, normalizeAgentPreset, agentPresetIds, chatAgentPresets, agentPresetLevel } from './admin/agent-permission.js';
-export { L0_MODES, LEVEL_TEXT } from './admin/mode-control.js';
+export { permissionCommandSucceeded, normalizeAgentPreset } from './agent-side/runtime-registry.mjs';
 export { createReconnectWatchdog } from './lib/ws-watchdog.mjs';
 export { describeAgentError, agentErrorUserText, isConfigError } from './lib/agent-errors.mjs';
 /** 斜杠命令守卫：不做自然语言识别，只判断「这是不是管理/特权命令」。 */
 export function parseOwnerCommandForGuard(text) {
-  return parseOwnerCommand(text, { naturalLanguage: false });
+  return parseOwnerCommand(text);
 }
 
 // 只抹掉「凭据赋值」形态（给 owner 看审批参数时用：路径要保留，否则就是盲批）。实现在 src/lib/redact.mjs（控制中心也用）。
 export { redactCredentials } from './lib/redact.mjs';
 import { redactCredentials } from './lib/redact.mjs';
-
-/** 读取 TOTP 秘密：环境变量优先，其次 state/admin/totp.json。秘密不会被打印或发给模型。 */
-export function loadTotpSecret(stateDir, env = process.env) {
-  const fromEnv = String(env.QQ_BRIDGE_TOTP_SECRET ?? '').trim();
-  if (fromEnv) return fromEnv;
-  try {
-    const raw = JSON.parse(fs.readFileSync(path.join(stateDir, 'admin', 'totp.json'), 'utf8').trim());
-    const s = String(raw?.secret ?? '').trim();
-    return s || null;
-  } catch {
-    return null;
-  }
-}
 
 function fmt(t) {
   if (!t) return '—';
@@ -66,12 +51,11 @@ function fmt(t) {
  * @param {object} deps.cfg                  桥接的内存配置对象（热更新时同一个引用）
  * @param {string} deps.stateDir
  * @param {(...a:any[])=>void} deps.log
- * @param {(text:string)=>Promise<void>} deps.notifyOwner
- * @param {(target:{mode,level}, ctx:object)=>Promise<void>} deps.applyMode
+ * @param {(reason:string)=>Promise<{ok:boolean, error?:string}>} deps.onPanic  紧急关闭的执行者（bridge 注入）
  * @param {(entry:object)=>Promise<void>} deps.onApprovalTimeout
  * @param {() => number} [deps.now]
  */
-export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyMode, onApprovalTimeout, now = Date.now, env = process.env }) {
+export function createBridgeExtensions({ cfg, stateDir, log, onPanic, onApprovalTimeout, now = Date.now }) {
   const logLine = (m) => log(m);
   const people = createPeopleRegistry({
     file: path.join(stateDir, 'social', 'people.json'),
@@ -81,17 +65,25 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   });
   try { people.load(); } catch (error) { log(`⚠️ 人物库加载失败：${error?.message ?? error}（本次运行不记录人物）`); }
   const audit = createAuditLog({ file: path.join(stateDir, 'admin', 'audit.jsonl'), log: logLine, now });
-  const getTotpSecret = () => loadTotpSecret(stateDir, env);
-  const controller = createModeController({
-    file: path.join(stateDir, 'admin', 'control.json'),
-    config: cfg.admin ?? {},
-    applyMode,
-    notifyOwner,
-    audit,
-    getTotpSecret,
-    now,
-    log: logLine,
-  });
+  // 审批编号跨重启不复用：游标单独落盘（一个整数，不需要与其它管理状态同文件）。
+  const approvalSeqFile = path.join(stateDir, 'admin', 'approval-seq.json');
+  function readApprovalSeq() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(approvalSeqFile, 'utf8'));
+      const n = Number(raw?.seq);
+      return Number.isSafeInteger(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+  function persistApprovalSeq(seq) {
+    try {
+      fs.mkdirSync(path.dirname(approvalSeqFile), { recursive: true });
+      fs.writeFileSync(approvalSeqFile, `${JSON.stringify({ seq })}\n`, 'utf8');
+    } catch (error) {
+      log(`⚠️ 审批编号落盘失败：${error?.message ?? error}`);
+    }
+  }
   const approvals = createApprovalRegistry({
     timeoutMs: Math.max(10_000, Number(cfg.questionTimeoutMs) || 300_000),
     onTimeout: async (entry) => {
@@ -99,8 +91,8 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
       await onApprovalTimeout?.(entry);
     },
     now,
-    // 编号跨重启不复用：从控制器持久化的最大编号继续。
-    startId: (() => { try { return controller.approvalSeq; } catch { return 0; } })(),
+    startId: readApprovalSeq(),
+    onAdvance: persistApprovalSeq,
   });
 
   const continuity = () => cfg.continuity ?? {};
@@ -188,20 +180,15 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   }
 
   function statusText() {
-    const c = controller.current();
-    const pend = controller.pendingRequests();
     const appr = approvals.list();
-    const lines = [
-      `当前模式：${MODE_TEXT[c.mode] ?? c.mode ?? '（未初始化）'}`,
-      `权限级别：${LEVEL_TEXT[c.level] ?? c.level}`,
-      `最近变更：${fmt(c.changedAt)}（${c.changedBy ?? '—'}）`,
-    ];
-    if (c.level !== 'L0') lines.push(`高权限开始：${fmt(c.elevatedAt)}；最近活动：${fmt(c.lastActivityAt)}`);
-    if (pend.length) lines.push(`待确认申请：${pend.map((r) => `#${r.id}→${r.target.mode}/${r.target.level}`).join('、')}`);
-    if (appr.length) lines.push(`待审批：${appr.map((a) => `#${a.id} ${a.toolName}`).join('、')}`);
-    lines.push(`TOTP：${getTotpSecret() ? '已配置' : '未配置（L3 不可用）'}`);
+    const lines = [];
+    lines.push(appr.length ? `待审批：${appr.map((a) => `#${a.id} ${a.toolName}`).join('、')}` : '待审批：无');
+    lines.push(`审批编号已用到 #${approvals.lastId}`);
     const s = people.stats();
     lines.push(`人物库：${s.people} 人 / ${s.notes} 条记忆 / 待审核共享 ${s.pendingShare} / 迁移待确认 ${s.legacyReview}`);
+    const v = audit.verify();
+    lines.push(`审计哈希链：${v.ok ? '完整' : `第 ${v.brokenAt} 行起不一致`}`);
+    lines.push('会话权限逐会话设置：/perm show 看当前会话，/perm <级别> 修改。');
     return lines.join('\n');
   }
 
@@ -246,58 +233,36 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
    */
   async function handleOwnerText(text, { say, actor } = {}) {
     if (!adminEnabled()) return { handled: false };
-    const cmd = parseOwnerCommand(text, { naturalLanguage: cfg.admin?.naturalLanguage !== false });
+    const cmd = parseOwnerCommand(text);
     if (!cmd) return { handled: false };
     const role = actor?.role ?? 'owner';
     const isOwner = role === 'owner';
     const can = (cap) => (actor && typeof actor.can === 'function' ? actor.can(cap) : true);
     const reply = (r) => ({ handled: true, reply: r });
-    // 管理员只开放三类：查状态/帮助、审批（有 approve 权限）、进入 closed-agent（≤ maxLevel）。
-    const adminAllowed = new Set(['status', 'help', 'approvals', 'mode', 'error', 'blocked-slash']);
+    // 管理员只开放三类：查状态/帮助、审批（有 approve 权限）、审计。紧急关闭只对 owner 开放。
+    const adminAllowed = new Set(['status', 'help', 'approvals', 'audit', 'error', 'blocked-slash']);
     if (!isOwner && !adminAllowed.has(cmd.type)) {
-      return reply('这条命令只对 owner 开放；管理员可用 /status、/approvals、/level L1|L2|L3。');
+      return reply('这条命令只对 owner 开放；管理员可用 /status、/approvals、/audit。会话权限用 /perm。');
     }
     if (!isOwner && cmd.type === 'approvals' && !can('approve')) {
       return reply('你没有审批权限（approve）。');
     }
-    if (!isOwner && cmd.type === 'mode') {
-      if (cmd.mode && cmd.mode !== 'closed-agent') return reply('管理员不能切换全局运行模式，只能申请进入 closed-agent 与权限级别。');
-      if (!cmd.level) return reply('管理员请用 /level L1|L2|L3 申请 closed-agent 权限级别。');
-      if (cmd.level !== 'L0' && !canOpenLevel(actor, cmd.level)) return reply(`你的权限上限是 ${actor.maxLevel}，不能申请 ${cmd.level}。`);
-      if (cmd.level === 'L3') return reply('L3 只能由 owner 开启（管理员上限 L2）。');
-    }
-    if (!isOwner && ['confirm', 'cancel', 'panic'].includes(cmd.type)) {
-      return reply('确认码/取消/紧急关闭只对 owner 开放。');
-    }
     try {
       switch (cmd.type) {
-        case 'confirm': {
-          const r = await controller.confirm(cmd.text);
-          return reply(r.text ?? '');
-        }
-        case 'cancel': {
-          const n = await controller.cancelAll('owner');
-          return reply(n ? `已取消 ${n} 个待确认申请。` : '没有待确认的申请。');
-        }
         case 'panic': {
-          const r = await controller.panic('panic');
+          const r = await onPanic?.('panic');
+          if (!r) return reply('当前不支持紧急关闭。');
           return reply(r.ok ? '' : `紧急关闭失败：${r.error}（请直接停止桥接进程）`);
         }
         case 'status':
           return reply(statusText());
         case 'help':
           return reply(ADMIN_HELP);
-        case 'mode': {
-          const mode = cmd.mode ?? (controller.options.safeMode);
-          const r = await controller.requestChange({ mode, level: cmd.level }, { origin: cmd.natural ? 'nl' : 'command', direct: !isOwner, actor: actor?.qq ?? null });
-          // 已执行（降级）时统一通知已经发过，这里不再重复。
-          return reply(r.status === 'applied' ? '' : r.text);
-        }
         case 'error':
           return reply(cmd.text);
         case 'blocked-slash':
           audit.append('slash.blocked', { name: cmd.name });
-          return reply(`「/${cmd.name}」会影响权限、工具或运行状态，已由桥接拦截，不会转交 DSH。改模式/权限请用 /mode 或 /level（发 /admin 查看命令）。`);
+          return reply(`「/${cmd.name}」会影响权限、工具或运行状态，已由桥接拦截，不会转交执行体。会话权限请用 /perm（发 /admin 查看命令）。`);
         case 'approvals': {
           const list = approvals.list();
           return reply(list.length ? list.map((e) => `#${e.id} ${e.key} 工具 ${e.toolName}（${Math.max(0, Math.round((e.expiresAt - now()) / 1000))} 秒后超时）`).join('\n') : '没有待审批。');
@@ -305,7 +270,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
         case 'audit': {
           const rows = audit.tail(Math.min(50, cmd.count));
           const v = audit.verify();
-          return reply([`审计哈希链：${v.ok ? '完整' : `第 ${v.brokenAt} 行起不一致（可能被改动）`}`, ...rows.map((r) => `${r.time?.slice(5, 16) ?? ''} ${r.event} ${r.source ?? r.origin ?? ''} ${r.to ? `${r.to.mode}/${r.to.level}` : ''}`.trim())].join('\n'));
+          return reply([`审计哈希链：${v.ok ? '完整' : `第 ${v.brokenAt} 行起不一致（可能被改动）`}`, ...rows.map((r) => `${r.time?.slice(5, 16) ?? ''} ${r.event} ${r.source ?? r.origin ?? ''} ${r.key ?? ''}`.replace(/\s+/g, ' ').trim())].join('\n'));
         }
         case 'whois':
           return reply(whoisText(cmd.userId));
@@ -368,9 +333,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, notifyOwner, applyM
   return {
     people,
     audit,
-    controller,
     approvals,
-    getTotpSecret,
     continuity,
     continuityEnabled,
     adminEnabled,

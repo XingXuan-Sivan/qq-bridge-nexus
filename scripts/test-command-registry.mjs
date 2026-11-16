@@ -173,27 +173,13 @@ function makeBuiltinHarness(overrides = {}) {
   return { registry, harness, run };
 }
 
-test('内置命令：六条都在注册表里，且都挂了 handler', () => {
+test('内置命令：五条都在注册表里，且都挂了 handler', () => {
   const { registry } = makeBuiltinHarness();
   const ids = registry.list().map((entry) => entry.id).sort();
-  assert.deepEqual(ids, ['active', 'perm', 'reset', 'role', 'silent', 'status']);
+  assert.deepEqual(ids, ['active', 'perm', 'reset', 'role', 'silent']);
   assert.ok(registry.list().every((entry) => entry.migrated === true && entry.source === 'bridge'));
   assert.equal(registry.match('/quiet').entry.id, 'silent');
   assert.equal(registry.match('/speak').entry.id, 'active');
-});
-
-test('/status：回执里有会话、白名单、角色与模式', async () => {
-  const { harness, run } = makeBuiltinHarness();
-  const result = await run('/status');
-  assert.equal(result.handled, true);
-  assert.equal(harness.sent.length, 1);
-  assert.match(harness.sent[0].text, /会话 sess-1；白名单 通过；角色 星苒；模式 active/);
-});
-
-test('/status：会话不存在时显示「未创建」，白名单拦截时显示「拦截」', async () => {
-  const { harness, run } = makeBuiltinHarness({ acl: { allowed: () => false } });
-  await run('/status', { key: 'group:404' });
-  assert.match(harness.sent[0].text, /会话 未创建；白名单 拦截/);
 });
 
 test('/reset：调用 session.reset，并把它的结果透传出去', async () => {
@@ -256,7 +242,7 @@ test('payload：按来源分组，DSH 命令与工具清单原样返回', () => 
   registry.register({ id: 'demo', name: '/demo', source: 'plugin', pluginId: 'x', handler: async () => {} });
   const payload = buildCommandsPayload(registry);
   assert.equal(payload.ok, true);
-  assert.equal(payload.bridge.builtin.length, 6);
+  assert.equal(payload.bridge.builtin.length, 5);
   assert.deepEqual(payload.bridge.plugin.map((entry) => entry.id), ['demo']);
   assert.deepEqual(payload.dsh.map((entry) => entry.name), ['/compact', '/permission']);
   assert.deepEqual(payload.tools.map((entry) => entry.name), ['web_search', 'web_fetch', 'snowluma_status']);

@@ -70,8 +70,9 @@ export function describeToolArgs(args, { redact = (s) => s, maxChars = 600 } = {
  * @param {(entry:object)=>Promise<void>} opts.onTimeout   超时：调用方负责给 DSH 回 rejected 并通知 owner
  * @param {() => number} [opts.now]
  * @param {number} [opts.startId]  从持久化的序号继续（编号跨重启也不复用）
+ * @param {(seq:number)=>void} [opts.onAdvance]  每次编号前进后回调（调用方负责落盘）
  */
-export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, startId = 0, maxPerKey = 10 } = {}) {
+export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, startId = 0, maxPerKey = 10, onAdvance } = {}) {
   let seq = Number.isSafeInteger(startId) && startId > 0 ? startId : 0;
   const entries = new Map(); // id -> entry
   const toolCalls = new Map(); // sessionId -> Map<callId, {name, args, at}>
@@ -115,6 +116,7 @@ export function createApprovalRegistry({ timeoutMs, onTimeout, now = Date.now, s
       entries.delete(evicted.id);
     }
     seq += 1;
+    try { onAdvance?.(seq); } catch { /* 落盘失败不该阻断审批 */ }
     const call = lookupToolCall(sessionId, callId);
     const entry = {
       id: seq,

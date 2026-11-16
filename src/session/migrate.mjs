@@ -47,7 +47,6 @@ function listKeys(list, kindHint, platform) {
  * @param {boolean} input.allowAllWhenEmpty
  * @param {object} input.sessions 旧绑定 key→sessionId
  * @param {object} input.policies 旧指纹 key→fingerprint
- * @param {object} input.dormant 旧休眠表
  * @param {object} input.roleByKey 旧人格 byKey（null=不挂卡）
  * @param {object} input.initialPrompts key→{text,updatedAt}
  * @param {object} input.wakeConfigs key→wakeConfig
@@ -70,7 +69,6 @@ export function migrateSessionProfiles(input = {}) {
     ...Object.keys(input.roleByKey ?? {}).map(canonicalKey).filter(Boolean),
     ...Object.keys(input.initialPrompts ?? {}).map(canonicalKey).filter(Boolean),
     ...Object.keys(input.wakeConfigs ?? {}).map(canonicalKey).filter(Boolean),
-    ...Object.keys(input.dormant ?? {}).map(canonicalKey).filter(Boolean),
   ]);
 
   const report = { keys: 0, allowed: 0, blocked: 0, persona: 0, prompt: 0, wake: 0, binding: 0 };
@@ -120,8 +118,6 @@ export function migrateSessionProfiles(input = {}) {
       report.binding += 1;
     }
 
-    if (input.dormant?.[key]) patch.dormant = input.dormant[key];
-
     profile = applyPatch(profile, patch, now);
     // 档案 schema 已去掉三态字段；把迁移读到的旧准入先挂在 legacyAccess 上，
     // 交给后面的 migrateAccessModel 翻译成 v2 名单，翻译完会删掉。
@@ -148,7 +144,6 @@ export function migrateSessionProfiles(input = {}) {
         .filter(([, ref]) => !!ref),
     ),
     sessionPolicies: Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.binding?.fingerprint).map(([k, p]) => [k, p.binding.fingerprint])),
-    dormantSessions: Object.fromEntries(Object.entries(profiles).filter(([, p]) => p.dormant).map(([k, p]) => [k, p.dormant])),
     report,
     legacy: { allowCount: allow.length, denyCount: deny.length, allAllow },
   };

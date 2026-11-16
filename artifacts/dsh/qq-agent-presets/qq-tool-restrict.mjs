@@ -151,17 +151,17 @@ const SAFE_EXACT = new Set([
 ])
 
 /**
- * v0.3.0：L1「本地只读 Agent」（readonly preset）额外放行的只读工具。
+ * v0.3.0：readonly「本地只读 Agent」（readonly 能力档）额外放行的只读工具。
  *
- * 为什么 L1 不能只靠 DSH 的 read-only 沙箱：rc.2 文档写明 Windows 上 read-only 是 partial
+ * 为什么只读档不能只靠 DSH 的 read-only 沙箱：rc.2 文档写明 Windows 上 read-only 是 partial
  * （ACL 只限制写、硬链接/NUL 等仍有缝隙），而且沙箱拒绝写入后模型可以申请「越权重试」，
- * owner 一旦误批就真的写了。L1 直接在**工具层**不给 shell 与写文件工具 —— 与操作系统无关。
+ * owner 一旦误批就真的写了。只读档直接在**工具层**不给 shell 与写文件工具 —— 与操作系统无关。
  * 这里只放行：读文件、读图片、glob/grep 检索、DSH 内置联网搜索/抓取（只读）。
  */
 export const READONLY_AGENT_TOOLS = Object.freeze(['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch'])
 
 /**
- * v0.3.0：L2/L3 运维 Agent（workspace / full）的 profile。
+ * v0.3.0：workspace / full 两个运维 Agent 能力档的 profile。
  *
  * 只拒绝「派生 / 编排 / 插件 / 调度 / 跨会话 / 宿主自省」这几类；shell 与文件写入
  * 是否放行由 qq-approval-gate.mjs 决定（守卫只能拒绝，不能要求审批）。
@@ -222,8 +222,8 @@ function reportSkipped(profile, skipped) {
 }
 
 export function apply(ctx, config = {}) {
-  // profile：默认（不配）= QQ 群友会话的最严白名单；'readonly-agent' = L1 只读 Agent；
-  // 'operator' = L2/L3 运维 Agent（只拒绝派生/编排/插件类工具与凭据读取，其余交给审批闸门）。
+  // profile：默认（不配）= QQ 群友会话的最严白名单；'readonly-agent' = 只读运维 Agent；
+  // 'operator' = workspace / full 运维 Agent（只拒绝派生/编排/插件类工具与凭据读取，其余交给审批闸门）。
   const readonlyAgent = config?.profile === 'readonly-agent'
   const operator = config?.profile === 'operator'
 
@@ -258,7 +258,7 @@ export function apply(ctx, config = {}) {
     if (extraAllowed.has(name)) return protectedFileReason(exec)
     if (SAFE_PREFIXES.some((prefix) => name.startsWith(prefix))) return
     if (DENIED_PREFIXES.some((prefix) => name.startsWith(prefix))) return `工具 "${name}" 属于宿主注入器族，不允许在 QQ 会话中使用`
-    if (readonlyAgent) return `工具 "${name}" 不在 L1 只读 Agent 白名单内，已拒绝（L1 只允许读文件/检索/联网只读；需要写入或执行命令请让 owner 在 QQ 私聊用 /level L2 申请提升）`
+    if (readonlyAgent) return `工具 "${name}" 不在只读运维 Agent 白名单内，已拒绝（只读档只允许读文件/检索/联网只读；需要写入或执行命令请让管理员换更高权限的能力档）`
     return `工具 "${name}" 不在 QQ 桥接白名单内，已拒绝（仅允许 QQ MCP 工具与无害模型侧工具）`
   })
 }

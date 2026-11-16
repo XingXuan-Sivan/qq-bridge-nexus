@@ -114,8 +114,9 @@ test('全局配置页：每个分区都写 config.json 顶层段，准入与会�
         (c) => c.compact?.mode === 'early' && c.compact?.thresholdTokens === 60_000],
       ['所有者与管理员', 'POST', '/api/whitelist', { owner: '100001', admins: [] },
         (c) => c.owner?.id === '100001' && Array.isArray(c.admins)],
-      ['权限级别', 'POST', '/api/config/permission', { default: 'read-only', allowFull: true, fullTtlMin: 30 },
-        (c) => c.permission?.allowFull === true && c.permission?.default === 'read-only'],
+      // 权限级别只存默认值：旧字段（allowFull / fullTtlMin）能改写就改写，不回写进 config.json。
+      ['权限级别', 'POST', '/api/config/permission', { default: 'workspace-write', allowFull: true, fullTtlMin: 30 },
+        (c) => c.permission?.default === 'workspace-write' && c.permission?.allowFull === undefined && c.permission?.fullTtlMin === undefined],
       ['安全拦截', 'POST', '/api/security', { interceptNotify: false },
         (c) => c.security?.interceptNotify === false],
       ['定时静默', 'POST', '/api/silence', {

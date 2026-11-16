@@ -20,9 +20,9 @@ import {
 } from '../src/tools/catalog.mjs';
 
 test('平台工具与 Agent 模块数量固定，id 不重复', () => {
-  assert.equal(PLATFORM_TOOLS.length, 37);
+  assert.equal(PLATFORM_TOOLS.length, 36);
   assert.equal(AGENT_MODULES.length, 8);
-  assert.equal(CATALOG_ENTRIES.length, 45);
+  assert.equal(CATALOG_ENTRIES.length, 44);
   const ids = CATALOG_ENTRIES.map((entry) => entry.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(platformToolFlags(), PLATFORM_TOOLS.map((tool) => tool.flag));
@@ -72,7 +72,7 @@ test('适配器声明的工具能并入目录，未知风险按 admin 兜底', (
     platform: [{ id: 'customQuery', label: '自定义查询', risk: 'read' }, { id: 'customDanger', label: '危险操作', risk: 'nonsense' }],
     agent: [{ id: 'tool-pwsh', label: '执行命令（覆盖）', risk: 'exec' }],
   });
-  assert.equal(merged.length, 47);
+  assert.equal(merged.length, 46);
   const custom = merged.find((entry) => entry.id === 'customQuery');
   assert.equal(custom.side, 'platform');
   assert.equal(custom.gated, false);
@@ -89,8 +89,8 @@ test('目录快照字段齐全，权限矩阵覆盖四档', () => {
   const snapshot = toolCatalogSnapshot();
   assert.deepEqual(snapshot.risks, TOOL_RISKS);
   assert.deepEqual(Object.keys(LEVEL_ALLOWS), ['read-only', 'workspace-write', 'full-ask', 'full']);
-  assert.equal(snapshot.entries.length, 45);
-  assert.equal(snapshot.platform.length, 37);
+  assert.equal(snapshot.entries.length, 44);
+  assert.equal(snapshot.platform.length, 36);
   assert.equal(snapshot.agent.length, 8);
   assert.ok(snapshot.levelAllows['read-only'].includes('send'));
   assert.ok(!snapshot.levelAllows['read-only'].includes('exec'));

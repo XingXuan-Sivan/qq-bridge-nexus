@@ -19,7 +19,6 @@ import * as stickerLimits from '../src/lib/sticker-limits.mjs';
 import * as modelPrices from '../src/model-prices.js';
 import * as dshModel from '../src/dsh-model.js';
 import * as quoteForward from '../src/quote-forward.js';
-import * as modeHandover from '../src/mode-handover.js';
 import * as roleCard from '../src/role-card.js';
 import { createScheduler } from '../src/scheduler/engine.js';
 import { parseRemindCommand, REMIND_HELP, formatTaskList } from '../src/scheduler/commands.js';
@@ -105,22 +104,21 @@ import { createAgentPort } from '../src/agent-side/port.mjs';
 // 平台注册表：快照拼装、单条查找、写口校验都是纯函数，用真实现。
 import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } from '../src/platforms/registry.mjs';
 // 提示注入通道与平台实现查询都是注册表的纯查询（声明面来自 profiles/…/adapters/runtime.mjs），直接用真实现。
-import { agentPlatform, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
+import { agentPlatform, agentPlatformPeerPermissions, agentPlatformPromptChannels } from '../src/agent-side/runtime-registry.mjs';
 // 平台话术的读写（唤醒前缀、控制台提示词编辑器、还原出厂）：真实现，纯 fs。
 // 整体注入命名空间：以后那边新增导出不必再回来补一行，也不会出现「函数在 VM 里未定义、
 // 读话术静默变空串」这种看不出问题的夹具失真。
 import * as platformPromptLib from '../src/user-side/prompt.mjs';
 import { DSH_AGENT_CAPABILITIES, createDshPort } from '../src/agent-side/adapters/dsh/port.mjs';
 import { createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
-import { normalizePermissionConfig, normalizeSessionPermission, presetForLevel, resolvePermission, FORBIDDEN_PERMISSION_PRESETS, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
+import { normalizePermissionConfig, normalizeSessionPermission, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry } from '../src/platforms/adapter-registry.mjs';
 
 import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
 import { migrateSessionProfiles } from '../src/session/migrate.mjs';
-import { isUsableMode, resolveEffectiveMode } from '../src/session/mode.mjs';
 // 多管理员（P3）：bridge 直接 import，夹具按同名补回。
-import { actorForQQ, actorForAddress, addressKey, normalizeOwner, normalizeAdmins, closedAgentMaxLevel, canOpenLevel } from '../src/admin/admins.mjs';
+import { actorForQQ, actorForAddress, addressKey, normalizeOwner, normalizeAdmins } from '../src/admin/admins.mjs';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 import { createSessionPolicy } from '../src/session/policy.mjs';
 // 上游适配（P7 第四步）：SnowLuma 健康探测同样是真实现，夹具要补回。
@@ -143,9 +141,6 @@ import * as memoryLocalStore from '../src/memory/local-store.mjs';
 import { SECURITY_HEADERS } from '../src/http/security.mjs';
 import { createAgentTurnCollector } from '../src/agent-side/collector.mjs';
 import { createDshEventPlane } from '../src/agent-side/adapters/dsh/events-plane.mjs';
-// P3 模式持久化：bridge 直接 import；夹具剥掉 import 后要按同名补回（否则 main() 里
-// createModeStore 会 ReferenceError）。夹具跑的是真实实现，两个后端都是纯存取，不联网。
-import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from '../src/runtime/mode-store.mjs';
 // 调度内核（src/scheduling/）：bridge 直接 import 这些纯函数，
 // 夹具剥掉 import 后按顶层名补回。整体注入命名空间，内核新增导出不必回来补行。
 import * as schedulingBatching from '../src/scheduling/batching.mjs';
@@ -222,7 +217,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, typeof content === 'string' ? content : JSON.stringify(content));
   }
-  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], forgets: [], cancelled: [], images: [], faces: [], http: [], commands: [], settings: [], responds: [], renames: [], selectModels: [] };
+  const calls = { created: [], archived: [], sent: [], prompts: [], follows: [], forgets: [], cancelled: [], images: [], faces: [], http: [], commands: [], responds: [], renames: [], selectModels: [] };
   // 语音发送在桥接里是**直接 fetch 网关**（与文本/表情共用 sendChain，但要自己带 record 段），
   // 所以这里给 VM 注入一个记录型 fetch：既不让测试真的发 QQ 消息，又能断言发出的段内容。
   const fakeFetch = async (url, init = {}) => {
@@ -249,12 +244,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   const success = (value) => ({ result: { ok: true, value } });
   const api = {
     events: { follow: (id) => calls.follows.push(id), forget: (id) => calls.forgets.push(id) },
-    // settings.describe 的默认桩：没有 qq-mode 命名空间 ⇒ refreshMode() 回退到本地 mode.json。
-    // 测试可覆盖它来验证「DSH 设置里的空 ownerQQ 不得覆盖 config.json」等契约。
-    settings: {
-      describe: async () => success({ namespaces: [] }),
-      update: async () => success({ updated: true })
-    },
     workspace: {
       create: async () => success({ created: false, workspace: { workspaceId: 'fixture-workspace' } }),
       rename: async (params) => { calls.renames.push(params); return success({}); },
@@ -271,7 +260,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // v0.3.0：会话斜杠命令（/permission）与权限预设目录、设置写穿。
     commands: { execute: async (sessionId, line) => { calls.commands.push({ sessionId, line }); const name = String(line).split(' ')[1] ?? ''; return success({ commandId: 'c', result: { kind: 'success', text: name ? `preset ${name}` : 'current preset workspace-write' } }); } },
     permissionPresets: { catalog: async () => success({ options: [{ value: 'read-only' }, { value: 'workspace-write' }, { value: 'danger-full-access' }, { value: 'qq-full-ask' }], defaultPreset: 'workspace-write' }) },
-    settings: { update: async (p) => { calls.settings.push(p); return success({}); }, describe: async () => success({ namespaces: [] }) },
     agentPresets: { list: async () => success({ presets: [] }) },
     stopSessionWork: async (sessionId) => { calls.cancelled.push(sessionId); return { removed: 0 }; },
     callUnary: async (method, params) => {
@@ -369,13 +357,13 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     sendToQQ, sendStickerV2, collectStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
     getSocialV2State, appendSocialV2Message, recordSentMessagesV2, localMemory,
     buildWakePromptV2, buildWakeSnapshotV2, sendWakePromptV2, socialV2,
-    refreshMode, trackTurnEvent, replayPendingWakeReasonsV2,
+    trackTurnEvent, replayPendingWakeReasonsV2,
     collectors, setupSleepTimerV2,
     getInitialPrompt, setInitialPrompt, loadInitialPrompts, formatInitialPromptV2,
     initialPrompts, initialPromptMaxChars,
     extractMediaFromSegments, segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
     resolveReplyInfo, seenForwardIds, forwardRawCache,
-    ownerTranscript, pendingHandover, reconcileSessionPolicies, recordOwnerTranscript, recordSentMessagesV2,
+    reconcileSessionPolicies, recordSentMessagesV2,
     scheduler, scheduledNotes, handleRemindCommand, silence, scheduledSilenceFor, silenceTick, shouldBlockSilentReply,
     roleRefresh, currentRoleFingerprintV2, roleRefreshBlockV2, refreshRoleNowV2, currentRoleHintV2, currentRoleHint, roleNameForKey, readRoleState,
     writeRoleStateFull,
@@ -386,8 +374,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     getStickerEntries() { return stickerEntries; },
     emojiCdnCandidates, getImageDimensions, acceptImageBuffer, MAX_MEDIA_BYTES, bot,
     isConversationBusyV2, v2TurnStartAt, turnLeaseNoted, TURN_BUSY_LEASE_MS,
-    settingFromDshNamespace, selfIdentityTextV2, buildWakeReminderPromptV2,
-    getMode() { return currentMode; },
+    selfIdentityTextV2, buildWakeReminderPromptV2,
+    getMode() { return defaultMode(); },
     setSelfIdentity(display, id) {
       selfDisplayName = String(display ?? '');
       selfUserId = String(id ?? '');
@@ -396,29 +384,25 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     flushQueue, retireSession, sessions, getDshHealth, reconcileDshSessions, rebuildSession,
     profileModelOf, profileModelSignature, modelLabelForKey, sessionCanSeeImages, ensureChatModel,
     effectiveMode, passiveAllowed, proactiveAllowed,
-    runtimeOf, promptChannelOf, permissionAuthorityOf, applySessionPermission, readAgentPermission, describeAgentPermission,
-    agentPermissionOptions, sessionAgentPayload,
+    runtimeOf, promptChannelOf, readAgentPermission, sessionAgentPayload,
     saveActiveAgentPlatform,
     // 提示注入四条：通道解析、首轮前缀的「带过没有」、记账与档案写入。
     // 投递路径（deliverPrompt / ensureSession）在切片点之外，测试用它们直接钉语义。
     platformPromptTextFor, promptInjectedFor, markPromptInjected, ensureSessionProfile,
-    ext, handleMemberNotice, reconcileConversationMembers, applyModeChange, sendOwnerDirect, tryHandleApprovalReply, initControllerOnce, looksLikeAdminChannelText,
-    setLevel(value) { currentLevel = value; },
-    getMode() { return { mode: currentMode, level: currentLevel }; },
+    ext, handleMemberNotice, reconcileConversationMembers, sendOwnerDirect, tryHandleApprovalReply, looksLikeAdminChannelText,
     voiceCfg, voiceLibrary, resolveVoicePathForV2, resolveVoicePathForOperator,
     voiceBudgetCheck, sendVoiceV2, sendVoiceForV2, assertOutboundAuditOk,
-    // 引擎由「会话行为 → 平台条目 defaultBehavior」决定，全局 mode 只剩 closed-agent。
-    // 旧用例用 setMode('chat'/'reserved'/'reserved2') 切引擎：映射成改平台默认行为。
+    // 引擎由「会话行为 → 平台条目 defaultBehavior」决定：旧用例用 setMode 切引擎，
+    // 这里统一映射成「改平台默认行为」，不再有第二个全局模式变量。
     setMode(value) {
-      if (value !== 'closed-agent') {
-        const behavior = value === 'reserved2' ? 'social-v2' : value === 'reserved' ? 'social-v1' : '';
-        cfg.platforms = cfg.platforms ?? {};
-        cfg.platforms.users = cfg.platforms.users ?? {};
-        cfg.platforms.users.qq = { ...(cfg.platforms.users.qq ?? {}), defaultBehavior: behavior };
-      }
-      currentMode = value;
+      const behavior = value === 'reserved2' ? 'social-v2' : value === 'reserved' ? 'social-v1' : '';
+      cfg.platforms = cfg.platforms ?? {};
+      cfg.platforms.users = cfg.platforms.users ?? {};
+      cfg.platforms.users.qq = { ...(cfg.platforms.users.qq ?? {}), defaultBehavior: behavior };
     },
     setReady(value) { agentReady = value; },
+    // 启动侧的一次性初始化（定时器补齐、静默监听）：夹具不跑连接层，由用例显式拉起。
+    startOnce() { startSchedulerOnce(); startSilenceMonitorOnce(); },
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
   };
@@ -463,6 +447,8 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     CAPABILITY_RUNTIME_DEFAULTS,
     agentPlatform,
     agentPlatformPromptChannels,
+    // 对端权限档的取值域由执行体自己申报（能力档建会话时钉档要靠它校验）。
+    agentPlatformPeerPermissions,
     ...schedulingBatching,
     ...schedulingPacing,
     ...schedulingCursor,
@@ -501,7 +487,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // bridge.js 从 src/http/security.mjs 导入（夹具会剥掉 import），这里给同名常量。
     SECURITY_HEADERS,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
-    ...modelPrices, ...dshModel, ...quoteForward, ...modeHandover, ...roleCard, ...tokenLedger,
+    ...modelPrices, ...dshModel, ...quoteForward, ...roleCard, ...tokenLedger,
     createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...presetDefaults, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
     // 插件内核与人格解析在 VM 里桩掉：这个夹具只验证 bridge.js 的接线与主链，不加载真插件、不连 soulkit。
     // 命令注册表用真实现（纯内存、无 IO），命令迁移后的行为才能在 VM 里验证。
@@ -526,8 +512,6 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     wakeAccessAxis,
     normalizePermissionConfig,
   normalizeSessionPermission,
-  FORBIDDEN_PERMISSION_PRESETS,
-  presetForLevel,
   resolvePermission,
   PERMISSION_LABEL,
   PERMISSION_LEVELS,
@@ -542,15 +526,11 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     migrateAccessModel,
     summarizeAccessConfig,
     migrateSessionProfiles,
-    resolveEffectiveMode,
-    isUsableMode,
     actorForQQ,
     actorForAddress,
     addressKey,
     normalizeOwner,
     normalizeAdmins,
-    closedAgentMaxLevel,
-    canOpenLevel,
     createSessionRegistry,
     createSessionPolicy,
     createSnowlumaHealth,
@@ -569,9 +549,6 @@ createExtensionCatalog,
     createExtensionHub,
     createPresetStore,
     validateAgentYaml,
-    createModeStore,
-    createLocalModeFileBackend,
-    createDshModeBackend,
     ensureHubToken,
     hubTokenMatches,
     formatKey,

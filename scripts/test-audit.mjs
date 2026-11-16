@@ -64,10 +64,6 @@ const tests = [
   //    这是唯一挡住"绕过桥接直连 OneBot HTTP"的东西（见 QSH_PLAN.md §0.1/§5.2），
   //    所以必须在每次回归里跑，而不是一次性验收。
   'test-preset-local-tools.mjs',
-  // qq-mode-console 的 settings 契约：0.2.0 删除了 ctx.settings.register()，
-  // 命名空间改为由 loader entry id + 导出的 Config 推导。断言三点前提都在，
-  // 并且那条已删除的 API 不会被照旧注释加回来。
-  'test-qq-mode-plugin.mjs',
   // SnowLuma 上游健康（被误诊成「qq-bridge 注入失败」的那个失败形态）：
   //   · good 必须取自心跳 status.good / get_status —— 取自 get_login_info 会**静默失效**
   //     （SDK 不校验 data 载荷，good 会永远停在 null，整条权威信号变成死分支）；
@@ -77,12 +73,10 @@ const tests = [
   // ── v0.3.0 新功能（全部离线，假数据）────────────────────────────────────────
   // 人际连续性：QQ 号认人、改名、入群分类/去重、首次部署对账、可见范围过滤、跨群协作、存储可靠性。
   'test-continuity.mjs',
-  // 管理通道：TOTP（RFC 6238 向量）、审计哈希链、确认码状态机、并发申请、自动回落、审批编号、命令解析。
-  'test-admin-control.mjs',
-  // 接线：真实 bridge.js + 假 DSH/OneBot —— 确认消息不进模型、非 owner/提示注入无法提权、
-  // 权限预设钉住与 fail-closed、审批绑定参数、入群唤醒、AI 工具的会话边界。
+  // 接线：真实 bridge.js + 假 DSH/OneBot —— /perm 与 /panic、非 owner 无法提权、
+  // 对端权限档钉住与 fail-closed、审批编号绑定参数、入群唤醒、AI 工具的会话边界。
   'test-integration-v030.mjs',
-  // L1 只读 agent preset 的工具白名单守卫（不依赖 Windows 沙箱）。
+  // 运维 Agent 的审批闸门 / 工具白名单 / 凭据路径保护（不依赖 Windows 沙箱）。
   'test-agent-readonly-guard.mjs',
   // 插件内核（v1.2.0）：清单/配置坏输入只降级、钩子超时隔离、人格 provider 注册表、关闭流程。
   // 插件内核与配置 schema：清单校验、默认值/边界、无 schema 兼容。
@@ -100,13 +94,11 @@ const tests = [
   'test-command-registry.mjs',
   // 会话重置（P7 第三步）：逐桶清理、落盘/停 DSH/回执的顺序、停止失败不阻断归档。
   'test-session-reset.mjs',
-  // 会话级有效模式（P2a）：closed-agent 排他、inherit 回落、覆盖合法性与非法值归一。
-  'test-session-mode.mjs',
   // 会话级模型（P2b）：模型签名进指纹、档案优先、看图能力与全局参数回退。
   'test-session-model.mjs',
   // 主动检查点（P2b）：调度器跳过通知去重/落盘、方案 A 的 v1 主动轴门禁。
   'test-session-proactive.mjs',
-  // 多管理员（P3）：名单归一化、capability、closed-agent 级别与私聊被动豁免。
+  // 多管理员（P3）：名单归一化、capability、角色与私聊被动豁免。
   'test-admins.mjs',
   // 手动静默：策略归一化、owner/管理员/普通矩阵、阶段开关、sendOnly、旧状态兼容。
   'test-manual-silence.mjs',
@@ -120,7 +112,7 @@ const tests = [
   'test-session-registry.mjs',
   // 会话稳定性（P0）：新建即命名、启动对账标 missing、prompt not-found 退役重建一次、60 秒 3 次熔断。
   'test-session-lifecycle.mjs',
-  // 会话策略指纹（P7 第三步收尾）：级别进指纹（提权要退役旧会话）、非 closed-agent 不进指纹、isCurrent 三条件。
+  // 会话策略指纹：引擎 / preset / 模型进指纹（换了就要退役旧会话）、级别不进指纹、isCurrent 三条件。
   'test-session-policy.mjs',
   // 会话档案目录：扫描/写入、损坏隔离、旧三态迁移、v2 档案的 planId / mode 改写成能力档 + 行为。
   'test-session-directory.mjs',
@@ -195,7 +187,6 @@ const tests = [
   'test-slang-guess.mjs',
   'test-dsh-model.mjs',
   'test-quote-forward.mjs',
-  'test-mode-handover.mjs',
   'test-scheduler.mjs',
   'test-silence-schedule.mjs',
   'test-role-refresh.mjs',

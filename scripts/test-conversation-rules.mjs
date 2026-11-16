@@ -113,7 +113,7 @@ function request(server, method, route, { body, headers = {} } = {}) {
 test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘并注入目标会话唤醒提示词', async () => {
   const h = await bridgeHarness();
   try {
-    await h.initControllerOnce('reserved2');
+    h.startOnce();
     h.setMode('reserved2');
     h.cfg.allow.private = [String(OWNER)];
     const ownerSt = h.getSocialV2State(`qq:private:${OWNER}`);
@@ -171,7 +171,6 @@ test('集成（真实 bridge.js 夹具）：权限边界、只读、规则落盘
       await new Promise((r) => server.close(r));
     }
   } finally {
-    h.ext.controller.stop();
     await h.close();
   }
 });

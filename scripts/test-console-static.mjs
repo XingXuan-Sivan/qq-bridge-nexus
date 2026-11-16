@@ -170,7 +170,7 @@ console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 /
   ok(/setConsolePage\('platforms', \{ sub: `agent:\$\{platformId\}`, tab: 'capabilities' \}\)/.test(plansText),
     '「改能力档」直接跳到声明这套档的平台能力页');
   const detailText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
-  ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /canPinPermission/.test(detailText),
+  ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /peerPermissions/.test(detailText),
     '平台详情的能力位矩阵写出注入通道与权限权威支持面');
   const sessionsText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
   ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染 Agent 平台与权限');

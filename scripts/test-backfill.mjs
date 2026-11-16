@@ -147,12 +147,12 @@ test('② 端到端：补收进未读、排唤醒、提示说明、不执行命�
     assert.ok(st.unread.some((m) => m.messageId === '5010' && m.backfill), '太旧的也记下');
     assert.ok(!st.pendingWakeReason, '太旧的不唤醒');
 
-    // 非二代模式：不补
+    // 没有会话处于对话环境（平台默认行为不是聊天引擎）：不补
     hist.group[456].push(groupMsg(5020, 3, [atSelf, text(' 现在呢')]));
     h.setMode('chat');
     const skipped = await h.runBackfill({ since: Date.now() - 10 * 60_000, gapMs: 10 * 60_000 });
-    assert.equal(skipped.skipped, 'mode');
-    assert.ok(!st.unread.some((m) => m.messageId === '5020'), '非二代模式不补');
+    assert.equal(skipped.skipped, 'no-conversation');
+    assert.ok(!st.unread.some((m) => m.messageId === '5020'), '没有会话处于对话环境时不补');
   } finally { await h.close(); }
 });
 

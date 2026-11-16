@@ -163,7 +163,6 @@
           "sendVoice": false,
           "webImage": false,
           "feedback": false,
-          "requestMode": false,
           "crossGroup": false,
           "ownerGroupAccess": false,
           "ownerRelay": false,

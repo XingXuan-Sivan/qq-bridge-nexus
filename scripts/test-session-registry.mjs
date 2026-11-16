@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { createSessionRegistry } from '../src/session/registry.mjs';
 
 const make = (platform = 'dsh') => {
-  let state = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
+  let state = { sessions: {}, sessionPolicies: {} };
   let instance = platform;
   const registry = createSessionRegistry(() => state, { instance: () => instance });
   return {
@@ -111,7 +111,7 @@ test('state 被整体替换后注册表跟着走（loadState 的路径）', () =
   const { registry, replaceState } = make();
   registry.bindSession('a', 'sid-1', 'p');
   // 整体替换时带着的仍是**老形状**（磁盘上就是这样），读侧必须照常工作。
-  replaceState({ sessions: { b: 'sid-2' }, sessionPolicies: { b: 'p2' }, dormantSessions: {} });
+  replaceState({ sessions: { b: 'sid-2' }, sessionPolicies: { b: 'p2' } });
   assert.equal(registry.get('a'), null);
   assert.equal(registry.get('b'), 'sid-2');
   registry.bindSession('c', 'sid-3', 'p3');

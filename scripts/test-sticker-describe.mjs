@@ -166,17 +166,11 @@ test('② 端到端：启动 → 专用会话看图 → 写进本地表情库；
   });
 });
 
-test('③ 闸门：agent token 拒绝；agent 模式 / 不能看图 / DSH 未就绪时不启动', async () => {
+test('③ 闸门：agent token 拒绝；DSH 未就绪 / 不能看图时不启动', async () => {
   await withHarness([sticker('a')], async (h, port) => {
     const token = h.getSocialV2State('group:456').agentToken;
     const agent = await call(port, '/api/stickers/describe', { method: 'POST', body: {}, headers: { 'x-agent-token': token, 'x-agent-call': '1' } });
     assert.equal(agent.status, 403, 'AI 不能自己触发');
-
-    h.setMode('closed-agent');
-    const inAgent = await call(port, '/api/stickers/describe', { method: 'POST', body: {} });
-    assert.equal(inAgent.status, 409);
-    assert.match(inAgent.json.error, /agent 模式下不运行/);
-    h.setMode('reserved2');
 
     h.setReady(false);
     const notReady = await call(port, '/api/stickers/describe', { method: 'POST', body: {} });

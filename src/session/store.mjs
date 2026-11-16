@@ -6,20 +6,20 @@
  * 1. 读失败或内容损坏时**绝不回写**。早期实现读到坏文件就当空状态处理，紧接着一次
  *    `saveState()` 会把空映射原子写回磁盘 —— 一次截断/占用/写满就变成永久丢失。
  *    这里用返回的 `writable:false` 表达「降级为只读不写」，由调用方原样传递。
- * 2. 缺字段就地补齐（`sessionPolicies`、`dormantSessions`），不因为老版本文件没有这些键
+ * 2. 缺字段就地补齐（`sessionPolicies`），不因为老版本文件没有这些键
  *    就把整个文件当作不可用。
  *
- * 模块本身不持有状态，也不 import 全局：`file` / `atomicWriteJson` / `log` /
- * `normalizeDormant` 都由调用方传入，测试里可以指向临时目录。
+ * 模块本身不持有状态，也不 import 全局：`file` / `atomicWriteJson` / `log`
+ * 都由调用方传入，测试里可以指向临时目录。
  */
 
-const EMPTY = () => ({ sessions: {}, sessionPolicies: {}, dormantSessions: {} });
+const EMPTY = () => ({ sessions: {}, sessionPolicies: {} });
 
 /**
  * @returns {{ state: object, writable: boolean }}
  *   `writable:false` 表示文件读不了或内容损坏 —— 调用方必须停止回写。
  */
-export function loadSessionState({ file, readFile, log = () => {}, normalizeDormant = (x) => x ?? {} }) {
+export function loadSessionState({ file, readFile, log = () => {} }) {
   let raw;
   try {
     raw = readFile(file);
@@ -42,8 +42,6 @@ export function loadSessionState({ file, readFile, log = () => {}, normalizeDorm
   }
   const state = loaded && loaded.sessions && typeof loaded.sessions === 'object' ? loaded : { sessions: {} };
   if (!state.sessionPolicies || typeof state.sessionPolicies !== 'object' || Array.isArray(state.sessionPolicies)) state.sessionPolicies = {};
-  // 模式切换期间休眠的聊天会话（见 src/mode-handover.js）；脏数据丢弃
-  state.dormantSessions = normalizeDormant(state.dormantSessions);
   return { state, writable: true };
 }
 

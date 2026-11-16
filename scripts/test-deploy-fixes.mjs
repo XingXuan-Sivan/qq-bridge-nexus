@@ -66,7 +66,6 @@ test('③ 会话重置清掉等待租约：forgetConversationCaches 连归一后
   const deps = src.slice(src.indexOf('createSessionResetter({'), src.indexOf('return resetSessionImpl('));
   assert.match(deps, /^\s+forgetConversationCaches,/m, '桥接要把等待租约清理登记进重置依赖');
   assert.match(deps, /forgetRoleSeen:/, '重置要忘掉「已读人格卡」，下次唤醒重新注入');
-  assert.match(deps, /discardDormantForReset,/, '重置要丢掉休眠中的会话');
   const block = (marker, endMarker) => { const i = src.indexOf(marker); assert.ok(i > 0, marker); return src.slice(i, src.indexOf(endMarker, i)); };
   assert.match(block("url.pathname === '/api/session/reset'", 'archived: oldSessionId'), /resetSession\(key, \{ notify: false \}\)/, '控制台 / 控制中心的「重置会话」走同一份序列，且不发群回执');
   assert.match(block("url.pathname === '/api/socialV2/reset'", 'saveState();'), /forgetConversationCaches\(key\);/, '二代仿真全量重置');

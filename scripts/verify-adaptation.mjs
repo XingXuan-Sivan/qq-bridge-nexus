@@ -327,12 +327,6 @@ if (want('repo')) {
   check('repo', 'bridge.js 可执行代码无 deepseek-v4-flash-vision-exp 残留', !bridgeCode.includes('deepseek-v4-flash-vision-exp'));
   check('repo', 'bridge.js 可执行代码无 router-standard 残留', !bridgeCode.includes('router-standard'));
   check('repo', 'DSH install 适配器可执行代码无 router-standard 残留', !installAdapterCode.includes('router-standard'));
-  check('repo', 'DSH install 适配器新装默认 closedAgentPreset 留空（交给 DSH 默认 preset）', /closedAgentPreset:\s*''/.test(installAdapterCode));
-  // P3：模式持久化走 src/runtime/mode-store.mjs，读/写不再各自拼 state/mode.json。
-  check('repo', 'bridge.js 的模式持久化走 src/runtime/mode-store.mjs（P3）',
-    bridgeCode.includes('./runtime/mode-store.mjs') && bridgeCode.includes('modeStore.readRemote') && bridgeCode.includes('modeStore.writeRemote'));
-  check('repo', 'bridge.js 不再直接用 readJsonSafe 读 state/mode.json 做模式判定',
-    !/readJsonSafe\(path\.join\(STATE_DIR, 'mode\.json'\)/.test(bridgeCode));
   check('repo', 'bridge.js 默认模型为 deepseek-flash', /model:\s*'deepseek-flash'/.test(bridgeCode));
   check('repo', 'bridge.js 不再有「无参创建会话」兜底', !/sessions\.create\(\{\}\)/.test(bridgeCode));
   check('repo', 'bridge.js 含 preset 清单/默认 preset 解析', bridgeSrc.includes('resolvePresetName') && bridgeSrc.includes('refreshPresetList'));
@@ -341,14 +335,11 @@ if (want('repo')) {
   // 旧实现会在 preset 不在 DSH 清单里时静默回退到 DSH 默认 preset（standard，含 bash/
   // 文件读写），把本地工具暴露给 QQ 群 —— 与 RULES.md「无本地工具」的承诺直接矛盾。
   check('repo', 'preset 解析带 strict 开关', /resolvePresetName\(name, \{ strict = false \} = \{\}\)/.test(bridgeCode));
-  check('repo', '非 closed-agent 模式以 strict 解析 preset', /resolvePresetName\(wanted, \{ strict: true \}\)/.test(bridgeCode));
-  check('repo', '群聊模式缺少 preset 时拒绝建会话（fail-closed）', /strictPreset && !preset/.test(bridgeCode));
-  // 2026-11-13 替换：旧断言 `/strictPreset \? \[true\] : \[true, false\]/` 钉的是
-  // 「不重试无 preset 建会话」这个**实现细节**。0.2.x 把它重构成 agentPlan / closedAgentPlan
-  // （closed-agent 也 fail-closed，比原来更严），正则立刻失效。现在钉的是行为契约：
-  // agentPlan 失败必须直接抛错，不能落到"再试一次"的分支。
-  check('repo', 'closed-agent 计划失败时直接抛错（不再重试建会话）',
-    /if \(agentPlan && !agentPlan\.ok\)\s*\{\s*throw/.test(bridgeCode));
+  check('repo', '非直通档会话以 strict 解析 preset', /resolvePresetName\(wanted, \{ strict: true \}\)/.test(bridgeCode));
+  check('repo', '缺少 preset 时拒绝建会话（fail-closed）', /strictPreset && !preset/.test(bridgeCode));
+  // 直通档不挂 preset、其余能力档必挂：两者都从能力档的 runtime 声明读，不得各自维护一份名单。
+  check('repo', 'preset 策略由能力档 runtime 声明驱动',
+    /const passthrough = passthroughOf\(key\)/.test(bridgeCode) && /const strictPreset = !passthrough/.test(bridgeCode));
 
   // ── 1d-2. 平台解耦不变式（B4）───────────────────────────────────────────
   // 内核只通过 src/agent-side/runtime-registry.mjs 问平台能力；具体平台装配点只在
@@ -488,10 +479,10 @@ if (want('repo')) {
   // 复发，这里把「所有对外自称的版本号必须等于 package.json」固定下来。
   const pkgJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const lockJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-  const pluginPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'artifacts/dsh/qq-mode-console/package.json'), 'utf8'));
+  const bundlePkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'artifacts/dsh/qq-agent-presets/package.json'), 'utf8'));
   check('repo', 'package-lock.json 顶层 version 与 package.json 一致', lockJson.version === pkgJson.version, `lock=${lockJson.version} pkg=${pkgJson.version}`);
   check('repo', 'package-lock.json packages[""] version 与 package.json 一致', lockJson.packages?.['']?.version === pkgJson.version, `lock=${lockJson.packages?.['']?.version}`);
-  check('repo', 'qq-mode-console 插件版本与主包一致', pluginPkg.version === pkgJson.version, `plugin=${pluginPkg.version}`);
+  check('repo', 'qq-agent-presets bundle 版本与主包一致', bundlePkg.version === pkgJson.version, `bundle=${bundlePkg.version}`);
   for (const f of ['src/mcp-snowluma-safe.js', 'src/mcp-host-server.js', 'src/mcp-web-search-safe.js']) {
     const m = /new McpServer\(\{[^}]*version:\s*'([^']+)'/.exec(fs.readFileSync(path.join(ROOT, f), 'utf8'));
     check('repo', `${f} 的 MCP serverInfo.version 与主包一致`, m?.[1] === pkgJson.version, `声明=${m?.[1]} 主包=${pkgJson.version}`);
@@ -503,7 +494,6 @@ if (want('repo')) {
   const SYNTAX_FILES = [
     'src/bridge.js', 'src/mcp-snowluma-safe.js', 'src/mcp-host-server.js',
     'src/mcp-web-search-safe.js', 'src/slang-learner.js', 'src/self-test.js',
-    'src/runtime/mode-store.mjs',
     // 执行体适配层整目录纳入：新增平台 / 事件面 / 收集器时不必再回来改这份清单。
     ...srcFiles.map((file) => path.relative(ROOT, file).replace(/\\/g, '/'))
       .filter((rel) => rel.startsWith('src/agent-side/')),
@@ -578,15 +568,11 @@ if (want('deploy')) {
     }
 
     const bundles = deployed.pkg?.dsh?.profile?.bundles ?? [];
-    check('deploy', 'profile bundles 含 qq-mode-console', bundles.includes('qq-mode-console'));
     check('deploy', 'profile bundles 含 qq-agent-presets', bundles.includes('qq-agent-presets'));
-    check('deploy', 'qq-mode-console link 依赖已注册', String(deployed.pkg?.dependencies?.['qq-mode-console'] ?? '').startsWith('link:'));
     check('deploy', 'qq-agent-presets link 依赖已注册', String(deployed.pkg?.dependencies?.['qq-agent-presets'] ?? '').startsWith('link:'));
     // junction 检查：pnpm 的 link: 依赖会建指向仓库的 junction，守卫行的裸说明符靠它解析。
-    for (const pkgName of ['qq-mode-console', 'qq-agent-presets']) {
-      check('deploy', `${pkgName} 已 link 进 profile node_modules`,
-        fs.existsSync(path.join(profileDir, 'node_modules', pkgName)));
-    }
+    check('deploy', 'qq-agent-presets 已 link 进 profile node_modules',
+      fs.existsSync(path.join(profileDir, 'node_modules', 'qq-agent-presets')));
 
     // 部署件就是仓库件（junction），但「磁盘上改了」不等于「DSH 已经加载了」。
     // 这条从 **profile 的 node_modules 解析路径**加载守卫，断言这台机器上会被 DSH 加载的
@@ -667,32 +653,9 @@ if (want('live')) {
     check('live', 'agentPresets/list 含 chat 与 chat-v2', presetIds.includes('chat') && presetIds.includes('chat-v2'), presetIds.join(', '));
     // 0.1.7 把设置命名空间从 `agent-presets` 改名为 `agent-preset-registry`，而且「用户默认」
     // 是易失字段 selectedDefault，不会出现在 describe 的 value 里。部署默认由 registry 行的
-    // config.default 决定（dsh-web-app 的 patch 写的是 standard）。桥接在 closedAgentPreset
-    // 留空时依赖的正是它，所以这里断言「注册表已装载」+「standard 预设存在」这两件可观测的事。
+    // config.default 决定（dsh-web-app 的 patch 写的是 standard），这里只断言「注册表已装载」。
     check('live', 'preset 注册表命名空间已装载',
       st.value?.namespaces?.some((n) => n.ns === 'agent-preset-registry'));
-    check('live', 'closed-agent 兜底所需的 standard 预设可用', presetIds.includes('standard'), presetIds.join(', '));
-
-    // ── qq-mode 命名空间（0.2.0 删除了 ctx.settings.register()）─────────────
-    // 0.2.0 里命名空间**不再需要注册**：它由 profile 里 id 恰好等于命名空间名的 loader
-    // entry + 该插件导出的 Config（含 volatile 字段）推导出来。这条断言把「模式能写穿
-    // DSH 设置」的可观测结果钉住 —— 它一旦坏掉，控制台改模式只在本地生效，
-    // 下一次 DSH 轮询就回滚，而且不会有任何提示。
-    const qqMode = st.value?.namespaces?.find((n) => n.ns === 'qq-mode');
-    check('live', 'settings/describe 列出 qq-mode 命名空间', qqMode !== undefined,
-      `${st.value?.namespaces?.length ?? 0} 个命名空间`);
-    if (qqMode) {
-      check('live', 'qq-mode 带 mode 字段', typeof qqMode.value?.mode === 'string', JSON.stringify(qqMode.value));
-      check('live', 'qq-mode 带 revision（写入所需）', Number.isInteger(qqMode.revision), String(qqMode.revision));
-      // settings/update 是**多参数** RPC：args 是 { ns, patch, expectedRevision } 平铺，
-      // 不是 { request: {...} }（传 request 会被网关拒为
-      // `gateway/arguments-invalid: missing "ns", "patch"; unexpected "request"`）。
-      const writeBack = await rpc('settings/update', {
-        ns: 'qq-mode', patch: { mode: qqMode.value.mode }, expectedRevision: qqMode.revision,
-      });
-      check('live', 'settings/update 可写 qq-mode（参数为平铺多参数，非 request 包装）', writeBack.ok === true,
-        writeBack.ok ? `mode=${writeBack.value?.value?.mode}` : `${writeBack.error?.code}: ${writeBack.error?.message}`);
-    }
 
     // ── session/projections：读会话队列的主路径 ────────────────────────────
     const probeDir = path.join(os.tmpdir(), 'qq-bridge-verify-live');

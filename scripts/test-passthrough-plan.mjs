@@ -1,8 +1,9 @@
-// 直通运行期（§7）：不装预设、提示注入四通道、权限档代改后的回读与漂移、
-// 以及「会话详情 › 执行体与权限」两个端点（§7.6）。
+// 直通运行期（§7）：不装预设、提示注入四通道、能力档钉对端权限档，
+// 以及「会话详情 › 执行体与权限」「会话档案保存」两个端点。
 //
-// 这里钉的是**直通的承诺**：直通只做追加（提示注入、会话编排），不碰执行体的
-// 预设 / 沙箱 / 权限档。任何一条被「顺手恢复」成装预设或回钉，都会在这里红。
+// 这里钉的是**直通的承诺**：直通只做追加（提示注入、会话编排），不装预设；
+// 需要沙箱与审批的档位只在建会话时钉一次对端权限档。任何一条被「顺手恢复」成
+// 装预设或每轮回钉，都会在这里红。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -28,7 +29,6 @@ tools:
 runtime:
   apply: passthrough
   prompt: tool
-  permission: agent
   narrow: []
 preset:
   name: 直通 · 工具拉取
@@ -37,6 +37,26 @@ preset:
   behavior: none
 rows: []
 `;
+
+// 声明了对端权限档的直通档：建会话时必须把它钉下去。
+const PIN_CAPABILITY = `version: 1
+id: pt-pin
+label: 直通 · 钉档
+note: 测试用：建会话时钉对端权限档
+tools:
+  platform: {}
+  agent:
+    host: true
+  mcp: []
+  skills: []
+runtime:
+  apply: passthrough
+  prompt: none
+  peerPermission: workspace-write
+  narrow: []
+rows: []
+`;
+const PIN_FILE = { 'profiles/agent-platforms/dsh/capabilities/pt-pin.yml': PIN_CAPABILITY };
 
 // 夹具只抄平台声明，不抄平台话术（那份是给人改的内容）。用到话术的两条用例自己给一份，
 // 否则 `platformPromptFor` 读不到文件会退回空串，前缀通道的断言就变成了「断言空串」。
@@ -77,7 +97,7 @@ test('直通建会话：不挂 preset，system 通道降级为首轮前缀并只
     await h.ensureSession(PRIVATE);
 
     assert.equal(h.runtimeOf(PRIVATE).apply, 'passthrough');
-    assert.equal(h.permissionAuthorityOf(PRIVATE), 'agent', '直通下权限档归执行体');
+    assert.equal(h.runtimeOf(PRIVATE).peerPermission, '', '直通不钉对端权限档');
 
     const created = h.calls.created.at(-1);
     assert.ok(created, '建了会话');
@@ -143,40 +163,39 @@ test('tool 通道：完全不带平台话术，靠模型自己调 qq_get_prompt'
   }
 });
 
-test('权限代改：写后回读一致才算成功，不一致时报错且不覆盖基线', async () => {
-  const h = await bridgeHarness();
+test('能力档钉对端权限档：建会话时钉一次并记基线，回执不符就丢弃这条会话', async () => {
+  const h = await bridgeHarness({ files: PIN_FILE });
   try {
-    h.state.profiles[PRIVATE] = { ...DIRECT };
+    h.state.profiles[PRIVATE] = { capability: 'pt-pin' };
     await h.ensureSession(PRIVATE);
-
-    const ok = await h.applySessionPermission(PRIVATE, 'workspace-write', { reason: 'console' });
-    assert.equal(ok.ok, true);
-    assert.equal(ok.preset, 'workspace-write');
     const mirror = h.state.profiles[PRIVATE].permissionMirror;
-    assert.equal(mirror.preset, 'workspace-write', '写成功要记下基线');
+    assert.equal(mirror?.preset, 'workspace-write', '钉成功要把实际档位记成基线');
     assert.ok(mirror.at > 0);
-    assert.ok(h.ext.audit.tail(20).some((e) => e.event === 'permission.change'));
+    assert.ok(h.calls.commands.some((c) => c.line.trim() === '/permission workspace-write'), '钉的动作就是那条命令');
+    assert.ok(h.ext.audit.tail(20).some((e) => e.event === 'permission.pin'));
 
-    // 夹具的对端回读恒为 workspace-write：写别的档位立刻变成「写了但没生效」。
-    const failed = await h.applySessionPermission(PRIVATE, 'read-only', { reason: 'console' });
-    assert.equal(failed.ok, false);
-    assert.equal(failed.current, 'workspace-write');
-    assert.match(failed.error, /workspace-write/);
-    assert.equal(h.state.profiles[PRIVATE].permissionMirror.preset, 'workspace-write', '失败不能污染基线');
-    assert.ok(h.ext.audit.tail(20).some((e) => e.event === 'permission.write_failed'));
+    // 对端回执说「preset read-only」：与能力档要求不符 ⇒ 失败，且不得把假档位记成基线。
+    h.api.commands.execute = async () => ({
+      result: { ok: true, value: { commandId: 'c', result: { kind: 'success', text: 'preset read-only' } } }
+    });
+    h.state.profiles[GROUP] = { capability: 'pt-pin' };
+    await assert.rejects(() => h.ensureSession(GROUP), /对端权限档设置失败/);
+    assert.equal(h.state.profiles[GROUP].permissionMirror, undefined, '失败不能记基线');
+    assert.ok(!h.sessions.get(GROUP), '钉不上的会话必须丢掉');
+    assert.ok(h.ext.audit.tail(20).some((e) => e.event === 'permission.pin_failed'));
   } finally {
     await h.close();
   }
 });
 
-test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批档并标出漂移', async () => {
+test('GET /api/sessions/:key/agent：直通给能力档的生效方式，对端权限档不钉就不读', async () => {
   const h = await bridgeHarness();
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
 
     await withServer(h, async (port) => {
-      let res = await call(port, sessionPath('/agent'));
+      const res = await call(port, sessionPath('/agent'));
       assert.equal(res.status, 200, res.body);
       const payload = res.json;
       assert.equal(payload.ok, true);
@@ -186,29 +205,34 @@ test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批�
 
       assert.equal(payload.capability.id, 'direct');
       assert.equal(payload.capability.apply, 'passthrough');
-      assert.equal(payload.capability.authority, 'agent');
       assert.equal(payload.capability.prompt, 'system');
+      assert.equal(payload.capability.peerPermission, '', '直通不要求对端权限档');
+      assert.equal(payload.behavior, 'none');
 
       assert.equal(payload.promptChannel.requested, 'system');
       assert.equal(payload.promptChannel.channel, 'prefix');
 
+      // 权限段：级别是档案值（inherit = 跟随全局默认），对端那一档只读展示。
       const permission = payload.permission;
-      assert.equal(permission.authority, 'agent');
-      assert.equal(permission.readable, true);
-      assert.equal(permission.current, 'workspace-write');
-      assert.deepEqual(permission.options.map((item) => item.value), ['read-only', 'workspace-write', 'qq-full-ask'], '免审批档不列');
-      assert.equal(permission.mirror, null, '没代改过就没有基线');
-      assert.equal(permission.drift, null);
+      assert.equal(permission.value, 'inherit');
+      assert.equal(permission.effective, 'read-only', '没设级别就跟随全局默认');
+      assert.deepEqual(
+        permission.options.map((item) => item.value),
+        ['inherit', 'read-only', 'workspace-write', 'full-ask', 'full'],
+      );
+      assert.equal(permission.peerPermission, '');
+      assert.equal(permission.peerPin, null, '没钉过就没有基线');
+      assert.equal(permission.peer, null, '不钉档就不去读对端');
+      assert.deepEqual(h.calls.commands.map((item) => item.line.trim()), [], '读详情不发任何命令');
 
-      // 基线在、对端又对不上 ⇒ 报漂移；但桥接**不能**自动改回（改回是用户点按钮的事）。
-      h.state.profiles[PRIVATE].permissionMirror = { preset: 'qq-full-ask', at: 111 };
-      const commandsBefore = h.calls.commands.length;
-      res = await call(port, sessionPath('/agent'));
-      assert.equal(res.status, 200);
-      assert.deepEqual(res.json.permission.drift, { expected: 'qq-full-ask', actual: 'workspace-write', at: 111 });
-      const added = h.calls.commands.slice(commandsBefore).map((item) => item.line);
-      assert.ok(added.every((line) => line.trim() === '/permission'), `读详情只查询、不写档：${added.join(' | ')}`);
-      assert.equal(h.state.profiles[PRIVATE].permissionMirror.preset, 'qq-full-ask', '读详情不得改基线');
+      // 档案没选能力档就落到 Agent 平台申报的默认档；那一档也不要求对端权限档。
+      h.state.profiles[GROUP] = { behavior: 'none' };
+      const chat = await call(port, `/api/sessions/${encodeURIComponent(GROUP)}/agent`);
+      assert.equal(chat.status, 200, chat.body);
+      assert.ok(chat.json.capability, '没选档也会有平台默认档');
+      assert.equal(chat.json.capability.peerPermission, '');
+      assert.equal(chat.json.permission.value, 'inherit');
+      assert.equal(chat.json.permission.effective, 'read-only', '没设级别就跟随全局默认');
 
       // 会话不存在 ⇒ 404；带会话令牌 ⇒ 只允许控制台。
       const missing = await call(port, `/api/sessions/${encodeURIComponent('qq:group:999')}/agent`);
@@ -221,38 +245,34 @@ test('GET /api/sessions/:key/agent：直通下给对端档位、过滤免审批�
   }
 });
 
-test('POST /api/sessions/:key/permission：直通可代改，桥接权威下拒绝，免审批档一律不接', async () => {
+test('PATCH /api/sessions/:key/profile：级别只改过滤档，能力档可随时换（换了连对端档都不再要）', async () => {
   const h = await bridgeHarness();
   try {
     h.state.profiles[PRIVATE] = { ...DIRECT };
     await h.ensureSession(PRIVATE);
-    // 桥接权威的会话：没有能力档 ⇒ runtime 段按缺省（permission: bridge）。
-    h.state.profiles[GROUP] = { behavior: 'none' };
 
     await withServer(h, async (port) => {
-      const groupPath = `/api/sessions/${encodeURIComponent(GROUP)}/permission`;
+      const bad = await call(port, sessionPath('/profile'), { method: 'PATCH', body: { permission: 'L2' } });
+      assert.equal(bad.status, 400, '级别只有四项固定取值，旧的级别名一律不接');
+      assert.match(bad.json.error, /权限级别无效/);
 
-      const bridgeOwned = await call(port, groupPath, { method: 'POST', body: { preset: 'read-only' } });
-      assert.equal(bridgeOwned.status, 409, '桥接权威下不接这个写口');
-      assert.match(bridgeOwned.json.error, /权限级别/);
-
-      const forbidden = await call(port, sessionPath('/permission'), { method: 'POST', body: { preset: 'danger-full-access' } });
-      assert.equal(forbidden.status, 403);
-      assert.match(forbidden.json.error, /不弹审批/);
-
-      const empty = await call(port, sessionPath('/permission'), { method: 'POST', body: {} });
-      assert.equal(empty.status, 400);
-
-      const ok = await call(port, sessionPath('/permission'), { method: 'POST', body: { preset: 'workspace-write' } });
+      const ok = await call(port, sessionPath('/profile'), { method: 'PATCH', body: { permission: 'full-ask' } });
       assert.equal(ok.status, 200, ok.body);
-      assert.equal(ok.json.permission.current, 'workspace-write');
-      assert.equal(ok.json.permission.mirror, 'workspace-write', '写成功要回新的基线');
-      assert.ok(ok.json.permission.setAt > 0);
+      assert.equal(ok.json.profile.permission, 'full-ask');
+      assert.equal(ok.json.permission.value, 'full-ask');
+      assert.equal(ok.json.permission.effective, 'full-ask');
+      assert.equal(h.state.profiles[PRIVATE].permissionMirror, null, '改级别不碰对端权限档');
 
-      // 回读对不上 ⇒ 502，并把对端实际档位带回去（界面上要能解释为什么没成）。
-      const failed = await call(port, sessionPath('/permission'), { method: 'POST', body: { preset: 'read-only' } });
-      assert.equal(failed.status, 502);
-      assert.equal(failed.json.current, 'workspace-write');
+      // 换能力档就是换执行体环境：换档不改级别，级别留在这里等用户自己改。
+      const plain = await call(port, sessionPath('/profile'), { method: 'PATCH', body: { capability: '' } });
+      assert.equal(plain.status, 200, plain.body);
+      assert.equal(plain.json.profile.capability, null, '清空 = 跟随平台默认档');
+      assert.equal(plain.json.permission.value, 'full-ask', '换档不动级别');
+      assert.equal(plain.json.permission.peerPermission, '', '平台默认档不要求对端权限档');
+
+      // 没建档的会话不接 PATCH：先建会话，再谈改什么都没意义。
+      const missing = await call(port, `/api/sessions/${encodeURIComponent('qq:private:999')}/profile`, { method: 'PATCH', body: { permission: 'full' } });
+      assert.equal(missing.status, 404);
     });
   } finally {
     await h.close();

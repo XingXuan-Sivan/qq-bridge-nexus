@@ -1,69 +1,63 @@
 // `src/session/policy.mjs`：会话策略指纹 + 「当前会话」的三条件判定。
 //
-// 这两个东西以前只能靠集成测试间接覆盖，而它们各自对应一类真实故障：
-//   · 指纹漏了级别 → 管理通道提权后旧会话仍被判「当前」，模型继续按低权限跑；
-//   · 指纹多算了易变量 → 每次检查都「过期」，会话无限重建（重新读卡、token 飞涨）；
+// 指纹只算「决定执行体会话形态」的量（引擎 / preset / 会话级模型）。这三样各自对应一类真实故障：
+//   · 漏了引擎或 preset → 换了运行方案后旧会话仍被判「当前」，模型继续用旧预设跑；
+//   · 多算了易变量（权限级别、每次调用都变的临时值）→ 改一次设置就重建会话，
+//     表现为「AI 一直在重新读卡、token 哗哗烧」；
 //   · 指纹 / 准入 / 映射三条件只查两个 → 会话被复活或幽灵会话留在表里。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSessionPolicy } from '../src/session/policy.mjs';
 
-function make({ mode = 'chat', preset = 'preset-a', owner = 10001, level = 'L1', plan } = {}) {
-  const state = { mode, preset, owner, level, plan: plan ?? { ok: true, permissionPreset: 'pp-a' } };
+function make({ mode = 'chat', preset = 'preset-a', model = '' } = {}) {
+  const state = { mode, preset, model };
   const policy = createSessionPolicy({
     getMode: () => state.mode,
-    modePreset: (key) => (key.startsWith('private:') ? null : state.preset),
-    getOwnerQQ: () => state.owner,
-    getLevel: () => state.level,
-    getClosedAgentPlan: () => state.plan,
+    modePreset: () => state.preset,
+    getModel: () => state.model,
   });
   return { policy, state };
 }
 
-function registryFor(entries) {
-  const map = new Map(entries);
-  return { get: (key) => map.get(key), policyOf: () => undefined, map };
-}
-
-test('chat 模式：指纹只含模式与模式预设', () => {
+test('指纹只含引擎与 preset；没有 preset 时记空串（直通 / 私聊）', () => {
   const { policy } = make();
-  assert.equal(policy.policyOf('group:1'), JSON.stringify(['chat', 'preset-a', null]));
+  assert.equal(policy.policyOf('group:1'), JSON.stringify(['chat', 'preset-a']));
+  const { policy: bare } = make({ preset: null });
+  assert.equal(bare.policyOf('group:1'), JSON.stringify(['chat', '']));
 });
 
-test('私聊（modePreset 返回 null）也稳定：不会因为 undefined 变成两个不同指纹', () => {
-  const { policy } = make();
-  assert.equal(policy.policyOf('private:10001'), policy.policyOf('private:10001'));
-  assert.equal(policy.policyOf('private:10001'), JSON.stringify(['chat', '', null]));
+test('换运行方案（引擎或 preset）会让旧会话过期', () => {
+  const { policy, state } = make({ mode: 'reserved2', preset: 'chat-v2' });
+  const before = policy.policyOf('group:1');
+  state.mode = 'chat';
+  const afterMode = policy.policyOf('group:1');
+  assert.notEqual(before, afterMode, '换引擎后指纹必须变化，否则旧会话会被判「当前」继续跑旧预设');
+  state.preset = 'chat';
+  assert.notEqual(afterMode, policy.policyOf('group:1'), '换 preset 后同样不能复用旧会话');
 });
 
-test('closed-agent：级别进指纹 —— L1 → L2 必须让旧会话过期', () => {
-  const { policy, state } = make({ mode: 'closed-agent', level: 'L1' });
-  const l1 = policy.policyOf('private:10001');
-  state.level = 'L2';
-  const l2 = policy.policyOf('private:10001');
-  assert.notEqual(l1, l2, '提权后指纹必须变化，否则旧会话会被判「当前」继续用低权限');
-  assert.match(l2, /L2/);
+test('会话级模型才进指纹：未指定时不写空位', () => {
+  const { policy, state } = make();
+  assert.equal(JSON.parse(policy.policyOf('group:1')).length, 2, '空模型不占指纹位');
+  state.model = 'deepseek-official/deepseek-pro/high';
+  assert.equal(
+    policy.policyOf('group:1'),
+    JSON.stringify(['chat', 'preset-a', 'deepseek-official/deepseek-pro/high']),
+  );
 });
 
-test('closed-agent：管理员与权限预设进指纹', () => {
-  const { policy, state } = make({ mode: 'closed-agent' });
-  const before = policy.policyOf('private:10001');
-  state.plan = { ok: true, permissionPreset: 'pp-b' };
-  assert.notEqual(before, policy.policyOf('private:10001'), '权限预设变化要触发重建');
-  state.owner = 20002;
-  assert.match(policy.policyOf('private:10001'), /20002/);
-});
-
-test('closed-agent 但授权未完成（plan.ok=false）：仍算级别，预设位记空串', () => {
-  const { policy } = make({ mode: 'closed-agent', plan: { ok: false, error: 'L0' } });
-  assert.equal(policy.policyOf('private:10001'), JSON.stringify(['closed-agent', '', 10001, 'L1', '']));
-});
-
-test('非 closed-agent 模式：级别变化不影响指纹（避免无谓重建）', () => {
-  const { policy, state } = make({ mode: 'reserved2' });
+test('权限级别不进指纹：级别是过滤器，每次工具调用现取', () => {
+  const consulted = [];
+  const policy = createSessionPolicy({
+    getMode: () => 'chat',
+    modePreset: () => 'preset-a',
+    getModel: () => '',
+    // 调用方即便传了级别来源，指纹也不该读它 —— 改级别不重建会话。
+    getLevel: () => { consulted.push('level'); return 'full-ask'; },
+  });
   const before = policy.policyOf('group:9');
-  state.level = 'L3';
-  assert.equal(before, policy.policyOf('group:9'));
+  assert.deepEqual(consulted, [], '级别不是指纹的输入');
+  assert.equal(before, JSON.stringify(['chat', 'preset-a']));
 });
 
 test('isCurrent：三条件都为真才成立', () => {
@@ -76,7 +70,7 @@ test('isCurrent：三条件都为真才成立', () => {
   // 映射变了（DSH 换了会话）
   assert.equal(policy.isCurrent({ key: 'group:1', sessionId: 'sid-2', registry, allowed: () => true }), false);
   // 指纹过期
-  const stale = { get: () => 'sid-1', policyOf: () => JSON.stringify(['chat', 'old-preset', null]) };
+  const stale = { get: () => 'sid-1', policyOf: () => JSON.stringify(['chat', 'old-preset']) };
   assert.equal(policy.isCurrent({ key: 'group:1', sessionId: 'sid-1', registry: stale, allowed: () => true }), false);
 });
 
@@ -89,4 +83,5 @@ test('isCurrent：缺参数时返回 false，不抛异常（调用方在定时�
 
 test('依赖缺失时构造即报错（别让它变成运行期 undefined 调用）', () => {
   assert.throws(() => createSessionPolicy({}), /getMode/);
+  assert.throws(() => createSessionPolicy({ getMode: () => 'chat' }), /modePreset/);
 });

@@ -46,7 +46,6 @@ tools:
     sendVoice: false
     webImage: false
     feedback: true
-    requestMode: true
     crossGroup: true
     ownerGroupAccess: false
     ownerRelay: false
@@ -65,8 +64,6 @@ tools:
 runtime:
   apply: passthrough
   prompt: system
-  # 权限档归对端：桥接读得到、可以替用户改，但不回钉、不冒充。
-  permission: agent
   # 投递侧 deny 名单（可选）。直通下它不是硬边界，只拦「经由桥接」的调用。
   narrow: []
 preset:

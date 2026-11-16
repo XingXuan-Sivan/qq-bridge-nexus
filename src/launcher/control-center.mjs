@@ -664,9 +664,8 @@ export async function startControlCenter({ open = true, port: portOverride = nul
   // ── 固定命令集 ──────────────────────────────────────────────────────────────
   const HELP = [
     '可用命令（不是系统终端，只能执行下面这些）：',
-    '  status                     桥接当前模式、级别、DSH/SnowLuma 连通情况',
-    '  mode <chat|reserved|reserved2|closed-agent> [L1|L2|L3] [TOTP]   切换模式（同控制台规则：L3 要 TOTP）',
-    '  panic                      紧急关闭：立即回到安全模式',
+    '  status                     桥接运行概览、DSH/SnowLuma 连通情况',
+    '  panic                      紧急关闭：全部会话降为只读',
     '  approvals                  查看待审批',
     '  audit [条数]               最近的管理审计记录',
     '  reconcile                  立刻重新对账群成员名单',
@@ -690,15 +689,9 @@ export async function startControlCenter({ open = true, port: portOverride = nul
         say(s.text ?? JSON.stringify(s));
         return { ok: true };
       }
-      case 'mode': {
-        if (!a1) { say('用法：mode <chat|reserved|reserved2|closed-agent> [L1|L2|L3] [TOTP]'); return { ok: false }; }
-        const r = await bridgeApi('/api/mode', { method: 'POST', body: { mode: a1, ...(a2 ? { level: a2.toUpperCase() } : {}), ...(a3 ? { totp: a3 } : {}) } }).catch((e) => ({ ok: false, error: e.message }));
-        say(r.ok ? `已切换：${r.mode} / ${r.level}` : `切换失败：${r.error}`);
-        return { ok: !!r.ok };
-      }
       case 'panic': {
         const r = await bridgeApi('/api/admin/panic', { method: 'POST', body: {} }).catch((e) => ({ ok: false, error: e.message }));
-        say(r.ok ? `已紧急关闭：${r.mode} / ${r.level}` : `失败：${r.error}`);
+        say(r.ok ? '已紧急关闭：全部会话降为只读' : `失败：${r.error}`);
         return { ok: !!r.ok };
       }
       case 'approvals': {

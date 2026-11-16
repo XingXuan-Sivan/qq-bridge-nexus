@@ -142,8 +142,8 @@ export function createHostApi({ id, version, permissions, config, stateDir, log,
   }
 
   if (granted.has('agent-provider:provide')) {
-    // 插件提供 Agent 平台（执行体）。与 transport 同形，但多一道校验：注册时要给出
-    // `resolveLevelPlan`（级别 → 权限档）与 `createRuntime`（连接层），少了就直接拒 ——
+    // 插件提供 Agent 平台（执行体）。与 transport 同形，但多一道校验：注册时必须给出
+    // `createRuntime`（连接层），少了就直接拒 ——
     // 「能被选为当前执行体」是个承诺，不能等到被选中的那一刻才验。
     // 能力位同理不由插件自证：它声明的 `capabilities` 只是描述，真正的闸门是 port 装配。
     ctx.agentPlatforms = {

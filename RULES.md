@@ -1,38 +1,25 @@
 # QQ 桥接权限与安全规则（RULES）
 
-## v0.3.0 补充：权限级别与管理通道（优先于下文与之冲突的描述）
+## 会话能力档与权限（当前语义）
 
-- closed-agent 不再是「完整工具」的单一档位，而是 **L1 只读 / L2 工作区读写 / L3 完全访问（每次审批）** 三级，只能经 owner 私聊管理通道（确认码；L3 加 TOTP）或控制台开启；未授权的 closed-agent 拒绝建会话。
-- 所有模式变更（控制台、DSH 设置、QQ、自动回落）都会私聊通知 owner 并写入 `state/admin/audit.jsonl`；DSH 设置里的外部提权默认被回退。
-- 高权限闲置 30 分钟或超过最长时长自动回落；桥接重启不继承高权限。
-- 特权斜杠命令（`/permission` `/sandbox` `/approval` `/yolo` 等）一律由桥接拦截，不透传；群里的模式/权限命令一律拒绝。
-- AI 只有 `qq_request_mode_change`（只能登记、只在 owner 私聊有效），确认码不会返回给 AI。
-- 审批改为编号制（`通过 #n` / `拒绝 #n`），展示实际参数，超时自动拒绝。
-- 群友身份只认 QQ 号；人物记忆的可见范围在注入时由程序过滤（默认只跨群共享「是同一个人」）。
-- 详见 [docs/guides/ADMIN_CHANNEL.md](docs/guides/ADMIN_CHANNEL.md) 与 [docs/guides/CONTINUITY.md](docs/guides/CONTINUITY.md)。
+- **能力档**决定会话跑哪套仿真与工具面。跨 Agent 平台共用的只有 `direct`（直通：不挂 preset 与沙箱，用平台现成的会话环境、工具与权限）；其余档位属于具体 Agent 平台（DSH：`chat` / `chat-v2` / `readonly` / `workspace` / `full`）。权威源在 `profiles/capabilities/` 与 `profiles/agent-platforms/<id>/capabilities/`，会话档案记 `capability`。控制台里的「运维 agent」= 当前默认 Agent 平台 + 直通档。
+- **权限级别**是会话自己的配置，与能力档、平台都不绑定：`read-only` / `workspace-write` / `full-ask`（完全访问但每次越权都要审批）/ `full`。它只过滤「已用能力档」里超出该级别的能力——不会因为换平台、换档位而改变。
+- 默认行为是**平台配置项**（`config.json` 的 `platforms.users.<id>.defaultBehavior`），各用户平台通用，不要求平台 yml 声明；会话没单独指定能力档时按它算。
+- 改权限只有一条链路：控制台「会话管理」直接改，owner 与管理员也可在 QQ 侧发 `/perm`；两处写的是同一份会话档案。
+- `/panic` 保留：全部会话降为只读，并退役当前执行体会话。
+- 所有权限变更追加到 `state/admin/audit.jsonl`。
 
-## 运行模式（QQ 桥接四模式）
-
-模式由**桥接控制台**（默认 `http://127.0.0.1:3100`）顶部的模式按钮切换，也可直接改 DSH 设置的 `qq-mode` 命名空间；
-控制台会**同时**写穿到 DSH 设置与本地 `qq-bridge/state/mode.json`，两者保持一致。
-（DSH 设置页目前**没有** `qq-mode` 卡片：该插件只有 host 半，未实现浏览器半。详见 docs/guides/DSH_SETUP.md。）
-桥接每 5 秒读取一次；控制台切换立即应用。会话持久化记录创建时的模式、preset 和管理员边界，权限变化时自动撤销旧会话映射和二代 token，并在下次消息到达时重建，避免继续使用旧的高权限 preset。升级前没有这些权限元数据的旧会话也会重建一次，历史仍保留在 DSH。
-全新安装运行 `scripts/setup-dsh.mjs` 后，DSH 设置与本地兜底默认均为 `reserved2`；若已存在 `state/mode.json` 或 DSH 设置旧值，脚本不会覆盖。
-
-| 模式 | 允许通道 | agent preset | 用途 |
+| 能力档 | 可用者 | 工具面 | 用途 |
 | --- | --- | --- | --- |
-| `chat` | 白名单群 + 白名单私聊 | chat（安全聊天） | 日常聊天 |
-| `closed-agent` | **仅** 私聊 ownerQQ | DSH 默认 preset（通常 `standard`，完整工具） | 你在 QQ 私聊里操控 DSH |
-| `reserved`（一代仿真） | 暂同 chat | chat | 仿真群友：观望/活跃/试探/退场状态机，选择性参与并主动收尾 |
-| `reserved2`（二代仿真，运行 `setup-dsh.mjs` 后默认） | 暂同 chat | chat-v2 | 文本不自动转发，AI 通过工具自主看消息/发言/等待/设置唤醒与潜水 |
+| `chat` | 白名单群 + 白名单私聊 | 无本地工具，只做对话与问答 | 日常聊天 |
+| `chat-v2` | 同上（新装默认档） | 无本地工具；一切皆工具（看消息 / 发言 / 等待 / 设置唤醒） | 二代仿真 |
+| `readonly` | owner | 只读文件与检索，不改任何东西 | owner 只让 Agent 看 |
+| `workspace` | owner | 工作区内读写与执行，越界触发审批 | owner 要让 Agent 动手 |
+| `full` | owner | 跨工作区与进程管理，每次越权审批 | owner 完全授权 |
+| `direct`（共用） | 所有 Agent 平台 | 不挂 preset，工具与权限由对端决定 | 直通 |
 
-> ⚠️ `closed-agent` 模式下 owner 私聊 agent 拥有**完整本地工具**（DSH 默认 preset，通常是 `standard`），
-> 这是有意为之（QQ 远程操控 DSH）。该模式只放行 owner 私聊，群友完全无法触达；
-> 切换回 `chat` 后，owner 私聊也回到 chat 安全预设。
->
-> 注：DSH 0.1.5 已不存在 `router-standard` preset。桥接现在留空表示「用 DSH 默认 preset」，
-> 并在启动时读取 `agentPresets/list` 校验；填了不存在的 preset 名会回退到默认值并打警告，
-> 绝不会创建出「无 preset」会话（那会被 DSH 套上 `standard`，对 QQ 群是安全回归）。
+> 群友任何情况下都拿不到 `readonly` / `workspace` / `full`：这三档 `audience: owner`，准入在建会话前判定。
+> 非直通档缺少已验证的安全 preset 时桥接**拒绝建会话**（fail-closed），绝不回落到 DSH 默认 preset（`standard` 含 bash / 文件读写）。
 
 ## 权限分层
 
@@ -40,8 +27,8 @@
 | --- | --- | --- |
 | **管理员（ownerQQ，控制台或 DSH 设置页可配置）** | QQ 群/私聊 | 正常聊天 + **管理命令由桥接硬执行**（不经过模型）：`/role <角色名>` 切人格、`/role off` 清除、`/silent` 静默、`/active` 恢复、`/reset`、`/status`；消息自动带【管理员】标记 |
 | **群友** | QQ 群 | **仅正常聊天**。控制词、`/` 管理命令被桥接拦截；静默模式下消息不投递给 agent |
-| **管理员** | **桥接控制台**（`http://127.0.0.1:3100`） | **最高权限**：控制模式（控制台顶部模式按钮）、控制角色/静默（写 `state/current-role.json`）、完整 DSH 工具（含本地操作）、查看 QQ 活动日志（`state/qq-activity.log`）、直接打开「QQ 聊天」工作区会话对话 |
-| **QQ 会话 agent（chat 模式）** | — | 最低权限面（见下） |
+| **管理员** | **桥接控制台**（`http://127.0.0.1:3100`） | **最高权限**：控制会话的能力档与权限（会话管理页）、控制角色/静默（写 `state/current-role.json`）、完整 DSH 工具（含本地操作）、查看 QQ 活动日志（`state/qq-activity.log`）、直接打开「QQ 聊天」工作区会话对话 |
+| **QQ 会话 agent（chat / chat-v2 档）** | — | 最低权限面（见下） |
 
 ## QQ 会话 agent 的硬边界
 
@@ -62,7 +49,7 @@
 
 | 层 | 位置 | 管什么 | 生效方式 |
 | --- | --- | --- | --- |
-| **仿真提示词**（两代各一份） | `dsh/agent-presets/chat/agent.cordis.yml`（一代）与 `chat-v2/agent.cordis.yml`（二代）的 `persona.prefix` | 怎么调工具、怎么参与群聊（行为与协议：安全规则、工具协议、唤醒/分条/记忆/黑话等） | 控制台可按代次分别编辑；保存会写仓库源文件并同步到 `~/.dsh/.agent-presets/<preset>/`；**新会话**自动用新版，**正在进行的 QQ 会话**需 `POST /api/session/reset` 或重启 DSH |
+| **仿真提示词**（各能力档一份） | `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `rows` 段里 `persona.config.prefix` | 怎么调工具、怎么参与群聊（行为与协议：安全规则、工具协议、唤醒/分条/记忆/黑话等） | 控制台可按档位分别编辑；保存即写这些 yml 并重建 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`；重启 DSH 后**新会话**生效，**正在进行的 QQ 会话**需 `POST /api/session/reset` |
 | **人格提示词** | `roles/<人格名>.md` | AI 是谁、什么性格、怎么说话（人设与语气） | 桥接注入，**保存即生效**（聊天 / 一代仿真每条消息前注入；二代仿真在下一次唤醒时把新卡交给各会话，或在控制台选「立即」） |
 
 - 拼装顺序：`仿真提示词 → 人格提示词 → 本轮消息`。
@@ -112,11 +99,11 @@
 
 ### 在 WebUI 与 QQ 机器人对话
 
-打开「QQ 聊天」工作区里的会话即可直接对话（DSH 原生）。`reserved2` 不自动转发 agent 文本，但工具可以发送 QQ；`chat`、`reserved` 和 `closed-agent` 会转发映射会话的 agent 回合输出，因此在这些会话中从 DSH 界面输入内容，也可能使回复出现在 QQ。需要纯本地讨论时请使用没有 QQ 映射的 DSH 会话。
+打开「QQ 聊天」工作区里的会话即可直接对话（DSH 原生）。`chat-v2` 不自动转发 agent 文本，但工具可以发送 QQ；`chat` 与 `direct` 会转发映射会话的 agent 回合输出，因此在这些会话中从 DSH 界面输入内容，也可能使回复出现在 QQ。需要纯本地讨论时请使用没有 QQ 映射的 DSH 会话。
 
 ## 事故与兜底
 
 - 群友诱导 agent 时，preset 的工具限制和目标白名单是主要硬边界。发送工具仍可能造成白名单内的误发；敏感信息正则属于启发式审计，不能识别任意秘密或保证“最多只发一条”。账号和会话隔离仍需结合实际运行模式使用。
 - 想彻底关闭机器人：停止桥接进程（start.bat 窗口 Ctrl+C）或 SnowLuma。
-- 修改白名单/角色/owner 后保存即热更新（控制台写入 config.json / state/*.json 后即时生效）；修改 preset（权威源在 `dsh/agent-presets/`，改完跑 `node scripts/build-agent-preset-patches.mjs` 重新生成 bundle patch）后重启 DSH 生效。
+- 修改白名单/角色/owner 后保存即热更新（控制台写入 config.json / state/*.json 后即时生效）；修改能力档（权威源在 `profiles/agent-platforms/<id>/capabilities/`，改完跑 `npm run build:artifacts` 重新生成 bundle patch）后重启 DSH 生效。
 - ⚠️ 桥接只能运行一个实例：消息异常时先检查任务管理器里是否有多余的 `node ...bridge.js`。

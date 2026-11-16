@@ -73,7 +73,6 @@ function makeHarness(overrides = {}) {
     forgetConversationCaches: (key) => calls.push(`forgetConversationCaches:${key}`),
     // 重置 = 新上下文：人格卡「读到哪一版」的记录也要忘，否则下次唤醒不会再给一遍卡。
     forgetRoleSeen: (key) => calls.push(`forgetRoleSeen:${key}`),
-    discardDormantForReset: (key) => calls.push(`discardDormant:${key}`),
     saveSocialV2State: () => calls.push('saveSocialV2State'),
     saveState: () => calls.push('saveState'),
     send: async (key, text) => { calls.push(`send:${key}:${text}`); return { ok: true }; },
@@ -138,7 +137,6 @@ test('全量清理：所有按键/按旧 sessionId 记账的桶都被清空', as
   assert.ok(h.calls.includes(`forgetAgentToken:${KEY}`));
   assert.ok(h.calls.includes(`forgetConversationCaches:${KEY}`));
   assert.ok(h.calls.includes(`forgetRoleSeen:${KEY}`), '重置必须忘掉已读人格卡，下次唤醒重新注入');
-  assert.ok(h.calls.includes(`discardDormant:${KEY}`));
   assert.ok(h.calls.includes('saveSocialV2State'));
   assert.ok(h.calls.includes('saveState'));
   assert.ok(h.calls.includes(`cancel:${OLD}`));

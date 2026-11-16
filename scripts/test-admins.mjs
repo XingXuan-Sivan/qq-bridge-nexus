@@ -1,20 +1,19 @@
-// P3 多管理员：纯函数契约（名单归一化、actor、capability、closed-agent 级别、私聊被动豁免）。
+// P3 多管理员：纯函数契约（名单归一化、actor、capability、角色与私聊被动豁免）。
 import assert from 'node:assert/strict';
 import {
   ADMIN_CAPS, normalizeCaps, normalizeAdmins, findAdmin, actorForQQ, actorForAddress,
-  normalizeOwner, isAdminQQ, isPrivilegedPrivate, closedAgentMaxLevel, canOpenLevel, levelRank,
+  normalizeOwner, isAdminQQ, isPrivilegedPrivate,
 } from '../src/admin/admins.mjs';
 
 // ① 名单归一化：默认值、owner 不入表、非法 cap 丢弃、缺名兜底。
 {
   const admins = normalizeAdmins([
-    { qq: '100001', caps: ['approve', 'approve', 'nope'], maxLevel: 'l2' },
-    { qq: '1000000002', name: '  ', caps: [], maxLevel: 'L9', notify: false, exemptPassive: false },
+    { qq: '100001', caps: ['approve', 'approve', 'nope'] },
+    { qq: '1000000002', name: '  ', caps: [], notify: false, exemptPassive: false },
   ], { ownerQQ: '100001' });
   assert.equal(admins.length, 1, 'owner 不应出现在管理员名单里');
   assert.equal(admins[0].qq, '1000000002');
   assert.equal(admins[0].name, '管理员 0002');
-  assert.equal(admins[0].maxLevel, 'L2', '非法级别回退 L2');
   assert.equal(admins[0].notify, false);
   assert.equal(admins[0].exemptPassive, false);
   assert.deepEqual(admins[0].caps, []);
@@ -34,10 +33,9 @@ assert.deepEqual(normalizeCaps('approve'), []);
 
 // ④ actor：owner 全能力、admin 只认 caps、user 全拒绝。
 {
-  const admins = normalizeAdmins([{ qq: '1000000002', caps: ['approve', 'memory'], maxLevel: 'L2' }], { ownerQQ: '100001' });
+  const admins = normalizeAdmins([{ qq: '1000000002', caps: ['approve', 'memory'] }], { ownerQQ: '100001' });
   const owner = actorForQQ({ ownerQQ: '100001', admins, qq: '100001' });
   assert.equal(owner.role, 'owner');
-  assert.equal(owner.maxLevel, 'L3');
   for (const cap of ADMIN_CAPS) assert.equal(owner.can(cap), true);
   const admin = actorForQQ({ ownerQQ: '100001', admins, qq: '1000000002' });
   assert.equal(admin.role, 'admin');
@@ -50,25 +48,21 @@ assert.deepEqual(normalizeCaps('approve'), []);
   assert.equal(findAdmin(admins, '1000000002')?.name, '管理员 0002');
 }
 
-// ⑤ closed-agent 级别：admin 不超过 maxLevel，owner 永远 L3。
+// ⑤ 旧配置里的级别字段（maxLevel）不再有任何语义：归一化时丢弃，不产出生效值。
 {
-  const admin = actorForQQ({ ownerQQ: '100001', admins: [{ qq: '1000000002', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true }], qq: '1000000002' });
-  const owner = actorForQQ({ ownerQQ: '100001', admins: [], qq: '100001' });
-  assert.equal(closedAgentMaxLevel(admin), 'L2');
-  assert.equal(canOpenLevel(admin, 'L1'), true);
-  assert.equal(canOpenLevel(admin, 'L2'), true);
-  assert.equal(canOpenLevel(admin, 'L3'), false);
-  assert.equal(canOpenLevel(owner, 'L3'), true);
-  assert.equal(canOpenLevel(actorForQQ({ qq: '55555' }), 'L1'), false);
-  assert.equal(levelRank('L3'), 2);
+  const admins = normalizeAdmins([{ qq: '1000000002', maxLevel: 'L3', caps: ['approve'] }], { ownerQQ: '100001' });
+  assert.equal(Object.hasOwn(admins[0], 'maxLevel'), false, '级别已从管理员条目移除（会话权限在会话档案里）');
+  const actor = actorForQQ({ ownerQQ: '100001', admins, qq: '1000000002' });
+  assert.equal(actor.can('approve'), true);
+  assert.equal(actor.can('sessions'), false);
 }
 
 // ⑥ 管理员私聊被动豁免：只对 private，exemptPassive 可关；owner 永远开。
 {
   const ownerQQ = '100001';
   const admins = [
-    { qq: '1000000002', name: 'A', caps: [], maxLevel: 'L2', notify: true, exemptPassive: true },
-    { qq: '2897715887', name: 'B', caps: [], maxLevel: 'L2', notify: true, exemptPassive: false },
+    { qq: '1000000002', name: 'A', caps: [], notify: true, exemptPassive: true },
+    { qq: '2897715887', name: 'B', caps: [], notify: true, exemptPassive: false },
   ];
   assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: ownerQQ, kind: 'private', id: ownerQQ }), true);
   assert.equal(isPrivilegedPrivate({ ownerQQ, admins, qq: '1000000002', kind: 'private', id: '1000000002' }), true);

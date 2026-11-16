@@ -231,7 +231,7 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
   const h = await bridgeHarness({ config: { admin: { consoleEscalationCooldownMs: 0 } } });
   const server = h.startConsoleServer();
   try {
-    await h.initControllerOnce('reserved2');
+    h.startOnce();
     h.setMode('reserved2');
     const port = await listen(server);
     // /remind：桥接直接处理，回复走管理通道，不进模型
@@ -287,7 +287,6 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
     assert.equal(preview.json.next.length, 5);
   } finally {
     h.scheduler.stop();
-    h.ext.controller.stop();
     await new Promise((r) => server.close(r));
     await h.close();
   }

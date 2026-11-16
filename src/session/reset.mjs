@@ -35,7 +35,6 @@ import { sessionIdOf } from './ref.mjs';
  *   forgetAgentToken: (key: string) => void,
  *   forgetConversationCaches: (key: string) => void,
  *   forgetRoleSeen?: (key: string) => void,
- *   discardDormantForReset: (key: string) => void,
  *   saveSocialV2State: () => void,
  *   saveState: () => void,
  *   send: (key: string, text: string) => Promise<any>,
@@ -51,7 +50,7 @@ export function createSessionResetter(deps) {
     state, bumpEpoch, pending, cancelPendingEntry, queued, queuedHintAt, sessionPromises,
     drainPromptQueue, approvals, social, socialV2, slang, wake, mediaStore, seenForwardIds,
     cancelSocialTimers, clearSocialV2Timers, forgetAgentToken, forgetConversationCaches,
-    forgetRoleSeen, discardDormantForReset, saveSocialV2State, saveState, send, api, withTimeout,
+    forgetRoleSeen, saveSocialV2State, saveState, send, api, withTimeout,
     dshControlTimeoutMs, log,
   } = deps;
   const bySessionId = deps.bySessionId ?? {};
@@ -98,7 +97,6 @@ export function createSessionResetter(deps) {
     // 「读到哪一版人格卡」也要忘：重置 = 新上下文，下一次唤醒必须重新把卡整段给一遍。
     // 与压缩（compact）后的处理一致——两处都是「上下文没了，卡得重读」。
     forgetRoleSeen?.(key);
-    discardDormantForReset(key);
     saveSocialV2State();
     saveState();
     // 与 retireSession 一致：先终止 Agent 侧排队的工作，再归档（归档只隐藏会话）。

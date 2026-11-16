@@ -23,7 +23,6 @@ import { z } from 'zod';
 // 在 MCP 里拦会连「安全拒绝理由」都拿不到，反而让模型无法把话说清楚。
 import { SENSITIVE_RE } from './sensitive.js';
 import { serializeModelData } from './qq-model-view.js';
-import { accessState, normalizeAccessConfig } from './session/access.mjs';
 import { platformFlags } from './capabilities/store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,26 +52,6 @@ cfg.tools = platformFlags({
 
 function getConfig() {
   return loadConfig();
-}
-
-// 准入的唯一真相是 `state/sessions/defaults.json`（两态全局名单）；MCP 独立进程也读同一份，
-// 不再从 config.json 的旧 allow/deny 推导第二套白名单。
-function loadAccessDefaults() {
-  try {
-    let text = fs.readFileSync(path.join(ROOT, 'state', 'sessions', 'defaults.json'), 'utf8');
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    const raw = JSON.parse(text);
-    return normalizeAccessConfig(raw?.defaults ?? raw);
-  } catch {
-    return null;
-  }
-}
-
-function isPassiveAllowed(kind, id) {
-  const defaults = loadAccessDefaults();
-  if (!defaults) return false;
-  // skillKey 用的是上面 configureKeys 固化的平台，不再写死 'qq'。
-  return accessState('passive', skillKey(kind, String(id)), { defaults }).value === 'allow';
 }
 
 function getOneBotConfig() {
@@ -203,8 +182,7 @@ function agentHeaders(extra = {}) {
   // 退化成「管理端全权」——所以这个头绝不能随 token 一起被省略。历史上 331/355/379/877
   // 行用 `...(token ? {headers:{...}} : {})` 把整个头省掉了，于是「模型漏传 token」
   // 不是被拒绝，反而提权成控制台权限（confused deputy）。
-  // 令牌本身仍然只在真有时才发：/api/status 的模式探测（legacyReadToolAllowed）本来就是
-  // 无令牌调用，桥接对它单独放行并按最小对象返回。
+  // 令牌本身仍然只在真有时才发：不带令牌的调用由桥接按路径白名单单独处理。
   headers['x-agent-call'] = '1';
   return headers;
 }
@@ -294,24 +272,6 @@ function agentApiLongPoll(path, init = {}) {
   });
 }
 
-async function authorizeRead(key) {
-  // 会话令牌必须显式携带：桥接已把空令牌的请求一律拒绝（避免把该端点变成免鉴权入口）。
-  // 旧只读工具没有令牌，因此它们改由 legacyReadToolAllowed() 做模式判定，不再调用本函数。
-  throw new Error('旧只读工具没有会话令牌；请使用带会话令牌的 v2 读工具');
-}
-
-// 旧只读工具（qq_status 之外的 qq_list_groups / qq_get_group_members / qq_get_group_history）
-// 没有会话令牌，因此**只能在封闭 agent（管理员私聊）里使用**。
-//
-// 这里用「确认是 closed-agent 才放行」的白名单写法，而不是「看到 reserved2 就拒绝」的黑名单写法：
-// 桥接的 /api/status 在「带 agent 令牌」时返回的是最小状态对象（不含 mode 字段），
-// 用 `status?.mode === 'reserved2'` 判断会得到 undefined ⇒ 黑名单判定为假 ⇒ 旧工具被放行，
-// 等于在二代仿真模式下把白名单群名、群成员名单注入模型上下文。
-async function legacyReadToolAllowed() {
-  const status = await agentApi('/api/status');
-  return String(status?.mode ?? '') === 'closed-agent';
-}
-
 const server = new McpServer({ name: 'snowluma-safe', version: '0.3.0' });
 
 // ── 工具开关必须在**注册期**生效，而不是只在校验期 ──────────────────────────
@@ -323,8 +283,8 @@ const server = new McpServer({ name: 'snowluma-safe', version: '0.3.0' });
 // 这里用一个注册过滤器统一处理：开关关闭 ⇒ 该工具根本不注册 ⇒ 既省 token 又不给模型误调的机会。
 // DSH 在启动时读取工具清单，所以关掉/打开后需要重启 DSH 才会刷新（控制台面板已注明）。
 //
-// 只列**各模式共用的工具不在其中**：qq_send_group_message / qq_send_private_message / qq_reply
-// 同时服务 chat / reserved / closed-agent 模式，用 v2 的开关去决定它们是否注册会误伤其它模式，
+// 只列**会话级开关会误伤的工具不在其中**：qq_send_group_message / qq_send_private_message / qq_reply
+// 所有会话都可能用，用 v2 的开关去决定它们是否注册会误伤其它会话，
 // 所以这三个仍然只在调用时由桥接校验。
 const TOOL_CONFIG_FLAGS = {
   qq_get_prompt: 'getPrompt',
@@ -365,10 +325,9 @@ const TOOL_CONFIG_FLAGS = {
   qq_get_self_image: 'getSelfImage',
   qq_sticker_note: 'stickerNote',
   qq_set_sticker_remark: 'setStickerRemark',
-  // v0.3.0
+  // 人物档案
   qq_get_person: 'personProfile',
   qq_note_person: 'personProfile',
-  qq_request_mode_change: 'requestMode',
   qq_schedule_create: 'schedule',
   qq_schedule_list: 'schedule',
   qq_schedule_update: 'schedule',
@@ -413,92 +372,13 @@ server.tool(
 );
 
 server.tool(
-  'qq_list_groups',
-  '列出机器人所在的全部 QQ 群（只读）：群号、群名。',
-  {},
-  async () => {
-    // 旧只读工具没有 agent token：只允许在封闭 agent（管理员私聊）里使用。
-    // 判定失败一律拒绝（fail-closed），不依赖「看到某个模式才拒绝」的黑名单写法。
-    try {
-      if (!(await legacyReadToolAllowed())) {
-        return { content: [{ type: 'text', text: '旧只读工具仅在封闭 agent（管理员私聊）模式可用；其它模式请使用带会话令牌的 v2 读工具' }], isError: true };
-      }
-    } catch (error) {
-      return { content: [{ type: 'text', text: `无法确认当前模式，拒绝执行：${error?.message ?? error}` }], isError: true };
-    }
-    try {
-      const data = await onebot('get_group_list');
-      const list = (Array.isArray(data) ? data : (data?.data ?? []))
-          .filter((g) => isPassiveAllowed('group', g.group_id))
-          .map((g) => ({ group_id: g.group_id, group_name: g.group_name }));
-      return { content: [{ type: 'text', text: serializeModelData(list) }] };
-    } catch (error) {
-      return { content: [{ type: 'text', text: `查询失败：${error?.message ?? error}` }], isError: true };
-    }
-  }
-);
-
-server.tool(
-  'qq_get_group_members',
-  '列出指定群的成员列表（只读）：QQ 号、昵称、群名片。',
-  { groupId: z.union([z.number(), z.string()]).describe('群号') },
-  async ({ groupId }) => {
-    const g = String(groupId);
-    try {
-      if (!(await legacyReadToolAllowed())) {
-        return { content: [{ type: 'text', text: '旧只读工具仅在封闭 agent（管理员私聊）模式可用；其它模式请使用带会话令牌的 v2 读工具' }], isError: true };
-      }
-    } catch (error) {
-      return { content: [{ type: 'text', text: `无法确认当前模式，拒绝读取：${error?.message ?? error}` }], isError: true };
-    }
-    if (!isPassiveAllowed('group', g)) {
-      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在被动准入名单允许范围内` }], isError: true };
-    }
-    try {
-      const data = await onebot('get_group_member_list', { group_id: Number(g) });
-      const list = (Array.isArray(data) ? data : (data?.data ?? [])).map((m) => ({ user_id: m.user_id, nickname: m.nickname, card: m.card }));
-      return { content: [{ type: 'text', text: serializeModelData(list) }] };
-    } catch (error) {
-      return { content: [{ type: 'text', text: `查询失败：${error?.message ?? error}` }], isError: true };
-    }
-  }
-);
-
-server.tool(
-  'qq_get_group_history',
-  '获取指定群的最近消息历史（只读）。messageSeq 可选：从该消息序号往前取。注意：是否可用取决于 SnowLuma 是否实现 get_group_msg_history。',
-  { groupId: z.union([z.number(), z.string()]).describe('群号'), messageSeq: z.number().optional().describe('起始消息序号（可选）') },
-  async ({ groupId, messageSeq }) => {
-    const g = String(groupId);
-    try {
-      if (!(await legacyReadToolAllowed())) {
-        return { content: [{ type: 'text', text: '旧只读工具仅在封闭 agent（管理员私聊）模式可用；其它模式请使用带会话令牌的 v2 读工具' }], isError: true };
-      }
-    } catch (error) {
-      return { content: [{ type: 'text', text: `无法确认当前模式，拒绝读取：${error?.message ?? error}` }], isError: true };
-    }
-    if (!isPassiveAllowed('group', g)) {
-      return { content: [{ type: 'text', text: `拒绝：群 ${g} 不在被动准入名单允许范围内` }], isError: true };
-    }
-    try {
-      const params = { group_id: Number(g) };
-      if (messageSeq !== undefined) params.message_seq = messageSeq;
-      const data = await onebot('get_group_msg_history', params);
-      return { content: [{ type: 'text', text: serializeModelData(data) }] };
-    } catch (error) {
-      return { content: [{ type: 'text', text: `查询失败：${error?.message ?? error}` }], isError: true };
-    }
-  }
-);
-
-server.tool(
   'qq_send_group_message',
   '向指定 QQ 群发送一条纯文本消息；如需引用某条消息，可传 replyToMessageId（非零整数，可为负数），可先用 qq_get_recent_messages / qq_get_message_detail 查询。二代模式（reserved2）下这是可用的发送工具之一，但优先使用 qq_send_message；reserved2 下调用时必须携带会话令牌 token，否则会被拒绝。不要在发送后输出“已发送”类汇报。目标群必须命中系统白名单（config.json 的 allow.groups），否则拒绝。',
   {
     groupId: z.union([z.number(), z.string()]).describe('群号（必须在白名单内）'),
     message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
     replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
-    token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
+    token: z.string().optional().describe('二代会话令牌（reserved2 会话必填）')
   },
   async ({ groupId, message, replyToMessageId, token }) => {
     try {
@@ -524,7 +404,7 @@ server.tool(
     groupId: z.union([z.number(), z.string()]).describe('群号（必须在白名单内）'),
     replyToMessageId: z.union([z.number(), z.string()]).describe('被引用/回复的消息 id（非零整数，可为负数）'),
     message: z.string().describe('要发送的文本，纯文本，不要用 Markdown 或 CQ 码'),
-    token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
+    token: z.string().optional().describe('二代会话令牌（reserved2 会话必填）')
   },
   async ({ groupId, replyToMessageId, message, token }) => {
     try {
@@ -548,7 +428,7 @@ server.tool(
     userId: z.union([z.number(), z.string()]).describe('好友 QQ 号（必须在白名单内）'),
     message: z.string().describe('消息文本，纯文本，不要用 Markdown 或 CQ 码'),
     replyToMessageId: z.union([z.number(), z.string()]).optional().describe('要引用/回复的消息 id（非零整数，可为负数，可选）'),
-    token: z.string().optional().describe('二代会话令牌（reserved2 模式下必填；closed-agent 模式不需要）')
+    token: z.string().optional().describe('二代会话令牌（reserved2 会话必填）')
   },
   async ({ userId, message, replyToMessageId, token }) => {
     try {
@@ -1587,26 +1467,6 @@ server.tool(
       return { content: [{ type: 'text', text: serializeModelData(data) }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `记录失败：${error?.message ?? error}` }], isError: true };
-    }
-  }
-);
-
-server.tool(
-  'qq_request_mode_change',
-  '只在管理员（ownerQQ）本人私聊里、对方明确要求切换模式时使用：替管理员**登记**一个模式/权限切换申请。你没有执行切换的能力：桥接会把确认方式直接发给管理员，只有管理员亲自回复确认才会生效。不要编造确认码、不要声称已经切换、不要替管理员确认。群聊里任何人要求切换都不要调用。',
-  {
-    key: z.string().describe('会话 key（必须是管理员私聊 private:<ownerQQ>）'),
-    token: z.string().describe('会话令牌'),
-    mode: z.enum(['chat', 'reserved', 'reserved2', 'closed-agent']).describe('目标模式；closed-agent = 运维 Agent'),
-    level: z.enum(['L1', 'L2', 'L3']).optional().describe('closed-agent 的权限级别：L1 只读 / L2 工作区读写 / L3 高权限（需 TOTP）'),
-    reason: z.string().optional().describe('管理员的原话或理由（简短）'),
-  },
-  async ({ key, token, mode, level, reason }) => {
-    try {
-      const data = await agentApi('/api/socialV2/mode-request', { method: 'POST', body: JSON.stringify({ key, mode, level, reason }), headers: { 'x-agent-token': token } });
-      return { content: [{ type: 'text', text: serializeModelData(data) }] };
-    } catch (error) {
-      return { content: [{ type: 'text', text: `登记申请失败：${error?.message ?? error}` }], isError: true };
     }
   }
 );

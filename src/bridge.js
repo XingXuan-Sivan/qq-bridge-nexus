@@ -22,14 +22,13 @@ import { SnowLumaWebSocketClient, text } from '@snowluma/sdk';
 import { agentRuntime, agentRuntimeId } from './agent-side/runtime.mjs';
 // 插件提供的 Agent 平台（`agent-provider:provide`）：注册表本身就是注入给插件内核的依赖，
 // 桥接不维护第二张表，也不在插件停用后再清另一份状态。
-import { agentPlatform, agentPlatformPromptChannels, agentProviderRegistry } from './agent-side/runtime-registry.mjs';
+import { agentPlatform, agentPlatformPeerPermissions, agentPlatformPromptChannels, agentProviderRegistry } from './agent-side/runtime-registry.mjs';
 import { mdToPlain, splitForPlatform, truncateText, truncateTextTail } from './md-to-plain.js';
 import { SENSITIVE_RE } from './sensitive.js';
 import { looksLikeUnfinished } from './v2-wait.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import YAML from 'yaml';
 import { createPresetStore, validateAgentYaml } from './presets/store.mjs';
-import { createModeStore, createLocalModeFileBackend, createDshModeBackend } from './runtime/mode-store.mjs';
 import {
   listBehaviorFiles,
   readBehaviorDocument,
@@ -70,16 +69,6 @@ import {
   FORWARD_MAIN_WAIT_MS,
   FORWARD_NESTED_WAIT_MS,
 } from './quote-forward.js';
-import {
-  isHibernatablePolicy,
-  normalizeDormant,
-  dormantDecision,
-  createOwnerTranscript,
-  buildOwnerHandover,
-  buildGroupResumeNote,
-  redactForHandover,
-  DORMANT_MAX_MS,
-} from './mode-handover.js';
 import { priceTableFromCatalog, CN_HOLIDAYS, normalizeUsage } from './model-prices.js';
 import { createScheduler } from './scheduler/engine.js';
 import { buildSkipNotice } from './scheduler/skip-notice.js';
@@ -116,13 +105,11 @@ import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } fro
 import { listAgentPlatformDirs, listPlatforms } from './platforms/index.mjs';
 import { createAdapterRegistry } from './platforms/adapter-registry.mjs';
 import {
-  FORBIDDEN_PERMISSION_PRESETS,
   PERMISSION_LABEL,
   PERMISSION_LEVELS,
   SESSION_PERMISSIONS,
   normalizePermissionConfig,
   normalizeSessionPermission,
-  presetForLevel,
   resolvePermission,
 } from './session/permission.mjs';
 import { capabilityCovers, toolCatalogSnapshot } from './tools/catalog.mjs';
@@ -170,7 +157,7 @@ import {
 // 业务规则全部在 src/social/* 与 src/admin/*，这里只接线。
 // 0.2.0：社交模型的容器词汇统一叫「会话」（conversation）；入站协议字段 `group_id`、会话 key 的
 // `qq:group:<id>` 段、关系状态值 member/left 属协议/文法面，保持不变。
-import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossConversation, queryPresence, queryActivity, resolveLevelPlan, permissionCommandSucceeded, permissionPresetMap, normalizeAgentPreset, L0_MODES, LEVEL_TEXT, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerConversationAccess, peekView, conversationRuleResultText, conversationRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
+import { createBridgeExtensions, redactCredentials, normalizeMemberNotice, processMemberEvent, joinWakeInstruction, checkCrossConversation, queryPresence, queryActivity, permissionCommandSucceeded, normalizeAgentPreset, parseOwnerCommandForGuard, createReconnectWatchdog, describeAgentError, agentErrorUserText, isConfigError, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText, validateOwnerConversationAccess, peekView, conversationRuleResultText, conversationRuleNoticeText, isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './bridge-extensions.js';
 // 插件内核：只提供四个稳定钩子与人格 provider 注册表，具体能力全部在 plugins/<id>/（docs/PLUGIN_KERNEL.md）。
 import { createPluginKernel } from './plugins/kernel.mjs';
 // 内置段落的块化（P4 第一批）：与插件块共用同一套注册表语义，但用自己的预算，避免改变现有 prompt 长度。
@@ -189,14 +176,13 @@ import { createSessionResetter } from './session/reset.mjs';
 // 会话准入：两态单源名单（白名单/黑名单），不再有 per-profile 三态或白名单投影。
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from './session/access.mjs';
 import { migrateAccessModel, summarizeAccessConfig } from './session/access-migrate.mjs';
-import { resolveEffectiveMode, isUsableMode } from './session/mode.mjs';
 // 调度内核（L1）：合批、预算、档位、游标全部是纯函数，桥接只负责喂事件与执行结论。
 import { batchDelayMs, tighterTier } from './scheduling/batching.mjs';
 import { createPacingState, normalizePacingState, takeToken, refundToken, pacingSnapshot } from './scheduling/pacing.mjs';
 import { classifyPendingWake, clearAcknowledgedOverflow, noteOverflow } from './scheduling/cursor.mjs';
 import { batchLimits, resolveSchedulingPolicy, tierOf } from './scheduling/policy.mjs';
 // 多管理员名单与能力判定（纯函数；owner 独占项不放进 ADMIN_CAPS）。
-import { actorForAddress, addressKey, normalizeAdmins, normalizeOwner, closedAgentMaxLevel, canOpenLevel } from './admin/admins.mjs';
+import { actorForAddress, addressKey, normalizeAdmins, normalizeOwner } from './admin/admins.mjs';
 // 会话档案目录与「损坏后不覆盖」不变量（SESSION_SUBSYSTEM.md §3），见模块头。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from './session/directory.mjs';
 import { migrateSessionProfiles } from './session/migrate.mjs';
@@ -311,56 +297,6 @@ const TOOL_LOG_FILE = path.join(STATE_DIR, 'tool-calls.jsonl');
 const TOKEN_USAGE_FILE = path.join(STATE_DIR, 'token-usage.jsonl');
 const ACTIVITY_LOG = path.join(STATE_DIR, 'qq-activity.log');
 const BRIDGE_LOG = path.join(STATE_DIR, 'bridge.log');
-
-/**
- * 模式拼写的**唯一**归一入口（输入边界）。
- *
- * `simulation` 是规范名（QSH_PLAN.md §2.1：对用户只暴露 `closed-agent` / `simulation`），
- * `chat` / `reserved` / `reserved2` 是历史拼写 —— 必须继续被**接受**（线上桥接持久化的全局值
- * 就是 `reserved2`），但进程内部一律用历史拼写存储与比较：`currentMode === 'reserved2'` 这类
- * 判断遍布发送闸门、定时器与 preset 解析，把规范名直接塞进 `currentMode` 会让它们全部变成假。
- *
- * 旧写法是 `VALID_MODES = ['chat','closed-agent','reserved','reserved2']`，控制台那处还抄了
- * 一份同样的字面量数组。后果是：在 DSH 设置或 `state/mode.json` 里写 `simulation` 会被**静默
- * 忽略**，`currentMode` 保持上一次的值（进程刚起来时是 `chat`，即一代仿真 —— preset 与工具面
- * 都和二代不同，`v2ToolEnabled` 之类的闸门也不生效）。用户以为切到了仿真，实际跑的是另一套，
- * 而且没有任何日志。规范名与历史名必须在这里收敛成同一个内部值。
- */
-const MODE_INPUT_ALIASES = Object.freeze({
-  chat: 'chat',
-  reserved: 'reserved',
-  reserved2: 'reserved2',
-  simulation: 'reserved2',
-  'closed-agent': 'closed-agent'
-});
-/** 内部合法模式集合（由别名表派生，避免"两份名单各自漂移"）。 */
-const VALID_MODES = Object.freeze([...new Set(Object.values(MODE_INPUT_ALIASES))]);
-
-/** 输入侧归一：返回内部拼写；无法识别返回 null，由调用方 fail-closed。 */
-function normalizeModeInput(value) {
-  if (typeof value !== 'string') return null;
-  const key = value.trim();
-  return Object.prototype.hasOwnProperty.call(MODE_INPUT_ALIASES, key) ? MODE_INPUT_ALIASES[key] : null;
-}
-
-/**
- * 从 DSH `settings.describe` 的一个命名空间里读某个键，**user 层优先、value 回退**。
- *
- * 为什么不能只读 `value`：DSH 0.2.0-rc.2 的 `settings/update` 写入的是 user 层
- * （profile patch 的显式 config），当次进程内 `describe().value`（取自插件 fiber 的
- * 运行配置）**不会更新**，要重启 DSH 才变。控制台切模式后 5 秒一次的 `refreshMode()`
- * 会读回旧 `value`，把刚选的模式改回去（issue #22，实测复现）。
- * 写哪读哪：`user` 里有显式值就用它，否则回退 `value`（从没写过时 `user` 是空对象，
- * 老行为不变；DSH 以后修好热更新也继续正确）。
- */
-function settingFromDshNamespace(ns, key) {
-  if (!ns || typeof ns !== 'object') return undefined;
-  for (const layer of [ns.user, ns.value]) {
-    if (!layer || typeof layer !== 'object' || Array.isArray(layer)) continue;
-    if (Object.prototype.hasOwnProperty.call(layer, key) && layer[key] !== undefined) return layer[key];
-  }
-  return undefined;
-}
 
 // 读取 JSON 文件并容错：Windows 下常见 UTF-8 BOM（\uFEFF）会令 JSON.parse 失败。
 // required=true 时文件缺失或解析失败直接抛错（用于启动必需配置，fail-fast）。
@@ -1615,10 +1551,8 @@ function loadConfig() {
         collectSticker: true,
         getSelfImage: true,
         personProfile: true,
-        requestMode: true,
         crossGroup: true,
         schedule: true,
-        handoverMemory: true,
         ownerRelay: false,
         webImage: false,          // 管理员私聊里搜图并发送（默认关闭）
         ownerGroupAccess: false   // 管理员私聊只读查看白名单群 + 给群设长期规则（默认关闭）
@@ -1745,14 +1679,11 @@ function loadConfig() {
     stickerNote: true,
     collectSticker: true,
     getSelfImage: true,
-    // v0.3.0：人物档案（按 QQ 号）/ 模式切换申请（只能登记，不能执行）/ 跨群受控查询
+    // 人物档案（按 QQ 号）/ 跨群受控查询
     personProfile: true,
-    requestMode: true,
     crossGroup: true,
     // 定时任务：只在管理员私聊里可用，只能登记发给管理员私聊的任务（见 src/scheduler/engine.js）
     schedule: true,
-    // 不是工具：切到 agent 时，是否把二代仿真里管理员私聊的长期记忆一起交接给 agent（见 withHandover）
-    handoverMemory: true,
     sendVoice: false,
     // v0.4.2：管理员私聊托付群会话（默认关闭）
     ownerRelay: false,
@@ -1939,28 +1870,13 @@ function loadConfig() {
     log(`⚠️ continuity.sharePolicy「${cfg.continuity.sharePolicy}」非法，已按 identity 处理`);
     cfg.continuity.sharePolicy = 'identity';
   }
-  // owner 管理通道：默认开启（只有 ownerQQ 私聊可用）；L3 默认允许但必须配置 TOTP 才能开。
+  // owner 管理通道：默认开启（只有 ownerQQ 私聊可用）；审批参数的裁剪长度与私聊备注展示。
   cfg.admin = {
     enabled: true,
-    naturalLanguage: true,
-    safeMode: 'reserved2',
-    defaultAgentLevel: 'L1',
-    confirmCodeDigits: 4,
-    requestTtlMs: 120000,
-    maxConfirmAttempts: 3,
-    maxPendingRequests: 3,
-    idleTimeoutMs: 1800000,
-    maxElevatedMs: { L1: 14400000, L2: 7200000, L3: 3600000, ...(file.admin?.maxElevatedMs ?? {}) },
-    totpMaxFailures: 5,
-    totpLockMs: 900000,
-    allowL3: true,
-    externalEscalation: 'revert',
-    showPrivateNotes: false,
-    pinChatReadOnly: true,
     approvalArgsMaxChars: 600,
+    showPrivateNotes: false,
     ...(file.admin ?? {}),
   };
-  if (file.admin?.maxElevatedMs) cfg.admin.maxElevatedMs = { L1: 14400000, L2: 7200000, L3: 3600000, ...file.admin.maxElevatedMs };
   // 跨会话协作：默认关闭；链接是有向的、按能力授权（见 src/social/cross-conversation.js）。
   cfg.crossGroup = { enabled: false, links: [], ...(file.crossGroup ?? {}) };
 
@@ -3429,7 +3345,7 @@ async function main() {
   /** 搜图三件套的统一闸门：只放行二代仿真里、带有效令牌的管理员私聊。返回 null 或 { status, error }。 */
   function webImageGate(req, key, { tokenOk, sessionAllowed }) {
     if (cfg.socialV2?.tools?.webImage !== true) return { status: 403, error: '工具未启用：搜图发图（socialV2.tools.webImage 默认关闭，需要管理员在控制台打开）' };
-    if (currentMode !== 'reserved2') return { status: 403, error: '搜图发图只在二代仿真模式里可用' };
+    if (effectiveMode(key) !== 'reserved2') return { status: 403, error: '搜图发图只在二代仿真模式里可用' };
     const token = req.headers['x-agent-token'];
     if (!token || !tokenOk(key, token)) return { status: 403, error: 'agent token 无效' };
     if (!sessionAllowed(key)) return { status: 403, error: '目标不在当前模式允许范围内' };
@@ -3704,7 +3620,6 @@ async function main() {
     if (!stickerEnabled()) return '表情包体系已关闭';
     if (!stickerStoreWritable) return '表情库处于只读降级状态，写不进去';
     if (!agentReady) return `${agentRuntime().label} 还没就绪`;
-    if (currentMode === 'closed-agent') return 'agent 模式下不运行（切回聊天或二代仿真后再点）';
     if (!modelCanSeeImages()) return `当前模型 ${currentModelLabel()} 不能看图，请先在「DSH 模型与思考强度」里换一个能看图的模型`;
     return '';
   }
@@ -4292,22 +4207,6 @@ async function main() {
   let dshCheckStarted = false;
   let dshReconcileTimer = null; // 运行期周期对账（手动删除的会话不必等投递失败才发现）
   let snowlumaWatchStarted = false; // SnowLuma 上游健康探测只启动一次（见 startSnowlumaWatch）
-  // 模式持久化（P3）：本地 state/mode.json 始终写（降级必须能生效），DSH settings 是
-  // best-effort 的远端权威。存储细节（命名空间名、settings.describe/update 的形状、
-  // user 层优先）全在 src/runtime/mode-store.mjs；模式语义（别名归一、级别、提权判定）
-  // 仍留在本文件——那是安全边界，不该被存储抽象带走。
-  const modeStore = createModeStore({
-    local: createLocalModeFileBackend({
-      file: path.join(STATE_DIR, 'mode.json'),
-      readJson: readJsonSafe,
-      writeJson: atomicWriteJson,
-    }),
-    remote: createDshModeBackend({
-      readSetting: settingFromDshNamespace,
-      normalizeMode: normalizeModeInput,
-    }),
-    log,
-  });
   /** 行为档案的引擎 → 会话模式拼写（内部比较仍用历史拼写）。 */
   function modeOfBehavior(behavior) {
     const engine = behavior?.engine ?? '';
@@ -4315,26 +4214,27 @@ async function main() {
     if (engine === 'v1') return 'reserved';
     return 'chat';
   }
-  // 无会话上下文的默认引擎：由当前用户平台条目的 defaultBehavior 决定（没设就是聊天）。
-  // closed-agent 仍由管理控制器与 state/mode.json 覆盖（见 noteObservedMode）。
-  const bootBehavior = cfg.behaviors?.get?.(String(
-    cfg.platforms?.users?.[String(cfg.platforms?.active?.user ?? '')]?.defaultBehavior ?? '',
-  )) ?? null;
-  let currentMode = modeOfBehavior(bootBehavior); // chat | closed-agent | reserved | reserved2
-  let lastMode = currentMode;
-  // closed-agent 模式使用的 DSH agent preset：留空表示「用 DSH 自己声明的默认 preset」。
-  // 旧版本这里硬编码 'router-standard'，但 DSH 0.1.5 已移除该 preset，硬编码会导致
-  // 创建出的会话挂不上 preset，进而被 DSH 套上 standard（含本地工具）。
-  let closedAgentPreset = '';
+  /**
+   * 无会话上下文的默认引擎：由当前用户平台的 `defaultBehavior` 决定（没设就是聊天）。
+   *
+   * 这是平台配置项：落在 config.json 的 `platforms.users.<id>` 上，各平台通用，
+   * 不需要平台目录 yml 声明。会话自己的行为档案见 behaviorRefOf()。
+   */
+  function defaultMode() {
+    const activeUser = String(cfg.platforms?.active?.user ?? '');
+    const behaviorId = String(cfg.platforms?.users?.[activeUser]?.defaultBehavior ?? '');
+    if (!behaviorId) return 'chat';
+    try {
+      return modeOfBehavior(resolveBehavior(cfg.behaviors, behaviorId));
+    } catch (error) {
+      log(`⚠️ 用户平台默认行为「${behaviorId}」不可用：${error?.message ?? error}（按聊天模式处理）`);
+      return 'chat';
+    }
+  }
   // DSH 侧真实的 preset 清单与默认 preset：旧版本这里是硬编码的 'router-standard'，
-  // 但 DSH 0.1.5 已不存在该 preset，硬编码会让 closed-agent 模式永远挂不上 preset。
+  // 但 DSH 0.1.5 已不存在该 preset，硬编码会让会话永远挂不上 preset。
   let dshPresetIds = [];        // 当前 DSH 可用的 preset id 列表（agentPresets/list）
   let dshDefaultPreset = '';    // DSH settings `agent-presets.default`，取不到时用列表里的 isDefault
-  // v0.3.0 权限级别：L0 = 群友模式；closed-agent 下为 L1/L2/L3（见 src/admin/mode-control.js）。
-  // 只由 applyModeChange() 修改 —— 它是 ModeController 唯一的执行回调。
-  let currentLevel = 'L0';
-  // 有效运行模式：全局模式是默认值，档案里的 mode 可以覆盖（closed-agent 全局排他）。
-  // closed-agent 开启时只保留管理员私聊，其余会话是 inactive——不参与任何发送/唤醒。
   // owner 的私聊 key：结构化后必须带平台（与账号），否则多账号部署下会把别人的私聊当成 owner。
   const ownerPrivateKeyOf = () => (cfg.owner
     ? buildKey('private', cfg.owner.id, { platform: cfg.owner.platform, account: cfg.owner.account })
@@ -4444,15 +4344,6 @@ async function main() {
     saveSocialV2State();
     log('手动静默已解除：按未读/休眠重排自动唤醒');
   }
-  function isPrivilegedPrivate(key) {
-    const actor = actorForKey(key);
-    if (actor.role === 'owner') return true;
-    return actor.role === 'admin' && actor.exemptPassive === true;
-  }
-  function canEnterClosedAgent(key) {
-    const actor = actorForKey(key);
-    return actor.role === 'owner' || (actor.role === 'admin' && canOpenLevel(actor, 'L1'));
-  }
   /** 审批通知收件人：owner + 勾了 notify 且有 approve 权限的管理员（私聊）。 */
   function approvalNotifyTargets(requester) {
     const keys = [];
@@ -4476,26 +4367,16 @@ async function main() {
   }
 
   /**
-   * 会话语义下的生效方式（能力档 `runtime` 段）。旧会话与未迁移方案没有能力档，
-   * 按缺省段处理：装预设、每次唤醒都带平台话术、权限归桥接。
+   * 会话语义下的生效方式（能力档 `runtime` 段）。旧会话与未迁移档案没有能力档，
+   * 按缺省段处理：装预设、每次唤醒都带平台话术。
    */
   function runtimeOf(key) {
     return capabilityOf(key)?.runtime ?? CAPABILITY_RUNTIME_DEFAULTS;
   }
 
-  /**
-   * 直通：不装预设、不套沙箱，会话跑在执行体原生环境里，桥接只做追加。
-   *
-   * closed-agent 不参与直通：那个模式的权威是「级别 → preset + 权限预设」，
-   * 跳过预设就等于把工具面交给执行体默认档，安全边界没人认账。
-   */
+  /** 直通：不装预设、不套沙箱，会话跑在执行体原生环境里，桥接只做追加。 */
   function passthroughOf(key) {
-    return currentMode !== 'closed-agent' && runtimeOf(key).apply === 'passthrough';
-  }
-
-  /** 权限档归谁：`bridge` = 桥接钉住；`agent` = 读得到、可按用户操作代改，但不回钉。 */
-  function permissionAuthorityOf(key) {
-    return runtimeOf(key).permission;
+    return runtimeOf(key).apply === 'passthrough';
   }
 
   /** 这条对端会话是不是已经带过平台话术（换了会话就不算）。 */
@@ -4615,124 +4496,70 @@ async function main() {
   }
 
   // ---- 会话权限级别（P11）----
-  const fullGrants = new Map(); // key -> { expiresAt, timer }
-
-  function fullGrantActive(key) {
-    const grant = fullGrants.get(key);
-    if (!grant) return false;
-    if (grant.expiresAt <= Date.now()) {
-      clearFullGrant(key, { revert: true, reason: 'expired' });
-      return false;
-    }
-    return true;
-  }
-
-  /** closed-agent 期间 level 仍是权限的来源（旧语义），其余模式走全局默认 + 会话覆盖。 */
-  const LEGACY_LEVEL_PERMISSION = { L1: 'read-only', L2: 'workspace-write', L3: 'full-ask' };
+  // 桥接侧唯一的权限语义：只决定「这个会话还能不能调用某类平台工具」（见 src/tools/catalog.mjs
+  // 的 LEVEL_ALLOWS）。它不绑能力档、不绑 Agent 平台，也不写对端——对端的权限档由能力档的
+  // `runtime.peerPermission` 在建会话时钉一次（见 pinSessionPeerPermission）。
   function permissionLevelOf(rawKey) {
     const key = apiKey(rawKey);
-    const profile = state.profiles?.[key];
-    // 纯聊天会话（没有任何能力档）恒只读：权限档只对拿到工具的会话有意义。
-    const chat = !capabilityOf(key);
-    const explicit = profile?.permission && profile.permission !== 'inherit' ? profile.permission : null;
-    // closed-agent 期间权限由管理通道的级别决定（旧语义保留）；其余模式走全局默认 + 会话覆盖。
-    if (!explicit && currentMode === 'closed-agent') {
-      const legacy = LEGACY_LEVEL_PERMISSION[String(currentLevel || '').toUpperCase()];
-      if (legacy) return legacy;
-    }
-    return resolvePermission({ profile, global: cfg.permission, chat });
+    // 纯聊天会话（没有任何能力档）恒只读：级别只对拿到工具的会话有意义。
+    return resolvePermission({ profile: state.profiles?.[key], global: cfg.permission, chat: !capabilityOf(key) });
   }
-
-  function fullAllowedForKey(key) {
-    return cfg.permission?.allowFull === true && fullGrantActive(key);
-  }
-
-  function grantFull(key, minutes) {
-    const ttl = Number(minutes) > 0 ? Number(minutes) : cfg.permission.fullTtlMin;
-    clearFullGrant(key, { revert: false, reason: 'replaced' });
-    const expiresAt = Date.now() + ttl * 60_000;
-    const timer = setTimeout(() => clearFullGrant(key, { revert: true, reason: 'expired' }), ttl * 60_000);
-    timer.unref?.();
-    fullGrants.set(key, { expiresAt, timer });
-    ext.audit.append('permission.full_grant', { key, ttlMin: ttl });
-    return { expiresAt, ttlMin: ttl };
-  }
-
-  function clearFullGrant(key, { revert = true, reason = 'manual' } = {}) {
-    const grant = fullGrants.get(key);
-    if (!grant) return false;
-    clearTimeout(grant.timer);
-    fullGrants.delete(key);
-    ext.audit.append('permission.full_revoked', { key, reason });
-    if (revert) void pinSessionPermission(key, { reason: `full-${reason}` }).catch(() => {});
-    return true;
-  }
-
-  async function pinSessionPermission(rawKey, { reason = 'manual', throwOnError = false, sessionId: explicitSessionId = null } = {}) {
-    const key = apiKey(rawKey);
-    // 直通能力档下档位归执行体：不回钉、不冒充。要改档走 applySessionPermission（写后核对）。
-    if (permissionAuthorityOf(key) === 'agent') return { ok: true, skipped: true, authority: 'agent' };
-    // 建会话时还没 bindSession，必须把刚拿到的 sessionId 显式传进来。
-    // 这里只能 `sessions.get` —— 它返回裸 id；`get(key)?.sessionId` 恒为 undefined，
-    // 会让不传 explicitSessionId 的调用（授权过期回收 / 命令改级别）静默地什么也不做。
-    const sessionId = explicitSessionId || sessions.get(key);
-    if (!sessionId || !agentPort.supports('permission')) return { ok: true, skipped: true };
-    const level = permissionLevelOf(key);
-    const picked = presetForLevel(level, { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() });
-    try {
-      // port 交回的是已解包的回执；「这份回执算不算成功」由平台档的纯函数判定。
-      const { value } = await agentPort.applyPermission(sessionId, picked.preset);
-      const ok = permissionCommandSucceeded(value, picked.preset);
-      if (ok) pinnedPermissions.set(key, picked.preset);
-      else pinnedPermissions.delete(key);
-      ext.audit.append(ok ? 'permission.change' : 'permission.pin_failed', { key, level: picked.level, preset: picked.preset, reason });
-      if (!ok && throwOnError) throw new Error(`权限预设 ${picked.preset} 结果不符合预期`);
-      return { ok, level: picked.level, preset: picked.preset };
-    } catch (error) {
-      ext.audit.append('permission.pin_failed', { key, level: picked.level, preset: picked.preset, reason, error: String(error?.message ?? error) });
-      if (throwOnError) throw error;
-      return { ok: false, error: String(error?.message ?? error) };
-    }
-  }
-
-  const pinnedPermissions = new Map();
 
   /**
-   * 直通方案下改档：桥接只是「代用户点一下」。写完立刻读回核对，
-   * 不一致就把对端的实际值如实报出来并记审计——不回滚成「假装成功」。
+   * 把能力档声明的对端权限档钉一次（只在建会话时）。
+   *
+   * 取值域由执行体自己申报（`PEER_PERMISSIONS`）；它没申报（空数组 = 由对端决定）就不钉，
+   * 但能力档写了 peerPermission 就必须落下去 —— 写不进或回执不符就是失败，调用方据此丢弃会话
+   * （承诺的沙箱与审批策略没生效的会话不能拿来跑活）。
+   * 钉住的结果同时写进档案的 `permissionMirror`：控制台与外部漂移核对都以它为基线。
    */
-  async function applySessionPermission(rawKey, preset, { reason = 'manual' } = {}) {
+  async function pinSessionPeerPermission(rawKey, { sessionId = null, reason = 'create' } = {}) {
     const key = apiKey(rawKey);
-    const sessionId = sessions.get(key);
-    if (!sessionId) return { ok: false, error: '会话还没建立，先发一条消息再改档' };
-    if (!agentPort.supports('permission')) return { ok: false, error: `执行体 ${agentPort.id} 不支持读写权限档` };
-    const wanted = String(preset ?? '').trim();
-    if (!wanted) return { ok: false, error: '权限档不能为空' };
+    const wanted = String(runtimeOf(key).peerPermission ?? '').trim();
+    if (!wanted) return { ok: true, skipped: true, peerPermission: '' };
+    const declared = agentPlatformPeerPermissions(agentPort.id);
+    if (declared.length && !declared.includes(wanted)) {
+      const error = `能力档要求对端权限档「${wanted}」，但执行体 ${agentPort.id} 只认领 ${declared.join(' / ')}`;
+      ext.audit.append('permission.pin_failed', { key, peerPermission: wanted, reason, error });
+      return { ok: false, error };
+    }
+    const target = sessionId || sessions.get(key);
+    if (!target) return { ok: true, skipped: true, peerPermission: wanted };
+    if (!agentPort.supports('permission')) {
+      const error = `执行体 ${agentPort.id} 不支持写权限档，无法落实能力档要求的「${wanted}」`;
+      ext.audit.append('permission.pin_failed', { key, peerPermission: wanted, reason, error });
+      return { ok: false, error };
+    }
     try {
-      await agentPort.applyPermission(sessionId, wanted);
+      const { value } = await agentPort.applyPermission(target, wanted);
+      const ok = permissionCommandSucceeded(value, wanted);
+      ext.audit.append(ok ? 'permission.pin' : 'permission.pin_failed', { key, peerPermission: wanted, reason });
+      if (!ok) return { ok: false, peerPermission: wanted, error: `对端权限档写入回执不符合预期（要求 ${wanted}）` };
+      const profile = ensureSessionProfile(key);
+      if (profile) {
+        profile.permissionMirror = { preset: wanted, at: Date.now() };
+        saveState();
+      }
+      return { ok: true, peerPermission: wanted };
     } catch (error) {
-      ext.audit.append('permission.write_failed', { key, preset: wanted, reason, error: String(error?.message ?? error) });
-      return { ok: false, error: String(error?.message ?? error) };
+      ext.audit.append('permission.pin_failed', { key, peerPermission: wanted, reason, error: String(error?.message ?? error) });
+      return { ok: false, peerPermission: wanted, error: String(error?.message ?? error) };
     }
-    // 写后核对：「发出了指令」不等于「对端改了」，核对不过就是失败。
-    let current = '';
-    try { ({ preset: current } = await agentPort.readPermission(sessionId)); } catch { current = ''; }
-    if (current !== wanted) {
-      ext.audit.append('permission.write_failed', { key, preset: wanted, current, reason });
-      return { ok: false, current, error: `对端回读为「${current || '读不出来'}」，与写入的「${wanted}」不一致` };
-    }
-    ext.audit.append('permission.change', { key, preset: current, by: reason, authority: 'agent' });
-    // 记下「桥接替用户设成了哪一档」：控制台用它判断对端是否已被外部改过（漂移只标记，不改回）。
-    const profile = ensureSessionProfile(key);
-    if (profile) {
-      profile.permissionMirror = { preset: current, at: Date.now() };
-      saveState();
-    }
-    return { ok: true, preset: current };
   }
 
   /**
-   * 直通方案下的权限档现状：对端说什么就是什么。
+   * 对端档位是否需要重新钉：能力档声明了档位，而档案里记下的不是它（含从没钉过的旧档案）。
+   * 纯聊天会话没有能力档，本就不钉。
+   */
+  function peerPermissionDrifted(rawKey) {
+    const key = apiKey(rawKey);
+    const wanted = String(runtimeOf(key).peerPermission ?? '').trim();
+    if (!wanted) return false;
+    return state.profiles?.[key]?.permissionMirror?.preset !== wanted;
+  }
+
+  /**
+   * 对端此刻的权限档：对端说什么就是什么。
    * 读不出来不等于没改（部分平台的会话要等一次事件才有快照），文案必须把这一点说清。
    */
   async function readAgentPermission(key) {
@@ -4747,68 +4574,25 @@ async function main() {
     }
   }
 
-  /** `/perm` 在直通方案下的回答：档位在对端，桥接只读。 */
-  async function describeAgentPermission(key) {
-    const now = await readAgentPermission(key);
-    const lines = [
-      '当前方案为直通：权限档由执行体自身管理，桥接只读、不自动改。',
-      now.readable ? `对端当前档位：${now.preset}` : `对端档位读不出来：${now.reason || '返回格式不符'}（读不出来不等于没改过）`,
-      '要改档请在控制台「会话详情 › 执行体与权限」里操作，写后会自动核对。',
-    ];
-    return lines.join('\n');
-  }
-
+  /** 会话的权限段：级别是档案值（可改），对端权限档只读（改它 = 换能力档）。 */
   function permissionPayload(rawKey) {
     const key = apiKey(rawKey);
-    const value = normalizeSessionPermission(state.profiles?.[key]?.permission);
     return {
-      value,
-      // 档位归谁：`bridge` 的 `effective` 是桥接四级算出来的，`agent` 的只是档案记录，
-      // 真正生效的值要用 readAgentPermission（会话详情）读对端。
-      authority: permissionAuthorityOf(key),
+      value: normalizeSessionPermission(state.profiles?.[key]?.permission),
       effective: permissionLevelOf(key),
-      options: SESSION_PERMISSIONS,
+      options: SESSION_PERMISSIONS.map((value) => ({ value, name: PERMISSION_LABEL[value] ?? value })),
       labels: PERMISSION_LABEL,
-      fullAllowed: cfg.permission?.allowFull === true,
-      grantActive: fullGrantActive(key),
-      grantExpiresAt: fullGrants.get(key)?.expiresAt ?? null,
-      ttlMin: cfg.permission.fullTtlMin,
-      canPinFull: fullAllowedForKey(key),
+      peerPermission: String(runtimeOf(key).peerPermission ?? ''),
+      peerPin: state.profiles?.[key]?.permissionMirror ?? null,
     };
-  }
-
-  /**
-   * 直通方案下可选的对端档位：目录来自执行体自己（`listPermissionPresets`）。
-   * `FORBIDDEN_PERMISSION_PRESETS` 里的档位不列出——它们不弹审批，列出来就是诱谁去点。
-   */
-  async function agentPermissionOptions() {
-    if (!agentPort.supports('permission')) {
-      return { options: [], defaultPreset: '', error: `执行体 ${agentPort.id} 不支持读写权限档` };
-    }
-    try {
-      const { options, defaultPreset } = await agentPort.listPermissionPresets();
-      return {
-        options: (Array.isArray(options) ? options : [])
-          .map((item) => ({
-            value: String(item?.value ?? '').trim(),
-            name: String(item?.name ?? '').trim(),
-          }))
-          .filter((item) => item.value && !FORBIDDEN_PERMISSION_PRESETS.includes(item.value))
-          .map((item) => ({ ...item, name: item.name || item.value })),
-        defaultPreset: String(defaultPreset ?? '').trim(),
-        error: '',
-      };
-    } catch (error) {
-      return { options: [], defaultPreset: '', error: String(error?.message ?? error) };
-    }
   }
 
   /**
    * 会话详情 › 「执行体与权限」的唯一数据源（§7.6）：一条请求给全，页面不再为了凑一块去打四个接口。
    *
-   * `permission.current` 的语义按权威分：`bridge` 是桥接四级算出来的生效档；
-   * `agent` 是对端此刻的档位——读不出来就如实标 `readable: false`，不拿档案里的旧值充数
-   * （「读不出来」与「没改过」不是同件事）。
+   * 权限分两档：`permission.value/effective` 是档案里的级别（桥接只拿它过滤本会话能调用的平台工具），
+   * `permission.peer` 是对端此刻的权限档 —— 只读展示，读不出来就如实标 `readable: false`
+   * （「读不出来」与「没改过」不是同件事）；能力档没声明对端档位时连读都不读，直接 null。
    */
   async function sessionAgentPayload(rawKey) {
     const key = apiKey(rawKey);
@@ -4817,46 +4601,13 @@ async function main() {
     if (!profile && !sessionId) return null;
     const capability = capabilityOf(key);
     const runtime = runtimeOf(key);
-    const authority = permissionAuthorityOf(key);
     const impl = agentPlatform(agentPort.id);
     const instance = sessions.instanceOf(key) ?? agentPort.id;
-    let permission;
-    if (authority === 'agent') {
-      const now = await readAgentPermission(key);
-      const catalog = await agentPermissionOptions();
-      const mirror = profile?.permissionMirror ?? null;
-      permission = {
-        authority,
-        current: now.preset || '',
-        readable: now.readable,
-        reason: now.reason || '',
-        options: catalog.options,
-        defaultPreset: catalog.defaultPreset,
-        catalogError: catalog.error || '',
-        // 桥接最后一次写入的档位与时间（没写过就没有基线）
-        mirror: mirror?.preset ?? null,
-        setAt: Number(mirror?.at) || 0,
-        // 漂移只是「对端被外部改过」的陈述：不自动改回（§7.2），界面给「改回」按钮。
-        drift: now.readable && mirror?.preset && now.preset !== mirror.preset
-          ? { expected: mirror.preset, actual: now.preset, at: Number(mirror.at) || 0 }
-          : null,
-      };
-    } else {
-      permission = {
-        authority,
-        current: permissionLevelOf(key),
-        readable: true,
-        reason: '',
-        options: SESSION_PERMISSIONS.map((value) => ({ value, name: PERMISSION_LABEL[value] ?? value })),
-        defaultPreset: '',
-        catalogError: '',
-        mirror: null,
-        setAt: 0,
-        drift: null,
-        fullAllowed: cfg.permission?.allowFull === true,
-        grantActive: fullGrantActive(key),
-      };
-    }
+    const permission = {
+      ...permissionPayload(key),
+      // 对端此刻的档位：只读展示。读不出来如实标，不拿档案里的旧值充数。
+      peer: runtime.peerPermission ? await readAgentPermission(key) : null,
+    };
     return {
       key,
       sessionId,
@@ -4873,7 +4624,7 @@ async function main() {
           note: capability.note,
           audience: capability.audience,
           apply: runtime.apply,
-          authority: runtime.permission,
+          peerPermission: runtime.peerPermission,
           prompt: runtime.prompt,
         }
         : null,
@@ -4898,17 +4649,12 @@ async function main() {
     return (registry ?? []).find?.((item) => item.id === behaviorId)?.engine ?? '';
   }
 
-  /**
-   * 会话的有效运行模式。引擎由行为档案决定（v1/v2），没挂行为就是普通聊天；
-   * closed-agent 是全局独占引擎，开启时覆盖一切（随管理通道退役）。
-   */
+  /** 会话的有效运行模式：完全由行为档案决定（v1/v2），没挂行为就是普通聊天。 */
   function effectiveMode(key) {
-    if (currentMode === 'closed-agent') return 'closed-agent';
     return modeOfBehavior(behaviorFor(key));
   }
   /** 是否还有任何会话会跑二代仿真（全局接口的总开关用）。 */
   function anyV2Session() {
-    if (currentMode === 'closed-agent') return false;
     return Object.keys(state.profiles ?? {}).some((key) => effectiveMode(key) === 'reserved2');
   }
   /** 两态单源名单的生效值；不再有 owner/管理员豁免，也没有旧白名单兜底。 */
@@ -4922,7 +4668,6 @@ async function main() {
     }
   }
   function passiveAllowed(key) {
-    if (!isUsableMode(effectiveMode(key))) return false;
     if (capabilityBlocks(key)) return false;
     return profileAccessAllowed('passive', key);
   }
@@ -4943,8 +4688,6 @@ async function main() {
       .map((parsed) => parsed.id);
   }
   function proactiveAllowed(key) {
-    const mode = effectiveMode(key);
-    if (mode === 'inactive' || mode === 'closed-agent') return false;
     if (capabilityBlocks(key)) return false;
     return profileAccessAllowed('proactive', key);
   }
@@ -4952,8 +4695,6 @@ async function main() {
     return proactiveAllowed(key);
   }
   let permissionCatalog = null;  // DSH permissionPresets/catalog 的预设名列表；null = 未知
-  let lastObservedDshMode = null; // 上一次从 DSH settings 读到的 qq-mode（用于识别「外部变更」）
-  let controllerReady = false;    // ModeController 完成启动校验之前，不把 DSH 值当作外部变更
 
   async function refreshPermissionCatalog() {
     try {
@@ -4961,100 +4702,37 @@ async function main() {
       const names = options.map((o) => String(o.value ?? o.name ?? '')).filter(Boolean);
       if (names) permissionCatalog = names;
     } catch (error) {
-      // 拿不到目录不致命：L1/L2 用的是 DSH 内置预设；L3 在目录未知时 fail-closed。
+      // 拿不到目录不致命：能力档要求的拦位写不进去时，建会话那一步会 fail-closed。
       log(`读取 DSH 权限预设目录失败：${error?.message ?? error}`);
     }
     return permissionCatalog;
   }
 
-  /** 离开/进入仿真模式时的运行态清理（原控制台 /api/mode 里的逻辑，抽出来给所有入口共用）。 */
-  function applyRuntimeModeTransition(fromMode, toMode) {
-    if (fromMode === 'reserved' && toMode !== 'reserved') {
-      cleanupSocialForModeChange();
-      log('模式离开一代仿真模式，清理社交状态');
-    }
-    if (fromMode === 'reserved2' && toMode !== 'reserved2') {
-      clearAllSocialV2Timers();
-      drainAllPromptQueues('模式切换，已取消排队中的投递');
-      log('模式离开二代仿真模式，清理 reserved2 定时器与排队投递');
-    }
-  }
-
-  function afterModeApplied(toMode) {
-    reconcileSessionPolicies();
-    if (toMode === 'reserved2') {
-      for (const key of socialV2.conversations.keys()) {
-        setupSleepTimerV2(key);
-        scheduleProactiveCheckV2(key);
-      }
-    }
-  }
-
   /**
-   * ModeController 的执行回调：**真正**切换模式/级别的唯一地方。
-   * 失败必须抛错（控制器据此通知 owner「失败」并保持原状态）。
-   *   · 升级（进入 closed-agent 或级别变高）时，DSH 设置写穿失败 = 失败（否则下一轮轮询会被回滚，
-   *     造成「通知说成功、实际没生效」）；
-   *   · 降级永远在本地生效（紧急关闭不能因为 DSH 挂了而失败）。
+   * 紧急关闭：把所有会话降为只读。
+   *
+   * 两件事要一起做，缺一条都能被绕过：全局默认改只读（新会话与 inherit 的会话直接受限），
+   * 再把每份档案的 permission 显式写为只读（先前显式设过更高档的会话也被按住）。
+   * 只掐桥接侧的工具闸门——对端权限档不在这里改，真正断掉执行体要靠停止进程。
    */
-  async function applyModeChange(target, ctx = {}) {
-    const mode = target.mode;
-    const level = target.level;
-    const rank = (lv) => ['L0', 'L1', 'L2', 'L3'].indexOf(lv);
-    const escalating = mode === 'closed-agent' && (currentMode !== 'closed-agent' || rank(level) > rank(currentLevel));
-    // 纵深防御：「按桥接的真实状态算」是升级时，只接受经确认码/控制台的来源。
-    // 控制器的记录万一与真实状态不一致（例如启动回落写盘失败），被它当成「降级」的请求也不能借机提权。
-    if (escalating && !['qq-confirm', 'console', 'external-accept'].includes(ctx.source)) {
-      throw new Error(`来源 ${ctx.source ?? '未知'} 不能提升权限（需要确认码或控制台）`);
+  async function panicAllSessions(reason = 'manual') {
+    try {
+      const permission = { ...(cfg.permission ?? {}), default: 'read-only' };
+      saveConfigSection('permission', permission);
+      cfg.permission = permission;
+      const keys = Object.keys(state.profiles ?? {});
+      for (const key of keys) {
+        const profile = state.profiles[key];
+        if (profile && typeof profile === 'object') profile.permission = 'read-only';
+      }
+      saveState();
+      ext.audit.append('panic', { reason, sessions: keys.length });
+      log(`已把所有会话降为只读（来源 ${reason}，会话 ${keys.length} 个）`);
+      return { ok: true };
+    } catch (error) {
+      log(`⚠️ 紧急关闭失败：${error?.message ?? error}`);
+      return { ok: false, error: String(error?.message ?? error) };
     }
-    if (escalating && ctx.source === 'external-accept' && level !== 'L1') {
-      throw new Error('外部变更最多只按 L1 接受');
-    }
-    if (level === 'L3' && cfg.admin?.allowL3 === false) throw new Error('配置禁止开启 L3（admin.allowL3=false）');
-    if (mode === 'closed-agent') {
-      if (!cfg.owner) throw new Error('未配置 owner（所有者地址），closed-agent 无人可用');
-      if (dshPresetIds.length === 0) await refreshPresetList();
-      if (level === 'L3' || permissionCatalog === null) await refreshPermissionCatalog();
-      if (level === 'L3' && permissionCatalog === null) throw new Error('无法确认 DSH 是否提供 qq-full-ask 预设（权限目录读取失败），按安全策略拒绝开启 L3');
-      const resolved = resolveLevelPlan(level, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
-      if (!resolved.ok) throw new Error(resolved.error);
-    }
-    // 本地文件必写：远端（DSH）挂掉时降级/关闭仍要生效，重启后也不会回到旧模式。
-    const existing = modeStore.readLocal() ?? {};
-    modeStore.writeLocal({ mode, level, closedAgentPreset: String(existing.closedAgentPreset ?? closedAgentPreset ?? '') });
-    // 远端 best-effort：升级（closed-agent / 提级）必须写穿，否则下一轮轮询会把模式改回去；
-    // 降级只要求本地生效（紧急关闭不能被 DSH 挂掉拖住）。
-    const remote = await modeStore.writeRemote({
-      mode,
-      update: async (payload) => (await agentPort.writeSettings(payload)).value,
-    });
-    const dshSynced = remote.synced || remote.skipped === true;
-    if (!dshSynced && escalating) throw new Error(`写入 DSH 设置失败（${remote.error?.message ?? remote.error}），未切换`);
-    if (!dshSynced) log(`⚠️ 模式写穿 DSH 设置失败（${remote.error?.message ?? remote.error}）；降级已在本地生效`);
-    const fromMode = currentMode;
-    const fromLevel = currentLevel;
-    applyRuntimeModeTransition(fromMode, mode);
-    currentMode = mode;
-    currentLevel = mode === 'closed-agent' ? level : 'L0';
-    // 模式切换只影响 DSH 权限预设；运行方案由全局默认 + 会话覆盖决定，不再跟随模式写指针。
-    if (mode === 'closed-agent') lastAgentLevel = currentLevel;
-    // owner 的会话会因此换新（或稍后从休眠恢复，那时会改成「恢复」交接）：下一条发给它的消息带上私聊交接
-    if (fromMode !== mode || fromLevel !== currentLevel) {
-      pendingHandover.set(ownerKeyOf(), { resumed: false, from: { mode: fromMode, level: fromLevel }, to: { mode, level: currentLevel } });
-    }
-    // 离开 closed-agent 或降低级别：无条件退役 owner 的运维会话、作废它的全部审批。
-    // 不能只靠 reconcileSessionPolicies —— 它在 DSH preset 清单未知时会跳过判定（见其注释），
-    // 那样 /panic 之后旧的高权限回合可能还在跑，审批也还能被「通过」。
-    if (fromMode === 'closed-agent' && (mode !== 'closed-agent' || rank(currentLevel) < rank(fromLevel))) {
-      const ownerKey = ownerPrivateKey();
-      for (const e of ext.approvals.removeKey(ownerKey)) void cancelPendingEntry({ ...e, kind: 'approval' }).catch(() => {});
-      if (sessions.get(ownerKey)) retireSession(ownerKey);
-    }
-    lastMode = mode;
-    if (dshSynced) lastObservedDshMode = mode;
-    afterModeApplied(mode);
-    appendActivity(`模式变更 ${fromMode} → ${mode}/${currentLevel}（来源 ${ctx.source ?? '未知'}）`);
-    log(`模式已设置为 ${mode} / ${currentLevel}（来源 ${ctx.source ?? '未知'}）${dshSynced ? '' : ' [DSH 未同步]'}`);
   }
 
   // 审批超时：给 DSH 回 rejected，并告诉 owner 是哪一个。
@@ -5071,8 +4749,7 @@ async function main() {
     cfg,
     stateDir: STATE_DIR,
     log,
-    notifyOwner: (text) => sendOwnerDirect(text),
-    applyMode: applyModeChange,
+    onPanic: (reason) => panicAllSessions(reason),
     onApprovalTimeout,
   });
   // ── 定时任务（逻辑在 src/scheduler/，这里只接线：校验目标、怎么发） ──────────────────
@@ -5411,97 +5088,7 @@ async function main() {
     setTimeout(() => { flushQueue(); }, 3000);
   };
 
-  // 从远端（DSH settings）读取桥接模式；命名空间未注册/不可用时回退本地 state/mode.json。
-  // 远端细节在 src/runtime/mode-store.mjs；本函数只保留「读到了谁、交给控制器判定」。
-  async function refreshMode() {
-    try {
-      const { value: s } = await agentPort.readSettings();
-      // DSH 的默认 preset（`agent-presets` 命名空间的 default）——closed-agent 的兜底值来源
-      const presetNs = s.namespaces.find((n) => n.ns === 'agent-presets');
-      const defaultPreset = settingFromDshNamespace(presetNs, 'default');
-      if (typeof defaultPreset === 'string' && defaultPreset) {
-        dshDefaultPreset = defaultPreset;
-      }
-      // 规范化（`simulation` → 内部名）与「user 层优先」都在后端里做：
-      // DSH 0.2.0-rc.2 写完 settings 后同进程内 value 不更新，只读 value 会让控制台切的
-      // 模式被 5 秒轮询改回去（上游 issue #22）。
-      const observed = modeStore.readRemote(s);
-      if (observed) {
-        noteObservedMode(observed.mode, modeStore.remoteId ?? 'remote');
-        // 设置页也可配置所有者；**留空表示不覆盖 config.json**（r4 修复：
-        // 归一化空值返回 null，照旧 `!== undefined` 就赋值，会被 5 秒轮询抹成 null，
-        // 导致 closed-agent 谁都不放行、审批等不到管理员）。
-        if (observed.ownerQQ !== undefined) {
-          const rawOwner = String(observed.ownerQQ ?? '').trim();
-          if (rawOwner) {
-            try {
-              noteOwnerChange(normalizeOwnerAddress(rawOwner, cfg.platform), 'dsh-settings');
-            } catch (error) {
-              log(`DSH settings ownerQQ 无效，已忽略: ${error?.message ?? error}`);
-            }
-          }
-        }
-        // 远端命名空间只有 mode / ownerQQ，没有 closedAgentPreset；
-        // 该值仍以本地 mode.json 为准（用 typeof 判断，允许用空串显式清空），
-        // 否则这里提前 return 会让控制台的 preset 下拉变成永远不生效的死设置。
-        const localPreset = modeStore.readLocal();
-        if (typeof localPreset?.closedAgentPreset === 'string') {
-          closedAgentPreset = localPreset.closedAgentPreset;
-        }
-        return;
-      }
-    } catch {}
-    const local = modeStore.readLocal();
-    const fromLocal = local ? normalizeModeInput(local.mode) : null;
-    if (fromLocal) noteObservedMode(fromLocal, 'local-file');
-    if (typeof local?.closedAgentPreset === 'string' && local.closedAgentPreset) {
-      closedAgentPreset = local.closedAgentPreset;
-    }
-  }
-
-  /**
-   * 轮询读到一个模式值。
-   * 控制器就绪前：直接采用（启动时由 controller.initialize 做一致性校验）。
-   * 就绪后：模式只由 applyModeChange 修改；读到**新的**不同值 = 外部变更（DSH 设置 / 手改 mode.json），
-   * 交给控制器判定：提权 → 回退并告警；非提权 → 接受并通知。同一个值只上报一次，避免每 5 秒刷屏。
-   */
-  function noteObservedMode(observed, origin) {
-    if (!controllerReady) {
-      currentMode = observed;
-      lastObservedDshMode = observed;
-      return;
-    }
-    if (observed === lastObservedDshMode) return;
-    lastObservedDshMode = observed;
-    if (observed === currentMode) return;
-    log(`检测到外部模式变更（${origin}）：${currentMode} → ${observed}，交给管理控制器判定`);
-    void ext.controller.observeExternalMode(observed).catch((error) => log(`外部模式变更处理失败：${error?.message ?? error}`));
-  }
-
-  /**
-   * owner 变化（DSH 设置页 / 控制台）。这等于改变「谁能操作管理通道」，属于权限变更：
-   * 记审计、通知新旧 owner，并在高权限期间立即紧急关闭（避免新 owner 直接继承 Agent 会话）。
-   *
-   * `next` 是结构化地址（`{ platform, account, id }`）或 null；`ownerQQ` 只是派生视图，
-   * 供 DSH 侧仍以裸号传 owner 的旧路径读取。
-   */
-  function noteOwnerChange(next, origin) {
-    const prevKey = ownerPrivateKey();
-    const nextKey = next ? formatKey(next.platform, 'private', next.id, next.account) : null;
-    if (prevKey === nextKey) return;
-    cfg.owner = next;
-    cfg.ownerQQ = next && next.platform === cfg.platform?.id && !next.account && /^\d+$/.test(next.id)
-      ? Number(next.id) : null;
-    if (!controllerReady) return;
-    ext.audit.append('owner.changed', { from: prevKey, to: nextKey, origin });
-    log(`⚠️ owner 已变更（${origin}）：${prevKey ?? '无'} → ${nextKey ?? '无'}`);
-    const notice = `🚨 所有者（owner）已变更：${prevKey ?? '无'} → ${nextKey ?? '无'}（来源：${origin}）。如果不是你本人操作，请立刻检查 DSH 与桥接控制台。`;
-    if (prevKey) void sendToQQ(prevKey, notice).catch(() => {});
-    void ext.controller.cancelAll('owner-changed');
-    if (currentLevel !== 'L0') void ext.controller.panic('external-revert');
-  }
-
-  /** 拉取 DSH 当前可用的 agent preset 清单（供控制台下拉与 closed-agent 兜底使用）。 */
+  /** 拉取 DSH 当前可用的 agent preset 清单（供控制台下拉与兜底使用）。 */
   async function refreshPresetList() {
     try {
       const { presets: list } = await agentPort.listPresets();
@@ -5515,14 +5102,11 @@ async function main() {
     }
   }
 
-  /** 当前模式是否允许该会话进入：只读两态全局准入（被动轴）。 */
-
   /**
    * 解析一个 preset 名。
    *
-   * strict=false（closed-agent，仅 owner 私聊）：名字不可用时回退到 DSH 默认 preset ——
-   *   那里本来就用完整工具面，回退不构成提权。
-   * strict=true（chat / reserved / reserved2，会话可能属于 QQ 群）：名字不可用时返回 ''，
+   * strict=false：名字不可用时回退到 DSH 默认 preset —— 用于不挂具体工具的会话。
+   * strict=true（会话可能属于 QQ 群）：名字不可用时返回 ''，
    *   表示「没有可安全使用的 preset」，由调用方拒绝建会话（fail-closed）。
    *   **绝不能回退到 DSH 默认 preset（standard）**：standard 含 bash/文件读写等本地工具，
    *   一旦套在群聊会话上，群友即可驱动一个能操作本机的 agent（见 RULES.md「无本地工具」）。
@@ -5543,12 +5127,6 @@ async function main() {
 
   /** 会话的 Agent 预设；返回 undefined 表示「该会话没有可安全使用的 preset」 */
   function modePreset(key, mode, cfg) {
-    if (mode === 'closed-agent') {
-      // closed-agent 的 preset 由权限级别决定（L1 = 只读工具白名单 preset）。
-      // 级别未知/计划不成立时返回 undefined，由 ensureSession fail-closed。
-      const resolved = closedAgentPlan();
-      return resolved.ok ? (resolved.agentPreset || undefined) : undefined;
-    }
     // 直通：能力档明确要求「不装预设」——直通的含义就是不改执行体环境。
     if (runtimeOf(key).apply === 'passthrough') return undefined;
     const wanted = mode === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
@@ -5612,28 +5190,11 @@ async function main() {
     return behaviorContext.run({ social: cfg.social, socialV2: behaviorV2View(behavior) }, fn);
   }
 
-  /** 判断一个会话 key 是否仍被当前模式/白名单允许（供唤醒调度与 HTTP 路由共用）。 */
-  function isSessionAllowedInCurrentMode(key) {
-    // closed-agent 是全局独占引擎：期间只服务 owner 私聊，群会话不能新建或复用。
-    if (currentMode === 'closed-agent' && parseKey(key)?.kind === 'group') return false;
-    return passiveAllowed(key);
-  }
-
-  /** closed-agent 当前级别的落地计划（agent preset + DSH 权限预设）。 */
-  function closedAgentPlan() {
-    if (currentLevel === 'L0') return { ok: false, error: 'closed-agent 尚未经过管理通道授权（级别 L0）' };
-    return resolveLevelPlan(currentLevel, { presetIds: dshPresetIds, closedAgentPreset, allowCustomAgentPreset: cfg.admin?.allowCustomAgentPreset === true, permissionCatalog });
-  }
-
   // 指纹怎么拼、什么算「当前会话」在 session/policy.mjs（三条件：准入 + 映射 + 指纹）。
   const sessionPolicyImpl = createSessionPolicy({
     getMode: (key) => effectiveMode(key),
     modePreset: (key, mode) => modePreset(key, mode, cfg),
     getModel: (key) => profileModelSignature(key),
-    getOwnerQQ: () => cfg.ownerQQ,
-    getOwner: () => cfg.owner,
-    getLevel: () => currentLevel,
-    getClosedAgentPlan: () => closedAgentPlan(),
   });
 
   function sessionPolicy(key) {
@@ -5645,7 +5206,7 @@ async function main() {
       key: apiKey(rawKey),
       sessionId,
       registry: sessions,
-      allowed: isSessionAllowedInCurrentMode,
+      allowed: passiveAllowed,
     });
   }
 
@@ -5709,16 +5270,8 @@ async function main() {
     markReadCalledKeys.delete(key);
   }
 
-  function retireSession(key, { hibernate = false, foreign = false } = {}) {
+  function retireSession(key, { foreign = false } = {}) {
     const sessionId = sessions.get(key);
-    // 休眠：只对从没挂过本地工具的聊天会话（非 closed-agent 建的）。高权限会话永远走归档；
-    // 属于其他平台的映射不参与休眠（那边的 id 复用过来说是“上下文连续”，实际是串台）。
-    const toDormant = hibernate && !!sessionId && !foreign && isHibernatablePolicy(sessions.policyOf(key));
-    if (toDormant) {
-      if (state.dormantSessions[key] && state.dormantSessions[key].sessionId !== sessionId) archiveDormantSession(key);
-      // instance：休眠会话也是「平台侧 id 的引用」，换平台后不能复用（见 src/session/ref.mjs）。
-      state.dormantSessions[key] = { sessionId, policy: sessions.policyOf(key), dormantAt: Date.now(), instance: agentPort.id };
-    }
     sessions.unbind(key);
     forgetDshHealth(key);
     // 按 key 记账的内存态在**有映射和无映射时都要清**：一条被移出白名单、
@@ -5754,17 +5307,12 @@ async function main() {
       // 保留旧 token 在脱敏集合中，但撤销它的调用权限。
       st.agentToken = crypto.randomBytes(24).toString('hex');
       rememberAgentToken(key, st.agentToken);
-      // 休眠的会话以后会原样复用：它已经引导过、也看过这些消息，不能把它当成新会话再发一遍引导唤醒、
-      // 再把看过的消息重新喂一遍。只有真正换新会话时才清（休眠作废归档时在 archiveDormantSession 里清）。
-      if (!toDormant) resetConversationIntro(st);
+      // 换新会话后模型没看过任何消息，重新引导一次。
+      resetConversationIntro(st);
     }
     saveState();
     saveSocialV2State();
-    if (toDormant) {
-      // 只停掉在途工作，不归档：回到同一模式、同一 preset 时原样复用（令牌已在上面轮换，休眠期间旧令牌无效）
-      stopSessionWorkOnly(sessionId, key);
-      log(`模式切换，会话休眠 ${key} -> ${sessionId}（回到 ${parsePolicyMode(state.dormantSessions[key].policy)} 时复用，不归档）`);
-    } else if (foreign) {
+    if (foreign) {
       // 映射来自另一个平台：本地撤诉即可，不向当前平台发 cancel/archive ——
       // 那边压根没这个会话，发过去只能换回一条 404 噪声，还会掩盖真正的病因。
       log(`会话映射属于其他平台，已撤销 ${key} -> ${sessionId}`);
@@ -5774,103 +5322,11 @@ async function main() {
     }
   }
 
-  // ── 模式切换不失忆：休眠表 + owner 私聊交接（逻辑在 src/mode-handover.js） ────────────
-  const parsePolicyMode = (policy) => { try { return String(JSON.parse(policy)[0] ?? ''); } catch { return ''; } };
   const ownerKeyOf = () => ownerPrivateKey();
-  const hibernateEnabled = () => cfg.admin?.hibernateChatSessions !== false;
-  const handoverEnabled = () => cfg.admin?.handover !== false && Boolean(cfg.owner);
-  const dormantMaxMs = () => Math.max(60_000, Number(cfg.admin?.dormantMaxMs) || DORMANT_MAX_MS);
-  // owner 私聊往来（只记 owner 私聊；管理通道命令 / 确认码 / TOTP 在交给模型前已被拦截，不会进来）
-  const ownerTranscript = createOwnerTranscript({
-    file: path.join(STATE_DIR, 'admin', 'owner-transcript.json'),
-    redact: (t) => redactSensitiveText(redactKnownTokensOnly(t)),
-    onError: (error) => log(`⚠️ owner 私聊交接记录读写失败：${error?.message ?? error}`),
-  });
-  const pendingHandover = new Map(); // key -> { resumed, from, to, dormantAt? }：下一条发给该会话的消息要带上的交接
-  let lastAgentLevel = 'L1';
-  function recordOwnerTranscript(key, role, text) {
-    if (!handoverEnabled() || key !== ownerKeyOf()) return;
-    ownerTranscript.record({ role, text, mode: currentMode, level: currentLevel });
-  }
-  /** 只停在途工作、不归档（休眠用）。 */
-  function stopSessionWorkOnly(sessionId, key = '') {
-    void (async () => {
-      try { await withTimeout(agentPort.cancel(sessionId), DSH_CONTROL_TIMEOUT_MS, 'cancel'); }
-      catch (error) { log(`⚠️ 停止休眠会话的在途工作失败 ${key}：${error?.message ?? error}`); }
-    })();
-  }
   /** 会话换新时：下一次唤醒要按「首次」走引导，模型也没看过任何消息。 */
   function resetConversationIntro(st) {
     st.bootstrapSent = false;
     st.modelSeenSeqs = new Set();
-  }
-  /** 休眠会话作废：停掉并归档。 */
-  function archiveDormantSession(key, reason = '过期或策略已变') {
-    const d = state.dormantSessions[key];
-    if (!d) return;
-    delete state.dormantSessions[key];
-    // 休眠时保留了「已引导 / 已看过」；作废后下一个会话是全新的，要重新引导（当前已有新会话在用时不动它）
-    const st = socialV2.conversations.get(key);
-    if (st && !sessions.get(key)) {
-      resetConversationIntro(st);
-      saveSocialV2State();
-    }
-    saveState();
-    // 属于其他平台的休眠会话：本地丢掉即可，别向当前平台发 cancel/archive（同 retireSession 的 foreign 分支）。
-    if (d.instance && d.instance !== agentPort.id) {
-      log(`休眠会话属于其他平台，已丢弃 ${key} -> ${d.sessionId}（${reason}）`);
-      return;
-    }
-    stopRetiredSessionWork(d.sessionId, key);
-    log(`休眠会话归档 ${key} -> ${d.sessionId}（${reason}）`);
-  }
-  /** 定期 / 模式切换后清理：过期、策略对不上、不再被允许的休眠会话归档。可复用的留到下一条消息再恢复。 */
-  function pruneDormantSessions() {
-    for (const [key, d] of Object.entries(state.dormantSessions)) {
-      // 属于其他平台的休眠会话一律作废：它们永远不会被当前平台「想起」，留着只是占位。
-      if (d.instance && d.instance !== agentPort.id) { archiveDormantSession(key, `属于平台 ${d.instance}`); continue; }
-      const decision = dormantDecision(d, {
-        now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
-        currentPolicy: sessionPolicy(key), allowed: isSessionAllowedInCurrentMode(key),
-      });
-      if (decision === 'archive') archiveDormantSession(key);
-    }
-  }
-  /** 手动重置会话时：休眠的那份也不要了，owner 的交接记录一并清空（用户要的就是「从头开始」）。 */
-  function discardDormantForReset(key) {
-    if (state.dormantSessions[key]) archiveDormantSession(key, '会话被重置');
-    pendingHandover.delete(key);
-    if (key === ownerKeyOf()) ownerTranscript.clear();
-  }
-  /** 取出（并清掉）要放在这次消息最前面的交接文字。 */
-  function withHandover(key, promptText) {
-    const p = pendingHandover.get(key);
-    if (!p) return promptText;
-    pendingHandover.delete(key);
-    if (!handoverEnabled()) return promptText;
-    const now = Date.now();
-    let block = '';
-    if (key === ownerKeyOf()) {
-      // 最新的一两条 owner 消息就在这次消息里，交接里不重复
-      const entries = ownerTranscript.recent({ since: p.resumed ? p.dormantAt : 0 });
-      while (entries.length && entries[entries.length - 1].role === 'owner' && now - entries[entries.length - 1].at < 60_000) entries.pop();
-      // 切进 agent 时可以顺带交接二代仿真里 AI 在管理员私聊记下的长期记忆（话题 / 想说的话 / 印象）。
-      // 只取管理员私聊这一个会话的，不取任何群的；开关是二代工具开关里的 handoverMemory（默认开）。
-      // 从休眠恢复的私聊会话不用带：它自己的唤醒提示里本来就有这些。
-      let memoryText = '';
-      if (!p.resumed && p.to?.mode === 'closed-agent' && cfg.memory?.handover?.enabled !== false) {
-        const ownerKey = ownerKeyOf();
-        if (socialV2.conversations.has(ownerKey)) {
-          memoryText = localMemory.digest(ownerKey).split('\n')
-            .map((line) => redactForHandover(line, (t) => redactSensitiveText(redactKnownTokensOnly(t))))
-            .filter(Boolean).join('\n');
-        }
-      }
-      block = buildOwnerHandover({ entries, from: p.from, to: p.to, resumed: p.resumed, dormantMs: p.resumed ? now - p.dormantAt : 0, now, memoryText });
-    } else if (p.resumed) {
-      block = buildGroupResumeNote({ dormantMs: now - p.dormantAt, from: p.from });
-    }
-    return block ? `${block}\n\n${promptText}` : promptText;
   }
 
   function reconcileSessionPolicies() {
@@ -5884,12 +5340,9 @@ async function main() {
     // 映射删除，每个群的上下文全丢，日志里只有一句「会话权限已变化」。
     // 一次网络抖动换来全体失忆，代价完全不成比例。清单为空时宁可不判定，等下一轮。
     if (dshPresetIds.length === 0) return;
-    // 进 closed-agent 时，聊天会话休眠而不是归档；回落后同一模式、同一 preset 原样复用（见 src/mode-handover.js）
-    const hibernate = currentMode === 'closed-agent' && hibernateEnabled();
     for (const [key, sessionId] of sessions.entries()) {
-      if (!isCurrentSession(key, sessionId)) retireSession(key, { hibernate });
+      if (!isCurrentSession(key, sessionId)) retireSession(key);
     }
-    pruneDormantSessions();
   }
 
   let flushingQueue = false;
@@ -5910,8 +5363,9 @@ async function main() {
           const item = items[i];
           try {
             const { kind, id } = parseKey(key) ?? {};
+            // 「续投」与首次投递用同一张理由表：排除在准入之外就不该再发。
             if (!passiveAllowed(key)) {
-              log(`补投跳过未授权会话 ${key}（当前模式 ${currentMode}）`);
+              log(`补投跳过未授权会话 ${key}`);
               continue;
             }
             // 补投是第二条投递路径：排队期间主动权限可能已被收回，投递前按同一张原因表再判一次。
@@ -6111,19 +5565,16 @@ async function main() {
       agentRuntime().resetAuthHint();
       const rec = agentHealth.ok();
       if (agentReady && rec.recoveredFrom > 0) log(`${agentRuntime().label} 探活偶发失败 ${rec.recoveredFrom} 次（${rec.reason?.label ?? '原因未知'}），已恢复，未判定为不可用`);
-      await refreshMode();
       // 执行体就绪后拉一次 preset 清单；执行体重启（agentReady 由 false 变 true）时再拉一次。
       if (!agentReady || dshPresetIds.length === 0) {
         try { await refreshPresetList(); } catch {}
         try { await refreshPermissionCatalog(); } catch {}
       }
-      // 管理控制器的启动校验（只做一次）：高权限状态不跨重启继承，遗留的 closed-agent 回落并告警。
-      await initControllerOnce(currentMode);
       reconcileSessionPolicies();
       if (!agentReady) {
         agentReady = true;
-        lastMode = currentMode;
-        log(`${agentRuntime().label} 已就绪（模式: ${currentMode}）`);
+        ext.audit.append('bridge.started', { agent: agentRuntimeId() });
+        log(`${agentRuntime().label} 已就绪`);
         // 启动/执行体重启后对账一次：把对端已经不存在的绑定标成 missing，
         // 详情页能看到、也能点重建；真正重建仍由下一条消息或用户触发。
         void reconcileDshSessions().catch((error) => log(`⚠️ 会话对账异常：${error?.message ?? error}`));
@@ -6135,37 +5586,16 @@ async function main() {
           }, 5 * 60 * 1000);
           dshReconcileTimer.unref?.();
         }
-        if (currentMode === 'reserved2') {
-          // 首次确定模式为 reserved2 后再恢复持久化的有限睡眠定时器，
-          // 避免在 initial chat 模式下设置定时器导致 timeout 唤醒被模式守卫吞掉。
-          for (const key of socialV2.conversations.keys()) {
-            setupSleepTimerV2(key);
-            scheduleProactiveCheckV2(key);
-          }
-          log('桥接模式已确定为 reserved2，恢复有限睡眠定时器');
+        // 对话环境的有限睡眠定时器在重启后重建：休眠到期的唤醒由会话自身的模式守卫判定，
+        // 聊天/一代仿真会话不设定时器。
+        for (const key of socialV2.conversations.keys()) {
+          if (effectiveMode(key) !== 'reserved2') continue;
+          setupSleepTimerV2(key);
+          scheduleProactiveCheckV2(key);
         }
         try { await flushQueue(); } catch (error) { log('补投队列异常:', error?.message ?? error); }
         // DSH 恢复后，把离线期间攒下的黑话学习窗口补触发
         for (const key of [...slangWindows.keys()]) maybeQueueSlangExtraction(key);
-      } else if (currentMode !== lastMode) {
-        if (lastMode === 'reserved' && currentMode !== 'reserved') {
-          cleanupSocialForModeChange();
-          log('桥接模式已离开一代仿真模式，清理社交状态');
-        }
-        if (lastMode === 'reserved2' && currentMode !== 'reserved2') {
-          clearAllSocialV2Timers();
-          drainAllPromptQueues('模式切换，已取消排队中的投递');
-          log('桥接模式已离开二代仿真模式，清理 reserved2 定时器与排队投递');
-        }
-        if (currentMode === 'reserved2' && lastMode !== 'reserved2') {
-          for (const key of socialV2.conversations.keys()) {
-            setupSleepTimerV2(key);
-            scheduleProactiveCheckV2(key);
-          }
-          log('桥接模式已进入二代仿真模式，重建有限睡眠定时器');
-        }
-        log(`桥接模式已切换为: ${currentMode}`);
-        lastMode = currentMode;
       }
     } else {
       const v = agentHealth.fail(lastErr);
@@ -6178,46 +5608,14 @@ async function main() {
       }
     }
   };
-  let controllerInitPromise = null;
-  function initControllerOnce(actualMode) {
-    if (!controllerInitPromise) {
-      controllerInitPromise = (async () => {
-        try {
-          // 先让 currentLevel 与「启动校验前」的事实一致：任何 closed-agent 都还没被授权。
-          currentLevel = 'L0';
-          const r = await ext.controller.initialize(actualMode);
-          const c = ext.controller.current();
-          if (c.mode && c.mode !== currentMode && r.action !== 'fallback') currentMode = c.mode;
-          ext.audit.append('bridge.started', { mode: currentMode, level: currentLevel, check: r.action });
-        } catch (error) {
-          log(`⚠️ 管理控制器启动校验失败：${error?.message ?? error}；按安全模式运行`);
-          if (currentMode === 'closed-agent') { currentMode = L0_MODES.includes(cfg.admin?.safeMode) ? cfg.admin.safeMode : 'reserved2'; }
-        } finally {
-          controllerReady = true;
-          lastObservedDshMode = currentMode;
-          ext.controller.start();
-          startSchedulerOnce();
-          startSilenceMonitorOnce();
-        }
-      })();
-    }
-    return controllerInitPromise;
-  }
-
+  // 定时任务与静默监听都不依赖执行体：执行体没起来时静默计时、补发提醒照样要跑。
   function startDshWatch() {
     if (dshCheckStarted) return;
     dshCheckStarted = true;
+    startSchedulerOnce();
+    startSilenceMonitorOnce();
     checkDsh();
     setInterval(checkDsh, 5000);
-    // DSH 一直起不来时也要完成启动校验（用本地 mode.json 的值），管理通道才能工作。
-    const t = setTimeout(() => { if (!controllerReady) { void refreshModeLocalOnly().then(() => initControllerOnce(currentMode)); } }, 20000);
-    t.unref?.();
-  }
-
-  async function refreshModeLocalOnly() {
-    const local = modeStore.readLocal();
-    const fromLocal = local ? normalizeModeInput(local.mode) : null;
-    if (fromLocal) currentMode = fromLocal;
   }
 
   // ── SnowLuma 上游健康：**连上了 ≠ 收得到** ──────────────────────────────────
@@ -6307,16 +5705,16 @@ async function main() {
   function backfillTargets() {
     const keys = new Set([...sessions.keys(), ...socialV2.conversations.keys()]);
     if (cfg.owner) keys.add(ownerPrivateKey());
-    return [...keys].filter((k) => Boolean(parseKey(k)) && isSessionAllowedInCurrentMode(k)).slice(0, 40);
+    return [...keys].filter((k) => Boolean(parseKey(k)) && passiveAllowed(k)).slice(0, 40);
   }
   async function runBackfill({ since, gapMs }) {
     const c = normalizeBackfillConfig(cfg.userPlatform?.backfill);
     if (!c.enabled) return { skipped: 'disabled' };
-    if (currentMode !== 'reserved2' || cfg.socialV2?.enabled === false) {
-      // 其它模式会把补收的旧消息逐条交给模型回复，不补；只提醒一下
-      log(`[backfill] 当前不是二代仿真，没有补收；断线${describeDuration(gapMs)}期间的消息可能错过了`);
-      appendActivity(`和 QQ 的连接断过${describeDuration(gapMs)}，当前模式不补收，这段时间的消息可能错过了`);
-      return { skipped: 'mode' };
+    if (!anyV2Session() || cfg.socialV2?.enabled === false) {
+      // 补收只对对话环境（逐条交给模型看而不逐条回复）有意义；其它会话会把旧消息逐条回一遍。
+      log(`[backfill] 没有会话处于对话环境，没有补收；断线${describeDuration(gapMs)}期间的消息可能错过了`);
+      appendActivity(`和 QQ 的连接断过${describeDuration(gapMs)}，没有会话处于对话环境、不补收，这段时间的消息可能错过了`);
+      return { skipped: 'no-conversation' };
     }
     const summary = [];
     const ownerCommands = [];
@@ -6490,7 +5888,7 @@ async function main() {
       return false;
     };
     // 二代会话工具必须仍命中当前模式的白名单/准入；避免白名单移除后旧 agentToken 继续读状态。
-    const v2SessionAllowed = isSessionAllowedInCurrentMode;
+    const v2SessionAllowed = passiveAllowed;
     const server = http.createServer(async (req, res) => {
       let url;
       try { url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`); }
@@ -6746,13 +6144,13 @@ async function main() {
       // 现在 MCP 端一律带上 x-agent-call: 1；带了令牌就必须命中某个活跃会话，
       // 端点自己漏写校验也不会退回管理端。
       //
-      // 但「没带令牌」的智能体调用不能一律拒绝：closed-agent（管理员私聊）模式下模型
-      // 本来就**没有**会话令牌（令牌只在 reserved2 的唤醒提示里下发），而 qq_send_group_message
-      // / qq_list_groups 等工具必须在这个模式里可用（工具描述写的也是"closed-agent 模式不需要"）。
-      // 这些端点各自按模式判定（/api/send/* 只在 closed-agent 放行；/api/images/* 在 reserved2
-      // 强制要令牌；/api/status 对智能体调用只回最小对象），所以这里把「无令牌智能体调用」
-      // 限制到这条非 v2 会话面；整个 /api/socialV2/ 前缀一概不放——那里的 token 校验全是
-      // `if (x-agent-token && …)`，放进来就等于退化成管理端全权（confused deputy）。
+      // 但「没带令牌」的智能体调用不能一律拒绝：会话令牌只在对话环境的唤醒提示里下发，
+      // 跑在完整工具面上的会话本来就没有令牌，而 qq_send_group_message / qq_list_groups
+      // 这类工具必须在那里可用。这些端点各自按权限等级与能力档判定
+      // （/api/send/* 看会话等级；/api/images/* 强制要令牌；/api/status 对智能体调用只回最小
+      // 对象），所以这里把「无令牌智能体调用」限制到非对话环境会话面；整个 /api/socialV2/
+      // 前缀一概不放——那里的 token 校验全是 `if (x-agent-token && …)`，放进来就等于退化成
+      // 管理端全权（confused deputy）。
       if (req.headers['x-agent-call'] !== undefined) {
         const agentToken = req.headers['x-agent-token'];
         const hasToken = typeof agentToken === 'string' && agentToken !== '';
@@ -6908,7 +6306,7 @@ async function main() {
           // 只认 token 会让这类请求落到下面的完整对象上，等于把 A 群的 AI 变成管理端。
           if (req.headers['x-agent-token'] || req.headers['x-agent-call'] !== undefined) {
             sendJson({
-              mode: currentMode,
+              mode: defaultMode(),
               role: rs.role ?? null,
               roleMode: rs.mode ?? 'active',
               agent: agentStatusSummary(),
@@ -6919,11 +6317,8 @@ async function main() {
           // 全局状态里的行为是「当前运行用户平台」配置的默认行为（行为未指定的会话用它）。
           const statusBehavior = String(bridgeCfg?.platforms?.users?.[runningUserPlatformId()]?.defaultBehavior ?? '') || null;
           sendJson({
-            mode: currentMode,
-            level: currentLevel,
+            mode: defaultMode(),
             defaultBehavior: statusBehavior,
-            closedAgentPreset,
-            adminPendingRequests: ext.controller.pendingRequests().length,
             botAccount,
             version: BRIDGE_VERSION,
             pendingApprovals: ext.approvals.list().length,
@@ -8146,35 +7541,6 @@ async function main() {
           sendJson({ presets });
           return;
         }
-        if (req.method === 'POST' && url.pathname === '/api/mode') {
-          const body = await readBody();
-          // 规范名与历史名都接受，落盘的始终是内部拼写（见 MODE_INPUT_ALIASES）。
-          const requestedMode = normalizeModeInput(body.mode);
-          if (!requestedMode) {
-            sendJson({ ok: false, error: `mode 必须是 ${VALID_MODES.join(' / ')}（simulation 为 reserved2 的规范名）` }, 400);
-            return;
-          }
-          // closedAgentPreset 只影响 L2/L3 使用的 agent preset；它本身不改变权限级别。
-          if (body.closedAgentPreset !== undefined) {
-            closedAgentPreset = String(body.closedAgentPreset ?? '');
-            // 只写本地兜底文件：closedAgentPreset 是桥接侧的预设选择，不属于远端命名空间的 schema。
-            modeStore.writeLocal({ closedAgentPreset });
-          }
-          // v0.3.0：所有模式变更都经过管理控制器（统一审计 + 通知 owner）。
-          // 控制台持有管理令牌：L1/L2 直接生效；L3 仍要求 body.totp（验证器动态码）。
-          // 未指定 level 时 closed-agent 默认 L2 —— 与旧版「closed-agent = DSH 默认 preset + 默认权限」等价。
-          const level = requestedMode === 'closed-agent'
-            ? (['L1', 'L2', 'L3'].includes(String(body.level)) ? String(body.level) : 'L2')
-            : 'L0';
-          if (!controllerReady) await initControllerOnce(currentMode);
-          const r = await ext.controller.consoleSet({ mode: requestedMode, level }, { totp: body.totp ?? null });
-          if (!r.ok) {
-            sendJson({ ok: false, error: r.error, mode: currentMode, level: currentLevel }, r.error?.includes('TOTP') ? 403 : 409);
-            return;
-          }
-          sendJson({ ok: true, mode: currentMode, level: currentLevel, closedAgentPreset, dshSynced: lastObservedDshMode === currentMode });
-          return;
-        }
         // 默认平台（P2）：默认 Agent 平台与默认用户实例。会话行为、能力档都在会话与平台条目上，
         // 这里只回答「默认装配哪一个」。
         if (url.pathname === '/api/config/runtime') {
@@ -9258,11 +8624,7 @@ async function main() {
               }
             }
             if (Object.hasOwn(body, 'permission')) {
-              // 直通下档位归执行体：桥接四级不生效，写进来只会变成一条没人读的记录。
-              if (permissionAuthorityOf(key) === 'agent') {
-                sendJson({ ok: false, error: '当前方案为直通：权限档由执行体自身管理，请用「执行体与权限」改档（写后自动核对）' }, 409);
-                return;
-              }
+              // 权限级别只过滤已使用能力档里的工具，不碰执行体侧权限档（那一档建会话时钉一次）。
               const raw = String(body.permission ?? 'inherit').trim();
               if (!SESSION_PERMISSIONS.includes(raw)) { sendJson({ ok: false, error: `权限级别无效：${raw}` }, 400); return; }
               patch.permission = raw;
@@ -9275,17 +8637,16 @@ async function main() {
             }
             if (!Object.keys(patch).length && !accessChanged) { sendJson({ ok: false, error: '没有要保存的字段' }, 400); return; }
             if (accessChanged) state.defaults = nextAccess;
-            const next = normalizeProfile(applyPatch(profile, patch), { key });
+            // key 以 URL 为准（档案就是从 state.profiles[key] 取的），归一出 null 时绝不能回写：
+            // 那会把这条会话的档案整个抹成 null，比拒绝保存严重得多。
+            const next = normalizeProfile({ ...applyPatch(profile, patch), key }, { key });
+            if (!next) { sendJson({ ok: false, error: '会话档案归一失败，未保存' }, 500); return; }
             state.profiles[key] = next;
             saveState();
             // 写盘校验只记日志、不拦请求：测试与外部进程可能共用目录，误报不该让保存失败。
             const persisted = accessChanged ? verifyAccessPersisted(state.defaults) : true;
             // 名单变了要立刻生效：撤掉已排队的主动定时器 / 补排，别等定时器到点才被闸门拦。
             if (accessChanged) rescheduleProactiveChecksAfterAccessChange();
-            if (Object.hasOwn(patch, 'permission')) {
-              const pinned = await pinSessionPermission(key, { reason: 'profile', throwOnError: false });
-              if (!pinned.ok) log(`⚠️ 会话 ${key} 的权限预设未能重钉：${pinned.error ?? '未知原因'}（重启桥接或重建会话后生效）`);
-            }
             log(`控制台：会话档案已更新 ${key}${accessChanged ? '（含准入名单）' : ''}`);
             // 人格卡是注入内容，不是普通字段：改完要和「默认人格下拉」一样走同一套生效时机，
             // 否则二代会话会一直按旧卡说话（直到下一次有人说话才顺带换卡）。
@@ -9309,8 +8670,8 @@ async function main() {
           sendJson({ ok: false, error: '不支持的请求' }, 405);
           return;
         }
-        // P5 会话详情 › 执行体与权限（§7.6）。读、写两个端点分开：
-        // 读可以随便调，写是「代用户改执行体权限」，所以只允许控制台（AI 不能自己提权）。
+        // P5 会话详情 › 执行体与权限（§7.6）：只读。写权限档是能力档在建会话时的事，
+        // 级别走 PATCH /profile，所以这里没有对应的写口；AI 也不能读（它不需要知道控制台的判定依据）。
         const sessionAgentMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/agent$/);
         if (sessionAgentMatch) {
           if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
@@ -9321,35 +8682,6 @@ async function main() {
           const payload = await sessionAgentPayload(key);
           if (!payload) { sendJson({ ok: false, error: '会话不存在' }, 404); return; }
           sendJson({ ok: true, ...payload });
-          return;
-        }
-        const sessionPermissionMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/permission$/);
-        if (sessionPermissionMatch) {
-          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
-          let key;
-          try { key = apiKey(decodeURIComponent(sessionPermissionMatch[1])); }
-          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
-          if (req.method !== 'POST') { sendJson({ ok: false, error: '不支持的请求' }, 405); return; }
-          // 桥接权威下不接这个写口：写了也会在下一个回合被钉回去，等于给用户一个假开关。
-          if (permissionAuthorityOf(key) !== 'agent') {
-            sendJson({ ok: false, error: '当前方案的权限档由桥接管理：改档请用会话档案里的「权限级别」' }, 409);
-            return;
-          }
-          const body = await readBody();
-          const preset = String(body?.preset ?? '').trim();
-          if (!preset) { sendJson({ ok: false, error: '缺少 preset' }, 400); return; }
-          // 列表里不列的档位，写入口也不接：不能靠手改请求把「不弹审批」打开。
-          if (FORBIDDEN_PERMISSION_PRESETS.includes(preset)) {
-            sendJson({ ok: false, error: `「${preset}」不弹审批直接执行，不允许从桥接写入；需要高权限请选 full-ask` }, 403);
-            return;
-          }
-          const result = await applySessionPermission(key, preset, { reason: 'console' });
-          if (!result.ok) {
-            sendJson({ ok: false, error: result.error, current: result.current ?? null }, 502);
-            return;
-          }
-          log(`控制台：会话 ${key} 的对端权限档已写入 ${result.preset}`);
-          sendJson({ ok: true, ...(await sessionAgentPayload(key)) });
           return;
         }
         // ── 挂起审批 / 提问 ───────────────────────────────────────────────────
@@ -9515,7 +8847,7 @@ async function main() {
               const targets = [{ key: schedulerOwnerKey(), label: '管理员私聊', kind: 'owner' }];
               for (const id of listOf('private')) if (sessionKey('private', id) !== schedulerOwnerKey()) targets.push({ key: sessionKey('private', id), label: `好友 ${id}`, kind: 'private' });
               for (const id of listOf('group')) targets.push({ key: sessionKey('group', id), label: `群 ${id}`, kind: 'group' });
-              sendJson({ ok: true, ...snap, targets, taskTypes: plugins?.taskTypes() ?? [], writable: scheduler.isWritable(), mode: currentMode });
+              sendJson({ ok: true, ...snap, targets, taskTypes: plugins?.taskTypes() ?? [], writable: scheduler.isWritable(), mode: defaultMode() });
               return;
             }
             const body = req.method === 'GET' ? {} : await readBody();
@@ -9741,7 +9073,7 @@ async function main() {
           }
           // id 的合法性已由 parseKey 保证，不再要求是数字：非数字 id 的平台要能走到这里。
           if (!passiveAllowed(key)) {
-            sendJson({ ok: false, error: `该会话不在当前模式（${currentMode}）允许范围内` }, 403);
+            sendJson({ ok: false, error: '该会话不在准入范围内' }, 403);
             return;
           }
           if (!agentReady) {
@@ -9822,59 +9154,24 @@ async function main() {
           sendJson({ ok: true, send });
           return;
         }
-        // ── 全局配置：权限级别（config.permission；默认值 + full 短时授权开关） ──
+        // ── 全局配置：权限级别（config.permission；只存默认级别） ───────────────
         if (req.method === 'GET' && url.pathname === '/api/config/permission') {
-          sendJson({ ok: true, permission: cfg.permission ?? normalizePermissionConfig({}), levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL, ttlOptions: [10, 30, 60] });
+          sendJson({ ok: true, permission: normalizePermissionConfig(cfg.permission), levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL });
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/config/permission') {
           const body = await readBody();
           let next;
           try {
-            next = normalizePermissionConfig({
-              ...(cfg.permission ?? {}),
-              ...body,
-              // normalizePermissionConfig 只认这三个字段；其它键由它自己丢弃。
-            });
+            next = normalizePermissionConfig(body);
           } catch (error) {
             sendJson({ ok: false, error: error?.message ?? '权限配置无效' }, 400);
             return;
           }
           saveConfigSection('permission', next);
           cfg.permission = next;
-          // 关掉 allowFull 立刻收回所有 full 授权，避免窗口里的会话继续用旧级别。
-          if (!next.allowFull) {
-            for (const key of [...fullGrants.keys()]) clearFullGrant(key, { revert: true, reason: 'allow-full-off' });
-          }
           ext.audit.append('config.permission.write', { ...next });
-          sendJson({ ok: true, permission: next, levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL, ttlOptions: [10, 30, 60] });
-          return;
-        }
-        // ── 会话：full 短时授权（一次性码由控制台 TOTP 换出 + TTL） ────────
-        const fullGrantMatch = url.pathname.match(/^\/api\/sessions\/(.+)\/permission\/full$/);
-        if (fullGrantMatch) {
-          if (req.headers['x-agent-token']) { sendJson({ ok: false, error: '仅控制台可用' }, 403); return; }
-          let key;
-          try { key = apiKey(decodeURIComponent(fullGrantMatch[1])); }
-          catch { sendJson({ ok: false, error: '会话 key 无效' }, 400); return; }
-          if (req.method === 'POST') {
-            if (cfg.permission?.allowFull !== true) { sendJson({ ok: false, error: '总开关没开：先在「全局配置 › 权限级别」里允许 full 档' }, 409); return; }
-            const body = await readBody();
-            grantFull(key, Number(body?.ttlMin) || 0);
-            const grant = fullGrants.get(key);
-            ext.audit.append('permission.full_grant', { key, expiresAt: grant?.expiresAt ?? null, ttlMin: cfg.permission.fullTtlMin, by: 'console' });
-            const pinned = await pinSessionPermission(key, { reason: 'grant-full', throwOnError: false });
-            sendJson({ ok: true, permission: permissionPayload(key), pinned });
-            return;
-          }
-          if (req.method === 'DELETE') {
-            clearFullGrant(key, { revert: true, reason: 'console' });
-            ext.audit.append('permission.full_revoke', { key, by: 'console' });
-            const pinned = await pinSessionPermission(key, { reason: 'revoke-full', throwOnError: false });
-            sendJson({ ok: true, permission: permissionPayload(key), pinned });
-            return;
-          }
-          sendJson({ ok: false, error: '不支持的请求' }, 405);
+          sendJson({ ok: true, permission: next, levels: PERMISSION_LEVELS, labels: PERMISSION_LABEL });
           return;
         }
         // 平台工具的注册开关已并入能力预设的「平台工具」表，不再有独立的全局开关接口。
@@ -9930,7 +9227,6 @@ async function main() {
             socialV2.conversations.delete(key);
             seenForwardIds.delete(key);
             forgetConversationCaches(key); // 含 qq_wait_for_messages 的等待租约
-            discardDormantForReset(key);
           }
           saveState();
           pendingWakeKeys.clear();
@@ -10016,7 +9312,6 @@ async function main() {
             getSelfImage: 'qq_get_self_image',
             sendVoice: 'qq_send_voice / qq_list_voices',
             personProfile: 'qq_get_person / qq_note_person',
-            requestMode: 'qq_request_mode_change',
             crossGroup: 'qq_cross_group_query',
             schedule: 'qq_schedule_create / qq_schedule_list / qq_schedule_update / qq_schedule_delete',
             ownerRelay: 'qq_ask_group_session',
@@ -10840,7 +10135,6 @@ async function main() {
             st.lastAiReplyAt = Date.now();
             st.lastActionAt = Date.now();
             saveSocialV2State();
-            recordOwnerTranscript(key, 'ai', text);
             log(`[web-image] 发图 ${key}：「${c.title}」（${c.site}${img.fromThumb ? '，原图取不到，发的是缩略图' : ''}）`);
             appendActivity(`${key} [web-image] 发图：${c.title}（${c.site}）`);
             sendJson({ ok: true, sent: 1, n, title: c.title, site: c.site, fromThumb: img.fromThumb, messageId: data?.message_id ?? null });
@@ -12027,35 +11321,6 @@ async function main() {
           }
           return;
         }
-        // ── v0.3.0 AI 工具：登记模式切换申请（**只登记，不执行**）─────────────────
-        // 只有 owner 私聊会话能调用；确认码由桥接直接私聊给 owner，**不会**出现在返回给 AI 的内容里。
-        if (req.method === 'POST' && url.pathname === '/api/socialV2/mode-request') {
-          const body = await readBody();
-          const key = apiKey(body.key);
-          const agentToken = req.headers['x-agent-token'];
-          if (!agentToken || !agentTokenOk(key, agentToken)) { sendJson({ ok: false, error: 'agent token 无效或缺失' }, 403); return; }
-          if (!v2SessionAllowed(key)) { sendJson({ ok: false, error: '会话不在当前模式允许范围内' }, 403); return; }
-          if (!v2ToolEnabled('requestMode')) { sendJson({ ok: false, error: '工具未启用：qq_request_mode_change' }, 403); return; }
-          if (!ext.adminEnabled() || !ext.isOwnerPrivateKey(key)) {
-            ext.audit.append('mode.request_denied', { key, reason: 'not owner private session' });
-            sendJson({ ok: false, error: '只有管理员（ownerQQ）本人的私聊会话可以申请切换模式；群聊和其他人的私聊不能申请' }, 403);
-            return;
-          }
-          const mode = normalizeModeInput(body.mode) ?? (String(body.mode ?? '').trim() === 'agent' ? 'closed-agent' : null);
-          if (!mode) { sendJson({ ok: false, error: 'mode 必须是 chat / reserved / reserved2 / closed-agent' }, 400); return; }
-          const level = ['L1', 'L2', 'L3'].includes(String(body.level)) ? String(body.level) : null;
-          const r = await ext.controller.requestChange({ mode, level }, { origin: 'ai-tool', reason: String(body.reason ?? '').slice(0, 200) });
-          if (r.status === 'pending') await sendOwnerDirect(r.text);
-          sendJson({
-            ok: r.status !== 'rejected',
-            status: r.status,
-            requestId: r.request?.id ?? null,
-            message: r.status === 'pending'
-              ? '已登记申请，桥接已把确认方式直接发给管理员。只有管理员亲自回复确认后才会切换；你无法、也不要替管理员确认，不要编造确认码。'
-              : r.status === 'applied' ? '已执行（降级/同级切换不需要确认）。' : (r.status === 'noop' ? '目标与当前一致，无需切换。' : `申请被拒绝：${r.text}`),
-          });
-          return;
-        }
         // ── v0.3.0 AI 工具：跨会话受控查询（默认关闭；只返回统计/成员关系，不返回内容）──
         // 路径与工具名（/cross-group、qq_cross_group_query）是 0.1.x 的公开面，不改；
         // 请求/响应字段从 0.2.0 起叫 targetConversationId，旧名 targetGroupId 仍然接受并回显一次。
@@ -12163,12 +11428,8 @@ async function main() {
         if (req.method === 'GET' && url.pathname === '/api/admin/status') {
           sendJson({
             ok: true,
-            mode: currentMode,
-            level: currentLevel,
-            controller: ext.controller.current(),
-            pendingRequests: ext.controller.pendingRequests(),
+            mode: defaultMode(),
             approvals: ext.approvals.list().map((e) => ({ id: e.id, key: e.key, toolName: e.toolName, argsKnown: e.argsKnown, expiresAt: e.expiresAt })),
-            totpConfigured: !!ext.getTotpSecret(),
             permissionCatalog,
             people: ext.people.stats(),
             auditChain: ext.audit.verify(),
@@ -12189,14 +11450,13 @@ async function main() {
             try { saveState(); } catch {}
             try { saveSocialV2State(); } catch {}
             try { ext.people.flush(); } catch {}
-            try { ext.controller.stop(); } catch {}
             process.exit(0);
           }, 200);
           return;
         }
         if (req.method === 'POST' && url.pathname === '/api/admin/panic') {
-          const r = await ext.controller.panic('console');
-          sendJson({ ok: r.ok, error: r.error ?? null, mode: currentMode, level: currentLevel });
+          const r = await panicAllSessions('console');
+          sendJson({ ok: r.ok, error: r.error ?? null });
           return;
         }
         if (req.method === 'GET' && url.pathname === '/api/people') {
@@ -12545,7 +11805,7 @@ async function main() {
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
-            sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
+            sendJson({ ok: false, error: '不在准入范围内' }, 403);
             return;
           }
           sendJson({ ok: true, key });
@@ -12563,8 +11823,9 @@ async function main() {
             sendJson({ ok: false, error: 'reserved2 模式读取图片必须携带 agent token' }, 403);
             return;
           }
-          if (currentMode === 'chat' || currentMode === 'reserved') {
-            sendJson({ ok: false, error: '一代 chat/reserved 模式图片已自动内联，按需图片工具仅 reserved2 模式可用' }, 403);
+          // 纯聊天会话的图片已随消息内联，按需图片工具只对跑了能力档的会话开放。
+          if (!capabilityOf(key)) {
+            sendJson({ ok: false, error: '纯聊天会话的图片已自动内联，按需图片工具只对配置了能力档的会话开放' }, 403);
             return;
           }
           if (agentToken && !agentTokenOk(key, agentToken)) {
@@ -12574,14 +11835,11 @@ async function main() {
           const kind = keyMatch.kind;
           const id = Number(keyMatch.id);
           if (!Number.isFinite(id) || id <= 0 || !passiveAllowed(key)) {
-            sendJson({ ok: false, error: '当前模式不允许读取该会话' }, 403);
+            sendJson({ ok: false, error: '不在准入范围内' }, 403);
             return;
           }
-          if (agentToken && !v2ToolEnabled('getImages')) {
-            sendJson({ ok: false, error: '工具未启用：qq_get_message_images' }, 403);
-            return;
-          }
-          if (!agentToken && currentMode === 'closed-agent' && !v2ToolEnabled('getImages')) {
+          // 服务端开关 = 能力档的「平台工具」表；令牌只决定是否绑定到某个对话环境会话。
+          if (!v2ToolEnabled('getImages', key)) {
             sendJson({ ok: false, error: '工具未启用：qq_get_message_images' }, 403);
             return;
           }
@@ -12639,10 +11897,10 @@ async function main() {
           const replyToMessageId = body.replyToMessageId;
           const atUserId = body.atUserId ?? null;
           const key = target.key;
-          // 安全边界：发送工具只允许在 closed-agent（管理员私聊）或 reserved2（二代 AI 带会话令牌）下使用；
-          // chat/reserved 的自动转发已覆盖正常回复，MCP 发送工具不应成为 prompt injection 的越权出口。
-          if (currentMode === 'chat' || currentMode === 'reserved') {
-            sendJson({ ok: false, error: '发送工具仅限 closed-agent / reserved2 模式使用' }, 403);
+          // 安全边界：纯聊天会话（没有能力档）的自动转发已覆盖正常回复，发送工具不该成为
+          // prompt injection 的越权出口；跑能力档的会话按能力档的「平台工具」表放行。
+          if (!capabilityOf(key)) {
+            sendJson({ ok: false, error: '发送工具只对已配置能力档的会话开放' }, 403);
             return;
           }
           if (socialV2.paused && token) {
@@ -12671,7 +11929,7 @@ async function main() {
           // 这里仍然拦住「数字但非正数」：`0` / `-1` 在任何平台上都不是会话。
           const id = keyMatch.idNum;
           if ((id !== null && id <= 0) || !passiveAllowed(key)) {
-            sendJson({ ok: false, error: '目标不在当前模式允许范围内' }, 403);
+            sendJson({ ok: false, error: '目标不在准入范围内' }, 403);
             return;
           }
           if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '' && !/^-?[1-9]\d*$/.test(String(replyToMessageId).trim())) {
@@ -12871,10 +12129,6 @@ async function main() {
           CONVERSATION_TOKENS.clear();
           KNOWN_AGENT_TOKENS.clear();
           saveSocialV2State();
-          // 休眠中的会话与 owner 私聊交接记录也一起作废（清空工作区 = 从头开始）
-          for (const key of Object.keys(state.dormantSessions)) archiveDormantSession(key, '工作区已清空');
-          pendingHandover.clear();
-          ownerTranscript.clear();
           sessions.clearAll();
           reverse.clear();
           collectors.clear();
@@ -13748,12 +13002,9 @@ async function main() {
     });
   }
 
-  // 审计范围：closed-agent 仅对 owner 私聊跳过；其余模式/会话一律审计
+  // 审计范围：owner 私聊跳过（那里本来就在向管理员展示路径/凭据），其余会话一律审计。
   function shouldAuditKey(key) {
-    if (currentMode === 'closed-agent') {
-      return key !== ownerPrivateKey();
-    }
-    return true;
+    return !ext.isOwnerPrivateKey(key);
   }
 
   // 入队校验无法约束排队等待期间的权限变化，每条消息临近实际发送时再次校验。
@@ -13761,7 +13012,7 @@ async function main() {
     const policy = sessionPolicy(key);
     const sessionId = sessions.get(key);
     return () => {
-      if (!isSessionAllowedInCurrentMode(key) || policy !== sessionPolicy(key)
+      if (!passiveAllowed(key) || policy !== sessionPolicy(key)
           || (sessionId && sessions.get(key) !== sessionId)) {
         throw new Error('发送已取消：会话、模式或白名单已变化');
       }
@@ -13791,7 +13042,6 @@ async function main() {
       return false;
     }
     await sendToQQ(key, text, opts);
-    recordOwnerTranscript(key, 'ai', text);
     return true;
   }
 
@@ -13885,7 +13135,7 @@ async function main() {
     const key = apiKey(rawKey);
     const epoch = sessionEpoch;
     const policy = sessionPolicy(key);
-    if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
+    if (!passiveAllowed(key)) throw new Error(`该会话不在准入范围内：${key}`);
     const existing = sessions.get(key);
     if (existing) {
       // 换平台：映射指向的是**上一个平台**的会话 id。同一个字符串在另一个平台可能恰好存在，
@@ -13911,18 +13161,15 @@ async function main() {
           retireSession(key);
         } else {
           if (epoch !== sessionEpoch || !isCurrentSession(key, existing)) throw new Error('会话创建期间已重置或权限已变化');
-          // 直通下档位归执行体：不重钉，也不因回读不一致丢弃会话。
-          if (permissionAuthorityOf(key) === 'bridge') {
-            const chatSession = !capabilityOf(key);
-            const wanted = presetForLevel(permissionLevelOf(key), { allowFull: cfg.permission.allowFull, grantActive: fullGrantActive(key), presets: permissionPresetMap() }).preset;
-            if (pinnedPermissions.get(key) !== wanted) {
-              const repinned = await pinSessionPermission(key, { reason: 'mode-change', throwOnError: false, sessionId: existing });
-              if (!repinned.ok && !chatSession && !cfg.permission.allowFull) {
-                log(`⛔ 无法为 ${key} 更新权限预设：${repinned.error}；丢弃该会话`);
-                try { await agentPort.archiveSession(existing); } catch {}
-                retireSession(key);
-                throw new Error(`权限预设设置失败（${repinned.error}），已拒绝继续使用该会话`);
-              }
+          // 对端权限档由能力档声明、建会话时钉一次；能力档换了就重新落下（旧档案没记过也补一次）。
+          // 钉不上的能力会话直接丢弃：承诺的沙箱与审批策略没生效的会话不能拿来跑活。
+          if (peerPermissionDrifted(key)) {
+            const repinned = await pinSessionPeerPermission(key, { reason: 'capability-change', sessionId: existing });
+            if (!repinned.ok && capabilityOf(key)) {
+              log(`⛔ 无法为 ${key} 更新对端权限档：${repinned.error}；丢弃该会话`);
+              try { await agentPort.archiveSession(existing); } catch {}
+              retireSession(key);
+              throw new Error(`对端权限档设置失败（${repinned.error}），已拒绝继续使用该会话`);
             }
           }
           markDshHealth(key, existing, 'online');
@@ -13932,40 +13179,6 @@ async function main() {
     }
     if (sessionPromises.has(key)) return sessionPromises.get(key);
     const promise = (async () => {
-      // 先看有没有可复用的休眠会话（进 agent 前的聊天会话；回到同一模式、同一 preset 才复用）
-      const dormant = hibernateEnabled() ? state.dormantSessions[key] : null;
-      if (dormant) {
-        // 休眠会话也是「平台侧 id 的引用」：instance 不同就不能复用（老数据没有该字段，按当前平台认领）。
-        const foreignDormant = !!dormant.instance && dormant.instance !== agentPort.id;
-        const decision = foreignDormant ? 'archive' : dormantDecision(dormant, {
-          now: Date.now(), maxMs: dormantMaxMs(), inClosedAgent: currentMode === 'closed-agent',
-          currentPolicy: policy, allowed: isSessionAllowedInCurrentMode(key),
-        });
-        if (decision === 'archive') archiveDormantSession(key, foreignDormant ? `属于平台 ${dormant.instance}` : '过期或策略已变');
-        if (decision === 'resume') {
-          const sid = dormant.sessionId;
-          delete state.dormantSessions[key];
-          sessions.bindSession(key, sid);
-          sessions.setPolicy(key, policy);
-          reverse.set(sid, key);
-          saveState();
-          api.events.follow(sid);
-          markDshHealth(key, sid, 'online');
-          const applied = await ensureChatModel(sid, key);
-          if (applied === 'not-found') {
-            log(`休眠会话 ${key} -> ${sid} 在 DSH 侧已不存在，改为新建`);
-            retireSession(key);
-          } else {
-            if (epoch !== sessionEpoch || !isCurrentSession(key, sid)) {
-              if (sessions.get(key) === sid) retireSession(key);
-              throw new Error('会话恢复期间已重置或权限已变化');
-            }
-            pendingHandover.set(key, { resumed: true, dormantAt: dormant.dormantAt, from: { mode: 'closed-agent', level: lastAgentLevel }, to: { mode: currentMode, level: currentLevel } });
-            log(`会话从休眠恢复 ${key} -> ${sid}（休眠 ${Math.round((Date.now() - dormant.dormantAt) / 60000)} 分钟）`);
-            return sid;
-          }
-        }
-      }
       const dir = cfg.sessionCwd ? String(cfg.sessionCwd) : path.join(STATE_DIR, 'agents');
       fs.mkdirSync(dir, { recursive: true });
       let sessionId;
@@ -13976,77 +13189,50 @@ async function main() {
       const promptChannel = promptChannelOf(key);
       notePromptDegrade(key, promptChannel);
       const preset = passthrough ? undefined : modePreset(key, effectiveMode(key), cfg);
-      // 非 closed-agent（chat / reserved / reserved2，会话可能属于 QQ 群）必须 fail-closed：
-      // 拿不到内置仿真 preset 就拒绝建会话，绝不让 DSH 用默认 preset（standard）顶上——那会把
-      // bash/文件读写等本地工具暴露给 QQ 群里的任何人（见 RULES.md「无本地工具」）。
-      // closed-agent 仅 owner 私聊、本来就用完整工具面，回退不构成提权。
+      // 非直通会话必须 fail-closed：拿不到内置仿真 preset 就拒绝建会话，绝不让 DSH 用默认 preset
+      // （standard）顶上——那会把 bash/文件读写等本地工具暴露给 QQ 群里的任何人（见 RULES.md「无本地工具」）。
       // 直通不挂预设，也就没有「preset 不可用」这一档：它本来就不装。
-      const strictPreset = !passthrough && currentMode !== 'closed-agent';
-      // v0.3.0：closed-agent 也 fail-closed —— 级别计划不成立（未授权 / L1 的只读 preset 缺失 /
-      // L3 的 qq-full-ask 缺失）就拒绝建会话，绝不退化成 DSH 默认 preset 的完整工具面。
-      const agentPlan = currentMode === 'closed-agent' ? closedAgentPlan() : null;
-      if (agentPlan && !agentPlan.ok) {
-        throw new Error(`拒绝为 ${key} 创建 closed-agent 会话：${agentPlan.error}`);
-      }
+      const strictPreset = !passthrough;
       if (strictPreset && !preset) {
-        const wanted = currentMode === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
-        throw new Error(`拒绝为 ${key} 创建会话：模式 ${currentMode} 需要 preset "${wanted}"，但它不在 DSH 可用清单中（${dshPresetIds.join(', ') || '未知'}）。回退到 DSH 默认 preset 会把本地工具暴露给 QQ 群；请先运行 node scripts/setup-dsh.mjs 并重启 DSH。`);
+        const wanted = effectiveMode(key) === 'reserved2' ? (cfg.socialV2?.agentPreset || cfg.agentPreset) : cfg.agentPreset;
+        throw new Error(`拒绝为 ${key} 创建会话：能力档 ${capabilityOf(key)?.id ?? '(默认)'} 需要 preset "${wanted}"，但它不在 DSH 可用清单中（${dshPresetIds.join(', ') || '未知'}）。回退到 DSH 默认 preset 会把本地工具暴露给 QQ 群；请先运行 node scripts/setup-dsh.mjs 并重启 DSH。`);
       }
-      // 归组：所有 QQ 会话挂到同一个 workspace（幂等创建），GUI 里不再散落「未分组」
-      // 创建顺序有安全含义：
-      //   1) workspace + agentPreset —— 正常路径；
-      //   2) workspace 无 preset     —— 仅 closed-agent 允许的降级（那里本就是完整工具面）；
-      //      群聊模式绝不走这一步：DSH 会给「无 preset 会话」套上默认 preset（standard）。
-      // v0.3.0：closed-agent 各级别都有明确的 preset（L1 只读 / L2、L3 带审批闸门），一律不允许「无 preset」降级
-      // （那会落到 DSH 默认 preset 的完整工具面，而且没有桥接的审批闸门）。
-      const allowNoPresetFallback = false;
-      for (const withPreset of allowNoPresetFallback ? [true, false] : [true]) {
-        try {
-          const workspace = await agentPort.createWorkspace({ path: dir });
-          if (workspace.created && cfg.workspaceTitle) {
-            await agentPort.renameWorkspace({ workspaceId: workspace.workspaceId, title: cfg.workspaceTitle });
-          }
-          const params = { workspaceId: workspace.workspaceId };
-          if (withPreset && preset) params.agentPreset = preset;
-          // `system` 通道：平台话术作为 system prompt 交给执行体，唤醒块里不再带（避免注入两份）。
-          if (promptChannel.channel === 'system') params.systemPrompt = platformPromptFor(key);
-          const value = await agentPort.ensureSession(params);
-          sessionId = value.sessionId;
-          markDshHealth(key, sessionId, 'online');
-          // DSH 默认用首条消息/时间命名，侧栏里分不清是哪个群；创建后立刻钉一个确定性标题。
-          await nameCreatedSession(key, sessionId);
-          if (withPreset && preset) {
-            log(`会话 ${key} 已挂载 preset ${preset}`);
-          } else if (preset) {
-            log(`⚠️ 会话 ${key} 未能挂载 preset ${preset}（${lastError?.message ?? '未知原因'}），已降级为无 preset 会话；请检查 capabilities/${preset}.yml 并在 node scripts/setup-dsh.mjs 后重启 DSH`);
-          }
-          break;
-        } catch (error) {
-          lastError = error;
+      // 归组：所有 QQ 会话挂到同一个 workspace（幂等创建），GUI 里不再散落「未分组」。
+      try {
+        const workspace = await agentPort.createWorkspace({ path: dir });
+        if (workspace.created && cfg.workspaceTitle) {
+          await agentPort.renameWorkspace({ workspaceId: workspace.workspaceId, title: cfg.workspaceTitle });
         }
+        const params = { workspaceId: workspace.workspaceId };
+        if (preset) params.agentPreset = preset;
+        // `system` 通道：平台话术作为 system prompt 交给执行体，唤醒块里不再带（避免注入两份）。
+        if (promptChannel.channel === 'system') params.systemPrompt = platformPromptFor(key);
+        const value = await agentPort.ensureSession(params);
+        sessionId = value.sessionId;
+        markDshHealth(key, sessionId, 'online');
+        // DSH 默认用首条消息/时间命名，侧栏里分不清是哪个群；创建后立刻钉一个确定性标题。
+        await nameCreatedSession(key, sessionId);
+        if (preset) log(`会话 ${key} 已挂载 preset ${preset}`);
+      } catch (error) {
+        lastError = error;
       }
       if (!sessionId) {
-        throw new Error(`无法为 ${key} 创建 DSH 会话（模式 ${currentMode}，preset ${preset ?? '无'}）：${lastError?.message ?? '未知原因'}。已拒绝退化为 DSH 默认 preset 会话——那会把本地工具暴露给 QQ 群。`);
+        throw new Error(`无法为 ${key} 创建 DSH 会话（能力档 ${capabilityOf(key)?.id ?? '(默认)'}，preset ${preset ?? '无'}）：${lastError?.message ?? '未知原因'}。已拒绝退化为 DSH 默认 preset 会话——那会把本地工具暴露给 QQ 群。`);
       }
       // 新版 DSH 事件流需要显式 follow 该会话，否则收不到 turn 事件。
       api.events.follow(sessionId);
       // `system` 通道：平台话术已经在建会话时交出去了，记下来（会话详情与诊断看这件事）。
       if (promptChannel.channel === 'system') markPromptInjected(key, sessionId);
-      // P11：按会话权限级别钉执行体权限预设。chat 会话恒只读（钉不上不影响聊天）；
-      // agent 能力会话钉不上就丢弃 —— 宁可建不出会话，也不让它带着默认权限运行。
-      // 直通（permission: agent）不钉：档位归执行体，桥接只读、只按用户操作代改。
-      if (permissionAuthorityOf(key) === 'bridge') {
-        // closed-agent 下定权限是硬要求：钉不上就丢弃会话；普通聊天会话钉不上不影响聊天。
-        const chatSession = currentMode !== 'closed-agent' && !capabilityOf(key);
-        const pinned = await pinSessionPermission(key, { reason: 'create', throwOnError: false, sessionId });
-        if (!pinned.ok && !chatSession) {
-          log(`⛔ 无法为 ${key} 设置权限预设：${pinned.error}；丢弃该会话`);
-          try { await agentPort.archiveSession(sessionId); } catch {}
-          throw new Error(`权限预设设置失败（${pinned.error}），已拒绝建会话`);
-        }
+      // P11：能力档声明了执行体权限档就钉一次；钉不上就丢弃会话 —— 宁可建不出会话，
+      // 也不让它带着默认权限运行。纯聊天会话没有能力档，本就不钉。
+      const pinned = await pinSessionPeerPermission(key, { reason: 'create', sessionId });
+      if (!pinned.ok) {
+        log(`⛔ 无法为 ${key} 设置对端权限档：${pinned.error}；丢弃该会话`);
+        try { await agentPort.archiveSession(sessionId); } catch {}
+        throw new Error(`对端权限档设置失败（${pinned.error}），已拒绝建会话`);
       }
       // reset/清空工作区期间创建完成：丢弃，防止旧会话复活
-      if (epoch !== sessionEpoch || policy !== sessionPolicy(key) || !isSessionAllowedInCurrentMode(key)) {
+      if (epoch !== sessionEpoch || policy !== sessionPolicy(key) || !passiveAllowed(key)) {
         log(`会话创建期间发生 reset，丢弃 ${key} 的新会话（${sessionId}）`);
         try { await withTimeout(agentPort.archiveSession(sessionId), DSH_CONTROL_TIMEOUT_MS, 'archiveSession'); } catch {}
         throw new Error('会话创建期间已重置，丢弃新会话');
@@ -14283,7 +13469,7 @@ async function main() {
     // 之后没人再说话，积压就永远沉底了。等窗口走完主动回看一眼。
     st.backlogTimer = setTimeout(() => {
       st.backlogTimer = null;
-      if (!isSessionAllowedInCurrentMode(key) || st.pendingWakeTimer) return;
+      if (!passiveAllowed(key) || st.pendingWakeTimer) return;
       if ((Number(st.backlogSinceWake) || 0) < policy.backlog.wakeAfter) return;
       fireBacklogWakeV2(key, st);
     }, Math.max(1000, Math.round(remaining)));
@@ -14793,13 +13979,12 @@ async function main() {
       return;
     }
 
-    let legacyState = { sessions: {}, sessionPolicies: {}, dormantSessions: {} };
+    let legacyState = { sessions: {}, sessionPolicies: {} };
     try {
       legacyState = loadSessionState({
         file: legacyFile,
         readFile: (file) => fs.readFileSync(file, 'utf8'),
         log,
-        normalizeDormant,
       }).state;
     } catch (error) {
       log(`⚠️ 旧 sessions.json 读取失败，迁移将按空绑定继续：${error?.message ?? error}`);
@@ -14827,7 +14012,6 @@ async function main() {
       allowAllWhenEmpty: cfg.allowAllWhenEmpty === true,
       sessions: legacyState.sessions,
       policies: legacyState.sessionPolicies,
-      dormant: legacyState.dormantSessions,
       roleByKey,
       initialPrompts: initialPromptsRaw,
       wakeConfigs,
@@ -14838,7 +14022,6 @@ async function main() {
     state = {
       sessions: migrated.sessions,
       sessionPolicies: migrated.sessionPolicies,
-      dormantSessions: migrated.dormantSessions,
       profiles: migrated.profiles,
       defaults: migrated.defaults,
       migratedAt: 0,
@@ -14997,45 +14180,28 @@ async function main() {
     }
   }
 
-  let permissionCheckFailures = 0;
-  // v0.3.0 外部权限变更检测：高权限期间每分钟用 `/permission`（只读查询）核对 owner 会话的实际权限预设。
-  // DSH Web UI 里有人手动改了这个会话的权限 → 桥接无法阻止，但会**发现**：告警 + 立刻紧急回落。
+  // 对端权限档漂移巡检：能力档钉下的档位被外部（执行体界面等）改掉 → 发现后按能力档钉回去；
+  // 钉不回去（执行体拒绝/回执不符）就把全平台会话降为只读，绝不让执行体带着更宽的档继续跑。
   {
     const t = setInterval(() => {
       void (async () => {
-        if (currentMode !== 'closed-agent' || currentLevel === 'L0' || !agentReady || !agentPort.supports('permission')) return;
-        const key = ownerPrivateKey();
-        // 直通下档位归执行体：漂移只该被看见，不该被自动改回，更不能因此紧急回落。
-        if (permissionAuthorityOf(key) === 'agent') return;
-        const sessionId = sessions.get(key);
-        const plan = closedAgentPlan();
-        if (!sessionId || !plan.ok || !isCurrentSession(key, sessionId)) return;
-        // preset 由适配器从回执里解出来（「回执格式长什么样」是平台知识）；内核只比较值。
-        let preset = '';
-        let text = '';
-        try {
-          ({ preset, text } = await agentPort.readPermission(sessionId));
-          permissionCheckFailures = 0;
-        } catch (error) {
-          // 连续 3 次核对失败按「无法确认」处理：fail-closed，回落到安全模式。
-          permissionCheckFailures += 1;
-          log(`权限核对失败（${permissionCheckFailures}/3）：${error?.message ?? error}`);
-          if (permissionCheckFailures < 3) return;
-          preset = '';
-        }
-        if (preset && preset === plan.permissionPreset) return;
-        if (!preset) {
-          permissionCheckFailures = 0;
-          ext.audit.append('permission.unverifiable', { key, sessionId, expected: plan.permissionPreset, text: text.slice(0, 120) });
-          log('🚨 无法确认 owner 会话的实际权限预设（DSH 返回格式不符或持续失败），按安全策略紧急回落');
-          await sendOwnerDirect('🚨 告警：桥接无法确认运维 Agent 会话的实际权限（DSH 返回异常），按安全策略已紧急关闭回到安全模式。');
-          await ext.controller.panic('external-revert');
+        if (!agentReady || !agentPort.supports('permission')) return;
+        for (const [key, profile] of Object.entries(state.profiles ?? {})) {
+          const pinned = String(profile?.permissionMirror?.preset ?? '').trim();
+          if (!pinned) continue;
+          const sessionId = sessions.get(key);
+          if (!sessionId || !isCurrentSession(key, sessionId)) continue;
+          const { readable, preset } = await readAgentPermission(key);
+          if (!readable || preset === pinned) continue;
+          ext.audit.append('permission.drift', { key, sessionId, expected: pinned, actual: preset });
+          log(`🚨 ${key} 的对端权限档被外部改为 ${preset}（能力档钉的是 ${pinned}），正在按能力档钉回`);
+          const restored = await pinSessionPeerPermission(key, { reason: 'external-drift' });
+          if (restored.ok) continue;
+          log(`⛔ 钉回失败（${restored.error}），按安全策略把全平台会话降为只读`);
+          await sendOwnerDirect(`🚨 告警：${key} 的对端权限档被外部改成「${preset}」（应为「${pinned}」），钉回失败，已把所有会话降为只读。请检查是否有人在执行体界面操作。`);
+          await panicAllSessions('external-drift');
           return;
         }
-        ext.audit.append('permission.drift', { key, sessionId, expected: plan.permissionPreset, actual: preset });
-        log(`🚨 owner 会话的权限预设被外部改为 ${preset}（应为 ${plan.permissionPreset}），紧急回落`);
-        await sendOwnerDirect(`🚨 告警：运维 Agent 会话的权限被外部改成了「${preset}」（桥接设定的是「${plan.permissionPreset}」）。这不是经管理通道的操作，已立即紧急关闭回到安全模式。请检查是否有人在 DSH Web 界面操作。`);
-        await ext.controller.panic('external-revert');
       })();
     }, 60_000);
     t.unref?.();
@@ -15168,23 +14334,6 @@ async function main() {
       for (const t of timers) clearTimeout(t);
     }
     social.pendingTimers.clear();
-  }
-
-  // 离开仿真模式时清理全部社交运行时状态，避免旧定时器/状态残留。
-  function cleanupSocialForModeChange() {
-    cancelAllSocialTimers();
-    social.states.clear();
-    social.recentMessages.clear();
-    messageMediaStore.clear();
-    social.pendingSummaries.clear();
-    social.silentContext.clear();
-    social.silentTurns.clear();
-    social.exitingSessions.clear();
-    // 拒绝仍在排队中的 prompt，避免调用方 await 永远挂起
-    for (const [, entry] of promptQueues) {
-      for (const item of entry.queue) item.reject(new Error('模式切换，已取消排队中的投递'));
-    }
-    promptQueues.clear();
   }
 
   function leaveActive(key) {
@@ -15349,7 +14498,7 @@ async function main() {
   }
 
   async function deliverPromptNow(key, promptText, opts = {}) {
-    if (!isSessionAllowedInCurrentMode(key)) throw new Error(`当前模式不允许会话 ${key}`);
+    if (!passiveAllowed(key)) throw new Error(`该会话不在准入范围内：${key}`);
     // Recheck queued wakes at dispatch time: no model call while paused/disabled
     // and no reserved2 prompt leaking into an ordinary chat after a mode switch.
     const wakeBlocked = () => opts.wakeReason && (effectiveMode(key) !== 'reserved2' || socialV2.paused || cfg.socialV2?.enabled === false);
@@ -15426,13 +14575,13 @@ async function main() {
       const schedulingNotice = schedulingNoticeV2(wakeState);
       if (schedulingNotice) promptText += `\n\n${schedulingNotice.trimEnd()}`;
     }
-    let modelText = withSlangContext(withHandover(key, promptText), { slang: blockPlan?.slang });
+    let modelText = withSlangContext(promptText, { slang: blockPlan?.slang });
     if (plugins) {
       // 插件只做前后缀补充，合并与总长截断由内核负责（plugins.json 的 maxPromptAppendChars）。
       const additions = await plugins.promptAdditions({
         key,
         sessionId,
-        mode: currentMode,
+        mode: effectiveMode(key),
         text: modelText,
         persona: currentRoleName(key),
       });
@@ -16067,7 +15216,7 @@ async function main() {
   function looksLikeAdminChannelText(raw) {
     const segs = Array.isArray(raw?.message) ? raw.message : [];
     const text = String(raw?.raw_message ?? segs.map((s) => s?.data?.text ?? '').join(''));
-    return /确认\s*\d{4,8}|\/confirm|确认请回复|审批\s*#\d+|模式已变更|管理通道|动态码|TOTP|^\s*\/(mode|level|perm|permission|panic|cancel|approvals|audit|whois|person|note|share|say|review|admin)\b|^\s*(通过|拒绝)(\s*#?\d+)?\s*$/i.test(text);
+    return /审批\s*#\d+|管理通道|^\s*\/(perm|permission|panic|紧急关闭|status|状态|approvals|audit|whois|people|person|note|note-del|share|review|say|admin|管理|adminhelp)(\s|$)|^\s*(通过|拒绝)(\s*#?\d+)?\s*$/i.test(text);
   }
 
   // waitMs > 0：最多等这么久，等不到返回 { pending: true, messageId }（后台继续取，结果进缓存；不负缓存）。
@@ -16095,8 +15244,8 @@ async function main() {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
       }
-      // v0.3.0：管理通道的消息（owner 发的确认码/TOTP/管理命令，桥接发的确认提示/审批/变更通知）
-      // 已在交给模型之前被拦截，不能再通过「引用」或 qq_get_message_detail 被模型读回来。
+      // 管理通道的消息（owner 发的管理命令、桥接发的审批/变更通知）已在交给模型之前被拦截，
+      // 不能再通过「引用」或 qq_get_message_detail 被模型读回来。
       if (adminHiddenMessageIds.has(String(messageId)) || looksLikeAdminChannelText(raw)) {
         replyInfoCache.set(cacheKey, { info: null, ts: Date.now() });
         return null;
@@ -16340,7 +15489,6 @@ async function main() {
   }
 
   function recordSentMessagesV2(key, messages) {
-    for (const m of Array.isArray(messages) ? messages : []) recordOwnerTranscript(key, 'ai', m);
     const st = getSocialV2State(key);
     const now = Date.now();
     const recentLimit = Number(cfg.socialV2?.context?.recentLimit) || 100;
@@ -16668,16 +15816,16 @@ async function main() {
   function applyRoleChange(apply, onlyKeys = null) {
     const mode = normalizeApplyMode(apply);
     // 人格卡关着：换卡没有注入可言，不排读卡唤醒，也不把待读计数报给控制台。
-    if (!roleInjectEnabled) return { apply: mode, mode: currentMode, woke: 0, pending: 0 };
-    const v2Active = currentMode === 'reserved2' || (onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session());
-    if (!v2Active) return { apply: mode, mode: currentMode, note: '当前模式每条消息都带角色卡，已立即生效' };
+    if (!roleInjectEnabled) return { apply: mode, mode: defaultMode(), woke: 0, pending: 0 };
+    const v2Active = onlyKeys ? onlyKeys.some((k) => effectiveMode(k) === 'reserved2') : anyV2Session();
+    if (!v2Active) return { apply: mode, mode: defaultMode(), note: '没有会话处于对话环境：每条消息都带角色卡，已立即生效' };
     if (mode !== 'immediate') {
       const pending = roleRefresh.stale(sessions.raw(), (k) => currentRoleFingerprintV2(k)).filter((k) => effectiveMode(k) === 'reserved2' && passiveAllowed(k) && (!onlyKeys || onlyKeys.includes(k))).length;
-      return { apply: mode, mode: currentMode, woke: 0, pending };
+      return { apply: mode, mode: defaultMode(), woke: 0, pending };
     }
     const r = refreshRoleNowV2(onlyKeys);
     log(`人格变更立即生效：唤醒 ${r.woke.length} 个会话重新读卡${r.pending ? `（${r.pending} 个在定时静默里，下次唤醒再读）` : ''}`);
-    return { apply: mode, mode: currentMode, woke: r.woke.length, pending: r.pending ?? 0 };
+    return { apply: mode, mode: defaultMode(), woke: r.woke.length, pending: r.pending ?? 0 };
   }
 
   // 唤醒提示词的唯一入口。文本由注入块注册表按 slot + priority 拼出来，
@@ -16954,11 +16102,11 @@ async function main() {
         return;
       }
     }
-    if (!isSessionAllowedInCurrentMode(key)) {
+    if (!passiveAllowed(key)) {
       log(`[reserved2] 跳过唤醒 ${key}（${reason}）：会话已不在当前模式允许范围内`);
       return;
     }
-    // 准入是唯一闸门：被动轴由上面的 isSessionAllowedInCurrentMode（= passiveAllowed）统一拦，
+    // 准入是唯一闸门：被动轴由上面的 isSessionAllowedFor（= passiveAllowed）统一拦，
     // 主动轴必须在这里拦。否则 replyCheck / timeout / silenceEnded / memberJoin 这类不走
     // scheduleWakeV2 的定时唤醒会绕过准入，把「关闭主动」的会话照样叫醒。
     if (wakeAccessAxis(reason) === 'proactive' && !proactiveAllowed(key)) {
@@ -17202,7 +16350,7 @@ async function main() {
   function scheduleWakeV2(key, reason) {
     if (cfg.socialV2?.enabled === false) return;
     if (socialV2.paused) return;
-    if (!isSessionAllowedInCurrentMode(key)) {
+    if (!passiveAllowed(key)) {
       log(`[reserved2] 跳过计划唤醒 ${key}（${reason}）：会话已不在当前模式允许范围内`);
       return;
     }
@@ -17366,7 +16514,7 @@ async function main() {
 
   function setupSleepTimerV2Impl(key) {
     if (cfg.socialV2?.enabled === false) return;
-    if (!isSessionAllowedInCurrentMode(key)) return;
+    if (!passiveAllowed(key)) return;
     // 潜水到期唤醒同样是主动行为：没授权就不排定时器（投递闸门还会再拦一次）。
     if (!proactiveAllowed(key)) return;
     const st = getSocialV2State(key);
@@ -17566,19 +16714,18 @@ async function main() {
       return true;
     }
     const entry = r.entry;
-    // 审批必须仍属于「当前有效」的会话：会话已退役/模式或级别已变化时，旧审批一律作废并回 rejected。
+    // 审批必须仍属于「当前有效」的会话：会话已退役/准入或指纹已变化时，旧审批一律作废并回 rejected。
     if (!isCurrentSession(entry.key, entry.sessionId)) {
       ext.approvals.complete(entry.id);
       void cancelPendingEntry({ ...entry, kind: 'approval' }).catch(() => {});
       ext.audit.append('approval.stale_rejected', { id: entry.id, key, tool: entry.toolName });
-      await reply(`⚠️ 审批 #${entry.id} 所属的会话已失效（模式/级别已变化），已作废并拒绝，不会执行。`);
+      await reply(`⚠️ 审批 #${entry.id} 所属的会话已失效（会话、能力或准入已变化），已作废并拒绝，不会执行。`);
       return true;
     }
     try {
       await agentPort.respondPermission(permissionRefOf(entry), r.decision);
       ext.approvals.complete(entry.id);
       ext.audit.append('approval.decided', { id: entry.id, key, tool: entry.toolName, decision: r.decision, argsKnown: entry.argsKnown, actor: role });
-      if (currentLevel !== 'L0') ext.controller.touch();
       await reply(r.decision === 'allowed-once' ? `✅ 已通过审批 #${entry.id}（仅这一次）` : `❌ 已拒绝审批 #${entry.id}`);
     } catch (error) {
       log(`处理审批 #${entry.id} 失败（保留挂起以便重试）:`, error?.message ?? error);
@@ -17594,7 +16741,7 @@ async function main() {
     if (!passiveAllowed(key)) return `群 ${gid} 未授权被动行为（会话详情 → 准入，或全局准入的被动名单），未发送。`;
     if (SENSITIVE_RE.test(textToSay)) return '内容疑似含路径/凭据，未发送。';
     await sendToQQ(key, textToSay);
-    if (!lastSendSucceeded(key)) return `发送到群 ${gid} 失败（可能当前模式不允许该群，或 QQ 侧发送失败）。`;
+    if (!lastSendSucceeded(key)) return `发送到群 ${gid} 失败（可能该群不在准入范围内，或 QQ 侧发送失败）。`;
     try {
       if (socialV2.conversations.has(key) || effectiveMode(key) === 'reserved2') recordSentMessagesV2(key, [`（受管理员之托转述）${textToSay}`]);
     } catch {}
@@ -17661,7 +16808,6 @@ async function main() {
       forgetConversationCaches,
       // 人格卡「读到哪一版」的记录：重置 = 新上下文，下次唤醒要把卡重新整段给一遍。
       forgetRoleSeen: (key) => { roleRefresh.forget(key); promptBlocks.forget(key); },
-      discardDormantForReset,
       saveSocialV2State,
       saveState,
       send: sendToQQ,
@@ -17707,36 +16853,28 @@ async function main() {
     },
     permission: {
       describe: (key) => {
-        // 直通：档位在对端，桥接四级在这个方案下不生效——先说清这一点，再报对端的实际值。
-        if (permissionAuthorityOf(key) === 'agent') return describeAgentPermission(key);
         const payload = permissionPayload(key);
         const labels = payload?.labels ?? {};
         const lines = [
           `本会话权限：${labels[payload?.effective] || payload?.effective || '—'}（${payload?.value === 'inherit' ? '跟随全局' : '单独设置'}）`,
           `可选：${(payload?.options ?? []).map((level) => `${level}=${labels[level] || level}`).join(' / ')}`,
-          payload?.grantActive ? 'full 短时授权进行中，到期自动回落 qq-full-ask。' : '',
           '用法：/perm <级别>；/perm show 只看状态。',
         ].filter(Boolean);
         return lines.join('\n');
       },
       set: async (key, level) => {
-        // 直通不改环境：收到 /level、/perm 时明确回「档位由执行体自身管理」并附当前值（见直通定义）。
-        if (permissionAuthorityOf(key) === 'agent') return { ok: false, error: await describeAgentPermission(key) };
         const raw = String(level || '').trim();
         if (!SESSION_PERMISSIONS.includes(raw)) return { ok: false, error: `级别无效：${raw}` };
         try {
+          // 权限级别只过滤能力档里的工具；执行体侧那一档由能力档决定，命令里不改。
           const stored = ensureSessionProfile(key);
           stored.permission = raw;
           state.profiles[apiKey(key)] = stored;
           saveState();
-          const pinned = await pinSessionPermission(key, { reason: 'command' });
           ext.audit.append('permission.change', { key, level: raw, by: 'command' });
           const payload = permissionPayload(key);
           const label = payload?.labels?.[payload?.effective] || payload?.effective;
-          return {
-            ok: true,
-            text: pinned.ok ? `已切到${label}（DSH 预设 ${pinned.preset}）` : `已记录为${label}，但钉权限失败：${pinned.error ?? '未知原因'}（重建会话或重启桥接后生效）`,
-          };
+          return { ok: true, text: `已切到${label}` };
         } catch (error) {
           return { ok: false, error: error?.message ?? String(error) };
         }
@@ -17813,15 +16951,15 @@ async function main() {
 
   async function handleIncomingImpl(key, kind, id, event, cfg, opts = {}) {
     // 补收（src/backfill.js）：断线期间错过、恢复后从历史接口拉回来的消息。只当聊天内容记下：
-    // 不执行任何命令 / 审批 / 确认码 / 角色切换，只在二代仿真里进未读。
+    // 不执行任何命令 / 审批 / 角色切换，只在会话处于对话环境时进未读。
     const backfill = opts.backfill || null;
     const incomingId = event?.message_id ?? event?.msg_id;
     if (backfill && seenMsgIds.has(key, incomingId)) return;
     seenMsgIds.add(key, incomingId);
-    if (backfill && currentMode !== 'reserved2') return;
-    // ── v0.3.0 管理通道：owner 与管理员私聊，在**任何**模式与白名单判断之前拦截 ──────
+    if (backfill && effectiveMode(key) !== 'reserved2') return;
+    // ── 管理通道：owner 与管理员私聊，在**任何**准入判断之前拦截 ──────────
     // 只认本人私聊（私聊对象与发送者一致）。这里处理的消息绝不交给模型：
-    // 确认码、TOTP 动态码、管理命令、审批回复。群里的同类命令在下面被拒绝。
+    // 审批回复与管理命令。群里的同类命令在下面被拒绝。
     const adminActor = kind === 'private' ? actorForKey(key) : null;
     if (!backfill && kind === 'private' && ext.adminEnabled() && adminActor && adminActor.role !== 'user'
         && String(event.user_id) === String(id)) {
@@ -17847,10 +16985,9 @@ async function main() {
           return;
         }
       }
-      if (currentLevel !== 'L0') ext.controller.touch();
     }
     if (!passiveAllowed(key)) {
-      log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.user_id}）`);
+      log(`忽略未授权会话 ${key}（来自 ${event.user_id}）`);
       return;
     }
     const resolveAtName = async (qq) => {
@@ -17903,7 +17040,7 @@ async function main() {
     // 引用对象是机器人自己时，视为直接对 AI 说（即使当前文字没有 @/关键词）。
     // 因此必须先解析 quoteTargetIsSelf 再做空文本过滤，避免“只引用不附文”被漏掉。
     const quoteTargetIsSelf = await isQuoteTargetSelf(event.message ?? [], kind, id, event.self_id, resolveReply);
-    if (!isSessionAllowedInCurrentMode(key)) return;
+    if (!passiveAllowed(key)) return;
     if (!plainContent && !quoteTargetIsSelf) return;
     // 插件钩子：只观察已经通过模式与空文本过滤的消息文本（不含引用原文），补收消息带 backfill 标记。
     plugins?.notify('onInbound', {
@@ -17956,8 +17093,6 @@ async function main() {
       });
     }
     const isOwner = isOwnerAuthor(event.user_id);
-    // owner 私聊交接记录：斜杠命令不记（/reset 之类由桥接处理）；管理通道命令、确认码、TOTP 在上面已被拦截
-    if (kind === 'private' && isOwner && plainContent && !plainContent.startsWith('/')) recordOwnerTranscript(key, 'owner', plainContent);
     const roleState = readRoleState();
 
     // v0.3.0 人物库：以 QQ 号记录「看到此人发言」（群名片/昵称只是附带字段）。
@@ -18026,15 +17161,12 @@ async function main() {
       return;
     }
 
-    // 管理命令：仅管理员（ownerQQ）可用，且由桥接直接执行（硬性，不经过模型）
+    // 管理命令：先查注册表（权限按 actor 判：/perm 对 owner 与管理员开放，见 src/commands/builtin.mjs），
+    // 其它以 / 开头的文本对非管理员一律拦下，绝不透传给执行体。
     if (plainContent.startsWith('/')) {
-      if (!isOwner) {
-        await sendToQQ(key, '管理命令仅管理员可用。');
-        return;
-      }
-      // v0.3.0：模式/权限/preset 类命令只能在 owner 私聊的管理通道使用，群里一律拒绝；
-      // 特权斜杠命令（/permission /sandbox /approval /yolo …）任何地方都不透传给 DSH。
-      {
+      if (isOwner) {
+        // 模式/权限/preset 类命令只能在私聊的管理通道使用，群里一律拒绝；
+        // 特权斜杠命令（/permission /sandbox /approval /yolo …）任何地方都不透传给 DSH。
         const adminCmd = parseOwnerCommandForGuard(plainContent);
         if (adminCmd && kind === 'group') {
           await sendToQQ(key, '模式/权限类命令只能在与机器人的私聊里使用。');
@@ -18046,11 +17178,15 @@ async function main() {
           return;
         }
       }
-      const dispatched = await commandRegistry.dispatch(plainContent, { key, kind, id, cfg, isOwner });
+      const dispatched = await commandRegistry.dispatch(plainContent, { key, kind, id, cfg, actor: adminActor, isOwner });
       if (dispatched.handled) {
         if (dispatched.denied) {
           await sendToQQ(key, dispatched.reason === 'scope' ? '这条命令不适用于当前会话类型。' : '管理命令仅管理员可用。');
         }
+        return;
+      }
+      if (!isOwner) {
+        await sendToQQ(key, '管理命令仅管理员可用。');
         return;
       }
 
@@ -18216,7 +17352,7 @@ async function main() {
       }
       throw error;
     }
-    const modelText = withSlangContext(withHandover(key, promptText));
+    const modelText = withSlangContext(promptText);
     let content = [{ type: 'text', text: modelText }];
     if (Array.isArray(mediaList) && mediaList.length > 0) {
       const imageParts = await resolveMediaList(mediaList, key);
@@ -18411,7 +17547,7 @@ async function main() {
     if (!r.handled) return r;
     if (ev.kind === 'join' || ev.kind === 'leave' || ev.kind === 'card') { groupMemberNameCache.delete(`${ev.conversationId}:${ev.userId}`); groupMemberIdsCache.delete(ev.conversationId); }
     if (r.streamText) appendActivity(`${key} ${r.streamText}`);
-    if (effectiveMode(key) !== 'reserved2' || !r.streamText || !isSessionAllowedInCurrentMode(key)) return r;
+    if (effectiveMode(key) !== 'reserved2' || !r.streamText || !passiveAllowed(key)) return r;
     appendSocialV2Notice(key, { text: r.streamText, userId: ev.userId });
     if (r.wake && !socialV2.paused && cfg.socialV2?.enabled !== false) {
       const st = getSocialV2State(key);
@@ -18638,8 +17774,6 @@ async function main() {
             // collector 生命周期见 trackTurnEvent()：只为 turn-start 建、空壳 turn-end 即清。
             const { ended } = trackTurnEvent(event.sessionId, event);
             if (ended) {
-              // v0.3.0：高权限 Agent 的回合结束算一次活动（闲置回落从这里重新计时）。
-              if (currentLevel !== 'L0' && ext.isOwnerPrivateKey(key)) ext.controller.touch();
               // reserved2 无行动兜底：普通唤醒回合若既没发消息、也没 mark_read / set_wake_config，
               // 则累计 noActionCount；达到阈值后自动重置 WakeConfig，避免 AI 卡死。
               const silentQueueNow = social.silentTurns.get(event.sessionId) ?? [];
@@ -18796,8 +17930,6 @@ async function main() {
                   }
                   continue;
                 }
-                // owner 私聊交接记录：只记模型真正说出去的话（审计通过之后；桥接自己的提示不记）
-                recordOwnerTranscript(key, 'ai', plain);
                 // 仿真群友模式：时间线多段发送（主回复 + 可选二次补刀）
                 if (socialEnabledForKey(key)) {
                   if (shouldBlockSilentReply(key)) {
@@ -18943,8 +18075,7 @@ async function main() {
               toolName: event.name, callId: event.callId, reason: event.reason,
             });
             if (duplicate) continue;
-            ext.controller.persistApprovalSeq(ext.approvals.lastId);
-            ext.audit.append('approval.requested', { id: entry.id, key, tool: entry.toolName, argsKnown: entry.argsKnown, level: currentLevel });
+            ext.audit.append('approval.requested', { id: entry.id, key, tool: entry.toolName, argsKnown: entry.argsKnown });
             const auditKey = shouldAuditKey(key);
             const msgText = ext.renderApprovalRequest(entry, { key, auditKey, redactAll: (s) => (SENSITIVE_RE.test(String(s)) ? redactSensitiveText(s) : String(s)) });
             for (const target of approvalNotifyTargets(key)) {
@@ -19044,7 +18175,7 @@ async function main() {
             && ext.adminEnabled() && actorForKey(key)?.role !== 'user') return true;
         if (passiveAllowed(key)) return true;
         // 措辞与收口前保持一致：排障时还是搜这句话。
-        log(`忽略未授权会话 ${key}（当前模式 ${currentMode}，来自 ${event.sender?.id ?? ''}）`);
+        log(`忽略未授权会话 ${key}（来自 ${event.sender?.id ?? ''}）`);
         return false;
       },
       // 会话映射：拿不到 key 就没有「哪个会话」可言，后面全是按 key 记账。

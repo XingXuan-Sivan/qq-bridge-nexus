@@ -9,7 +9,7 @@
 
 | 路径 | 是什么 | 由谁加载 | 例子 |
 | --- | --- | --- | --- |
-| `artifacts/dsh/` | **给 DSH 加载的 npm bundle**（preset 行、`qq-mode` 设置命名空间） | DSH profile 的 `bundles` + `link:` | `qq-agent-presets`、`qq-mode-console` |
+| `artifacts/dsh/` | **给 DSH 加载的 npm bundle**（预设行 + 守卫脚本） | DSH profile 的 `bundles` + `link:` | `qq-agent-presets` |
 | `plugins/` | **桥接运行时插件**：本内核加载，进程内运行，只能通过 host-api 触碰桥接 | 桥接（`src/plugins/kernel.mjs`） | `soulkit-persona` |
 | `src/plugins/` | 内核自身（发现、校验、钩子、权限、审计） | 桥接 | —— |
 

@@ -6,7 +6,7 @@
 /** DSH 自己的斜杠命令：桥接只在特定时机调用，执行方是 DSH。 */
 const DSH_COMMANDS = Object.freeze([
   Object.freeze({ name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' }),
-  Object.freeze({ name: '/permission', note: 'closed-agent 会话钉权限预设时调用，由 DSH 执行' }),
+  Object.freeze({ name: '/permission', note: '能力档钉对端权限档时调用，由 DSH 执行' }),
 ]);
 
 /** 桥接自带的 MCP server 暴露给 DSH 的工具：只读展示，启停归 DSH。 */

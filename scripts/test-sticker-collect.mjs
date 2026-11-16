@@ -66,12 +66,11 @@ async function withHarness(botRequest, run, { tempDir } = {}) {
     globals: { safeFetchBuffer: async () => ({ buffer: GIF }) },
   });
   try {
-    await h.initControllerOnce('reserved2');
+    h.startOnce();
     h.setMode('reserved2');
     h.appendSocialV2Message(KEY, '甲', '[表情]', '[表情]', false, false, '777', [{ kind: 'image', url: 'https://public.invalid/a.gif' }], '20001');
     await run(h);
   } finally {
-    h.ext.controller.stop();
     await h.close();
   }
 }

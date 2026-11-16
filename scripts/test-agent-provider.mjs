@@ -71,7 +71,6 @@ function makeImpl(id, overrides = {}) {
     id,
     label: `平台 ${id}`,
     capabilities: ['session'],
-    resolveLevelPlan: () => ({ ok: false, error: '夹具不提供级别计划' }),
     createRuntime: () => runtimeStub({ id, label: `平台 ${id}` }),
     ...overrides,
   };
@@ -119,8 +118,8 @@ test('注册表：同 owner 可覆盖、换 owner 拒绝、内置不可被顶替
   assert.throws(() => registerAgentPlatform(makeImpl('dsh'), { owner: 'plug-1' }), /插件不得顶替别人的平台/);
 
   assert.throws(() => registerAgentPlatform(makeImpl('Bad_Id')), /id 不合法/);
-  assert.throws(() => registerAgentPlatform({ id: 'tpl-b', createRuntime: () => runtimeStub() }), /缺少 resolveLevelPlan/);
-  assert.throws(() => registerAgentPlatform({ id: 'tpl-b', resolveLevelPlan: () => ({}) }), /缺少 createRuntime/);
+  // 连接层是唯一必填项：没有 createRuntime 的平台永远不能被选为当前执行体，注册时就判。
+  assert.throws(() => registerAgentPlatform({ id: 'tpl-b' }), /缺少 createRuntime/);
 
   unregisterAgentPlatform('tpl-a');
   assert.equal(agentPlatform('tpl-a'), null);
@@ -268,11 +267,10 @@ export function activate(ctx) {
     label: '演示执行体',
     capabilities: ['session'],
     configSchema: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] },
-    resolveLevelPlan: () => ({ ok: false, error: '演示平台不提供级别计划' }),
     createRuntime: () => ({ id: 'demo-agent', label: '演示执行体', mode: 'http' }),
   });
   // 顶替内置平台：注册表拒绝，插件其余部分照常跑。
-  ctx.agentPlatforms.register({ id: 'dsh', label: '冒名', resolveLevelPlan: () => ({}), createRuntime: () => ({}) });
+  ctx.agentPlatforms.register({ id: 'dsh', label: '冒名', createRuntime: () => ({}) });
   return {};
 }
 `;

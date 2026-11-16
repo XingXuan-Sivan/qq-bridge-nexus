@@ -571,28 +571,14 @@ test('ACP：连接层成员齐备，成员不齐则 agentRuntime() fail-closed',
   await resetAgentRuntime();
 });
 
-test('ACP：级别计划按对端模式名单 fail-closed，绝不降到更宽的模式', () => {
-  const base = { presetIds: [], closedAgentPreset: '', allowCustomAgentPreset: false };
-  // 读不到名单（null）不在声明面猜：交给 port 拿实时 modes 校（它会抛「没有这个名字」）。
-  assert.deepEqual(
-    acpDeclaration.resolveLevelPlan('L1', { ...base, permissionCatalog: null }),
-    { ok: true, agentPreset: '', permissionPreset: 'read-only' },
-  );
-  assert.equal(acpDeclaration.resolveLevelPlan('L1', { ...base, permissionCatalog: ['read-only', 'default'] }).ok, true);
-  const missing = acpDeclaration.resolveLevelPlan('L1', { ...base, permissionCatalog: ['default', 'yolo'] });
-  assert.equal(missing.ok, false);
-  // 错误里要写出对端实际提供的模式，否则用户不知道该改哪一边。
-  assert.match(missing.error, /default \/ yolo/);
-  // L3 只认 full-ask；对端只有 'yolo' 这种更宽的档时拒绝，不许拿它顶替。
-  assert.equal(acpDeclaration.resolveLevelPlan('L3', { ...base, permissionCatalog: ['yolo'] }).ok, false);
-  // 未知级别与空名单。
-  assert.equal(acpDeclaration.resolveLevelPlan('L9', base).ok, false);
-  assert.equal(acpDeclaration.resolveLevelPlan('L2', { ...base, permissionCatalog: [] }).ok, false);
-  // 自选 agent 只在对端清单里才采用；L1 一律不换档。
-  const customCtx = { ...base, presetIds: ['planner'], closedAgentPreset: 'planner', allowCustomAgentPreset: true };
-  assert.equal(acpDeclaration.resolveLevelPlan('L2', customCtx).agentPreset, 'planner');
-  assert.equal(acpDeclaration.resolveLevelPlan('L1', customCtx).agentPreset, '');
-  assert.equal(acpDeclaration.resolveLevelPlan('L2', { ...customCtx, presetIds: [] }).agentPreset, '');
+test('ACP：能力档生效方式与提示通道按协议声明，对端权限档不预设取值', () => {
+  // 声明面是「这个平台认领哪些生效方式」的唯一出处：能力档写了平台没认领的通道，
+  // 校验期就该拒绝，而不是等到建会话时才静默降级。
+  assert.deepEqual([...acpDeclaration.RUNTIME_APPLY], ['preset', 'passthrough']);
+  // ACP 在 `session/new` 带 systemPrompt，但没有「首轮前缀」概念：prefix 不得声明。
+  assert.deepEqual([...acpDeclaration.RUNTIME_PROMPT], ['system', 'tool']);
+  // 没有可安装的 profile：取值域交给对端实时清单，空名单 = 不预设，不是「全放开」。
+  assert.deepEqual([...acpDeclaration.PEER_PERMISSIONS], []);
 });
 
 test('ACP：applyPermission 的回执判据是「ok 且名字一致」', () => {

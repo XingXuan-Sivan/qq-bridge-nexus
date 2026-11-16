@@ -49,8 +49,9 @@ test('未单独指定能力档的会话走 Agent 平台申报的 defaultCapabili
     // chat-v2 的 audience 是缺省的 access：群里不因受众被拦。
     h.state.profiles[GROUP] = { behavior: 'none' };
     assert.equal(h.passiveAllowed(GROUP), true);
-    // 缺省档不直通：权限仍归桥接，引擎按行为走聊天。
-    assert.equal(h.permissionAuthorityOf(GROUP), 'bridge');
+    // 缺省档既不直通也不钉对端权限档：权限只按会话级别过滤桥接侧工具。
+    assert.equal(h.runtimeOf(GROUP).apply, 'preset');
+    assert.equal(h.runtimeOf(GROUP).peerPermission, '');
     assert.equal(h.effectiveMode(GROUP), 'chat');
   } finally {
     await h.close();

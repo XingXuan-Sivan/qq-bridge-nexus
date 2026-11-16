@@ -87,7 +87,7 @@ try {
     }
     const pkg = JSON.parse(fs.readFileSync(path.join(f.home, 'profiles/web/package.json')));
     assert.equal(pkg.dependencies.existing, '1.0.0');
-    assert.deepEqual(pkg.dsh.profile.bundles, ['existing', 'qq-mode-console', 'qq-agent-presets']);
+    assert.deepEqual(pkg.dsh.profile.bundles, ['existing', 'qq-agent-presets']);
   });
 
   test('legacy root [] is repaired without altering literal strings', () => {
@@ -114,19 +114,20 @@ try {
     assert.equal(fs.existsSync(path.join(f.home, '.agent-presets')), false);
   });
 
-  test('existing mode, DSH settings and non-link plugin directory remain untouched', () => {
+  test('existing session state, DSH settings and non-link plugin directory remain untouched', () => {
     const f = fixture('preserve', '[]\n');
     fs.mkdirSync(path.join(f.repo, 'state'), { recursive: true });
-    const mode = '{"mode":"closed-agent","closedAgentPreset":"custom"}\n';
-    fs.writeFileSync(path.join(f.repo, 'state/mode.json'), mode);
+    const stateFile = path.join(f.repo, 'state/sessions.json');
+    const sessions = '{"sessions":{"qq:group:1":"sid-1"},"sessionPolicies":{}}\n';
+    fs.writeFileSync(stateFile, sessions);
     const result = f.run();
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(fs.readFileSync(path.join(f.repo, 'state/mode.json'), 'utf8'), mode);
+    assert.equal(fs.readFileSync(stateFile, 'utf8'), sessions);
     const blocker = fixture('plugin-conflict', '[]\n');
-    fs.mkdirSync(path.join(blocker.home, 'plugins/qq-mode-console'), { recursive: true });
-    fs.writeFileSync(path.join(blocker.home, 'plugins/qq-mode-console/keep.txt'), 'keep');
+    fs.mkdirSync(path.join(blocker.home, 'plugins/qq-agent-presets'), { recursive: true });
+    fs.writeFileSync(path.join(blocker.home, 'plugins/qq-agent-presets/keep.txt'), 'keep');
     assert.notEqual(blocker.run().status, 0);
-    assert.equal(fs.readFileSync(path.join(blocker.home, 'plugins/qq-mode-console/keep.txt'), 'utf8'), 'keep');
+    assert.equal(fs.readFileSync(path.join(blocker.home, 'plugins/qq-agent-presets/keep.txt'), 'utf8'), 'keep');
   });
 
   if (process.platform === 'win32') test('Windows runs the npm .cmd shim with literal profile arguments', () => {

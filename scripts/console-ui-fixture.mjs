@@ -1221,10 +1221,10 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 active: true,
                 configured: state.defaultAgent === 'dsh',
                 capabilities: ['session', 'rename', 'permission', 'models', 'settings', 'workspace', 'events', 'compact'],
-                // 声明面三件套：能跑哪些应用方式、话术能走哪些通道、能不能钉权限档。
+                // 声明面三件套：能跑哪些应用方式、话术能走哪些通道、对端权限档可钉哪些值。
                 applies: ['preset', 'passthrough'],
                 promptChannels: ['prefix', 'tool'],
-                canPinPermission: true,
+                peerPermissions: ['read-only', 'workspace-write', 'qq-full-ask'],
                 conversationTypes: [],
                 limits: {},
                 inbound: false,
@@ -1269,7 +1269,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 capabilities: ['session', 'events'],
                 applies: ['preset', 'passthrough'],
                 promptChannels: ['system', 'tool'],
-                canPinPermission: true,
+                peerPermissions: [],
                 conversationTypes: [],
                 limits: {},
                 inbound: false,

@@ -1,12 +1,11 @@
-// 运维 Agent（L1~L3）不得通过文件工具读取的桥接/DSH 机密文件。
+// 运维 Agent（readonly / workspace / full 三个能力档）不得通过文件工具读取的桥接/DSH 机密文件。
 //
 // 为什么需要：Windows 上 DSH 沙箱不限制读，而这些文件里有能绕过管理通道的凭据 ——
 //   · 桥接控制台令牌（state/console-token、config.json 的 consoleToken）：拿到它就能调控制台 API；
-//   · TOTP 秘密（state/admin/totp.json）：拿到它就能自己算 L3 动态码；
 //   · DSH 的会话签名密钥（~/.dsh/.credentials.yaml）：拿到它就能直连 DSH API 改权限。
 // 这里只拦**文件类工具**（read / read_image / glob / grep 等）的路径参数；pwsh 命令无法可靠解析，
 // 由审批闸门（qq-approval-gate.mjs）要求 owner 逐条审批，owner 能在审批消息里看到完整命令。
-// 这是纵深防御，不是边界：L2/L3 本质上运行在 owner 的本机账户下。
+// 这是纵深防御，不是边界：运维 Agent 本质上运行在 owner 的本机账户下。
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -48,7 +47,7 @@ export const PROTECTED_PATHS = Object.freeze([
 ])
 
 /** 无论在哪个目录，出现这些文件名就拒绝（覆盖相对路径/通配的情况）。 */
-const PROTECTED_BASENAMES = ['console-token', 'totp.json', 'control.json', 'audit.jsonl', '.credentials.yaml', 'sessions.json', 'people.json']
+const PROTECTED_BASENAMES = ['console-token', 'control.json', 'audit.jsonl', '.credentials.yaml', 'sessions.json', 'people.json']
 
 /** 判断一个路径/模式字符串是否指向受保护内容。 */
 export function touchesProtected(value) {
@@ -63,7 +62,7 @@ export function touchesProtected(value) {
   // 会话工作目录默认在 state/agents 下：任何向上跳出的相对路径都可能走到 state/ 的机密文件。
   if (/(^|[\\/])\.\.([\\/]|$)/.test(v)) return true
   // 通配模式里直接写 state/config 的
-  if (/(^|[\\/*])state([\\/]|$)/.test(v) && /console|totp|admin|token/.test(v)) return true
+  if (/(^|[\\/*])state([\\/]|$)/.test(v) && /console|admin|token/.test(v)) return true
   return false
 }
 

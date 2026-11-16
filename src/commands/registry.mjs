@@ -96,10 +96,13 @@ export function createCommandRegistry({ log = () => {} } = {}) {
     return { entry: best.entry, name: best.name, arg: raw.slice(best.name.length).trim() };
   }
 
+  /** `admin` 覆盖 owner 与名单内管理员；`owner` 只认 owner。 */
   function permitted(entry, ctx) {
     const permission = overrides.get(entry.id)?.permission ?? entry.permission;
     if (permission === 'all') return true;
-    return Boolean(ctx?.isOwner);
+    const role = ctx?.actor?.role ?? (ctx?.isOwner ? 'owner' : 'user');
+    if (permission === 'owner') return role === 'owner';
+    return role === 'owner' || role === 'admin';
   }
 
   async function dispatch(text, ctx = {}) {

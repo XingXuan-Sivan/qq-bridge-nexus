@@ -167,8 +167,6 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
       checkedAt: Number(bindingRaw.checkedAt) > 0 ? Number(bindingRaw.checkedAt) : 0,
       createdAt: Number(bindingRaw.createdAt) > 0 ? Number(bindingRaw.createdAt) : 0,
     },
-    // 运行态的休眠标记（模式切换期间保留）；文档 §3 未列，但重启需要恢复，放在会话文件里避免第二个索引。
-    dormant: raw.dormant && typeof raw.dormant === 'object' ? raw.dormant : null,
     // 提示注入标记（能力档 `runtime.prompt: prefix`）：这条对端会话是否已经带过平台话术。
     // 它是运行态而不是档案配置——换了对端会话就自然重来一次，删档时一起消失。
     promptInjected: raw.promptInjected && typeof raw.promptInjected === 'object' && raw.promptInjected.sessionId
@@ -199,7 +197,6 @@ export function createProfile(key, patch = {}, now = Date.now) {
     permission: 'inherit',
     permissionMirror: null,
     binding: { agentRef: null, workspaceId: null, fingerprint: null, status: 'unknown', checkedAt: 0, createdAt: now() },
-    dormant: null,
     promptInjected: null,
     updatedAt: now(),
   };
@@ -242,7 +239,6 @@ export function applyPatch(profile, patch, now = Date.now) {
   if (Object.hasOwn(p, 'wake')) next.wake = p.wake && typeof p.wake === 'object' ? p.wake : { config: null };
   if (Object.hasOwn(p, 'model')) next.model = p.model && typeof p.model === 'object' ? p.model : null;
   if (p.binding && typeof p.binding === 'object') next.binding = { ...next.binding, ...p.binding };
-  if (Object.hasOwn(p, 'dormant')) next.dormant = p.dormant && typeof p.dormant === 'object' ? p.dormant : null;
   if (Object.hasOwn(p, 'promptInjected')) next.promptInjected = p.promptInjected && typeof p.promptInjected === 'object' ? p.promptInjected : null;
   next.updatedAt = now();
   return next;
@@ -280,7 +276,6 @@ export function loadSessionDirectory({ dir, fs, path, log = () => {}, now = Date
   const state = {
     sessions: {},
     sessionPolicies: {},
-    dormantSessions: {},
     profiles: {},
     defaults: { ...DEFAULT_ACCESS },
     migratedAt: 0,
@@ -364,7 +359,6 @@ export function loadSessionDirectory({ dir, fs, path, log = () => {}, now = Date
       state.sessions[key] = ref;
       if (profile.binding.fingerprint) state.sessionPolicies[key] = profile.binding.fingerprint;
     }
-    if (profile.dormant) state.dormantSessions[key] = profile.dormant;
   }
 
   // 没有 defaults.json：全新安装给黑名单空名单（空=全部允许），避免首次启动把所有人挡在外面；
@@ -400,7 +394,6 @@ export function createSessionDirectoryWriter({ dir, fs, path, atomicWriteJson, l
     const next = {
       ...profile,
       binding,
-      dormant: state.dormantSessions?.[key] ?? null,
       updatedAt: profile.updatedAt ?? now(),
     };
     state.profiles[key] = next;

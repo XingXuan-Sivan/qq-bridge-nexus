@@ -89,7 +89,7 @@ test('写入只写变化，删除档案会删文件', () => {
   const dir = tempDir();
   const writer = createSessionDirectoryWriter({ dir, fs, path, atomicWriteJson, log, now: () => 100 });
   const state = {
-    sessions: {}, sessionPolicies: {}, dormantSessions: {}, defaults: { passive: 'deny', proactive: 'deny' }, migratedAt: 1,
+    sessions: {}, sessionPolicies: {}, defaults: { passive: 'deny', proactive: 'deny' }, migratedAt: 1,
     profiles: { 'qq:group:1': createProfile('qq:group:1', {}, () => 100) },
   };
   writer.save(state);
@@ -111,7 +111,6 @@ test('迁移：allow/deny、allowAllWhenEmpty、人格/提示词/唤醒/绑定�
     allowAllWhenEmpty: false,
     sessions: { 'qq:group:1': 'session-1', 'qq:group:4': 'session-4' },
     policies: { 'qq:group:1': 'fp-1', 'qq:group:4': 'fp-4' },
-    dormant: { 'qq:group:4': { sessionId: 'session-4', since: 5 } },
     roleByKey: { 'qq:group:1': '小鲸鱼', 'qq:group:4': null },
     initialPrompts: { 'qq:group:1': { text: '技术群', updatedAt: 7 } },
     wakeConfigs: { 'qq:group:2': { mode: 'active' } },
@@ -127,7 +126,6 @@ test('迁移：allow/deny、allowAllWhenEmpty、人格/提示词/唤醒/绑定�
   assert.equal(out.profiles['qq:group:1'].prompt.initialText, '技术群');
   assert.deepEqual(out.profiles['qq:group:2'].wake.config, { mode: 'active' });
   assert.deepEqual(out.sessions['qq:group:1'], { instance: '', sessionId: 'session-1' });
-  assert.deepEqual(out.dormantSessions['qq:group:4'], { sessionId: 'session-4', since: 5 });
   const emptyAll = migrateSessionProfiles({ allowGroups: [], allowPrivate: [], allowAllWhenEmpty: true, now: () => 1 });
   assert.deepEqual(emptyAll.defaults, { passive: 'allow', proactive: 'allow' });
 });

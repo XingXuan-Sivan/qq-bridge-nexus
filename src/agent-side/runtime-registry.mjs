@@ -1,13 +1,14 @@
 // Agent 侧平台注册表（中立，零平台名）。
 //
-// 内核只通过这里问「当前 Agent 平台能做什么、某个级别该映射成什么」。具体平台由
+// 内核只通过这里问「当前 Agent 平台能做什么、认领哪些生效方式」。具体平台由
 // src/agent-side/builtin.mjs（内置）或插件在运行期（`agent-provider:provide`）注册。
 //
-// 为什么是同步注册表而不是 await import()：resolveLevelPlan 在消息处理的热路径上，
+// 为什么是同步注册表而不是 await import()：能力档解析在消息处理的热路径上，
 // 异步解析会让每次调用都变成 Promise，调用方要穿透 await，收益为零。平台模块本身
 // 只是常量与纯函数，同步加载没有副作用。
 //
-// 未注册时的行为：抛错（fail-closed）。猜一个默认平台会把权限映射错，比直接报错更贵。
+// 未注册时的行为：抛错（fail-closed）。猜一个默认平台会把工具面与对端权限档搞错，
+// 比直接报错更贵。
 //
 // 除「有哪些平台」之外，这张表还记两件事，都因为**只有注册表知道归属**才住在这里：
 //   · `owner`：插件注册的平台要能按插件批量注销（与 src/user-side/transport.mjs 同口径）；
@@ -37,7 +38,7 @@ function normalizeId(value) {
  * @param {string} impl.label            控制台显示名
  * @param {string[]} [impl.capabilities]  描述性能力清单（同一份会出现在控制台与诊断里）
  * @param {Function} impl.createRuntime  连接层工厂（成员表见 runtime.mjs 的 RUNTIME_MEMBERS）
- * @param {Function} impl.resolveLevelPlan 级别 → { agentPreset, permissionPreset }
+ * @param {string[]} [impl.PEER_PERMISSIONS]  对端权限档的静态取值域（空 = 由对端决定）
  * @param {{owner?: string}} [options]   `owner` 缺省为内置；插件注册时传 pluginId
  */
 export function registerAgentPlatform(impl, { owner = BUILTIN_OWNER } = {}) {
@@ -45,12 +46,8 @@ export function registerAgentPlatform(impl, { owner = BUILTIN_OWNER } = {}) {
   if (!ID_RE.test(id)) {
     throw new Error(`registerAgentPlatform: id 不合法：${id || '(空)'}（要求小写字母开头，2–40 位小写字母 / 数字 / 连字符）`);
   }
-  // resolveLevelPlan 是纯函数，缺了内核连「L1 该用哪个权限档」都答不出来；
   // createRuntime 是连接层，缺了它这个平台永远不能被配成「当前执行体」。
-  // 两者都在注册时就判，而不是等到第一次用才炸。
-  if (typeof impl.resolveLevelPlan !== 'function') {
-    throw new Error(`registerAgentPlatform: ${id} 缺少 resolveLevelPlan（级别 → 权限档映射）`);
-  }
+  // 注册时就判，而不是等到第一次用才炸。
   if (typeof impl.createRuntime !== 'function') {
     throw new Error(`registerAgentPlatform: ${id} 缺少 createRuntime（不能连接的执行体不是平台）`);
   }
@@ -169,11 +166,11 @@ export function listAgentPlatforms() {
     id: impl.id,
     label: impl.label ?? impl.id,
     capabilities: [...(impl.capabilities ?? [])],
-    // 能力档的生效方式与提示注入通道：都是「这个执行体认领什么」的声明面，
-    // 控制台的方案页与能力位矩阵直接读这里，不再从 port 上现问。
+    // 能力档的生效方式、提示注入通道与对端权限档取值域：都是「这个执行体认领什么」
+    // 的声明面，控制台的平台详情与能力位矩阵直接读这里，不再从 port 上现问。
     applies: agentPlatformApplies(impl.id),
     promptChannels: agentPlatformPromptChannels(impl.id),
-    canPinPermission: agentPlatformCanPinPermission(impl.id),
+    peerPermissions: agentPlatformPeerPermissions(impl.id),
     // 插件平台的配置模型：控制台要靠它画表单，统一注册表要靠它校 `platforms.agents.<id>`。
     // 内置平台的这一项来自 profiles 目录（agent-platform.yml），不从实现上取。
     configSchema: impl.configSchema ?? null,
@@ -200,11 +197,6 @@ export const agentProviderRegistry = Object.freeze({
 
 // ── 转发查询 ────────────────────────────────────────────────────────────────
 
-/** 级别 → { agentPreset, permissionPreset, custom? } | { ok:false, error }。 */
-export function resolveLevelPlan(level, ctx = {}) {
-  return requireAgentPlatform(ctx.agentPlatform).resolveLevelPlan(level, ctx);
-}
-
 export function permissionCommandSucceeded(result, wanted, ctx = {}) {
   const impl = requireAgentPlatform(ctx.agentPlatform);
   return typeof impl.permissionCommandSucceeded === 'function'
@@ -218,27 +210,10 @@ export function normalizeAgentPreset(name, ctx = {}) {
   return typeof impl?.normalizeAgentPreset === 'function' ? impl.normalizeAgentPreset(name) : String(name ?? '').trim();
 }
 
-/** 该 preset 是否管理通道托管的档位；返回 L1/L2/L3 或 null。 */
-export function agentPresetLevel(name, ctx = {}) {
-  const impl = agentPlatform(ctx.agentPlatform);
-  const map = impl?.AGENT_PRESET_FOR_LEVEL;
-  if (!map) return null;
-  const wanted = normalizeAgentPreset(name, ctx);
-  for (const [level, preset] of Object.entries(map)) {
-    if (preset === wanted) return level;
-  }
-  return null;
-}
-
-/** 群友 preset（不能被当作 closed-agent 自选档）。 */
-export function chatAgentPresets(ctx = {}) {
-  return [...(agentPlatform(ctx.agentPlatform)?.CHAT_AGENT_PRESETS ?? [])];
-}
-
 /** 全部受管 preset id（构建期与静态校验用）。 */
 export function agentPresetIds(ctx = {}) {
   const impl = requireAgentPlatform(ctx.agentPlatform);
-  return [...(impl.AGENT_PRESET_IDS ?? Object.values(impl.AGENT_PRESET_FOR_LEVEL ?? {}))];
+  return [...(impl.AGENT_PRESET_IDS ?? [])];
 }
 
 /**
@@ -254,9 +229,15 @@ export function agentPlatformApplies(id = '', ctx = {}) {
   return values.length ? values : ['preset'];
 }
 
-/** 该平台是否认领权限预设映射（能力档 `runtime.permission: bridge` 的前提）。 */
-export function agentPlatformCanPinPermission(id = '', ctx = {}) {
-  return Boolean(agentPlatform(id || ctx.agentPlatform)?.PERMISSION_PRESET_FOR_LEVEL);
+/**
+ * 该平台声明的对端权限档取值域（能力档 `runtime.peerPermission` 的可选值）。
+ *
+ * 返回空数组 = 「由对端自己决定」：ACP 这类平台没有静态模式表，可选值只能建立会话后
+ * 现读。桥接不会因此放宽校验 —— 写入前仍要按实时清单核对一次。
+ */
+export function agentPlatformPeerPermissions(id = '', ctx = {}) {
+  const declared = agentPlatform(id || ctx.agentPlatform)?.PEER_PERMISSIONS;
+  return Array.isArray(declared) ? declared.map(String).filter(Boolean) : [];
 }
 
 /**

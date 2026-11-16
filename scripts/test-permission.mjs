@@ -1,56 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as permissionModule from '../src/session/permission.mjs';
 import {
   PERMISSION_LEVELS,
+  SESSION_PERMISSIONS,
+  PERMISSION_LABEL,
   normalizePermissionConfig,
   normalizeSessionPermission,
   resolvePermission,
-  canPinLevel,
-  presetForLevel,
+  permissionText,
 } from '../src/session/permission.mjs';
-import { permissionPresetMap } from '../src/admin/agent-permission.js';
 
-// 级别 → 平台预设名的映射已下沉到 Agent 侧适配器（B4），内核只负责降级/校验。
-const DSH_PERMISSION_PRESET = permissionPresetMap();
-
-test('四档与预设映射唯一', () => {
+test('四档与继承值', () => {
   assert.deepEqual(PERMISSION_LEVELS, ['read-only', 'workspace-write', 'full-ask', 'full']);
-  assert.equal(DSH_PERMISSION_PRESET.full, 'danger-full-access');
-  assert.equal(DSH_PERMISSION_PRESET['full-ask'], 'qq-full-ask');
-  for (const level of PERMISSION_LEVELS) assert.ok(DSH_PERMISSION_PRESET[level]);
+  assert.deepEqual(SESSION_PERMISSIONS, ['inherit', ...PERMISSION_LEVELS]);
+  for (const level of PERMISSION_LEVELS) assert.ok(PERMISSION_LABEL[level], `${level} 必须有可读标签`);
+  assert.equal(permissionText('full-ask'), '完全访问 · 每次确认');
+  assert.equal(permissionText('unknown'), 'unknown', '未知值原样返回，不造伪标签');
 });
 
-test('配置归一：默认只读、不能把 full 设成默认、TTL 只认 10/30/60', () => {
-  const a = normalizePermissionConfig(null);
-  assert.deepEqual(a, { default: 'read-only', allowFull: false, fullTtlMin: 30 });
-  const b = normalizePermissionConfig({ default: 'full', allowFull: 'yes', fullTtlMin: 45 });
-  assert.equal(b.default, 'read-only');
-  assert.equal(b.allowFull, false);
-  assert.equal(b.fullTtlMin, 30);
-  const c = normalizePermissionConfig({ default: 'full-ask', allowFull: true, fullTtlMin: 10 });
-  assert.deepEqual(c, { default: 'full-ask', allowFull: true, fullTtlMin: 10 });
+test('配置归一：默认只读，非法值回落只读', () => {
+  assert.deepEqual(normalizePermissionConfig(null), { default: 'read-only' });
+  assert.deepEqual(normalizePermissionConfig({ default: 'bad' }), { default: 'read-only' });
+  assert.deepEqual(normalizePermissionConfig({ default: 'full' }), { default: 'full' });
+  // 旧字段（allowFull / fullTtlMin）不再有任何语义：级别不绑平台、不再有短时授权窗口。
+  assert.deepEqual(normalizePermissionConfig({ default: 'full', allowFull: true, fullTtlMin: 10 }), { default: 'full' });
 });
 
-test('会话级值：非法回落 inherit，chat 恒只读', () => {
+test('会话级值：非法回落 inherit，纯聊天会话恒只读', () => {
   assert.equal(normalizeSessionPermission('full'), 'full');
   assert.equal(normalizeSessionPermission('bad'), 'inherit');
   assert.equal(resolvePermission({ profile: { permission: 'full' }, global: { default: 'read-only' }, chat: true }), 'read-only');
   assert.equal(resolvePermission({ profile: { permission: 'inherit' }, global: { default: 'workspace-write' }, chat: false }), 'workspace-write');
   assert.equal(resolvePermission({ profile: { permission: 'full' }, global: { default: 'read-only' }, chat: false }), 'full');
+  assert.equal(resolvePermission({ profile: null, global: { default: 'workspace-write' } }), 'workspace-write');
 });
 
-test('full 需要 allowFull 且授权窗口内才允许钉', () => {
-  assert.equal(canPinLevel('workspace-write', { allowFull: false, grantActive: false }), true);
-  assert.equal(canPinLevel('full', { allowFull: false, grantActive: true }), false);
-  assert.equal(canPinLevel('full', { allowFull: true, grantActive: false }), false);
-  assert.equal(canPinLevel('full', { allowFull: true, grantActive: true }), true);
-});
-
-test('不允许 full 时降级为 full-ask', () => {
-  const presets = DSH_PERMISSION_PRESET;
-  assert.equal(presetForLevel('full', { allowFull: false, presets }).level, 'full-ask');
-  assert.equal(presetForLevel('full', { allowFull: false, presets }).preset, 'qq-full-ask');
-  assert.equal(presetForLevel('full', { allowFull: true, grantActive: true, presets }).preset, 'danger-full-access');
-  assert.equal(presetForLevel('read-only', { presets }).level, 'read-only');
-  assert.equal(presetForLevel('read-only', { presets }).preset, 'read-only');
+test('级别不与平台预设绑定：没有 canPinLevel / presetForLevel 这类入口', () => {
+  // 对端权限档由能力档的 runtime.peerPermission 在建会话时一次性钉住，级别只过滤桥接工具表。
+  assert.equal(permissionModule.canPinLevel, undefined);
+  assert.equal(permissionModule.presetForLevel, undefined);
 });

@@ -136,8 +136,27 @@ test('keyPath 与 normalizeProfile 的边界', () => {
   assert.equal(keyPath('group:123'), 'qq/group/123.json');
   assert.equal(keyPath('qq:private:9'), 'qq/private/9.json');
   assert.equal(keyPath('bad'), null);
-  assert.equal(normalizeProfile({ version: 2, key: 'qq:group:1' }, { key: 'qq:group:1' }).mode, 'inherit');
+  const fresh = normalizeProfile({ version: 2, key: 'qq:group:1' }, { key: 'qq:group:1' });
+  assert.equal(fresh.behavior, 'inherit');
+  assert.equal(fresh.capability, null);
   assert.equal(normalizeProfile({ version: 2, key: 'qq:group:2' }, { key: 'qq:group:1' }), null);
+});
+
+test('v2 档案的 planId / mode 改写成能力档 + 行为', () => {
+  const byPlan = normalizeProfile({ version: 2, key: 'qq:group:1', planId: 'social-v2' }, { key: 'qq:group:1' });
+  assert.equal(byPlan.capability, 'chat-v2');
+  assert.equal(byPlan.behavior, 'social-v2');
+  // 没有 planId 的老档案只有 mode：引擎能改写，能力档继续跟随 Agent 平台的默认档。
+  const byMode = normalizeProfile({ version: 2, key: 'qq:group:1', mode: 'reserved' }, { key: 'qq:group:1' });
+  assert.equal(byMode.capability, null);
+  assert.equal(byMode.behavior, 'social-v1');
+  // 新字段写了就用新字段，旧 planId 不再参与。
+  const explicit = normalizeProfile(
+    { version: 3, key: 'qq:group:1', planId: 'social-v2', capability: 'readonly', behavior: 'none' },
+    { key: 'qq:group:1' },
+  );
+  assert.equal(explicit.capability, 'readonly');
+  assert.equal(explicit.behavior, 'none');
 });
 
 let failed = 0;

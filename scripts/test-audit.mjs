@@ -122,6 +122,8 @@ const tests = [
   'test-session-lifecycle.mjs',
   // 会话策略指纹（P7 第三步收尾）：级别进指纹（提权要退役旧会话）、非 closed-agent 不进指纹、isCurrent 三条件。
   'test-session-policy.mjs',
+  // 会话档案目录：扫描/写入、损坏隔离、旧三态迁移、v2 档案的 planId / mode 改写成能力档 + 行为。
+  'test-session-directory.mjs',
   // 会话标识平台化：key 组装/解析、新旧形态互认、非法输入不产出半成品 key。
   'test-session-key.mjs',
   // 地址模型（B2）：账号维度、非数字 id、开放类型、withAddress 上下文与跨平台串号。

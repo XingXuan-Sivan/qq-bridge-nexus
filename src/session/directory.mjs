@@ -39,6 +39,24 @@ function normalizeBehavior(value) {
 }
 
 /**
+ * v2 档案的两个旧字段 → v3 的两个新字段。
+ *
+ * v2 只记「用哪个运行方案」，方案同时绑了能力档与行为档案；方案层已删，所以改写只能
+ * 落在这里：能对上就改写（保留用户当初的选择），对不上才落回默认。
+ * `planId` 是 v2 的写法，没有它时才看更早的 `mode`。
+ */
+const LEGACY_PLAN_RUNTIME = Object.freeze({
+  chat: { capability: 'chat', behavior: 'none' },
+  'social-v1': { capability: 'chat', behavior: 'social-v1' },
+  'social-v2': { capability: 'chat-v2', behavior: 'social-v2' },
+  'agent-readonly': { capability: 'readonly', behavior: 'none' },
+  'agent-workspace': { capability: 'workspace', behavior: 'none' },
+  'agent-full': { capability: 'full', behavior: 'none' },
+  direct: { capability: 'direct', behavior: 'none' },
+});
+const LEGACY_MODE_BEHAVIOR = Object.freeze({ chat: 'none', reserved: 'social-v1', reserved2: 'social-v2' });
+
+/**
  * 会话 key → 相对路径（`qq/group/123.json`、`qq@napcat/group/123.json`）；不合法返回 null。
  *
  * 用 `parsed.key`（规范写法）而不是就地拼：账号维度必须进路径，否则同一平台上
@@ -105,7 +123,9 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
   const wakeRaw = raw.wake && typeof raw.wake === 'object' ? raw.wake : {};
   const bindingRaw = raw.binding && typeof raw.binding === 'object' ? raw.binding : {};
   const modelRaw = raw.model && typeof raw.model === 'object' ? raw.model : null;
-
+  const legacyPlan = LEGACY_PLAN_RUNTIME[normalizeString(raw.planId, 40)] ?? null;
+  const legacyMode = normalizeString(raw.mode, 40);
+  const ownBehavior = normalizeString(raw.behavior, 40);
   return {
     version: SESSION_DIR_VERSION,
     key: canonical,
@@ -113,8 +133,8 @@ export function normalizeProfile(raw, { key, now = Date.now } = {}) {
     ...(legacyAccess ? { legacyAccess } : {}),
     // 运行时选择：能力档决定工具面 / 生效方式 / 权限权威，行为档案决定仿真内核。
     // null = 跟随 Agent 平台申报的默认能力档；inherit = 跟随用户平台的默认行为。
-    capability: normalizeRef(raw.capability) || null,
-    behavior: normalizeBehavior(raw.behavior),
+    capability: normalizeRef(raw.capability) || legacyPlan?.capability || null,
+    behavior: ownBehavior ? normalizeBehavior(ownBehavior) : (legacyPlan?.behavior ?? LEGACY_MODE_BEHAVIOR[legacyMode] ?? 'inherit'),
     persona: { mode: personaMode, name: personaMode === 'card' ? personaName || null : null },
     prompt: { initialText, updatedAt: Number(promptRaw.updatedAt) > 0 ? Number(promptRaw.updatedAt) : 0 },
     wake: { config: wakeRaw.config && typeof wakeRaw.config === 'object' ? wakeRaw.config : null },

@@ -142,7 +142,10 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   const platformsPage = pageDirs.find((entry) => entry.id === 'platforms');
   const platformsJs = platformsPage?.js ? fs.readFileSync(platformsPage.js, 'utf8') : '';
   ok(/SIDE_ORDER = \['user', 'agent'\]/.test(platformsJs), '平台页把用户侧与 Agent 侧都列出来');
-  ok(/platform-detail\.js/.test(platformsJs) && /mountPlatformDetail\(/.test(platformsJs), '右栏详情走 platform-detail.js');
+  ok(/platform-detail\.js/.test(platformsJs) && /mountPlatformDetail\(/.test(platformsJs), '平台二级页走 platform-detail.js');
+  ok(/cardHtml\(/.test(platformsJs) && /collapseHtml\(/.test(platformsJs) && /tileHtml\(/.test(platformsJs),
+    '平台清单用卡片 + 折叠分组 + 卡片网格（不用主从分栏）');
+  ok(!/splitViewHtml|splitItemHtml/.test(platformsJs), '平台页不再用 split-view 组件');
   const detailPath = path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js');
   const detailJs = fs.existsSync(detailPath) ? fs.readFileSync(detailPath, 'utf8') : '';
   // 标签由「这一侧真有的资产」推出来：不是按平台 id 写死分支。
@@ -164,7 +167,8 @@ console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 /
   ok(/APPLY_LABEL/.test(plansText) && /AUTHORITY_LABEL/.test(plansText), '方案页的生效方式标签与能力档同源（不在方案里另存一份）');
   ok(/不做工具级限制/.test(plansText), '直通方案行明显不做工具级限制');
   ok(/planRuntimeSummary/.test(plansText) && /data-plan-cap-jump/.test(plansText), '方案编辑器的生效方式只读块带「改能力档」');
-  ok(/focusPlatform\(`agent:\$\{platformId\}`/.test(plansText), '「改能力档」跳到声明这套档的执行体');
+  ok(/setConsolePage\('platforms', \{ sub: `agent:\$\{platformId\}`, tab: 'capabilities' \}\)/.test(plansText),
+    '「改能力档」直接跳到声明这套档的平台能力页');
   const detailText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
   ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /canPinPermission/.test(detailText),
     '平台详情的能力位矩阵写出注入通道与权限权威支持面');

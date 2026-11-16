@@ -324,6 +324,41 @@ span.time-field
 5. 折叠分组用 `<details class="settings-group">`，分组记忆由 `initGroups(root, { pageId })` 统一处理：首次只展开第一组，之后按 `localStorage['dsh.console.groups.<pageId>']` 恢复。路由在 `module.init()` 之后调用它（分组可能是 init 里渲染的）。
 6. 页面级 CSS 只允许写「这一页独有的装饰」（如 `.sched-limits` 的格宽、`.voice-list` 的行距），**不许覆盖 `.field-row` / `.field-control` / `.field-block` 的布局**——静态检查会拦。
 
+### 列表页：卡片网格清单 + 二级详情页（2026-11-16 落地，`platforms` 为样板）
+
+「一屏看全 + 点进去改」的页面不再用左右分栏：清单页只放可点的卡片，改配置进二级页。两层都是 `.page-stack`，由页面自己切 `hidden`（清单留在 DOM 里，折叠组的展开状态不会因来回切而丢）。
+
+```html
+<section class="page-stack">                 <!-- page.html：只留宿主 -->
+  <div id="platformHost" class="page-stack"></div>
+</section>
+
+<!-- 清单（[data-platform-view="list"]） -->
+<section class="card is-group">              <!-- cardHtml({ className: 'is-group', … }) -->
+  <details id="platformGroup-user">          <!-- collapseHtml({ elementId, … }) -->
+    <summary>用户平台 · 2</summary>
+    <div class="tile-list">                 <!-- 每一张：tileHtml({ id, interactive: true }) -->
+      <div class="tile tile--interactive" data-tile-id="user:qq" role="button" tabindex="0">…</div>
+    </div>
+  </details>
+</section>
+
+<!-- 二级页（[data-platform-view="detail"]，hidden） -->
+<div class="platform-detail">               <!-- display: contents -->
+  <header class="platform-head">…</header>  <!-- grid-column: 1 / -1 -->
+  <div class="page-tabs">…</div>            <!-- 自带 grid-column: 1 / -1 -->
+  <div class="platform-stack">…</div>       <!-- 纵向分节，每一段一张 card -->
+</div>
+```
+
+约定：
+
+1. 清单与详情**同时常驻**：路由（`#platforms/<side>:<id>[/<tab>]`）只切 `hidden`。刷新时只重画卡片与诊断卡，**不重建 `details`** —— 重建会把用户展开的组分回去；诊断汇总卡只在有 `level === 'error'` 的诊断时创建。
+2. 卡片整块可点：`tileHtml({ interactive: true })` 给 `role="button"` 与 `tabindex="0"`，点击 / 回车 / 空格都进二级页；卡片里的 `button` / `a` 不触发跳转（点击委托里排除）。
+3. 二级页的标签属于路由：`onTab` 写 `setConsolePage(page, { sub, tab })`，返回写 `sub: ''`；不要面板里本地切 tab，否则深链、前进/后退与刷新会各说一套。（返回不用 `history.back()`，见 [CONSOLE.md](CONSOLE.md) §2.3。）
+4. 详情里每一段都单独是 `cardHtml` 的一张卡（页头与标签条不是卡）；自带外壳的组件（提示词卡、分节面板）直接挂进 `.platform-stack`，不要再套一层 card。
+5. 外壳用 `display: contents` 时，**需要跨满两列的块自己写 `grid-column: 1 / -1`**（`.platform-head` / `.platform-stack`；`.page-tabs` 的已在 `components.css` 里）。漏写会掉进 `main` 网格的第一列。
+
 ## 5. 现有复杂表单的迁移
 
 按控件量排序（2026-11-07 全站收口后实测，`page.html` 里的手写控件数已全部为 0；`scripts/test-console-static.mjs` 的 `BARE_CONTROL_BASELINE` 现在只留 0，任何页面再手写控件都会让门禁失败）：`plugins` **0**、`usage` **0**、`behaviors` **0**、`sessions` **0**、`operations` **0**、`access` **0**、`reference` **0**、`mcp` **0**、`skills` **0**、`overview` **0**、`social-v1` **0**、`social-v2` **0**、`scheduler` **0**、`persona` **0**、`slang` **0**。

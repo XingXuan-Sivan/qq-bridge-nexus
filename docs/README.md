@@ -38,7 +38,7 @@
 | [CONSOLE.md](CONSOLE.md) | **控制台单一入口**：零构建结构、目录六条规则、设计令牌与栅格、组件 API（card / collapse / tag / alert / message / message-box / tile / table / search-box）、必须不变的契约、门禁、长页重排实测、执行体 / 方案 / 权限的界面口径 | ✅ 现行（改 `public/console/` 前先读） |
 | [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | **表单系统规格**：16 个控件工厂、`createForm()` 内核（类型化取值、校验、条件显示、脏值守卫）、字段注解、两步迁移法 | ✅ 规格已定 |
 | [CONSOLE_FORM_LESSONS.md](CONSOLE_FORM_LESSONS.md) | 表单迁移踩坑与检查清单 | ✅ 迁页面前先读 |
-| [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) | **控制台 IA 重构与平台配置归一**：既有结构/风格基线（§2）、组件增量（tile 图标、split-view 宽度变量与工具栏槽、页面子路由）、平台页与插件页的两级 IA、平台自描述 `modelCatalog`、默认运行方案三级链与 config v3、B1–B4 批次与验收 | 🚧 方案定稿，按 §7 批次执行 |
+| [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) | **控制台 IA 重构与平台配置归一**：既有结构/风格基线（§2）、组件增量（tile 图标、split-view 宽度变量与工具栏槽、页面子路由）、平台页与插件页的两级 IA、平台自描述 `modelCatalog`、默认运行方案三级链与 config v3、B1–B4 批次与验收 | 🚧 B1 已收尾，按 §7 继续 B2–B4 |
 
 ### 扩展与插件
 

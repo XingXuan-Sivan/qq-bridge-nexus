@@ -86,8 +86,14 @@ try {
   async function hydrate(view) {
     await page.evaluate(v => { if (location.hash !== `#${v}`) location.hash = `#${v}`; }, view);
     // 片段 HTML 到位 ≠ 页面可用：字段由 fields.js 的规格在 init() 里渲染（router 在 init 之后打 pageReady）。
-    await page.waitForFunction(v => (document.querySelector(`[data-page="${v}"]`)?.children.length ?? 0) > 0, view);
-    await page.waitForFunction(v => document.querySelector(`[data-page="${v}"]`)?.dataset.pageReady === '1', view);
+    try {
+      await page.waitForFunction(v => (document.querySelector(`[data-page="${v}"]`)?.children.length ?? 0) > 0, view);
+      await page.waitForFunction(v => document.querySelector(`[data-page="${v}"]`)?.dataset.pageReady === '1', view);
+    } catch (error) {
+      // init() 抛错时 pageReady 永远不会打上：把页面自己的报错带出来，否则只剩一行超时。
+      const detail = errors.length ? `；页面错误：${errors.join(' | ')}` : '';
+      throw new Error(`页面 ${view} 未就绪：${error.message}${detail}`);
+    }
   }
   for (const view of allPages) await hydrate(view);
   await hydrate('overview');
@@ -131,6 +137,18 @@ try {
       if (await details.getAttribute('open') === null) await details.locator(':scope > summary').click();
     }
     return target;
+  }
+  // 平台页是清单 + 二级页：卡片在折叠组里，先展开所在组再点卡片，等地址栏落到子路由。
+  async function openPlatform(key) {
+    await navigate('platforms');
+    const tile = page.locator(`[data-tile-id="${key}"]`).first();
+    await tile.waitFor({ state: 'attached', timeout: 5000 });
+    for (const details of await tile.locator('xpath=ancestor::details').all()) {
+      if (await details.getAttribute('open') === null) await details.locator(':scope > summary').click();
+    }
+    await tile.click();
+    await page.waitForFunction((k) => location.hash === `#platforms/${k}`, key);
+    await page.waitForSelector('[data-platform-view="detail"]:not([hidden]) [data-platform-panel-body] > *', { timeout: 5000 });
   }
   async function fill(id, value) { await (await reveal(`#${id}`)).fill(String(value)); }
   async function check(id, checked) { await (await reveal(`#${id}`)).setChecked(checked); }
@@ -305,9 +323,8 @@ try {
     await saveBarWrite('/api/config/runtime');
     assert.deepEqual(fixture.requests.at(-1).body, { defaultPlan: 'social-v1' });
 
-    // 行为档案是用户侧平台的子资源：C7 起在「平台 › 详情 › 行为」里改，不再有独立整页。
-    await navigate('platforms');
-    await page.click('[data-split-key="user:qq"]');
+    // 行为档案是用户侧平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
+    await openPlatform('user:qq');
     await page.click('[data-platform-tab="behaviors"]');
     await page.waitForSelector('#behaviorTable [data-behavior-edit="social-v1"]', { timeout: 5000 });
     await page.click('#behaviorTable [data-behavior-edit="social-v1"]');
@@ -329,8 +346,7 @@ try {
   });
 
   await test('Platform detail merges behavior prompt into one save', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="user:qq"]');
+    await openPlatform('user:qq');
     await page.click('[data-platform-tab="behaviors"]');
     await reveal('#behaviorFormSave');
     assert.equal(await page.locator('#behaviorPromptSave').count(), 0, '提示词卡不再有独立保存按钮');
@@ -341,33 +357,48 @@ try {
   });
 
   await test('Platform detail voice tab owns the prompt card', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="user:qq"]');
+    await openPlatform('user:qq');
     await page.click('[data-platform-tab="voice"]');
     await page.waitForSelector('#platformPromptCard .prompt-card-body', { timeout: 5000 });
     assert.equal(await page.locator('#platformSave').count(), 0, '平台话术卡不再自带独立保存按钮');
     assert.ok(await page.locator('#platformPromptCard [data-prompt-edit]').count() > 0, '平台提示词卡有编辑按钮');
-    assert.ok(await page.locator('#platformCard [data-table]').count() > 0, '平台工具走表格组件');
+    assert.ok(await page.locator('[data-platform-panel-body] [data-table]').count() > 0, '平台工具走表格组件');
   });
 
   await test('Platforms page lists both sides and hides the clean diagnostics card', async () => {
     await navigate('platforms');
-    // 两侧平台都列在主从清单里；诊断为空时汇总卡不占地方（fixture 的 diagnostics: []）。
-    assert.equal(await page.locator('#platformSplit [data-split-key="user:qq"]').count(), 1, '用户侧平台在清单里');
-    assert.equal(await page.locator('#platformSplit [data-split-key="user:wx"]').count(), 1, '第二条用户实例也在清单里');
-    assert.equal(await page.locator('#platformSplit [data-split-key="agent:dsh"]').count(), 1, 'Agent 侧平台在清单里');
-    assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"]').count(), 1, '第二个 Agent 平台也在清单里');
+    await page.waitForSelector('[data-tile-id="user:qq"]', { timeout: 5000 });
+    // 两侧平台都列在折叠分组的卡片网格里；诊断为空时汇总卡不占地方（fixture 的 diagnostics: []）。
+    assert.equal(await page.locator('[data-tile-id="user:qq"]').count(), 1, '用户平台在清单里');
+    assert.equal(await page.locator('[data-tile-id="user:wx"]').count(), 1, '第二条用户实例也在清单里');
+    assert.equal(await page.locator('[data-tile-id="agent:dsh"]').count(), 1, 'Agent 平台在清单里');
+    assert.equal(await page.locator('[data-tile-id="agent:acp"]').count(), 1, '第二个 Agent 平台也在清单里');
     assert.equal(await page.locator('#platformDiagnosticsCard').count(), 0, '没有诊断时不渲染诊断卡');
-    assert.equal(await page.locator('#platformSplit button.split-item').count(), 4, '每条注册的平台都走主从组件的条目');
-    // 条目开关与入站结论都挂在清单条目上：停用的实例不该看起来像在跑。
-    const wx = page.locator('#platformSplit [data-split-key="user:wx"]');
+    assert.equal(await page.locator('[data-platform-list] .tile--interactive').count(), 4, '每条注册的平台都是一张可点的卡片');
+    assert.equal(await page.locator('#platformGroup-user, #platformGroup-agent').count(), 2, '两侧各一个折叠分组');
+    // 条目徽标挂在卡片上：停用的实例不该看起来像在跑。
+    const wx = page.locator('[data-tile-id="user:wx"]');
     assert.equal(await wx.locator('.tag').filter({ hasText: '已停用' }).count(), 1, '停用的实例在清单里标出');
-    assert.equal(await page.locator('#platformSplit [data-split-key="user:qq"] .tag').filter({ hasText: '已接管' }).count(), 1, '在跑的实例标出入站结论');
+    assert.equal(await page.locator('[data-tile-id="user:qq"] .tag').filter({ hasText: '已接管' }).count(), 1, '在跑的实例标出入站结论');
+  });
+
+  await test('Platform detail restores from a deep link and steps back', async () => {
+    await navigate('platforms');
+    // 深链直接带 sub 与 tab：刷新后应该落到同一个平台的同一个标签。
+    await page.evaluate(() => { location.hash = '#platforms/agent:dsh/config'; });
+    await page.waitForSelector('[data-platform-view="detail"]:not([hidden]) #platformConfigMount [data-field="cfg__model"]', { timeout: 5000 });
+    assert.equal(await page.locator('[data-platform-tab="config"].active').count(), 1, '深链还原到配置标签');
+    // 标签与返回都写地址栏：后退回清单，前进回同一个标签。
+    await page.evaluate(() => history.back());
+    await page.waitForSelector('[data-platform-view="list"]:not([hidden])', { timeout: 5000 });
+    assert.equal(await page.locator('[data-platform-view="detail"]').isHidden(), true, '后退回清单');
+    await page.evaluate(() => history.forward());
+    await page.waitForSelector('[data-platform-view="detail"]:not([hidden])', { timeout: 5000 });
+    assert.equal(await page.locator('[data-platform-tab="config"].active').count(), 1, '前进回同一个标签');
   });
 
   await test('User platform config is writable and carries the entry switch', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="user:qq"]');
+    await openPlatform('user:qq');
     await page.click('[data-platform-tab="config"]');
     await page.waitForSelector('#platformConfigMount [data-field="cfg__wsUrl"]', { timeout: 5000 });
     // 与 Agent 侧同一张表单：字段来自 configSchema，值来自注册表条目的那一份 config。
@@ -384,8 +415,7 @@ try {
   });
 
   await test('Agent platform config form saves through the registry write endpoint', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="agent:dsh"]');
+    await openPlatform('agent:dsh');
     await page.click('[data-platform-tab="config"]');
     await page.waitForSelector('#platformConfigMount [data-field="cfg__model"]', { timeout: 5000 });
     // 字段由 configSchema 生成，值来自注册表条目的 config：与插件详情同构。
@@ -403,9 +433,7 @@ try {
   });
 
   await test('Agent platform probe reports its conclusion in the overview', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="agent:dsh"]');
-    await page.click('[data-platform-tab="overview"]');
+    await openPlatform('agent:dsh');
     await page.waitForSelector('#platformProbe', { timeout: 5000 });
     await clickWrite('#platformProbe', '/api/platforms/registry/agent/dsh/probe');
     // 探活结论进注册表快照（entry.probe），刷新后由「执行体」卡画出来。
@@ -435,8 +463,7 @@ try {
 
   await test('Capability file contracts', async () => {
     // 能力档是 Agent 平台的资产：只有声明了能力档的 Agent 平台才有「能力」标签。
-    await navigate('platforms');
-    await page.click('[data-split-key="agent:dsh"]');
+    await openPlatform('agent:dsh');
     await page.click('[data-platform-tab="capabilities"]');
     await page.waitForSelector('#platformCapabilityList [data-cap-edit]', { timeout: 5000 });
     await page.click('#platformCapabilityList [data-cap-edit]');
@@ -464,21 +491,24 @@ try {
   });
 
   await test('Agent platform becomes the default executor only after a successful probe', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="agent:acp"]');
+    await openPlatform('agent:acp');
     await page.waitForSelector('#platformSetDefault', { timeout: 5000 });
     const body = await clickWrite('#platformSetDefault', '/api/config/runtime');
     assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交执行体 id，不夹带默认方案');
     // 切换只落盘：本进程仍装配 dsh，于是「待重启」同时出现在详情与清单，外加一条可复查的诊断。
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
     assert.equal(await page.locator('#platformSetDefault').count(), 0, '已设为默认的平台不再显示同一个按钮');
-    assert.equal(await page.locator('#platformSplit [data-split-key="agent:acp"] .tag').filter({ hasText: '待重启' }).count(), 1, '清单里标出待重启');
-    assert.match(await page.textContent('#platformDiagnosticsCard'), /active_pending_restart/, '配置面与运行期不一致时给一条诊断');
+    // 诊断结论写在本平台的概览里（清单的诊断卡只收 error，这条是 warning）。
+    assert.match(await page.textContent('[data-platform-panel-body]'), /active_pending_restart/, '配置面与运行期不一致时给一条诊断');
+    // 徽标在清单页：返回后卡片应同时标出待重启与诊断。
+    await page.click('[data-platform-back]');
+    await page.waitForSelector('[data-platform-view="list"]:not([hidden])');
+    assert.equal(await page.locator('[data-tile-id="agent:acp"] .tag').filter({ hasText: '待重启' }).count(), 1, '清单里标出待重启');
+    assert.equal(await page.locator('[data-tile-id="agent:acp"] .tag').filter({ hasText: '警告' }).count(), 1, '清单卡片标出诊断结论');
   });
 
   await test('User instance becomes the default one from the instance card', async () => {
-    await navigate('platforms');
-    await page.click('[data-split-key="user:wx"]');
+    await openPlatform('user:wx');
     // 概览把这三件事实分开写：条目开关、入站结论、出站实现。
     const overview = await page.textContent('[data-platform-panel-body]');
     assert.match(overview, /已停用/, '停用的实例在概览里写明不会装配');
@@ -488,7 +518,7 @@ try {
     assert.deepEqual(body, { defaultUser: 'wx' }, '设为默认实例只提交实例 id');
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
     assert.equal(await page.locator('#platformSetUserDefault').count(), 0, '已设为默认的实例不再显示同一个按钮');
-    assert.match(await page.textContent('#platformDiagnosticsCard'), /active_pending_restart/, '用户侧的默认实例与运行期不一致时也给一条诊断');
+    assert.match(await page.textContent('[data-platform-panel-body]'), /active_pending_restart/, '用户侧的默认实例与运行期不一致时也给一条诊断');
   });
 
   await test('Role creation, selection, clearing and silent-mode contracts', async () => {
@@ -1305,11 +1335,12 @@ try {
 
     await page.selectOption('#planEditTools', 'direct');
     await page.locator('[data-plan-cap-jump]').click();
-    await page.waitForFunction(() => location.hash === '#platforms');
+    // 跳转直接落到「平台 › 能力」二级页：sub 与 tab 一起写进地址栏。
+    await page.waitForFunction(() => location.hash === '#platforms/agent:dsh/capabilities');
     await page.waitForSelector('[data-platform-tab="capabilities"].active');
     await page.waitForSelector('#platformCapabilityList [data-cap-edit]');
     assert.equal(await page.locator('#planEditor').count(), 0, '跳转前先关掉方案编辑器');
-    assert.equal(await page.locator('#platformSplit [data-split-key="agent:dsh"].is-active').count(), 1, '能力档属于声明它的执行体');
+    assert.match(await page.textContent('.platform-head-main h3'), /DeepSeek Harness/, '能力档属于声明它的平台');
   });
 
   if (!original) await test('全局配置：执行体卡区分配置面与运行期，切换默认执行体只落盘', async () => {

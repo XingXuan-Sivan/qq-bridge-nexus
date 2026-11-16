@@ -15,7 +15,6 @@ import { modalHtml, openModal, wireModal } from '../../components/modal/modal.js
 import { alertBox, confirmBox } from '../../components/message-box/message-box.js';
 import { onPageRefresh, setConsolePage } from '../../js/router.js';
 import { loadPlatforms, registryMeta } from '../../js/registry.js';
-import { focusPlatform } from '../platforms/page.js';
 
 let payload = null;
 let presets = []; // 能力档（= /api/runtime/capabilities 的 capabilities）
@@ -306,9 +305,8 @@ async function jumpToCapability() {
     confirmText: '去改',
   }))) return;
   el('planEditor')?.remove();
-  // 先把目标平台与标签摆好，再切页：平台页首次注入时靠这两个参数直接落到「能力」。
-  focusPlatform(`agent:${platformId}`, { tab: 'capabilities' });
-  setConsolePage('platforms', { updateHash: true });
+  // 平台详情是子路由：切页的同时把 sub 与 tab 一起写上，直接落到「能力」。
+  setConsolePage('platforms', { sub: `agent:${platformId}`, tab: 'capabilities' });
 }
 
 async function savePlan() {

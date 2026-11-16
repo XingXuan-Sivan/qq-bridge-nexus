@@ -5,6 +5,7 @@
 // 字段规格由后端类型注册表下发（GET /api/behaviors/kinds），按 (平台, kind) 索引，页面不自带一份。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
+import { cardHtml } from '../../components/card/card.js';
 import { renderFields, bindSwitches } from '../../components/form/form.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
@@ -264,30 +265,26 @@ function openArchiveModal({ mode, source = null }) {
   });
 }
 
-/** 面板骨架：三块（清单 / 基本信息 / 提示词），标题用 h3 —— 详情本身已经在卡片里，不再套一层卡。 */
+/** 面板骨架：两段卡（清单 / 基本信息）+ 自带外壳的提示词卡；宿主就是详情页的分节栈。 */
 function markup() {
   return `
-    <div class="platform-stack">
-      <section class="platform-section">
-        <h3>档案清单</h3>
-        <p class="meta">档案是资源，被运行方案的行为字段引用；改名不影响引用，删除前先确认没有被方案使用。</p>
-        <div data-behavior-fields="list"></div>
-      </section>
-      <section class="platform-section">
-        <h3>基本信息</h3>
-        <p class="meta">写入 <code>profiles/platforms/${esc(platformId)}/behaviors</code>，重启桥接后生效。</p>
-        <div class="form-stack" data-behavior-fields="basics"></div>
+    ${cardHtml({
+    title: '档案清单',
+    description: '档案是资源，被运行方案的行为字段引用；改名不影响引用，删除前先确认没有被方案使用。',
+    body: '<div data-behavior-fields="list"></div>',
+  })}
+    ${cardHtml({
+    title: '基本信息',
+    description: `写入 <code>profiles/platforms/${esc(platformId)}/behaviors</code>，重启桥接后生效。`,
+    body: `<div class="form-stack" data-behavior-fields="basics"></div>
         <div class="form-actions">
           <button class="btn primary" type="button" id="behaviorFormSave">保存</button>
           <button class="btn" type="button" id="behaviorFormReset" hidden>重置</button>
           <span class="meta" id="behaviorFormMsg" role="status"></span>
         </div>
-        <div class="behavior-groups" id="behaviorFormPanel"></div>
-      </section>
-      <section class="platform-section">
-        <div class="prompt-card" id="behaviorPromptCard"></div>
-      </section>
-    </div>`;
+        <div class="behavior-groups" id="behaviorFormPanel"></div>`,
+  })}
+    <div class="prompt-card" id="behaviorPromptCard"></div>`;
 }
 
 /**

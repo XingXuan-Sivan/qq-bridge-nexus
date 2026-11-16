@@ -552,6 +552,32 @@ MCP 编辑弹窗出现过三个问题：底栏「取消 / 测试连接」顺序�
 
 **规则**：核心实现用本地名单判定（`CORE_PROVIDERS`），其余默认按插件处理；不要依赖接口「顺带返回」的字段做功能分支。
 
+### 1.93 `tileHtml` 的 `badges` / `tags` 只收数组，传拼接好的字符串会直接抛错
+
+平台清单从 `splitItemHtml` 换成 `tileHtml` 时，`badges` / `tags` 沿用了旧组件的习惯传了 `.join('')` 的字符串；`tileHtml` 内部做 `badges.filter(Boolean)`，字符串没有 `.filter`，页面 `init()` 抛 `TypeError`。
+
+**表现**：页面一直是空壳，浏览器用例只报「页面 platforms 未就绪」——因为 `dataset.pageReady` 是在 `init()` 之后才打的，`init()` 一抛就永远不会打上。测试未把页面自己报错带出来时，最容易误判成超时/抖动。
+
+**规则**：列表类组件的片段参数一律传数组（字符串也算一个片段就包成 `['…']`）；`hydrate()` 把页面报错一起带进错误信息，不要只留一行 `Timeout`。
+
+### 1.94 `display:contents` 容器里的块要自己写 `grid-column: 1 / -1`
+
+二级页外壳 `.platform-detail` 用 `display:contents` 把页头、标签条、分节栈直接交给 `main` 的两列网格；页头与分节栈没写 `grid-column` 时会掉进第一列，被挤成半宽（`.page-tabs` 的已在 `components.css` 里）。
+
+**规则**：凡是用 `display:contents` 的页面外壳，里层每个「应整行」的块都显式写 `grid-column: 1 / -1`；不要靠父容器 `flex` 堆叠——那会让整块掉进网格的一列。
+
+### 1.95 折叠组与卡片网格共存：刷新只重画内容，不重建 `details`
+
+平台清单每拉一次注册表就会重画卡片；如果连 `details`（折叠组）一起 `innerHTML` 重建，用户刚展开的组会被 `initGroups` 之外的默认态收回，且折叠组只在页面 hydrate 时初始化一次，重建后再也不会重新绑定。
+
+**规则**：壳（`details` / 分组卡）只建一次，刷新时只替换叶子（`[data-platform-list]` 里的卡片、诊断卡）；诊断行“有则替换、无则删除”按固定 id 就地增删，不要整块重写。
+
+### 1.96 页面子路由的回调要在 hydrate 之后查表
+
+`onPageRoute(page, fn)` 是页面在 `init()` 里注册的，而 `hydratePage()` 是异步的；路由在 hydrate 之前就查 `pageRoutes` 会拿到空表，首屏深链（`#platforms/agent:dsh/config`）的 `sub` / `tab` 直接丢掉，刷新后才变成清单页。
+
+**规则**：`applyRoute(page, …)` 写成 `hydratePage(page).then(() => pageRoutes.get(page)?.(路由))`；新增子路由时把「刷新能还原深链」当成必测项。
+
 ## 2. 迁移一个页面的检查清单
 
 0. **先跑基线**：`npm run test:audit`（当前 90/90）、`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs` 三条都绿了再动手；给该页拍一张 1600 宽截图存底，并记下 `BARE_CONTROL_BASELINE` 里这一页的数字。**迁移过程中只允许这个数字往下降。**

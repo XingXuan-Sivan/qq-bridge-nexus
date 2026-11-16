@@ -1,30 +1,19 @@
-/* 平台页：页面本身只是宿主（.page-stack = display:contents），
+/* 平台页：清单是两个折叠组里的卡片网格，详情是同页二级路由（#platforms/<side>:<id>）。
    下面全部是 page.js / platform-detail.js 生成内容的样式。 */
 
-/* 左列表的两侧分组标题：不是可点条目，只做分隔。 */
-.platforms-page .split-group {
-  margin: 10px 4px 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .04em;
-  color: var(--muted);
-}
-.platforms-page .split-group:first-child { margin-top: 2px; }
+/* 详情铺满网格：页头、标签条、面板三块都是 main .grid 的直接网格项。
+   .page-tabs 自带 grid-column:1/-1（css/components.css），这里只管页头与面板。 */
+.platform-detail { display: contents; }
 
-/* 详情：标题行 + 标签 + 面板，三者同一节奏。 */
-.platform-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-}
 .platform-head {
+  grid-column: 1 / -1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
+.platform-head-main { min-width: 0; }
 .platform-head-main h3 {
   margin: 0 0 6px;
   font-size: 16px;
@@ -34,34 +23,24 @@
   color: var(--muted);
 }
 .platform-head-main .meta { margin: 0; }
+/* 返回清单是页头的一部分：在标题上方，与标题同列。 */
+.platform-back { margin-bottom: 10px; }
 
-/* 标签条在详情里：.page-tabs 的默认外边距是给页首用的，这里收窄。 */
+/* 标签条在页面里：.page-tabs 的默认外边距是给页首用的，这里收窄。 */
 .platform-detail .page-tabs {
   margin: 14px 0 16px;
   flex-wrap: wrap;
 }
 .platform-detail .page-tab { padding: 8px 14px; }
 
-/* 面板分段：详情已经在卡片里，不再套第二层卡片，标题 + 内容按段落排。 */
+/* 面板分段：每一段由 platform-detail.js 生成一张 card，本层只负责它们的间距。 */
 .platform-stack {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-6);
   min-width: 0;
 }
-.platform-stack[hidden] { display: none; }
-.platform-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.platform-section > h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.platform-section > p.meta { margin: 0; }
 
 /* 行为档案的字段分组直接铺开（不额外套一层容器），分组本身仍是卡片式 fieldset。 */
 .platform-detail .behavior-groups { display: contents; }

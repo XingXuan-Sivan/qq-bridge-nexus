@@ -1,18 +1,21 @@
-// 平台详情：左侧选中的平台在右栏按标签页展开。
+// 平台详情：二级页（#platforms/<side>:<id>[/<tab>]）的正文，按标签页展开。
 //
 // 标签按「这一侧真有的东西」给，不给空壳：
-//   用户侧 概览 / 配置 / 话术与工具 / 行为（有档案目录才有）
-//   Agent 侧 概览 / 能力（有声明的能力档才有） / 配置
+//   用户平台 概览 / 配置 / 话术与工具 / 行为（有档案目录才有）
+//   Agent 平台 概览 / 能力（有声明的能力档才有） / 配置
 // 数据来自统一注册表的那一份快照（page.js 传进来的条目），只有需要正文的面板
 // （平台提示词、行为档案、能力预设）才各自去请求自己的接口。
 //
 // 两侧的「运行期」语义不同，界面上分开说：
-//   · 用户侧每一条条目就是一个实例（平台 + 账号），各有自己的入站管线：`enabled`
+//   · 用户平台每一条条目就是一个实例（平台 + 账号），各有自己的入站管线：`enabled`
 //     决定它装配不装配，`inboundState` 是它此刻的连接结论，`outbound` 是它发消息
 //     会走的实现；`active` 只是默认实例（出站没有地址上下文时的兜底）；
-//   · Agent 侧装配的是同一个单例，`active` 就是「执行体」本身。
+//   · Agent 平台装配的是同一个单例，`active` 就是当前在跑的那个。
+//
+// 版面：页头（返回 + 平台名 + 徽标）/ 标签条 / 面板，面板里每一段是一张 card。
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { api } from '../../js/api.js';
+import { cardHtml } from '../../components/card/card.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { bindSwitches, getSwitch, inlineActions, renderFields } from '../../components/form/form.js';
 import { hasSchemaFields, readSchemaPatch, schemaFields } from '../../components/form/schema.js';
@@ -21,7 +24,7 @@ import { createCapabilityPanel } from '../../components/capability-panel/capabil
 import { capabilityLabel, conversationTypeLabel, conversationTypeTone, inboundStateLabel, inboundStateTone, outboundViaLabel } from '../../js/registry.js';
 import { mountBehaviorsPanel } from './behaviors-panel.js';
 
-const SIDE_LABEL = { user: '用户侧', agent: 'Agent 侧' };
+const SIDE_LABEL = { user: '用户平台', agent: 'Agent 平台' };
 const SOURCE_LABEL = { builtin: '内置', plugin: '插件', 'profile-only': '只有配置目录', 'config-only': '只有配置条目' };
 const SOURCE_HINT = {
   builtin: '随桥接一起装配的平台适配器。',
@@ -34,17 +37,18 @@ const LEVEL_TONE = { error: 'tag--danger', warn: 'tag--warning' };
 /** 能力位矩阵里的三个声明面：应用方式、提示注入通道、权限权威支持面。 */
 const APPLY_KIND_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
 const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
-const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: '执行体自身' };
+const AUTHORITY_SIDE_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
 /** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
 const ENABLED_FIELD = 'platformEnabled';
 /** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
 const CONFIG_MOUNT = '<div id="platformConfigMount"></div>';
 
-let root = null; // 详情根节点（[data-split-detail]）
+let root = null; // 详情根节点（[data-platform-view="detail"]）
 let entry = null; // 当前平台条目（注册表快照里的一份）
 let tab = 'overview';
-let mountedKey = ''; // 上一次挂载的平台 key：同一平台重挂时保留当前标签
 let onChanged = null; // 写成功后的刷新回调（由 page.js 提供：重拉注册表并重画）
+let onTab = null; // 切标签：由 page.js 把 sub/tab 写进地址栏
+let onBack = null; // 返回清单：由 page.js 切回 #platforms
 let promptCard = null; // 平台提示词卡，只属于「话术与工具」
 let behaviorsPanel = null; // 行为档案面板，只属于「行为」
 let capabilityPanel = null; // 能力档面板，只属于「能力」
@@ -100,8 +104,8 @@ function runtimeStateCell(item) {
   }
   if (item.configured) return '<span class="tag tag--warning">已设为默认，重启后生效</span>';
   const where = item.side === 'user'
-    ? '在下面的「实例」里设为默认'
-    : '在下面的「执行体」里设为默认';
+    ? '在「实例」卡里设为默认'
+    : '在「执行端」卡里设为默认';
   return `<span class="tag">非默认</span><div class="meta">${where}</div>`;
 }
 
@@ -119,22 +123,20 @@ function inboundCell(item) {
   return `${tag}${detail}${body}`;
 }
 
-/** 用户侧「实例」：条目开关与设为默认都在这里（入站 / 出站事实放在「属性」表里）。 */
+/** 用户平台「实例」：条目开关与设为默认都在这里（入站 / 出站事实放在「属性」表里）。 */
 function instanceHtml(item) {
-  return `
-    <section class="platform-section">
-      <h3>实例</h3>
-      <p class="meta">一条条目 = 一个实例（平台 + 账号），各有自己的入站管线。默认实例只决定
-        没有地址上下文时出站用哪个账号（<code>config.json</code> 的 <code>platforms.active.user</code>）。</p>
-      <div class="row">${runtimeStateCell(item)}${item.enabled === false ? '<span class="tag tag--warning">条目已停用</span>' : ''}</div>
+  return cardHtml({
+    title: '实例',
+    description: '一条条目 = 一个实例（平台 + 账号），各有自己的入站管线。默认实例只决定没有地址上下文时出站用哪个账号（<code>config.json</code> 的 <code>platforms.active.user</code>）。',
+    body: `<div class="row">${runtimeStateCell(item)}${item.enabled === false ? '<span class="tag tag--warning">条目已停用</span>' : ''}</div>
       ${inlineActions({
     items: item.configured ? [] : [{ id: 'platformSetUserDefault', label: '设为默认实例', variant: 'primary' }],
     status: 'platformUserMsg',
-  })}
-    </section>`;
+  })}`,
+  });
 }
 
-/** Agent 侧「执行体」：探活与设为默认都在这里，不新开数据源（写口就是注册表那个）。 */
+/** Agent 平台「执行端」：探活与设为默认都在这里，不新开数据源（写口就是注册表那个）。 */
 function executorHtml(item) {
   const probe = item.probe ?? null;
   const probeHtml = probe
@@ -142,21 +144,19 @@ function executorHtml(item) {
       ? `<span class="tag tag--success">上次探活通过</span><span class="meta">${esc(probe.at || '')}${probe.url ? ` · ${esc(probe.url)}` : ''}</span>`
       : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`)
     : '<span class="meta">本次运行里还没探活过。</span>';
-  return `
-    <section class="platform-section">
-      <h3>执行体</h3>
-      <p class="meta">默认执行体是桥接启动时装配的那个 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）。
-        连接层句柄在启动时就绑定了，所以换执行体要重启桥接；设为默认前会先探活，探不通不落盘。</p>
-      <div class="row">${runtimeStateCell(item)}${probeHtml}</div>
+  return cardHtml({
+    title: '执行端',
+    description: '默认 Agent 平台是桥接启动时装配的那个（<code>config.json</code> 的 <code>platforms.active.agent</code>）。连接层句柄在启动时就绑定了，所以换平台要重启桥接；设为默认前会先探活，探不通不落盘。',
+    body: `<div class="row">${runtimeStateCell(item)}${probeHtml}</div>
       ${inlineActions({
     items: [
       { id: 'platformProbe', label: '探活' },
       // 已经设为默认就不必再点一次：重启后它会变成「当前启用」。
-      ...(item.configured ? [] : [{ id: 'platformSetDefault', label: '设为默认执行体', variant: 'primary' }]),
+      ...(item.configured ? [] : [{ id: 'platformSetDefault', label: '设为默认平台', variant: 'primary' }]),
     ],
     status: 'platformAgentMsg',
-  })}
-    </section>`;
+  })}`,
+  });
 }
 
 function overviewHtml(item) {
@@ -208,34 +208,32 @@ function overviewHtml(item) {
     })
     : '<p class="meta">这个平台没有诊断。</p>';
 
-  return `
-    <section class="platform-section">
-      <h3>属性</h3>
-      ${dataTableHtml({
-    columns: [{ label: '项目', width: '120px' }, { label: '值' }],
-    rows: rows.map(([label, value]) => ({ cells: [esc(label), value] })),
-    pageSize: 20,
-  })}
-    </section>
-    ${item.side === 'agent' ? executorHtml(item) : instanceHtml(item)}
-    <section class="platform-section">
-      <h3>这个平台有什么</h3>
-      <p class="meta">资产都在 ${item.side === 'user' ? 'profiles/platforms' : 'profiles/agent-platforms'}/<code>${esc(item.id)}</code> 下，改完重启桥接生效。</p>
-      <div class="row">${assetTags}</div>
-    </section>
-    <section class="platform-section">
-      <h3>能力位</h3>
-      <p class="meta">平台声明的能力位决定表单与适配器能做什么；没声明的能力不会出现在任何界面里。</p>
-      ${dataTableHtml({
-    columns: [{ label: '项目', width: '160px' }, { label: '声明' }],
-    rows: capabilityMatrix(item),
-    pageSize: 10,
-  })}
-    </section>
-    <section class="platform-section">
-      <h3>诊断</h3>
-      ${diagHtml}
-    </section>`;
+  return [
+    cardHtml({
+      title: '属性',
+      body: dataTableHtml({
+        columns: [{ label: '项目', width: '120px' }, { label: '值' }],
+        rows: rows.map(([label, value]) => ({ cells: [esc(label), value] })),
+        pageSize: 20,
+      }),
+    }),
+    item.side === 'agent' ? executorHtml(item) : instanceHtml(item),
+    cardHtml({
+      title: '这个平台有什么',
+      description: `资产都在 ${item.side === 'user' ? 'profiles/platforms' : 'profiles/agent-platforms'}/<code>${esc(item.id)}</code> 下，改完重启桥接生效。`,
+      body: `<div class="row">${assetTags}</div>`,
+    }),
+    cardHtml({
+      title: '能力位',
+      description: '平台声明的能力位决定表单与适配器能做什么；没声明的能力不会出现在任何界面里。',
+      body: dataTableHtml({
+        columns: [{ label: '项目', width: '160px' }, { label: '声明' }],
+        rows: capabilityMatrix(item),
+        pageSize: 10,
+      }),
+    }),
+    cardHtml({ title: '诊断', body: diagHtml }),
+  ].join('');
 }
 
 // ── 配置 ────────────────────────────────────────────────────────────────────
@@ -250,30 +248,23 @@ function configHtml(item) {
   const where = `<code>${file}/${esc(item.id)}/${item.side === 'user' ? 'platform.yml' : 'agent-platform.yml'}</code>`;
   const hasFields = hasSchemaFields(item.configSchema);
   if (item.side === 'agent' && !hasFields) {
-    return `
-      <section class="platform-section">
-        <h3>配置</h3>
-        <p class="meta">这个平台没有声明 <code>configSchema</code>，因此没有可编辑的配置项。</p>
-        <p class="meta">平台参数写在 ${where}，改完重启桥接生效。</p>
-      </section>`;
+    return cardHtml({
+      title: '配置',
+      description: `这个平台没有声明 <code>configSchema</code>，因此没有可编辑的配置项。平台参数写在 ${where}，改完重启桥接生效。`,
+    });
   }
   if (!hasFields) {
-    return `
-      <section class="platform-section">
-        <h3>配置</h3>
-        <p class="meta">这个平台没有声明 <code>configSchema</code>：只能改「启用」与条目字段（账号）。</p>
-        <p class="meta">平台参数写在 ${where}，改完重启桥接生效。</p>
-        ${CONFIG_MOUNT}
-      </section>`;
+    return cardHtml({
+      title: '配置',
+      description: `这个平台没有声明 <code>configSchema</code>：只能改「启用」与条目字段（账号）。平台参数写在 ${where}，改完重启桥接生效。`,
+      body: CONFIG_MOUNT,
+    });
   }
-  return `
-    <section class="platform-section">
-      <h3>配置</h3>
-      <p class="meta">表单字段就是 <code>config.json</code> 里 <code>platforms.${item.side === 'user' ? 'users' : 'agents'}.${esc(item.id)}</code> 那一份：
-        连接参数（地址、令牌…）改完要重启桥接才重新连接，其余选项下一次调用就生效。
-        配置文件 ${where} 只声明字段，不再存值。</p>
-      ${CONFIG_MOUNT}
-    </section>`;
+  return cardHtml({
+    title: '配置',
+    description: `表单字段就是 <code>config.json</code> 里 <code>platforms.${item.side === 'user' ? 'users' : 'agents'}.${esc(item.id)}</code> 那一份：连接参数（地址、令牌…）改完要重启桥接才重新连接，其余选项下一次调用就生效。配置文件 ${where} 只声明字段，不再存值。`,
+    body: CONFIG_MOUNT,
+  });
 }
 
 /** 挂载可写表单：字段由 configSchema 生成，保存只发给写口。 */
@@ -306,30 +297,29 @@ function mountConfig(item) {
 // ── 话术与工具（用户侧） ────────────────────────────────────────────────────
 function voiceHtml(item) {
   const tools = item.assets?.tools ?? [];
+  // 提示词卡自带 .prompt-card 外壳（与「行为」标签里那张同构），不再套一层 card。
   return `
-    <section class="platform-section">
-      <div class="prompt-card" id="platformPromptCard"></div>
-    </section>
-    <section class="platform-section">
-      <h3>平台工具</h3>
-      <p class="meta">这一层工具由平台适配器提供；某套能力档能用哪些，在「方案」页的能力档里勾。</p>
-      ${tools.length
-    ? dataTableHtml({
-      columns: [{ label: '工具' }, { label: '工具名', width: '180px' }, { label: '说明' }, { label: '风险', width: '90px' }, { label: '默认', width: '90px' }],
-      rows: tools.map((tool) => ({
-        cells: [
-          esc(tool.label || tool.flag),
-          `<code>${esc(tool.flag)}</code>`,
-          esc(tool.desc || '—'),
-          `<span class="tag">${esc(tool.risk)}</span>`,
-          tool.defaultOff ? '<span class="tag">默认关闭</span>' : '<span class="tag">默认开启</span>',
-        ],
-      })),
-      pageSize: 12,
-      empty: '这个平台没有声明工具清单。',
-    })
-    : '<p class="meta">这个平台没有声明工具清单。</p>'}
-    </section>`;
+    <div class="prompt-card" id="platformPromptCard"></div>
+    ${cardHtml({
+    title: '平台工具',
+    description: '这一层工具由平台适配器提供；某套能力档能用哪些，在「方案」页的能力档里勾。',
+    body: tools.length
+      ? dataTableHtml({
+        columns: [{ label: '工具' }, { label: '工具名', width: '180px' }, { label: '说明' }, { label: '风险', width: '90px' }, { label: '默认', width: '90px' }],
+        rows: tools.map((tool) => ({
+          cells: [
+            esc(tool.label || tool.flag),
+            `<code>${esc(tool.flag)}</code>`,
+            esc(tool.desc || '—'),
+            `<span class="tag">${esc(tool.risk)}</span>`,
+            tool.defaultOff ? '<span class="tag">默认关闭</span>' : '<span class="tag">默认开启</span>',
+          ],
+        })),
+        pageSize: 12,
+        empty: '这个平台没有声明工具清单。',
+      })
+      : '<p class="meta">这个平台没有声明工具清单。</p>',
+  })}`;
 }
 
 /** 平台提示词：正文来自 /api/platform/prompts/<id>，保存与还原都由提示词卡自己收口。 */
@@ -373,13 +363,12 @@ function mountBehaviors(item) {
 function capabilitiesHtml(item) {
   const count = (item.assets?.capabilityProfiles ?? []).length;
   return `
-    <section class="platform-section">
-      <h3>能力档</h3>
-      <p class="meta">这套 Agent 平台声明了 ${count} 套能力档：方案里的「能力档」字段就是从这里选。
-        能力档的正文（工具可见集、MCP 与技能范围）在 <code>profiles/agent-platforms/${esc(item.id)}/capabilities/</code>。</p>
-      <div id="platformCapabilityList"></div>
-    </section>
-    <!-- 编辑器自己带 .platform-stack，与行为档案面板那块同构；这里不再包一层 section。 -->
+    ${cardHtml({
+    title: '能力档',
+    description: `这套 Agent 平台声明了 ${count} 套能力档：方案里的「能力档」字段就是从这里选。能力档的正文（工具可见集、MCP 与技能范围）在 <code>profiles/agent-platforms/${esc(item.id)}/capabilities/</code>。`,
+    body: '<div id="platformCapabilityList"></div>',
+  })}
+    <!-- 编辑器里的每一段自己是一张 card；这里只给宿主，不再包一层。 -->
     <div id="platformCapabilityEditor"></div>`;
 }
 
@@ -482,6 +471,7 @@ async function saveCurrentConfig() {
 /** 写口按钮的事件委托：面板重画后不需要重新绑定。 */
 function onActionClick(event) {
   if (!(event.target instanceof Element)) return;
+  if (event.target.closest('[data-platform-back]')) { onBack?.(); return; }
   if (event.target.closest('#platformProbe')) { void probeCurrent(); return; }
   if (event.target.closest('#platformSetDefault')) { void setDefaultCurrent(); return; }
   if (event.target.closest('#platformSetUserDefault')) { void setDefaultUserCurrent(); return; }
@@ -506,13 +496,14 @@ function shell(item) {
   const sourceTag = `<span class="tag">${esc(SOURCE_LABEL[item.source] ?? item.source)}</span>`;
   const headMeta = [
     esc(SIDE_LABEL[item.side] ?? item.side),
-    esc(item.source),
-    item.active ? (item.side === 'user' ? '默认实例' : '运行期平台') : '',
+    item.owner ? `所有者 ${esc(item.owner)}` : '',
+    item.active ? (item.side === 'user' ? '默认实例' : '当前在跑') : '',
   ].filter(Boolean).join(' · ');
   return `
     <div class="platform-detail">
       <header class="platform-head">
         <div class="platform-head-main">
+          <button class="btn small platform-back" type="button" data-platform-back>← 返回平台清单</button>
           <h3>${esc(item.label || item.id)} <code>${esc(item.id)}</code></h3>
           <p class="meta">${headMeta}</p>
         </div>
@@ -549,7 +540,8 @@ function paintPanel() {
       if (card) card.innerHTML = `<p class="meta err">读取平台提示词失败：${esc(error?.message ?? error)}</p>`;
     });
   } else if (tab === 'behaviors') {
-    host.innerHTML = '<div class="platform-stack" data-behaviors-host></div>';
+    // 面板自己带 .platform-stack（每一段是一张 card），这里只清空宿主。
+    host.innerHTML = '';
     mountBehaviors(entry);
   } else if (tab === 'capabilities') {
     host.innerHTML = capabilitiesHtml(entry);
@@ -560,21 +552,20 @@ function paintPanel() {
 }
 
 /**
- * 在右栏挂载某个平台的详情。
- * @param {HTMLElement} target [data-split-detail] 容器
+ * 在二级页的宿主里挂载某个平台的详情。
+ * @param {HTMLElement} target 详情视图容器（page.js 的 [data-platform-view="detail"]）
  * @param {object} item 注册表条目（含 diagnostics 时一并展示）
- * @param {{onChanged?: () => void, tab?: string}} [options] 写成功后的刷新回调；tab 指定落到的标签页
+ * @param {{onChanged?: () => void, onTab?: (tab: string) => void, onBack?: () => void, tab?: string}} [options]
+ *   onChanged 写成功后的刷新；onTab / onBack 把标签与返回交给路由；tab 是当前路由里的标签
  */
 export function mountPlatformDetail(target, item, options = {}) {
   root = target;
   entry = item;
   onChanged = options.onChanged ?? null;
-  // 同一平台重挂（保存 / 探活 / 切默认后的整页刷新）时保留当前标签：改完配置不该跳回概览。
-  const key = `${item.side}:${item.id}`;
-  if (key !== mountedKey) tab = 'overview';
-  // 别的页面点名要落到哪个标签（方案页「改能力档」）：条目真有的标签才切过去。
-  if (options.tab && tabsOf(item).some((entryTab) => entryTab.id === options.tab)) tab = options.tab;
-  mountedKey = key;
+  onTab = options.onTab ?? null;
+  onBack = options.onBack ?? null;
+  // 标签来自路由（深链里带着它）：没给或不认识就回概览。
+  tab = tabsOf(item).some((entryTab) => entryTab.id === options.tab) ? options.tab : 'overview';
   resetPanels();
   root.innerHTML = shell(item);
   root.addEventListener('click', onTabClick);
@@ -587,16 +578,11 @@ function onTabClick(event) {
   if (!button) return;
   const next = button.dataset.platformTab;
   if (!next || next === tab) return;
-  tab = next;
-  for (const el of root.querySelectorAll('[data-platform-tab]')) {
-    const on = el.dataset.platformTab === tab;
-    el.classList.toggle('active', on);
-    el.setAttribute('aria-selected', on ? 'true' : 'false');
-  }
-  paintPanel();
+  // 标签是路由的一部分（深链与前进/后退都靠它）：交给页面写进地址栏，再按新路由重挂。
+  onTab?.(next);
 }
 
-/** 拆掉详情（切平台 / 离开页面时调）：清掉组件状态与委托监听。 */
+/** 拆掉详情（换平台 / 回清单时调）：清掉组件状态与委托监听。 */
 export function unmountPlatformDetail() {
   if (!root) return;
   root.removeEventListener('click', onTabClick);
@@ -606,4 +592,6 @@ export function unmountPlatformDetail() {
   root = null;
   entry = null;
   onChanged = null;
+  onTab = null;
+  onBack = null;
 }

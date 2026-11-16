@@ -3,6 +3,7 @@
 // 表格一律用 dataTableHtml/initDataTables（工具栏、分页、多选列都由组件提供，不手写）。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
+import { cardHtml } from '../card/card.js';
 import { renderFields } from '../form/form.js';
 import { confirmBox } from '../message-box/message-box.js';
 import { modalHtml, openModal, closeModal } from '../modal/modal.js';
@@ -285,25 +286,36 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved, platformI
       return;
     }
     editorHost.hidden = false;
-    // 版面与「行为档案」面板同构：section + h3 + meta + 字段 + 左下动作条，
-    // 不再套 .card（详情面板本身就是一张卡，卡中卡会让间距变成两套）。
+    // 版面与「行为档案」面板同构：每一段是一张 card（标题 + meta + 字段 + 左下动作条）。
     editorHost.innerHTML = `
       <div class="platform-stack">
-        <section class="platform-section">
-          <h3>基本信息 · <code>${esc(draft.id)}</code></h3>
-          <p class="meta">保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。</p>
-          <div class="form-stack" id="capabilityEditorFields"></div>
+        ${cardHtml({
+    title: '基本信息',
+    description: `能力档 <code>${esc(draft.id)}</code>：保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。`,
+    body: `<div class="form-stack" id="capabilityEditorFields"></div>
           <div class="form-actions">
             <button class="btn primary" type="button" id="capabilitySave">保存</button>
             <button class="btn" type="button" id="capabilityReset" ${draft.builtin ? '' : 'hidden'}>重置</button>
             <button class="btn ghost" type="button" id="capabilityCancel">取消</button>
             <span class="meta" id="capabilitySaveMsg" role="status"></span>
-          </div>
-        </section>
-        <section class="platform-section"><h3>平台工具</h3><p class="meta">「平台」是 QQ 桥接提供的工具，由这张表决定是否暴露；「Agent」模块由 Agent 预设决定，这里只读展示。</p><div id="capEditorPlatform"></div></section>
-        <section class="platform-section"><h3>MCP 服务器</h3><p class="meta">勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。</p><div id="capEditorServers"></div></section>
-        <section class="platform-section"><h3>MCP 工具</h3><p class="meta">只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。</p><div id="capEditorTools"></div></section>
-        <section class="platform-section"><h3>技能</h3><div id="capEditorSkills"></div></section>
+          </div>`,
+  })}
+        ${cardHtml({
+    title: '平台工具',
+    description: '「平台」是 QQ 桥接提供的工具，由这张表决定是否暴露；「Agent」模块由 Agent 预设决定，这里只读展示。',
+    body: '<div id="capEditorPlatform"></div>',
+  })}
+        ${cardHtml({
+    title: 'MCP 服务器',
+    description: '勾选服务器后，下面的「MCP 工具」只列出这些服务器的工具。',
+    body: '<div id="capEditorServers"></div>',
+  })}
+        ${cardHtml({
+    title: 'MCP 工具',
+    description: '只列出已允许服务器的工具；在这里取消勾选等于把该服务器收窄到具体工具。',
+    body: '<div id="capEditorTools"></div>',
+  })}
+        ${cardHtml({ title: '技能', body: '<div id="capEditorSkills"></div>' })}
       </div>`;
     renderFields(editorHost.querySelector('#capabilityEditorFields'), [
       { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },

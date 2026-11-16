@@ -163,11 +163,12 @@ export function onPageRoute(page, fn) {
   if (typeof fn === 'function') pageRoutes.set(page, fn);
 }
 
-/** 把当前子段交给页面；片段还没就绪时等 hydrate 完再交（页面模块在 init 里才注册）。 */
+/** 把当前子段交给页面：页面模块是在 hydrate 里才注册回调的，所以必须等片段就绪后再查一次。 */
 function applyRoute(page, sub, tab) {
-  const fn = pageRoutes.get(page);
-  if (typeof fn !== 'function') return;
-  void hydratePage(page).then(() => fn({ page, sub, tab }));
+  void hydratePage(page).then(() => {
+    const fn = pageRoutes.get(page);
+    if (typeof fn === 'function') fn({ page, sub, tab });
+  });
 }
 
 /** 切页（含子段）：只做展示层与 URL，数据加载交给各页面注册的回调。 */

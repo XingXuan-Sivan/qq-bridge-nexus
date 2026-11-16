@@ -197,13 +197,14 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 - `badges` / `tags` / `actions` 是 HTML 片段（调用方转义文本）。
 - `icon` 是 `{ glyph | src, tone }`（`tone` = `accent`/`ok`/`warn`/`danger`）；**不传也渲染图标位**，内容取标题首字（`.tile-icon.is-default`）。这样 DOM 结构不因有无自定义图标而分叉，作者将来补图标只需传参。
 - 给了 `body` 就不再输出默认的标题/描述/标签行（此时图标也由调用方自己放）。
-- 插件页与人格页的列表都用它，样式 `.tile` / `.tile-head` / `.tile-icon` / `.tile-head-body` / `.tile-actions` 共享（均在 `css/components.css`）。
+- `interactive: true` 让整张卡可点：输出 `role="button"` + `tabindex="0"`，配合页面的点击委托（排除卡内的 `button` / `a`）与 `Enter` / 空格键进二级页。平台清单就是这么用的。
+- 插件页、人格页与平台清单的列表都用它，样式 `.tile` / `.tile-head` / `.tile-icon` / `.tile-head-body` / `.tile-actions` 共享（均在 `css/components.css`）。
 
 ### 4.8 其它
 
 | 组件 | 导出 | 说明 |
 | --- | --- | --- |
-| `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏，组件只管间距；窄屏 ≤900px 自动上下堆叠 |
+| `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏，组件只管间距；窄屏 ≤900px 自动上下堆叠。**现仅 MCP 页使用**：平台页已改为「卡片网格清单 + 二级页」（见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) §4），不再适合塞进两栏 |
 | `table` | `tableHtml(...)` | 页面不许手写表格骨架；分页见页面实现 |
 | `search-box` | `searchBoxHtml({ id, placeholder, value, label, className })` / `bindSearchBox(input, onQuery, { onEnter })` | 固定产出 `type="search"` + `class="search-box"`，宽度用 `input.search-box--w240` 而不是工具类 |
 | `modal` | 三段式弹窗 | 被 `message-box` 复用 |
@@ -289,17 +290,17 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 | 界面 | 数据源 | 写口 | 口径 |
 | --- | --- | --- | --- |
-| 平台页（列表 + 分栏） | `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应，列表与分栏共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
+| 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户侧与 Agent 侧同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是「诊断汇总（仅有 error 时出现）+ 用户平台 / Agent 平台两个折叠组 + 卡片网格」，路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
 | 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户侧一行「能力位」；Agent 侧四行「能力位 / 应用方式 / 提示注入通道 / 权限权威支持面」。空项给「—」；权限权威支持面由 `canPinPermission` 决定（能钉档给两种，否则只有「执行体自身」） |
 | 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个执行体」由注册表回答 |
-| 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器再跳平台›能力标签 |
+| 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器，再 `setConsolePage('platforms', { sub: 'agent:<id>', tab: 'capabilities' })` 直接落到那个平台的能力页 |
 | 会话详情›执行体与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：执行体名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉与「在新执行体上重开」；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
 | 全局配置›运行（执行体卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认执行体只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
 | 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉不列 `full`——要 full 先打开「允许 full 档」，再在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
 
 三条落地细节：
 
-- **一次取全**：会话详情不为「执行体 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台分栏也不为每个标签重拉注册表。
+- **一次取全**：会话详情不为「执行体 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台清单与二级页共用一份注册表快照，切标签不重拉。
 - **写口只有一个**：权限档只走 `/permission`（不混进会话 PATCH），默认执行体只走 `/api/config/runtime`（不混进平台配置），能力档只走 `/capabilities/<id>`。同一个值出现第二个写口就是缺陷。
 - **失败写在块内**：写后回读不一致、桥接权威拦截（409）、禁用档（403）都在块内联报错，不弹全局 toast、不静默改回。
 

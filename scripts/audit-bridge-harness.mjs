@@ -76,7 +76,7 @@ import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, reso
 import { normalizePlan, createPlanStore, legacyModeOfPlan, legacyLevelOfPlan, planIdForLegacy, findPlan } from '../src/runtime/plans.mjs';
 import { createRuntimeState } from '../src/runtime/active.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
-import { listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
+import { listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
 // 配置 v2（C2）：bridge.js 在 loadConfig 里做迁移与派生视图，夹具剥 import 后要按同名补回。
 // P2 又进了三个：写口按 id 打补丁要用扁平条目，切换默认执行体要用 setActivePlatform，
 // 「改完要不要重启」靠端点白名单判定 —— 都是纯函数，用真实现。
@@ -455,7 +455,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ...schedulingCursor,
     ...schedulingPolicy,
     ...platformPromptLib,
-    createPlanStore, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
+    createPlanStore, listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
     AGENT_ENDPOINT_KEYS, CONFIG_VERSION, flatPlatformEntry, migrateConfigToV2, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform,
     // `platforms.active` 的落地要真注册表；VM 里没有装配内置平台，桩掉。

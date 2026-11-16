@@ -1,5 +1,5 @@
 // Token 用量账本：把归一用量事件里的 provider usage 落成「按会话 × 按回合」的可查明细，
-// 并在读取时用价目表折算成金额。
+// 并在读取时用平台申报的价目折算成金额（没申报价目的模型只计 token，不计价）。
 //
 // 为什么这样设计（三条约束决定了实现形态）：
 //
@@ -24,14 +24,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  DEFAULT_PRICE_TABLE,
   ZERO_BUCKETS,
   addBuckets,
-  costOfBuckets,
   isPeakAt,
   normalizeUsage,
   priceUsage,
-  ratesAt,
   totalTokensOf
 } from './model-prices.js';
 
@@ -67,7 +64,8 @@ export function pickBucketMs(windowMs, maxBuckets) {
  * @param {object} options
  * @param {string} options.file           JSONL 落盘路径
  * @param {(msg: string, err?: unknown) => void} [options.log]
- * @param {object} [options.priceTable]   价目表（`resolvePriceTable()` 的结果）
+ * @param {object|null} [options.priceTable] 平台申报的价目表（`priceTableFromCatalog()` 的结果）；
+ *                                       未申报时为 null，此时只计 token、不计价
  * @param {(sessionId: string) => (string|undefined)} [options.resolveKey] 运行期 sessionId → 会话 key 解析
  * @param {number} [options.maxLines]     日志行数上限，超出即压缩重写
  * @param {() => number} [options.now]
@@ -75,12 +73,18 @@ export function pickBucketMs(windowMs, maxBuckets) {
 export function createTokenLedger({
   file,
   log = () => {},
-  priceTable = DEFAULT_PRICE_TABLE,
+  priceTable = null,
   resolveKey,
   maxLines = 20000,
   now = () => Date.now()
 } = {}) {
   if (typeof file !== 'string' || !file) throw new Error('createTokenLedger: file is required');
+
+  /**
+   * 计价结果 → 「金额 / 档位 / 是否未申报」。
+   * 没申报价目的模型只计 token：金额 0、无档位，单独累加到 unpricedTokens。
+   */
+  const chargeOf = (p) => ({ amount: p.cost ? p.cost.total : 0, tier: p.rates?.tier ?? null, unpriced: !p.cost });
 
   /** sessionId -> 最新一条投影基线 */
   const baselines = new Map();
@@ -136,7 +140,8 @@ export function createTokenLedger({
           peak: Number(record.peak) || 0,
           off: Number(record.off) || 0
         },
-        estimated: record.estimated === true,
+        unpriced: record.unpriced === true,
+        unpricedTokens: Number(record.unpricedTokens) || 0,
         dropped: Number(record.dropped) || 0,
         maxSeq: Number.isFinite(Number(record.maxSeq)) ? Number(record.maxSeq) : -1
       });
@@ -257,7 +262,7 @@ export function createTokenLedger({
       out.push({
         k: 'evict', t: sessionSeen.get(e.sessionId) ?? 0, sid: e.sessionId, key: e.key,
         b: e.buckets, cost: e.cost, peak: e.byTier.peak, off: e.byTier.off,
-        estimated: e.estimated, dropped: e.dropped, maxSeq: Number(e.maxSeq) >= 0 ? Number(e.maxSeq) : -1
+        unpriced: e.unpriced, unpricedTokens: e.unpricedTokens, dropped: e.dropped, maxSeq: Number(e.maxSeq) >= 0 ? Number(e.maxSeq) : -1
       });
     }
     try {
@@ -299,7 +304,8 @@ export function createTokenLedger({
         buckets: { ...ZERO_BUCKETS },
         cost: 0,
         byTier: { peak: 0, off: 0 },
-        estimated: false,
+        unpriced: false,
+        unpricedTokens: 0,
         dropped: 0,
         // 被淘汰采样里最大的 seq：一旦更新的投影基线覆盖到它，这些桶就已经包含在
         // 基线里了，再相加就是重复计费（见 evictionCovered()）。
@@ -310,10 +316,13 @@ export function createTokenLedger({
       if (Number.isFinite(sampleSeq) && sampleSeq >= 0) {
         acc.maxSeq = Math.max(Number(acc.maxSeq) >= 0 ? Number(acc.maxSeq) : -1, sampleSeq);
       }
-      const p = priceUsage(sample.buckets, { model: sample.model, at: sample.t || now(), table: priceTable });
-      acc.cost += p.cost.total;
-      acc.byTier[p.rates.tier] += p.cost.total;
-      acc.estimated ||= p.rates.estimated;
+      const charge = chargeOf(priceUsage(sample.buckets, { model: sample.model, at: sample.t || now(), table: priceTable }));
+      acc.cost += charge.amount;
+      if (charge.tier) acc.byTier[charge.tier] += charge.amount;
+      else {
+        acc.unpriced = true;
+        acc.unpricedTokens += totalTokensOf(sample.buckets);
+      }
       acc.dropped += 1;
       if (sample.key) acc.key = sample.key;
       evicted.set(sample.sessionId, acc);
@@ -461,7 +470,8 @@ export function createTokenLedger({
           liveByTier: { peak: 0, off: 0 },
           allCost: 0,
           allByTier: { peak: 0, off: 0 },
-          estimated: false,
+          unpriced: false,
+          unpricedTokens: 0,
           turns: new Map(),
           models: new Set()
         };
@@ -469,14 +479,17 @@ export function createTokenLedger({
       }
       const base = baselines.get(s.sessionId);
       const isLive = !base || s.seq > base.seq;
-      const p = priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable });
-      entry.estimated ||= p.rates.estimated;
-      entry.allCost += p.cost.total;
-      entry.allByTier[p.rates.tier] += p.cost.total;
+      const charge = chargeOf(priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable }));
+      if (charge.unpriced) {
+        entry.unpriced = true;
+        entry.unpricedTokens += totalTokensOf(s.buckets);
+      }
+      entry.allCost += charge.amount;
+      if (charge.tier) entry.allByTier[charge.tier] += charge.amount;
       if (isLive) {
         entry.liveBuckets = addBuckets(entry.liveBuckets, s.buckets);
-        entry.liveCost += p.cost.total;
-        entry.liveByTier[p.rates.tier] += p.cost.total;
+        entry.liveCost += charge.amount;
+        if (charge.tier) entry.liveByTier[charge.tier] += charge.amount;
       }
       let row = entry.turns.get(s.turn);
       if (!row) {
@@ -492,7 +505,8 @@ export function createTokenLedger({
           provider: s.provider,
           buckets: { ...ZERO_BUCKETS },
           cost: 0,
-          tier: null
+          tier: null,
+          unpriced: false
         };
         entry.turns.set(s.turn, row);
       }
@@ -503,8 +517,9 @@ export function createTokenLedger({
       if (s.t > row.endedAt) row.endedAt = s.t;
       if (s.model) { row.model = s.model; entry.models.add(s.model); }
       if (s.provider) row.provider = s.provider;
-      row.cost += p.cost.total;
-      row.tier = row.tier === null || row.tier === p.rates.tier ? p.rates.tier : 'mixed';
+      row.cost += charge.amount;
+      row.unpriced ||= charge.unpriced;
+      if (charge.tier) row.tier = row.tier === null || row.tier === charge.tier ? charge.tier : 'mixed';
     }
     return index;
   }
@@ -522,7 +537,8 @@ export function createTokenLedger({
       byTier: { peak: 0, off: 0 },
       turns: 0,
       steps: 0,
-      estimated: false,
+      unpriced: false,
+      unpricedTokens: 0,
       lastAt: 0,
       firstAt: 0,
       models: []
@@ -541,12 +557,14 @@ export function createTokenLedger({
       let cost = (entry?.liveCost ?? 0) + (gone?.cost ?? 0);
       view.byTier.peak += (entry?.liveByTier.peak ?? 0) + (gone?.byTier.peak ?? 0);
       view.byTier.off += (entry?.liveByTier.off ?? 0) + (gone?.byTier.off ?? 0);
-      view.estimated ||= (entry?.estimated ?? false) || (gone?.estimated ?? false);
+      view.unpriced ||= (entry?.unpriced ?? false) || (gone?.unpriced ?? false);
+      view.unpricedTokens += (entry?.unpricedTokens ?? 0) + (gone?.unpricedTokens ?? 0);
       if (base) {
-        const p = priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable });
-        cost += p.cost.total;
-        view.byTier[p.rates.tier] += p.cost.total;
-        view.estimated ||= p.rates.estimated;
+        const charge = chargeOf(priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }));
+        cost += charge.amount;
+        if (charge.tier) view.byTier[charge.tier] += charge.amount;
+        view.unpriced ||= charge.unpriced;
+        if (charge.unpriced) view.unpricedTokens += totalTokensOf(base.buckets);
       }
       view.cost += cost;
       if (entry) {
@@ -612,7 +630,8 @@ export function createTokenLedger({
       turns: 0,
       steps: 0,
       conversations: conversations.length,
-      estimated: false
+      unpriced: false,
+      unpricedTokens: 0
     };
     for (const c of conversations) {
       totals.buckets = addBuckets(totals.buckets, c.buckets);
@@ -623,18 +642,28 @@ export function createTokenLedger({
       totals.byTier.off += c.byTier.off;
       totals.turns += c.turns;
       totals.steps += c.steps;
-      totals.estimated ||= c.estimated;
+      totals.unpriced ||= c.unpriced;
+      totals.unpricedTokens += c.unpricedTokens;
     }
     const totalTok = totalTokensOf(totals.buckets);
     const inputTok = totals.buckets.cacheMiss + totals.buckets.cacheHit + totals.buckets.cacheWrite;
+    // 此刻的峰谷档位与货币口径：没有价目表时整块为 null，
+    // 控制台据此说「这个 Agent 平台没申报价目」，而不是编一个 0 元。
+    const peakNow = priceTable ? isPeakAt(now(), priceTable) : null;
     return {
       ok: true,
       generatedAt: now(),
-      priceVersion: priceTable.version,
-      currency: priceTable.currency,
-      symbol: priceTable.symbol,
-      nowTier: ratesAt(undefined, now(), priceTable),
-      priceTable: {
+      priceVersion: priceTable?.version ?? '',
+      currency: priceTable?.currency ?? '',
+      symbol: priceTable?.symbol ?? '',
+      nowTier: priceTable ? {
+        tier: peakNow ? 'peak' : 'off',
+        tierLabel: peakNow ? '高峰时段' : '空闲时段',
+        currency: priceTable.currency,
+        symbol: priceTable.symbol,
+        peakMultiplier: priceTable.peakMultiplier
+      } : null,
+      priceTable: priceTable ? {
         version: priceTable.version,
         currency: priceTable.currency,
         symbol: priceTable.symbol,
@@ -644,7 +673,7 @@ export function createTokenLedger({
         peakWeekdays: priceTable.peakWeekdays,
         holidayCount: (priceTable.holidays ?? []).length,
         models: Object.fromEntries(Object.entries(priceTable.models).map(([name, m]) => [name, { label: m.label, off: m.off }]))
-      },
+      } : null,
       totals: {
         ...totals,
         totalTokens: totalTok,
@@ -671,8 +700,8 @@ export function createTokenLedger({
     return {
       ok: true,
       generatedAt: now(),
-      currency: priceTable.currency,
-      symbol: priceTable.symbol,
+      currency: priceTable?.currency ?? '',
+      symbol: priceTable?.symbol ?? '',
       ...view,
       turnLimit,
       turns: rows.slice(0, Math.max(1, Math.min(1000, Number(turnLimit) || 200)))
@@ -715,11 +744,12 @@ export function createTokenLedger({
         turns: 0,
         steps: 0,
         tier: null,
+        unpricedTokens: 0,
         keys: new Set()
       });
     }
     const totals = { cost: 0, tokens: 0, turns: 0, steps: 0 };
-    let estimated = false;
+    let unpriced = false;
     let countedSamples = 0;
     // 逐桶的「轮次」去重集合（键 = sessionId|turn）。
     // steps 数的是计费请求（同一回合的多个 step / 重试各算一条），turns 数的是真正的对话轮次；
@@ -740,29 +770,30 @@ export function createTokenLedger({
     }
     for (const base of baselines.values()) {
       // 与 sessionView() 同口径：基线没有逐时明细，按快照时刻（缺失时取当前）整体计价。
-      ledgerCost += priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }).cost.total;
+      ledgerCost += chargeOf(priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable })).amount;
       ledgerBuckets = addBuckets(ledgerBuckets, base.buckets);
     }
     for (const s of samples.values()) {
-      // 这条采样的计价只算一次：窗口内的桶与窗口外的"总额"共用同一个 p。
-      const p = priceUsage(s.buckets, { model: s.model, at: s.t || endAt, table: priceTable });
+      // 这条采样的计价只算一次：窗口内的桶与窗口外的"总额"共用同一个 charge。
+      const charge = chargeOf(priceUsage(s.buckets, { model: s.model, at: s.t || endAt, table: priceTable }));
       const tokens = totalTokensOf(s.buckets);
       const base = baselines.get(s.sessionId);
       if (!base || s.seq > base.seq) {
-        ledgerCost += p.cost.total;
+        ledgerCost += charge.amount;
         ledgerBuckets = addBuckets(ledgerBuckets, s.buckets);
       }
       if (s.t < start || s.t >= end) continue;
       const idx = Math.min(count - 1, Math.max(0, Math.floor((s.t - start) / bucketMs)));
       const row = rows[idx];
-      row.cost += p.cost.total;
+      row.cost += charge.amount;
       row.tokens += tokens;
+      if (charge.unpriced) row.unpricedTokens += tokens;
       row.cacheMiss += s.buckets.cacheMiss;
       row.cacheHit += s.buckets.cacheHit;
       row.cacheWrite += s.buckets.cacheWrite;
       row.output += s.buckets.output;
       row.steps += 1;
-      row.tier = row.tier === null || row.tier === p.rates.tier ? p.rates.tier : 'mixed';
+      if (charge.tier) row.tier = row.tier === null || row.tier === charge.tier ? charge.tier : 'mixed';
       row.keys.add(keyOf(s.sessionId) ?? s.key ?? null);
       const turnId = `${s.sessionId}|${s.turn}`;
       if (!rowTurnSeen[idx].has(turnId)) {
@@ -774,10 +805,10 @@ export function createTokenLedger({
         turnSeen.add(turnId);
         totals.turns += 1;
       }
-      totals.cost += p.cost.total;
+      totals.cost += charge.amount;
       totals.tokens += tokens;
       totals.steps += 1;
-      estimated ||= p.rates.estimated;
+      unpriced ||= charge.unpriced;
       countedSamples += 1;
     }
     for (const row of rows) {
@@ -800,8 +831,8 @@ export function createTokenLedger({
     return {
       ok: true,
       generatedAt: endAt,
-      currency: priceTable.currency,
-      symbol: priceTable.symbol,
+      currency: priceTable?.currency ?? '',
+      symbol: priceTable?.symbol ?? '',
       hours: windowHours,
       bucketMs,
       from: start,
@@ -809,7 +840,8 @@ export function createTokenLedger({
       buckets: rows.map(({ keys, ...rest }) => ({ ...rest, keys })),
       totals,
       busiest: busiest ? { t: busiest.t, cost: busiest.cost, tokens: busiest.tokens } : null,
-      estimated,
+      unpriced,
+      unpricedTokens: rows.reduce((sum, row) => sum + row.unpricedTokens, 0),
       countedSamples,
       // 时间轴之外的部分：图上画不出来，控制台会单独说明，避免"图上加起来 ≠ 总花费"引起误会。
       offChartCost: Math.max(0, ledgerCost - totals.cost),
@@ -823,7 +855,7 @@ export function createTokenLedger({
     const all = [...samples.values()].sort((a, b) => b.t - a.t);
     const out = [];
     for (const s of all.slice(0, n)) {
-      const p = priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable });
+      const charge = chargeOf(priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable }));
       out.push({
         time: s.t,
         key: keyOf(s.sessionId) ?? s.key ?? null,
@@ -834,9 +866,9 @@ export function createTokenLedger({
         model: s.model ?? null,
         tokens: totalTokensOf(s.buckets),
         ...s.buckets,
-        cost: p.cost.total,
-        tier: p.rates.tier,
-        estimated: p.rates.estimated
+        cost: charge.unpriced ? null : charge.amount,
+        tier: charge.tier,
+        unpriced: charge.unpriced
       });
     }
     return out;
@@ -853,7 +885,7 @@ export function createTokenLedger({
       samples: samples.size,
       lastIngestAt,
       lastCompactedAt,
-      priceVersion: priceTable.version
+      priceVersion: priceTable?.version ?? ''
     };
   }
 

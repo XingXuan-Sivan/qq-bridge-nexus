@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { createScheduler } from '../src/scheduler/engine.js';
 import { parseKey } from '../src/session/key.mjs';
-import { CN_HOLIDAYS, resolvePriceTable } from '../src/model-prices.js';
+import { CN_HOLIDAYS } from '../src/model-prices.js';
+import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 const PLATFORM_PROMPT_SAMPLE = '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。';
 
 import { listBehaviorTypes } from '../src/behaviors/types.mjs';
@@ -37,20 +38,19 @@ function presetStatusFixture(preset) {
 // ── 令牌与花费：离线示例数据 ──────────────────────────────────────────────
 // 字段口径与 src/token-ledger.js 的 summary()/conversation()/recent() 保持一致，
 // 这样控制台渲染路径在离线预览与真实环境走的是同一套形状。
-const USAGE_SYMBOL = '¥';
+// 价目表取 dsh 平台自己申报的那份，再按 summary() 的投影口径（只给 label/off、节假日只给数量）
+// 拍平 —— 不在夹具里另抄一份价格，否则改声明时预览不会跟着变。
+const USAGE_SYMBOL = DSH_PRICE_TABLE.symbol;
 const USAGE_PRICE_TABLE = {
-  version: '2026-11-04',
-  currency: 'CNY',
+  version: DSH_PRICE_TABLE.version,
+  currency: DSH_PRICE_TABLE.currency,
   symbol: USAGE_SYMBOL,
-  unit: 1e6,
-  peakMultiplier: 2,
-  peakWindows: [[9, 12], [14, 18]],
-  peakWeekdays: [1, 2, 3, 4, 5],
-  holidayCount: 33,
-  models: {
-    'deepseek-flash': { label: 'DeepSeek-V4.1-Flash', off: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 } },
-    'deepseek-v4-pro': { label: 'DeepSeek-V4-Pro-0813', off: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 } },
-  },
+  unit: DSH_PRICE_TABLE.unit,
+  peakMultiplier: DSH_PRICE_TABLE.peakMultiplier,
+  peakWindows: DSH_PRICE_TABLE.peakWindows,
+  peakWeekdays: DSH_PRICE_TABLE.peakWeekdays,
+  holidayCount: DSH_PRICE_TABLE.holidays.length,
+  models: Object.fromEntries(Object.entries(DSH_PRICE_TABLE.models).map(([id, m]) => [id, { label: m.label, off: m.off }])),
 };
 
 function usageConversationFixture(key, buckets, cost, turns, steps, unattributed = 0) {
@@ -66,7 +66,8 @@ function usageConversationFixture(key, buckets, cost, turns, steps, unattributed
     byTier: { peak: cost * 0.4, off: cost * 0.6 },
     turns,
     steps,
-    estimated: false,
+    unpriced: false,
+    unpricedTokens: 0,
     lastAt: Date.parse(timestamp),
     firstAt: Date.parse(timestamp) - 3600_000,
     models: ['deepseek-flash'],
@@ -97,7 +98,7 @@ function usageSummaryFixture() {
     priceVersion: USAGE_PRICE_TABLE.version,
     currency: 'CNY',
     symbol: USAGE_SYMBOL,
-    nowTier: { model: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash', tier: 'off', tierLabel: '空闲时段', estimated: false },
+    nowTier: { tier: 'off', tierLabel: '空闲时段', currency: USAGE_PRICE_TABLE.currency, symbol: USAGE_SYMBOL, peakMultiplier: USAGE_PRICE_TABLE.peakMultiplier },
     priceTable: USAGE_PRICE_TABLE,
     totals: {
       buckets,
@@ -108,7 +109,8 @@ function usageSummaryFixture() {
       turns,
       steps,
       conversations: conversations.length,
-      estimated: false,
+      unpriced: false,
+      unpricedTokens: 0,
       totalTokens: buckets.cacheMiss + buckets.cacheHit + buckets.cacheWrite + buckets.output,
       inputTokens: input,
       cacheHitRate: input > 0 ? buckets.cacheHit / input : 0,
@@ -191,6 +193,7 @@ function usageSeriesFixture(hoursRaw) {
       turns,
       steps,
       tier: tierOfBucket(t),
+      unpricedTokens: 0,
       keys: steps > 0 ? ['group:123456789'] : [],
     });
   }
@@ -213,7 +216,8 @@ function usageSeriesFixture(hoursRaw) {
     buckets,
     totals,
     busiest: busiest ? { t: busiest.t, cost: busiest.cost, tokens: busiest.tokens } : null,
-    estimated: false,
+    unpriced: false,
+    unpricedTokens: 0,
     countedSamples: buckets.reduce((n, b) => n + b.steps, 0),
     offChartCost: 0.02,
     offChartTokens: 18000,
@@ -262,7 +266,8 @@ function usageTurnsFixture(key) {
       reasoning: 0,
     }), { cacheMiss: 0, cacheHit: 0, cacheWrite: 0, output: 0, reasoning: 0 }),
     byTier: { peak: cost * 0.3, off: cost * 0.7 },
-    estimated: false,
+    unpriced: false,
+    unpricedTokens: 0,
     models: ['deepseek-flash'],
     turnLimit: 200,
     // 与 src/token-ledger.js 的 conversation() 一致：`turns` 是**数组**（不是条数）。
@@ -290,7 +295,7 @@ function usageRecentFixture() {
       reasoning: 0,
       cost: 0.0021 + i * 0.0001,
       tier: i === 3 ? 'peak' : 'off',
-      estimated: false,
+      unpriced: false,
     });
   }
   return rows;
@@ -693,7 +698,7 @@ async function handleFixtureSilence(req, method, json, requests, state) {
     requests.push({ method, path: '/api/silence', body });
     try { sil.update(body); } catch (error) { return json({ ok: false, error: error?.message ?? String(error) }, 400); }
   }
-  return json({ ok: true, ...sil.status(), manual: state.roleMode === 'silent', peakPreset: peakPresetRanges(resolvePriceTable()), writable: true });
+  return json({ ok: true, ...sil.status(), manual: state.roleMode === 'silent', peakPreset: peakPresetRanges(DSH_PRICE_TABLE), writable: true });
 }
 
 async function handleFixtureScheduler(req, method, path, json, requests) {

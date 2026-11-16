@@ -28,7 +28,7 @@ import { mdToPlain } from '../src/md-to-plain.js';
 import { extractJsonArray } from '../src/slang-learner.js';
 import { sanitizeStickerText } from '../src/sticker-lib.js';
 import { createTokenLedger } from '../src/token-ledger.js';
-import { DEFAULT_PRICE_TABLE } from '../src/model-prices.js';
+import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 
 const CONSOLE = { 'x-console-token': 'fixture-console-token' };
 let failures = 0;
@@ -395,7 +395,7 @@ await test('R14 淘汰桶被新基线覆盖后不再重复累加', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-ledger-regress-'));
   const file = path.join(dir, 'usage.jsonl');
   try {
-    const ledger = createTokenLedger({ file, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'qq:group:456', maxLines: 2 });
+    const ledger = createTokenLedger({ file, priceTable: DSH_PRICE_TABLE, resolveKey: () => 'qq:group:456', maxLines: 2 });
     const at = Date.parse('2026-03-02T20:00:00+08:00');
     const usage = (input, output) => ({ inputTokens: input, outputTokens: output });
     for (let i = 1; i <= 3; i += 1) ledger.ingestSample({ sessionId: 's1', seq: i, turn: i, step: 1, at, usage: usage(1000, 100) });

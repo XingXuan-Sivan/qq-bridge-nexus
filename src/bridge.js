@@ -80,7 +80,7 @@ import {
   redactForHandover,
   DORMANT_MAX_MS,
 } from './mode-handover.js';
-import { resolvePriceTable, CN_HOLIDAYS, normalizeUsage } from './model-prices.js';
+import { priceTableFromCatalog, CN_HOLIDAYS, normalizeUsage } from './model-prices.js';
 import { createScheduler } from './scheduler/engine.js';
 import { buildSkipNotice } from './scheduler/skip-notice.js';
 import { parseRemindCommand, REMIND_HELP, formatTaskList } from './scheduler/commands.js';
@@ -96,7 +96,7 @@ import { cleanImageQuery, searchBingImages, imageCandidatesText, createImageCand
 import { findNearToken, nearTokenError, tokenNoticeBlock, createTokenMissTracker } from './agent-token-guard.js';
 import { createBlockTracker, BLOCK_REFS } from './prompt-blocks.js';
 import { createPlanStore, findPlan, legacyModeOfPlan, legacyLevelOfPlan } from './runtime/plans.mjs';
-import { PLATFORMS_ROOT } from './profiles/paths.mjs';
+import { PLATFORMS_ROOT, AGENT_PLATFORMS_ROOT } from './profiles/paths.mjs';
 import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITIES_ROOT, CAPABILITY_RUNTIME_DEFAULTS } from './capabilities/store.mjs';
 // 平台话术 = profiles/platforms/<id>/prompt.md，读写只经这一层（注入块 core-platform-prompt 用同一份）。
 import { readPlatformPrompt, listPlatformPrompts, writePlatformPrompt, restorePlatformPrompt, renderPlatformText } from './user-side/prompt.mjs';
@@ -114,7 +114,7 @@ import { INBOUND_DROP, createInboundPipeline } from './user-side/inbound.mjs';
 import { findRegistryPlatform, platformRegistrySnapshot, vetPlatformConfig } from './platforms/registry.mjs';
 // 平台清单与提示词变量都来自平台目录（C2b）：profiles/platforms/<id>/platform.yml 是唯一源，
 // src/ 里不再有内置平台清单，插件只能经 adapters:provide 注册一份「描述」。
-import { listPlatforms } from './platforms/index.mjs';
+import { listAgentPlatformDirs, listPlatforms } from './platforms/index.mjs';
 import { createAdapterRegistry } from './platforms/adapter-registry.mjs';
 import {
   FORBIDDEN_PERMISSION_PRESETS,
@@ -1508,8 +1508,6 @@ function loadConfig() {
     questionTimeoutMs: file.questionTimeoutMs ?? 5 * 60 * 1000,
     consolePort: file.consolePort ?? 3100,
     consoleToken: file.consoleToken ?? '',
-    // 价目表覆盖项（可选）。留空即用 src/model-prices.js 的官方默认价。
-    pricing: file.pricing ?? null,
     security: {
       interceptNotify: true,
       ...(file.security ?? {})
@@ -4108,10 +4106,15 @@ async function main() {
   const sessionPromises = new Map(); // key -> create promise（防并发重复创建）
   const promptQueues = new Map(); // key -> { queue: [], running: false }：每个 QQ 会话串行投递 DSH prompt，保证 turn 顺序
 
-  // ── Token 用量账本（控制台「令牌与花费」） ───────────────────────────────
+  // ── Token 用量账本（控制台「令牌与花费」） ─────────────────────────────────
   // 权威总量取 DSH 的 tokenUsage 投影（整条会话日志累计，含桥接启动前的历史），
   // 逐轮明细由 assistant/message 的 usage 折叠而来；花费在读取时按价目表折算。
-  const priceTable = resolvePriceTable(cfg.pricing);
+  //
+  // 价目表来自**正在跑的 Agent 平台**自己申报的 modelCatalog（模型单价 + 计费口径）：
+  // 桥接不内置任何价格，没申报就只报 token、不算钱。
+  const declaredAgentCatalog = (id) => listAgentPlatformDirs({ root: AGENT_PLATFORMS_ROOT })
+    .find((item) => item.id === id)?.modelCatalog ?? null;
+  const priceTable = priceTableFromCatalog(declaredAgentCatalog(String(cfg.platforms?.active?.agent ?? '')));
   const tokenLedger = createTokenLedger({
     file: TOKEN_USAGE_FILE,
     log: (...args) => log(...args),
@@ -6101,7 +6104,10 @@ async function main() {
       const got = await withTimeout(runtime.port().listModels(), 10_000, 'listModels');
       value.live = got?.catalog ?? null;
       // 三个下拉要的是整理后的形状（每个模型带档位 / 看图 / 价目覆盖），不在控制台重算。
-      value.view = value.live ? buildCatalogView(value.live, { priceTable }) : null;
+      // 「是否报价」按**这个平台**自己的声明算：价目是平台自己的商业条款。
+      value.view = value.live
+        ? buildCatalogView(value.live, { priceTable: priceTableFromCatalog(declaredAgentCatalog(id)) })
+        : null;
     } catch (error) {
       value.error = String(error?.message ?? error);
     } finally {
@@ -11747,7 +11753,7 @@ async function main() {
           }
           if (req.method === 'GET' && url.pathname === '/api/tokens/recent') {
             const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit')) || 50));
-            sendJson({ ok: true, symbol: priceTable.symbol, entries: tokenLedger.recent(limit) });
+            sendJson({ ok: true, symbol: priceTable?.symbol ?? '', entries: tokenLedger.recent(limit) });
             return;
           }
           if (req.method === 'POST' && url.pathname === '/api/tokens/reset') {

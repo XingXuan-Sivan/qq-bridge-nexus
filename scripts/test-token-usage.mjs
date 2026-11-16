@@ -3,7 +3,7 @@
 // 覆盖点（每一条都对应一个曾经容易写错的地方）：
 // 1. 峰谷分时判定按北京时间，且排除中国法定节假日；
 // 2. 四个计费桶互不重叠，金额 = Σ(桶 token × 单价)；
-// 3. 未知模型走兜底价并标记 estimated；
+// 3. 没申报价目的模型不报价（只计 token，绝不拿别的模型兜底估算）；
 // 4. 同一 (turn, step, retry) 的采样「后到覆盖先到」，不是累加；
 // 5. 重连重放同一批 snapshot 记录不会让用量翻倍（幂等）；
 // 6. `llm/retry-started` 之后同一步骤的第二次请求另算一次；
@@ -15,18 +15,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  DEFAULT_PRICE_TABLE,
   CN_HOLIDAYS_2026,
   beijingParts,
   costOfBuckets,
   isPeakAt,
   normalizeUsage,
+  priceTableFromCatalog,
   priceUsage,
   ratesAt,
-  resolvePriceTable,
   totalTokensOf
 } from '../src/model-prices.js';
 import { createTokenLedger } from '../src/token-ledger.js';
+import { DSH_PRICE_TABLE as PRICE } from './dsh-price-fixture.mjs';
 
 let failed = 0;
 function assert(cond, label) {
@@ -39,33 +39,33 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-token-ledger-'));
 const ledgerFile = path.join(tmpDir, 'token-usage.jsonl');
 function freshLedger(opts = {}) {
   try { fs.unlinkSync(ledgerFile); } catch {}
-  return createTokenLedger({ file: ledgerFile, priceTable: DEFAULT_PRICE_TABLE, ...opts });
+  return createTokenLedger({ file: ledgerFile, priceTable: PRICE, ...opts });
 }
 
 // ── 1. 峰谷分时 ─────────────────────────────────────────────────────────
 // 北京时间 = UTC+8。2026-03-02 是周一。
 const mon = (hhmm) => Date.parse(`2026-03-02T${hhmm}:00+08:00`);
 assert(beijingParts(mon('10:00')).weekday === 1, '2026-03-02 是周一');
-assert(isPeakAt(mon('10:00')) === true, '周一 10:00 属高峰时段');
-assert(isPeakAt(mon('13:00')) === false, '周一 13:00（午休）属空闲时段');
-assert(isPeakAt(mon('15:00')) === true, '周一 15:00 属高峰时段');
-assert(isPeakAt(mon('08:59')) === false, '周一 08:59 属空闲时段');
-assert(isPeakAt(mon('12:00')) === false, '窗口为半开区间：12:00 已不在高峰');
-assert(isPeakAt(mon('18:00')) === false, '窗口为半开区间：18:00 已不在高峰');
+assert(isPeakAt(mon('10:00'), PRICE) === true, '周一 10:00 属高峰时段');
+assert(isPeakAt(mon('13:00'), PRICE) === false, '周一 13:00（午休）属空闲时段');
+assert(isPeakAt(mon('15:00'), PRICE) === true, '周一 15:00 属高峰时段');
+assert(isPeakAt(mon('08:59'), PRICE) === false, '周一 08:59 属空闲时段');
+assert(isPeakAt(mon('12:00'), PRICE) === false, '窗口为半开区间：12:00 已不在高峰');
+assert(isPeakAt(mon('18:00'), PRICE) === false, '窗口为半开区间：18:00 已不在高峰');
 // 周六（2026-03-07）全天空闲
-assert(isPeakAt(Date.parse('2026-03-07T10:00:00+08:00')) === false, '周六 10:00 属空闲时段');
+assert(isPeakAt(Date.parse('2026-03-07T10:00:00+08:00'), PRICE) === false, '周六 10:00 属空闲时段');
 // 节假日：2026-10-01 是周四，但属国庆假期 → 空闲
 assert(beijingParts(Date.parse('2026-10-01T10:00:00+08:00')).weekday === 4, '2026-10-01 是周四');
-assert(isPeakAt(Date.parse('2026-10-01T10:00:00+08:00')) === false, '国庆节（周四）10:00 属空闲时段');
+assert(isPeakAt(Date.parse('2026-10-01T10:00:00+08:00'), PRICE) === false, '国庆节（周四）10:00 属空闲时段');
 // 春节段
-assert(isPeakAt(Date.parse('2026-02-17T10:00:00+08:00')) === false, '春节（周二）10:00 属空闲时段');
+assert(isPeakAt(Date.parse('2026-02-17T10:00:00+08:00'), PRICE) === false, '春节（周二）10:00 属空闲时段');
 // 节假日表的边界不应误伤相邻工作日
-assert(isPeakAt(Date.parse('2026-10-08T10:00:00+08:00')) === true, '2026-10-08（节后周四）10:00 恢复高峰');
+assert(isPeakAt(Date.parse('2026-10-08T10:00:00+08:00'), PRICE) === true, '2026-10-08（节后周四）10:00 恢复高峰');
 assert(CN_HOLIDAYS_2026.length === 33, `2026 法定节假日共 33 天（实得 ${CN_HOLIDAYS_2026.length}）`);
 
 // ── 2. 单价与金额 ───────────────────────────────────────────────────────
-const offRates = ratesAt('deepseek-flash', mon('20:00'), DEFAULT_PRICE_TABLE);
-const peakRates = ratesAt('deepseek-flash', mon('10:00'), DEFAULT_PRICE_TABLE);
+const offRates = ratesAt('deepseek-flash', mon('20:00'), PRICE);
+const peakRates = ratesAt('deepseek-flash', mon('10:00'), PRICE);
 assert(offRates.tier === 'off' && peakRates.tier === 'peak', '同一模型峰谷档位判定正确');
 assert(near(peakRates.cacheMiss, offRates.cacheMiss * 2), '高峰单价为空闲单价的 2 倍');
 assert(near(offRates.cacheHit, 0.02) && near(offRates.cacheMiss, 1) && near(offRates.output, 4), 'flash 空闲单价与官方一致（0.02/1/4）');
@@ -81,13 +81,26 @@ assert(norm.cacheMiss === 100 && norm.cacheHit === 900 && norm.cacheWrite === 5 
   'normalizeUsage 四桶互不重叠（inputTokens 只算未命中）');
 assert(totalTokensOf(norm) === 1015, 'token 总量 = 四桶之和');
 
-// ── 3. 未知模型兜底 ─────────────────────────────────────────────────────
-const unknown = ratesAt('some-future-model', mon('10:00'), DEFAULT_PRICE_TABLE);
-assert(unknown.estimated === true, '未知模型标记 estimated');
-assert(near(unknown.cacheMiss, 2), '未知模型按 flash 兜底（高峰期 1×2）');
-const tbl = resolvePriceTable({ models: { 'my-model': { label: '自定义', off: { cacheHit: 0.5, cacheMiss: 3, output: 9 } } } });
-assert(tbl.models['my-model'].off.cacheWrite === 3, '自定义模型未给 cacheWrite 时跟随 cacheMiss');
-assert(tbl.models['deepseek-flash'].off.cacheMiss === 1, '自定义覆盖不影响内置模型');
+// ── 3. 没申报价目就不报价 ───────────────────────────────────────────────
+assert(ratesAt('some-future-model', mon('10:00'), PRICE) === null,
+  '价目表里没有的模型返回 null（不拿别的模型兜底估算）');
+const unknownUsage = priceUsage({ cacheMiss: 1e6, cacheHit: 0, cacheWrite: 0, output: 0 }, { model: 'some-future-model', at: mon('10:00'), table: PRICE });
+assert(unknownUsage.cost === null && unknownUsage.rates === null, '未申报的模型只计 token，不算钱');
+assert(isPeakAt(mon('10:00'), null) === false && ratesAt('deepseek-flash', mon('10:00'), null) === null,
+  '没有价目表就没有峰谷之分，也不报价');
+// 声明的价目表：单位/货币/峰谷口径都取自 pricingPolicy
+const declared = priceTableFromCatalog({
+  models: [
+    { id: 'my-model', label: '自定义', pricing: { cacheHit: 0.5, cacheMiss: 3, output: 9 } },
+    { id: 'no-price', label: '没申报单价' },
+  ],
+  pricingPolicy: { currency: 'USD', symbol: '$', unit: 1000, peakMultiplier: 3, peakWindows: [[9, 12]], peakWeekdays: [1] },
+});
+assert(declared.models['my-model'].off.cacheWrite === 3, '声明里没给 cacheWrite 时跟随 cacheMiss');
+assert(declared.models['no-price'] === undefined, '没写单价（或只写部分桶）的模型不进价目表');
+assert(declared.currency === 'USD' && declared.unit === 1000 && declared.peakMultiplier === 3, '货币 / 单位 / 峰谷倍数取自 pricingPolicy');
+assert(priceTableFromCatalog({ models: [{ id: 'free', label: '免费' }] }) === null, '一个模型都没申报单价时整张表为 null');
+assert(PRICE.models['deepseek-flash'].off.cacheMiss === 1, '价目只来自各自平台的声明（dsh 不受别的表影响）');
 
 // ── 4~8. 账本折叠语义 ───────────────────────────────────────────────────
 const usage = (inputTokens, outputTokens, cacheReadTokens = 0, extra = {}) =>
@@ -98,8 +111,9 @@ const usage = (inputTokens, outputTokens, cacheReadTokens = 0, extra = {}) =>
 // 这里统一钉到下面的 `at`（周一 20:00，空闲档），让期望值与任何跑测试的时刻无关。
 const at = mon('20:00');
 // 中立用量样本：回合 / 步骤 / 重试 / 时间都由适配器解好，账本不认识平台事件。
+// model 必须是价目表里有的那个：没申报价目的模型只计 token、不算钱（见下方用例）。
 const ingest = (target, seq, turn, step, u, extra = {}) =>
-  target.ingestSample({ sessionId: 's1', seq, turn, step, at, usage: u, ...extra });
+  target.ingestSample({ sessionId: 's1', seq, turn, step, at, model: 'deepseek-flash', usage: u, ...extra });
 
 let ledger = freshLedger({ resolveKey: (sid) => (sid === 's1' ? 'group:100' : undefined) });
 
@@ -172,7 +186,7 @@ assert(near(c.byTier.peak, 10) && near(c.byTier.off, 5), '高峰期/空闲期花
 
 // ── 9. 半行容错 ─────────────────────────────────────────────────────────
 fs.appendFileSync(ledgerFile, '{"k":"turn","sid":"s1","turn":9,"ste', 'utf8');
-ledger = createTokenLedger({ file: ledgerFile, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'group:100' });
+ledger = createTokenLedger({ file: ledgerFile, priceTable: PRICE, resolveKey: () => 'group:100' });
 assert(ledger.stats().droppedLines === 1, '进程中断留下的半行被跳过而不是让账本读不出来');
 assert(ledger.summary().conversations.length === 1, '半行之后仍能读出既有数据');
 
@@ -192,7 +206,7 @@ assert(afterEvict.buckets.cacheMiss === 300, `淘汰后累计未命中输入仍�
 assert(afterEvict.buckets.output === 30, `淘汰后累计输出仍为 30（实得 ${afterEvict.buckets.output}）`);
 assert(near(afterEvict.cost, expectEvictCost, 1e-9), `淘汰后累计花费不变（实得 ${afterEvict.cost.toFixed(8)} 期望 ${expectEvictCost.toFixed(8)}）`);
 assert(afterEvict.unattributedCost > 0, '被淘汰的回合归入「未逐轮归属」而不是凭空消失');
-const reloaded = createTokenLedger({ file: ledgerFile, priceTable: DEFAULT_PRICE_TABLE, resolveKey: () => 'group:100' });
+const reloaded = createTokenLedger({ file: ledgerFile, priceTable: PRICE, resolveKey: () => 'group:100' });
 assert(reloaded.stats().samples === stats.samples, '淘汰后重新载入不丢采样');
 assert(near(reloaded.summary().totals.cost, afterEvict.cost, 1e-9), '淘汰结果的累计花费可跨重启复现');
 
@@ -222,6 +236,7 @@ const emitAt = (ms, turn, step, u) => ledger.ingestSample({
   turn,
   step,
   at: ms,
+  model: 'deepseek-flash',
   usage: u
 });
 // 09:30、09:45（高峰）各一笔；13:00（午休空闲）一笔；中间留出 3 小时空档
@@ -284,6 +299,15 @@ assert(ledger.ingestSample({ sessionId: 's1', step: 1, at, usage: usage(100, 10)
   '缺 turn 的样本被拒绝（无从归属，记账会让实数失真）');
 assert(ledger.ingestSample({ sessionId: 's1', turn: 1, step: 1, at, usage: usage(0, 0) }) === false,
   '零用量样本被拒绝');
+
+// ── 没带模型名的采样：只计 token、不计钱 ────────────────────────────────
+// 宁可留缺口也不猜价：模型名缺失时无法确定申报的单价，不能拿别的模型顶上。
+ledger = freshLedger({ resolveKey: () => 'group:100' });
+ledger.ingestSample({ sessionId: 's1', seq: 1, turn: 1, step: 1, at, usage: usage(1000, 100) });
+const unpricedTotals = ledger.summary().totals;
+assert(near(unpricedTotals.cost, 0) && unpricedTotals.unpriced === true, '没带模型名的采样计入 token 但不计价');
+assert(unpricedTotals.unpricedTokens === 1100, `未计价 token 单独统计（实得 ${unpricedTotals.unpricedTokens}）`);
+assert(ledger.recent(10)[0].cost === null, '逐笔明细里未计价的金额为 null（界面显示「—」）');
 
 // ── 收尾 ────────────────────────────────────────────────────────────────
 try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}

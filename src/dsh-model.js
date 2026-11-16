@@ -75,7 +75,7 @@ export function canSeeImages({ provider, model, vision } = {}) {
   return knownVision(provider, model) === 'yes';
 }
 
-/** 价格表是否覆盖：只收录 DeepSeek 自家价目，第三方同名模型也不算。 */
+/** 价格表是否覆盖：价目由平台自己申报，只对它自己的提供方有效；第三方同名模型不按这个价。 */
 export function isPriced(provider, model, priceTable) {
   return isFirstPartyProvider(provider) && !!priceTable?.models?.[clean(model)];
 }

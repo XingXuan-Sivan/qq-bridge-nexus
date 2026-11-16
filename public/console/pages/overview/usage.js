@@ -126,7 +126,7 @@ function renderUsageChart(series) {
   const busiest = series.busiest;
   hintEl.textContent = `窗口内合计 ｜ 每格 ${Math.round(series.bucketMs / 60000)} 分钟`
     + (busiest && metric === 'cost' ? ` ｜ 最贵一格：${usageBucketClock(busiest.t, series.bucketMs)} ${usageMoney(busiest.cost, sym)}` : '')
-    + (series.estimated ? ' ｜ ⚠️ 含按兜底价估算的模型' : '');
+    + (series.unpriced ? ' ｜ ⚠️ 有模型没申报价目，这部分只计 token、不计钱' : '');
 
   // 图上一定要能看出"还有多少没画进来"：投影基线覆盖的更早历史没有逐时明细。
   const notes = [];
@@ -162,6 +162,8 @@ function usageNum(n) {
   return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 function usageMoney(n, sym) {
+  // 没申报价目的用量没有金额（不是 0 元）：显式 null 一律显示破折号。
+  if (n === null || n === undefined) return '—';
   const s = sym || '¥';
   const v = Number(n) || 0;
   if (v === 0) return s + '0';
@@ -266,8 +268,8 @@ function renderUsageConversations(r) {
   if (Number(totals.unattributedCost) > 0) {
     box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">其中 ' + usageMoney(totals.unattributedCost, sym) + ' 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>');
   }
-  if (totals.estimated) {
-    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">⚠️ 有模型未登记在价目表里，这部分按 <code>deepseek-flash</code> 兜底价估算，可在 <code>config.json</code> 的 <code>pricing.models</code> 补充。</div>');
+  if (totals.unpriced) {
+    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">⚠️ 有 ' + usageNum(totals.unpricedTokens) + ' token 来自没申报价目的模型：这部分只计 token、不计价（价目由该 Agent 平台的 agent-platform.yml 里的 modelCatalog 声明）。</div>');
   }
   // 会话名直接跳到「会话与审批」，并把搜索框预填成这个 key。
   box.querySelectorAll('[data-open-session]').forEach((link) => link.addEventListener('click', (ev) => {
@@ -312,7 +314,7 @@ function renderUsageTurns(r) {
         usageNum(b.cacheHit),
         usagePct(usageRate(b)),
         usageNum(b.output),
-        usageMoney(t.cost, sym),
+        usageMoney(t.unpriced ? null : t.cost, sym),
         usageTierTag(t.tier),
       ],
     };
@@ -381,11 +383,15 @@ function renderUsageRecent(r) {
 
 function renderUsagePrices(pt) {
   const box = document.getElementById('usagePrices');
-  if (!pt || !pt.models) { box.dataset.usageSig = ''; box.textContent = '（价目表不可用）'; return; }
+  if (!pt || !pt.models) {
+    box.dataset.usageSig = 'no-price';
+    box.textContent = '（这个 Agent 平台没申报价目：花费只报 token，不做估算）';
+    return;
+  }
   const sym = pt.symbol || '¥';
   const tier = pt.nowTier;
   const rows = Object.entries(pt.models).map(([name, m]) => {
-    // 单价与货币符号都可能来自 config.json 的 pricing 覆盖项（运维可写），统一走 esc()。
+    // 单价与货币符号都是平台声明的内容，统一走 esc()。
     const price = (v) => esc(sym + (Number.isFinite(Number(v)) ? Number(v) : (v ?? '')));
     return {
       cells: [
@@ -396,17 +402,23 @@ function renderUsagePrices(pt) {
       ],
     };
   });
-  const sig = 'prices:' + String(pt.version) + ':' + (tier?.tier || '') + ':' + (tier?.estimated ? '1' : '0');
+  const windows = (pt.peakWindows ?? [])
+    .map(([a, b]) => `${String(a).padStart(2, '0')}:00-${String(b).padStart(2, '0')}:00`)
+    .join('、');
+  const weekdayText = (pt.peakWeekdays ?? []).length === 5 ? '周一至周五' : '平台申报的固定几天';
+  const sig = 'prices:' + String(pt.version) + ':' + (tier?.tier || '');
   const changed = usageTable(box, {
     sig,
     columns: [{ label: '模型', width: 300 }, { label: '缓存命中', width: 140 }, { label: '缓存未命中', width: 160 }, { label: '输出', width: 120 }],
     rows,
     pager: false,
-    meta: '价目表版本 ' + pt.version + ' ｜ 高峰时段为北京时间的 2 倍价（周一至周五 9:00-12:00、14:00-18:00，法定节假日除外，已内置 ' + pt.holidayCount + ' 天假期）',
+    meta: '价目表版本 ' + (pt.version || '未标注') + ' ｜ 高峰时段 ' + weekdayText
+      + (windows ? ' ' + windows : '')
+      + '，单价 ×' + (pt.peakMultiplier ?? 1) + '（法定节假日除外，已内置 ' + pt.holidayCount + ' 天假期）',
     empty: '（价目表为空）',
   });
   if (!changed) return;
-  box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（元 / 百万 token）。当前时刻属于 <b>' + (tier ? esc(tier.tierLabel) : '—') + '</b>' + (tier?.estimated ? '，且价目表里没有 <code>' + esc(tier.model) + '</code>，按兜底价估算' : '') + '。</div>');
+  box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（' + esc(pt.currency || 'CNY') + ' / ' + usageNum(pt.unit) + ' token）。当前时刻属于 <b>' + (tier ? esc(tier.tierLabel) : '—') + '</b>。</div>');
 }
 
 async function refreshUsage() {
@@ -416,7 +428,7 @@ async function refreshUsage() {
     const t = r.totals || {};
     const b = t.buckets || {};
     const sym = r.symbol || '¥';
-    document.getElementById('metricUsageCost').textContent = usageMoney(t.cost, sym);
+    document.getElementById('metricUsageCost').textContent = usageMoney(t.unpriced && !t.cost ? null : t.cost, sym);
     document.getElementById('metricUsageCostHint').textContent =
       `高峰 ${usageMoney(t.byTier?.peak, sym)} ｜ 空闲 ${usageMoney(t.byTier?.off, sym)}`;
     document.getElementById('metricUsageTokens').textContent = usageNum(t.totalTokens);

@@ -23,7 +23,8 @@ import {
   SLANG_MAX_ENTRIES,
   SLANG_STATUS
 } from '../src/slang-learner.js';
-import { CN_HOLIDAYS, CN_HOLIDAYS_2027, DEFAULT_PRICE_TABLE, isPeakAt } from '../src/model-prices.js';
+import { CN_HOLIDAYS, CN_HOLIDAYS_2027, isPeakAt } from '../src/model-prices.js';
+import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 
 let failed = 0;
 function assert(cond, label) {
@@ -118,9 +119,9 @@ assert(!fs.readdirSync(tmp).some((f) => f.endsWith('.tmp')), '失败/成功路�
 // ── 6. 节假日表覆盖到 2027 ──────────────────────────────────────────────
 assert(CN_HOLIDAYS_2027.length >= 30, `2027 节假日表已预置（${CN_HOLIDAYS_2027.length} 天）`);
 assert(CN_HOLIDAYS.includes('2027-01-01'), '内置表包含 2027 元旦');
-assert(isPeakAt(Date.parse('2027-02-08T10:00:00+08:00')) === false, '2027 春节（周一）10:00 判为空闲时段');
-assert(isPeakAt(Date.parse('2027-03-01T10:00:00+08:00')) === true, '2027 普通周一 10:00 仍为高峰时段');
-assert(DEFAULT_PRICE_TABLE.holidays.includes('2027-10-01'), '默认价目表用的是跨年份的节假日表');
+assert(isPeakAt(Date.parse('2027-02-08T10:00:00+08:00'), DSH_PRICE_TABLE) === false, '2027 春节（周一）10:00 判为空闲时段');
+assert(isPeakAt(Date.parse('2027-03-01T10:00:00+08:00'), DSH_PRICE_TABLE) === true, '2027 普通周一 10:00 仍为高峰时段');
+assert(DSH_PRICE_TABLE.holidays.includes('2027-10-01'), '价目表用的是跨年份的节假日表');
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
 

@@ -150,10 +150,13 @@ export function upcomingWindows(config, fromMs, n = 6, { holidays = new Set() } 
   return out.sort((a, b) => a.startMs - b.startMs).slice(0, n);
 }
 
-/** 「一键填入 DeepSeek 高峰时段」：按价目表的高峰窗口生成工作日、跳过节假日的时间段（北京时间）。 */
+/**
+ * 「一键填入高峰时段」：按平台申报的价目口径生成工作日、跳过节假日的时间段（北京时间）。
+ * 平台没申报峰谷窗口时返回空数组 —— 按钮无内容可填，也不替它编一套。
+ */
 export function peakPresetRanges(priceTable) {
-  const windows = Array.isArray(priceTable?.peakWindows) ? priceTable.peakWindows : [[9, 12], [14, 18]];
-  const weekdays = Array.isArray(priceTable?.peakWeekdays) ? priceTable.peakWeekdays.map(Number) : [1, 2, 3, 4, 5];
+  const windows = Array.isArray(priceTable?.peakWindows) ? priceTable.peakWindows : [];
+  const weekdays = Array.isArray(priceTable?.peakWeekdays) ? priceTable.peakWeekdays.map(Number) : [];
   const isWorkdays = weekdays.length === 5 && [1, 2, 3, 4, 5].every((d) => weekdays.includes(d));
   const label = (h) => `${String(h).padStart(2, '0')}:00`;
   return windows.filter((w) => Array.isArray(w) && w.length === 2).map(([a, b], i) => ({

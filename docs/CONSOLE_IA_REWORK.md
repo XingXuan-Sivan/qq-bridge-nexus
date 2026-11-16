@@ -37,7 +37,7 @@
 `config.platforms.agents.<id>.options` 已经是平台选项的唯一存放处（`src/config/platforms.mjs` 的 `normalizeAgentEntry`），DSH 的模型 / 思考强度写进去即可落盘。真正的问题在两端：
 
 - 写口是 DSH 专有的 `POST /api/dsh/model`（`public/console/pages/config/page.js:61`、`:220`），全仓 24 处引用。
-- 读口是 `src/dsh-model.js` + `src/model-prices.js` 的 `DEFAULT_PRICE_TABLE`（DeepSeek 专属价目），运行总览的价目表就是它。
+- 读口是 `src/dsh-model.js` + `src/model-prices.js` 里内置的 DeepSeek 专属价目（改造前叫 `DEFAULT_PRICE_TABLE`，B3-4 已删），运行总览的价目表就是它。
 
 即：**存储已经中性，接口与展示还是单平台语义**。归一动作是换接口、换数据来源，不动存储分层。
 
@@ -198,7 +198,10 @@ hash 形状：`#<page>[/<sub>[/<tab>]]`，`sub` / `tab` 对路由器是不透明
 modelCatalog:
   models:
     - { id: deepseek-v3, label: 'DeepSeek V3', contextWindow: 128000,
-        pricing: { input: 2, output: 8, cacheRead: 0.5, unit: 'perMillionCNY' } }
+        pricing: { cacheHit: 0.5, cacheMiss: 2, cacheWrite: 2, output: 8 } }
+  pricingPolicy:                 # 计费口径（货币、单位、峰谷倍数与窗口）
+    { version: '2026-11-04', currency: CNY, symbol: '¥', unit: 1000000,
+      peakMultiplier: 2, peakWindows: [[9, 12], [14, 18]], peakWeekdays: [1, 2, 3, 4, 5] }
   efforts:                       # 思考强度档位；没有就是单档
     - { id: off, label: '关闭' }
     - { id: high, label: '高' }
@@ -227,11 +230,11 @@ modelCatalog:
 | 消费点 | 现在 | 改为 |
 | --- | --- | --- |
 | 全局配置页的模型 / 思考强度卡 | `POST /api/dsh/model` | 移到平台详情页；写 `platforms.agents.<id>.options`，走 `models` 能力位的 `selectModel(ref, params)` |
-| 运行总览价目表 | `src/model-prices.js` 的 `DEFAULT_PRICE_TABLE`（DeepSeek 专属） | `modelCatalog.models[].pricing`，`config.pricing` 仍可作为运维覆盖 |
+| 运行总览价目表 | 内置的 DeepSeek 专属价目表 | `modelCatalog.models[].pricing` + `pricingPolicy` 折算；没声明就不报价 |
 | 上下文压缩 | `config.socialV2.compact`，模式值 `early` / `dsh`，文案写死「交给 DSH 自己压缩」 | 模式值 `early` / `agent`，阈值缺省取 `modelCatalog.compact.approxTokens` |
 | 能力档 / 工具面展示 | `CAPABILITIES_ROOT` 硬编码 `dsh` | 按当前活动的 Agent 平台 id 取目录 |
 
-`src/model-prices.js` 里的价格计算函数保留（它是纯算术），只删掉 DeepSeek 专属的默认表与「只有 DSH 模型」的注释；没有 `pricing` 时不估算、显示为「未声明」，**不做兜底猜测**。
+价目**只来自平台声明**：`priceTableFromCatalog()` 把 `modelCatalog` 折算成价目表，一个模型都没申报单价时返回 `null`。`src/model-prices.js` 保留纯算术（峰谷判定、桶计价），删掉内置默认表与 `resolvePriceTable()`，`config.pricing` 覆盖项同批删除。没申报的模型不估算：账本用 `unpriced` / `unpricedTokens` 表达「只计 token、不计钱」，金额显示 `—`，**不做兜底猜测**。
 
 ### 4.5 全局配置页只剩通用项
 
@@ -356,13 +359,13 @@ modelCatalog:
 | 2 | `GET /api/platforms/registry/agent/<id>/models`（`declared` + `live`，30s 缓存，失败降级） | `src/bridge.js` |
 | 3 | 控制台读口：`loadModelCatalog(agentId)` | `js/registry.js` |
 | 4 | 模型 / 思考强度从全局配置搬到平台详情页，写 `platforms.agents.<id>.options`，走 `models` 能力位 | `pages/config/**`、`pages/platforms/page.js` |
-| 5 | 价目表改由 `modelCatalog.models[].pricing` 提供，`config.pricing` 作为覆盖；无声明时显示「未声明」，不估算 | `src/model-prices.js`、`pages/overview/**` |
+| 5 | 价目表改由 `modelCatalog` 声明折算（`pricing` + `pricingPolicy`），`config.pricing` 覆盖项删除；无声明不报价、只计 token | `src/model-prices.js`、`src/token-ledger.js`、`pages/overview/**` |
 | 6 | 压缩模式 `early` / `agent`，阈值缺省取 `modelCatalog.compact.approxTokens` | `src/bridge.js`、`pages/config/compact.js` |
 | 7 | `CAPABILITIES_ROOT` 去硬编码 | `src/**` |
 | 8 | 人格注入块可关（§6.2） | `pages/prompt-blocks/**`、`src/bridge.js` |
 | 9 | 全局配置页逐项核对：每个分区都写 `config.json` 顶层段 | `pages/config/**` |
 
-**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；`DEFAULT_PRICE_TABLE` 的 DeepSeek 专属条目与「只有 DSH 模型」注释；`config.socialV2.compact` 的 `dsh` 模式值（迁移到 `agent`，不留双写）；`src/dsh-model.js` 的界面专有分支。
+**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；内置的 DeepSeek 价目表、`resolvePriceTable()` 与 `config.pricing` 覆盖项；`config.socialV2.compact` 的 `dsh` 模式值（迁移到 `agent`，不留双写）；`src/dsh-model.js` 的界面专有分支。
 
 **出口**：把 Agent 平台切到 ACP（config 里改 active）后，全局配置页与运行总览**不显示任何 DSH 专属内容**，且不报错；`test-audit`、`test-token-usage`、`test-dsh-model` 同批改写通过。
 

@@ -1,6 +1,6 @@
 // 定时静默：按时间段让 AI 停下来省 token。全部离线、假数据（夹具里的假号 123 / 456）。
 //   ① 模块：时间段校验、哪些天（每天 / 工作日 / 周末 / 自选 + 跳过节假日）、跨午夜以开始那天为准、接下来的时间段、
-//      DeepSeek 高峰预设取自价目表、临时恢复到这一段结束、开始 / 结束检测、持久化 0600、读坏只读；
+//      DeepSeek 高峰预设取自平台申报的价目口径、临时恢复到这一段结束、开始 / 结束检测、持久化 0600、读坏只读；
 //   ② 桥接：静默时群消息记下但不唤醒、各种唤醒都不发（真正不花 token）、管理员私聊默认不受影响、发送被拦；
 //      定时任务「叫 AI 来说」跳过 / 设了「照常执行」就放行、固定文字照发、预览标出会跳过的那几次；
 //      手动「关闭手动静默」= 这一段临时恢复；结束时给被直接找过的会话补一次唤醒；控制台接口拒绝 agent token；
@@ -15,7 +15,7 @@ import http from 'node:http';
 import {
   normalizeSilenceConfig, activeWindow, upcomingWindows, peakPresetRanges, describeRange, rangeAppliesOnDay, createSilenceSchedule, wakeTierOf, DIRECT_PASS_MS,
 } from '../src/silence-schedule.js';
-import { resolvePriceTable } from '../src/model-prices.js';
+import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 import { zonedParts } from '../src/scheduler/time.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 import { readConsoleSource } from './console-source.mjs';
@@ -58,8 +58,9 @@ test('① 模块：哪些天、节假日、跨午夜、接下来、高峰预设�
   const up = upcomingWindows(cfg, at('2026-10-21T03:00:00Z'), 3, { holidays: hol });
   assert.deepEqual(up.map((x) => x.range.name), ['上午高峰', '周三午休', '上午高峰'], '从正在进行的那段开始列');
 
-  const preset = peakPresetRanges(resolvePriceTable());
-  assert.deepEqual(preset.map((r) => [r.start, r.end, r.days, r.skipHolidays]), [['09:00', '12:00', 'workdays', true], ['14:00', '18:00', 'workdays', true]], '与价目表的高峰窗口一致');
+  const preset = peakPresetRanges(DSH_PRICE_TABLE);
+  assert.deepEqual(preset.map((r) => [r.start, r.end, r.days, r.skipHolidays]), [['09:00', '12:00', 'workdays', true], ['14:00', '18:00', 'workdays', true]], '与平台申报的高峰窗口一致');
+  assert.deepEqual(peakPresetRanges(null), [], '平台没申报峰谷口径时没有可填的段（不替它编一套）');
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qqb-silence-'));
   try {

@@ -14,7 +14,7 @@ import {
   buildCatalogView, canSeeImages, knownVision, isFirstPartyProvider, isPriced,
   mediaTextParts, mediaTextEntries, KNOWN_EFFORTS,
 } from '../src/dsh-model.js';
-import { DEFAULT_PRICE_TABLE } from '../src/model-prices.js';
+import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 const effort = (id) => ({ id, name: id.toUpperCase() });
@@ -99,10 +99,10 @@ test('③ 目录缓存、看图能力、提示与图片降级', async () => {
 
   assert.equal(isFirstPartyProvider('deepseek-official') && isFirstPartyProvider('deepseek-account'), true);
   assert.equal(isFirstPartyProvider('example-cloud'), false);
-  assert.equal(isPriced('deepseek-official', 'deepseek-flash', DEFAULT_PRICE_TABLE), true);
-  assert.equal(isPriced('example-cloud', 'deepseek-flash', DEFAULT_PRICE_TABLE), false, '第三方同名模型不按 DeepSeek 价目');
+  assert.equal(isPriced('deepseek-official', 'deepseek-flash', DSH_PRICE_TABLE), true);
+  assert.equal(isPriced('example-cloud', 'deepseek-flash', DSH_PRICE_TABLE), false, '第三方同名模型不按 DeepSeek 价目');
 
-  const view = buildCatalogView(CATALOG, { priceTable: DEFAULT_PRICE_TABLE });
+  const view = buildCatalogView(CATALOG, { priceTable: DSH_PRICE_TABLE });
   assert.equal(view.providers.length, 2);
   assert.equal(view.providers[1].thirdParty, true);
   assert.deepEqual(view.providers[1].models[0].efforts, []);

@@ -117,18 +117,6 @@
   "questionTimeoutMs": 300000,
   "consolePort": 3100,
   "consoleToken": "",
-  "pricing": {
-    "models": {
-      "my-relay-model": {
-        "label": "我的中转模型",
-        "off": {
-          "cacheHit": 0.5,
-          "cacheMiss": 3,
-          "output": 9
-        }
-      }
-    }
-  },
   "security": {
     "interceptNotify": true
   },

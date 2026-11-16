@@ -1,24 +1,23 @@
-// DeepSeek 官方价目表与峰谷分时判定（桥接侧自行维护）。
+// 账单换算：按 Agent 平台自己申报的价目把 token 桶折算成金额，并判定峰谷时段。
 //
 // 为什么放在桥接里：DSH 自身不做任何货币换算（`dsh-llm-pi-ai` 明写 "no consumer reports
-// spend"），provider 只回 token 数。所以「花多少钱」必须由消费方用价目表算。
+// spend"），provider 只回 token 数。所以「花多少钱」必须由消费方用价目算。
 //
-// 口径（与官方文档一致，单位：元 / 百万 token）：
+// **价目不在代码里**：哪个模型多少钱、货币与单位、峰谷倍数与窗口，都是平台在
+// `profiles/agent-platforms/<id>/agent-platform.yml` 的 `modelCatalog` 里写的声明
+// （`pricing` + `pricingPolicy`）。这里只负责按声明算；没申报的模型不算钱 ——
+// 只计 token、金额显示「未申报」，绝不拿别的模型的价格估算。
+//
+// 口径：
 //   扣减费用 = Σ(各桶 token 数 × 对应单价)
-//   桶共三个：输入缓存命中 / 输入缓存未命中 / 输出。
-//   空闲时段单价 = 高峰时段的一半。
-//   高峰时段 = 北京时间周一至周五 9:00-12:00、14:00-18:00，且不含中国法定节假日；
-//   其余时段（含周末与法定节假日全天）均为空闲时段。
+//   桶共三个：缓存命中 / 缓存未命中 / 输出；没单独报 cacheWrite 时按未命中计。
+//   高峰时段单价 = 空闲 × pricingPolicy.peakMultiplier，窗口与工作日同样来自声明。
 //
 // 注意 `dsh` 报的 token 桶是**互不重叠**的：
 //   计费输入 = inputTokens(未命中) + cacheReadTokens + cacheWriteTokens
 // 所以三个桶要分别计价再相加，不能把 cacheRead 当成 inputTokens 的一部分。
 //
-// 价目来源：https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
-// 节假日来源：国办发明电〔2025〕7 号（2026 年部分节假日安排）。
-
-/** 价目表版本标记，仅用于控制台展示与排障（改了价目表就改这里）。 */
-export const PRICE_TABLE_VERSION = '2026-11-04';
+// 节假日不在这里：它是日历事实（与任何平台无关），见下方 CN_HOLIDAYS。
 
 /**
  * 2026 年中国法定节假日（放假日，含调休连休段）。
@@ -78,79 +77,48 @@ export const CN_HOLIDAYS = [...CN_HOLIDAYS_2026, ...CN_HOLIDAYS_2027];
 const BEIJING_OFFSET_MINUTES = 8 * 60;
 
 /**
- * 默认价目表（元 / 百万 token）。
- * `off` 为空闲时段单价；高峰时段单价 = 空闲单价 × `peakMultiplier`。
- * `cacheWrite` 缺省时按未命中价计费（DeepSeek 目前不单独报 cacheWrite，恒为 0）。
+ * 用平台声明的模型目录生成价目表。
+ *
+ * @param catalog `modelCatalog`：`{ models:[{id,label,pricing}], pricingPolicy }`
+ * @returns 价目表；一个模型的单价都没申报时返回 `null`（= 不报价）
  */
-export const DEFAULT_PRICE_TABLE = {
-  version: PRICE_TABLE_VERSION,
-  currency: 'CNY',
-  symbol: '¥',
-  unit: 1e6,
-  peakMultiplier: 2,
-  // 高峰时段窗口，按北京时间的小时数半开区间 [start, end)
-  peakWindows: [[9, 12], [14, 18]],
-  // 高峰时段只在周一至周五；1=周一 … 7=周日
-  peakWeekdays: [1, 2, 3, 4, 5],
-  holidays: CN_HOLIDAYS,
-  models: {
-    'deepseek-flash': {
-      label: 'DeepSeek-V4.1-Flash',
-      off: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
-    },
-    'deepseek-v4-flash': {
-      label: 'DeepSeek-V4.1-Flash（旧模型名）',
-      off: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
-    },
-    'deepseek-v4-flash-vision-exp': {
-      label: 'DeepSeek-V4.1-Flash（视觉实验名）',
-      off: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
-    },
-    'deepseek-v4-pro': {
-      label: 'DeepSeek-V4-Pro-0813',
-      off: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
-    },
-    'deepseek-pro': {
-      label: 'DeepSeek-V4-Pro-0813（旧模型名）',
-      off: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
-    }
-  },
-  // 未知模型的兜底价：按 flash 计，并在返回值里标 estimated=true，控制台会提示。
-  fallbackModel: 'deepseek-flash'
-};
-
-/** 合并用户配置的价目表覆盖项（config.json 的 `pricing` 字段），失败时回落到默认表。 */
-export function resolvePriceTable(override) {
-  if (!override || typeof override !== 'object' || Array.isArray(override)) {
-    return { ...DEFAULT_PRICE_TABLE, models: { ...DEFAULT_PRICE_TABLE.models } };
+export function priceTableFromCatalog(catalog) {
+  const policy = catalog?.pricingPolicy ?? {};
+  const models = {};
+  for (const item of catalog?.models ?? []) {
+    const given = item?.pricing;
+    if (!given || !item?.id) continue;
+    const cacheMiss = Number(given.cacheMiss);
+    const output = Number(given.output);
+    // 未命中价与输出价是算钱的基准：有一个缺失就不是可用的报价。
+    if (!Number.isFinite(cacheMiss) || !Number.isFinite(output)) continue;
+    const hit = Number(given.cacheHit);
+    const write = Number(given.cacheWrite);
+    models[item.id] = {
+      label: String(item.label || item.id),
+      off: {
+        cacheHit: Number.isFinite(hit) ? hit : cacheMiss,
+        cacheMiss,
+        // 平台没单独报缓存写入价时按未命中价计。
+        cacheWrite: Number.isFinite(write) ? write : cacheMiss,
+        output,
+      },
+    };
   }
-  const merged = {
-    ...DEFAULT_PRICE_TABLE,
-    ...override,
-    models: { ...DEFAULT_PRICE_TABLE.models },
-    peakWindows: Array.isArray(override.peakWindows) ? override.peakWindows : DEFAULT_PRICE_TABLE.peakWindows,
-    peakWeekdays: Array.isArray(override.peakWeekdays) ? override.peakWeekdays : DEFAULT_PRICE_TABLE.peakWeekdays,
-    holidays: Array.isArray(override.holidays) ? override.holidays : DEFAULT_PRICE_TABLE.holidays
+  if (!Object.keys(models).length) return null;
+  const unit = Number(policy.unit);
+  const peakMultiplier = Number(policy.peakMultiplier);
+  return {
+    version: String(policy.version ?? ''),
+    currency: String(policy.currency ?? '') || 'CNY',
+    symbol: String(policy.symbol ?? '') || '¥',
+    unit: Number.isFinite(unit) && unit > 0 ? unit : 1e6,
+    peakMultiplier: Number.isFinite(peakMultiplier) && peakMultiplier > 0 ? peakMultiplier : 1,
+    peakWindows: Array.isArray(policy.peakWindows) ? policy.peakWindows : [],
+    peakWeekdays: Array.isArray(policy.peakWeekdays) ? policy.peakWeekdays : [],
+    holidays: CN_HOLIDAYS,
+    models,
   };
-  if (override.models && typeof override.models === 'object' && !Array.isArray(override.models)) {
-    for (const [name, entry] of Object.entries(override.models)) {
-      const base = DEFAULT_PRICE_TABLE.models[name];
-      if (!entry || typeof entry !== 'object') continue;
-      const given = entry.off ?? {};
-      const off = { ...(base?.off ?? DEFAULT_PRICE_TABLE.models[DEFAULT_PRICE_TABLE.fallbackModel].off), ...given };
-      // 只有用户/内置条目**自己**没写 cacheWrite 时才跟随 cacheMiss；
-      // 否则会从兜底模型继承一个不相干的 cacheWrite 价（静默算错钱）。
-      if (!Number.isFinite(Number(given.cacheWrite))) off.cacheWrite = off.cacheMiss;
-      merged.models[name] = { label: entry.label ?? base?.label ?? name, off };
-    }
-  }
-  if (typeof merged.fallbackModel !== 'string' || !merged.models[merged.fallbackModel]) {
-    merged.fallbackModel = DEFAULT_PRICE_TABLE.fallbackModel;
-  }
-  if (!Number.isFinite(merged.peakMultiplier) || merged.peakMultiplier <= 0) merged.peakMultiplier = 2;
-  if (!Number.isFinite(merged.unit) || merged.unit <= 0) merged.unit = 1e6;
-  if (typeof merged.version !== 'string' || !merged.version) merged.version = PRICE_TABLE_VERSION;
-  return merged;
 }
 
 /** 把任意时间戳换算成北京时间的日历分量（不依赖运行机器的本地时区）。 */
@@ -167,10 +135,10 @@ export function beijingParts(atMs) {
   };
 }
 
-/** 判断某一时刻是否落在高峰时段。 */
-export function isPeakAt(atMs, table = DEFAULT_PRICE_TABLE) {
+/** 判断某一时刻是否落在高峰时段；没有价目表就没有峰谷之分。 */
+export function isPeakAt(atMs, table) {
   const ms = Number(atMs);
-  if (!Number.isFinite(ms)) return false;
+  if (!table || !Number.isFinite(ms)) return false;
   const { weekday, hour, date } = beijingParts(ms);
   if (!table.peakWeekdays.includes(weekday)) return false;
   const holidays = table.holidays instanceof Set ? table.holidays : new Set(table.holidays ?? []);
@@ -178,23 +146,28 @@ export function isPeakAt(atMs, table = DEFAULT_PRICE_TABLE) {
   return (table.peakWindows ?? []).some(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && hour >= start && hour < end);
 }
 
-/** 取某模型在某一时刻生效的单价（含峰谷判定）。 */
-export function ratesAt(model, atMs, table = DEFAULT_PRICE_TABLE) {
+/**
+ * 取某模型在某一时刻生效的单价（含峰谷判定）。
+ *
+ * @returns 单价；**表里没有这个模型就是 `null`** —— 没申报就不报价，
+ *          不像以前那样拿兜底模型估算（会把钱算错还看不出来）。
+ */
+export function ratesAt(model, atMs, table) {
+  if (!table) return null;
   const key = String(model ?? '').trim();
   const entry = table.models[key];
-  const chosen = entry ?? table.models[table.fallbackModel];
-  const off = chosen.off;
+  if (!entry) return null;
+  const off = entry.off;
   const peak = isPeakAt(atMs, table);
   const factor = peak ? table.peakMultiplier : 1;
   return {
-    model: key || table.fallbackModel,
-    label: chosen.label,
+    model: key,
+    label: entry.label,
     tier: peak ? 'peak' : 'off',
     tierLabel: peak ? '高峰时段' : '空闲时段',
     currency: table.currency,
     symbol: table.symbol,
     unit: table.unit,
-    estimated: !entry,
     cacheHit: off.cacheHit * factor,
     cacheMiss: off.cacheMiss * factor,
     cacheWrite: (Number.isFinite(off.cacheWrite) ? off.cacheWrite : off.cacheMiss) * factor,
@@ -257,9 +230,13 @@ export function costOfBuckets(buckets, rates) {
   };
 }
 
-/** 一步到位：给桶 + 时间 + 模型，直接算钱。 */
-export function priceUsage(buckets, { model, at, table = DEFAULT_PRICE_TABLE } = {}) {
+/**
+ * 一步到位：给桶 + 时间 + 模型，直接算钱。
+ * @returns `{ rates, cost }`；模型没申报价目时两者都是 `null`（只计 token，不计价）
+ */
+export function priceUsage(buckets, { model, at, table } = {}) {
   const rates = ratesAt(model, at, table);
+  if (!rates) return { rates: null, cost: null };
   return { rates, cost: costOfBuckets(buckets, rates) };
 }
 

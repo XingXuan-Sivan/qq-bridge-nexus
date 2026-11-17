@@ -20,7 +20,7 @@
 | 读侧（`plans.agentPlatform`、`createAdapterRegistry`、`agentPlatformDir(id)`） | 已按平台 id 分发，加平台理论上可行 |
 | 写侧（产物格式、构建器、安装器） | 100% 硬绑 DSH：源是 cordis 行列表、产物叫 `dsh-bundles`、安装是 448 行的 `setup-dsh.mjs` |
 | `agent-platform.yml` 的 `artifacts:` 字段 | **死字段**：没有任何读者，值还指向早已删除的路径 |
-| `templates/rows.yml` | 注释指向不存在的 `src/capabilities/build.mjs` / `build-capability-artifacts.mjs`（历史残留） |
+| `templates/rows.yml` | 注释指向不存在的 `src/capabilities/build.mjs` / `build-capability-artifacts.mjs`（历史残留；S5 已连同 `templates/` 目录删除） |
 
 结论：**平台假设泄漏到了本不该知道平台的地方**。修复方向不是「再加一层配置声明」，
 而是把平台知识全部收进 `profiles/agent-platforms/<id>/adapters/`，调度层只做发现与调度。
@@ -34,11 +34,13 @@
 ```
 profiles/agent-platforms/<id>/
 ├── agent-platform.yml     # 元信息（id/label/tools/capabilities）——不声明产物路径
-├── tools.yml              # 该平台的 Agent 模块目录（给人看 + 控制台用）
-├── capabilities/<id>.yml  # 能力档：tools（拿到什么）+ preset（预设元信息）+ rows（预设正文）
+├── tools.yml              # 该平台的 Agent 模块目录（每个模块声明它承担哪些 effects）
+├── render.yml             # 渲染层：效果 → 插件行 / 行序 / 权限档 / 人格文案
+├── capabilities/<id>.yml  # 能力档：只写意图（effects / runtime / behavior / audience / mcp / skills）
 │                          # C4 起原 agents/<agent>/（preset.yml + agent.cordis.yml + 守卫薄壳）并入这里
 └── adapters/
-    ├── build.mjs          # 源 → 产物（纯函数）
+    ├── build.mjs          # 意图 + render.yml → 产物（纯函数）
+    ├── render.mjs         # renderPresetRows / renderPresetMeta（构建与运行期共用的纯函数）
     ├── install.mjs        # 产物 → 运行时（幂等，有副作用）
     └── runtime.mjs        # 声明面：能力位、提示注入通道、权限权威和 modelCatalog
 
@@ -82,8 +84,10 @@ export async function install({ repoRoot, profile, env, log }) {
 权限权威支持面（`RUNTIME_PERMISSION`）、`apply` 认领（`RUNTIME_APPLY`），以及 B3 新增的 `modelCatalog`。
 
 `modelCatalog` 是平台自描述的只读元数据：模型清单（`models`）、思考强度可选值、压缩策略的近似 token 数、
-价目（`pricing` + `pricingPolicy`）。控制台与内核只消费它、不内置任何一家的模型名或价格——
-没有声明就不报价、只计 token，压缩阈值也不猜。它与 `configSchema` 分工明确：前者是平台作者的只读元数据，
+价目（`pricing` + `pricingPolicy`）。控制台与内核只消费这一份声明，不为任何一家写分支：价目三层里最下面
+一层是 `src/pricing/builtins.mjs` 的官方价（DeepSeek-V4.1-Flash / DeepSeek-V4-Pro 及其 id 别名，人民币、
+百万 token 计价、工作日 09–12 与 14–18 高峰 ×2），平台申报盖在它上面，本机覆盖再盖一层；三处都没有的
+模型仍不报价、只计 token，压缩阈值也不猜。它与 `configSchema` 分工明确：前者是平台作者的只读元数据，
 后者是用户可写的平台选项，混用会把作者笔误报成用户配置非法。注册表把它投影成
 `GET /api/platforms/registry/agent/<id>/models` 的 `declared`，`live` 部分由平台自己的探活会话提供。
 
@@ -143,6 +147,12 @@ npm run verify:repo              # 含 P1/P3 的文本断言与全量语法检�
 > 渲染产物是 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`（golden 已立：`build-artifacts --check` 逐字节比对）。
 > 下文 §3.2–§3.5 里的 `agents/<id>/agent.yml` 请读作「能力档里的平台无关声明 + `platformSpecific.dsh.rows` 逃生舱」，
 > 不要新建 `agents/` 目录。
+>
+> **2026-11-17 补记（S5）**：触发条件已经满足（ACP 在 C6 落地），实施按 [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md)
+> §3.4 走完了：能力档只写 `effects`（意图），行由 `agent-platforms/<id>/render.yml` + `adapters/render.mjs` 编译。
+> **没有**引入 `platformSpecific` 逃生舱（DSH 的行语义全部收进渲染层），也没有新建 `agents/` ——
+> 下文 §3.2 的结构与 §3.5 里 `platformSpecific.dsh.rows` 的写法是当时的草案，不再按它实施。
+> §3.5 第 1 条的「逐字节等于 golden」已达成：5 份产物正文逐字节不变，仅生成器文件头一行不同（见台账 §1.2）。
 
 ### 3.2 提议结构（草案，不是最终版）
 
@@ -193,7 +203,7 @@ platformSpecific:       # 逃生舱：原样注入某个平台，不做翻译
 - 控制台需要**跨平台编辑**同一份 Agent（否则编辑器只需要认 `capabilities/<id>.yml` 的字段约定）；
 - DSH 的 cordis 行格式连续两次破坏性变更（说明「把格式当源」的代价已经超过迁移成本）。
 
-### 3.5 实施步骤（届时按序）
+### 3.5 实施步骤（2026-11-17 已按此落地）
 
 1. **先立黄金测试**：把现有 5 个预设的产物（现为 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml`）固化成 golden；
    写「IR → dsh 行列表」的渲染器，逐字节等于 golden 才算迁移成功（不允许「语义等价」）。
@@ -203,6 +213,8 @@ platformSpecific:       # 逃生舱：原样注入某个平台，不做翻译
    id 唯一、相对名改写、必需行检查）。
 4. 校验器的硬要求：**任何平台无法表达的能力必须报错**，禁止静默降级（安全边界不能因为「那个平台不支持」而消失）。
 5. 迁移期间保持现有产物可读：先用 IR 生成 `presets/*.patch.yml`，diff 为零后再删旧渲染路径。
+
+**落地形态**：中立层就是能力档的意图段（`effects` / `runtime` / `behavior` / `audience` / `mcp` / `skills`），平台层是 `profiles/agent-platforms/<id>/render.yml` + `adapters/render.mjs`（`renderPresetRows` / `renderPresetMeta`）：构建期与运行期共用同一份渲染，5 份 `presets/*.patch.yml` 行数与正文逐字节不变（仅文件头来源行改写）；原先的 `rows` / `preset` / `tools.agent` 字段已删，没有保留双读。
 
 ### 3.6 验收标准
 

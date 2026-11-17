@@ -16,8 +16,9 @@
 | --- | --- | --- |
 | [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) | **平台统一与 Agent 通用化（总纲）**：统一平台注册表、`AgentPort` 窄契约 + DSH/ACP 双实现、用户侧入站、界面 IA 重构（平台配置页 + 运行方案页）、配置 v2 / v3、C0–C8 批次与验收；§9.5 记 C9「控制台文案与人格生效口径」 | ✅ C0–C8 已完成，C9 补充与 C6.5 ACP 接线均已收口；动平台/Agent/平台页之前先读这份 |
 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) | **Agent 平台通用化与运行方案重构**：Agent 平台切换（`platforms.active.agent`，单活动 + 多实例）、四轴方案模型（应用方式 / 工具面 / 权限权威 / 行为）、能力档 `runtime` 段、直通模式的提示注入与权限权威、界面改造清单、P0–P6 批次；接 PLATFORM_UNIFICATION 的 C6.5 | ✅ P0 已落地（连接层下沉 / 三处归一 / ACP 事件流出口与 TCK / 概览指标卡按位置命名）、P1 已落地（Agent 侧插件化）、P2 已落地（Agent 平台配置写口 / 探活 / 默认 Agent 平台）、P3 已落地（多入站实例 / 条目开关 / 用户侧配置写口与默认实例）、P4 已落地（能力档 `runtime` 段 / 方案去 `platform` / 方言上移 / `direct` 能力档）、P5 已落地（直通运行期三通道注入 / 权限读写与漂移 / 会话详情块与全局 Agent 平台卡）、P6 已落地（PROFILES_MODEL / SESSION_SUBSYSTEM / CONSOLE 三份文档同步，`PLATFORM_UNIFICATION` 的 C6.5 核销，清掉「方案带 `tools`」的残留分支）；动方案 / 权限档 / Agent 平台之前先读 |
+| [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) | **平台能力契约（最后一公里）**：用户侧补通知类统一事件、动作词表（`actions.mjs`）、工具面 37 → 8 收敛；Agent 侧把能力档拆成「意图 / 渲染」（`render.yml` + 效果词表 + 删 `AGENT_MODULES`）；控制台三段式平台详情、结论式能力清单、能力档编辑器（效果表 + 只读工具面 + 扩展授权）；顺带修会话详情（§8.1）、价目表 state 化（§8.2）、模型目录降级（§8.3）；S0–S9 批次、两条新门禁与验收指标 | ✅ 已全部落地（2026-11-17）：门禁两条断言 / 通知事件中立化 / 动作词表与适配器动作面 / 入站正文切读统一事件 / 工具面 37 → 8 / 能力档意图化 + `render.yml` 渲染层 + ACP 第二消费者，产物正文与基线逐字节一致 / 控制台导航与平台详情三段 / 会话详情六卡 / 价目表 state 化 / 模型目录降级；`test:audit` 132/132、`test-console-ui` 54/54、`verify:repo` 105 通过；台账见 `_internal/CAPABILITY_CONTRACT_LEDGER.md`；动入站正文 / 工具面 / 能力档结构前先读 |
 | [PROFILES_MODEL.md](PROFILES_MODEL.md) | **配置模型**：四轴（应用方式 / 工具面 / 权限权威 / 行为）+ 存储分层（用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 会话档案 → 权限级别）+ 两层默认解析链（会话 → 用户平台条目 / 能力档 → 内置）；`profiles/` 目录与 schema、已删除的旧结构、代码接口与自检 | ✅ 现行权威（改配置存储前先读） |
-| [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | **Agent 平台适配层**：P0 目录迁移 / P1 build-install 分离 / P3 平台话术渲染的现状与不变式；P2 中立 Agent IR 的规划、触发条件与反模式 | ✅ P0/P1/P3 已落地；P2 已纳入 PLATFORM_UNIFICATION 的 C4 |
+| [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) | **Agent 平台适配层**：P0 目录迁移 / P1 build-install 分离 / P3 平台话术渲染的现状与不变式；P2 中立 Agent IR 的规划、触发条件与反模式 | ✅ P0/P1/P3 已落地；P2（意图 / 渲染分离）已于 2026-11-17 落地：能力档 `effects` + `profiles/agent-platforms/<id>/render.yml` + `adapters/render.mjs`，产物逐字节不变（见 §3.5「落地形态」） |
 | [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) | **两侧解耦规格**：地址模型（`platform[@account]:type:id`、多平台并存防串号）、`UserPlatform` / `AgentPlatform` 运行期契约、中立消息段与降级规则、`interface-platform` 合并取舍、插件接管连接的安全边界、B0–B8 迁移批次与验收 | ✅ B0–B8 已落地；B8 之后的缺口由 PLATFORM_UNIFICATION 接管 |
 | [INJECTION_PROFILE_CONFIG.md](INJECTION_PROFILE_CONFIG.md) | **注入块与提示词拼接**：块模型（slot / timing / profiles / scope）、注入块页、预算与上限迁移 | ✅ §2、§7 现行；§3–§5 已由 PROFILES_MODEL 取代 |
 | [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) | **HTTP 边界**：静态资源穿越守卫、未启用=404、先鉴权后存在性、CSP 与安全响应头、刷新/深链恢复、插件 UI 沙箱 | ✅ 改路由/静态资源前必读 |
@@ -108,6 +109,7 @@
 开发台账与阶段材料，保留在本机供追溯，不随仓库发布：
 
 - 未完项与偏差台账：`STATUS.md`、`PARITY.md`、`PLAN_DEVIATIONS.md`、`EXTENSION_PLATFORM_DEVIATIONS.md`、`migration-report.md`
+- 能力契约实施台账：`_internal/CAPABILITY_CONTRACT_LEDGER.md`（任务清单 T-001…T-114 / 偏差记录 / 踩坑记录 / 收口清单，配套 `CAPABILITY_CONTRACT.md` 执行）
 - 执行计划：`UNIFY_PLAN.md`、`PLUGIN_ROADMAP.md`
 - 解耦现状清单：`DECOUPLING_AUDIT.md`（逐条耦合点、位置、难度，是 PLATFORM_DECOUPLING.md 的输入）
 - 人格与提示词快照：`prompts/2026-11-11/`
@@ -123,7 +125,9 @@
 | 加一个 Agent 平台 / 改产物链路 | [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) |
 | 加上一个用户侧平台（微信、B 站…）/ 多平台并存 / 让插件接管连接 | [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md)、[PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §六 |
 | 决定「平台页 / 行为档案 / 能力档」三类界面资产各去哪 | [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) §7.3 |
-| 换 Agent 平台、加直通能力档、对端权限档怎么钉 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) |
+| 换 Agent 平台、加直通能力档、对端权限档怎么钉 | [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md)、[CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) §3.4 |
+| 入站正文怎么写、消息外的动作用什么词、工具面还该不该按平台命名 | [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) |
+| 会话管理弹窗该怎么重排 / 价目表能不能自定义 / 模型与思考强度下拉为什么是灰的 | [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) §八 |
 | 在新设备上把桥接接进 DSH | [DSH_DEPLOYMENT.md](DSH_DEPLOYMENT.md)、[guides/DSH_SETUP.md](guides/DSH_SETUP.md) |
 | 改控制台界面 / 加组件 / 跑 UI 回归 | [CONSOLE.md](CONSOLE.md)、[CONSOLE_FORMS.md](CONSOLE_FORMS.md)、[guides/CONSOLE-UI-TESTING.md](guides/CONSOLE-UI-TESTING.md) |
 | 把卡片页改成二级详情页 / 加页面子路由 / 左栏宽度 | [CONSOLE_IA_REWORK.md](CONSOLE_IA_REWORK.md) §3 |

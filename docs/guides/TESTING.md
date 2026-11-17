@@ -3,8 +3,20 @@
 ## 离线回归（不需要 QQ、SnowLuma、DSH 或网络）
 
 ```powershell
-npm run test:audit      # 73 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
+npm run test:audit      # 132 个脚本：原版与各版本新增的离线回归，清单见 scripts/test-audit.mjs；macOS 上 test-console-encoding 是已知失败（只适用于 Windows）
 npm run test:v030       # 只跑 v0.3.0 的四个新测试
+```
+
+### 执行策略
+
+套件默认并发 4 跑（`--jobs N` 调并发，`--serial` 退回串行），每个脚本的输出先收进内存：
+通过的只回一行 `ok <脚本> (<ms>)`，失败才整段回放并汇总到最后一行的「失败：…」。
+改一个局部模块时不必全量：按改动面定向跑，收尾再跑一次全量。
+
+```powershell
+node scripts/test-audit.mjs --only capability     # 文件名含该词的脚本，可重复 --only
+node scripts/test-audit.mjs --only tool-catalog --only runtime-capabilities
+node scripts/test-audit.mjs --list                # 看清单
 ```
 
 | 脚本 | 覆盖 |
@@ -42,10 +54,9 @@ npm run test:v030       # 只跑 v0.3.0 的四个新测试
 | `scripts/test-dsh-auth-hint.mjs` | DSH 401 诊断提示：识别 401；凭据缺失 / 对不上两种说法与发现另一个有凭据的目录；用户目录显示成 ~、不输出密钥；10 分钟限频与恢复后重置；bridge 接线（从没就绪过也提示、「事件流 0 帧」在 401 时不再说成协议不匹配）；诊断与限频归连接层（`adapters/dsh/auth-hint.mjs`） |
 | `scripts/test-backfill.mjs` | 断线补收：断档检测（含桥接重启后读回）、消息 ID 去重、命令类识别、挑选（时间窗 / 自己发的 / 收过的 / 太旧 / 上限）；端到端（补收进未读带原始时间与标记、有 @ 排唤醒、唤醒提示说明是补收的且送达后清掉、不执行补收到的命令只提醒管理员、重复补收不重复、太旧不唤醒、非二代不补）；启动后第一个事件包自动触发；拉历史失败时记下没补上的时间、重试、下次从更早的时间补 |
 | `scripts/test-send-limit-console.mjs` | 发言上限：超过每分钟上限 AI 收到说明（桥接的上限，不是 QQ 的）、控制台状态里有最近 24 小时被拦次数（AI 拿不到）、控制台改上限马上生效；总览页卡片 |
-| `scripts/test-agent-preset-patches.mjs` | preset 源与 bundle patch 不漂移（含新 preset） |
+| `scripts/test-agent-preset-patches.mjs` | 渲染结果与 bundle patch 不漂移（同一份意图 → `renderPreset()` → 产物，含新 preset）；能力档里不得再出现 `rows` / `preset` / `tools` 段 |
 
 原版测试在本仓库里做过的调整（都是让测试不依赖开发机环境，没有放宽断言）：
-- `test-preset-prompt.mjs`：行尾测试改为显式构造 CRLF 样本，不再依赖检出时的行尾；
 - `test-preset-local-tools.mjs`：找不到 DSH 安装时跳过工具名对账（原来是抛错）；
   只存在于可选第三方 bundle 的三个工具名（`dsh_snapshot` 等）不算「假名」；
 - `test-audit-bridge.mjs`：closed-agent 用例先设置级别 L2（v0.3.0 起未授权的 closed-agent 拒绝建会话）；

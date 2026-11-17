@@ -12,7 +12,7 @@
 
 - 两边都能改、都不是最终状态，用户不知道以谁为准；
 - 一边换了卡，另一边的注入还在用旧的；
-- 桥接的 `roleRefreshBlockV2`、`qq_get_prompt`、唤醒提示词各自读一次 `roles/`，接上外部来源后必然出现「注入 A、刷新块写 B」。
+- 桥接的 `roleRefreshBlockV2`、`admin`（`op=get_prompt`）、唤醒提示词各自读一次 `roles/`，接上外部来源后必然出现「注入 A、刷新块写 B」。
 
 所以这里定的是**权威归属**，不是「再加一个来源」。
 
@@ -88,7 +88,7 @@ ctx.persona.register({
 | 位置 | 行为 |
 | --- | --- |
 | `currentRoleHintV2(key)` | 解析结果的正文；provider 卡原样 trim，本地卡过 `sanitizeRoleTextV2`（一代指令行过滤、示例空格改写），再按 `promptBlocks['core-persona'].maxChars`（默认 8000，1000~20000）截断 |
-| `currentRoleName(key)` | 解析结果的 `name`；`buildWakePromptV2Core`、`buildWakeReminderPromptV2`、`qq_get_prompt` 都用它 |
+| `currentRoleName(key)` | 解析结果的 `name`；`buildWakePromptV2Core`、`buildWakeReminderPromptV2`、`admin`（`op=get_prompt`）都用它 |
 | `currentRoleFingerprintV2(key)` | 同一张卡的指纹；没卡时也返回稳定值，避免每次唤醒重复注入「角色卡已更新」 |
 | `roleRefreshBlockV2(key)` | 名字改用 `currentRoleName`，不再读 `roleNameForKey` |
 | `deliverPromptNow(key)` | 唤醒时先 `personaWarm(key)`：异步、有超时、失败只记日志，不挡消息 |

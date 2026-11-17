@@ -229,7 +229,8 @@ npm run test:audit
 
 预期：
 - `npm ci` 末尾有 `[patch-snowluma] … 修补了 N 个文件` 与 `added … packages`；
-- `npm run test:audit` 最后一行 `Audit suite: N/N scripts passed.`（不需要 QQ、DSH 或网络）。
+- `npm run test:audit` 最后一行 `Audit suite: N/N scripts passed in Xs (jobs=4).`（不需要 QQ、DSH 或网络）。
+  脚本默认并发执行；失败时会把该脚本的完整输出回放到 `FAIL ...` 下面，并在最后一行列出「失败：…」。
   - **macOS 上 `test-console-encoding.mjs` 会失败**（它检查 Windows 控制台的 `chcp`，Mac 上没有这个命令），显示为 `N-1/N`——这是已知情况，可以继续；
   - 会打印 `⏭ 跳过：未找到 DSH 工具包` 等跳过项——正常（没指定 DSH 安装目录时跳过工具名对账）。
 
@@ -543,7 +544,7 @@ zip -r "../qq-bridge-backup/qq-bridge-$(date +%Y%m%d-%H%M%S).zip" config.json st
 | SnowLuma WebUI 输对密码也登不进，提示「登录尝试过多，请 N 秒后重试」 | 同一地址 5 次输错后锁 15 分钟，锁定期间**正确密码也会被拒**。等 15 分钟或重启 SnowLuma 即解除（计数只在内存里）。注意 `localhost` 和 `127.0.0.1` 算两个地址；用控制中心「打开 SnowLuma WebUI」打开的固定是同一个 |
 | WebUI 改密码提示「新密码不得与旧密码相同」 | 说明你填的「当前密码」就是现在存着的密码——直接用它登录即可。只想“重新设成这个密码”时，先改成另一个密码，再改回来（只比较这一次的新旧密码，不记历史） |
 | 回合出错 `working-directory: directory does not exist: "<旧目录>\state\agents"` | 删除 / 改名了旧的项目目录，而老的 DSH 会话还记着旧目录：重置这些会话（第 13 节表格第一行） |
-| 机器人说「还有个等待没结束」，日志反复「该会话已有一个等待中的 qq_wait_for_messages」 | 等待租约残留（最长 15 分钟）。v1.0.2 起重置会话会一并清掉；更早的版本重启桥接即可 |
+| 机器人说「还有个等待没结束」，日志反复「该会话已有一个等待中的 read_messages（op=wait_for_messages）」 | 等待租约残留（最长 15 分钟）。v1.0.2 起重置会话会一并清掉；更早的版本重启桥接即可 |
 | 双击 `control-center-hidden.vbs` 没反应 | 多半双击的是**旧目录**的启动器（和正在运行的新目录抢端口，隐藏窗口看不到报错）；只用当前目录的启动器，排障时用 `control-center.bat` 看输出 |
 | Windows 解压 Release ZIP 失败 / 中文文件名乱码（`roles/小鲸鱼.md` 等） | v1.0.0、v1.0.1 的包缺「文件名是 UTF-8」标志；v1.0.2 起已修复。旧包可以用 7-Zip 解压，或从仓库直接获取 |
 | 开启卡上一直「等你扫码」 | NapCat 登录态失效：用手机 QQ 扫卡片上「查看登录二维码 →」里的码（约 2 分钟换一次） |

@@ -27,18 +27,27 @@ export const capabilities = ['group', 'direct', 'mention', 'reply', 'recall', 'p
   'image', 'voice', 'sticker', 'file', 'forward', 'member-list', 'member-info'];
 export const limits = { chunkChars: 4000, markdown: false };
 
+export const actions = ['message.send', 'poke.send', 'history.get', /* … */];  // 敢接的中立动作
+export async function actionHandler({ name, params }) {}  // 一个入口收全部动作，内部才碰 bot.raw / 私有动作
 export function buildSendCall(kind, id, message) {}       // → { action, params }（报文拆分用，可选）
 export async function send({ address, segments, opts }) {} // 真正发出去：中立段 → 本平台报文 → 网络
 export async function connect({ signal, onEvent, onStatus }) {} // 收：本平台报文 → 统一事件（可选，见第 4 步）
 export function describeBackend(opts) {}                   // 日志里的「经 X 后端」称呼
-export function readBackendInfo(versionInfo) {}            // get_version_info → { name, version }
+export async function probeBackend() {}                    // 问后端身份 → { name, version } | null
 ```
 
 - `capabilities` 是**能力声明**而不是能力检查：内核按它决定降级（缺 `sticker` 发文字占位）还是报错（缺 `poke`）。
+- `actions` 是**动作声明**：词表在 `src/user-side/actions.mjs`（13 项，`CAPABILITY_CONTRACT.md` §3.2），
+  平台只列自己敢接的。没列的动作内核不会调到这里 —— 能降级的按词表降级（`message.reply` → `message.send`），
+  降不了的抛 `capability_unsupported`。新增平台**不必**实现全部 13 项，正向同步、缺项降级才是常态。
 - `limits` 参与分条与格式转换，缺省时内核用默认值。
 - `send` 是唯一发送出口，收到的是**已校验、已降级的中立段**（`{ type, data }`），不是原始文本。本平台的
   动作名、参数形状、HTTP/鉴权都只该出现在适配器目录里（QQ 的实现见 `adapters/qq/transport.mjs`）。
+- `actionHandler` 内部可以直接用平台私有动作（QQ 的 `set_group_poke`、`fetch_custom_face_detail` 等）：
+  这正是它存在的理由。**适配器之外**出现 `bot.raw` / `bot.request` 会被门禁拦下（§三 第 8 条）。
 - `buildSendCall` 仍保留：报文是数据时（例如需要把「动作 + 参数」交给外部网关）用它，不要两边各写一份三元式。
+- `probeBackend` 是异步的（它要发 `get_version_info`）：「是不是 NapCat」这类判定不要缓存到适配器模块级变量，
+  交给 `connection.mjs` 随连接失效（换网关后判断会变）。
 
 ### 2. 装配：`src/user-side/builtin.mjs`
 
@@ -52,9 +61,9 @@ export const BUILTIN_USER_PLATFORMS = Object.freeze([qq]);
 ### 3. 内核侧：不用改
 
 `bridge.js` / `self-test.js` / `launcher` 只经 `src/user-side/user-platform.mjs` 门面调用
-（`buildSendCall` / `sendAction` / `previewSegments` / `describeBackend` / `readBackendInfo` /
-`supportsUserCapability` / `userPlatformLimits`，以及入站的 `startUserPlatformInbound` /
-`configureUserPlatformInbound`）。
+（出站 `buildSendCall` / `sendAction` / `previewSegments`，动作 `callAction` / `supportsAction`，
+后端 `probeBackend` / `describeBackend`，能力 `supportsUserCapability` / `userPlatformLimits`，
+以及入站的 `startUserPlatformInbound` / `configureUserPlatformInbound`）。
 门面导出的是**转发函数**而不是常量绑定，所以运行期切平台能立刻生效。
 
 后端配置（地址、token、fetch）也在这里注入：`configureUserPlatformBackend(provider)` 只传
@@ -103,6 +112,9 @@ QQ 的完整实现见 `src/user-side/adapters/qq/inbound.mjs`，机制说明见 
    判断“这条会话能不能回”、也不要自己拼会话 key。原因：准入的真相在内核（白名单 / 管理通道 / 当前模式），
    适配器判一次就会与内核分叉；而会话 key 的拼法一旦被适配器复写，插件就能把事件投到任意会话上。
    同理：把整条消息判成 INVALID 是最坏的降级方式（一个陌生段就能让一句话消失），未知段一律降成占位文本。
+8. **平台私有动作不出适配器（C4）**：`bot.raw` / `bot.request` / `bot.send*` 只允许出现在 `src/user-side/adapters/`，
+   内核经 `callAction(name, params)` 说中立词。门禁是 `verify:repo` 对 `src/**/*.{mjs,js}` 排除适配器目录后的
+   正则扫描，所以「绕过办法」不是加白名单，而是先把这件事变成词表里的一个动作。
 
 ## 四、自检
 
@@ -116,6 +128,7 @@ node scripts/test-qq-inbound.mjs         # 入站报文翻译/connect 改动后�
 node scripts/test-unified-inbound.mjs    # 入站管线四步顺序/丢弃原因改动后
 node scripts/test-prompt-layers.mjs      # 平台话术（prompt.mjs）改动后
 node scripts/test-onebot-send-call.mjs   # 发送调用构造改动后
+node scripts/test-user-actions.mjs       # 动作词表 / actionHandler 回调改动后
 ```
 
 ## 五、入站：已接通（PLATFORM_UNIFICATION C3）
@@ -133,12 +146,12 @@ raw event → validateUnifiedEvent(raw, origin) → 准入 → 会话映射 → 
 **顺序不可换**：校验必须在准入之前，否则插件（或任何一个适配器）能看到未准入会话的正文。四步里
 只有第一步（报文 → 统一事件）在适配器，后三步全在 `bridge.js`。
 
-- 管道 `emit` **永不抛错**：任何异常都变成 `{ ok: false, reason }` 交给 `onDrop`（`INBOUND_DROP` 五种：
-  `invalid` / `not_admitted` / `conversation_unresolved` / `body_unsupported` / `deliver_failed`）。
+- 管道 `emit` **永不抛错**：任何异常都变成 `{ ok: false, reason }` 交给 `onDrop`（内置原因码 `INBOUND_DROP` 四个：
+  `invalid` / `not_admitted` / `conversation_unresolved` / `deliver_failed`；`deliver` 也可以自己返回 `reason`）。
 - **一条实例一条管线**：`platforms.users` 里每条启用的条目都会单独装配，`origin` 是那条条目的
   `{ platform, account }` —— 会话 key 与准入白名单都按它算，多实例并存也不会串号。
-- **正文契约 `rawEvent`**：`describePlatform()` 里的静态布尔。声明的平台才拿得到 `ext.raw`；
-  没声明的由 `deliver` 返回 `body_unsupported` —— 不假装处理过。
+- **正文只说一遍**：统一事件 `message.text` 由校验阶段从段里拼出，`ext.raw` 只是适配器侧的排障入口，
+  内核业务体一处不读（门禁 `verify:adaptation` 断言这个目录之外零读取）。
 - 未实现 `connect` 的平台仍合法：统一注册表把它标成 `inbound: false` 并报 `inbound_unsupported`（warn），
   不再静默地“看起来能用”。QQ 在 C3 之后不再触发该诊断。
 - 启动与退出：`startUserPlatformInbound(...)` 返回 `{ close }`，`bridge.js` 逐条收集并在 `shutdownThenExit`

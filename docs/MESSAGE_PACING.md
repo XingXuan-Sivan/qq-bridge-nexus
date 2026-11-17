@@ -46,7 +46,7 @@
 | 入站 | 平台适配器把一条平台消息交给会话 |
 | 投递 / 唤醒 | 向 Agent 平台投递一次 prompt，形成一次模型回合 |
 | 档位（tier） | 本次投递的优先级分类，决定合批上限与预算桶 |
-| 显式回执 | 模型带水位调用 `qq_mark_read` 或 `qq_set_wake_config`，表示「我看过这些了」 |
+| 显式回执 | 模型带水位调用 `conversation_state`（`op=mark_read` 或 `op=set_wake_config`），表示「我看过这些了」 |
 | 搭车（piggyback） | 预算不足时不单独叫醒，把内容并入下一次唤醒的 prompt |
 | 溢出（overflow） | 消息因未读缓冲上限被挤出、模型从未被展示过 |
 | 直通（pass-through） | 不合批、不限预算的调度策略，供默认 chat 模式使用；与档位 `direct` 同名不同义 |
@@ -149,7 +149,7 @@ tokens <  1 → direct：照常投递并记 directOverflow（宁多发一次，�
 - `tokens` 必须保留小数（`stored` 落盘），否则回填会取整成 0 而永不恢复
 - 桶状态落在会话档案 `profiles/<key>.json` 的 `wake.pacing`，重启不清零（否则重启即可绕过预算）
 - 落盘必须保留并列键：`profile.wake = { ...profile.wake, config, pacing }`。整段覆写会把桶一起清掉，结果是每次落盘都回到满桶、预算形同虚设
-- 桶状态不暴露给模型，也不作为 `qq_set_wake_config` 的入参；只在 `/api/socialV2/states` 读侧给控制台看剩余额度
+- 桶状态不暴露给模型，也不作为 `conversation_state` 的 `op=set_wake_config` 入参；只在 `/api/socialV2/states` 读侧给控制台看剩余额度
 
 ### 4.3 `cursor.mjs` — 游标与三态收尾判据
 
@@ -251,7 +251,7 @@ overflowed   seq 已被挤出且从未展示                         → 记溢�
 | 删除项 | 出现位置 | 处理 | 批次 / 状态 |
 | --- | --- | --- | --- |
 | `batchWindowMs`（会话态） | `defaultWakeConfigV2`、`scheduleWakeV2`、`/api/socialV2/wake-config` 的入参白名单 | 字段删除；旧档案里的残留键读到即丢弃 | N2 已完成 |
-| `config.batchWindowMs` | MCP 工具 `qq_set_wake_config` 的 schema | 从工具 schema 删除，模型不再能改自己的调度窗口 | N2 已完成 |
+| `config.batchWindowMs` | MCP 工具 `conversation_state`（`op=set_wake_config`）的 schema | 从工具 schema 删除，模型不再能改自己的调度窗口 | N2 已完成 |
 | `wake_batchWindowMs` | 行为档案字段表 `profiles/behavior-engines/v2.yml`、QQ 档案 | 删除 | N2 已完成 |
 | `maxWakePerMinute` / `maxWakePerHour` | `defaultSocialV2.wake`、限频分支、字段表、QQ 档案 | 删除，由双桶替代 | N1 已完成 |
 | `wakeTimes`（会话态数组） | 会话状态、落盘、`/api/socialV2/states` 间接暴露 | 删除，由 `wake.pacing` 桶状态承载 | N1 已完成 |
@@ -266,8 +266,8 @@ overflowed   seq 已被挤出且从未展示                         → 记溢�
 | 出口 | 生效范围 |
 | --- | --- |
 | 本轮不调发送工具 | 所有模式 |
-| `qq_mark_read`（带水位） | social-v2 |
-| `qq_set_wake_config`（可带水位） | social-v2 |
+| `conversation_state`（`op=mark_read`，带水位） | social-v2 |
+| `conversation_state`（`op=set_wake_config`，可带水位） | social-v2 |
 | `[SILENT]` 标记 | 仅 social-v1 |
 | 手动静默（full / sendOnly，按环节） | 全部 |
 | 定时静默（`stopWakes` / `directWakes` / `recordMessages`） | 全部 |
@@ -341,7 +341,7 @@ L1 只提供能力：当「距上次成功唤醒后新增入站 ≥ `backlogWake
 | 字段表：删 3 个旧键、新增 12 个两段扁平键（新开「投递节奏」分组） | `profiles/behavior-engines/v2.yml` | 已完成 |
 | 档案：删 3 个旧键；实例档案存全量快照（缺省键按引擎默认值补齐），出厂副本只放文案 | `profiles/platforms/qq/behavior-types/social-v2.yml`、`behaviors/social-v2.yml`、`.defaults/social-v2.yml` | 已完成 |
 | 表单：字段值按引擎默认值回填，保存时整份写回（不再依赖「键缺失 = 用默认」）；数字框清空即回到默认值 | `public/console/pages/platforms/behavior-form.js` | 已完成 |
-| MCP：`qq_set_wake_config` 的 schema 删 `batchWindowMs`，模型不再能改自己的调度窗口 | `src/mcp-snowluma-safe.js` | 已完成 |
+| MCP：`conversation_state`（`op=set_wake_config`）的 schema 删 `batchWindowMs`，模型不再能改自己的调度窗口 | `src/mcp-snowluma-safe.js` | 已完成 |
 | 唤醒卡片：文案改指平台行为档案；只读行（两档 token、暂存、未读溢出）从 `/api/socialV2/states` 读 | `public/console/pages/sessions/page.js` | 已完成 |
 | 不动字段表：v1 的调度策略由 `kind` 固定为零参与，不开开关，避免出现设了也无效果的配置项 | `profiles/behavior-engines/v1.yml` | 已完成（未加任何节奏键） |
 | `/api/socialV2/states` 的 `wakeConfig` 不再含 `batchWindowMs` | `src/bridge.js` | 已完成 |

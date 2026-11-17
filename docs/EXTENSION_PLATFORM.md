@@ -1,6 +1,7 @@
 # 桥接扩展平台（MCP / 技能 / 插件 / 预设）设计方案
 
 > 状态：**方案评审中（2026-11-08），未动工**。
+> 补记（2026-11-17，S5）：能力档已改为只写意图（`effects` / `runtime` / `behavior` / `audience` / 顶层 `mcp` / `skills`），插件行与预设展示名改由 `profiles/agent-platforms/<id>/render.yml` + `adapters/render.mjs` 渲染；旧的结构化预设编辑器（`src/presets/`）已连同 `templates/rows.yml` 删除，扩展授权改在「平台 › 能力」面板里改（见 [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) §3.4 与 [CONSOLE.md](CONSOLE.md) §9）。本文其余部分是评审时的形态，保留作设计依据。
 > 关系：本文修订 ](./_internal/PLUGIN_ROADMAP.md) §9/§10 中「MCP 清单管理、skills、插件市场、平台适配器不做/暂缓」的旧结论；实施顺序以本文为准。
 > 读者：负责扩展页、DSH 预设、MCP 接入与插件市场的实现者。
 
@@ -39,7 +40,7 @@
 - `src/bridge.js:5309-5319` 的 `GET /api/extensions`：MCP 是 3 条字面量；`snowluma-safe` 的 `tools` 为空，但 `src/mcp-snowluma-safe.js:383-1463` 实际注册 36 个 `qq_*` 工具。
 - `public/console/pages/reference/fields.js:5-15`：9 条硬编码工具说明，页面不发请求。
 - `src/bridge.js:5321-5329`：`GET /api/presets` 只回 `{id, trust}`。
-- `profiles/agent-platforms/dsh/capabilities/<id>.yml` 是 preset 权威源（`preset` + `rows` 段）；`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
+- `profiles/agent-platforms/dsh/capabilities/<id>.yml` 是 preset 权威源（意图段：`effects` / `runtime` / `behavior` / `audience` / `mcp` / `skills`）；插件行与展示名在同平台的 `render.yml`，由 `adapters/render.mjs` 编译；`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 是生成物；`setup-dsh.mjs` 安装进 DSH profile。
 - `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs:244-252`：执行期 guard 只放行 `SAFE_EXACT`（`ask_user_question`、`todo_write`）、三个 MCP 前缀与 L1 只读工具；`compress` 被拒。
 
 ### 1.2 三个结构性问题
@@ -81,7 +82,7 @@
 | `mcp` | 一个 MCP server（stdio / SSE / Streamable HTTP）及其工具 | `extensions/mcp/<id>/server.json`，内置 server 仍由 `src/mcp-*.js` 提供 | 连接、工具清单、健康、错误 |
 | `skill` | 一份 `SKILL.md`，只注入 name/description，正文按需读 | `extensions/skills/<id>/SKILL.md`，内置来源 `DSH_HOME/skills`、仓库 `skills/`、插件自带 skills | 扫描结果、启用状态 |
 | `plugin` | 桥接进程内插件（钩子 / 人格 provider / 命令 / 注入块） | `plugins/<id>/plugin.json` + `plugins.json` | 加载状态、钩子、调用计数 |
-| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `profiles/agent-platforms/dsh/capabilities/<id>.yml`（`preset` + `rows` + `extensions`） | 安装后的 patch / 当前会话绑定 |
+| `preset` | DSH agent preset（提示词、工具面、compaction、MCP/技能授权） | `profiles/agent-platforms/dsh/capabilities/<id>.yml`（意图）+ `profiles/agent-platforms/dsh/render.yml`（行模板与展示名） | 安装后的 patch / 当前会话绑定 |
 
 说明：`preset` 不是「扩展」本身，但它是扩展授权的中心，所以放进同一个 catalog 视图；不把 preset 伪装成可安装插件。
 
@@ -452,13 +453,17 @@ resolve source → preview manifest → staging download
 ### 8.1 权威源与生成链
 
 ```text
-profiles/agent-platforms/dsh/capabilities/<id>.yml   # 权威源（preset + rows，人可读、可 review）
+profiles/agent-platforms/dsh/capabilities/<id>.yml   # 权威源：只写意图（effects / runtime / behavior / audience / mcp / skills）
+  → profiles/agent-platforms/dsh/render.yml       # 该平台的渲染规则：效果 → 行模板、展示名、行序、权限档、compaction
+  → profiles/agent-platforms/dsh/adapters/render.mjs（renderPresetRows，构建与运行期共用）
   → profiles/agent-platforms/dsh/adapters/build.mjs（planArtifacts，调度器 scripts/build-artifacts.mjs）
   → artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml
   → profiles/agent-platforms/dsh/adapters/install.mjs（scripts/install-agent-platform.mjs）安装到 DSH profile
 ```
 
-预设编辑器只写权威源，再走生成/安装；不直接改生成物，否则下次 build 会覆盖。
+预设编辑器只写意图段，再走渲染、生成、安装；不直接改生成物，否则下次 build 会覆盖。
+
+> S5 已删除旧的预设编辑器：现在改能力档的是「平台 › 能力」面板，它只写 `label` / `note` / `mcp` / `skills`（可勾的只有扩展授权，效果表与执行体工具面是只读结论）。下表 §8.2 / §8.5 是当时的编辑器设想。
 
 ### 8.2 结构化视图 + YAML 高级编辑
 

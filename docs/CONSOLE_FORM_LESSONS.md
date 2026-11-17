@@ -365,7 +365,7 @@ MCP 删除回归新增了一条 `DELETE /api/extensions/mcp/test-ext`，`test-co
 
 预设页保存 `extensions.yml` 时走 `yaml.dump`，一次「原样保存」把 `allow: ['*']` 改成多行列表、并删掉文件头三行说明注释；`writeMeta` 同理。源码是权威源，注释也是维护信息。
 
-**规则**：结构化保存必须在写盘前保留一段固定说明头（`src/presets/store.mjs` 的 `writeExtensions` 已加「扩展授权：由控制台预设编辑器维护…」），并在验收时 `git diff` 看格式变化；需要逐字节保留注释就只能走 YAML 原文编辑或 CST，不要假装结构化保存无损。
+**规则**：结构化保存在写盘前必须保留一段固定说明头（现在是 `src/capabilities/store.mjs` 的 `CAPABILITY_HEADER`，写明 effects / behavior / runtime / audience / mcp / skills 各是什么），并在验收时 `git diff` 看格式变化；要逐字节保留既有注释就只能走 YAML 原文编辑或 CST，不要假装结构化保存无损。
 
 ### 1.63 删页不是只删目录：路由、静态基线和 legacy ID 会同时失配
 
@@ -377,7 +377,7 @@ G3 删除 `access`/`social-v1`/`social-v2` 后，`test-console-ui` 连续报旧 
 
 行为档案迁移后，`cfg.socialV2` 只代表当前会话的 v2 行为视图；`tools`/`voice`/`media`/`limits` 等系统键在 `cfg.*`。旧测试 fixture 仍传 `config.socialV2.tools`/`.sticker`，会在 `cfg.socialV2` 视图中读不到并报 `Cannot read properties of undefined`。
 
-**规则**：系统级开关走 `config.voice`/`config.media`/`config.limits`（工具注册面已不在 `config` 里，由能力预设 `tools.platform` 的并集推导）；行为参数走 `behavior.v2`。测试夹层要显式分两处传，不能再用一个 `socialV2` 对象兜所有。
+**规则**：系统级开关走 `config.voice`/`config.media`/`config.limits`（工具注册面已不在 `config` 里，由平台声明 `profiles/platforms/<id>/tools.yml` 推导）；行为参数走 `behavior.v2`。测试夹层要显式分两处传，不能再用一个 `socialV2` 对象兜所有。
 
 ### 1.65 行为视图的返回形状必须同时带 `.config` 与 `.v1/.v2`
 

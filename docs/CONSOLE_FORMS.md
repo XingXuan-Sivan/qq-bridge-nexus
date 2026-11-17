@@ -347,10 +347,13 @@ span.time-field
 </section>
 
 <!-- 二级页（[data-platform-view="detail"]，hidden） -->
-<div class="platform-detail">               <!-- display: contents -->
-  <header class="detail-head">…</header>   <!-- detailHeadHtml()，自带 grid-column: 1 / -1 -->
-  <div class="page-tabs">…</div>            <!-- 自带 grid-column: 1 / -1 -->
-  <div class="platform-stack">…</div>       <!-- 纵向分节，每一段一张 card -->
+<div class="platform-detail detail-view">        <!-- display: contents -->
+  <section class="detail-panel">                <!-- detailPanelHtml()：整页就这一张卡 -->
+    <header class="detail-head">…</header>     <!-- detailHeadHtml() -->
+    <div class="page-tabs">…</div>              <!-- 标签条的下边框就是分区起始的那条线 -->
+    <div class="detail-body" data-platform-panel-body>…</div>
+    <!-- 面板里是若干 detailSectionHtml() 分区 -->
+  </section>
 </div>
 ```
 
@@ -359,8 +362,8 @@ span.time-field
 1. 清单与详情**同时常驻**：路由（`#platforms/<side>:<id>[/<tab>]`、`#plugins/<id>`）只切 `hidden`。刷新时只重画卡片与诊断卡，**不重建 `details`** —— 重建会把用户展开的组分回去；诊断汇总卡只在有 `level === 'error'` 的诊断时创建。
 2. 卡片整块可点：`tileHtml({ interactive: true })` 给 `role="button"` 与 `tabindex="0"`，点击 / 回车 / 空格都进二级页；卡片里的 `button` / `a` 不触发跳转（点击委托里排除）。
 3. 二级页的标签属于路由：`onTab` 写 `setConsolePage(page, { sub, tab })`，返回写 `sub: ''`；不要面板里本地切 tab，否则深链、前进/后退与刷新会各说一套。（返回不用 `history.back()`，见 [CONSOLE.md](CONSOLE.md) §2.3。）
-4. 详情里每一段都单独是 `cardHtml` 的一张卡（页头与标签条不是卡）：页头用 `detailHeadHtml()`，自带外壳的组件（提示词卡、分节面板）直接挂进 `.platform-stack`，不要再套一层 card。
-5. 外壳用 `display: contents` 时，**需要跨满两列的块自己写 `grid-column: 1 / -1`**（`.detail-head` / `.platform-stack`；`.page-tabs` 的已在 `components.css` 里）。漏写会掉进 `main` 网格的第一列。
+4. 详情页**整页就是一张大卡**（`detailPanelHtml()`）：页头、结论句、标签条与面板都放进这张卡，卡外不留裸露的页面底色；卡里按分区排（`detailSectionHtml()` 的标题行 + 说明 + 正文，分区之间靠分隔线分层，不再各套一张卡）；分区里的短内容用带边框小卡（`detailCardHtml` / `detailCardsHtml`，类名是组件自己的 `detail-panel-card`，与会话弹窗的 `.detail-card` 无关）。页头用 `detailHeadHtml()`；自带外壳的组件直接挂进大卡——提示词卡的 `h2` 就当分区标题，`cardHtml` 出的卡（能力档、行为档案）在大卡里统一降成小卡。
+5. 外壳用 `display: contents` 时，**需要跨满两列的块自己写 `grid-column: 1 / -1`**（`.detail-panel`；`.page-tabs` 的已在 `components.css` 里）。漏写会掉进 `main` 网格的第一列。
 6. 详情自己拉数据（`/api/platforms/registry` 的快照、`/api/plugins/<id>`）时用加载令牌：换了 id 或已卸载就把在途响应丢掉，不要在已清空的宿主上画。写成功后**不重挂详情**（会冲掉状态位与刚敲的值），只刷新清单。
 7. 深链不等清单接口：`paint(sub)` 在有 `sub` 时直接挂详情，清单接口回来再画清单；指向不存在的 id 时平台页把地址栏归一回清单，插件页在详情里给出“读取失败”与返回。
 

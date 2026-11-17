@@ -56,7 +56,7 @@
 
    脚本会完成（实现在 `profiles/agent-platforms/dsh/adapters/install.mjs`）：
 
-   - 安装 agent preset：通过 `artifacts/dsh/qq-agent-presets` 这个 DSH bundle 把 `chat` / `chat-v2` 两条 `@deepseek-ai/dsh-agent-preset` 行插入 profile（DSH 0.1.7 起 preset **不再是** `~/.dsh/.agent-presets/<名>/` 目录，该目录完全不被读取）。patch 由 `profiles/agent-platforms/dsh/adapters/build.mjs` 从 `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `preset` + `rows` 段渲染
+   - 安装 agent preset：通过 `artifacts/dsh/qq-agent-presets` 这个 DSH bundle 把 `chat` / `chat-v2` 两条 `@deepseek-ai/dsh-agent-preset` 行插入 profile（DSH 0.1.7 起 preset **不再是** `~/.dsh/.agent-presets/<名>/` 目录，该目录完全不被读取）。patch 由 `profiles/agent-platforms/dsh/adapters/build.mjs` 从 `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `effects` 段查出该平台 `render.yml` 的行模板后渲染（展示名与行序也来自 `render.yml`）
    - 在 `~/.dsh/profiles/web/cordis.patch.yml` 挂载：
      - `mcp-snowluma`（`src/mcp-snowluma-safe.js`，带 `toolCallTimeoutMs: 725000`）
      - `mcp-snowluma-host`（`src/mcp-host-server.js`）
@@ -101,7 +101,7 @@
 
 - **每次启动日志里都先报一次「连接断开（1006）」再报「已连接」**：**这是正常的，不是故障**。原因：SnowLuma 同一账号的 **HTTP token（默认 3000 端口）与 WS token（默认 3001 端口）是两个不同的值**，而 `config.json` 里当前平台的 `transport.accessToken` 只能存一个（存的是 HTTP 那个）。所以 WS 首次连接会被拒 → 触发 token 自愈（重新发现 WS token）→ 重连成功。有的 SnowLuma 版本握手被拒时不报 1006，只记一行 `SnowLuma 错误: … non-101 status code`——v0.4.1 起同样会触发自愈，并由连接看门狗定时重连，结果相同。真正有问题的是**自愈也失败**：日志里会出现 `token 自愈失败`，QQ 侧完全收不到消息。那时先确认 `platforms.users.<平台 id>.transport.homeDir` 指向真正的 SnowLuma 安装目录（自愈要从它的 `config/onebot_<QQ号>.json` 里读 WS token）。
 - **QQ 上毫无反应，但桥接日志说「SnowLuma 已连接」**：这几乎总是 **SnowLuma 侧的 `[Hook]` 收不到 QQ 数据**，不是桥接的问题。桥接的 WebSocket 连的是 SnowLuma，SnowLuma 再通过原生组件挂进 QQ 客户端进程；中间这层退化时 SnowLuma 进程与它的 WebSocket 都还活着，所以桥接这边看不出异常。
-  1. 打开控制台「运行总览」，看 **「用户平台」格的上游摘要**：`上游连着但收不到数据` 就是这个状态；「访问与安全」页会有对应告警条与处置建议。`GET /api/status` 的 `snowluma` 字段（`degraded` / `good` / `hint`）给的是同一份判断。
+  1. 打开控制台「运行总览」，看 **「用户平台」格**：数值是已连接的用户侧实例条数（入站结论 `open` 才有），上游摘要在它下面 —— `上游连着但收不到数据` 就是这个状态；「访问与安全」页会有对应告警条与处置建议。`GET /api/status` 的 `snowluma` 字段（`degraded` / `good` / `hint`）给的是同一份判断。
   2. 去看 **SnowLuma 自己的日志** `logs/snowluma-*.log`，搜 `[Hook]`：
      - `receive path stale: … reporting good=false` —— 收不到数据（会自愈，也可能不自愈）
      - `process enumeration timed out after 4000ms` —— 连 QQ 进程都枚举不到

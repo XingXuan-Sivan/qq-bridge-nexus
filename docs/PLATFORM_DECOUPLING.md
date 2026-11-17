@@ -105,10 +105,10 @@
 | 旧 DSH 会话（B4） | 自动迁移 | 不迁移，`install` 适配器只在安装时**报告**残留的旧 preset 目录/patch，由用户重建会话 | dsh 侧会话绑定的是 preset id，桥接无法安全改写；`state/sessions/*.json` 只存 `planId` 不存 raw preset 名，故桥接自身无需迁移 |
 | 适配器边界（B5） | §3.1 约定下的全部平台相关模块 | 只下沉**传输层**：`dsh-client` / `dsh-endpoint` / `dsh-health` / `onebot` / `qq-backend-label` / `prompt`；`dsh-model`、`qq-model-view`、`mcp-snowluma-safe`、`snowluma-conn` 留在 `src/` | `adapters/` 回答的是「怎么连上平台」；「连上之后拿它做什么」（模型目录视图、MCP 桥、控制台文案）属内核业务，随 B7/B8 元数据化再收敛。一次搬完会让 B5 的回归面从「路径等价」扩大到「行为等价」 |
 | `snowluma-conn.js`（B5） | 一并下沉进 `adapters/qq/` | **不动**，仍在 `src/` 根，登记为唯一豁免 | 它是仓库外独立工具（`voice-tool/`）按固定路径引用的**外部契约**，`scripts/test-snowluma-conn.mjs` 钉死了这个路径；移动会打断仓库外调用方 |
-| `bridge-extensions.js` 直连（B5） | 全部经门面 | 保留**一处**直连 `user-side/adapters/qq/qq-backend-label.js` | `qqBackendLabel` / `qqBackendFromVersionInfo` 是 0.1.x 的公开导出名，文件名也被 `scripts/test-qq-backend-label.mjs` 钉住；门面用的是中立名（`describeBackend` / `readBackendInfo`），凭空造不出旧名字。测试从「一律禁止」改成「只允许这一条」的精确比对 |
+| `bridge-extensions.js` 直连（B5） | 全部经门面 | 保留**一处**直连 `user-side/adapters/qq/qq-backend-label.js` | `qqBackendLabel` / `qqBackendFromVersionInfo` 是 0.1.x 的公开导出名，文件名也被 `scripts/test-qq-backend-label.mjs` 钉住；门面用的是中立名（`describeBackend` / `probeBackend`），凭空造不出旧名字。测试从「一律禁止」改成「只允许这一条」的精确比对 |
 | 声明面与协议面（B5） | 适配器是一个模块 | 拆成两面：`profiles/agent-platforms/<id>/adapters/runtime.mjs`（能力、权限映射、preset 清单——纯常量与纯函数）与 `src/agent-side/adapters/<id>/`（RPC 客户端、鉴权、事件解包），由 `builtin.mjs` 用 `protocol` 字段拼装 | 声明面被构建期适配器与浏览器端复用，不能 import 依赖本机凭据与 npm SDK 的协议面；让它反向依赖 `src/` 等于把配置模型（声明面）变成内核的从属物 |
 | 门面导出方式（B5） | 统一 `export const X = impl.X` | Agent 侧 `export const X = protocol.X`（协议是模块级单例）；用户侧一律**转发函数** | 用户侧将来要在同一进程里切多个平台（多平台在线），把引用绑死在模块加载期会拿到启动时的那一个 |
-| 夹具同步（B5） | —— | 审计夹具注入表改按门面的中立名补回（`buildSendCall` / `describeBackend` / `readBackendInfo` / `AgentApiClient` / `discoverLaunchToken` / `resolveAgentHome`） | 夹具剥掉 bridge 的 import 后靠同名注入提供绑定；改名不同步会让 bridge 落到门面的**真实现**上。`resolveAgentBaseUrl` 尤其致命：真实现会扫本机进程找 DSH，单次启动多花约 0.8 秒，把 `test-backfill` 里「记原始发送时间」的 2 秒容差顶成随机失败。现在由 `test-platform-adapters.mjs` 钉住「地址发现必须离线桩掉、注入表不得残留旧符号」 |
+| 夹具同步（B5） | —— | 审计夹具注入表改按门面的中立名补回（`buildSendCall` / `describeBackend` / `probeBackend` / `callAction` / `supportsAction` / `AgentApiClient` / `discoverLaunchToken` / `resolveAgentHome`） | 夹具剥掉 bridge 的 import 后靠同名注入提供绑定；改名不同步会让 bridge 落到门面的**真实现**上。`resolveAgentBaseUrl` 尤其致命：真实现会扫本机进程找 DSH，单次启动多花约 0.8 秒，把 `test-backfill` 里「记原始发送时间」的 2 秒容差顶成随机失败。现在由 `test-platform-adapters.mjs` 钉住「地址发现必须离线桩掉、注入表不得残留旧符号」 |
 
 ---
 
@@ -161,6 +161,11 @@ export async function send(address, segments, opts = {}) {}
 // 能力查询与降级
 export function supports(capability) {}
 
+// 动作词表：内核要平台做的那十几件事（词表定义在 src/user-side/actions.mjs）
+// 13 项 = 9 项 scope 'conversation'（必须带 params.conversation）+ 4 项 scope 'global'
+export const actions = Object.freeze(['message.send', 'reaction.add', 'poke.send', 'history.get', 'member.list', 'message.get', 'forward.get', 'sticker.list', /* … */]);
+export async function actionHandler(name, params) {}   // 不支持抛 ActionUnsupportedError，不静默降级
+
 // 元数据（控制台渲染用）
 export function describe() { return { label, conversationTypes, accountLabel, configSchema }; }
 ```
@@ -169,7 +174,8 @@ export function describe() { return { label, conversationTypes, accountLabel, co
 
 - `send` 只接受内核已校验的 segments；**实现不得自行读取配置文件或全局状态**。
 - 能力缺失时**抛明确错误**（`capability_unsupported`），不得静默丢弃——现状里"贴纸/语音/合并转发在非 QQ 平台会假装成功"是必须消灭的行为。
-- 入站事件由实现归一为 §3.3 的形状，**不带上游原始结构**（原始放在 `ext.<platform>`）。
+- 入站事件由实现归一为 §3.3 的形状，**不带上游原始结构**（原始放在 `ext.raw`，业务体不读，只作排障）。
+- 平台方言（`bot.raw` / `bot.request` / `bot.send*`）只允许出现在适配器目录（`src/user-side/adapters/<id>/`），内核对平台只认 `send` 与 `actionHandler`。
 
 ### 3.3 统一事件（借 interface-platform 的形状）
 
@@ -177,16 +183,33 @@ export function describe() { return { label, conversationTypes, accountLabel, co
 {
   v: 1,
   id: 'evt_42',                    // 本进程内单调序号
-  time: 1760000000000,             // 本进程收到时间
+  time: 1760000000000,             // 本进程收到时间（毫秒）
   platform: 'qq', account: 'qq:10001',
-  kind: 'message' | 'notice' | 'request' | 'meta' | 'agent',   // agent = Agent 侧事件
+  kind: 'message' | 'notice' | 'agent',   // agent = Agent 侧事件；request / meta 不进统一事件
   type: 'message.group',
   conversation: { type: 'group', id: '20001' },
-  sender: { id: '30001', name: '群名片或昵称' },
-  message: { id: '123456', segments: [...], text: '...' },
-  ext: { qq: { ... } }             // 平台逃生舱，内核不读
+  sender: { id: '30001', name: '群名片或昵称', card: '群名片', nickname: '昵称', role: 'admin' },
+  self: { id: '10001' },           // 机器人自己在这条连接里的身份（@ 与「引用我自己」要比它）
+  message: {
+    id: '123456',
+    seq: '12',                     // 平台的备用消息号（引用解析的第二选择）
+    segments: [...],               // 中立段（§3.4）
+    text: '...',                   // 由段推导，内核用这个
+    media: [                       // 收到的媒体清单（段里没有位置放平台私有字段）
+      { kind: 'image', file: 'abc.image', url: 'https://…', stickerId: '100', packageId: '200',
+        stickerKey: 'k1', subType: '1', summary: '[图片]' },
+      { kind: 'sticker', url: 'https://…', stickerId: '300', subType: '1' },
+      { kind: 'face', faceId: '14' },
+    ],
+  },
+  ext: { raw: { ... } }            // 平台逃生舱：业务体不读（S3b 起），只作排障
 }
 ```
+
+`media` 与 `segments` 回答的不是同一件事：段回答「怎么把这个发出去」（只有 `file` / `url`），
+清单回答「收到的是什么」（图片还是表情包、是哪个收藏表情、内置表情编号）。
+图片与表情的 `emoji_id` / `sub_type` / `summary` / `face.id` 只活在清单里 —— 它们是选兜底地址的唯一依据。
+清单单项认不出只跳过该项，不让整条消息作废（与「陌生段降成占位文本」同一条理由）。
 
 ### 3.4 中立消息段
 

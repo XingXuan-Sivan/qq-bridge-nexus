@@ -288,9 +288,9 @@ P0 的两项遗留（ACP 当主平台、TCK）都卡在同一处：`events()` �
 | 入口 | 位置 | 状态 |
 | --- | --- | --- |
 | 平台配置 › Agent 侧 › 详情 | 「Agent 平台」卡：探活 + 「设为默认 Agent 平台」+ 上次结论 | 已落地（P2） |
-| 全局配置 › 行为与模型 | 新增卡片「Agent 平台」：默认 Agent 平台下拉 + 连接方式徽标 + 当前运行（已就绪 / 待重启）+ 「切换」 | 已落地（P5） |
+| 全局配置 › Agent 平台 | 一张卡：默认 Agent 平台下拉 + 连接方式徽标 + 当前运行（已就绪 / 待重启）+ 探活 + 模型与思考强度控件；动作只有「刷新」「保存」 | 已落地（P5） |
 
-两处都读同一份 `/api/platforms/registry`，按钮都打 `POST /api/config/runtime`。**不新开第二个数据源**——第二个入口只是同一端点上的另一个视图，补卡时不需要新接口。
+两处都读同一份 `/api/platforms/registry`；默认平台都打 `POST /api/config/runtime`，全局配置那张卡保存时再补一次模型设置 `PATCH`。**不新开第二个数据源**——第二个入口只是同一端点上的另一个视图，补卡时不需要新接口。
 
 ### 5.4 与方案的关系
 
@@ -420,7 +420,7 @@ server 声明两次。等有 Agent 平台只能在 `session/new` 里声明 MCP�
 | --- | --- | --- | --- |
 | `system` | ACP | `session/new` 的客户端 system prompt（`append`），2026-11-06 已稳定 | `mode.override` 会替换对端正文，默认禁用 |
 | `prefix` | DSH | 会话第一条唤醒把提示词作为首轮前缀追加，同时记 `promptInjectedAt` | 污染首轮对话历史；同一会话只做一次 |
-| `tool` | 兜底 | 只靠 `qq_get_prompt` 工具按需拉取（`prompt.md` 第 2 条已要求模型先调它） | 长度受限、依赖模型主动调用 |
+| `tool` | 兜底 | 只靠 `admin`（`op=get_prompt`）按需拉取（`prompt.md` 第 2 条已要求模型先调它） | 长度受限、依赖模型主动调用 |
 
 - 落点是 `promptChannelOf()`：`none` 每次唤醒都带（既有行为）；`prefix` 只首轮带一次并写
   `promptInjected = { sessionId, at }`（换会话自然重来）；`system` 只在建会话时交给对端，唤醒块不再带；
@@ -498,9 +498,9 @@ POST /api/sessions/:key/permission  { preset }
 
 | 变更 | 内容 |
 | --- | --- |
-| 新增卡片「Agent 平台」 | 当前默认 Agent 平台下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 「切换」；切换前预检、失败提示保留原值 |
+| 新增卡片「Agent 平台」 | 当前默认 Agent 平台下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 模型与思考强度控件；动作只有「刷新」「保存」，保存前预检、失败提示保留原值 |
 | 既有「人格与行为」卡 | 默认运行方案控件已退役（`#runtimeDefaultSelect`、全局默认方案卡、条目级 `defaultPlan` 均删）；它现在是用户平台条目的 `defaultBehavior`，在「平台 › 详情 › 配置」里改 |
-| 既有「DSH 模型与思考强度」卡 | 已落地（B3）：模型与思考强度搬到 Agent 平台详情页，标题用该平台的 `label`，选项来自平台声明的 `modelCatalog`；全局配置页不再有这张卡 |
+| 既有「DSH 模型与思考强度」卡 | 已落地（B3）：模型与思考强度搬到 Agent 平台详情页，标题用该平台的 `label`，选项来自平台声明的 `modelCatalog`；全局配置页不再有独立的这张卡，模型控件并入「Agent 平台」卡 |
 
 ### 8.2 平台配置 › Agent 侧详情
 
@@ -550,19 +550,18 @@ POST /api/sessions/:key/permission  { preset }
 
 ### 8.6 概览与诊断
 
-概览顶部五格指标卡按「Agent 平台 / 用户平台 / 当前运行方案 / 会话 / 待处理」定义语义：前两格读 `/api/status` 的
-平台身份投影（`agent` / `platform`），标题写死的是「位置」而不是平台名，换 Agent 平台或换用户平台时格子仍成立。
+概览顶部五格指标卡按「Agent 平台 / 用户平台 / 当前运行方案 / 会话 / 待处理」定义语义：第一格读 `/api/status` 的平台身份投影（`agent`），第二格读注册表快照里的入站结论（已连接几个用户侧实例），标题写死的是「位置」而不是平台名，换 Agent 平台或增减用户实例时格子仍成立。
 
 | 格 | 标题 | 值 | 副行 |
 | --- | --- | --- | --- |
 | 1 | Agent 平台 | `agent.label` + 连接态（未就绪标红） | 连接方式（`http` / `stdio`）+ 连接态 |
-| 2 | 用户平台 | `platform` 的显示名 | 上游摘要（该平台上报了 `snowluma` 才有：正常 / 连不上网关 / 连着但收不到数据） |
+| 2 | 用户平台 | 已连接的**条数**（`listPlatforms('user')` 里 `inboundState.state === 'open'` 的条数） | 上游摘要（该平台上报了 `snowluma` 才有：正常 / 连不上网关 / 连着但收不到数据） |
 | 3 | 当前运行方案 | 模式名 | 角色（`state/profiles/<key>.role`） |
 | 4 | 已建立会话 | 会话数（可点） | 查看会话映射 |
 | 5 | 待处理请求 | 提问 + 审批数（可点） | 提问与工具审批 |
 
 - 数据由 `js/app.js` 的 `refresh()` 写入，DOM 由 `pages/overview/fields.js` 的 `METRICS_HTML` 产出；
-  不新增组件、不在页面里写样式。文本格用 `.metric strong.is-text` 修饰字号，新增指示格不会再需要按 id 加样式分支。
+  不新增组件、不在页面里写样式。文本格用 `.metric strong.is-text` 修饰字号；用户平台那一格放的是条数，保持数值格的大字号。注册表尚未就绪时写 `—`，加载完成后重画一次，不让首屏 3 秒内先显示一个旧平台名。
 - 第 2 格的上游摘要按平台上报的事实出现，不按平台名判断：用户侧换成没有上游健康的平台时，副行自然变成
   「未上报」，格子标题仍成立。告警条与这行副行由同一次 `snowluma` 快照渲染，两处不会说出不同结论。
 - 新诊断码：`capability_overclaimed`、`agent_provider_invalid`、`agent_instance_offline`、

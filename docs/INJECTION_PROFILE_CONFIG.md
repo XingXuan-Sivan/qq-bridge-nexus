@@ -346,7 +346,7 @@ DSH 预设 preset（用户可建，DSH 侧）
 
 ### 5.4 资源型文件
 
-`profiles/platforms/qq/behaviors/*.yml`、`profiles/agent-platforms/dsh/capabilities/*.yml`（`preset` + `rows` + `extensions` 三段）、`extensions/mcp/<id>/server.json`、`state/extensions/secrets.json`。
+`profiles/platforms/qq/behaviors/*.yml`、`profiles/agent-platforms/dsh/capabilities/*.yml`（意图段：`effects` / `runtime` / `behavior` / `audience` / `mcp` / `skills`；插件行在同平台的 `render.yml`）、`extensions/mcp/<id>/server.json`、`state/extensions/secrets.json`。
 
 ### 5.5 待清理
 
@@ -404,7 +404,7 @@ DSH 预设 preset（用户可建，DSH 侧）
 | 风险 | 对策 |
 | --- | --- |
 | 注入顺序变化影响模型行为 | 迁移前后各抓一次真实投递逐块比对；块顺序进 golden 测试 |
-| 人格“其余轮一行”导致人设漂移 | 首轮/变更全文；`qq_get_prompt` 常驻；日志记录本轮是否全文 |
+| 人格“其余轮一行”导致人设漂移 | 首轮/变更全文；`admin`（`op=get_prompt`）常驻；日志记录本轮是否全文 |
 | 保存栏改造影响现有页面 | 先做保存栏，再动配置页；每页跑 UI 用例 |
 | 运行档案迁移丢覆盖 | 迁移脚本备份 + 打印摘要；开发阶段一次性迁移 |
 | 极端组合（agent 进群、L3+群）被滥用 | 默认不提供；创建时风险确认；运行时能力校验与限速 |

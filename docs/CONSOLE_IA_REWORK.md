@@ -30,7 +30,7 @@
 `config.platforms.agents.<id>.options` 已经是平台选项的唯一存放处（`src/config/platforms.mjs` 的 `normalizeAgentEntry`），DSH 的模型 / 思考强度写进去即可落盘。真正的问题在两端：
 
 - 写口是 DSH 专有的 `POST /api/dsh/model`（`public/console/pages/config/page.js:61`、`:220`），全仓 24 处引用。
-- 读口是 `src/dsh-model.js` + `src/model-prices.js` 里内置的 DeepSeek 专属价目（改造前叫 `DEFAULT_PRICE_TABLE`，B3-4 已删），运行总览的价目表就是它。
+- 读口是 DSH 专有的 `src/dsh-model.js`，价目只有 `src/model-prices.js` 里一张写死的 DeepSeek 表，换一个平台就得改代码——运行总览的价目表就是它。
 
 即：**存储已经中性，接口与展示还是单平台语义**。归一动作是换接口、换数据来源，不动存储分层。
 
@@ -223,13 +223,13 @@ modelCatalog:
 | 消费点 | 现在 | 改为 |
 | --- | --- | --- |
 | 全局配置页的模型 / 思考强度卡 | `POST /api/dsh/model` | 移到平台详情页；写 `platforms.agents.<id>.options`，走 `models` 能力位的 `selectModel(ref, params)` |
-| 运行总览价目表 | 内置的 DeepSeek 专属价目表 | `modelCatalog.models[].pricing` + `pricingPolicy` 折算；没声明就不报价 |
+| 价目表（全局配置 › 模型与行为） | 一张写死的 DeepSeek 表，住在运行总览 | `modelCatalog.models[].pricing` + `pricingPolicy` 折算成表，三层：内置官方价（`src/pricing/builtins.mjs`）→ 平台申报 → 本机覆盖 `state/pricing/<agent>.yml`（只存单价差异，最优先）；只为**全局默认模型**匹配，不接受 `?agent=`；模型级 `pricingPolicy` 可另定峰谷，显式空窗口 = 全天同价 |
 | 上下文压缩 | `config.socialV2.compact`（与顶层 `config.compact` 双存储），模式值 `early` / `dsh`，文案写死「交给 DSH 自己压缩」 | `config.compact` 单存储，模式值 `early` / `agent`，阈值留空即取 `modelCatalog.compact.approxTokens`（也是阈值上限） |
 | 能力档 / 工具面展示 | `CAPABILITIES_ROOT` 硬编码 `dsh` | 按当前活动的 Agent 平台 id 取目录 |
 
 能力档目录不再自带默认值：`agentCapabilitiesDir(platforms.active.agent)` 决定 root，`createCapabilityStore()` / `platformFlags()` 缺 root 直接抛错；预设出厂副本（`.defaults/`）与 MCP 子进程（`activeAgentPlatformId(cfg)`）同步按活动平台解析。
 
-价目**只来自平台声明**：`priceTableFromCatalog()` 把 `modelCatalog` 折算成价目表，一个模型都没申报单价时返回 `null`。`src/model-prices.js` 保留纯算术（峰谷判定、桶计价），删掉内置默认表与 `resolvePriceTable()`，`config.pricing` 覆盖项同批删除。没申报的模型不估算：账本用 `unpriced` / `unpricedTokens` 表达「只计 token、不计钱」，金额显示 `—`，**不做兜底猜测**。
+价目是**三层**：`src/pricing/builtins.mjs` 的官方价垫在最底下（`withBuiltin()` 把申报叠上去：申报写了单价就用申报，只写了模型就补内置价并标 `origin: 'builtin'`；口径以内置为底、申报写了的字段盖上去），中间是平台 `modelCatalog` 申报，最上面是本机覆盖 `state/pricing/<agent>.yml`（`mergeCatalog()` 在申报形状上按 id 逐字段合并，只存单价差异）。`priceTableFromCatalog()` 把合并结果折算成价目表，`src/model-prices.js` 只管纯算术（峰谷判定、桶计价），一个可用报价都没有时才返回 `null`。`GET` / `PUT` / `DELETE /api/pricing`，保存后热刷新；平台与模型都取自全局配置（活动 Agent 平台 + 默认模型），不接受 `?agent=`，也不猜「现在哪个模型在跑」。峰谷口径只在声明面（内置 + 申报），本机层改不了。三层都没有的模型不估算：账本用 `unpriced` / `unpricedTokens` 表达「只计 token、不计钱」，`coverage[]` 逐模型点名，金额显示「—」，**不做兜底猜测**；补上单价后历史金额按新表重算。
 
 ### 4.5 全局配置页只剩通用项
 
@@ -341,7 +341,7 @@ modelCatalog:
 
 四批，**批内任务连续做完再停**；每批必须带着全绿门禁收尾，不留半成品跨批。每批都含「当批删除」，旧方案不推到下一批再删。
 
-**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 ✅ 已收尾（1–9 全部完成：平台自描述模型目录与读口、模型卡搬到平台详情页、价目只按声明折算、压缩 `early` / `agent`、能力档 root 去硬编码、人格注入块可关、全局配置逐项核对）；B4 未开始。
+**进度**：B1 ✅ 已收尾；B2 ✅ 已收尾（1–7 全部完成：平台清单与二级页、插件二级页、MCP 两栏收口、名词统一到 Agent 平台 / 用户平台、`full` 档跟随开关、直通去特例）；B3 ✅ 已收尾（1–9 全部完成：平台自描述模型目录与读口、模型卡搬到平台详情页、价目三层（内置官方价 → 申报 → 本机覆盖）、压缩 `early` / `agent`、能力档 root 去硬编码、人格注入块可关、全局配置逐项核对）；B4 未开始。
 
 ### B1 底座：组件能力 + 子路由 + 令牌债
 
@@ -360,9 +360,9 @@ modelCatalog:
 
 | # | 任务 | 落点 |
 | --- | --- | --- |
-| 1 | 平台页改为「诊断汇总（仅有 error 时出现）+ 两个 `collapseHtml` 分组（用户平台 / Agent 平台）+ `tileHtml` 网格」；每张卡进二级页 | `pages/platforms/{page.html,page.js,page.css}` |
-| 2 | 平台二级页：把现有右栏 `shell()` 的内容搬成整页，`#platforms/<side>:<id>`，页头「返回」+ 平台名 + 状态徽标，正文按「连接 / 平台选项 / 工具与话术 / 行为 / 诊断」分节卡 | 同上 |
-| 3 | 插件详情由弹窗改为二级页 `#plugins/<id>`：概览 / 配置 / 审计三块折叠或分节，保存走该页 save-dock | `pages/plugins/{page.html,page.js,page.css}` |
+| 1 | 平台页：一张非折叠卡 —— 工具栏（刷新 / 搜索 / 计数）+ 两个 `collapseHtml({ plain: true })` 分组（用户平台 / Agent 平台）+ `tileHtml` 网格；诊断块（仅 error）在同一张卡里，每张卡进二级页 | `pages/platforms/{page.html,page.js,page.css}` |
+| 2 | 平台二级页：页头「返回」+ 平台名 + 状态徽标，正文固定「概览 / 配置 / 能力」三页，用户平台多一页「话术与行为」；整页一张大卡（页头与标签条也在卡内，卡内分区，分区里的短内容用带边框小卡），概览 = 运行状态 + 资产小卡 + 诊断表，原始声明降级到能力页的普通下拉 | 同上 |
+| 3 | 插件详情由弹窗改为二级页 `#plugins/<id>`：「概览 / 配置 / 审计」三标签，概览 = 调用统计小卡 + 键值网格，保存走该页 save-dock | `pages/plugins/{page.html,page.js,page.css}` |
 | 4 | MCP 两栏细节：工具栏下沉左栏（槽里放 `tableToolbarHtml`）、右栏分节卡、列表项信息重排（标题 + 状态徽标 + 一行摘要） | `pages/mcp/{page.html,page.js,page.css}` |
 | 5 | 名词统一：界面文案与 `consolePages` 说明里「执行体 / Agent 侧 / 用户侧」→「Agent 平台 / 用户平台」（协议字段名 `agent` / `user` 不动，它们本来就中性） | `js/router.js`、各页文案 |
 | 6 | `full` 档（§6.1） | `js/permission-levels.js`、`components/form/form.js`、`pages/{overview/fields.js,config/page.js,sessions/page.js}` |
@@ -380,13 +380,13 @@ modelCatalog:
 | 2 | `GET /api/platforms/registry/agent/<id>/models`（`declared` + `live`，30s 缓存，失败降级） | `src/bridge.js` |
 | 3 | 控制台读口：`loadModelCatalog(agentId)` | `js/registry.js` |
 | 4 | 模型 / 思考强度从全局配置搬到平台详情页，写 `platforms.agents.<id>.options`，走 `models` 能力位 | `pages/config/**`、`pages/platforms/page.js` |
-| 5 | 价目表改由 `modelCatalog` 声明折算（`pricing` + `pricingPolicy`），`config.pricing` 覆盖项删除；无声明不报价、只计 token | `src/model-prices.js`、`src/token-ledger.js`、`pages/overview/**` |
+| 5 | 价目表改为三层折算（内置官方价 → `modelCatalog` 申报 → 本机覆盖），`config.pricing` 覆盖项删除；三层都没有的模型只计 token | `src/model-prices.js`、`src/token-ledger.js`、`pages/overview/**` |
 | 6 | 压缩模式 `early` / `agent`，阈值缺省取 `modelCatalog.compact.approxTokens` | `src/bridge.js`、`pages/config/compact.js` |
 | 7 | `CAPABILITIES_ROOT` 去硬编码 | `src/**` |
 | 8 | 人格注入块可关（§6.2） | `pages/prompt-blocks/**`、`src/bridge.js` |
 | 9 | 全局配置页逐项核对：每个分区都写 `config.json` 顶层段 | `pages/config/**` |
 
-**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；内置的 DeepSeek 价目表、`resolvePriceTable()` 与 `config.pricing` 覆盖项；`config.socialV2.compact` 整段（压缩设置只住顶层 `config.compact`）、`enabled` 开关（换 `mode`：`early` / `agent`）与 `DSH_COMPACT_APPROX` / `COMPACT_THRESHOLD_MAX` 这类平台专属数字；`src/dsh-model.js` 的界面专有分支。
+**当批删除**：`POST/GET /api/dsh/model` 及其 24 处引用；`model-prices.js` 里写死的那张 DeepSeek 表、`resolvePriceTable()` 与 `config.pricing` 覆盖项（官方价后来以 `src/pricing/builtins.mjs` 的声明面形式回来，见 §4.4）；`config.socialV2.compact` 整段（压缩设置只住顶层 `config.compact`）、`enabled` 开关（换 `mode`：`early` / `agent`）与 `DSH_COMPACT_APPROX` / `COMPACT_THRESHOLD_MAX` 这类平台专属数字；`src/dsh-model.js` 的界面专有分支。
 
 **出口**：把 Agent 平台切到 ACP（config 里改 active）后，全局配置页与运行总览**不显示任何 DSH 专属内容**，且不报错；`test-audit`、`test-token-usage`、`test-dsh-model` 同批改写通过。
 

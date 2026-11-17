@@ -34,7 +34,7 @@ ctx.memory.registerProvider({
 
 - 注册走插件内核的 staging → commit（与 persona 同构）：activate 成功才生效，停用/重载按 `pluginId` 注销。
 - 同一时刻**一个注入源**：`memory.inject.provider`（单选）。
-- 查询工具**联邦**：所有 `enabled` 的 provider 都能被 `qq_memory_recall` 问到，结果合并并标注来源。
+- 查询工具**联邦**：所有 `enabled` 的 provider 都能被 `memory` 的 `op=recall` 问到，结果合并并标注来源。
 - 内置 `local-digest` 由 core 注册（owner=core），数据仍在 `state/social-v2.json` 的会话状态里。
 
 ### 2.2 块（所有注入块的通用约定）
@@ -54,8 +54,8 @@ ctx.memory.registerProvider({
 
 ### 2.3 查询工具（S4，2026-11-07 已实现）
 
-- `qq_memory_recall(query, provider?, limit?)`：联邦查询——所有 `enabled` 的 provider 各查一次（async 直接 fetch、带各自超时，不吃注入缓存），结果按 provider 标注；每源 ≤800 字、总 ≤2000 字、最多 3 个源（`limit` 1–5）。单个源超时/报错只在结果里留 `error`，不影响其它源。超时计入 provider 的 `failures`，与注入路径同一份状态。
-- `qq_memory_note(text, tags?)`：默认关（`memory.tools.note=false`）。写回**只走主 provider**；主 provider 声明 `write:true` 且实现了 `note()` 才写，否则退到第一个可写的 provider 并在结果里说明（见 `PLAN_DEVIATIONS.md` D4）。`soulkit` 目前是只读（`write:false`），写回会落到 `local-digest`（记成一条进行中的话题）。
+- `memory` 的 `op=recall`（`query` / `provider?` / `limit?`）：联邦查询——所有 `enabled` 的 provider 各查一次（async 直接 fetch、带各自超时，不吃注入缓存），结果按 provider 标注；每源 ≤800 字、总 ≤2000 字、最多 3 个源（`limit` 1–5）。单个源超时/报错只在结果里留 `error`，不影响其它源。超时计入 provider 的 `failures`，与注入路径同一份状态。
+- `memory` 的 `op=note`（`text` / `tags?`）：默认关（`memory.tools.note=false`）。写回**只走主 provider**；主 provider 声明 `write:true` 且实现了 `note()` 才写，否则退到第一个可写的 provider 并在结果里说明（见 `PLAN_DEVIATIONS.md` D4）。`soulkit` 目前是只读（`write:false`），写回会落到 `local-digest`（记成一条进行中的话题）。
 - 两个工具都走 `POST /api/socialV2/memory-recall` / `memory-note`，agent token + 会话白名单 + 工具开关三道校验；文本经 `redactKnownTokensOnly` 脱敏，note 截 500 字、recall 的 query 截 600 字。
 - key 解析：由当前 DSH session 反查 `state/sessions.json`（值是 sessionId、键带 `qq:` 前缀），**禁止跨会话**。
 
@@ -107,8 +107,8 @@ ctx.memory.registerProvider({
 - **注入**：单选 provider（local-digest / soulkit）、记忆上限、超时、缓存 TTL；右侧实时预览「本轮会注入什么」（只读）。
 - **provider 卡片**：local-digest（开关 + 条数上限 + 话题过期小时数 + 工具开关）；soulkit（开关 + 地址 + 超时 + 「测试连通」+ 最近命中/最近错误）。
 - **本机轻量记忆**：从二代仿真页迁来的按 key 查询/删除/清空，加条数统计。
-- **长期规则**：`ownerRules` 只读列出（仍由管理员私聊 `qq_owner_group_rule` 修改），附来源说明。
-- **工具**：`qq_memory_recall` / `qq_memory_note` 开关；`qq_memory_append/query/remove/clear` 在 local-digest 卡片里。
+- **长期规则**：`ownerRules` 只读列出（仍由管理员私聊 `admin`（`op=owner_group_rule`）修改），附来源说明。
+- **工具**：`memory` 组的 `op=recall` / `op=note` 开关；`op=append/query/remove/clear` 在 local-digest 卡片里。
 - **跨模式**：`handover` 开关（原 `socialV2.tools.handoverMemory`）。
 - **最近回忆**：最近 10 次主动回忆记录（时间 / query / 命中条数 / 来源）。
 
@@ -122,10 +122,10 @@ ctx.memory.registerProvider({
 | `formatMemoryV2` 硬编码 | 各取 `slice(-10)`、印象 50 条、话题 24h 清理、文本 200 字 | `local-digest.limits` | **改**：全部变成配置项 |
 | `ownerRules` | 注入在最前、管理员私聊命令修改 | local-digest「长期规则」区 | 保留机制；记忆页只读展示 + 说明入口 |
 | `socialV2.tools.handoverMemory` | 切 agent 时带私聊记忆 | `memory.handover.enabled` | **迁**：默认仍 true |
-| `socialV2.tools.memory` | `qq_memory_append/query/remove/clear` | `local-digest.tools.*` | **迁** |
+| `socialV2.tools.memory` | `memory` 的 `op=append/query/remove/clear` | `local-digest.tools.*` | **迁** |
 | 二代仿真页「轻量记忆」组 | 查看/清空调试面板 | 记忆页「本机轻量记忆」 | **迁**：原处直接移除，不留提示或链接 |
 | 插件页「内置注入块」 | digest 开关/上限 | 记忆页「注入」卡 + 记忆块行 | **迁**：块表保留 `core-memory` 一行（上限随记忆页），不再列 `core-digest` |
-| `qq_get_prompt` / `peekView` | 返回 `formatMemoryV2` | 不变 | 保留，改读 provider 输出 |
+| `admin`（`op=get_prompt`）/ `peekView` | 返回 `formatMemoryV2` | 不变 | 保留，改读 provider 输出 |
 
 ## 6. 分阶段计划
 
@@ -134,12 +134,12 @@ ctx.memory.registerProvider({
 | S1 块注册表归一 | 块记录补 `owner` / `label` / `priority` / `maxChars` / `truncated` / `skipped`；`status()` 输出统一形状；控制台块表改表格 | `src/plugins/prompt-blocks.mjs`、`src/bridge.js`（`registerCoreBlocks` / `/api/plugins`）、`pages/plugins/fields.js` | 块表显示 owner/优先级/上限/最近字数/状态；关块后整段消失且预算回收；`node scripts/test-prompt-blocks.mjs` 全过 |
 | S2 记忆 provider + local-digest | `memory` 注册表（与内核同构）、`core-memory` 块、`memory.*` 配置与兼容读、上限参数化、注入切换、状态端点 | `src/memory/registry.mjs`（新）、`src/bridge.js`、`config.json` 归一化 | 关 local-digest 后提示词无记忆段；改 `maxChars=400` 后段被截断且状态显示 `truncated`；旧 `promptBlocks['core-digest']` 配置读入后行为等价 |
 | S3 soulkit provider | 插件 `plugins/soulkit-memory/`：`/api/recall`、`(key,query)` 60s 缓存、预热、失败静默、状态上报；权限 `memory:provide` + `net:http` | `plugins/soulkit-memory/`、`src/plugins/host-api.mjs`、`src/plugins/kernel.mjs` | soulkit 停机时唤醒 <1s、记忆段为空、其它块正常；开起来后记忆段出现且字数 ≤ 上限；缓存命中不重复请求 |
-| S4 查询工具 | `qq_memory_recall` / `qq_memory_note` + 联邦 + 审计 | `src/bridge.js`、preset 工具表 | 不跨会话；note 关闭时工具不暴露；recall 结果带来源 |
+| S4 查询工具 | `memory` 的 `op=recall` / `op=note` + 联邦 + 审计 | `src/bridge.js`、preset 工具表 | 不跨会话；note 关闭时工具不暴露；recall 结果带来源 |
 | S5 写回与收尾 | `/api/ingest` 队列（默认关）、记忆页完整化、文档与偏差登记 | `src/memory/ingest.mjs`（新）、`pages/memory/` | ingest 关闭时无外发请求；打开后队列可观测；记忆页四项开关生效 |
 
 每阶段收尾固定动作：`node scripts/test-console-static.mjs`、`PLAYWRIGHT_MODULE=playwright-core node scripts/test-console-ui.mjs`、`npm run test:audit`、更新 `STATUS.md` 与 `PLAN_DEVIATIONS.md`、一阶段一提交。
 
-**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3 已完成（`plugins/soulkit-memory/` 适配器 + `memory:provide` 权限 + 真机 `POST /api/recall` 命中，`scripts/test-soulkit-memory.mjs` 6/6，注入源已切到 `soulkit`，旧 `promptBlocks['core-digest']` 键已从运行配置删除）；S4 已完成（`memoryRegistry.recall/note`、`qq_memory_recall` / `qq_memory_note` 两个 MCP 工具与 `/api/socialV2/memory-recall` / `memory-note` 端点、`local-digest` 的写回实现，`scripts/test-memory-tools.mjs` 6/6，真机 recall 返回 soulkit 片段）；S5 已完成（新「记忆」页六块 + `memory.providers['local-digest'].tools` / `memory.handover.enabled` 接管旧开关、二代仿真页的「轻量记忆」组与两个开关原处移除、`/api/ingest` 写回队列默认关闭且落盘可恢复、`scripts/test-memory-ingest.mjs` 6/6）；S1–S5 全部完成，后续仅有可选的监控与打磨。
+**实施进度**：S1 已完成（提交 `094a251`）；S2 已完成（`src/memory/registry.mjs` + `core-memory` + `memory.*` 兼容读 + `/api/memory`，`test-core-prompt-blocks.mjs` 新增 memory 用例，static / UI 27/27 / audit 90/90 全过）；S3 已完成（`plugins/soulkit-memory/` 适配器 + `memory:provide` 权限 + 真机 `POST /api/recall` 命中，`scripts/test-soulkit-memory.mjs` 6/6，注入源已切到 `soulkit`，旧 `promptBlocks['core-digest']` 键已从运行配置删除）；S4 已完成（`memoryRegistry.recall/note`、`memory` 组的 `op=recall` / `op=note` 两个 op 与 `/api/socialV2/memory-recall` / `memory-note` 端点、`local-digest` 的写回实现，`scripts/test-memory-tools.mjs` 6/6，真机 recall 返回 soulkit 片段）；S5 已完成（新「记忆」页六块 + `memory.providers['local-digest'].tools` / `memory.handover.enabled` 接管旧开关、二代仿真页的「轻量记忆」组与两个开关原处移除、`/api/ingest` 写回队列默认关闭且落盘可恢复、`scripts/test-memory-ingest.mjs` 6/6）；S1–S5 全部完成，后续仅有可选的监控与打磨。
 
 ## 7. 风险与对策
 

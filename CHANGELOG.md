@@ -4,6 +4,59 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
+## 0.3.0 —— 2026-11-17
+
+内核与平台彻底分家：入站事件、出站动作、工具面、能力档四处都不再认识具体平台；
+控制台的平台配置、会话详情、价目卡按「声明面能回答的问题」重排。
+规格与逐任务清单见 [docs/CAPABILITY_CONTRACT.md](docs/CAPABILITY_CONTRACT.md)
+与 [docs/_internal/CAPABILITY_CONTRACT_LEDGER.md](docs/_internal/CAPABILITY_CONTRACT_LEDGER.md)。
+
+### 协议：统一事件与动作词表
+
+- **统一事件（`src/user-side/event.mjs`）**：入站只有一种形状 —— `message.{id,seq,segments,text,media}`、`sender.{id,card,nickname,role}`、`self.id`、`conversation`、`notice.{type,actor,target,detail}`。`request` / `meta_event` 不进统一事件（健康度走 `onEvent` 旁路，没有第二个消费者）。
+- **通知翻译**：适配器翻六类通知（`poke` / `reaction` / `recall` / `member.join|leave|card`），`actor` 按白名单要求 —— `member.*` 常常没有操作者（系统自动处理），硬性要求会把合法事件判成 INVALID；成员事件的当事人放 `notice.target`。
+- **动作词表（`src/user-side/actions.mjs`）**：13 项动作，每项带 `risk` / `fallback` / `scope`。9 项 `conversation`（缺 `params.conversation` 直接抛错，不猜一个会话发出去）、4 项 `global`（`message.get` / `forward.get` / `sticker.list` / `sticker.save` 按平台对象寻址）。QQ 的方言（`bot.raw` / `bot.request` / `bot.send*`，共 21 处）只允许活在 `src/user-side/adapters/qq/`。
+- **`ext.raw` 读取归零**：`deliver()` 把管线校验后的统一事件直接交给 `handleIncoming`，下游不再按 OneBot 字段读；`rawEvent` 声明整链删除。
+
+### 工具面：37 项登记 → 8 组
+
+- `src/tools/catalog.mjs` 从 36 个 flag 改成 8 组（`read_messages` / `get_member` / `send` / `act` / `conversation_state` / `memory` / `slang` / `admin`），组内 op 50 个；`tools/list` 的 schema 合计从 ≈60–100KB 降到 ≈25.8KB，`qq_*` 在运行期提示面上零残留。
+- 补登记 `status`（`conversation_state` 的 `op=status`）：它一直在 mcp 里注册，却既不在目录、也不受开关与权限判定（36 → 37）。
+- `AGENT_MODULES`、`visiblePlatformFlags`、`capabilityAllows()`、`v2ToolEnabled(flag, …)` 的双参形态全部删除：白名单唯一源是平台声明 `profiles/platforms/<id>/tools.yml`，会话收紧只由权限级别（`src/session/permission.mjs` 四档）承担，不会再出现「注册了但被旧白名单挡下」。
+
+### 能力档：意图 / 渲染分离
+
+- 5 份 dsh 能力档改写成意图层（`effects` / `runtime` / `behavior` / `audience` / `mcp` / `skills`），不再写 `rows` / `preset` / `tools.agent`；`profiles/agent-platforms/dsh/render.yml` + `adapters/render.mjs`（`renderPresetRows` / `renderPresetMeta`）把意图翻成插件行、行序、权限档与人格文案，构建期与运行期共用同一份。
+- 新增共用直通档 `profiles/capabilities/direct.yml`（住共用目录，任何 Agent 平台都能选）。
+- **产物不变**：`artifacts/dsh/qq-agent-presets/presets/*.patch.yml` 五份行数与正文逐字节一致，只有文件头第 2 行的来源说明改写（整文件 sha 因此不同，`build-artifacts --check` 常绿）。
+- 能力位矩阵、应用方式、注入通道、对端权限档都从能力档声明读，控制台不再维护第二张中文表。
+
+### 控制台
+
+- **导航**回到「管理 / 聊天行为 / 扩展」三组平铺 14 项（`全局配置` 在 `平台配置` 之前），去掉折叠分组与深链时的自动展开。
+- **平台配置**：清单是**一张非折叠卡** —— 工具栏（刷新 / 搜索 / 计数）+ 两个分类的普通下拉栏（`collapseHtml({ plain: true })`）+ 卡片墙，与「人格与角色」的卡片墙同形；二级页固定「概览 / 配置 / 能力」，用户平台多一页「话术与行为」。一句话结论与能力清单由注册表下发，原始声明降级成能力页里的只读下拉；资产（能力档 / 行为档案）只决定该不该挂面板，详情不按平台 id 分支。
+- **详情页信息密度**：详情**整页就是一张大卡**（`detail-panel`）——页头、结论句、标签条与面板都在卡里，卡外不再裸露；卡内按分区排、分区之间只用一条分隔线；计数与短属性用带边框小卡（`detail-panel-card`），键值走 `keyValueHtml`，能力项用「名字 + id」药丸。同一行的小卡按网格拉伸自动等高（不再 `align-items: start`）；分节容器（`detail-sections`）里的多段同一条分隔线，大卡内的引擎分组降一档底色、不叠卡的圆角与阴影。插件详情同步按「概览 / 配置 / 审计」三页，概览只留调用统计与键值网格，日志单独一页。
+- **用户平台›话术与行为**：行为档案面板改成两段 `detailSectionHtml` 分区（档案清单 / 档案内容），与能力页同一种分区写法，不再卡里套卡；字段分组的间距回到 `pages/platforms/page.css` 的一处 `gap`。
+- **会话详情**：运行卡底部一行结论（能力档 / 行为 / 权限 / 模型，缺省写未设置），人格 + 提示、唤醒 + 准入各合成一张卡，关联（记忆 · 定时任务）与危险操作降级成折叠卡；「执行体与对端权限」整张删掉——Agent 平台名、注入通道、对端权限档与钉档记录只在「平台 › 该 Agent 平台 › 能力」，`/agent` 只剩 `instanceForeign` 驱动危险操作里的「在新 Agent 平台上重开」；`presets` / 顶层 `apply` / 显示名字段删除，改名统一走列表行的弹窗；`dsh` 字段改名 `health`，列表行与详情头部共用 `agentHealthTag`。
+- **全局配置›Agent 平台（默认平台 + 模型）**：模型卡搬进 `components/agent-model`（`mountAgentModel`，控件 id 带前缀），平台详情与全局配置挂同一个实现。全局配置把模型控件并进「Agent 平台」一张卡，动作条只有「刷新」「保存」：保存先写默认平台（没变就不碰），再写模型设置；平台没声明 `models` 能力位时只少这段控件——不写死 `dsh`，也没有平台专用门控。
+- **运行总览›用户平台**：格子里从「某个平台名」改成**已连接的用户侧实例条数**（`inboundState.state === 'open'`），`title` 写「x / y 条已接管：名称」；副行仍是上游健康摘要。
+- **会话工具卡**：`这个会话能用的工具（N）` 默认折叠，求交只在 `src/session/tools.mjs` 算一次，读口与夹具同源。
+
+### 价目与模型目录
+
+- **价目表 state 化**：三层 —— 内置官方价（`src/pricing/builtins.mjs`，与官方一致：人民币、百万 token 计价，工作日 09–12 与 14–18 高峰 ×2；含 DeepSeek-V4.1-Flash 与 DeepSeek-V4-Pro 的 id 别名）→ 平台 `modelCatalog` 申报（申报优先，缺单价补内置价并标 `origin: 'builtin'`）→ `state/pricing/<agent>.yml` 本机覆盖（只存与申报不同的单价，写前备份到 `state/platform-backups/pricing/<agent>/`）。`GET` / `PUT` / `DELETE /api/pricing`，保存后热刷新 —— 账本里的历史金额立即按新表重算，不是「只影响以后」。表**只为全局配置里的默认模型匹配**（平台 + 模型取自 `platforms.active.agent` / `platforms.agents.<id>.model`，不接受 `?agent=`，也不猜「现在哪个模型在跑」）。单价只含空白 = 没填（`Number('  ')` 会得到 0）；新增申报里没有的模型必须同时给 `cacheMiss` 与 `output`，否则保存即报错。
+- **价目卡搬家**：从运行总览搬到「全局配置 › 模型与行为」的最后一张卡（`components/pricing-panel`），没有平台 / 模型切换控件；运行总览「花费概览」在刷新与清空账本之间加同款「价目表」按钮（`data-page-tab="runtime"`）跳到这张卡；默认模型没匹配到价目时，那行「每 3 秒自动同步」换成灰色提示，引导去补价目。
+- **覆盖率**：账本读口新增 `coverage()`（`{ model, label, tokens, cost, unpricedTokens, priced }`）。没价的模型只计 token、金额显示「—」（不估算、不拿别的模型兜底）；账本里出现过但表里没有的模型在价目卡里列成空格子（「账本已记 N token，没算钱」），补上单价后历史金额当场重算（含被压缩聚合的部分），跨重启可复现。
+- **模型级峰谷只在声明面**：`modelCatalog.models[].pricingPolicy` 按模型定高峰窗口与高峰日 —— 没写的组回落平台口径，显式空数组 = 全天同价，所以「这个模型没有空闲时段」与「空闲时段跟平台不同」都能表达。本机覆盖层不写 `pricingPolicy` / `policy`（`normalizeLocalPricing()` 直接丢弃），价目卡的峰谷列只读、只有一行「跟随当前口径」的提示 —— 口径若随读表时刻变化，历史金额就不可复现。
+- **模型目录降级**：实时目录读不到时，模型下拉按平台声明的 `modelCatalog.models` 铺、档位按「实时模型 → 声明模型 → 声明全集 → `effortFallback`」四级回落；提供方（只有实时目录才有这一维）保持原值并置灰。写口照存并回 `warnings: ['模型未校验：目录不可用']`，不再 400 / 503，同时递增 `modelSelectionEpoch` 让已有会话下一条消息重新选模型。平台没声明 `modelCatalog` 时保留原值，保存照常成功。
+
+### 门禁
+
+- `scripts/test-audit.mjs` 从串行 `spawnSync` 改为并发（默认 4，`--jobs`、`--only`、`--list`），全量脚本 **132/132** 从数分钟降到 ≈77s。
+- 新增 `scripts/test-pricing.mjs`（56 条：三层合并 / 只存差异 / 空白=未填 / 新增必须两价 / 本机丢弃峰谷口径 / 备份 / 安全 id / 坏 YAML）、`scripts/test-user-actions.mjs`、`scripts/test-inbound-body-fields.mjs`（入站正文契约的唯一定义）、`scripts/test-acp-capability-intent.mjs`；删除 `test-preset-store` / `test-preset-prompt`（`src/presets/` 与预设编辑器、仿真提示词同批删除）。
+- `test-console-ui` 45 → **54** 条（导航三组、平台详情四页与能力药丸、Agent 矩阵默认折叠在能力页、会话详情三张常驻卡 + 两张折叠卡、会话工具卡与原因、价目卡跟随默认模型 / 先记账后补价 / 总览「价目表」跳转与灰色提示、全局配置模型卡跟随选中的 Agent 平台、模型目录不可用时按声明清单铺选项）；契约基线 29 条未改。
+- `verify-adaptation --layer repo` 新增两条断言（`bot.*` 直达 = 0、`ext.raw` 读取 = 0），**105 通过 / 0 失败**；`check-profiles.mjs` 新增「类型只能写 `label/platform/engine/fields`」「能力档不写 `tools.platform`」「声明里的 flag 必须在目录里」。
+
 ## 0.2.1 —— 2026-11-16
 
 消息调度内核（`src/scheduling/`）上线，针对三个现象：回复偏慢、后台略过消息（重发才回）、回复中被吞。

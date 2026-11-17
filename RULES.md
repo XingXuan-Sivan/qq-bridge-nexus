@@ -45,11 +45,11 @@
 
 ## 提示词的两层边界（仿真 vs 人格）
 
-二代仿真模式下，AI 拿到的提示词由两层拼成，控制台「人格与角色」页可分别查看与修改：
+二代仿真模式下，AI 拿到的提示词由两层拼成，控制台「人格与角色」页可查看分工（人格层可编辑）：
 
 | 层 | 位置 | 管什么 | 生效方式 |
 | --- | --- | --- | --- |
-| **仿真提示词**（各能力档一份） | `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `rows` 段里 `persona.config.prefix` | 怎么调工具、怎么参与群聊（行为与协议：安全规则、工具协议、唤醒/分条/记忆/黑话等） | 控制台可按档位分别编辑；保存即写这些 yml 并重建 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`；重启 DSH 后**新会话**生效，**正在进行的 QQ 会话**需 `POST /api/session/reset` |
+| **仿真提示词**（按能力档渲染） | 平台提示词 `profiles/platforms/<id>/prompt.md`；人设基线与安全边界在 `profiles/agent-platforms/<id>/render.yml` 的 `persona` 段（`header` + `guard` 按 `runtime.peerPermission` + `delivery` 按 `behavior`） | 怎么调工具、怎么参与群聊（行为与协议：安全规则、工具协议、唤醒/分条/记忆/黑话等） | 预装式：改完跑 `npm run build:artifacts` 重建 `artifacts/dsh/qq-agent-presets/presets/*.patch.yml`；重启 DSH 后**新会话**生效，**正在进行的 QQ 会话**需 `POST /api/session/reset` |
 | **人格提示词** | `roles/<人格名>.md` | AI 是谁、什么性格、怎么说话（人设与语气） | 桥接注入，**保存即生效**（聊天 / 一代仿真每条消息前注入；二代仿真在下一次唤醒时把新卡交给各会话，或在控制台选「立即」） |
 
 - 拼装顺序：`仿真提示词 → 人格提示词 → 本轮消息`。

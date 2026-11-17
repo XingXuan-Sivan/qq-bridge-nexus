@@ -142,11 +142,13 @@ mountCard(host, spec)   // 替换宿主内容并返回 section
 ### 4.2 折叠面板 `collapse`
 
 ```js
-collapseHtml({ id, title, body, open, persist, className, elementId })
+collapseHtml({ id, title, body, open, persist, plain, className, elementId })
 hydrateCollapses(root)   // 恢复 persist 的展开状态（幂等）
 ```
 
 输出 `<details class="settings-group"><summary>…</summary><div class="settings-content">…</div></details>`。页面级「默认展开第一组 + 按页面记忆」由 `components/groups/groups.js` 的 `initGroups(host,{pageId})` 负责，**不要**再叠一层 persist。
+
+`plain: true` 加 `.is-plain`：去掉外框与底色，只留一行可点的小标题。用于**卡片内部的分类分组**（平台清单的两个分类）与**详情页的只读附注段**（原始声明）——这两种位置再套一张卡就会变成卡中卡。
 
 ### 4.3 标签 `tag`
 
@@ -206,7 +208,9 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | --- | --- | --- |
 | `split-view` | `splitViewHtml({ id, listLabel, listHtml, detailHtml, empty, toolbar, className })` / `splitItemHtml({ key, title, meta, badges, active, attrs })` / `setSplitActive(root, key)` / `initSplitView(root, { onSelect, onEnter })` | 左栏宽度的唯一开关是 CSS 变量 `--split-list-w`（默认 `minmax(272px, 348px)`），页面在自己的 `page.css` 里对宿主作用域重设它，组件不接收宽度参数；`toolbar` 槽里放 `tableToolbarHtml()` 生成的工具栏（槽内搜索框按整栏撑开、工具栏不再留表格的上边距）；`split-detail` 是一列分节卡（flex column，卡间距 16px），多张 `cardHtml()` 直接放进去，不再另套容器；窄屏 ≤900px 自动上下堆叠。**现仅 MCP 页使用**，并把 `--split-list-w` 重设为 `minmax(300px, 360px)`：平台页已改为「卡片网格清单 + 二级页」（见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) §4），不再适合塞进两栏 |
 | `table` | `tableHtml(columns, rows)` / `dataTableHtml({ columns, rows, …, fit })` / `tableToolbarHtml({ … })` | 页面不许手写表格骨架；工具栏 + 表体 + 分页的完整表格用 `dataTableHtml`。键值表（属性 / 开关这类两三列的短表）传 `fit: true` 去掉 1000px 最小宽度，否则会在分栏右栏、窄卡片里溢出并被硬切 |
-| `detail-head` | `detailHeadHtml({ title, code, meta, badges, backLabel })` | 二级页页头：返回按钮（`data-detail-back`，点击由页面的事件委托接住）+ 标题 + 可选的 `code` 次级标识 + 一行说明 + 右侧徽标。`title` / `code` / `backLabel` 由组件转义，`meta` 与 `badges` 是已渲染的片段（调用方转义）。样式 `components/detail-head/detail-head.css` 已写 `grid-column: 1 / -1`，直接放进 `display:contents` 的二级页外壳即可；平台详情与插件详情共用 |
+| `detail-head` | `detailHeadHtml({ title, code, meta, badges, backLabel })` | 二级页页头：返回按钮（`data-detail-back`，点击由页面的事件委托接住）+ 标题 + 可选的 `code` 次级标识 + 一行说明 + 右侧徽标。`title` / `code` / `backLabel` 由组件转义，`meta` 与 `badges` 是已渲染的片段（调用方转义）。样式 `components/detail-head/detail-head.css` 写 `grid-column: 1 / -1`，直接放进 `display:contents` 的二级页外壳即可；现在它放在 `detail-panel` 大卡里，那条网格声明在卡内不再生效（卡不是网格容器）；平台详情与插件详情共用 |
+| `key-value` | `keyValueHtml({ rows, columns })` | 键值网格：把两三列、行数又少的「属性 / 值」表格摊成「两对一行」（`columns` 可 1–3）。值可以是 HTML 片段（标签、代码、补充说明），调用方转义；一行放不下就只开一对（`columns: 1`），长值给 row 加 `wide` 独占整行。**短属性优先用它，不要用 `dataTableHtml`**——两列表格会一屏只放十行、剩下都是留白，还给人「这是可排序数据集」的错觉 |
+| `detail-panel` | `detailPanelHtml({ body })` / `detailSectionHtml({ title, note, actions, body })` / `detailCardHtml({ title, note, value, text, hint, actions, body })` / `detailCardsHtml(cards, { wide })` | 详情页版面：**整页就是一张大卡**，页头、结论句、标签条与面板都在卡里；卡内按分区排，分区之间靠分隔线分层；分区里的短内容用带边框小卡（`.detail-panel-card`），给 `value` 就是「标签 / 数值 / 脚注」的数字卡，`wide` 用于药丸清单或带表单的一组。大卡里再挂 `cardHtml` 的组件（能力档、行为档案）会被统一降成小卡外观。**详情页不要再用多张 `.card` 平铺，也不要把页头留在卡外** |
 | `search-box` | `searchBoxHtml({ id, placeholder, value, label, className })` / `bindSearchBox(input, onQuery, { onEnter })` | 固定产出 `type="search"` + `class="search-box"`，宽度用 `input.search-box--w240` 而不是工具类 |
 | `modal` | 三段式弹窗 | 被 `message-box` 复用 |
 | `form` | 见 [CONSOLE_FORMS.md](CONSOLE_FORMS.md) | 表单控件工厂与 `createForm()` |
@@ -236,9 +240,9 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 改样式可以，这些不能动：
 
 - **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
-- **28 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×2、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`×3（连接参数、条目级 `defaultBehavior` 与回填各一条）、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`PATCH /api/sessions/<key>/profile`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **29 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×2、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`×3（连接参数、条目级 `defaultBehavior` 与回填各一条）、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`PATCH /api/sessions/<key>/profile`、`POST /api/session/rename`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
 - **基线是改造前的快照**：录制时控制台仍是 `scripts/fixtures/console.before.html` 那一版，所以基线只认「改造前就有的写口」。改造后新加的写口不进基线（每条都有专项用例），由夹具的 `unknownRequests` 兜住「调了没人认领的路线」。
-- 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
+- 14 个导航目标（`consolePages` 的键，按「管理 / 聊天行为 / 扩展」三组平铺）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
 契约确实变了才重录：`node scripts/test-console-ui.mjs --accept-contracts`，并在提交信息里写明原因。
 
@@ -249,7 +253,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | 门禁 | 覆盖什么 |
 | --- | --- |
 | `node scripts/test-console-static.mjs` | 结构约定：页面必须用 `tableHtml`、不许手写 `className='meta ok\|err'`、组件导出齐全、`input.search-box` 唯一定义、页面搜索框带 `type` |
-| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、28 条写载荷契约基线、几何与分页、移动端无横向溢出 |
+| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、29 条写载荷契约基线、几何与分页、移动端无横向溢出 |
 | `npm run test:audit` | 全量脚本回归（提交前必跑） |
 | 截图 | 视觉一致性：`sessions` / `platforms` / `persona` / `overview` 三档（1440 / 1180 / 760） |
 
@@ -291,19 +295,21 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 | 界面 | 数据源 | 写口 | 口径 |
 | --- | --- | --- | --- |
-| 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户平台与 Agent 平台同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是「诊断汇总（仅有 error 时出现）+ 用户平台 / Agent 平台两个折叠组 + 卡片网格」，路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
-| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户平台一行「能力位」；Agent 平台四行「能力位 / 应用方式 / 提示注入通道 / 对端权限档」。空项给「—」；对端权限档是平台声明的取值域（`peerPermissions`），空即「由对端决定」，不另维护一份「平台支持什么」的表 |
-| 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个 Agent 平台」由注册表回答 |
-| 会话详情›Agent 平台与权限 | `GET /api/sessions/<key>/agent` + `GET /api/sessions/<key>/profile` | 无（只读）；级别走 `PATCH /api/sessions/<key>/profile` | `/agent` 一次给全：Agent 平台名字、能力档、注入通道、对端权限档与钉档记录，全是只读——没有改档写口，对端档位由能力档在建会话时钉住。桥接侧的权限级别在运行卡里选，与能力档、行为档案同一次保存 |
-| 全局配置›运行（Agent 平台卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认 Agent 平台只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
+| 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户平台与 Agent 平台同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是**一张非折叠卡**：顶部工具栏（刷新 / 搜索 / 计数）+ 两个分类的普通下拉栏（`collapseHtml({ plain: true })`）+ 卡片网格，与「人格与角色」的卡片墙同形；诊断块（仅 error）在同一张卡里、工具栏之上。路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；二级页固定「概览 / 配置 / 能力」，用户平台多一页「话术与行为」（不按平台 id 分支）：概览 = 运行状态键值网格 + 资产计数条 + 诊断表，配置 = `configSchema` 表单与模型卡，能力 = 一句话结论 + 注册表下发的分组清单（每项一枚「名字 + id」药丸）+ 工具表 / 能力档，话术与行为 = 平台提示词卡 + 行为档案（档案清单 / 档案内容两段 `detailSectionHtml` 分区，与能力页同一套分区写法，不再卡里套卡）。平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
+| 平台›原始声明（能力位矩阵） | 注册表条目（同上） | 无（只读） | 降级到「能力 › 原始声明」的普通下拉（`collapseHtml({ plain: true })`）且默认折叠：用户平台一行「能力位」；Agent 平台四行「能力位 / 应用方式 / 提示注入通道 / 对端权限档」。空项给「—」；对端权限档是平台声明的取值域（`peerPermissions`），空即「由对端决定」，不另维护一份「平台支持什么」的表 |
+| 平台›能力（能力档） | `GET /api/runtime/capabilities`（`catalog.agent` 是执行体的模块声明 + `capabilities`）+ 注册表的 `assets.capabilityProfiles` + `GET /api/extensions`（MCP 与技能目录） | `PATCH /api/runtime/capabilities/<id>`（只带 `label` / `note` / `mcp`（`allow` + `tools.allow` / `tools.deny`）/ `skills.allow`） | 能力档只写意图（`effects` / `runtime` / `behavior` / `audience` / `mcp` / `skills`），插件行由该平台渲染层（`render.yml` + `adapters/render.mjs`）生成——本页不出现任何插件名。「效果」表只读：每行写效果、变体（`true` = 默认）、承担它的模块、可装 / 装不出（由 `catalog.agent` 的 `effects` 求交得到）；「执行体工具面」只读，8 个模块来自 `tools.yml`；只有 MCP 工具与技能是勾选写口。受众 / 生效方式在卡头一句话写明，改它们要改后端 |
+| 会话详情›执行体与对端权限（已删卡） | `GET /api/sessions/<key>/agent` 只取 `instanceForeign`；正文仍由平台的「能力」页提供 | 无（只读） | 执行体与对端权限档不在会话里复述：Agent 平台名、注入通道、对端权限档与钉档记录都在「平台›该 Agent 平台›能力」。会话只用 `/agent` 的 `instanceForeign` 决定危险操作卡里要不要给「在新 Agent 平台上重开」；桥接侧的权限级别仍在运行卡里选，与能力档、行为档案同一次保存 |
+| 全局配置›Agent 平台（默认平台 + 模型与思考强度） | `GET /api/config/runtime` + `GET /api/status` + 注册表条目（`config` + `modelCatalog`）+ `GET /api/platforms/registry/agent/<id>/models` | `POST /api/config/runtime`；`PATCH /api/platforms/registry/agent/<id>/config`（与平台详情的模型卡同一个写口） | **一张卡、两个按钮**（`#agentRefresh` / `#agentSave`）。默认平台只落盘：`#agentDefaultSelect` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」；模型控件（`components/agent-model`，控件 id `agentModel*`）跟着选中的平台走，不写死平台，没声明 `models` 能力位时只少这段控件、卡片与两个按钮仍在。保存先写默认平台（变了才写，服务端先预检探活），再写模型设置；两个写口分开报结果。选项来源、目录不可用的兜底、第三方提供方确认、看图能力提示与平台详情那份完全一致 —— 两处只是同一个组件的两次挂载（`prefix` 传 `platform` / `agent`） |
 | 平台›配置（条目级默认行为） | 注册表条目的 `defaultBehavior` + `assets.behaviors` | `PATCH /api/platforms/registry/user/<id>/config` | 字段 `#platformDefaultBehavior`，首项「不设置（聊天模式）」，与条目开关一起保存；只对用户平台出现。它描述「这个平台新建、且行为档案选『跟随平台默认』的会话挂哪份档案」，不提供全局开关 |
-| 会话详情›运行卡（能力档 / 行为 / 权限） | `GET /api/sessions/<key>/profile` 的 `capability` / `defaultCapability` / `capabilities` / `behavior` / `defaultBehavior` / `behaviors` / `permission` | `PATCH /api/sessions/<key>/profile` | 三个下拉的首项都写「跟随平台默认（当前：…）」，不许只剩一个破折号；能力档空 = 平台默认，行为 `inherit` = 平台条目默认，权限 `inherit` = 全局默认。只提交改过的项，不混入其它字段 |
+| 会话详情›运行卡（能力档 / 行为 / 权限 / 模型） | `GET /api/sessions/<key>/profile` 的 `capability` / `defaultCapability` / `capabilities` / `behavior` / `defaultBehavior` / `behaviors` / `permission` / `model` / `effectiveModel` | `PATCH /api/sessions/<key>/profile` | 三个下拉的首项都写「跟随平台默认（当前：…）」，不许只剩一个破折号；能力档空 = 平台默认，行为 `inherit` = 平台条目默认，权限 `inherit` = 全局默认。只提交改过的项，不混入其它字段。模型按「会话值 → 平台配置 → 未设置」显示生效值；保存时模型目录不可用按原值存并回 `warnings`，不当成失败；页面把 `warnings` 拼进保存结果（`已保存（模型未校验：目录不可用）`，`⚠` 前缀让 toast 走 warning 配色） |
+| 会话详情›显示名 | `GET /api/sessions` 的 `displayName` / `health` | `POST /api/session/rename`（唯一写口） | 列表行「重命名」按钮打开弹窗（没有 `sessionId` 时置灰）；它同时改对端标题与档案 `displayName`，详情头部只读。`PATCH /profile` 收到 `displayName` 一律 400 |
 | 运行总览›指标格「会话模式」 | `GET /api/status` 的 `defaultBehavior` / `platform` | 无（只读） | 格子里是**当前运行用户平台**的默认行为，不是全局值；全局默认行为卡不存在 |
+| 运行总览›指标格「用户平台」 | 注册表快照（`listPlatforms('user')` 的 `inboundState`） | 无（只读） | 格子里是**已连接的用户侧平台条数**，不是某个平台名：判据是每条实例的入站结论 `inboundState.state === 'open'`（真的在收），不是「默认出站实例是哪个」。`title` 写「x / y 条用户实例已接管：名称」，不让一个数字没有分母；注册表未就绪时写 `—`。副行仍是上游健康摘要（`#metricUpstream`） |
 | 全局配置›权限级别 | `GET /api/config/permission`（`levels` / `labels` 一起给） | `POST /api/config/permission` | 四档全部可选，标签与后端 `PERMISSION_LABEL` 逐字一致；没有总开关、没有限时授权，写口径只有 `default` 一项 |
 
 三条落地细节：
 
-- **一次取全**：会话详情不为「Agent 平台 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台清单与二级页共用一份注册表快照，切标签不重拉。
+- **一次取全**：会话详情不复述平台声明面，`/agent` 只为「在新平台上重开」取 `instanceForeign`；平台清单与二级页共用一份注册表快照，切标签不重拉。
 - **写口只有一个**：会话的三项运行参数（能力档 / 行为档案 / 权限级别）只走 `PATCH /api/sessions/<key>/profile`，默认 Agent 平台只走 `POST /api/config/runtime`（不混进平台配置），能力档只走 `/api/runtime/capabilities/<id>`，条目级默认行为只走平台条目配置。同一个值出现第二个写口就是缺陷。
 - **失败写在块内**：写后回读不一致、写口拒绝（409）都在块内联报错，不弹全局 toast、不静默改回。
 
@@ -313,5 +319,5 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 - 不引框架（Vue/React/Svelte）与打包器：当前体量下收益不抵引入成本，且会破坏「改完刷新即生效」。
 - 不引 CSS 预处理器：变量已用 CSS 自定义属性表达。
-- 不引 Bootstrap 整包：只是借它的组织与纪律。现有令牌与组件已够用，整包替换等于全量重录 27 条契约。
+- 不引 Bootstrap 整包：只是借它的组织与纪律。现有令牌与组件已够用，整包替换等于全量重录 29 条契约。
 - 不做运行时组件注册（插件 UI 是另一件事，见 [HTTP_BOUNDARY.md](HTTP_BOUNDARY.md) 的插件 UI 沙箱）。

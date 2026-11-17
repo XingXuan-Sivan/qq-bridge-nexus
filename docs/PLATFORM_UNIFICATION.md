@@ -44,7 +44,7 @@
 
 ### 2.2 「能做什么」被三处同时描述
 
-> **C4 已收敛**：`agents/<id>/` 并入 `capabilities/<id>.yml`（`preset` + `rows` 段），plan 删除 `agent` 字段只留 `capability`。
+> **C4 已收敛**：`agents/<id>/` 并入 `capabilities/<id>.yml`（当时是 `preset` + `rows` 段，S5 起这两段也移出到 `render.yml`，见下文），plan 删除 `agent` 字段只留 `capability`。
 > 下表是 C4 **之前**的形态，保留作诊断依据。
 
 | 位置 | 数量 | 举例 | 谁决定 |
@@ -59,10 +59,15 @@
 另有一处易混淆：`agents/<id>/qq-tool-restrict.mjs` 是 5 份**相同**的 549B 薄壳（SHA256 前缀 `3573A344E72A`），
 而 `artifacts/dsh/qq-agent-presets/qq-tool-restrict.mjs` 是 13KB 的**唯一权威实现**。迁移时必须核对前者用途，不能一起删。
 
-**C4 之后的形态**：一份 `capabilities/<id>.yml` 同时给出 `tools`（能做什么）、`preset`（DSH 预设列表里显示什么）、
+**C4 之后的形态**（当时的四段制，S5 已再拆一次）：一份 `capabilities/<id>.yml` 同时给出 `tools`（能做什么）、`preset`（DSH 预设列表里显示什么）、
 `rows`（插件行，渲染成 `artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`）、`extensions`（MCP/技能授权）四段；
 **能力档 id 就是 preset id**（`chat` / `chat-v2` / `readonly` / `workspace` / `full` / `direct`）。
-P4 起再增 `runtime` 段（`apply` / `prompt` / `permission` / `narrow`）：`apply: passthrough` 的档不装预设、`rows` 可为空、不产 patch。核对结果：那 5 份薄壳只是把裸说明符
+P4 起再增 `runtime` 段（`apply` / `prompt` / `permission` / `narrow`）：`apply: passthrough` 的档不装预设、`rows` 可为空、不产 patch。
+
+**S5 起（2026-11-17）**：`tools` / `preset` / `rows` / `extensions` 四段全部移出 —— 能力档只写
+`effects`（要哪些效果）+ `runtime`（`apply` / `prompt` / `peerPermission` / `narrow`）+ `behavior` / `audience` + 顶层 `mcp` / `skills`；
+插件行、行序、权限档与预设展示名落到 `profiles/agent-platforms/<id>/render.yml`，由 `adapters/render.mjs` 编译（见 [CAPABILITY_CONTRACT.md](CAPABILITY_CONTRACT.md) §3.4）。
+核对结果：那 5 份薄壳只是把裸说明符
 `qq-agent-presets/qq-tool-restrict.mjs` 转发一次，随 `agents/` 一起删除；权威实现留在 artifacts 里不动。
 
 ### 2.3 界面 IA 错位：四标签按"存储层级"组织，不按"用户问题"组织
@@ -118,7 +123,8 @@ L5  会话绑定 + 权限级别  state/sessions/*.json = planId + agentRef + lev
 
 1. **上游只引用下游 id，不重复描述**：plan 引用 capability 与 behavior，不得再抄一份工具清单。
 2. **派生物不手写**：DSH 预设 patch（`artifacts/dsh/qq-agent-presets/presets/<id>.patch.yml`）由 capability 的
-   `preset` + `rows` **渲染**（C4 已落地，golden 逐字节比对）。`profiles/.../agents/` 目录已删除，不再有手写预设源。
+   `effects` 经 `agent-platforms/dsh/render.yml` **渲染**（C4 定下 `preset` + `rows` 渲染后，S5 把 `rows` 搬到 `render.yml`；
+   一直是 golden 逐字节比对）。`profiles/.../agents/` 目录已删除，不再有手写预设源。
 3. **声明面不 import 实现**：`profiles/*/adapters/runtime.mjs` 只放常量与纯函数（现有不变式，继续沿用）。
    用户侧**不新增**声明面 mjs：能力/上限仍由实现自报（`describePlatform()`），`configSchema` 落 `platform.yml`。
 
@@ -379,7 +385,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 `assets` 实际形状是 `{ prompt:{active,hasDefault}, tools, behaviors, capabilityProfiles }`（C4 起能力档列表就是预设列表，不再另给 `agentPresets`）；
 `source` 只取 `builtin` / `plugin` / `profile-only` 三值（`profile-only` 是合成出来的，不再单设“只有目录”那一栏）。
 P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `active` 不一致时出 `active_pending_restart`）、`enabled` /
-`inboundState` / `outbound` / `rawEvent`（用户侧每条实例各自的入站管线）、`probe`（Agent 侧上次探活结论）。
+`inboundState` / `outbound`（用户侧每条实例各自的入站管线）、`probe`（Agent 侧上次探活结论）。
 原定的两处待落地已清：探活端点与 `PATCH .../config` 均在 P2 落地（两侧共用一条写路径，校验与诊断同一套 schema 规则）。
 
 端点（旧的全部删除，不留投影）：

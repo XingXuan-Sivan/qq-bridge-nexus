@@ -144,7 +144,7 @@ test('prefix 通道：首轮带一次平台话术，重建会话后重新带', a
   }
 });
 
-test('tool 通道：完全不带平台话术，靠模型自己调 qq_get_prompt', async () => {
+test('tool 通道：完全不带平台话术，靠模型自己调 admin（op=get_prompt）', async () => {
   const h = await bridgeHarness({
     files: { 'profiles/agent-platforms/dsh/capabilities/pt-tool.yml': TOOL_CAPABILITY },
   });

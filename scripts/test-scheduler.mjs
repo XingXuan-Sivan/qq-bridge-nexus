@@ -292,13 +292,15 @@ test('⑤ 桥接：/remind 不进模型、到点发文字、AI 来说带上任�
   }
 });
 
-test('⑥ 控制台：左侧「聊天行为」黑话词库下面有定时任务，页面与接口接上', () => {
+test('⑥ 控制台：「聊天行为」组里黑话词库下面有定时任务，页面与接口接上', () => {
   const html = readConsoleSource();
   const nav = html.slice(html.indexOf('<nav id="mainNav">'), html.indexOf('</nav>'));
+  // 导航按三组排列后，定时任务仍在「聊天行为」组、紧跟黑话词库。
+  const group = nav.slice(nav.indexOf('>聊天行为</div>'), nav.indexOf('>扩展</div>'));
   assert.ok(
-    nav.indexOf('data-view="slang"') < nav.indexOf('data-view="scheduler"')
-      && nav.indexOf('data-view="scheduler"') < nav.indexOf('>扩展</div>'),
-    '位置在黑话词库下面、同一「聊天行为」分组内',
+    group.indexOf('data-view="slang"') >= 0
+      && group.indexOf('data-view="slang"') < group.indexOf('data-view="scheduler"'),
+    '位置在黑话词库下面、同一个「聊天行为」分组内',
   );
   assert.match(html, /scheduler: \['定时任务'/);
   assert.match(html, /<section id="section-scheduler" data-page="scheduler"/);

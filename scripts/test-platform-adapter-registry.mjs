@@ -109,15 +109,13 @@ test('模型目录：作者写错的部分按缺省降级，不炸也不原样�
   const catalog = demo.modelCatalog;
   assert.ok(catalog, '有模型或档位就算声明了目录');
   assert.deepEqual(catalog.models, [
-    { id: 'free-model', label: 'free-model', contextWindow: null, vision: false, pricing: null },
-  ], '没写 id 的条目丢掉；没写价目的模型 pricing=null，不拿兜底价猜');
+    { id: 'free-model', label: 'free-model', contextWindow: null, vision: false, pricing: null, pricingPolicy: null },
+  ], '没写 id 的条目丢掉；没写价目的模型 pricing=null，不拿兜底价猜；没写模型级峰谷就是 null');
   assert.deepEqual(catalog.efforts, [{ id: 'low', label: 'low' }]);
   assert.deepEqual(catalog.effortFallback, ['low', '42']);
   assert.equal(catalog.compact, null, '0 不是合法的触发点');
-  assert.deepEqual(catalog.pricingPolicy.peakWindows, [[9, 12]], '倒置与残缺的窗口丢掉');
-  assert.deepEqual(catalog.pricingPolicy.peakWeekdays, [1], '1-7 之外的星期丢掉');
-  assert.equal(catalog.pricingPolicy.unit, 1e6, '非法单位回落百万');
-  assert.equal(catalog.pricingPolicy.peakMultiplier, 1, '非法倍数回落 1（即不分峰谷）');
+  assert.deepEqual(catalog.pricingPolicy, {},
+    '口径只保留合法的键：坏掉的组与非法标量整份丢掉，读时回落上一层（内置官方价）');
 });
 
 test('内核不再持有内置平台清单', () => {

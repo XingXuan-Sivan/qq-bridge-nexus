@@ -1,5 +1,10 @@
 version: 1
 tools:
+  - flag: status
+    label: 机器人登录状态
+    names:
+      - qq_status
+    risk: read
   - flag: getPrompt
     label: 读取提示词
     names:
@@ -171,11 +176,6 @@ tools:
     label: 向管理端反馈
     names:
       - qq_report_feedback
-    risk: admin
-  - flag: requestMode
-    label: 申请切换模式
-    names:
-      - qq_request_mode_change
     risk: admin
   - flag: crossGroup
     label: 跨群查询

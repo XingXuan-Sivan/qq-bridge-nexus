@@ -6,17 +6,19 @@
 //   2. 出厂副本只放内容：行为副本不写 config；
 //   3. 字段表与默认值只有引擎定义一份，行为类型只写按名覆盖；
 //   4. 行为档案写全量快照（config 键集 = 引擎字段集）；
-//   5. 能力档的 tools.platform 显式写全（缺键即不可见，不许猜默认）；
-//   6. 能力档 audience 只认 access / owner，Agent 平台申报的 defaultCapability 必须真实存在。
+//   5. 工具面只住平台声明（tools.yml）：能力档只写效果，不得再存 tools / rows / preset；
+//   6. 能力档 audience 只认 access / owner，Agent 平台申报的 defaultCapability 必须真实存在；
+//   7. 渲染闭环：每份能力档都能被该平台的 render.yml 编译成行，不让效果默默装不出；
+//   8. tools.yml 的模块要声明它承担的效果，且效果必须是渲染层认识的。
 // 用法：node scripts/check-profiles.mjs
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import YAML from 'yaml';
 import {
-  listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
+  listPlatforms, loadPlatform, readPlatformTools, readAgentPlatformTools, PLATFORM_TOOL_RISKS,
 } from '../src/platforms/index.mjs';
-import { createCapabilityStore } from '../src/capabilities/store.mjs';
+import { appliesPreset, createCapabilityStore } from '../src/capabilities/store.mjs';
 import { PLATFORM_TOOLS } from '../src/tools/catalog.mjs';
 import { loadBehaviorProfiles, validateBehaviorText } from '../src/behaviors/index.mjs';
 import { loadBehaviorTypes, typeFields } from '../src/behaviors/types.mjs';
@@ -87,6 +89,11 @@ for (const platform of platforms) {
   for (const tool of tools) {
     if (!tool.flag || !tool.label) note(`平台 ${platform.id} 工具缺少 flag/label：${JSON.stringify(tool)}`);
     if (!PLATFORM_TOOL_RISKS.includes(tool.risk)) note(`平台 ${platform.id} 工具 ${tool.flag} 风险值不合法：${tool.risk}`);
+    // 声明是工具面的唯一源：写了目录里没有的 flag 会让注册面与目录漂移。
+    if (!PLATFORM_TOOLS.some((item) => item.flag === tool.flag)) note(`平台 ${platform.id} 的工具 ${tool.flag} 不在目录里（src/tools/catalog.mjs）`);
+  }
+  for (const tool of PLATFORM_TOOLS) {
+    if (!tools.some((item) => item.flag === tool.flag)) note(`平台 ${platform.id} 的 tools.yml 缺 ${tool.flag}（工具面必须显式写全）`);
   }
 
   const typesDir = path.join(dir, 'behavior-types');
@@ -165,58 +172,155 @@ for (const platform of platforms) {
   catch (error) { note(`平台 ${platform.id} 装载失败：${error?.message ?? error}`); }
 }
 
-// 2) Agent 平台：agent-platform.yml / tools.yml / capabilities/
+// 2) Agent 平台：agent-platform.yml / tools.yml / render.yml / capabilities/
+//    render.yml 只在有自己那批能力档时必需：没有能力档就没有行要编译，
+//    这时缺渲染层是「不渲染」，不是「忘了写」（ACP 就属于这种）。
 const agentPlatformIds = dirs(AGENT_PLATFORMS_ROOT);
 for (const id of agentPlatformIds) {
   const dir = path.join(AGENT_PLATFORMS_ROOT, id);
-  for (const name of ['agent-platform.yml', 'tools.yml']) {
+  const capsDir = path.join(dir, 'capabilities');
+  const ownCapabilityFiles = ymlFiles(capsDir);
+  const required = ['agent-platform.yml', 'tools.yml'];
+  if (ownCapabilityFiles.length > 0) required.push('render.yml');
+  for (const name of required) {
     if (!fs.existsSync(path.join(dir, name))) note(`Agent 平台 ${id} 缺 ${name}`);
   }
-  const capsDir = path.join(dir, 'capabilities');
   if (!fs.existsSync(capsDir)) note(`Agent 平台 ${id} 缺 capabilities/`);
   if (fs.existsSync(path.join(dir, 'agents'))) {
     note(`Agent 平台 ${id} 还留着 agents/（能力档已吸收预设，正文由 build 适配器渲染）`);
   }
+  // 模块声明本身要合法：readAgentPlatformTools 会静默丢掉非法条目，所以这里读原文对账。
+  // `modules: []` 是合法声明（这台执行体的工具面由 Agent 自己定，桥接不渲染任何行）。
+  const rawModules = readYaml(path.join(dir, 'tools.yml')).modules;
+  if (!Array.isArray(rawModules)) {
+    note(`Agent 平台 ${id} 的 tools.yml 缺 modules（没有模块也要显式写 modules: []）`);
+  } else {
+    for (const module of rawModules) {
+      const moduleId = String(module?.id ?? '').trim();
+      if (!moduleId) { note(`Agent 平台 ${id} 的 modules 里有一条没有 id`); continue; }
+      if (!PLATFORM_TOOL_RISKS.includes(String(module?.risk ?? 'read'))) {
+        note(`Agent 平台 ${id} 的模块 ${moduleId} 风险值不合法：${module.risk}`);
+      }
+      if (!Array.isArray(module?.effects) || module.effects.length === 0) {
+        note(`Agent 平台 ${id} 的模块 ${moduleId} 必须声明它承担的效果（effects）`);
+      }
+    }
+  }
 }
 
-// 3) 能力档：工具面显式写全，audience 取值合法，出厂副本成对（各 Agent 平台一批 + 一批跨平台共用）
+// 3) 能力档：只写意图（effects / runtime / audience / mcp / skills），出厂副本成对
+//    （各 Agent 平台一批 + 一批跨平台共用）
 const capabilities = [];
 const capabilityIds = new Set();
 const declaredCapabilities = new Map();
+/** 各 Agent 平台自己的那批档（共用档不参与它的渲染闭环）。 */
+const platformCapabilities = new Map();
 
-/** 一批能力档的字段约定；返回这批档的 id 集合。 */
+/** 能力档允许出现的字段：normalizeCapability 会静默丢掉不认识的键，旧形状的残留只能在这里发现。 */
+const CAPABILITY_KEYS = new Set([
+  'version', 'id', 'label', 'note', 'behavior', 'effects', 'runtime', 'audience', 'mcp', 'skills',
+]);
+
+/** 一批能力档的字段约定；返回这批档的归一结果。 */
 function checkCapabilityDir(capsRoot, label) {
   checkFactoryPairs(capsRoot, label);
-  for (const name of ymlFiles(capsRoot)) {
-    const raw = readYaml(path.join(capsRoot, name));
-    if (raw.audience !== undefined && !['access', 'owner'].includes(String(raw.audience))) {
-      note(`能力档 ${label}/${name} 的 audience 只能是 access 或 owner（现在 ${raw.audience}）`);
+  const shapeRoots = [
+    { root: capsRoot, suffix: '' },
+    { root: factoryDir(capsRoot), suffix: '（出厂副本）' },
+  ];
+  for (const { root, suffix } of shapeRoots) {
+    for (const name of ymlFiles(root)) {
+      const raw = readYaml(path.join(root, name));
+      const id = name.replace(/\.ya?ml$/i, '');
+      for (const key of Object.keys(raw)) {
+        if (!CAPABILITY_KEYS.has(key)) {
+          note(`能力档 ${label}/${name}${suffix} 含未知字段 ${key}（能力档只写意图：effects / runtime / audience / mcp / skills）`);
+        }
+      }
+      if (raw.id !== undefined && String(raw.id).trim() !== id) {
+        note(`能力档 ${label}/${name}${suffix} 的 id=${raw.id} 与文件名不一致`);
+      }
+      if (raw.audience !== undefined && !['access', 'owner'].includes(String(raw.audience))) {
+        note(`能力档 ${label}/${name}${suffix} 的 audience 只能是 access 或 owner（现在 ${raw.audience}）`);
+      }
+      if (raw.effects !== undefined && (typeof raw.effects !== 'object' || Array.isArray(raw.effects))) {
+        note(`能力档 ${label}/${name}${suffix} 的 effects 必须是「效果: 变体」的映射`);
+      }
     }
   }
   const list = createCapabilityStore({ root: capsRoot }).list();
   for (const capability of list) {
-    const explicit = capability.tools?.platform ?? {};
-    for (const tool of PLATFORM_TOOLS) {
-      if (typeof explicit[tool.flag] !== 'boolean') note(`能力档 ${label}/${capability.id} 的 tools.platform 缺 ${tool.flag}（必须显式写全）`);
-    }
-    for (const flag of Object.keys(explicit)) {
-      if (!PLATFORM_TOOLS.some((tool) => tool.flag === flag)) note(`能力档 ${label}/${capability.id} 的 tools.platform 含未知工具 ${flag}`);
-    }
     if (capabilityIds.has(capability.id)) continue;
     capabilityIds.add(capability.id);
     capabilities.push(capability);
   }
-  return new Set(list.map((item) => item.id));
+  return list;
 }
 
 // 跨平台共用的能力档：任何 Agent 平台都能选，平台目录里的同名档优先。
 const sharedCapabilities = checkCapabilityDir(SHARED_CAPABILITIES_DIR, '共用能力档');
 for (const agentId of agentPlatformIds) {
   const own = checkCapabilityDir(agentCapabilitiesDir(agentId), `Agent 平台 ${agentId}`);
-  declaredCapabilities.set(agentId, new Set([...own, ...sharedCapabilities]));
+  platformCapabilities.set(agentId, own);
+  declaredCapabilities.set(agentId, new Set([...own.map((item) => item.id), ...sharedCapabilities.map((item) => item.id)]));
 }
 
-// 4) 引用面：Agent 平台申报的默认能力档必须真实存在。
+// 4) 渲染闭环：能力档只写意图，行由该平台的渲染层生成。
+//    「这份意图在这台执行体上装得出什么」必须现在就能算出来，不能等建会话时才报错，
+//    更不能默默装不出（degraded）——那就等于能力档写了个不存在的效果。
+for (const agentId of agentPlatformIds) {
+  const dir = path.join(AGENT_PLATFORMS_ROOT, agentId);
+  const renderFile = path.join(dir, 'render.yml');
+  if (!fs.existsSync(renderFile)) continue;
+  const renderCfg = readYaml(renderFile);
+  const order = Array.isArray(renderCfg.order) ? renderCfg.order.map(String) : [];
+  if (order.length === 0) note(`render.yml（${agentId}）缺 order（行序就是装配顺序）`);
+  for (const slot of ['persona', 'guard']) {
+    if (!renderCfg.structure?.[slot]) note(`render.yml（${agentId}）缺 structure.${slot}`);
+  }
+  for (const effect of Object.keys(renderCfg.effects ?? {})) {
+    if (!order.includes(effect)) note(`render.yml（${agentId}）的 effects.${effect} 不在 order 里：声明了也永远装不上`);
+  }
+  for (const slot of order) {
+    if (!renderCfg.structure?.[slot] && !renderCfg.effects?.[slot]) {
+      note(`render.yml（${agentId}）的 order 槽位 ${slot} 既不是结构行也没有效果模板`);
+    }
+  }
+  // tools.yml 声明的效果必须被渲染层认识，否则控制台里「谁承担这个效果」与产物对不上。
+  for (const module of readAgentPlatformTools({ root: AGENT_PLATFORMS_ROOT, id: agentId })) {
+    for (const effect of module.effects) {
+      if (!renderCfg.effects?.[effect]) {
+        note(`tools.yml（${agentId}）的模块 ${module.id} 声明了渲染层不认识的效果 ${effect}`);
+      }
+    }
+  }
+  const render = await import(pathToFileURL(path.join(dir, 'adapters', 'render.mjs')).href);
+  const own = platformCapabilities.get(agentId) ?? [];
+  for (const capability of own) {
+    let rendered;
+    try {
+      rendered = render.renderPresetRows(capability, renderCfg);
+    } catch (error) {
+      note(`能力档 ${agentId}/${capability.id} 渲染失败：${error?.message ?? error}`);
+      continue;
+    }
+    for (const item of rendered.degraded) {
+      note(`能力档 ${agentId}/${capability.id} 的 ${item.effect} 装不出：${item.reason}`);
+    }
+    // 要装预设的能力档必须有预设元信息（名称 / 描述 / 序号），否则预设列表也列不出来。
+    if (!appliesPreset(capability)) continue;
+    try { render.renderPresetMeta(capability.id, renderCfg); }
+    catch (error) { note(`能力档 ${agentId}/${capability.id} 没有预设元信息：${error?.message ?? error}`); }
+  }
+  // 反向：render.yml 声明了元信息的能力档必须真实存在，否则预设列表点了也装不上。
+  for (const id of Object.keys(renderCfg.presets ?? {})) {
+    if (!own.some((capability) => capability.id === id)) {
+      note(`render.yml（${agentId}）的 presets.${id} 没有对应的能力档`);
+    }
+  }
+}
+
+// 5) 引用面：Agent 平台申报的默认能力档必须真实存在。
 //    声明面与运行期同一份 agent-platform.yml，静态检查不另建一套判断依据。
 await import('../src/agent-side/builtin.mjs');
 for (const agentId of agentPlatformIds) {
@@ -227,7 +331,7 @@ for (const agentId of agentPlatformIds) {
   }
 }
 
-// 5) 旧目录残留：绕过 profiles/ 的第二套数据源必须不存在
+// 6) 旧目录残留：绕过 profiles/ 的第二套数据源必须不存在
 for (const legacy of ['config/behaviors', 'config/platform', 'dsh/agent-presets']) {
   if (fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', legacy))) {
     note(`检测到旧数据目录 ${legacy}（四层模型只认 profiles/）`);

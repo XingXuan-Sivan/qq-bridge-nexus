@@ -1,5 +1,5 @@
 // 运维 Agent 三个能力档（readonly / workspace / full）的硬边界：
-//   · 能力档的 rows 里没有任何 shell / 子代理 / 工作流 / 任务类行；
+//   · 编译出来的预设行里没有任何 shell / 子代理 / 工作流 / 任务类行；
 //   · 守卫按能力档分别以 profile: readonly-agent / operator 运行；
 //   · 审批闸门按 policy: workspace / full 决策，缺少配置时按更严的 full 处理；
 //   · 不带 profile 时守卫行为与原版完全一致（群友会话不因此多出读文件能力）。
@@ -11,15 +11,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const capabilityDir = path.join(root, 'profiles', 'agent-platforms', 'dsh', 'capabilities');
+const presetsDir = path.join(root, 'artifacts', 'dsh', 'qq-agent-presets', 'presets');
 const guardUrl = pathToFileURL(path.join(root, 'artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).href;
 
-/** 能力档的 rows 段（C4 起预设正文与工具面同一份文件）。 */
+/**
+ * 预设编译出来的插件行：能力档只声明效果，行由 dsh/render.yml 编译进产物。
+ * 断言落在产物上，是因为装配到 DSH 里的就是它；产物与意图的一致性由 build --check 与
+ * test-agent-preset-patches 保证。
+ */
 function capabilityRows(id) {
-  const file = path.join(capabilityDir, `${id}.yml`);
-  const doc = parseYaml(fs.readFileSync(file, 'utf8')) ?? {};
-  assert.ok(Array.isArray(doc.rows) && doc.rows.length > 0, `${id} 有非空 rows 段`);
-  return flatten(doc.rows);
+  const file = path.join(presetsDir, `${id}.patch.yml`);
+  assert.ok(fs.existsSync(file), `${id} 的产物存在（${path.relative(root, file)}）`);
+  const patch = parseYaml(fs.readFileSync(file, 'utf8'));
+  const rows = patch?.[0]?.insert?.[0]?.config?.plugins;
+  assert.ok(Array.isArray(rows) && rows.length > 0, `${id} 的产物应含插件行`);
+  return flatten(rows);
 }
 
 function flatten(rows) {
@@ -51,7 +57,7 @@ test('L1 能力档不挂载任何执行/派生类工具行', () => {
 test('readonly-agent 守卫：放行只读工具与 QQ MCP，拒绝写入/执行/未知工具', async () => {
   const mod = await import(guardUrl);
   const { guard, restricted } = makeGuard(mod, { profile: 'readonly-agent' });
-  for (const name of ['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch', 'todo_write', 'ask_user_question', 'mcp__snowluma__qq_status']) {
+  for (const name of ['read', 'read_image', 'glob', 'grep', 'web_search', 'web_fetch', 'todo_write', 'ask_user_question', 'mcp__snowluma__read_messages']) {
     assert.equal(guard({ name }), undefined, `应放行 ${name}`);
   }
   for (const name of ['write', 'edit', 'str_replace_editor', 'pwsh', 'bash', 'subagent', 'workflow', 'job_kill', 'plugin_manager', 'load_workspace_dependencies', 'schedule_create', 'mcp__filesystem__write', 'unknown_tool', '', null]) {
@@ -93,7 +99,7 @@ test('审批闸门：workspace 执行命令要审批、工作区写入放行；f
   assert.equal(decide({ name: 'write', arguments: { file_path: 'C:/work/a.txt' } }, 'full'), 'ask');
   assert.equal(decide({ name: 'pwsh', arguments: { command: 'dir' } }, 'full'), 'ask');
   assert.equal(decide({ name: 'read', arguments: { file_path: 'C:/work/a.txt' } }, 'full'), 'allow');
-  assert.equal(decide({ name: 'mcp__snowluma__qq_status' }, 'full'), 'allow');
+  assert.equal(decide({ name: 'mcp__snowluma__read_messages' }, 'full'), 'allow');
   assert.equal(decide({ name: 'brand_new_tool' }, 'workspace'), 'ask', '未知工具按需审批处理');
   for (const t of ['subagent', 'workflow', 'plugin_manager', 'schedule_create']) assert.ok(decide({ name: t }, 'full').deny, t);
 });

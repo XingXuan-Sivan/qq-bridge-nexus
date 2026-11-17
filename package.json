@@ -38,7 +38,6 @@
     "voice-cli": "cd ../voice-tool && node voice-cli.mjs",
     "test-console": "node scripts/test-console.mjs",
     "test:console-ui": "node scripts/test-console-ui.mjs",
-    "test:preset-prompt": "node scripts/test-preset-prompt.mjs",
     "test:role-card": "node scripts/test-role-card.mjs",
     "preview:console": "node scripts/console-ui-fixture.mjs",
     "build:console-vendor": "node scripts/build-console-vendor.mjs",

@@ -12,7 +12,7 @@
 import { configureBuiltinUserPlatformBackend, configureBuiltinUserPlatformInbound } from './builtin.mjs';
 import {
   buildSendCall as registryBuildSendCall,
-  readBackendInfo as registryReadBackendInfo,
+  probeBackend as registryProbeBackend,
   describeBackend as registryDescribeBackend,
   requireUserPlatform,
   supportsUserCapability as registrySupportsUserCapability,
@@ -20,6 +20,7 @@ import {
   activeUserPlatformId,
   listUserPlatforms,
 } from './runtime-registry.mjs';
+import { callAction as registryCallAction, supportsAction as registrySupportsAction } from './actions.mjs';
 import { sendAction as registrySendAction, previewSegments as registryPreviewSegments } from './outbound.mjs';
 import { getTransport, listTransports, registerTransport, unregisterTransportsByOwner } from './transport.mjs';
 import { resolveSendTarget as registryResolveSendTarget } from './metadata.mjs';
@@ -115,9 +116,24 @@ export function buildSendCall(kind, id, message) {
   return registryBuildSendCall(kind, id, message);
 }
 
-/** get_version_info 回执 → { name, version }。 */
-export function readBackendInfo(data) {
-  return registryReadBackendInfo(data);
+/** 问一次当前连接的后端是谁（{ name, version }）；问不到返回 null。 */
+export function probeBackend() {
+  return registryProbeBackend();
+}
+
+/**
+ * 让平台执行一个动作（拍一拍、拉历史、存表情…）。
+ *
+ * 名字与降级口径在 src/user-side/actions.mjs；这里是内核的唯一入口，
+ * bridge 不 import 任何 adapters/。
+ */
+export function callAction(name, params, ctx) {
+  return registryCallAction(name, params, ctx);
+}
+
+/** 当前平台是否声明了某个动作（没声明 = 做不到，不猜）。 */
+export function supportsAction(name, ctx) {
+  return registrySupportsAction(name, ctx);
 }
 
 /** 日志 / 状态文字里的后端称呼。 */

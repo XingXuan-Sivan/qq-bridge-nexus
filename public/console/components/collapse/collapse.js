@@ -1,12 +1,14 @@
 // 折叠面板：统一 <details class="settings-group"> 的结构、箭头与可选展开记忆。
 // 用法：collapseHtml({ id: 'slang-config', title: '黑话配置', body: html, open: true, persist: true })
 // 需要记住展开状态时传 persist（存 localStorage 'qq-console:collapse:<id>'）。
+// 传 plain 时换成「非卡片」的外观：没有外框与底色，只有一行可点的小标题，
+// 用于卡片内部的分类分组，或详情页的附注段（原始声明这类）。
 
 const TEXT_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => TEXT_ESCAPES[c]);
 
-export function collapseHtml({ id = '', title = '', body = '', open = false, persist = false, className = '', elementId = '' } = {}) {
-  const classes = ['settings-group', className].filter(Boolean).join(' ');
+export function collapseHtml({ id = '', title = '', body = '', open = false, persist = false, plain = false, className = '', elementId = '' } = {}) {
+  const classes = ['settings-group', plain ? 'is-plain' : '', className].filter(Boolean).join(' ');
   const attrs = [
     `class="${classes}"`,
     elementId ? `id="${esc(elementId)}"` : '',

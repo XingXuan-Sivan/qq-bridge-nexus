@@ -6,7 +6,7 @@
 // 这里的做法：
 // - 真正的请求用长超时（默认 120 秒）在后台跑，同一个 key 同时只发一个（并发去重）；
 // - 调用方只「等一会儿」：收消息时最多等几秒，等不到就先用占位文字，不阻塞这条消息；
-// - 后台请求完成后写进缓存，AI 之后再查（qq_get_message_detail / qq_get_forward_msg）直接命中。
+// - 后台请求完成后写进缓存，AI 之后再查（read_messages（op=get_message_detail） / read_messages（op=get_forward_msg））直接命中。
 
 /** 后台真正请求的超时：NapCat 读旧合并转发实测约 76 秒，留余量。 */
 export const SLOW_FETCH_TIMEOUT_MS = 120_000;
@@ -92,7 +92,7 @@ export function createSlowFetchCache({ fetch, ttlMs = 30 * 60_000, negativeTtlMs
 /** 引用还在加载时给 AI 看的占位文字（带被引用消息的 id，AI 可以稍后用工具查）。 */
 export function pendingReplyText(messageId) {
   const id = String(messageId ?? '').replace(/[^\w-]/g, '').slice(0, 40);
-  return `[引用消息${id ? ` id=${id}` : ''}（原消息加载较慢，稍后可用 qq_get_message_detail 查看${id ? '这个 id' : ''}）]`;
+  return `[引用消息${id ? ` id=${id}` : ''}（原消息加载较慢，稍后可用 read_messages（op=get_message_detail） 查看${id ? '这个 id' : ''}）]`;
 }
 
 /** 合并若干 forward id 列表（去重、保序、丢空值）。 */

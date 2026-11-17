@@ -62,6 +62,67 @@ test('C3 之后 qq 能收：有 connect() 就不能再报 inbound_unsupported', 
   assert.equal(diag, undefined, '已经能收的平台不该再报这条');
 });
 
+test('标签表随快照下发：中文名只住后端，控制台不再维护第二张表', () => {
+  const snapshot = platformRegistrySnapshot();
+  const labels = snapshot.labels;
+  assert.ok(labels, '快照必须带 labels');
+  assert.equal(labels.capabilities.group, '群聊');
+  assert.equal(labels.capabilities['member-info'], '成员详情');
+  assert.equal(labels.segments.video, '视频');
+  assert.equal(labels.effects['fs.read'], '读文件');
+  assert.equal(labels.apply.passthrough, '直通（不装预设）');
+  assert.equal(labels.conversations.private, '私聊');
+  assertPlainJson(labels, 'snapshot.labels');
+});
+
+test('用户侧一句话结论：能发 / 能收 / 做不到三组由「段表 ∩ 声明能力」求交得出', () => {
+  const snapshot = platformRegistrySnapshot();
+  const qq = findRegistryPlatform(snapshot, 'user', 'qq');
+  assert.ok(qq.promise, '用户条目必须带 promise');
+  assert.deepEqual(qq.promise.groups.map((group) => group.id), ['send', 'receive', 'cannot']);
+  const send = qq.promise.groups[0];
+  const receive = qq.promise.groups[1];
+  const cannot = qq.promise.groups[2];
+  // 能发 = 内核认识的段减去平台没声明能力的那些（视频 / 平台私有段）。
+  assert.deepEqual(send.items.map((item) => item.id), ['text', 'mention', 'reply', 'image', 'voice', 'file', 'sticker', 'forward', 'poke']);
+  assert.deepEqual(cannot.items.map((item) => item.id), ['video', 'ext']);
+  assert.equal(cannot.items[0].label, '视频', '中文名必须由后端给，前端不拼');
+  assert.deepEqual(receive.items.map((item) => item.id), ['group', 'private']);
+  assert.equal(receive.note, '', '能收的平台不该挂「收不到」的备注');
+  assert.ok(qq.promise.text.startsWith('能收能发'), qq.promise.text);
+  assert.ok(qq.promise.text.includes('不支持 视频、平台私有段'), qq.promise.text);
+  assertPlainJson(qq.promise, 'qq.promise');
+});
+
+test('不能收的平台：结论第一句就说清楚，且能收那组挂备注', () => {
+  const snapshot = buildPlatformRegistry({
+    profilePlatforms: [{ id: 'sender', label: '只发', behaviors: [], prompt: {}, tools: [] }],
+    userRuntime: { active: 'sender', platforms: [{ id: 'sender', label: '只发', source: 'plugin', inbound: false, capabilities: ['group', 'image'] }] },
+    agentRuntime: { active: '', platforms: [] },
+  });
+  const sender = findRegistryPlatform(snapshot, 'user', 'sender');
+  assert.ok(sender.promise.text.startsWith('只能发不能收'), sender.promise.text);
+  assert.deepEqual(sender.promise.groups[0].items.map((item) => item.id), ['text', 'image'], '没声明的能力对应的段一个都不算能发');
+  assert.ok(sender.promise.groups[1].note.includes('connect()'), '不能收必须写明原因');
+});
+
+test('Agent 侧一句话结论：生效方式 / 提示注入 / 效果 / 对端权限档，效果与 tools.yml 同源', () => {
+  const snapshot = platformRegistrySnapshot();
+  const dsh = findRegistryPlatform(snapshot, 'agent', 'dsh');
+  assert.deepEqual(dsh.promise.groups.map((group) => group.id), ['apply', 'prompt', 'effects', 'peer']);
+  const [apply, prompt, effects, peer] = dsh.promise.groups;
+  assert.deepEqual(apply.items.map((item) => item.id), ['preset', 'passthrough']);
+  assert.ok(prompt.items.length > 0);
+  // 效果清单必须等于该平台 tools.yml 里各模块 effects 的并集（去重后）：
+  // 能力档的效果表、构建期 degraded 判定读的是同一份声明。
+  const declared = [...new Set(dsh.assets.tools.flatMap((module) => module.effects ?? []))];
+  assert.deepEqual(effects.items.map((item) => item.id), declared);
+  assert.equal(effects.items[0].label, '读文件');
+  assert.deepEqual(peer.items.map((item) => item.id), ['read-only', 'workspace-write', 'qq-full-ask']);
+  assert.ok(dsh.promise.text.includes('效果。'), dsh.promise.text);
+  assertPlainJson(dsh.promise, 'dsh.promise');
+});
+
 test('只实现发送的平台仍然报 inbound_unsupported（warn，不是 error）', () => {
   const snapshot = buildPlatformRegistry({
     profilePlatforms: [{ id: 'sender', label: '只发', behaviors: [], prompt: {}, tools: [] }],

@@ -1,21 +1,23 @@
 // Agent 侧能力档：profiles/agent-platforms/<Agent 平台 id>/capabilities/<id>.yml，
 // 外加跨平台共用的 profiles/capabilities/<id>.yml（直通档这类与执行体无关的档位）。
 //
-// 一个能力档是**唯一档位真源**，五段各管一件事：
-//   tools      拿到什么（平台工具开关 / Agent 模块 / MCP 服务器与工具 / 技能）
+// 能力档只写**意图**，六段各管一件事：
+//   effects    要哪些 Agent 侧效果（fs.read / shell.exec …，词表见 docs/CAPABILITY_CONTRACT.md §3.4.2）
+//   behavior   绑定哪个行为档案
 //   runtime    怎么生效（装不装预设 / 提示怎么注入 / 建会话时要不要钉对端权限档）
 //   audience   谁能用（`access` = 受准入名单约束的普通会话，`owner` = 仅主人与管理员私聊）
-//   preset     Agent 平台预设的元信息（名字 / 描述 / 顺序 / 绑定行为）
-//   rows       预设正文（Agent 平台的插件行列表，由该平台的 build 适配器渲染成产物）
-//   extensions 扩展授权（MCP / 技能白名单，Hub 读取）
-// 能力档 id 与 Agent 预设 id 同名：会话只引用能力，不再另写 preset 名。
-// `runtime.apply: passthrough` 的能力档不装预设（rows 允许为空），
-// 此时 preset 段只作为「建议值」供界面展示，不参与构建。
+//   mcp/skills 扩展授权（Hub 读取；缺省 = 全部拒绝）
+//
+// 插件名、行序、默认 config、人格文案都不在这里：那是执行体的渲染层
+// （profiles/agent-platforms/<id>/adapters/render.yml）的事。同一份意图换一个执行体，
+// 由那个执行体渲染成它自己的形状 —— 能力档不认识任何平台的插件。
+// 能力档 id 与 Agent 预设 id 同名：会话只引用能力，不再另写预设名。
+// `runtime.apply: passthrough` 的能力档不装预设，渲染层不产出行。
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML, { parseDocument } from 'yaml';
 import { copyFactory, hasFactory } from '../profiles/factory.mjs';
-import { capabilityCovers, PLATFORM_TOOLS } from '../tools/catalog.mjs';
+import { declaredToolFlags } from '../tools/catalog.mjs';
 
 /**
  * 能力档目录只属于某个 Agent 平台（`agentCapabilitiesDir(id)`），这里不自带默认值：
@@ -27,10 +29,9 @@ function requireRoot(root) {
   return root;
 }
 
-const CAPABILITY_HEADER = '# 能力档（Agent 侧）：tools = 工具面，runtime = 生效方式，audience = 可用受众，preset = 预设元信息，rows = 插件行列表。\n'
-  + '# 由控制台平台详情的「能力」维护；保存 tools 不会重写 preset / rows。';
-
-const PRESET_KEYS = Object.freeze(['name', 'description', 'order', 'behavior']);
+const CAPABILITY_HEADER = '# 能力档（Agent 侧）：effects = 要哪些效果，behavior = 绑定的行为档案，\n'
+  + '# runtime = 生效方式，audience = 可用受众，mcp / skills = 扩展授权。\n'
+  + '# 由控制台平台详情的「能力」维护；插件行由该平台的渲染层生成，不在能力档里写。';
 
 /** 生效方式：装预设，还是交给执行体自己（直通）。 */
 export const CAPABILITY_APPLY = Object.freeze(['preset', 'passthrough']);
@@ -52,27 +53,12 @@ export const CAPABILITY_RUNTIME_DEFAULTS = Object.freeze({
 /** `audience` 段缺省值：不写时等于「受准入名单约束」，与引入前一致。 */
 export const CAPABILITY_AUDIENCE_DEFAULT = 'access';
 
-function boolMap(value) {
-  const out = {};
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
-  for (const [key, item] of Object.entries(value)) {
-    if (item === true || item === false) out[key] = item;
-  }
-  return out;
-}
-
-function mcpList(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => {
-    const server = String(item?.server ?? '').trim();
-    if (!server) return null;
-    const tools = item?.tools;
-    return {
-      server,
-      tools: tools === '*' || tools === undefined || tools === null ? '*' : (Array.isArray(tools) ? tools.map(String) : '*'),
-    };
-  }).filter(Boolean);
-}
+/** 效果名文法：`域.动作`（fs.read / web.access / approval.gate）。 */
+const EFFECT_NAME_RE = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/;
+/** 效果取值里的变体名（web.access 的 mcp / builtin）。 */
+const EFFECT_VARIANT_RE = /^[a-z][a-z0-9-]*$/;
+/** 行为档案 id 文法（与行为档案文件名同一条）。 */
+const BEHAVIOR_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 function stringList(value) {
   if (!Array.isArray(value)) return [];
@@ -96,6 +82,36 @@ export function normalizeExtensions(raw) {
 }
 
 /**
+ * 效果段：键是效果名，值是 `true`（缺省变体）/ `false`（显式关掉）/ 变体名。
+ * 不校验效果名是否存在于某个执行体 —— 那是渲染层的事（装了才知道），
+ * 这里只保证形状合法，免得能力档里出现 `fs:read` 这种拼错的键一路带到产物里。
+ */
+export function normalizeEffects(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!EFFECT_NAME_RE.test(key)) throw new Error(`effects 的键必须是「域.动作」形式：${key}`);
+    if (value === true || value === false) {
+      out[key] = value;
+      continue;
+    }
+    const variant = String(value ?? '').trim();
+    if (!EFFECT_VARIANT_RE.test(variant)) {
+      throw new Error(`effects.${key} 只能写 true / false / 变体名：${JSON.stringify(value)}`);
+    }
+    out[key] = variant;
+  }
+  return out;
+}
+
+/** 该能力档要哪些效果（true 与变体名都算「要」，false 不算）。 */
+export function capabilityEffects(capability) {
+  return Object.entries(capability?.effects ?? {})
+    .filter(([, value]) => value !== false)
+    .map(([effect, value]) => ({ effect, variant: value === true ? 'default' : value }));
+}
+
+/**
  * 生效方式（`runtime` 段）。任何一项取值非法都直接报错 —— 猜一个默认值会把
  * 「不装预设」的能力悄悄装成预设，安全边界与档位权威都会跟着错位。
  *
@@ -111,26 +127,6 @@ export function normalizeRuntime(raw) {
   return { apply, prompt, peerPermission: String(value.peerPermission ?? '').trim(), narrow: stringList(value.narrow) };
 }
 
-/** 预设元信息：没有 name = 该能力档不渲染 Agent 预设（纯工具档）。 */
-export function normalizePreset(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const name = String(raw.name ?? '').trim();
-  if (!name) return null;
-  const order = Number(raw.order);
-  return {
-    name,
-    description: String(raw.description ?? '').trim(),
-    order: Number.isInteger(order) ? order : 999,
-    behavior: String(raw.behavior ?? '').trim(),
-  };
-}
-
-/** 预设正文：只做“是对象数组”的降级过滤，行内容由 Agent 平台的 build 适配器校验。 */
-function normalizeRows(value) {
-  if (!Array.isArray(value)) return [];
-  return value.filter((row) => row && typeof row === 'object' && !Array.isArray(row));
-}
-
 /** 归一并校验一份能力档；id 来自文件名。 */
 export function normalizeCapability(raw, { id, source = 'capability' } = {}) {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
@@ -138,24 +134,23 @@ export function normalizeCapability(raw, { id, source = 'capability' } = {}) {
   const name = String(id ?? value.id ?? '').trim();
   if (!/^[a-z][a-z0-9-]{1,39}$/.test(name)) throw new Error(`${source}.id 不合法：${name || '(空)'}`);
   const label = String(value.label ?? '').trim() || name;
+  const behavior = String(value.behavior ?? '').trim();
+  if (behavior && !BEHAVIOR_RE.test(behavior)) throw new Error(`${source}.behavior 必须是行为档案 id：${behavior}`);
+  // 顶层 mcp / skills 与 Hub 授权同形（allow / tools.allow / tools.deny），复用同一份归一。
+  const grants = normalizeExtensions({ mcp: value.mcp, skills: value.skills });
   return {
     version: Number.isInteger(Number(value.version)) ? Number(value.version) : 1,
     id: name,
     label,
     note: String(value.note ?? '').trim(),
-    tools: {
-      platform: boolMap(value.tools?.platform),
-      agent: boolMap(value.tools?.agent),
-      mcp: mcpList(value.tools?.mcp),
-      skills: stringList(value.tools?.skills),
-    },
+    behavior,
+    effects: normalizeEffects(value.effects),
     runtime: normalizeRuntime(value.runtime),
     audience: CAPABILITY_AUDIENCE.includes(String(value.audience ?? '').trim())
       ? String(value.audience).trim()
       : CAPABILITY_AUDIENCE_DEFAULT,
-    preset: normalizePreset(value.preset),
-    extensions: normalizeExtensions(value.extensions),
-    rows: normalizeRows(value.rows),
+    mcp: grants.mcp,
+    skills: grants.skills,
   };
 }
 
@@ -164,24 +159,32 @@ export function appliesPreset(capability) {
   return (capability?.runtime?.apply ?? CAPABILITY_RUNTIME_DEFAULTS.apply) === 'preset';
 }
 
+/** 授权段是否全空（控制台据此显示「全部拒绝」）。 */
+export function hasGrants(capability) {
+  const mcp = capability?.mcp ?? { allow: [], tools: { allow: [], deny: [] } };
+  const skills = capability?.skills ?? { allow: [] };
+  return Boolean(mcp.allow.length || mcp.tools.allow.length || mcp.tools.deny.length || skills.allow.length);
+}
+
 function capabilityText(capability) {
   const body = {
     version: capability.version,
     id: capability.id,
     label: capability.label,
     note: capability.note,
-    tools: capability.tools,
   };
+  if (capability.behavior) body.behavior = capability.behavior;
+  if (Object.keys(capability.effects).length) body.effects = capability.effects;
   // 只在偏离缺省时写这一段：新建的普通能力档不必为「和以前一样」多背四行。
   const runtime = capability.runtime ?? CAPABILITY_RUNTIME_DEFAULTS;
   if (RUNTIME_KEYS.some((key) => JSON.stringify(runtime[key]) !== JSON.stringify(CAPABILITY_RUNTIME_DEFAULTS[key]))) {
     body.runtime = Object.fromEntries(RUNTIME_KEYS.map((key) => [key, runtime[key]]));
   }
   if (capability.audience && capability.audience !== CAPABILITY_AUDIENCE_DEFAULT) body.audience = capability.audience;
-  if (capability.preset) {
-    body.preset = Object.fromEntries(PRESET_KEYS.filter((key) => capability.preset[key] !== '').map((key) => [key, capability.preset[key]]));
+  if (hasGrants({ mcp: capability.mcp, skills: capability.skills })) {
+    body.mcp = capability.mcp;
+    body.skills = capability.skills;
   }
-  if (capability.rows.length) body.rows = capability.rows;
   const text = YAML.stringify(body, { lineWidth: 0, singleQuote: true });
   return `${CAPABILITY_HEADER}\n\n${text}`;
 }
@@ -190,27 +193,6 @@ export function capabilityFile(root, id) {
   const name = String(id ?? '').trim();
   if (!/^[a-z][a-z0-9-]{1,39}$/.test(name)) throw new Error(`能力预设 id 不合法：${name || '(空)'}`);
   return path.join(root, `${name}.yml`);
-}
-
-/**
- * 平台工具可见集：只看能力档自己写的 tools.platform，缺的键就是不可见。
- * 白名单不许猜：没写的不当成「默认开」，也不回落某条内置能力档的模板。
- */
-export function visiblePlatformFlags(capability) {
-  const explicit = capability?.tools?.platform ?? {};
-  return PLATFORM_TOOLS.filter((tool) => explicit[tool.flag] === true).map((tool) => tool.flag);
-}
-
-/** 这套能力允许该工具吗？只对可收紧的副作用工具有意义（读类恒 true）。 */
-export function capabilityAllowsFlag(capability, flag) {
-  if (!capabilityCovers(flag)) return true;
-  if (!capability) return true;
-  return visiblePlatformFlags(capability).includes(flag);
-}
-
-/** 能力的 Agent 模块 id 列表（历史字段，已不再由能力决定）。 */
-export function agentModulesOf() {
-  return [];
 }
 
 export function createCapabilityStore({ root, sharedRoot = null, log = () => {} } = {}) {
@@ -246,17 +228,12 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
     return source;
   }
 
-  function decorate(capability, source, { withRows = false } = {}) {
-    const { rows, ...rest } = capability;
+  function decorate(capability, source) {
     return {
-      ...rest,
+      ...capability,
       builtin: hasFactory(source.dir, capability.id),
       shared: source.shared === true,
-      platformVisible: visiblePlatformFlags(capability),
-      agentModules: agentModulesOf(capability),
-      hasRows: rows.length > 0,
-      rowsCount: rows.length,
-      ...(withRows ? { rows } : {}),
+      hasGrants: hasGrants(capability),
     };
   }
 
@@ -265,7 +242,6 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
     return normalizeCapability(raw, { id, source: `capabilities/${file}` });
   }
 
-  /** 列表不带 rows（一个预设正文就是几千字符，5 份一起回会把控制台接口撞到几百 KB）。 */
   function list() {
     return sources().map((source) => decorate(readFile(source), source));
   }
@@ -273,7 +249,7 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
   function get(id) {
     const source = sourceOf(id);
     if (!source) return null;
-    return decorate(readFile(source), source, { withRows: true });
+    return decorate(readFile(source), source);
   }
 
   function docFor(id) {
@@ -285,7 +261,7 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
     return { file, doc };
   }
 
-  /** 局部写回：只改指定段，其余文本（包括 rows 里的注释）保持原样。 */
+  /** 局部写回：只改指定段，其余文本（包括注释）保持原样。 */
   function mutate(id, apply) {
     const { file, doc } = docFor(id);
     apply(doc);
@@ -295,24 +271,24 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
   }
 
   /**
-   * 保存工具面（控制台能力面板）。新建时写出完整能力档；已有文件只改 tools / label / note。
+   * 保存意图（控制台能力面板）：新建时写完整能力档，已有文件只改提供的段。
+   * 提示词与插件行不在这里 —— 它们是执行体渲染层的产物。
    */
   function save(id, patch = {}) {
     const current = get(id);
     if (current?.shared) throw new Error(`${current.id} 是跨 Agent 平台共用的能力档（只读）：请先克隆一份到当前平台再改`);
-    const base = current ?? normalizeCapability({ label: id, note: '', tools: {} }, { id });
+    const base = current ?? normalizeCapability({ label: id, note: '' }, { id });
     const builtin = current?.builtin === true;
     const next = normalizeCapability({
       ...base,
-      // 内置预设的名称/备注是固定文案，只允许改工具面。
+      // 内置能力档的名称/备注是固定文案，只允许改效果与授权。
       label: builtin ? base.label : (patch.label ?? base.label),
       note: builtin ? base.note : (patch.note ?? base.note),
-      tools: {
-        platform: patch.tools?.platform ?? base.tools.platform,
-        agent: patch.tools?.agent ?? base.tools.agent,
-        mcp: patch.tools?.mcp ?? base.tools.mcp,
-        skills: patch.tools?.skills ?? base.tools.skills,
-      },
+      effects: patch.effects ?? base.effects,
+      runtime: patch.runtime ?? base.runtime,
+      audience: patch.audience ?? base.audience,
+      mcp: patch.mcp ?? base.mcp,
+      skills: patch.skills ?? base.skills,
     }, { id });
     if (!current) {
       fs.mkdirSync(root, { recursive: true });
@@ -323,48 +299,31 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
     return mutate(id, (doc) => {
       doc.set('label', next.label);
       doc.set('note', next.note);
-      doc.setIn(['tools', 'platform'], next.tools.platform);
-      doc.setIn(['tools', 'agent'], next.tools.agent);
-      doc.setIn(['tools', 'mcp'], next.tools.mcp);
-      doc.setIn(['tools', 'skills'], next.tools.skills);
-    });
-  }
-
-  /** 预设元信息（Agent 平台预设的名字/描述/顺序/绑定行为）。传 null 删除该段。 */
-  function setPreset(id, patch = null) {
-    const next = normalizePreset(patch);
-    if (!next) throw new Error('预设元信息缺少 name');
-    return mutate(id, (doc) => {
-      for (const key of PRESET_KEYS) {
-        if (!next[key]) doc.deleteIn(['preset', key]);
-        else doc.setIn(['preset', key], next[key]);
+      if (Object.keys(next.effects).length) doc.set('effects', next.effects);
+      else doc.delete('effects');
+      if (next.behavior) doc.set('behavior', next.behavior);
+      const runtime = next.runtime;
+      if (RUNTIME_KEYS.some((key) => JSON.stringify(runtime[key]) !== JSON.stringify(CAPABILITY_RUNTIME_DEFAULTS[key]))) {
+        for (const key of RUNTIME_KEYS) doc.setIn(['runtime', key], runtime[key]);
+      }
+      if (next.audience !== CAPABILITY_AUDIENCE_DEFAULT) doc.set('audience', next.audience);
+      else doc.delete('audience');
+      if (hasGrants(next)) {
+        doc.set('mcp', next.mcp);
+        doc.set('skills', next.skills);
+      } else {
+        doc.delete('mcp');
+        doc.delete('skills');
       }
     });
   }
 
-  /** 预设正文（插件行列表）：整段覆盖；高级编辑与表单编辑都走这里。 */
-  function setRows(id, rows) {
-    const next = normalizeRows(rows);
-    // 直通不装预设，行列表为空是它的正常形态；装预设的空正文才是错误。
-    if (!next.length && appliesPreset(get(id))) throw new Error('插件行列表不能为空');
-    return mutate(id, (doc) => { doc.set('rows', next); });
-  }
-
-  /** 生效方式（apply / prompt / permission / narrow）。 */
-  function setRuntime(id, patch = {}) {
-    const current = get(id);
-    if (!current) throw new Error(`没有这个能力档：${id}`);
-    const next = normalizeRuntime({ ...current.runtime, ...(patch ?? {}) });
-    return mutate(id, (doc) => {
-      for (const key of RUNTIME_KEYS) doc.setIn(['runtime', key], next[key]);
-    });
-  }
-
-  /** 扩展授权（MCP / 技能白名单）。 */
-  function setExtensions(id, patch = {}) {
+  /** 扩展授权（MCP / 技能白名单）整段覆盖。 */
+  function setGrants(id, patch = {}) {
     const next = normalizeExtensions(patch);
     return mutate(id, (doc) => {
-      doc.set('extensions', next);
+      doc.set('mcp', next.mcp);
+      doc.set('skills', next.skills);
     });
   }
 
@@ -391,28 +350,14 @@ export function createCapabilityStore({ root, sharedRoot = null, log = () => {} 
     return get(name);
   }
 
-  return { root, list, get, save, setPreset, setRows, setRuntime, setExtensions, remove, reset };
+  return { root, list, get, save, setGrants, remove, reset };
 }
 
 /**
- * 平台工具注册开关：所有能力预设 platformVisible 的并集。
+ * 平台工具的注册开关：由平台声明（profiles/platforms/<id>/tools.yml）决定。
+ * 声明了就是「这个平台有」，`defaultOff: true` 的不默认注册 —— 工具面不再抄进能力档。
  * 桥接与 MCP 脚本共用这一个函数，避免两份配置产生分歧。
  */
-export function platformFlags({ root, sharedRoot = null, log = () => {} } = {}) {
-  requireRoot(root);
-  const flags = Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, false]));
-  try {
-    const capabilities = createCapabilityStore({ root, sharedRoot, log }).list();
-    if (!capabilities.length) {
-      for (const tool of PLATFORM_TOOLS) flags[tool.flag] = tool.defaultOff !== true;
-      log('[capabilities] 没有能力预设，平台工具按目录默认值注册');
-      return flags;
-    }
-    for (const capability of capabilities) {
-      for (const flag of capability.platformVisible ?? []) flags[flag] = true;
-    }
-  } catch (error) {
-    log(`[capabilities] 平台工具开关推导失败，按全部关闭处理：${error?.message ?? error}`);
-  }
-  return flags;
+export function platformFlags(declared = []) {
+  return declaredToolFlags(declared);
 }

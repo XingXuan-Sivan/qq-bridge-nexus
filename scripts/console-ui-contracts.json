@@ -135,57 +135,32 @@
     }
   },
   {
+    "method": "POST",
+    "path": "/api/session/rename",
+    "body": {
+      "key": "group:100003",
+      "title": "开发群"
+    }
+  },
+  {
     "method": "PATCH",
     "path": "/api/runtime/capabilities/chat",
     "body": {
       "label": "聊天 Agent",
       "note": "",
-      "tools": {
-        "platform": {
-          "getPrompt": false,
-          "getUnread": false,
-          "getRecent": false,
-          "getMyRecent": false,
-          "getMessageDetail": false,
-          "getImages": false,
-          "getForwardMsg": false,
-          "getActiveMembers": false,
-          "waitMessages": false,
-          "socialState": false,
-          "listStickers": false,
-          "getStickerImage": false,
-          "getSelfImage": false,
-          "personProfile": false,
-          "memory": false,
-          "slangQuery": false,
-          "slangSubmit": false,
-          "markRead": true,
-          "setWakeConfig": true,
-          "stickerNote": false,
-          "setStickerRemark": false,
-          "collectSticker": false,
-          "sendGroup": false,
-          "sendPrivate": false,
-          "reply": false,
-          "sendBurst": true,
-          "sendMessage": true,
-          "sendPoke": false,
-          "sendSticker": false,
-          "sendVoice": false,
-          "webImage": false,
-          "feedback": false,
-          "crossGroup": false,
-          "ownerGroupAccess": false,
-          "ownerRelay": false,
-          "schedule": false
-        },
-        "mcp": [
-          {
-            "server": "*",
-            "tools": "*"
-          }
+      "mcp": {
+        "allow": [
+          "*"
         ],
-        "skills": [
+        "tools": {
+          "allow": [
+            "*"
+          ],
+          "deny": []
+        }
+      },
+      "skills": {
+        "allow": [
           "*"
         ]
       }

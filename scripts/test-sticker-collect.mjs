@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from '../src/social/sticker-collect.js';
+import { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from '../src/user-side/adapters/qq/sticker-collect.js';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
 
 // 最小合法 GIF（1x1）

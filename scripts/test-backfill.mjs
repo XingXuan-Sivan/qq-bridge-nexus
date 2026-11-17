@@ -55,23 +55,32 @@ test('① 模块', () => {
 
   for (const t of ['/reset', '/level L3', '123456', '确认', '#2 同意', 'y']) assert.equal(isCommandLike(t), true, t);
   for (const t of ['在吗', '确认一下今晚几点', '12345 是我的幸运数字', '']) assert.equal(isCommandLike(t), false, t);
-  assert.equal(plainTextOf([{ type: 'at', data: { qq: '1' } }, { type: 'text', data: { text: ' /reset' } }]), ' /reset');
+  // 补收吃的是统一事件（history.get 已经翻译过），纯文本直接取 message.text。
+  assert.equal(plainTextOf({ message: { text: ' /reset' } }), ' /reset');
+  assert.equal(plainTextOf({}), '');
 
   const now = 10_000_000_000;
-  const msg = (id, minAgo, text, extra = {}) => ({ message_id: id, time: Math.floor((now - minAgo * 60_000) / 1000), user_id: 777, self_id: SELF, message: [{ type: 'text', data: { text } }], raw_message: text, ...extra });
+  const msg = (id, minAgo, text, extra = {}) => ({
+    id: `evt-${id}`,
+    time: now - minAgo * 60_000,
+    self: { id: String(SELF) },
+    sender: { id: '777' },
+    message: { id: String(id), segments: [{ type: 'text', data: { text } }], text },
+    ...extra,
+  });
   const seen2 = createSeenMessageIds(); seen2.add(GROUP, 3);
   const { items, skippedCommands } = selectBackfill([
     msg(5, 5, '后到的'), msg(1, 20, '先到的'), msg(2, 90, '断线前很久的'), msg(3, 10, '实时收过的'),
-    msg(4, 8, '自己发的', { user_id: SELF }), msg(6, 6, '/reset'), msg(1, 20, '先到的'),
+    msg(4, 8, '自己发的', { sender: { id: String(SELF) } }), msg(6, 6, '/reset'), msg(1, 20, '先到的'),
   ], { key: GROUP, since: now - 30 * 60_000, now, seen: seen2, config: {} });
-  assert.deepEqual(items.map((x) => x.event.message_id), [1, 5], '只要断线这段时间的、按时间排序、去掉自己发的 / 收过的 / 重复的');
-  assert.deepEqual(skippedCommands.map((x) => x.event.message_id), [6], '命令单独拿出来');
+  assert.deepEqual(items.map((x) => x.event.message.id), ['1', '5'], '只要断线这段时间的、按时间排序、去掉自己发的 / 收过的 / 重复的');
+  assert.deepEqual(skippedCommands.map((x) => x.event.message.id), ['6'], '命令单独拿出来');
   assert.equal(items[0].ageMs, 20 * 60_000);
   const old = selectBackfill([msg(9, 400, '很早')], { key: GROUP, since: now - 500 * 60_000, now, config: {} });
   assert.equal(old.items[0].tooOld, true, '超过 6 小时：太旧');
   const many = selectBackfill(Array.from({ length: 80 }, (_, i) => msg(100 + i, 30 - i * 0.3, `第${i}条`)), { key: GROUP, since: now - 31 * 60_000, now, config: { maxPerConversation: 10 } });
   assert.equal(many.items.length, 10, '条数上限');
-  assert.equal(many.items.at(-1).event.message_id, 179, '留的是最近的');
+  assert.equal(many.items.at(-1).event.message.id, '179', '留的是最近的');
 
   assert.equal(describeDuration(37 * 60_000), '约 37 分钟');
   assert.equal(describeDuration(125 * 60_000), '约 2 小时 5 分');

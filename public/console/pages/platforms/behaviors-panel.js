@@ -5,7 +5,7 @@
 // 字段规格由后端类型注册表下发（GET /api/behaviors/kinds），按 (平台, kind) 索引，页面不自带一份。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { cardHtml } from '../../components/card/card.js';
+import { detailSectionHtml } from '../../components/detail-panel/detail-panel.js';
 import { renderFields, bindSwitches } from '../../components/form/form.js';
 import { confirmBox } from '../../components/message-box/message-box.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
@@ -274,17 +274,17 @@ function openArchiveModal({ mode, source = null }) {
   });
 }
 
-/** 面板骨架：两段卡（清单 / 基本信息）+ 自带外壳的提示词卡；宿主就是详情页的分节栈。 */
+/** 面板骨架：清单 / 档案内容两段分区 + 自带外壳的提示词卡，与平台详情其他页同一种「分节」写法。 */
 function markup() {
   return `
-    ${cardHtml({
+    ${detailSectionHtml({
     title: '档案清单',
-    description: '档案是资源：会话可以显式挂它，用户平台可以把它设为默认行为；改名不影响引用，删除前先确认没被引用。',
+    note: '档案是资源：会话可以显式挂它，用户平台可以把它设为默认行为；改名不影响引用，删除前先确认没被引用。',
     body: '<div data-behavior-fields="list"></div>',
   })}
-    ${cardHtml({
-    title: '基本信息',
-    description: `写入 <code>profiles/platforms/${esc(platformId)}/behaviors</code>，重启桥接后生效。`,
+    ${detailSectionHtml({
+    title: '档案内容',
+    note: `写入 <code>profiles/platforms/${esc(platformId)}/behaviors</code>，重启桥接后生效。`,
     body: `<div class="form-stack" data-behavior-fields="basics"></div>
         <div class="form-actions">
           <button class="btn primary" type="button" id="behaviorFormSave">保存</button>

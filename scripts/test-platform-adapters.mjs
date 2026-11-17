@@ -24,7 +24,7 @@ import {
   listUserPlatforms,
   requireUserPlatform,
   buildSendCall,
-  readBackendInfo,
+  probeBackend,
   describeBackend,
   supportsUserCapability,
   userPlatformLimits,
@@ -56,10 +56,11 @@ test('内置用户平台已注册，且描述里没有平台实现细节', () =>
   // 描述里只允许静态元数据：任何函数都说明实现泄漏进了控制台可见的部分。
   // limits 自 B7 起也在这里（控制台按它画表单，不再自己写死 4000）；
   // inbound 自 C3 起也是布尔值（有没有 connect()，函数本身不出口）；
-  // rawEvent 是正文契约：声明了才有业务体入口（见 src/user-side/inbound.mjs 的 deliver 契约）。
-  assert.deepEqual(Object.keys(qq).sort(), ['capabilities', 'conversationTypes', 'id', 'inbound', 'label', 'limits', 'rawEvent']);
+  // actions 是能力声明（S2）：平台敢接哪些中立动作，没列出的一律视为做不到。
+  assert.deepEqual(Object.keys(qq).sort(), ['actions', 'capabilities', 'conversationTypes', 'id', 'inbound', 'label', 'limits']);
+  assert.ok(Array.isArray(qq.actions) && qq.actions.every((a) => typeof a === 'string'), 'actions 只能是字符串数组');
+  assert.ok(qq.actions.includes('message.send'), 'message.send 是基本盘，必须声明');
   assert.equal(typeof qq.inbound, 'boolean');
-  assert.equal(qq.rawEvent, true, 'QQ 的业务体吃 OneBot 报文：rawEvent 必须是静态布尔');
   assert.equal(qq.limits.chunkChars, 4000);
 });
 
@@ -80,11 +81,12 @@ test('门面不吞适配器的抛错：未知类型与空 id 仍然抛', () => {
   assert.throws(() => buildSendCall('group', '', []), /需要数字 id/);
 });
 
-test('后端称呼与能力查询按声明委托，不自作判断', () => {
-  assert.deepEqual(readBackendInfo({ app_name: 'NapCat.Onebot', app_version: '4.18.38' }), {
-    name: 'NapCat',
-    version: '4.18.38',
-  });
+test('后端称呼与能力查询按声明委托，不自作判断', async () => {
+  // 后端身份的「问法与判定」都已收进适配器，门面只负责转发。
+  // 具体解析（app_name → NapCat）由 scripts/test-qq-backend-label.mjs 钉住；
+  // 这里钉的是「门面存在且不猜」：连连接都没有时返回 null，不编一个后端。
+  assert.equal(typeof probeBackend, 'function');
+  assert.equal(await probeBackend(), null, '没有连接就没有后端身份，不猜');
   assert.match(describeBackend({ viaPlatform: true, backend: { name: 'NapCat', version: '4.18.38' } }), /NapCat/);
   assert.equal(supportsUserCapability('sticker'), true);
   assert.equal(supportsUserCapability('nonexistent-capability'), false, '未声明即不支持，不猜');

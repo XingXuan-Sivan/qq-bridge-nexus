@@ -37,7 +37,7 @@ export function normalizeMemoryConfig(raw) {
     if (value.maxChars === null || value.maxChars === 0) conf.maxChars = 0;
     else if (Number.isInteger(Number(value.maxChars))) conf.maxChars = clampInt(value.maxChars, 0, 100000, MEMORY_INJECT_DEFAULT_CHARS);
     if (Number.isInteger(Number(value.timeoutMs))) conf.timeoutMs = clampInt(value.timeoutMs, 100, 10000, MEMORY_TIMEOUT_MS);
-    // 本机轻量记忆的四个 qq_memory_* 工具：显式配置优先，缺省仍回落到旧的 socialV2.tools.memory。
+    // 本机轻量记忆的四个动作（memory 组的 append / query / remove / clear）：显式配置优先，缺省仍回落到旧的 socialV2.tools.memory。
     if (value.tools && typeof value.tools === 'object' && !Array.isArray(value.tools) && typeof value.tools.enabled === 'boolean') {
       conf.tools = { enabled: value.tools.enabled };
     }
@@ -148,7 +148,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
       },
       fetch: typeof provider.fetch === 'function' ? provider.fetch : null,
       fetchSync: typeof provider.fetchSync === 'function' ? provider.fetchSync : null,
-      // 写回只对声明 write 且真的实现了 note() 的 provider 开放（qq_memory_note 用）。
+      // 写回只对声明 write 且真的实现了 note() 的 provider 开放（memory（op=memory_note） 用）。
       note: typeof provider.note === 'function' ? provider.note : null,
       // 管理只对声明 manage 且实现了最小方法集的 provider 开放（/api/memory/entries|rules 用）。
       manage,
@@ -314,7 +314,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     };
   }
 
-  // 主动回忆（qq_memory_recall）：联邦查询，所有启用的 provider 各查一次，合并时标注来源。
+  // 主动回忆（memory（op=memory_recall））：联邦查询，所有启用的 provider 各查一次，合并时标注来源。
   // 与注入路径不同，这里要的是“现在就去问”，所以 async provider 直接 fetch（带自己的超时），不吃注入缓存。
   async function recall({ key, query = '', limit = 3, maxCharsPerProvider = 800, maxTotalChars = 2000, provider: onlyProvider = '' } = {}) {
     const wanted = Math.max(1, Math.min(5, Number(limit) || 3));
@@ -373,7 +373,7 @@ export function createMemoryRegistry({ log = () => {}, config = null, now = () =
     return { query: String(query ?? ''), totalChars: total, results };
   }
 
-  // 写回（qq_memory_note）：只写主 provider；主 provider 不可写时退到第一个可写的，并在结果里说明。
+  // 写回（memory（op=memory_note））：只写主 provider；主 provider 不可写时退到第一个可写的，并在结果里说明。
   async function note({ key, text, tags } = {}) {
     const body = normalizeText(text);
     if (!key || !body) return { ok: false, error: 'key/text 不能为空' };

@@ -39,7 +39,7 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-token-ledger-'));
 const ledgerFile = path.join(tmpDir, 'token-usage.jsonl');
 function freshLedger(opts = {}) {
   try { fs.unlinkSync(ledgerFile); } catch {}
-  return createTokenLedger({ file: ledgerFile, priceTable: PRICE, ...opts });
+  return createTokenLedger({ file: ledgerFile, getPriceTable: () => PRICE, ...opts });
 }
 
 // ── 1. 峰谷分时 ─────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ assert(near(c.byTier.peak, 10) && near(c.byTier.off, 5), '高峰期/空闲期花
 
 // ── 9. 半行容错 ─────────────────────────────────────────────────────────
 fs.appendFileSync(ledgerFile, '{"k":"turn","sid":"s1","turn":9,"ste', 'utf8');
-ledger = createTokenLedger({ file: ledgerFile, priceTable: PRICE, resolveKey: () => 'group:100' });
+ledger = createTokenLedger({ file: ledgerFile, getPriceTable: () => PRICE, resolveKey: () => 'group:100' });
 assert(ledger.stats().droppedLines === 1, '进程中断留下的半行被跳过而不是让账本读不出来');
 assert(ledger.summary().conversations.length === 1, '半行之后仍能读出既有数据');
 
@@ -206,7 +206,7 @@ assert(afterEvict.buckets.cacheMiss === 300, `淘汰后累计未命中输入仍�
 assert(afterEvict.buckets.output === 30, `淘汰后累计输出仍为 30（实得 ${afterEvict.buckets.output}）`);
 assert(near(afterEvict.cost, expectEvictCost, 1e-9), `淘汰后累计花费不变（实得 ${afterEvict.cost.toFixed(8)} 期望 ${expectEvictCost.toFixed(8)}）`);
 assert(afterEvict.unattributedCost > 0, '被淘汰的回合归入「未逐轮归属」而不是凭空消失');
-const reloaded = createTokenLedger({ file: ledgerFile, priceTable: PRICE, resolveKey: () => 'group:100' });
+const reloaded = createTokenLedger({ file: ledgerFile, getPriceTable: () => PRICE, resolveKey: () => 'group:100' });
 assert(reloaded.stats().samples === stats.samples, '淘汰后重新载入不丢采样');
 assert(near(reloaded.summary().totals.cost, afterEvict.cost, 1e-9), '淘汰结果的累计花费可跨重启复现');
 
@@ -285,6 +285,56 @@ assert(wide.buckets.length <= 48, '放大窗口后桶数仍受上限约束');
 const emptyWindow = ledger.series({ hours: 1, at: sBase - 60 * 60 * 1000 });
 assert(emptyWindow.countedSamples === 0, '采样发生在窗口之后时不计入');
 assert(emptyWindow.buckets.every((b) => b.cost === 0), '窗口内无用量时全为 0 桶');
+
+// ── 12. 逐模型价目覆盖 / 先记账后补价 ─────────────────────────────────
+// 账本只存 token 与模型名，金额是**读取时**按当前价目表算的。所以：
+//   · 部分模型没价目时，它们只计 token（totals.unpriced / coverage 里能看见是哪一个）；
+//   · 补上单价后，已产生的 token（含被淘汰聚合的那部分）金额当场重算，不用迁移账本；
+//   · 金额跨重启可复现（每行存的是「模型 × 档位」而不是算好的钱）。
+const baseCatalog = {
+  models: [{ id: 'deepseek-flash', label: 'Flash', pricing: { cacheHit: 0.02, cacheMiss: 1, output: 4 } }],
+  pricingPolicy: { currency: 'CNY', symbol: '¥', unit: 1e6, peakMultiplier: 2, peakWindows: [[9, 12], [14, 18]], peakWeekdays: [1, 2, 3, 4, 5] },
+};
+const withSide = {
+  ...baseCatalog,
+  models: [...baseCatalog.models, { id: 'side-model', label: '会话单独用的模型', pricing: { cacheHit: 0.1, cacheMiss: 2, output: 8 } }],
+};
+const currentTable = { value: priceTableFromCatalog(baseCatalog) };
+try { fs.unlinkSync(ledgerFile); } catch { /* 第一次跑没有文件 */ }
+ledger = createTokenLedger({
+  file: ledgerFile,
+  getPriceTable: () => currentTable.value,
+  resolveKey: () => 'group:100',
+  maxLines: 20,
+});
+for (let turn = 1; turn <= 25; turn += 1) {
+  ledger.ingestSample({ sessionId: 's1', seq: turn * 10, turn, step: 1, at, model: 'deepseek-flash', usage: usage(1000, 100) });
+  ledger.ingestSample({ sessionId: 's1', seq: turn * 10 + 1, turn, step: 2, at, model: 'side-model', usage: usage(2000, 200) });
+}
+const flashOnly = 25 * ((1000 / 1e6) * 1 + (100 / 1e6) * 4);
+const sidePriced = 25 * ((2000 / 1e6) * 2 + (200 / 1e6) * 8);
+let partial = ledger.summary();
+assert(near(partial.totals.cost, flashOnly, 1e-9), `只有 flash 有价目时只算它的钱（实得 ${partial.totals.cost}）`);
+assert(partial.totals.unpriced === true && partial.totals.unpricedTokens === 25 * 2200,
+  `另一个模型的 token 单独记为未计价（实得 ${partial.totals.unpricedTokens}）`);
+const coverageOf = (id) => ledger.coverage().find((row) => row.model === id) ?? {};
+assert(coverageOf('deepseek-flash').priced === true && near(coverageOf('deepseek-flash').cost, flashOnly, 1e-9),
+  '覆盖清单能按模型看到已算钱的金额');
+assert(coverageOf('side-model').priced === false && coverageOf('side-model').unpricedTokens === 25 * 2200,
+  '覆盖清单点名哪个模型只有 token、没有金额');
+assert(coverageOf('deepseek-flash').tokens === 25 * 1100 && coverageOf('side-model').tokens === 25 * 2200,
+  '两边 token 都完整记着（包含被淘汰聚合的部分）');
+assert(ledger.stats().samples <= 20, `逐轮明细已压缩到上限内（实得 ${ledger.stats().samples}）`);
+
+// 补上单价：不重新记账，金额按新表重算。
+currentTable.value = priceTableFromCatalog(withSide);
+partial = ledger.summary();
+assert(near(partial.totals.cost, flashOnly + sidePriced, 1e-9),
+  `补价后历史金额立即重算（实得 ${partial.totals.cost} 期望 ${flashOnly + sidePriced}）`);
+assert(partial.totals.unpriced === false && partial.totals.unpricedTokens === 0, '补完价目后不再有未计价 token');
+assert(near(ledger.conversation('group:100').cost, partial.totals.cost, 1e-9), '会话视图与合计同一口径');
+const reread = createTokenLedger({ file: ledgerFile, getPriceTable: () => currentTable.value, resolveKey: () => 'group:100' });
+assert(near(reread.summary().totals.cost, partial.totals.cost, 1e-9), '补价后的金额跨重启仍可复现');
 
 // ── reset ───────────────────────────────────────────────────────────────
 ledger.reset();

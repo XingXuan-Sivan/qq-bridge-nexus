@@ -17,9 +17,19 @@
 //   · `platformRegistrySnapshot()` 只负责取运行期事实与磁盘目录，不含判断逻辑。
 // 这样 `test-platform-registry` 不用起进程就能覆盖全部诊断分支。
 
-import { listAgentPlatformDirs, listPlatforms, readPlatformTools } from './index.mjs';
+import { listAgentPlatformDirs, listPlatforms, readAgentPlatformTools, readPlatformTools } from './index.mjs';
 import { agentPlatformMetadata } from '../agent-side/metadata.mjs';
 import { userPlatformMetadata } from '../user-side/metadata.mjs';
+import { SEGMENT_TYPES, segmentCapability } from '../user-side/segments.mjs';
+import {
+  APPLY_LABELS,
+  CONVERSATION_LABELS,
+  EFFECT_LABELS,
+  PROMPT_LABELS,
+  SEGMENT_LABELS,
+  labelOf,
+  labelsPayload,
+} from './labels.mjs';
 import { applyPluginConfig, normalizeConfigSchema } from '../plugins/config-schema.mjs';
 // 配置 v2 的段内结构（transport/options/endpoint）不该泄露给前端：注册表对外只给扁平值。
 import { flatPlatforms } from '../config/platforms.mjs';
@@ -71,6 +81,94 @@ const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stri
 
 function diagnostic(code, side, platformId, message) {
   return { code, side, platformId, level: DIAGNOSTIC_LEVELS[code] ?? 'warn', message };
+}
+
+/** 一组只读结论行：`[{ id, label }]`，表里没有的 id 原样显示。 */
+function conclude(table, ids) {
+  return (ids ?? []).map((id) => ({ id, label: labelOf(table, id) }));
+}
+
+/**
+ * 用户平台的「一句话结论」+ 三组只读清单（发送能力 / 接收能力 / 不支持的消息段）。
+ *
+ * 两侧都由声明算出来，没有第二份表：发送能力 = 内核认识的段 ∩ 平台声明的能力；
+ * 接收能力 = 声明的会话类型 + 到底能不能收（`connect()` 有没有接上）；不支持的消息段 = 剩下的段。
+ * 句子由这里拼，控制台不再拿一堆 id 自己拼——它只负责摆版式。
+ */
+function userPromise(entry) {
+  const caps = new Set(entry.capabilities ?? []);
+  const send = [];
+  const cannot = [];
+  for (const type of SEGMENT_TYPES) {
+    const need = segmentCapability(type);
+    if (need === null || caps.has(need)) send.push(type);
+    else cannot.push(type);
+  }
+  const missing = conclude(SEGMENT_LABELS, cannot);
+  const text = [
+    entry.inbound ? '能收能发' : '只能发不能收',
+    `能发 ${send.length} 种段`,
+    missing.length ? `不支持 ${missing.map((item) => item.label).join('、')}` : '中立段全都支持',
+  ].join('；') + '。';
+  return {
+    text,
+    groups: [
+      { id: 'send', label: '发送能力', source: '内核段表 ∩ 平台声明', items: conclude(SEGMENT_LABELS, send) },
+      {
+        id: 'receive',
+        label: '接收能力',
+        source: '平台声明',
+        items: conclude(CONVERSATION_LABELS, entry.conversationTypes),
+        note: entry.inbound ? '' : '平台没有提供 connect()：入站消息不会进入准入与唤醒',
+      },
+      { id: 'cannot', label: '不支持的消息段', source: '平台声明', items: missing, note: missing.length ? '' : '内核认识的中立段全都支持' },
+    ],
+  };
+}
+
+/**
+ * Agent 平台的「一句话结论」+ 四组只读清单（生效方式 / 提示注入 / 效果 / 对端权限档）。
+ *
+ * 效果取自该平台 `tools.yml` 里各模块的 `effects` —— 与能力档效果表、构建期 degraded
+ * 判定同源，不在前端再列一份「哪个执行体有什么」。
+ */
+function agentPromise(entry) {
+  const effects = [...new Set((entry.assets?.tools ?? []).flatMap((module) => module.effects ?? []))];
+  const applies = entry.applies ?? [];
+  const channels = entry.promptChannels ?? [];
+  const peers = entry.peerPermissions ?? [];
+  const applyText = applies.includes('preset') && applies.includes('passthrough')
+    ? '能装预设或直通'
+    : applies.includes('preset') ? '只能装预设' : applies.includes('passthrough') ? '只能直通' : '不声明生效方式';
+  const channelText = channels.length ? `话术走${conclude(PROMPT_LABELS, channels).map((item) => item.label).join('或')}` : '不注入话术';
+  const peerText = peers.length ? `对端权限档可钉 ${peers.length} 档` : '对端权限档由对端决定';
+  const effectText = effects.length ? `提供 ${conclude(EFFECT_LABELS, effects).map((item) => item.label).join('、')} 效果` : '没有声明任何效果';
+  return {
+    text: `${applyText}；${channelText}；${peerText}；${effectText}。`,
+    groups: [
+      { id: 'apply', label: '生效方式', source: '平台声明', items: conclude(APPLY_LABELS, applies) },
+      { id: 'prompt', label: '提示注入', source: '平台声明', items: conclude(PROMPT_LABELS, channels) },
+      { id: 'effects', label: '效果', source: '工具表 tools.yml', items: conclude(EFFECT_LABELS, effects) },
+      {
+        id: 'peer',
+        label: '对端权限档',
+        source: '平台声明',
+        // 取值域是平台自己的预设名，控制台不另维护中文表。
+        items: peers.map((id) => ({ id, label: id })),
+        note: peers.length ? '' : '由对端决定：能力档不钉档，建会话时现读现校',
+      },
+    ],
+  };
+}
+
+/**
+ * 某条目的结论 + 分组（按侧分派）。
+ *
+ * 导出是因为它也是「单条重算」的唯一入口：控制台夹具、以后的面板预览都调这里，
+ * 不另写一份「谁能干什么」的判断。
+ */
+export function platformPromiseOf(entry) {
+  return entry?.side === 'agent' ? agentPromise(entry) : userPromise(entry);
 }
 
 /**
@@ -174,8 +272,6 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       conversationTypes: [...(impl?.conversationTypes ?? [])],
       limits: { ...(impl?.limits ?? {}) },
       inbound: impl ? impl.inbound === true : false,
-      // 入站事件里能不能带业务体认识的报文（见 src/user-side/inbound.mjs 的 deliver 契约）。
-      rawEvent: impl?.rawEvent === true,
       // 这条实例此刻的入站结论：`open` / `closed` / `error` / `disabled` / `send-only` /
       // `unregistered`，null = 没装配过（进程刚起来还没走到装配那一步）。
       inboundState: stateOf(id),
@@ -221,7 +317,6 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       conversationTypes: [...(impl.conversationTypes ?? [])],
       limits: { ...(impl.limits ?? {}) },
       inbound: impl.inbound === true,
-      rawEvent: impl.rawEvent === true,
       inboundState: stateOf(id),
       outbound: outboundOf(impl),
       configSchema: null,
@@ -255,7 +350,6 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
       conversationTypes: [],
       limits: {},
       inbound: false,
-      rawEvent: false,
       inboundState: stateOf(id),
       outbound: outboundOf(null),
       configSchema: null,
@@ -264,7 +358,7 @@ function buildUserEntries({ profilePlatforms, runtime, config, inbound = {} }) {
     });
   }
 
-  return { entries, diagnostics };
+  return { entries: entries.map((item) => ({ ...item, promise: userPromise(item) })), diagnostics };
 }
 
 /** 合成 Agent 侧平台。结构与用户侧同形，差异在 `assets`（能力档而不是行为档案）与 `probe`。 */
@@ -336,10 +430,10 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
       probe: probeOf(id),
       assets: {
         prompt: { active: false, hasDefault: false },
-        tools: [],
+        // 插件式条目没有 tools.yml，`assets.tools` 留空：效果清单本来就只来自声明目录。
+        tools: clone(profile?.tools ?? []),
         behaviors: [],
-        // C4 起 preset 与能力档同名同文件（capabilities/<id>.yml 的 preset + rows），
-        // 不再有平行的 agents/ 目录，也不再另给一份 agentPresets —— 能力档列表就是预设列表。
+        // 能力档列表就是这张表：一档一个文件，没有平行的预设清单字段。
         capabilityProfiles: [...(profile?.capabilities ?? [])],
       },
     });
@@ -378,7 +472,7 @@ function buildAgentEntries({ profilePlatforms, runtime, config, probes }) {
     });
   }
 
-  return { entries, diagnostics };
+  return { entries: entries.map((item) => ({ ...item, promise: agentPromise(item) })), diagnostics };
 }
 
 function summarize(entries, diagnostics) {
@@ -474,6 +568,8 @@ export function buildPlatformRegistry({
     platforms: entries,
     diagnostics,
     summary: summarize(entries, diagnostics),
+    // 中文名只住后端：控制台与「一句话结论」用同一份，插件新增的 id 不改前端也能显示。
+    labels: labelsPayload(),
   };
 }
 
@@ -495,9 +591,14 @@ export function platformRegistrySnapshot({
     ...item,
     tools: readPlatformTools({ root: profilesRoot, id: item.id }),
   }));
+  // Agent 侧的 `tools.yml` 同样只在这里读：注册表的「效果」清单与能力档效果表同源。
+  const profileAgentPlatforms = listAgentPlatformDirs({ root: agentPlatformsRoot }).map((item) => ({
+    ...item,
+    tools: readAgentPlatformTools({ root: agentPlatformsRoot, id: item.id }),
+  }));
   return buildPlatformRegistry({
     profilePlatforms,
-    profileAgentPlatforms: listAgentPlatformDirs({ root: agentPlatformsRoot }),
+    profileAgentPlatforms,
     userRuntime: userPlatformMetadata(),
     agentRuntime: agentPlatformMetadata(),
     config: flatPlatforms(config),

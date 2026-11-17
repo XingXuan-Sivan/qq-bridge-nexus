@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { INBOUND_DROP, createInboundPipeline } from '../src/user-side/inbound.mjs';
-import { resetEventSequence } from '../src/user-side/event.mjs';
+import { resetEventSequence, validateUnifiedEvent } from '../src/user-side/event.mjs';
+import { noticeToUnified } from '../src/user-side/adapters/qq/inbound.mjs';
 
 const ORIGIN = { platform: 'qq', account: 'bot-1' };
 
@@ -20,6 +21,18 @@ function validEvent(overrides = {}) {
     conversation: { type: 'group', id: '20001' },
     sender: { id: '30001', name: '群友' },
     message: { id: '123456', segments: [{ type: 'text', data: { text: '在吗' } }] },
+    ...overrides,
+  };
+}
+
+/** 一条合法的拍一拍通知（适配器产出的形状）。 */
+function pokeEvent(overrides = {}) {
+  return {
+    kind: 'notice',
+    type: 'notice.poke',
+    conversation: { type: 'group', id: '20001' },
+    actor: { id: '30001', name: '群友' },
+    notice: { type: 'poke', target: { id: '99999' }, detail: {} },
     ...overrides,
   };
 }
@@ -150,19 +163,19 @@ test('唤醒抛错：报 deliver_failed，不把异常抛给 WS 回调', async (
   assert.equal(drops.length, 1);
 });
 
-test('唤醒可以拒绝：业务体不认这个平台的正文时按该原因记丢弃', async () => {
+test('唤醒可以拒绝：业务体不处理这类事件时按该原因记丢弃', async () => {
   const { pipeline, calls, drops } = harness({
-    // 平台没声明正文契约（rawEvent）：事件已过校验与准入，但唤醒侧没有它的入口。
-    deliver: () => ({ reason: INBOUND_DROP.BODY_UNSUPPORTED, errors: ['wx 未声明 rawEvent'] }),
+    // 事件已过校验与准入，但唤醒侧决定不处理它。
+    deliver: () => ({ reason: 'not_for_agent', errors: ['这类会话不交给 agent'] }),
   });
   const result = await pipeline.emit(validEvent());
 
   assert.equal(result.ok, false);
-  assert.equal(result.reason, INBOUND_DROP.BODY_UNSUPPORTED, '拒绝的原因码要原样透出，不能被归成 deliver_failed');
-  assert.deepEqual(result.errors, ['wx 未声明 rawEvent']);
+  assert.equal(result.reason, 'not_for_agent', '拒绝的原因码要原样透出，不能被归成 deliver_failed');
+  assert.deepEqual(result.errors, ['这类会话不交给 agent']);
   assert.deepEqual(calls, [['admit', 'message.group'], ['resolve', '20001'], ['deliver', 'qq:group:20001']]);
   assert.equal(drops.length, 1);
-  assert.equal(drops[0].reason, INBOUND_DROP.BODY_UNSUPPORTED);
+  assert.equal(drops[0].reason, 'not_for_agent');
 });
 
 test('唤醒返回空对象（普通成功）不算拒绝', async () => {
@@ -202,15 +215,82 @@ test('装配缺项当场报错：来源与三步策略都必须显式给', () =>
   assert.throws(() => createInboundPipeline({ ...base, deliver: undefined }), /唤醒函数/);
 });
 
-test('非消息事件（notice/meta）同样进管线，但没有 message 载荷', async () => {
-  const { pipeline } = harness();
-  const result = await pipeline.emit({
-    kind: 'notice',
-    type: 'notice.notify',
-    conversation: { type: 'group', id: '20001' },
-    sender: { id: '30001', name: '群友' },
-  });
+test('通知事件同样走完四步：拿到 key 与地址，但没有 message 载荷', async () => {
+  const { pipeline, calls, drops } = harness();
+  const result = await pipeline.emit(pokeEvent());
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.errors?.join('；'));
+  assert.equal(result.key, 'qq:group:20001');
   assert.equal(result.event.message, null);
+  assert.equal(result.event.sender, null, '通知的当事人不叫 sender');
+  assert.deepEqual(result.event.notice.target, { id: '99999' });
+  assert.deepEqual(calls, [['admit', 'notice.poke'], ['resolve', '20001'], ['deliver', 'qq:group:20001']]);
+  assert.deepEqual(drops, []);
+});
+
+test('通知类型是闭集：未知类型与 type 对不上都直接判非法，连 admit 都到不了', async () => {
+  const { pipeline, calls } = harness();
+  const unknown = await pipeline.emit(pokeEvent({ type: 'notice.typing', notice: { type: 'typing' } }));
+  assert.equal(unknown.reason, INBOUND_DROP.INVALID);
+  assert.match(unknown.errors.join('；'), /未知通知类型/);
+
+  // type 与 notice.type 说的是同一件事，对不上说明适配器自己没想清楚。
+  const mismatch = await pipeline.emit(pokeEvent({ type: 'notice.reaction' }));
+  assert.equal(mismatch.reason, INBOUND_DROP.INVALID);
+  assert.match(mismatch.errors.join('；'), /type 必须等于 notice\.poke/);
+  assert.deepEqual(calls, [], '畸形通知不进准入');
+});
+
+test('拍一拍必须能回答「谁做的」；成员事件只认当事人', async () => {
+  const { pipeline } = harness();
+  const anonymous = await pipeline.emit(pokeEvent({ actor: undefined }));
+  assert.equal(anonymous.ok, false);
+  assert.match(anonymous.errors.join('；'), /必须带 actor/);
+
+  // 系统自动处理的成员事件没有操作者：当事人放在 target 上就够了。
+  const join = await pipeline.emit(pokeEvent({
+    type: 'notice.member.join',
+    actor: undefined,
+    notice: { type: 'member.join', target: { id: '30002' }, detail: { subType: 'approve' } },
+  }));
+  assert.equal(join.ok, true, join.errors?.join('；'));
+  assert.equal(join.event.actor, null);
+  assert.deepEqual(join.event.notice.target, { id: '30002' });
+});
+
+test('非准入会话的通知被拦住：适配器不会自己放行', async () => {
+  const { pipeline, calls, drops } = harness({ admit: () => false });
+  const result = await pipeline.emit(pokeEvent());
+
+  assert.equal(result.reason, INBOUND_DROP.NOT_ADMITTED);
+  assert.deepEqual(calls, [['admit', 'notice.poke']]);
+  assert.equal(drops.length, 1);
+});
+
+test('适配器：自己拍的不进管线；当事人与操作者分开，私聊里对端就是拍的人', () => {
+  const unified = (raw) => validateUnifiedEvent(noticeToUnified(raw), ORIGIN);
+
+  assert.equal(
+    noticeToUnified({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', self_id: 999, group_id: 20001, sender_id: 999, target_id: 30001 }),
+    null,
+    '自己拍的不回灌：那不是我收到的事',
+  );
+
+  const poke = unified({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', self_id: 999, group_id: 20001, sender_id: 30001, target_id: 999, action: '拍了拍' });
+  assert.equal(poke.ok, true, poke.errors?.join('；'));
+  assert.equal(poke.event.type, 'notice.poke');
+  assert.deepEqual(poke.event.actor, { id: '30001', name: '' });
+  assert.equal(poke.event.notice.detail.selfInvolved, true, '被拍的是本账号');
+
+  const direct = unified({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', self_id: 999, user_id: 30001, sender_id: 30001, target_id: 999 });
+  assert.deepEqual(direct.event.conversation, { type: 'private', id: '30001' });
+
+  const join = unified({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'invite', group_id: 20001, user_id: 30002, operator_id: 30003 });
+  assert.equal(join.event.type, 'notice.member.join');
+  assert.deepEqual(join.event.notice.target, { id: '30002' });
+  assert.deepEqual(join.event.actor, { id: '30003', name: '' });
+  assert.equal(join.event.notice.detail.subType, 'invite');
+
+  // 六种之外的 notice_type 不进统一事件：平台的开放词汇不该流进业务层。
+  assert.equal(noticeToUnified({ post_type: 'notice', notice_type: 'group_ban', group_id: 20001, user_id: 30002 }), null);
 });

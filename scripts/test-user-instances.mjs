@@ -3,8 +3,6 @@
 // 「一个实例 = `platforms.users` 里的一条条目（平台 + 账号）」。这一批把它变成**可装配的东西**，
 // 所以这里钉住的是三个接口而不是某个平台：
 //   · 配置面：`enabled` 是条目级键（不是发给平台的选项），`userInstances()` 把表摊成清单；
-//   · 平台契约：`rawEvent` 决定这条实例的事件能不能交给业务体（没声明的由管线按
-//     `body_unsupported` 丢弃，见 test-unified-inbound）；
 //   · 注册表：`enabled` / `inboundState` / `outbound` 三个读视图，外加「只在配置里存在」
 //     的条目也必须可见 —— 否则那条实例在控制台上无处可改。
 import assert from 'node:assert/strict';
@@ -93,8 +91,8 @@ function twoInstances(extra = {}) {
     userRuntime: {
       active: 'qq',
       platforms: [
-        { id: 'qq', label: 'QQ', source: 'builtin', inbound: true, rawEvent: true },
-        { id: 'wx', label: '微信', source: 'builtin', inbound: true, rawEvent: false },
+        { id: 'qq', label: 'QQ', source: 'builtin', inbound: true },
+        { id: 'wx', label: '微信', source: 'builtin', inbound: true },
       ],
     },
     config,
@@ -110,19 +108,17 @@ test('注册表按实例给出 enabled / 入站状态 / 出站实现', () => {
   assert.equal(qq.enabled, true);
   assert.equal(qq.inboundState.state, 'open', '入站结论是桥接记账的那一份');
   assert.deepEqual(qq.outbound, { via: 'adapter', owner: null });
-  assert.equal(qq.rawEvent, true, '声明了正文契约才能进唤醒');
 
   const wx = findRegistryPlatform(snapshot, 'user', 'wx');
   assert.equal(wx.enabled, false, '停用的实例照样列出，否则改不回去');
   assert.equal(wx.inboundState, null, '没装配过就是 null，而不是编一个状态');
-  assert.equal(wx.rawEvent, false);
 });
 
 test('插件 transport 接管时出站写 transport，并带上 owner', () => {
   const snapshot = buildPlatformRegistry({
     userRuntime: {
       active: 'bot',
-      platforms: [{ id: 'bot', label: '演示机器人', source: 'plugin', owner: 'plugin-a', inbound: true, rawEvent: true }],
+      platforms: [{ id: 'bot', label: '演示机器人', source: 'plugin', owner: 'plugin-a', inbound: true }],
     },
     config: { users: { bot: {} } },
   });

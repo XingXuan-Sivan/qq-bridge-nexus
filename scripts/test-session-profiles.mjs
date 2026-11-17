@@ -58,8 +58,19 @@ test('profile：无档案 404；建绑后返回默认档案与并集列表', asy
       assert.equal(got.json.access.passiveMode, 'allow');
       assert.equal(got.json.access.proactive, 'allow');
       assert.equal(typeof got.json.prompt.maxChars, 'number');
-      assert.ok(Array.isArray(got.json.presets));
-      assert.equal(got.json.dsh.status, 'online');
+      // `presets` 与顶层 `apply` 已从读口移除：能力档的生效方式随每一项 `capabilities[]` 下发。
+      assert.equal(got.json.presets, undefined, '读口不再下发 presets');
+      assert.equal(got.json.apply, undefined, '读口不再下发顶层 apply');
+      assert.equal(got.json.dsh, undefined, '执行体字段统一叫 health');
+      assert.equal(got.json.health.status, 'online');
+      assert.equal(got.json.model, null, '会话没选模型就是 null');
+      // 会话没选时生效值来自平台配置的现价，不再拿 deepseek-* 写死当兜底。
+      assert.deepEqual(got.json.effectiveModel, { provider: 'deepseek-official', model: 'deepseek-flash', reasoning: 'max' });
+      const active = got.json.capabilities.find((item) => item.id === got.json.defaultCapability);
+      assert.ok(active, '默认能力档必须出现在 capabilities[] 里');
+      assert.equal(active.isDefault, true, '默认能力档由 isDefault 标出');
+      assert.equal(typeof active.apply, 'string', '每一项带自己的生效方式');
+      assert.equal(got.json.capabilities.filter((item) => item.isDefault).length, 1, '只有一项是默认能力档');
 
       const list = await call(port, '/api/sessions', { headers: ADMIN });
       const row = list.json.sessions.find((item) => item.key === KEY);
@@ -70,7 +81,7 @@ test('profile：无档案 404；建绑后返回默认档案与并集列表', asy
   } finally { await h.close(); }
 });
 
-test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async () => {
+test('profile：PATCH 保存准入/人格/提示词并落盘', async () => {
   const h = await bridgeHarness();
   try {
     await h.ensureSession(KEY);
@@ -78,7 +89,6 @@ test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async (
       const patched = await call(port, `/api/sessions/${ENCODED}/profile`, {
         method: 'PATCH', headers: ADMIN,
         body: {
-          displayName: '测试群',
           access: { passive: 'deny', proactive: 'allow' },
           persona: { mode: 'card', name: '测试角色' },
           prompt: { text: '这是测试提示词。' },
@@ -88,7 +98,6 @@ test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async (
       assert.equal(patched.json.ok, true);
 
       const got = await call(port, `/api/sessions/${ENCODED}/profile`, { headers: ADMIN });
-      assert.equal(got.json.displayName, '测试群');
       assert.equal(got.json.access.passive, 'deny');
       assert.equal(got.json.access.proactive, 'allow');
       assert.equal(got.json.persona.mode, 'card');
@@ -96,7 +105,6 @@ test('profile：PATCH 保存显示名/准入/人格/提示词并落盘', async (
       assert.equal(got.json.prompt.text, '这是测试提示词。');
 
       const file = JSON.parse(fs.readFileSync(`${h.temp}/state/sessions/qq/group/456.json`, 'utf8'));
-      assert.equal(file.displayName, '测试群');
       assert.equal(file.access, undefined, '档案里不再保存三态准入');
       assert.equal(file.persona.name, '测试角色');
       assert.equal(file.prompt.initialText, '这是测试提示词。');
@@ -121,17 +129,42 @@ test('profile：非法值与越权都被拒，且不改变已存内容', async (
         const res = await call(port, `/api/sessions/${ENCODED}/profile`, { method: 'PATCH', headers: ADMIN, body });
         assert.equal(res.status, 400, `非法 PATCH 必须 400：${JSON.stringify(body)}`);
       }
-      const longName = await call(port, `/api/sessions/${ENCODED}/profile`, {
+      const renamed = await call(port, `/api/sessions/${ENCODED}/profile`, {
         method: 'PATCH', headers: ADMIN, body: { displayName: 'x'.repeat(61) },
       });
-      assert.equal(longName.status, 200, '超长显示名应截断而不是报错');
-      assert.equal(longName.json.profile.displayName, 'x'.repeat(60));
+      assert.equal(renamed.status, 400, '显示名只有一个写口：/api/session/rename');
       const asAgent = { ...ADMIN, 'x-agent-token': 'fixture-agent-token', 'x-agent-call': '1' };
       const read = await call(port, `/api/sessions/${ENCODED}/profile`, { headers: asAgent });
       assert.equal(read.status, 403, 'agent token 读档案必须 403');
-      const write = await call(port, `/api/sessions/${ENCODED}/profile`, { method: 'PATCH', headers: asAgent, body: { displayName: 'AI 改的' } });
+      const write = await call(port, `/api/sessions/${ENCODED}/profile`, { method: 'PATCH', headers: asAgent, body: { prompt: { text: 'AI 改的' } } });
       assert.equal(write.status, 403, 'agent token 改档案必须 403');
-      assert.equal(h.state.profiles[KEY].displayName, 'x'.repeat(60), '被拒的请求不得改动其它字段，只有长名被截断');
+      assert.equal(h.state.profiles[KEY].displayName ?? '', '', '被拒的请求不得改动任何字段');
+    });
+  } finally { await h.close(); }
+});
+
+test('profile：模型目录不可用时按原值保存并回 warning', async () => {
+  const h = await bridgeHarness();
+  try {
+    await h.ensureSession(KEY);
+    await withServer(h, async (port) => {
+      // 夹具里的模型目录恒不可用：目录读不到是环境问题，不是选择错误，不能把请求打回 400。
+      const model = { provider: 'fixture-provider', model: 'fixture-model', reasoning: 'high' };
+      const patched = await call(port, `/api/sessions/${ENCODED}/profile`, { method: 'PATCH', headers: ADMIN, body: { model } });
+      assert.equal(patched.status, 200, JSON.stringify(patched.json));
+      assert.deepEqual(patched.json.warnings, ['模型未校验：目录不可用']);
+      assert.deepEqual(patched.json.profile.model, model);
+
+      const got = await call(port, `/api/sessions/${ENCODED}/profile`, { headers: ADMIN });
+      assert.deepEqual(got.json.model, model, '目录不可用也要按原值落盘');
+      // 生效值取会话值：选了模型就不该再落到平台默认。
+      assert.equal(got.json.effectiveModel.provider, model.provider);
+      assert.equal(got.json.effectiveModel.model, model.model);
+
+      const cleared = await call(port, `/api/sessions/${ENCODED}/profile`, { method: 'PATCH', headers: ADMIN, body: { model: null } });
+      assert.equal(cleared.status, 200);
+      assert.equal(cleared.json.warnings, undefined, '跟随平台默认不需要 warning');
+      assert.equal(cleared.json.profile.model, null);
     });
   } finally { await h.close(); }
 });

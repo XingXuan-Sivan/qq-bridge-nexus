@@ -1,17 +1,19 @@
-// 账单换算：按 Agent 平台自己申报的价目把 token 桶折算成金额，并判定峰谷时段。
+// 账单换算：按合成后的价目（内置官方价 → 平台申报 → 本机覆盖）把 token 桶折算成金额，并判定峰谷时段。
 //
 // 为什么放在桥接里：DSH 自身不做任何货币换算（`dsh-llm-pi-ai` 明写 "no consumer reports
 // spend"），provider 只回 token 数。所以「花多少钱」必须由消费方用价目算。
 //
-// **价目不在代码里**：哪个模型多少钱、货币与单位、峰谷倍数与窗口，都是平台在
-// `profiles/agent-platforms/<id>/agent-platform.yml` 的 `modelCatalog` 里写的声明
-// （`pricing` + `pricingPolicy`）。这里只负责按声明算；没申报的模型不算钱 ——
-// 只计 token、金额显示「未申报」，绝不拿别的模型的价格估算。
+// **价目不在代码里**：哪个模型多少钱、货币与单位、峰谷倍数与窗口，都来自三层价目 ——
+// 内置官方表（src/pricing/builtins.mjs）、平台在 `profiles/agent-platforms/<id>/agent-platform.yml`
+// 的 `modelCatalog` 申报（`pricing` + `pricingPolicy`）、以及本机覆盖（`state/pricing/<agent>.yml`）。
+// 这里只负责把合成后的目录算成表；三层都没有单价的模型不算钱 —— 只计 token、金额显示「未申报」，
+// 绝不拿别的模型的价格估算。
 //
 // 口径：
 //   扣减费用 = Σ(各桶 token 数 × 对应单价)
 //   桶共三个：缓存命中 / 缓存未命中 / 输出；没单独报 cacheWrite 时按未命中计。
-//   高峰时段单价 = 空闲 × pricingPolicy.peakMultiplier，窗口与工作日同样来自声明。
+//   高峰时段单价 = 空闲 × 峰谷倍数，窗口与工作日同样来自目录；模型级 `pricingPolicy`
+//   可以逐模型改窗口（显式空窗口 = 该模型全天同价），没写的那组回落平台声明。
 //
 // 注意 `dsh` 报的 token 桶是**互不重叠**的：
 //   计费输入 = inputTokens(未命中) + cacheReadTokens + cacheWriteTokens
@@ -77,13 +79,19 @@ export const CN_HOLIDAYS = [...CN_HOLIDAYS_2026, ...CN_HOLIDAYS_2027];
 const BEIJING_OFFSET_MINUTES = 8 * 60;
 
 /**
- * 用平台声明的模型目录生成价目表。
+ * 用合成后的模型目录生成价目表。
  *
- * @param catalog `modelCatalog`：`{ models:[{id,label,pricing}], pricingPolicy }`
- * @returns 价目表；一个模型的单价都没申报时返回 `null`（= 不报价）
+ * @param catalog `modelCatalog`：`{ models:[{id,label,pricing,pricingPolicy}], pricingPolicy }`
+ * @returns 价目表；一个模型的单价都没有时返回 `null`（= 不报价）
  */
 export function priceTableFromCatalog(catalog) {
   const policy = catalog?.pricingPolicy ?? {};
+  const platformPeak = {
+    peakMultiplier: peakMultiplierOf(policy),
+    peakWindows: windowsOf(policy),
+    peakWeekdays: weekdaysOf(policy),
+    holidays: CN_HOLIDAYS,
+  };
   const models = {};
   for (const item of catalog?.models ?? []) {
     const given = item?.pricing;
@@ -94,8 +102,19 @@ export function priceTableFromCatalog(catalog) {
     if (!Number.isFinite(cacheMiss) || !Number.isFinite(output)) continue;
     const hit = Number(given.cacheHit);
     const write = Number(given.cacheWrite);
+    // 模型级口径只覆盖写了的组：没写的高峰窗口沿用平台，显式空数组则是「全天同价」。
+    const own = item.pricingPolicy ?? {};
+    const peak = Object.keys(own).length
+      ? {
+        peakMultiplier: 'peakMultiplier' in own ? peakMultiplierOf(own) : platformPeak.peakMultiplier,
+        peakWindows: 'peakWindows' in own ? windowsOf(own) : platformPeak.peakWindows,
+        peakWeekdays: 'peakWeekdays' in own ? weekdaysOf(own) : platformPeak.peakWeekdays,
+        holidays: CN_HOLIDAYS,
+      }
+      : platformPeak;
     models[item.id] = {
       label: String(item.label || item.id),
+      origin: item.origin === 'builtin' ? 'builtin' : 'declared',
       off: {
         cacheHit: Number.isFinite(hit) ? hit : cacheMiss,
         cacheMiss,
@@ -103,22 +122,35 @@ export function priceTableFromCatalog(catalog) {
         cacheWrite: Number.isFinite(write) ? write : cacheMiss,
         output,
       },
+      peak,
     };
   }
   if (!Object.keys(models).length) return null;
   const unit = Number(policy.unit);
-  const peakMultiplier = Number(policy.peakMultiplier);
   return {
     version: String(policy.version ?? ''),
     currency: String(policy.currency ?? '') || 'CNY',
     symbol: String(policy.symbol ?? '') || '¥',
     unit: Number.isFinite(unit) && unit > 0 ? unit : 1e6,
-    peakMultiplier: Number.isFinite(peakMultiplier) && peakMultiplier > 0 ? peakMultiplier : 1,
-    peakWindows: Array.isArray(policy.peakWindows) ? policy.peakWindows : [],
-    peakWeekdays: Array.isArray(policy.peakWeekdays) ? policy.peakWeekdays : [],
+    peakMultiplier: platformPeak.peakMultiplier,
+    peakWindows: platformPeak.peakWindows,
+    peakWeekdays: platformPeak.peakWeekdays,
     holidays: CN_HOLIDAYS,
     models,
   };
+}
+
+function peakMultiplierOf(policy) {
+  const n = Number(policy?.peakMultiplier);
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+function windowsOf(policy) {
+  return Array.isArray(policy?.peakWindows) ? policy.peakWindows : [];
+}
+
+function weekdaysOf(policy) {
+  return Array.isArray(policy?.peakWeekdays) ? policy.peakWeekdays : [];
 }
 
 /** 把任意时间戳换算成北京时间的日历分量（不依赖运行机器的本地时区）。 */
@@ -147,32 +179,64 @@ export function isPeakAt(atMs, table) {
 }
 
 /**
- * 取某模型在某一时刻生效的单价（含峰谷判定）。
+ * 某模型在某一时刻的峰谷档位（`'peak'` / `'off'`）。
  *
- * @returns 单价；**表里没有这个模型就是 `null`** —— 没申报就不报价，
- *          不像以前那样拿兜底模型估算（会把钱算错还看不出来）。
+ * 峰谷看这个模型自己的口径（模型级窗口 / 倍数），没有就回落表级的平台口径。
+ * 表里还没有这个模型时同样按表级口径判 —— 账本淘汰聚合要先按档位分桶，
+ * 那时可能还没有价目；等补上价目后按当时那一档重算，金额才追得回来。
  */
-export function ratesAt(model, atMs, table) {
+export function tierAt(model, atMs, table) {
+  if (!table) return null;
+  const entry = table.models[String(model ?? '').trim()];
+  return isPeakAt(atMs, entry?.peak ?? table) ? 'peak' : 'off';
+}
+
+/**
+ * 按**已判定的档位**取单价。
+ *
+ * 账本里被淘汰的聚合桶只留 `{模型 × 档位}`：金额在读取时重算，
+ * 档位沿用记录当时的判定，不随「现在几点」漂移。
+ *
+ * @returns 单价；**表里没有这个模型就是 `null`** —— 没价就不报价。
+ */
+export function ratesAtTier(model, tier, table) {
   if (!table) return null;
   const key = String(model ?? '').trim();
   const entry = table.models[key];
   if (!entry) return null;
   const off = entry.off;
-  const peak = isPeakAt(atMs, table);
-  const factor = peak ? table.peakMultiplier : 1;
+  const peakScope = entry.peak ?? table;
+  const peak = tier === 'peak';
+  const factor = peak ? peakMultiplierOf(peakScope) : 1;
   return {
     model: key,
     label: entry.label,
+    origin: entry.origin ?? 'declared',
     tier: peak ? 'peak' : 'off',
     tierLabel: peak ? '高峰时段' : '空闲时段',
     currency: table.currency,
     symbol: table.symbol,
     unit: table.unit,
+    peakWindows: peakScope.peakWindows ?? [],
+    peakWeekdays: peakScope.peakWeekdays ?? [],
+    peakMultiplier: peakMultiplierOf(peakScope),
     cacheHit: off.cacheHit * factor,
     cacheMiss: off.cacheMiss * factor,
     cacheWrite: (Number.isFinite(off.cacheWrite) ? off.cacheWrite : off.cacheMiss) * factor,
     output: off.output * factor
   };
+}
+
+/**
+ * 取某模型在某一时刻生效的单价（含峰谷判定）。
+ *
+ * @returns 单价；表里没有这个模型就是 `null`（没价不报价，不拿别的模型兜底估算）。
+ */
+export function ratesAt(model, atMs, table) {
+  if (!table) return null;
+  const key = String(model ?? '').trim();
+  if (!table.models[key]) return null;
+  return ratesAtTier(key, tierAt(key, atMs, table), table);
 }
 
 /**

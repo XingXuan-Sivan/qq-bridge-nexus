@@ -16,6 +16,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bridgeHarness } from './audit-bridge-harness.mjs';
+import { oneBotToUnified } from '../src/user-side/adapters/qq/inbound.mjs';
+import { validateUnifiedEvent } from '../src/user-side/event.mjs';
 import {
   bingSearch,
   clearSearchCache,
@@ -53,10 +55,18 @@ const WEBP_VP8X = (() => {
 })();
 
 // ── 消息段 → 媒体元数据 ─────────────────────────────────────────────────────
-await test('extractMediaFromSegments 保留表情包字段（image / mface / face）', async () => {
-  const h = await bridgeHarness();
-  try {
-    const media = h.extractMediaFromSegments([
+// 入口在适配器：OneBot 段的私有字段（emoji_id / sub_type / 包 id）在中立段里没有位置，
+// 统一事件单列一份媒体清单把它们带下去（src/user-side/event.mjs 的 mediaOf）。
+await test('入站媒体清单保留表情包字段（image / mface / face）', async () => {
+  const raw = {
+    post_type: 'message',
+    message_type: 'group',
+    self_id: 10000,
+    group_id: 456,
+    user_id: 777,
+    message_id: 9001,
+    time: 1731500000,
+    message: [
       {
         type: 'image',
         data: {
@@ -75,23 +85,24 @@ await test('extractMediaFromSegments 保留表情包字段（image / mface / fac
       },
       { type: 'face', data: { id: '178', url: 'https://example.invalid/f.png', summary: 'doge' } },
       { type: 'text', data: { text: '普通文字' } }
-    ]);
-    assert.equal(media.length, 3);
-    assert.equal(media[0].kind, 'image');
-    assert.equal(media[0].emojiId, 'f96bf2d2d93c3530d5eb148f55206fb1', 'emoji_id 必须保留（否则失去 CDN 兜底）');
-    assert.equal(media[0].emojiPackageId, '242139');
-    assert.equal(media[0].emojiKey, 'a39bbb09c7d85d41');
-    assert.equal(media[0].subType, '0');
-    assert.equal(media[0].summary, '[给你糖吃]');
-    assert.equal(media[1].kind, 'sticker', 'mface 必须被识别为表情包');
-    assert.equal(media[1].emojiId, 'abcdef0123456789abcdef0123456789');
-    assert.equal(media[1].subType, '1');
-    assert.equal(media[2].kind, 'face');
-    assert.equal(media[2].faceId, '178');
-    assert.equal(media[2].url, 'https://example.invalid/f.png');
-
-    assert.equal(await h.segmentsToText([{ type: 'mface', data: { summary: '给你糖吃' } }]), '[表情:给你糖吃]');
-  } finally { await h.close(); }
+    ]
+  };
+  const checked = validateUnifiedEvent(oneBotToUnified(raw), { platform: 'qq' });
+  assert.equal(checked.ok, true, checked.errors.join('；'));
+  const media = checked.event.message.media;
+  assert.equal(media.length, 3);
+  assert.equal(media[0].kind, 'image');
+  assert.equal(media[0].stickerId, 'f96bf2d2d93c3530d5eb148f55206fb1', 'stickerId 必须保留（否则失去 CDN 兜底）');
+  assert.equal(media[0].packageId, '242139');
+  assert.equal(media[0].stickerKey, 'a39bbb09c7d85d41');
+  assert.equal(media[0].subType, '0');
+  assert.equal(media[0].summary, '[给你糖吃]');
+  assert.equal(media[1].kind, 'sticker', 'mface 必须被识别为表情包');
+  assert.equal(media[1].stickerId, 'abcdef0123456789abcdef0123456789');
+  assert.equal(media[1].subType, '1');
+  assert.equal(media[2].kind, 'face');
+  assert.equal(media[2].faceId, '178');
+  assert.equal(media[2].url, 'https://example.invalid/f.png');
 });
 
 // ── 表情包下载：CDN 优先、emoji_id 兜底、普通图片仍走 get_image ──────────────
@@ -113,14 +124,14 @@ await test('fetchOneBotImage 表情优先 CDN，普通图片优先 get_image', a
     assert.equal(fetched.at(-1), 'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif');
     assert.equal(h.calls.images.length, 0, '表情有 URL 时不应先问网关 get_image（市场表情必然 not found）');
 
-    // ② 表情（没有 url，只有 emoji_id）：按 emoji_id 推 CDN 地址兜底
+    // ② 表情（没有 url，只有 stickerId）：按 id 推 CDN 地址兜底
     const byId = await h.fetchOneBotImage({
       kind: 'image',
       subType: '0',
-      emojiId: 'f96bf2d2d93c3530d5eb148f55206fb1',
+      stickerId: 'f96bf2d2d93c3530d5eb148f55206fb1',
       file: 'f9-f96bf2d2d93c3530d5eb148f55206fb1.gif'
     });
-    assert.ok(byId?.buffer?.length, '只有 emoji_id 时也要能取到');
+    assert.ok(byId?.buffer?.length, '只有表情 id 时也要能取到');
     assert.equal(
       fetched.at(-1),
       'https://gxh.vip.qq.com/club/item/parcel/item/f9/f96bf2d2d93c3530d5eb148f55206fb1/raw300.gif',
@@ -179,11 +190,11 @@ await test('fetchOneBotImage：32 位哈希文件名的普通图片按图片处�
     await h.fetchOneBotImage({ kind: 'image', file: `ab-${'f96bf2d2d93c3530d5eb148f55206fb1'}.gif` });
     assert.ok(!fetched.some((u) => u.includes('gxh.vip.qq.com')), '前缀不匹配的不当成表情');
 
-    // ④ 真表情：sub_type=1 / emoji_id / mface / 「前缀-id」文件名，仍然先走 CDN
+    // ④ 真表情：sub_type=1 / stickerId / mface / 「前缀-id」文件名，仍然先走 CDN
     const ID = 'f96bf2d2d93c3530d5eb148f55206fb1';
     for (const media of [
       { kind: 'image', subType: '1', file: `${HASH}.gif`, url: 'https://sticker.invalid/a.gif' },
-      { kind: 'image', subType: '0', emojiId: ID },
+      { kind: 'image', subType: '0', stickerId: ID },
       { kind: 'sticker', url: 'https://sticker.invalid/m.gif' },
       { kind: 'image', subType: '0', file: `f9-${ID}.gif` },
     ]) {
@@ -208,7 +219,7 @@ await test('emojiCdnCandidates 只接受十六进制 id（防任意 URL 拼接�
   } finally { await h.close(); }
 });
 
-await test('fetchMediaData 标注表情/图片，并保留 summary 与 emojiId', async () => {
+await test('fetchMediaData 标注表情/图片，并保留 summary 与 stickerId', async () => {
   const h = await bridgeHarness({
     globals: {
       safeFetchBuffer: async (url) => {
@@ -219,12 +230,12 @@ await test('fetchMediaData 标注表情/图片，并保留 summary 与 emojiId',
   });
   try {
     const out = await h.fetchMediaData([
-      { kind: 'sticker', emojiId: 'f96bf2d2d93c3530d5eb148f55206fb1', summary: '[给你糖吃]' }
+      { kind: 'sticker', stickerId: 'f96bf2d2d93c3530d5eb148f55206fb1', summary: '[给你糖吃]' }
     ]);
     assert.equal(out.length, 1);
     assert.equal(out[0].kind, 'sticker');
     assert.equal(out[0].summary, '[给你糖吃]');
-    assert.equal(out[0].emojiId, 'f96bf2d2d93c3530d5eb148f55206fb1');
+    assert.equal(out[0].stickerId, 'f96bf2d2d93c3530d5eb148f55206fb1');
     assert.ok(out[0].data?.length, '应带 base64 图片数据');
     assert.equal(out[0].text, '');
 

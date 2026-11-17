@@ -17,8 +17,9 @@ import { mountPluginDetail, unmountPluginDetail } from './plugin-detail.js';
 
 const ACTION_LABELS = { enable: '启用', disable: '停用', reload: '重载', uninstall: '卸载' };
 
-// 当前画出来的子路由；空表示在清单页。详情只在换插件时重挂：重画会丢掉表单草稿与状态位。
+// 当前画出来的子路由；空表示在清单页。详情只在换插件 / 换标签时重挂：重画会丢掉表单草稿与状态位。
 let routeSub = '';
+let routeTab = '';
 
 // 卡片外壳统一由 card 组件生成（page.html 只留 #pluginsHost 宿主）。
 // 两张 .is-group 卡本来就没有标题（可见标题是 <summary>），所以只给 className 与 body。
@@ -101,18 +102,23 @@ function detailView() {
  * 按路由画页面：清单常驻，详情按需挂载。
  * 深链（刷新后直接落 #plugins/<id>）不等清单接口——详情自己会拉 /api/plugins/<id>。
  */
-function paint({ sub = '' } = {}) {
+function paint({ sub = '', tab = '' } = {}) {
   const next = String(sub ?? '');
   if (!next) {
     unmountPluginDetail();
     routeSub = '';
+    routeTab = '';
     setView('list');
     return;
   }
   setView('detail');
-  if (routeSub === next) return;
+  const nextTab = String(tab ?? '');
+  if (routeSub === next && routeTab === nextTab) return;
   routeSub = next;
+  routeTab = nextTab;
   mountPluginDetail(detailView(), next, {
+    tab: nextTab,
+    onTab: (id) => { setConsolePage('plugins', { sub: next, tab: id }); },
     onBack: () => { setConsolePage('plugins', { sub: '' }); },
     // 写成功只刷新清单：详情保持原样，状态位文案与用户刚敲的值都还在。
     onChanged: () => { refreshPlugins().catch(() => {}); },
@@ -313,7 +319,7 @@ export function init() {
   document.getElementById('pluginInstallPathBtn').addEventListener('click', () => { installPluginFromPath().catch(() => {}); });
   document.getElementById('pluginSettingsSave').addEventListener('click', () => { savePluginRuntimeSettings().catch(() => {}); });
   onPageRefresh('plugins', () => { refreshPlugins().catch(() => {}); });
-  onPageRoute('plugins', ({ sub }) => paint({ sub }));
+  onPageRoute('plugins', ({ sub, tab }) => paint({ sub, tab }));
   setInterval(() => { if (getCurrentPage() === 'plugins' && !document.hidden) refreshPlugins().catch(() => {}); }, 15_000);
   refreshPlugins().catch(() => {});
 }

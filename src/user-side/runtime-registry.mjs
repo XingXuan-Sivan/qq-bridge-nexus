@@ -76,13 +76,12 @@ export function listUserPlatforms() {
     label: impl.label ?? impl.id,
     conversationTypes: [...(impl.conversationTypes ?? [])],
     capabilities: [...(impl.capabilities ?? [])],
+    // 敢接的动作（docs/CAPABILITY_CONTRACT.md §3.2）。控制台据此置灰，内核据此降级。
+    actions: [...(impl.actions ?? [])],
     limits: { ...(impl.limits ?? {}) },
     // 能不能收消息 = 有没有 connect()（C3 的入站契约）。函数本身不进返回值：
     // 这份对象会原样进 /api/platforms/registry。
     inbound: typeof impl.connect === 'function',
-    // 入站事件里能不能带业务体认识的原始报文：只有声明了的平台，它的消息才能
-    // 直接进唤醒（社交、引用、媒体都是按那个形状写的）。
-    rawEvent: impl.rawEvent === true,
   }));
 }
 
@@ -102,10 +101,15 @@ export function buildSendCall(kind, id, message, ctx = {}) {
   return impl.buildSendCall(kind, id, message);
 }
 
-/** get_version_info 回执 → { name, version }；未提供实现时返回空名。 */
-export function readBackendInfo(data, ctx = {}) {
+/**
+ * 问一次「当前连接的后端是谁」→ { name, version }（问不到返回 null）。
+ *
+ * 回执的形状判定（哪些字段认作版本信息）住适配器；内核只拿“谁”用于日志称呼。
+ */
+export async function probeBackend(ctx = {}) {
   const impl = requireUserPlatform(ctx.platform);
-  return typeof impl.readBackendInfo === 'function' ? impl.readBackendInfo(data) : { name: null, version: null };
+  if (typeof impl.probeBackend !== 'function') return null;
+  return impl.probeBackend();
 }
 
 /** 日志里的后端称呼。 */

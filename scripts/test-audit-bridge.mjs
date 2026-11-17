@@ -103,6 +103,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
   try {
     if (!server.listening) await new Promise((resolve) => server.once('listening', resolve));
     const sessionId = await h.ensureSession('private:123');
+    assert.ok(h.calls.follows.includes(sessionId), '新建会话必须订阅事件流，否则收不到 turn 事件');
     assert.ok(h.state.sessionPolicies['qq:private:123'], 'policy should exist before reset');
     h.calls.cancelled.length = 0;
     const status = await new Promise((resolve, reject) => {
@@ -120,6 +121,7 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
     assert.equal(h.state.sessions['qq:private:123'], undefined);
     assert.equal(h.state.sessionPolicies['qq:private:123'], undefined, 'policy must not be orphaned by reset');
     assert.ok(h.calls.cancelled.includes(sessionId), 'reset must stop the retired DSH session');
+    assert.ok(h.calls.forgets.includes(sessionId), '退役会话必须退订事件流，否则每次重连都会重放整份快照');
     console.log('PASS console reset drops the session policy and stops the retired DSH session');
   } catch (error) { failures++; console.error('FAIL console reset cleanup:', error.message); }
   finally { await new Promise((resolve) => server.close(resolve)); await h.close(); }
@@ -401,12 +403,12 @@ await test('malformed HTTP request targets return 400 without hanging', async (h
       ['GET', '/api/roles'], ['GET', '/api/roles/content?name=x'], ['GET', '/api/roles?x=1'],
       ['POST', '/api/roles/create'], ['POST', '/api/roles/update'],
       ['POST', '/api/roles/rename'], ['POST', '/api/roles/delete'],
-      ['GET', '/api/preset/sim-prompt'], ['POST', '/api/preset/sim-prompt'],
-      ['GET', '/api/preset/sim-prompt/backups'], ['POST', '/api/preset/sim-prompt/restore'],
       ['GET', '/api/platforms/registry/agent/dsh/models'], ['PATCH', '/api/platforms/registry/agent/dsh/config'],
       ['GET', '/api/platforms/registry'],
       ['GET', '/api/whitelist'], ['POST', '/api/whitelist'], ['POST', '/api/restart'],
       ['POST', '/api/console/token'], ['GET', '/api/role'], ['POST', '/api/role'],
+      // 花多少钱是管理信息：价目表读口与写口都不能对 agent token 开放。
+      ['GET', '/api/pricing'], ['PUT', '/api/pricing'], ['DELETE', '/api/pricing'],
     ];
     for (const [method, path] of mustDeny) {
       const res = await call(path, method, asAgent, method === 'POST' ? {} : undefined);

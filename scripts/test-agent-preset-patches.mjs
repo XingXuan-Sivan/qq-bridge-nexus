@@ -1,6 +1,6 @@
 // 钉住 DSH 0.1.7 preset 装配的「防漂移」契约（纯离线，不需要 DSH 在跑）：
-//   1. bundle patch（artifacts/dsh/qq-agent-presets/presets/*.patch.yml）与仓库权威源
-//      （profiles/agent-platforms/dsh/capabilities/<id>.yml 的 preset + rows 段）逐字一致；
+//   1. bundle patch（artifacts/dsh/qq-agent-presets/presets/*.patch.yml）与「能力档意图经
+//      渲染层编译」的结果逐字一致（意图是源，产物是纯生成物）；
 //   2. patch 的形状符合新机制：insert 一条 @deepseek-ai/dsh-agent-preset 行，
 //      config 里带 id/name/description/order/plugins；
 //   3. 守卫行只能用「从 profile 目录可解析」的引用方式（裸说明符），
@@ -9,19 +9,17 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import {
   BUNDLE_DIR, GUARD_SPECIFIER, PRESETS, REPO_ROOT,
   buildPatches, patchFileFor, presetRowId,
 } from './build-agent-preset-patches.mjs';
+import { renderPreset } from '../profiles/agent-platforms/dsh/adapters/build.mjs';
 
 const ROOT = REPO_ROOT;
 const read = (p) => fs.readFileSync(p, 'utf8');
 const load = (p) => parseYaml(read(p));
-
-/** 能力档的权威位置（C4 起 preset 与工具面合并到这里）。 */
-const capabilityFile = (name) => path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities', `${name}.yml`);
 
 let failures = 0;
 function ok(cond, label) {
@@ -47,15 +45,15 @@ for (const name of PRESETS) {
   ok(row.id === presetRowId(name), `${name}: 行 id = ${presetRowId(name)}（非 preset 名，便于按行定位）`);
   ok(row.name === '@deepseek-ai/dsh-agent-preset', `${name}: 行 name = @deepseek-ai/dsh-agent-preset`);
   ok(row.config?.id === name, `${name}: config.id = ${name}（桥接按这个 id 解析 preset）`);
-  const meta = load(capabilityFile(name)).preset;
-  ok(row.config.name === meta?.name && row.config.description === meta?.description && row.config.order === meta?.order,
-    `${name}: capabilities/${name}.yml 的 preset.name/description/order 原样带进 config`);
+  const { meta } = renderPreset(ROOT, name);
+  ok(row.config.name === meta.name && row.config.description === meta.description && row.config.order === meta.order,
+    `${name}: dsh/render.yml 的 presets.${name} 原样带进 config`);
   ok(Array.isArray(row.config.plugins) && row.config.plugins.length > 0, `${name}: config.plugins 非空（新机制里必填）`);
 
-  // 与源行列表逐字对比：C4 起源里就写裸说明符，适配器不再做任何改写。
-  const source = load(capabilityFile(name)).rows;
-  assert.deepEqual(row.config.plugins, source, `${name}: config.plugins 必须与 capabilities/${name}.yml 的 rows 段完全一致`);
-  ok(true, `${name}: config.plugins 与 rows 段逐字一致（${source.length} 行）`);
+  // 与渲染结果逐字对比：能力档写意图，行由 dsh/render.yml 编译，产物不再有第二份源。
+  const { rows: source } = renderPreset(ROOT, name);
+  assert.deepEqual(row.config.plugins, source, `${name}: config.plugins 必须与渲染层编译结果完全一致`);
+  ok(true, `${name}: config.plugins 与渲染结果逐字一致（${source.length} 行）`);
 
   // 人格正文是产品本体：单独再钉一次，防止「顺手改写/截断」。
   const srcPersona = source.find((r) => r.id === 'persona');

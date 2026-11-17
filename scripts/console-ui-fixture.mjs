@@ -12,113 +12,253 @@ import { tmpdir } from 'node:os';
 import { join as joinPath } from 'node:path';
 import { createScheduler } from '../src/scheduler/engine.js';
 import { parseKey } from '../src/session/key.mjs';
-import { CN_HOLIDAYS } from '../src/model-prices.js';
-import { DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
+import { addBuckets, CN_HOLIDAYS, costOfBuckets, isPeakAt, priceTableFromCatalog, ratesAt, tierAt, totalTokensOf, ZERO_BUCKETS } from '../src/model-prices.js';
+import { withBuiltin } from '../src/pricing/builtins.mjs';
+import { mergeCatalog, normalizeLocalPricing } from '../src/pricing/store.mjs';
+import { DSH_MODEL_CATALOG, DSH_PRICE_TABLE } from './dsh-price-fixture.mjs';
 const PLATFORM_PROMPT_SAMPLE = '【平台】你在 QQ 里说话。\n\n1. 引用只在必要时用。\n2. 分条发送。';
 
 import { listBehaviorTypes } from '../src/behaviors/types.mjs';
 import { toolCatalogSnapshot } from '../src/tools/catalog.mjs';
+import { readAgentPlatformTools, readPlatformTools } from '../src/platforms/index.mjs';
+import { labelsPayload } from '../src/platforms/labels.mjs';
+import { platformPromiseOf } from '../src/platforms/registry.mjs';
+import { sessionToolsCard } from '../src/session/tools.mjs';
 import { createSilenceSchedule, peakPresetRanges } from '../src/silence-schedule.js';
 
 export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const timestamp = '2026-09-20T08:30:00.000Z';
+// 执行体工具面从真实声明读：预览里看到的模块名与真实挂哪个执行体一致。
+const FIXTURE_AGENT_TOOLS = readAgentPlatformTools({ root: joinPath(projectRoot, 'profiles', 'agent-platforms'), id: 'dsh' });
+// 用户平台声明的工具面也读真实那一份：会话工具卡在两处算出来的结论必须一致。
+const FIXTURE_PLATFORM_TOOLS = readPlatformTools({ root: joinPath(projectRoot, 'profiles', 'platforms'), id: 'qq' });
 
-// 预设状态：mock 直接复用真实字段口径，避免与 bridge.js 漂移。
-function presetStatusFixture(preset) {
+/**
+ * 注册表响应补两样东西，算法直接调真实的那一份：
+ *   · `labels`：中文名只住后端，夹具不手抄第二张表；
+ *   · 每条 `promise`：一句话结论 + 只读分组（能发 / 能收 / 做不到 / 效果…）。
+ * 少了它们，控制台的结论行与能力标签就是空壳 —— 预览验不到 S6 的实际渲染。
+ */
+function withPromise(payload) {
   return {
-    preset,
-    label: preset === 'chat'
-      ? '一代仿真（reserved）'
-      : preset === 'chat-v2' ? '二代仿真（reserved2）' : '预设提示词',
-    sourceFile: `profiles/agent-platforms/dsh/capabilities/${preset}.yml`,
-    requiresRestart: true,
+    ...payload,
+    labels: labelsPayload(),
+    platforms: payload.platforms.map((item) => ({ ...item, promise: platformPromiseOf(item) })),
   };
 }
 
 // ── 令牌与花费：离线示例数据 ──────────────────────────────────────────────
 // 字段口径与 src/token-ledger.js 的 summary()/conversation()/recent() 保持一致，
 // 这样控制台渲染路径在离线预览与真实环境走的是同一套形状。
-// 价目表取 dsh 平台自己申报的那份，再按 summary() 的投影口径（只给 label/off、节假日只给数量）
-// 拍平 —— 不在夹具里另抄一份价格，否则改声明时预览不会跟着变。
+// 价目取 dsh 平台自己申报的那份（不在夹具里另抄价格），金额一律按当前价目表现算。
 const USAGE_SYMBOL = DSH_PRICE_TABLE.symbol;
-const USAGE_PRICE_TABLE = {
-  version: DSH_PRICE_TABLE.version,
-  currency: DSH_PRICE_TABLE.currency,
-  symbol: USAGE_SYMBOL,
-  unit: DSH_PRICE_TABLE.unit,
-  peakMultiplier: DSH_PRICE_TABLE.peakMultiplier,
-  peakWindows: DSH_PRICE_TABLE.peakWindows,
-  peakWeekdays: DSH_PRICE_TABLE.peakWeekdays,
-  holidayCount: DSH_PRICE_TABLE.holidays.length,
-  models: Object.fromEntries(Object.entries(DSH_PRICE_TABLE.models).map(([id, m]) => [id, { label: m.label, off: m.off }])),
-};
+const USAGE_AT = Date.parse(timestamp);
 
-function usageConversationFixture(key, buckets, cost, turns, steps, unattributed = 0) {
-  const input = buckets.cacheMiss + buckets.cacheHit + buckets.cacheWrite;
+// /api/pricing：活动的 Agent 平台固定是 dsh（夹具里只有一个），默认模型取自配置面的 agents.dsh.model。
+// 申报层 = withBuiltin(dsh 声明)，本机层只存单价差异，合成仍走 mergeCatalog + priceTableFromCatalog ——
+// 夹具不另抄一份合并规则，否则改实现时预览会「照样通过」。
+const PRICING_AGENT = { id: 'dsh', label: 'DSH' };
+const PRICING_DEFAULT_MODEL = 'deepseek-flash';
+const PRICING_CATALOG = withBuiltin(DSH_MODEL_CATALOG);
+// 账本里出现过、表里却没有单价的模型：预览要能看到「有 token、没算钱」的那一行，
+// 补上单价后金额当场出现，这条链路才有东西可验。
+const PRICING_UNPRICED_MODEL = 'deepseek-chat-0715';
+
+// 示例用量：每个会话只命中一个模型。金额不写死，全部按传入的价目表现算，
+// 所以本机覆盖一改，历史会话的金额与逐模型覆盖清单会一起变（与账本读取路径同一条规则）。
+const USAGE_CONVERSATIONS = [
+  {
+    key: 'group:123456789', model: PRICING_DEFAULT_MODEL, turns: 42, steps: 231, unattributed: 0.02,
+    buckets: { cacheMiss: 41230, cacheHit: 1284000, cacheWrite: 0, output: 18420, reasoning: 0 },
+  },
+  {
+    key: 'private:100001', model: PRICING_DEFAULT_MODEL, turns: 9, steps: 48, unattributed: 0,
+    buckets: { cacheMiss: 8600, cacheHit: 210400, cacheWrite: 0, output: 3900, reasoning: 0 },
+  },
+  {
+    key: 'internal:黑话学习', model: PRICING_DEFAULT_MODEL, turns: 3, steps: 11, unattributed: 0,
+    buckets: { cacheMiss: 2200, cacheHit: 18000, cacheWrite: 0, output: 900, reasoning: 0 },
+  },
+  // 会话单独选过、价目表里还没有的模型：token 照记，金额为 0（不是「免费」，是「没法算」）。
+  {
+    key: 'group:555666777', model: PRICING_UNPRICED_MODEL, turns: 2, steps: 6, unattributed: 0,
+    buckets: { cacheMiss: 9000, cacheHit: 39000, cacheWrite: 0, output: 3200, reasoning: 0 },
+  },
+];
+
+function pricingTableFixture(state) {
+  return priceTableFromCatalog(mergeCatalog(PRICING_CATALOG, state.pricingLocal[PRICING_AGENT.id] ?? null));
+}
+
+/** 一个模型这批用量在**当前**价目表下的金额；没价目就是 null（只计 token、不算钱）。 */
+function usageCharge(model, buckets, table) {
+  const rates = ratesAt(model, USAGE_AT, table);
+  if (!rates) return null;
+  const total = costOfBuckets(buckets, rates).total;
+  const peak = tierAt(model, USAGE_AT, table) === 'peak';
+  return { total, tier: peak ? 'peak' : 'off', byTier: peak ? { peak: total, off: 0 } : { peak: 0, off: total } };
+}
+
+/** 账本逐模型覆盖清单（与 token-ledger 的 coverage() 同形：有价才算钱，没价只计 token）。 */
+function pricingCoverageFixture(table) {
+  const acc = new Map();
+  for (const item of USAGE_CONVERSATIONS) {
+    const entry = table?.models?.[item.model] ?? null;
+    if (!acc.has(item.model)) {
+      acc.set(item.model, {
+        model: item.model,
+        label: entry?.label ?? item.model,
+        tokens: 0,
+        cost: 0,
+        unpricedTokens: 0,
+        priced: Boolean(entry),
+      });
+    }
+    const row = acc.get(item.model);
+    const tokens = totalTokensOf(item.buckets);
+    row.tokens += tokens;
+    const charge = entry ? usageCharge(item.model, item.buckets, table) : null;
+    if (charge) row.cost += charge.total;
+    else row.unpricedTokens += tokens;
+  }
+  return [...acc.values()].sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
+}
+
+/** summary() 里的价目投影：只给 label/off，节假日只给数量。 */
+function priceTableProjection(table) {
+  if (!table) return null;
   return {
-    key,
-    sessionIds: [`fixture-session-${key.replace(/\W/g, '')}`],
-    sessions: 1,
-    buckets,
-    cost,
-    unattributedCost: unattributed,
-    attributedCost: cost - unattributed,
-    byTier: { peak: cost * 0.4, off: cost * 0.6 },
-    turns,
-    steps,
-    unpriced: false,
-    unpricedTokens: 0,
-    lastAt: Date.parse(timestamp),
-    firstAt: Date.parse(timestamp) - 3600_000,
-    models: ['deepseek-flash'],
-    cacheHitRate: input > 0 ? buckets.cacheHit / input : 0,
+    version: table.version,
+    currency: table.currency,
+    symbol: table.symbol,
+    unit: table.unit,
+    peakMultiplier: table.peakMultiplier,
+    peakWindows: table.peakWindows,
+    peakWeekdays: table.peakWeekdays,
+    holidayCount: (table.holidays ?? []).length,
+    models: Object.fromEntries(Object.entries(table.models).map(([id, m]) => [id, { label: m.label, off: m.off }])),
   };
 }
 
-function usageSummaryFixture() {
-  const conversations = [
-    usageConversationFixture('group:123456789', { cacheMiss: 41230, cacheHit: 1284000, cacheWrite: 0, output: 18420, reasoning: 0 }, 0.2886, 42, 231),
-    usageConversationFixture('private:100001', { cacheMiss: 8600, cacheHit: 210400, cacheWrite: 0, output: 3900, reasoning: 0 }, 0.0467, 9, 48),
-    usageConversationFixture('internal:黑话学习', { cacheMiss: 2200, cacheHit: 18000, cacheWrite: 0, output: 900, reasoning: 0 }, 0.0075, 3, 11),
-  ];
-  const buckets = conversations.reduce((acc, c) => ({
-    cacheMiss: acc.cacheMiss + c.buckets.cacheMiss,
-    cacheHit: acc.cacheHit + c.buckets.cacheHit,
-    cacheWrite: acc.cacheWrite + c.buckets.cacheWrite,
-    output: acc.output + c.buckets.output,
-    reasoning: 0,
-  }), { cacheMiss: 0, cacheHit: 0, cacheWrite: 0, output: 0, reasoning: 0 });
+/** 默认模型的价目结论（与 bridge 的 pricingStatus() 同形）。 */
+function pricingStatusFixture(table, model = PRICING_DEFAULT_MODEL) {
+  const entry = table?.models?.[model] ?? null;
+  const tier = entry ? tierAt(model, USAGE_AT, table) : null;
+  return {
+    agent: PRICING_AGENT.id,
+    model,
+    label: entry?.label ?? model,
+    priced: Boolean(entry),
+    source: entry?.origin ?? null,
+    tier,
+    tierLabel: tier ? (tier === 'peak' ? '高峰时段' : '空闲时段') : '',
+    currency: table?.currency ?? '',
+    symbol: table?.symbol ?? '',
+  };
+}
+
+function pricingFixture(state) {
+  const declared = priceTableFromCatalog(PRICING_CATALOG);
+  const table = pricingTableFixture(state);
+  const local = state.pricingLocal[PRICING_AGENT.id] ?? null;
+  const status = pricingStatusFixture(table, state.pricingDefaultModel);
+  const entry = status.model ? table?.models?.[status.model] ?? null : null;
+  // 来源按模型层算：这一层里有平台自己申报的价，就说「平台申报」，否则「内置官方价」。
+  const origins = new Set((PRICING_CATALOG?.models ?? []).map((item) => item?.origin));
+  return {
+    ok: true,
+    agent: PRICING_AGENT.id,
+    agentLabel: PRICING_AGENT.label,
+    model: status.model,
+    source: local ? 'local' : (origins.has('declared') ? 'declared' : (table ? 'builtin' : 'none')),
+    match: { ...status, priced: Boolean(entry), origin: entry?.origin ?? null, off: entry?.off ?? null },
+    policy: table ? {
+      version: table.version,
+      currency: table.currency,
+      symbol: table.symbol,
+      unit: table.unit,
+      multiplier: Number(table.peakMultiplier) || 1,
+      windows: table.peakWindows ?? [],
+      weekdays: table.peakWeekdays ?? [],
+      holidayCount: (table.holidays ?? []).length,
+    } : null,
+    table,
+    local,
+    declared,
+    coverage: pricingCoverageFixture(table),
+  };
+}
+
+function usageSummaryFixture(state) {
+  const priceTable = pricingTableFixture(state);
+  // 金额一律按当前价目表现算：本机覆盖一改，已有 token 的金额跟着变（账本里不多存一份金额）。
+  const conversations = USAGE_CONVERSATIONS.map((item) => {
+    const charge = usageCharge(item.model, item.buckets, priceTable);
+    const cost = charge?.total ?? 0;
+    const input = item.buckets.cacheMiss + item.buckets.cacheHit + item.buckets.cacheWrite;
+    return {
+      key: item.key,
+      sessionIds: [`fixture-session-${item.key.replace(/\W/g, '')}`],
+      sessions: 1,
+      buckets: item.buckets,
+      cost,
+      unattributedCost: item.unattributed,
+      attributedCost: cost - item.unattributed,
+      byTier: charge?.byTier ?? { peak: 0, off: 0 },
+      turns: item.turns,
+      steps: item.steps,
+      unpriced: !charge,
+      unpricedTokens: charge ? 0 : totalTokensOf(item.buckets),
+      lastAt: USAGE_AT,
+      firstAt: USAGE_AT - 3600_000,
+      models: [item.model],
+      cacheHitRate: input > 0 ? item.buckets.cacheHit / input : 0,
+    };
+  });
+  const buckets = conversations.reduce((acc, c) => addBuckets(acc, c.buckets), { ...ZERO_BUCKETS });
   const cost = conversations.reduce((acc, c) => acc + c.cost, 0);
+  const byTier = conversations.reduce((acc, c) => ({ peak: acc.peak + c.byTier.peak, off: acc.off + c.byTier.off }), { peak: 0, off: 0 });
+  const unpricedTokens = conversations.reduce((acc, c) => acc + c.unpricedTokens, 0);
   const input = buckets.cacheMiss + buckets.cacheHit + buckets.cacheWrite;
   const turns = conversations.reduce((acc, c) => acc + c.turns, 0);
   const steps = conversations.reduce((acc, c) => acc + c.steps, 0);
+  const peakNow = priceTable ? isPeakAt(USAGE_AT, priceTable) : null;
   return {
     ok: true,
-    generatedAt: Date.parse(timestamp),
-    priceVersion: USAGE_PRICE_TABLE.version,
-    currency: 'CNY',
+    generatedAt: USAGE_AT,
+    priceVersion: priceTable?.version ?? '',
+    currency: priceTable?.currency ?? '',
     symbol: USAGE_SYMBOL,
-    nowTier: { tier: 'off', tierLabel: '空闲时段', currency: USAGE_PRICE_TABLE.currency, symbol: USAGE_SYMBOL, peakMultiplier: USAGE_PRICE_TABLE.peakMultiplier },
-    priceTable: USAGE_PRICE_TABLE,
+    nowTier: priceTable ? {
+      tier: peakNow ? 'peak' : 'off',
+      tierLabel: peakNow ? '高峰时段' : '空闲时段',
+      currency: priceTable.currency,
+      symbol: USAGE_SYMBOL,
+      peakMultiplier: priceTable.peakMultiplier,
+    } : null,
+    priceTable: priceTableProjection(priceTable),
+    // 账本里出现过的模型各自缺不缺价目：会话表与状态行据此说「还差哪个模型」。
+    models: pricingCoverageFixture(priceTable),
+    pricing: pricingStatusFixture(priceTable, state.pricingDefaultModel),
     totals: {
       buckets,
       cost,
-      attributedCost: cost - 0.02,
-      unattributedCost: 0.02,
-      byTier: { peak: cost * 0.4, off: cost * 0.6 },
+      attributedCost: conversations.reduce((acc, c) => acc + c.attributedCost, 0),
+      unattributedCost: conversations.reduce((acc, c) => acc + c.unattributedCost, 0),
+      byTier,
       turns,
       steps,
       conversations: conversations.length,
-      unpriced: false,
-      unpricedTokens: 0,
-      totalTokens: buckets.cacheMiss + buckets.cacheHit + buckets.cacheWrite + buckets.output,
+      unpriced: unpricedTokens > 0,
+      unpricedTokens,
+      totalTokens: totalTokensOf(buckets),
       inputTokens: input,
       cacheHitRate: input > 0 ? buckets.cacheHit / input : 0,
-      avgCostPerTurn: cost / turns,
-      avgCostPerStep: cost / steps,
+      avgCostPerTurn: turns > 0 ? cost / turns : 0,
+      avgCostPerStep: steps > 0 ? cost / steps : 0,
     },
     conversations,
-    ledger: { file: '(fixture)', journalLines: 0, maxLines: 20000, droppedLines: 0, sessions: 3, baselines: 3, samples: steps, lastIngestAt: Date.parse(timestamp), lastCompactedAt: 0, priceVersion: USAGE_PRICE_TABLE.version },
+    ledger: { file: '(fixture)', journalLines: 0, maxLines: 20000, droppedLines: 0, sessions: conversations.length, baselines: conversations.length, samples: steps, lastIngestAt: USAGE_AT, lastCompactedAt: 0, priceVersion: priceTable?.version ?? '' },
   };
 }
 
@@ -394,32 +534,36 @@ function fixturePermissionState(state, key) {
 function fixtureCapabilities() {
   return [
     {
-      id: 'chat', label: '聊天 Agent', audience: 'access', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'],
-      agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'],
-      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      id: 'chat', label: '聊天 Agent', audience: 'access', builtin: true, behavior: 'social-v1',
+      effects: { 'web.access': 'mcp', 'user.ask': true, 'todo.manage': true },
+      mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } },
+      skills: { allow: ['*'] },
       runtime: { apply: 'preset', prompt: 'none', peerPermission: '', narrow: [] },
-      note: '', hasRows: true, rowsCount: 2, usedBy: [], isDefault: false,
+      note: '', hasGrants: true, usedBy: [], isDefault: false,
     },
     {
-      id: 'chat-v2', label: '二代仿真', audience: 'access', builtin: true, platformVisible: ['sendMessage', 'sendBurst', 'sendPoke', 'markRead', 'setWakeConfig'],
-      agentModules: ['tool-web', 'tool-ask-user', 'tool-todo'],
-      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      id: 'chat-v2', label: '二代仿真', audience: 'access', builtin: true, behavior: 'social-v2',
+      effects: { 'web.access': 'mcp', 'user.ask': true, 'todo.manage': true },
+      mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } },
+      skills: { allow: ['*'] },
       runtime: { apply: 'preset', prompt: 'tool', peerPermission: '', narrow: [] },
-      note: '', hasRows: true, rowsCount: 2, usedBy: ['group:100003'], isDefault: true,
+      note: '', hasGrants: true, usedBy: ['group:100003'], isDefault: true,
     },
     {
-      id: 'readonly', label: 'Agent · 只读', audience: 'owner', builtin: true, platformVisible: ['sendMessage', 'markRead'],
-      agentModules: ['tool-fs', 'tool-fs-search'],
-      tools: { platform: {}, mcp: [{ server: '*', tools: '*' }], skills: ['*'] },
+      id: 'readonly', label: 'Agent · 只读', audience: 'owner', builtin: true, behavior: 'social-v2',
+      effects: { 'fs.read': true, 'fs.search': true, 'web.access': 'builtin', 'user.ask': true, 'todo.manage': true },
+      mcp: { allow: [], tools: { allow: [], deny: [] } },
+      skills: { allow: [] },
       runtime: { apply: 'preset', prompt: 'none', peerPermission: 'read-only', narrow: [] },
-      note: '', hasRows: true, rowsCount: 2, usedBy: ['group:123456789'], isDefault: false,
+      note: '', hasGrants: false, usedBy: ['group:123456789'], isDefault: false,
     },
     {
-      id: 'direct', label: '直通 · 主人', audience: 'owner', builtin: true, platformVisible: ['sendMessage', 'markRead'],
-      agentModules: [],
-      tools: { platform: {}, mcp: [], skills: [] },
+      id: 'direct', label: '直通 · 主人', audience: 'owner', builtin: true,
+      effects: {},
+      mcp: { allow: [], tools: { allow: [], deny: [] } },
+      skills: { allow: [] },
       runtime: { apply: 'passthrough', prompt: 'system', peerPermission: '', narrow: [] },
-      note: '不装预设与沙箱，直接使用执行体自己的会话、工具与权限档', hasRows: false, rowsCount: 0, usedBy: ['private:100001'], isDefault: false,
+      note: '不装预设与沙箱，直接使用执行体自己的会话、工具与权限档', hasGrants: false, usedBy: ['private:100001'], isDefault: false,
     },
   ];
 }
@@ -472,6 +616,8 @@ function fixtureSessionAgent(state, key) {
 export function makeFixtureState() {
   return {
     mode: 'reserved2', role: '小鲸鱼', roleMode: 'active', paused: false,
+    // 价目表的本机覆盖层（按 Agent 平台分），/api/pricing 的 PUT / DELETE 会改它，初始为空。
+    pricingLocal: {}, pricingDefaultModel: PRICING_DEFAULT_MODEL,
     memoryConfig: {
       inject: { provider: 'soulkit', maxChars: 2400, timeoutMs: 900, cacheTtlMs: 60000 },
       providers: { 'local-digest': { enabled: true }, soulkit: { enabled: true, baseUrl: 'http://127.0.0.1:3110', timeoutMs: 900, maxChars: 1200 } },
@@ -492,18 +638,6 @@ export function makeFixtureState() {
     externalPersonas: {
       星苒: { slug: '星苒', description: '群里的主角色', overlay: '雨夜的北京，窗没关。', systemAppend: '说话别太长。' },
       备用角色: { slug: '备用角色', description: '备用设定', overlay: '', systemAppend: '' },
-    },
-    simPrompts: {
-      'chat-v2': '你是 QQ 群里的仿真群友。\n\n【安全边界（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【送达方式：工具发送】\n1. 文本输出不会自动发送给群友。',
-      'chat': '你是 QQ 群里的仿真群友（一代）。\n\n【安全边界（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【送达方式：自动转发】\n1. 回复会自动转发到 QQ。',
-      // 自建预设：persona.prefix 为空，用来验证「提示词卡不该被隐藏、空内容也能编辑」。
-      'demo-agent': '',
-    },
-    // 「初始版本」：与 simPrompts 起始值一致，用来测「已修改 / 还原」。
-    simDefaults: {
-      'chat-v2': '你是 QQ 群里的仿真群友。\n\n【安全边界（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【送达方式：工具发送】\n1. 文本输出不会自动发送给群友。',
-      'chat': '你是 QQ 群里的仿真群友（一代）。\n\n【安全边界（最高优先级，不可违反）】\n1. 你没有本地工具。\n\n【送达方式：自动转发】\n1. 回复会自动转发到 QQ。',
-      'demo-agent': '',
     },
     roleInjectMax: 6000,
     // 人格卡虚拟块的开关（promptBlocks['core-persona'].enabled）。
@@ -597,12 +731,15 @@ export function makeFixtureState() {
       { id: 'demo-rejected', content: '测试噪声', meaning: '', risk: '演示排除项', status: 'rejected', count: 1, source: 'auto', createdAt: timestamp, updatedAt: timestamp },
     ],
     security: { interceptNotify: true },
+    // 实时模型目录是否读得到。默认读得到；置 true 用来演「执行体离线 / 目录不可用」，
+    // 此时模型卡按平台声明的 modelCatalog 铺选项，写口回一条 warning。
+    modelCatalogDown: false,
     // state/ 的 ACL 是否已收紧。离线演示默认给「未收紧」，这样告警条在预览里可见
     // （真实场景：Windows 上未以管理员身份运行桥接时就是这个状态）。
     hardenStateDir: false,
     toolLog: [
-      { time: timestamp, key: 'group:123456789', tool: 'qq_get_recent_messages', type: 'call', args: JSON.stringify({ key: 'group:123456789', limit: 20 }) },
-      { time: timestamp, key: 'group:123456789', tool: 'qq_get_recent_messages', type: 'result', ok: true },
+      { time: timestamp, key: 'group:123456789', tool: 'read_messages', type: 'call', args: JSON.stringify({ op: 'get_recent_messages', key: 'group:123456789', limit: 20 }) },
+      { time: timestamp, key: 'group:123456789', tool: 'read_messages', type: 'result', ok: true },
     ],
     feedback: [{ time: timestamp, level: 'info', message: '这是离线演示反馈。' }],
   };
@@ -819,6 +956,22 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
       if (path === '/favicon.ico') { res.writeHead(204); res.end(); return; }
       if (method === 'GET' && path === '/__fixture/requests') return json({ requests, unknownRequests });
       if (method === 'GET' && path === '/__fixture/info') return json({ offline: true, htmlPath: file });
+      if (method === 'POST' && path === '/__fixture/model-catalog') {
+        // 测试专用开关：模拟「实时目录读不到」（执行体离线 / 平台没声明 models 能力位）。
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const control = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        state.modelCatalogDown = control.down !== false;
+        return json({ ok: true, down: state.modelCatalogDown });
+      }
+      if (method === 'POST' && path === '/__fixture/pricing') {
+        // 测试专用开关：把默认模型换成未定价的模型，模拟「找不到与默认模型匹配的价目表」。
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const control = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        state.pricingDefaultModel = String(control.defaultModel || '').trim() || PRICING_DEFAULT_MODEL;
+        return json({ ok: true, defaultModel: state.pricingDefaultModel });
+      }
       if (!path.startsWith('/api/')) return json({ ok: false, error: 'Offline fixture route not found' }, 404);
       // 定时任务：直接用真实的调度引擎（临时数据文件 + 假发送），预览里看到的规则计算与真实一致
       if (path === '/api/scheduler' || path.startsWith('/api/scheduler/')) return handleFixtureScheduler(req, method, path, json, requests);
@@ -831,31 +984,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         requests.push({ method, path, body });
         if (logWrites) console.log(`[mock write] ${method} ${path} ${JSON.stringify(body)}`);
-      }
-      // 预设：新建 / 插件配置 / 还原出厂（表单化后控制台只走这三个写接口）。
-      if (method === 'POST' && path === '/api/extensions/presets/create') {
-        return json({ ok: true, id: body?.id ?? 'new-preset', from: body?.from ?? '', presets: [] });
-      }
-      const presetEdit = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(meta|extensions|yaml|validate|apply|rollback)$/);
-      if (presetEdit) {
-        const [, presetId, action] = presetEdit;
-        if (action === 'validate') return json({ ok: true, validation: { ok: true, rows: 3 } });
-        if (action === 'apply') return json({ ok: true, preset: presetStatusFixture(presetId), requiresRestart: true });
-        if (action === 'rollback') return json({ ok: true, restored: '2026-01-01-00-00-00-000' });
-        return json({ ok: true, id: presetId, preset: { id: presetId } });
-      }
-      const presetDelete = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)$/);
-      if (presetDelete && method === 'DELETE') {
-        const id = presetDelete[1];
-        if (['chat', 'chat-v2'].includes(id)) return json({ ok: false, error: '系统自带预设不能删除' }, 400);
-        return json({ ok: true, id, presets: [] });
-      }
-      const presetAction = path.match(/^\/api\/extensions\/presets\/([a-z0-9-]+)\/(agent|factory)$/);
-      if (presetAction) {
-        const [, presetId, action] = presetAction;
-        if (action === 'factory') return json({ ok: true, id: presetId, restored: ['capability.yml'] });
-        if (method === 'PUT') return json({ ok: true, id: presetId, rows: Array.isArray(body?.rows) ? body.rows.length : 0 });
-        return json({ ok: true, preset: { id: presetId, rows: [] } });
       }
       const demoPlugin = {
         id: 'demo-plugin', name: '演示插件', version: '0.1.0', status: 'active',
@@ -954,7 +1082,15 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           if (action === 'config' && method === 'PATCH') {
             state.agentConfigs[platformId] = { ...state.agentConfigs[platformId], ...patch };
             const endpointKeys = ['baseUrl', 'authToken', 'authTokenExplicit', 'authHeader', 'authPrefix', 'allowRemote'];
-            return json({ ok: true, requiresRestart: Object.keys(patch).some((key) => endpointKeys.includes(key)) });
+            // 与真实现同一条：目录读不到时模型照存，但多回一条 warning（卡片状态位要回显它）。
+            const warnings = state.modelCatalogDown && ['provider', 'model', 'reasoningEffort'].some((key) => key in patch)
+              ? ['模型未校验：目录不可用']
+              : [];
+            return json({
+              ok: true,
+              requiresRestart: Object.keys(patch).some((key) => endpointKeys.includes(key)),
+              ...(warnings.length ? { warnings } : {}),
+            });
           }
           if (action === 'probe' && method === 'POST') {
             state.agentProbes[platformId] = { ok: true, error: '', url: `http://127.0.0.1:3080/${platformId}`, at: timestamp };
@@ -1005,28 +1141,42 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           const key = decodeURIComponent(profileMatch[1]);
           const capabilityId = fixtureSessionCapabilityId(state, key);
           const capability = fixtureCapabilities().find((item) => item.id === (capabilityId || 'chat-v2')) ?? null;
+          // 会话值 → 平台配置 → null：与桥接同一个口径，缺任一项就是「未设置」。
+          const platformModel = state.agentConfigs.dsh ?? {};
+          const effectiveModel = platformModel.provider && platformModel.model
+            ? { provider: platformModel.provider, model: platformModel.model, reasoning: platformModel.reasoningEffort || '' }
+            : null;
           return json({
             ok: true,
             key,
             displayName: state.displayNames?.[key] ?? '',
             sessionId: state.sessions.find((item) => item.key === key)?.sessionId ?? null,
-            dsh: { label: 'DSH 已连接' },
+            health: { key, status: 'online', checkedAt: timestamp, error: '' },
             access: fixtureAccessSummary(state, key),
             // 会话级选择：`capability` 空 = 跟随平台默认；`behavior` 的 inherit = 用平台默认行为。
             capability: capabilityId || null,
             defaultCapability: 'chat-v2',
-            capabilities: fixtureCapabilities().map((item) => ({ id: item.id, label: item.label, audience: item.audience })),
+            capabilities: fixtureCapabilities().map((item) => ({
+              id: item.id, label: item.label, audience: item.audience,
+              isDefault: item.id === 'chat-v2', apply: item.runtime.apply,
+            })),
             behavior: state.sessionBehaviors?.[key] ?? 'inherit',
             defaultBehavior: state.userDefaultBehaviors.qq || null,
             behaviors: ['social-v1', 'social-v2'],
             effectiveMode: state.mode,
-            apply: capability?.runtime.apply ?? 'preset',
             persona: { mode: 'inherit' },
             prompt: { maxChars: 2000, text: '', updatedAt: 0 },
             wake: { triggers: { atMention: true } },
             permission: fixturePermissionState(state, key),
-            model: {},
-            effectiveModel: { provider: state.dshProvider, model: state.dshModel },
+            // 会话工具卡：夹具不手写求交，直接调后端的同一个函数。
+            tools: sessionToolsCard({
+              declared: FIXTURE_PLATFORM_TOOLS,
+              level: fixturePermissionState(state, key).effective,
+              capability: capability ? { id: capability.id, label: capability.label } : null,
+              platform: 'QQ',
+            }),
+            model: null,
+            effectiveModel,
           });
         }
         const sessionAgentMatch = path.match(/^\/api\/sessions\/([^/]+)\/agent$/);
@@ -1039,6 +1189,18 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           if (!state.agentConfigs[platformId]) return json({ ok: false, error: `没有这个 Agent 平台：${platformId}` }, 404);
           if (platformId !== 'dsh') {
             return json({ ok: true, agent: platformId, declared: null, live: null, view: null, error: `${platformId} 没有声明 models 能力位`, unsupported: true });
+          }
+          if (state.modelCatalogDown) {
+            // 与真桥接同一条语义：读不到也是结论，一律 200，`declared` 照常可用。
+            return json({
+              ok: true,
+              agent: platformId,
+              declared: FIXTURE_DSH_DECLARED,
+              live: null,
+              view: null,
+              error: '连不上 DSH（演示）',
+              unsupported: false,
+            });
           }
           return json({
             ok: true,
@@ -1065,7 +1227,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/behaviors/kinds': return json({ ok: true, kinds: listBehaviorTypes() });
           case '/api/runtime/capabilities': return json({
             ok: true,
-            catalog: toolCatalogSnapshot(),
+            catalog: toolCatalogSnapshot({ agentPlatform: 'dsh', agentTools: FIXTURE_AGENT_TOOLS }),
             capabilities: fixtureCapabilities(),
           });
           // 行为档案：`usedBy` 与真实桥接同形（显式挂它的会话 + 把它设为默认行为的用户平台）。
@@ -1079,7 +1241,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           // C1：平台统一注册表。控制台只读这一个端点回答「接了哪些平台、能不能用」。
           // 两侧都列（user / agent），诊断与汇总与真实桥接同形。C3 起 qq 有 connect()
           // （inbound: true），所以不再有 inbound_unsupported 这条诊断——预览也要照实反映。
-          case '/api/platforms/registry': return json({
+          case '/api/platforms/registry': return json(withPromise({
             ok: true,
             // 配置面（`configured`）由 state.defaultAgent 派生，运行期（`active`）恒为 dsh：
             // 切换默认执行体之后重拉快照，就能同时看到「待重启」与那条诊断。
@@ -1098,7 +1260,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 conversationTypes: ['group', 'private'],
                 limits: { chunkChars: 4000, markdown: false },
                 inbound: true,
-                rawEvent: true,
                 enabled: state.userEnabled.qq,
                 // 条目级默认行为：会话详情里「行为档案 › 跟随平台默认」读它。
                 defaultBehavior: state.userDefaultBehaviors.qq,
@@ -1148,7 +1309,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 conversationTypes: ['group', 'private'],
                 limits: { chunkChars: 2000, markdown: false },
                 inbound: true,
-                rawEvent: true,
                 inboundState: state.userInbound.wx ?? null,
                 // 插件注册的平台出站走它自己的 transport，不是内置适配器。
                 outbound: { via: 'transport', owner: 'wx-adapter' },
@@ -1195,7 +1355,8 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
                 probe: state.agentProbes.dsh ?? null,
                 assets: {
                   prompt: { active: false, hasDefault: false },
-                  tools: [],
+                  // 效果清单与真实注册表同源：dsh 的 tools.yml 里各模块声明的 effects。
+                  tools: FIXTURE_AGENT_TOOLS,
                   behaviors: [],
                   capabilityProfiles: ['chat', 'chat-v2', 'direct', 'full', 'readonly', 'workspace'],
                 },
@@ -1263,7 +1424,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               errors: 0,
               warnings: (state.defaultAgent === 'dsh' ? 0 : 1) + (state.defaultUser === 'qq' ? 0 : 1),
             },
-          });
+          }));
           case '/api/presets': return json({ presets: [{ id: 'chat-v2', trust: 'user' }, { id: 'chat', trust: 'user' }] });
           // 以下几个是控制台「扩展」页在页面片段化之后新增的只读接口：预览也要给响应，
           // 否则 Playwright 的「没有未知 API / JS 错误」检查会被 404 打穿（真实桥接里它们都在）。
@@ -1312,94 +1473,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
             bridge: { builtin: [{ id: 'reset', name: '/reset', aliases: ['/new'], scope: 'all', permission: 'owner', group: '会话', description: '重置会话' }], plugin: [] },
             dsh: [{ name: '/compact', note: '桥接在上下文压缩时调用，由 DSH 执行' }],
             tools: [{ name: 'web_search', source: 'src/mcp-web-search-safe.js', managed: 'dsh' }],
-          });
-          case '/api/extensions/presets': return json({
-            ok: true,
-            presets: [
-              {
-                id: 'chat',
-                name: 'QQ 群聊',
-                description: '离线预览用的安全群聊预设。',
-                order: 1,
-                editable: true,
-                builtin: true,
-                error: null,
-                hasExtensions: true,
-                extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
-              },
-              {
-                id: 'chat-v2',
-                name: 'QQ 群聊（二代）',
-                description: '离线预览用的二代群聊预设。',
-                order: 2,
-                editable: true,
-                builtin: true,
-                error: null,
-                hasExtensions: true,
-                extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
-              },
-              {
-                id: 'demo-agent',
-                name: '演示预设',
-                description: '离线预览用的自建预设，persona 提示词为空。',
-                order: 3,
-                editable: true,
-                builtin: false,
-                error: null,
-                hasExtensions: false,
-                extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: [] } },
-              },
-            ],
-          });
-          case '/api/extensions/presets/chat': return json({
-            ok: true,
-            preset: {
-              id: 'chat',
-              meta: { name: 'QQ 群聊（一代）', description: '离线预览用的群聊预设。', order: 1 },
-              extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: ['*'] } },
-              extensionsExists: true,
-              agent: [
-                { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
-                { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
-                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: { profile: 'chat' } },
-              ],
-              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n',
-              validation: { ok: true, rows: 3 },
-              backups: [],
-            },
-          });
-          case '/api/extensions/presets/chat-v2': return json({
-            ok: true,
-            preset: {
-              id: 'chat-v2',
-              meta: { name: 'QQ 群聊（二代）', description: '离线预览用的二代群聊预设。', order: 2 },
-              extensions: { mcp: { allow: ['*'], tools: { allow: ['*'], deny: [] } }, skills: { allow: ['*'] } },
-              extensionsExists: true,
-              agent: [
-                { id: 'persona', name: '@deepseek-ai/dsh-persona', config: { prefix: '测试用提示词。' } },
-                { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { search: false, fetch: false, searchTimeoutMs: 60000 } },
-                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: { profile: 'chat' } },
-              ],
-              agentYaml: '- id: persona\n  name: ./persona\n  config:\n    prefix: 测试用提示词。\n- id: tool-web\n  name: ./tool-web\n  config:\n    search: false\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n',
-              validation: { ok: true, rows: 3 },
-              backups: [],
-            },
-          });
-          case '/api/extensions/presets/demo-agent': return json({
-            ok: true,
-            preset: {
-              id: 'demo-agent',
-              meta: { name: '演示预设', description: '离线预览用的自建预设，persona 提示词为空。', order: 3 },
-              extensions: { mcp: { allow: ['*'], tools: { allow: [], deny: [] } }, skills: { allow: [] } },
-              extensionsExists: false,
-              agent: [
-                { id: 'persona', name: '@deepseek-ai/dsh-persona' },
-                { id: 'qq-tool-restrict', name: 'qq-agent-presets/qq-tool-restrict.mjs', config: {} },
-              ],
-              agentYaml: '- id: persona\n  name: ./persona\n- id: qq-tool-restrict\n  name: qq-agent-presets/qq-tool-restrict.mjs\n  config: {}\n',
-              validation: { ok: true, rows: 2 },
-              backups: [],
-            },
           });
           case '/api/extensions/skills': return json({
             ok: true,
@@ -1558,34 +1631,16 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               sections: { v1: roleSectionReport(content, 'v1'), v2: roleSectionReport(content, 'v2') },
             });
           }
-          case '/api/preset/sim-prompt': {
-            const preset = String(url.searchParams.get('preset') || 'chat-v2');
-            const content = state.simPrompts[preset] ?? '';
-            const initial = state.simDefaults[preset];
-            return json({
-              ok: true,
-              content,
-              chars: content.length,
-              bytes: Buffer.byteLength(content, 'utf8'),
-              warnings: [],
-              status: presetStatusFixture(preset),
-              presets: [presetStatusFixture('chat'), presetStatusFixture('chat-v2')],
-              hasDefault: initial !== undefined,
-              modified: content !== (initial ?? ''),
-              defaultContent: initial ?? '',
-              defaultChars: (initial ?? '').length,
-            });
-          }
-          case '/api/preset/sim-prompt/backups': {
-            const preset = String(url.searchParams.get('preset') || 'chat-v2');
-            return json({ ok: true, backups: [{ file: `${preset}.capability.yml.fixture`, mtime: Date.parse(timestamp) }] });
-          }
           case '/api/memory/entries': return json({ ok: true, provider: 'local-digest', key: url.searchParams.get('key') || '', data: memoryEntryList(state, url.searchParams.get('key') || '') });
         case '/api/memory/sessions': return json({ ok: true, provider: 'local-digest', sessions: memorySessions(state) });
           case '/api/memory': return json({ ok: true, config: state.memoryConfig, status: memoryStatusOf(state), ingest: ingestStatusOf(state), promptBlocks: { maxTotalChars: 200000, blocks: [] } });
           case '/api/whitelist': return json(state.whitelist);
           case '/api/access': return json({ ok: true, access: state.access });
-          case '/api/sessions': return json({ sessions: state.sessions });
+          case '/api/sessions': return json({ sessions: state.sessions.map((item) => ({
+            ...item,
+            displayName: state.displayNames?.[item.key] ?? '',
+            health: { key: item.key, status: 'online', checkedAt: timestamp, error: '' },
+          })) });
           case '/api/pending': return json({ pending: [{ key: 'group:123456789', kind: 'approval', toolName: '演示工具', reason: '等待管理员确认（离线示例）' }] });
           case '/api/social': return json({ config: state.social, states: state.socialStates, pendingSummaries: { 'group:123456789': 2 } });
           case '/api/socialV2/config': return json({ ok: true, config: state.v2 });
@@ -1642,13 +1697,37 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               : { hardened: false, path: 'D:\\demo\\qq-bridge\\state', manualCommand: manualDirCommand('D:\\demo\\qq-bridge\\state') }
           });
           // 令牌与花费：全部为离线示例数据，不含任何真实用量。
-          case '/api/tokens/summary': return json(usageSummaryFixture());
+          case '/api/tokens/summary': return json(usageSummaryFixture(state));
           case '/api/tokens/series': return json(usageSeriesFixture(url.searchParams.get('hours')));
           case '/api/tokens/turns': return json(usageTurnsFixture(url.searchParams.get('key')));
           case '/api/tokens/recent': return json({ ok: true, symbol: '¥', entries: usageRecentFixture() });
+          // 价目表：跟着全局配置里的默认模型，平台与模型都不由 query 决定。
+          case '/api/pricing': return json(pricingFixture(state));
+        }
+      }
+      // 价目覆盖：与真实现同为整段 PUT，但只收单价 —— 峰谷口径属于声明面，本机层改不了。
+      if (method === 'PUT' && path === '/api/pricing') {
+        try {
+          const local = normalizeLocalPricing(body ?? {});
+          const declaredIds = new Set((PRICING_CATALOG.models ?? []).map((item) => String(item.id)));
+          for (const [id, entry] of Object.entries(local.models)) {
+            if (declaredIds.has(id)) continue;
+            if (entry.cacheMiss === undefined || entry.output === undefined) {
+              return json({ ok: false, error: `新模型 ${id} 要同时填「未命中」与「输出」单价，否则算不了钱` }, 400);
+            }
+          }
+          state.pricingLocal[PRICING_AGENT.id] = Object.keys(local.models).length ? local : null;
+          return json(pricingFixture(state));
+        } catch (error) {
+          return json({ ok: false, error: String(error?.message ?? error) }, 400);
         }
       }
       if (method === 'PATCH' || method === 'DELETE') {
+        // 恢复平台申报：删掉本机覆盖，回落申报价（账本不动）。
+        if (method === 'DELETE' && path === '/api/pricing') {
+          state.pricingLocal[PRICING_AGENT.id] = null;
+          return json(pricingFixture(state));
+        }
         if (method === 'PATCH' && path === '/api/access') {
           const axis = (raw) => ({
             mode: raw?.mode === 'deny' ? 'deny' : 'allow',
@@ -1661,7 +1740,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           const id = decodeURIComponent(path.slice('/api/runtime/capabilities/'.length));
           state.capabilityPatches = state.capabilityPatches ?? {};
           state.capabilityPatches[id] = body;
-          return json({ ok: true, capability: { id, label: body?.label, note: body?.note, tools: body?.tools, builtin: true, platformVisible: [], agentModules: [], hasRows: true, rowsCount: 2 } });
+          return json({ ok: true, capability: { id, label: body?.label, note: body?.note, mcp: body?.mcp, skills: body?.skills, builtin: true } });
         }
         // 会话档案：与真实 PATCH 同一条落点（capability 空 = 跟随平台默认，behavior 的 inherit = 用平台默认行为）。
         const profilePatch = path.match(/^\/api\/sessions\/([^/]+)\/profile$/);
@@ -1863,22 +1942,6 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
               saveApply: state.roleSaveApply,
               limits: { injectMaxChars: state.roleInjectMax, source: 'promptBlocks.core-persona.maxChars' },
             });
-          case '/api/preset/sim-prompt': {
-            const preset = String(body.preset || 'chat-v2');
-            const content = String(body.content ?? '');
-            const unchanged = content === state.simPrompts[preset];
-            if (!unchanged) state.simPrompts[preset] = content;
-            return json({ ok: true, unchanged, chars: content.length, warnings: [], synced: true, requiresRestart: !unchanged, status: presetStatusFixture(preset) });
-          }
-          case '/api/preset/sim-prompt/reset': {
-            const preset = String(body.preset || 'chat-v2');
-            state.simPrompts[preset] = state.simDefaults[preset];
-            return json({ ok: true, restored: true, chars: state.simDefaults[preset].length, warnings: [], requiresRestart: true, status: presetStatusFixture(preset) });
-          }
-          case '/api/preset/sim-prompt/restore': {
-            const preset = String(body.preset || 'chat-v2');
-            return json({ ok: true, restoredFrom: `${preset}.capability.yml.fixture`, requiresRestart: true });
-          }
           case '/api/memory/entries': {
             const key = String(body.key || '');
             const bucket = memoryBucket(state, key);
@@ -1963,6 +2026,17 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/restart': return json({ ok: true, message: '离线预览：已模拟重启，实际服务未改变。' });
           case '/api/workspace/reset': state.sessions = []; return json({ ok: true, archivedCount: 3 });
           case '/api/session/reset': state.sessions = state.sessions.filter(x => x.key !== body.key); return json({ ok: true });
+          // 改名是对端标题与档案显示名的同一个写口。
+          case '/api/session/rename': {
+            const key = String(body?.key || '');
+            const title = String(body?.title || '').replace(/\s+/g, ' ').trim();
+            const row = state.sessions.find((item) => item.key === key);
+            if (!row) return json({ ok: false, error: '会话不存在' }, 404);
+            if (!title) return json({ ok: false, error: '标题不能为空' }, 400);
+            if (title.length > 60) return json({ ok: false, error: '标题最多 60 个字符' }, 400);
+            state.displayNames = { ...(state.displayNames ?? {}), [key]: title };
+            return json({ ok: true, key, sessionId: row.sessionId, title });
+          }
           case '/api/slang/extract': return json({ ok: true });
           case '/api/slang/research': return json({ ok: true, count: body.ids?.length || 1 });
           case '/api/slang/batch-confirm':

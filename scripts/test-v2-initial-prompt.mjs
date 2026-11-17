@@ -276,9 +276,11 @@ await test('端到端：群消息进线触发的首次唤醒，投递给 DSH 的
       self_id: 999,
       user_id: 123,
       message_id: 4242,
+      message_type: 'group',
+      group_id: 456,
       message: [{ type: 'text', data: { text: '大家好' } }],
       raw_message: '大家好',
-      sender: { nickname: '测试群友', card: '测试群友' }
+      sender: { user_id: 123, nickname: '测试群友', card: '测试群友' },
     };
     await h.handleIncoming('group', '456', event, h.cfg);
     for (let i = 0; i < 100 && !h.calls.prompts.length; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));

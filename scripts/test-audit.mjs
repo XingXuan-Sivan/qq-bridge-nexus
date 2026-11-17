@@ -1,8 +1,14 @@
 // Safe audit suite: fixtures and mocks only, never production QQ/DSH.
+//
+// 用法：
+//   node scripts/test-audit.mjs                      全部脚本，默认并发（上限 4）
+//   node scripts/test-audit.mjs --only capability    只跑文件名含该词的脚本，可重复
+//   node scripts/test-audit.mjs --jobs 8             指定并发；--serial 退回串行
+//   node scripts/test-audit.mjs --list               列出清单
 import path from 'node:path';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tests = [
@@ -17,7 +23,7 @@ const tests = [
   'test-dsh-inbox-projection.mjs',
   'test-md-to-plain.mjs', 'test-onebot-send-call.mjs', 'test-slang-learn.mjs', 'test-mux-reconnect.mjs',
   'test-token-economy.mjs', 'test-qq-model-view.mjs', 'test-qq-preset-contract.mjs',
-  'test-reply-wait.mjs', 'test-preset-prompt.mjs', 'test-role-card.mjs',
+  'test-reply-wait.mjs', 'test-role-card.mjs',
   // 体检修复回归：无令牌智能体调用面、send-burst 失败回滚、唤醒限频重试、
   // 定时器类暂存唤醒补发、collector 生命周期、ownerQQ 覆盖语义、预设名校验、
   // wake triggers 白名单、memory-update 边界、wait 租约归一化、md/黑话/表情/账本；
@@ -37,6 +43,8 @@ const tests = [
   'test-v2-initial-prompt.mjs',
   // 令牌账本 / 价目表 与 体检修复回归（纯函数，无外部依赖）
   'test-token-usage.mjs', 'test-hardening.mjs',
+  // 价目表本机覆盖层（state/pricing/<agent>.yml）：只存差异、整段替换、新增模型必须能算钱
+  'test-pricing.mjs',
   // 语音发送（纯函数 + 端点存在性；真发语音只在 --live 或 CLI 里做）
   'test-voice.mjs',
   // 音量：参数校验 + 真的调用 ffmpeg 调音量 + 自算 RMS 验证增益
@@ -82,8 +90,6 @@ const tests = [
   // 插件内核与配置 schema：清单校验、默认值/边界、无 schema 兼容。
   'test-plugin-kernel.mjs',
   'test-plugin-config-schema.mjs',
-  // 预设编辑器源文件存储（P3）：元数据/扩展授权校验、备份恢复、YAML 结构底线。
-  'test-preset-store.mjs',
   // 行为档案（全局配置）：YAML 校验、预设绑定、坏文件 fail closed。
   'test-behavior-profiles.mjs',
   // 人格三层解析：会话覆盖 → provider → 全局本地卡，off 硬覆盖，缺卡时继续往下落。
@@ -205,6 +211,9 @@ const tests = [
   // B5 运行期适配器：两侧注册表的 fail-closed、门面委托（buildSendCall / AgentApiClient），
   // 以及「平台专属实现不得回流 src/ 根与 src/lib/」。
   'test-platform-adapters.mjs',
+  // S2 动作面：12 项词表、未声明即 capability_unsupported、reply/reaction 降级、
+  // 以及 QQ 适配器把拍一拍 / 历史 / 转发 / 收藏表情落到哪个 OneBot 动作。
+  'test-user-actions.mjs',
   // B6 中立段与统一出站：11 种段的形状校验、按 capabilities 降级、段降级不得扩大能力。
   'test-unified-segments.mjs',
   // B6 统一事件：形状校验 + platform/account 由内核补全（插件伪造的平台必须被覆盖）。
@@ -213,6 +222,8 @@ const tests = [
   'test-unified-inbound.mjs',
   // C3 QQ 入站：OneBot 报文 → 统一事件（陌生段降级不丢消息）+ connect() 的订阅/退订契约。
   'test-qq-inbound.mjs',
+  // S3a 入站正文双写：self / sender 名片与角色 / message.seq / 媒体清单与 raw 同值。
+  'test-inbound-body-fields.mjs',
   // B6 插件 transport：id 冲突拒绝、sendAction 路由、降级先于 transport、QQ 报文不变；
   // C3 起还跑一遍 mock 平台端到端（收 → 准入 → 唤醒 → 发）。
   'test-transport-plugin.mjs',
@@ -229,6 +240,9 @@ const tests = [
   // C5 AgentPort：中立动词 + 能力位 fail-closed（capability_unsupported 而不是 TypeError），
   // 以及 DSH 适配器把每个动词落到正确的 RPC（策略判定留在桥接）。
   'test-agent-port.mjs',
+  // S5 第二消费者：同一份能力档意图，DSH 编译成插件行、ACP 编译成 session/new 报文；
+  // 两个执行体的认领差异（提示通道 / 对端权限档）必须可计算，不静默失真。
+  'test-acp-capability-intent.mjs',
   // P1 Agent 侧插件化：owner 归属（同 owner 覆盖 / 换 owner 拒绝 / 按 owner 注销）、
   // 装配结论（离线 / 契约不合规 / 自证失败）与三条诊断码、插件内核的 agent-provider:provide。
   'test-agent-provider.mjs',
@@ -236,21 +250,100 @@ const tests = [
   // 以及注册表为控制台补的 configured / probe 读视图与 active_pending_restart。
   'test-platform-config.mjs',
   // P3 多实例：一条 `platforms.users` 条目 = 一个实例（enabled 是条目级键、userInstances
-  // 派生）、注册表的 inboundState / outbound / rawEvent，以及只存在配置里的条目也可见（config_only）。
+  // 派生）、注册表的 inboundState / outbound，以及只存在配置里的条目也可见（config_only）。
   'test-user-instances.mjs',
 ];
-let failed = 0;
-for (const test of tests) {
-  console.log(`\nRunning ${test}`);
-  const result = spawnSync(process.execPath, [path.join(root, 'scripts', test)], {
-    cwd: root, stdio: 'inherit', timeout: 60000,
-    // 离线测试一律不碰真实 NapCat 目录（macOS 上在 QQ 沙盒容器里，读它会弹授权窗并卡住）
-    env: { ...process.env, QQ_BRIDGE_TEST_LIVE: '0', QQ_BRIDGE_NAPCAT_HOME: process.env.QQ_BRIDGE_NAPCAT_HOME || path.join(os.tmpdir(), 'qq-bridge-test-no-napcat') },
-  });
-  if (result.status !== 0 || result.error) {
-    failed++;
-    console.error(`FAILED ${test}: ${result.error?.message || `exit ${result.status}`}`);
+// 运行器：132 个脚本串行 spawn 的固定开销比测试本身还大，stdio 直连又会把终端刷爆。
+// 默认并发（上限 4），每个脚本的输出先收进内存 —— 通过只回一行，失败才整段回放。
+const argv = process.argv.slice(2);
+let jobs = Math.min(4, Math.max(1, os.availableParallelism?.() ?? os.cpus().length ?? 1));
+const only = [];
+for (let i = 0; i < argv.length; i += 1) {
+  const arg = argv[i];
+  if (arg === '--list') {
+    console.log(tests.join('\n'));
+    process.exit(0);
+  } else if (arg === '--serial') {
+    jobs = 1;
+  } else if (arg === '--jobs' || arg === '-j') {
+    i += 1;
+    jobs = Math.max(1, Number(argv[i]) || 1);
+  } else if (arg.startsWith('--jobs=')) {
+    jobs = Math.max(1, Number(arg.slice('--jobs='.length)) || 1);
+  } else if (arg === '--only' || arg === '-o') {
+    i += 1;
+    only.push(argv[i] ?? '');
+  } else if (arg.startsWith('--only=')) {
+    only.push(arg.slice('--only='.length));
+  } else {
+    only.push(arg);
   }
 }
-console.log(`\nAudit suite: ${tests.length - failed}/${tests.length} scripts passed.`);
-process.exitCode = failed ? 1 : 0;
+const selected = only.length === 0
+  ? tests
+  : tests.filter((name) => only.some((needle) => needle && name.includes(needle.replace(/\.mjs$/, ''))));
+if (selected.length === 0) {
+  console.error(`没有匹配的脚本：${only.join('、')}（用 --list 看全部）`);
+  process.exit(1);
+}
+
+const TIMEOUT_MS = 60000;
+const env = {
+  ...process.env,
+  QQ_BRIDGE_TEST_LIVE: '0',
+  // 离线测试一律不碰真实 NapCat 目录（macOS 上在 QQ 沙盒容器里，读它会弹授权窗并卡住）
+  QQ_BRIDGE_NAPCAT_HOME: process.env.QQ_BRIDGE_NAPCAT_HOME || path.join(os.tmpdir(), 'qq-bridge-test-no-napcat'),
+};
+const running = new Set();
+
+function runScript(test) {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const child = spawn(process.execPath, [path.join(root, 'scripts', test)], { cwd: root, env });
+    running.add(child);
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    const timer = setTimeout(() => {
+      output += `\n[runner] ${test} 超过 ${TIMEOUT_MS / 1000} 秒，已终止（按失败计）\n`;
+      child.kill('SIGKILL');
+    }, TIMEOUT_MS);
+    const finish = (ok) => {
+      clearTimeout(timer);
+      running.delete(child);
+      resolve({ test, ok, output, ms: Date.now() - startedAt });
+    };
+    child.on('error', (error) => { output += `\n[runner] ${error.message}\n`; finish(false); });
+    child.on('close', (code) => finish(code === 0));
+  });
+}
+
+const results = [];
+let cursor = 0;
+const suiteStartedAt = Date.now();
+async function worker() {
+  while (cursor < selected.length) {
+    const test = selected[cursor];
+    cursor += 1;
+    const result = await runScript(test);
+    results.push(result);
+    if (result.ok) console.log(`ok   ${result.test} (${result.ms}ms)`);
+    else console.log(`FAIL ${result.test} (${result.ms}ms)\n${result.output.replace(/^/gm, '    ')}`);
+  }
+}
+process.on('SIGINT', () => {
+  for (const child of running) child.kill('SIGKILL');
+  process.exit(130);
+});
+const concurrency = Math.min(jobs, selected.length);
+await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+const failed = results.filter((result) => !result.ok).map((result) => result.test).sort();
+const seconds = ((Date.now() - suiteStartedAt) / 1000).toFixed(1);
+console.log(`\nAudit suite: ${results.length - failed.length}/${results.length} scripts passed in ${seconds}s (jobs=${concurrency}).`);
+if (failed.length) {
+  console.log(`失败：${failed.join('、')}`);
+  process.exitCode = 1;
+}

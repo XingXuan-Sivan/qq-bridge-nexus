@@ -69,6 +69,22 @@ function clientVersion() {
 
 const clean = (value) => String(value ?? '').trim();
 
+/**
+ * 中立的建会话入参 → `session/new` 的报文。
+ *
+ * 桥接给的是与执行体无关的三样东西（工作目录、MCP 服务器、system prompt），这里只做协议
+ * 翻译：`workspaceId` 与 `agentPreset` 不进报文 —— 前者 ACP 没有，后者走建会话后的
+ * `session/set_config_option`（`agent` 选项）。
+ */
+export function sessionNewPayload(params = {}, fallbackCwd = '') {
+  const payload = {
+    cwd: clean(params.cwd) || clean(fallbackCwd) || process.cwd(),
+    mcpServers: Array.isArray(params.mcpServers) ? params.mcpServers : [],
+  };
+  if (params.systemPrompt) payload.systemPrompt = String(params.systemPrompt);
+  return payload;
+}
+
 /** 选项的取值清单（`configOptions[].options` 是 `[{value, name}]`）。 */
 const optionValues = (option) => (Array.isArray(option?.options) ? option.options : [])
   .map((item) => clean(item?.value))
@@ -321,12 +337,7 @@ export function createAcpPort({
       // 明知会被忽略却静默丢弃，会让「换了工作区」在日志里查不出来。
       noteOnce('workspace-ignored', 'ACP 没有工作区概念：workspaceId 被忽略，会话目录由 cwd 决定');
     }
-    const dir = clean(params.cwd) || clean(cwd) || process.cwd();
-    const payload = {
-      cwd: dir,
-      mcpServers: Array.isArray(params.mcpServers) ? params.mcpServers : [],
-    };
-    if (params.systemPrompt) payload.systemPrompt = String(params.systemPrompt);
+    const payload = sessionNewPayload(params, cwd);
     const raw = await client.request('session/new', payload);
     const sessionId = clean(raw?.sessionId);
     if (!sessionId) throw new Error('session/new 没有返回 sessionId');

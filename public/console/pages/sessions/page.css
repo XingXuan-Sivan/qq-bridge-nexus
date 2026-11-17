@@ -1,7 +1,7 @@
 /* 会话与审批页：两张表都复用 .tool-log-table + 全局表格样式，这里只留本页独有的窄屏处理。
    标签页（.page-tabs/.page-tab）在 css/components.css 里，和别的页面共用，不要在这里重写。 */
 @media (max-width: 760px) {
-  /* 会话行里「DSH 会话」是最长的一列，窄屏优先让操作列可点，别把按钮挤出屏幕。 */
+  /* 会话行里「状态 + 未读 + 最近唤醒」三列都很窄，窄屏优先让操作列可点，别把按钮挤出屏幕。 */
   #sessionList table { table-layout:auto }
 }
 
@@ -59,9 +59,6 @@
   background: var(--surface);
   min-width: 0;
 }
-.detail-card--wide {
-  grid-column: 1 / -1;
-}
 .detail-card h4 {
   margin: 0 0 6px;
   font-size: 14px;
@@ -91,6 +88,24 @@
 .detail-danger .btn.danger {
   margin-right: 8px;
 }
+/* 折叠卡里的导语：.settings-content 自带 6px 上内边距，这里只管与下文的分隔。 */
+.session-detail-grid .settings-content > .meta {
+  margin: var(--space-3) 0 var(--space-5);
+}
+/* 关联/危险操作是 .settings-group 折叠卡：它自带 margin-top，放进栅格会被 gap 叠加成双倍间距。 */
+.session-detail-grid > .settings-group {
+  margin-top: 0;
+}
+.detail-danger > summary {
+  color: var(--err);
+}
+/* 运行卡的结论行：一段话读完「档/行为/权限/模型」，放在字段之后、工具卡之前。 */
+.detail-conclusion {
+  margin: var(--space-6) 0 var(--space-5);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
 
 /* 会话列：会话名一行，平台/类型等标签另起一行。 */
 .session-name { font-weight: 600; line-height: 1.4; }
@@ -104,6 +119,3 @@
 }
 
 /* 详情里的准入：两个并排复选框，不写额外说明。 */
-@media (max-width: 900px) {
-  .session-detail-grid { grid-template-columns: minmax(0, 1fr); }
-}

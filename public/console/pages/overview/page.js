@@ -34,10 +34,6 @@ function renderCards() {
       className: 'is-group',
       body: '<div data-usage-fields="recent"></div>',
     }),
-    cardHtml({
-      className: 'is-group',
-      body: '<div data-usage-fields="prices"></div>',
-    }),
   ].join('');
 }
 

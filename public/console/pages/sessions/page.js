@@ -7,6 +7,7 @@ import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
+import { collapseHtml } from '../../components/collapse/collapse.js';
 import { bindCounters, bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
 import { permissionLevelLabel } from '../../js/permission-levels.js';
@@ -22,6 +23,7 @@ import {
   loadModelCatalog,
   platformFilterOptions,
   platformLabel,
+  registryLabel,
 } from '../../js/registry.js';
 
 const MODE_LABEL = {
@@ -93,12 +95,12 @@ function nameCell(entry) {
     + `<div class="session-tags">${keyLine}${platformTag}${kindPill(entry)}${ownerTag}</div>`;
 }
 
-function dshCell(entry) {
-  if (!entry.sessionId) return '<span class="tag">未建</span>';
-  const status = entry.dsh?.status || 'unknown';
+/** 健康度：列表行与详情头部共用一份映射（在线 / 缺失 / 未知），还没有会话就写「未建」。 */
+function agentHealthTag(health, sessionId) {
+  if (!sessionId) return '<span class="tag">未建</span>';
+  const status = health?.status || 'unknown';
   const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
-  const pill = status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag';
-  return `<span class="${pill}">${esc(label)}</span>`;
+  return `<span class="${status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag'}">${esc(label)}</span>`;
 }
 
 
@@ -287,6 +289,10 @@ function renderSessions() {
   const platforms = platformOptions();
   const rows = sessionsCache.map((entry) => {
     const unread = entry.unread ? `<span class="tag tag--danger">${entry.unread}</span>` : '<span class="meta">0</span>';
+    // 显示名的唯一写口：对端标题与档案 displayName 由这个弹窗一起写。
+    const rename = entry.sessionId
+      ? `<button type="button" class="btn small" data-rename-key="${esc(entry.key)}">重命名</button>`
+      : '<button type="button" class="btn small" disabled title="还没有 DSH 会话，下一条消息到达后再改">重命名</button>';
     const delProfile = entry.hasProfile
       ? ` <button type="button" class="btn small danger" data-drop-key="${esc(entry.key)}">删档案</button>`
       : '';
@@ -296,10 +302,10 @@ function renderSessions() {
         modeCell(entry),
         accessCell(entry),
         personaCell(entry),
-        dshCell(entry),
+        agentHealthTag(entry.health, entry.sessionId),
         unread,
         whenCell(entry.lastWakeAt),
-        `<button type="button" class="btn small" data-manage-key="${esc(entry.key)}">管理</button>${delProfile}`,
+        `<button type="button" class="btn small" data-manage-key="${esc(entry.key)}">管理</button>${rename}${delProfile}`,
       ],
       attrs: { 'data-filter-platform': platformOf(entry), 'data-filter-kind': entry.kind || '' },
     };
@@ -310,10 +316,10 @@ function renderSessions() {
       { label: '模式', width: '110px' },
       { label: '准入（被动 / 主动）', width: '180px' },
       { label: '人格', width: '160px' },
-      { label: 'DSH', width: '80px' },
+      { label: '状态', width: '80px' },
       { label: '未读', width: '60px' },
       { label: '最近唤醒', width: '95px' },
-      { label: '操作', width: '150px' },
+      { label: '操作', width: '210px' },
     ],
     rows,
     pageSize: 20,
@@ -354,6 +360,9 @@ function renderSessions() {
 
   box.querySelectorAll('[data-manage-key]').forEach((btn) => btn.addEventListener('click', () => {
     openDetail(btn.dataset.manageKey);
+  }));
+  box.querySelectorAll('[data-rename-key]').forEach((btn) => btn.addEventListener('click', () => {
+    openRename(btn.dataset.renameKey);
   }));
   box.querySelectorAll('[data-drop-key]').forEach((btn) => btn.addEventListener('click', () => {
     void dropProfile(btn.dataset.dropKey);
@@ -445,7 +454,7 @@ function openRename(key) {
   const input = document.getElementById('sessionRenameInput');
   if (!overlay || !input || !entry) return;
   renameTarget = entry;
-  input.value = '';
+  input.value = entry.displayName || '';
   input.placeholder = entry.sessionId;
   const who = document.getElementById('sessionRenameWho');
   if (who) who.textContent = `${entry.key} → ${entry.sessionId}`;
@@ -485,16 +494,9 @@ let detailKey = null;
 let detailCache = null;
 let detailDirty = false;
 let detailRendering = false; // 渲染期间会主动派发 change 同步下拉联动，不能把它当成用户编辑
-// 「Agent 平台与权限」的数据（GET /api/sessions/:key/agent）：读的是 Agent 平台此刻的状态
-// （对端档位、注入通道），与上面那份桥接档案分开取，也不写回档案。
+// 会话装到哪个 Agent 实例上（GET /api/sessions/:key/agent）：只用它的 `instanceForeign` ——
+// 换过平台才在危险操作里给「在新平台上重开」。执行体与对端权限档的正文在「平台 › 能力」，不在这里复述。
 let detailAgent = null;
-
-function detailDshLabel(health, sessionId) {
-  if (!sessionId) return '<span class="tag">未建</span>';
-  const status = health?.status || 'unknown';
-  const label = { online: '在线', missing: '缺失', unknown: '未知' }[status] || status;
-  return `<span class="${status === 'online' ? 'tag tag--success' : status === 'missing' ? 'tag tag--danger' : 'tag'}">${esc(label)}</span>`;
-}
 
 // 详情弹窗的模型目录：与平台详情页同一个读口（声明 + 实时），打开时取一次，
 // 供运行卡的提供方 / 模型 / 思考强度下拉使用。
@@ -594,88 +596,61 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
   if (preferredReasoning && efforts.some((e) => e.id === preferredReasoning)) reasonEl.value = preferredReasoning;
 }
 
-const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
-/** 能力档的生效方式与受众：与能力档 yml 的 runtime 段同一套取值。 */
-const APPLY_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
+/** 能力档的受众：与能力档 yml 的 runtime 段同一套取值。 */
 const AUDIENCE_LABEL = { owner: '仅主人私聊', access: '按准入' };
-
-/** 提示注入通道：降级（能力档要 system 但 Agent 平台没有）只说事实，不把降级当配置生效。 */
-function promptChannelHtml(channel) {
-  if (!channel) return '<span class="meta">未声明</span>';
-  const channelId = channel.channel || '';
-  const label = PROMPT_CHANNEL_LABEL[channelId] || channelId || '—';
-  const tag = `<span class="tag${channel.degraded ? ' tag--warning' : ''}">${esc(label)}</span>`;
-  const requested = channel.requested && channel.requested !== channelId
-    ? ` <span class="meta">能力档要求 ${esc(PROMPT_CHANNEL_LABEL[channel.requested] || channel.requested)}</span>`
-    : '';
-  const reason = channel.degraded
-    ? `<div class="meta">${esc(channel.reason || 'Agent 平台没有这个通道，已降级')}</div>`
-    : '';
-  return `${tag}${requested}${reason}`;
-}
-
-/**
- * 「Agent 平台与执行体」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
- * 这一块全部只读：能改的能力档 / 行为档案 / 权限级别都在上面的「运行」卡里，
- * 对端权限档由能力档在建会话时钉住，会话内没有写口。
- */
-function detailAgentFields() {
-  const agent = detailAgent;
-  if (!agent) {
-    return [{
-      name: 'detailAgentMissing', type: 'custom', span: 2,
-      html: '<span class="meta err">Agent 平台信息读取失败：不影响上面的档案保存，重开详情再试一次。</span>',
-    }];
-  }
-  const platform = agent.agentPlatform || {};
-  const capability = agent.capability || null;
-  const permission = agent.permission || {};
-  const peer = permission.peer || null;
-  const pin = permission.peerPin || null;
-  return [
-    {
-      name: 'detailAgentInstance', type: 'custom', label: 'Agent 平台', span: 2,
-      html: `<strong>${esc(platform.label || platform.id || '—')}</strong>`
-        + ` <code>${esc(agent.instance || '')}</code> `
-        + (agent.instanceForeign
-          ? '<span class="tag tag--warning">跟随建会话时的实例</span>'
-          : '<span class="tag tag--success">当前 Agent 平台</span>'),
-      hint: agent.instanceForeign
-        ? '这个会话建在切换前的实例上：历史与状态留在旧实例，只有「重开」才会在新实例上新建会话。'
-        : '会话绑在这个实例上；换 Agent 平台后旧会话不会自动迁移。',
-    },
-    {
-      name: 'detailAgentCapability', type: 'custom', label: '生效能力档', span: 2,
-      html: capability
-        ? `<strong>${esc(capability.label || capability.id)}</strong> <code>${esc(capability.id)}</code>`
-          + ` <span class="tag">${esc(APPLY_LABEL[capability.apply] || capability.apply || '—')}</span>`
-          + ` <span class="tag">${esc(AUDIENCE_LABEL[capability.audience] || capability.audience || '—')}</span>`
-        : '<span class="meta">没有匹配的能力档：纯聊天会话，权限恒只读</span>',
-      hint: '生效方式、受众与对端权限档都来自能力档的 runtime 段；换档用上面的「运行 › 能力档」。',
-    },
-    {
-      name: 'detailAgentPrompt', type: 'custom', label: '提示注入', span: 2,
-      html: promptChannelHtml(agent.promptChannel),
-      hint: '这是平台话术进会话的方式；降级只记一条审计，不改变对端配置。',
-    },
-    {
-      name: 'detailAgentPeer', type: 'custom', label: '对端权限档', span: 2,
-      html: !permission.peerPermission
-        ? '<span class="meta">这套能力档不钉对端档位</span>'
-        : peer?.readable
-          ? `<code>${esc(peer.preset)}</code>`
-            + (peer.text ? ` <span class="meta">${esc(peer.text)}</span>` : '')
-          : `<span class="meta">读不出来：${esc(peer?.reason || '对端没有返回档位')}（不等于没改过）</span>`,
-      hint: pin?.preset
-        ? `建会话时钉住的是 ${pin.preset}${pin.at ? `（${whenText(pin.at)}）` : ''}；会话内不可改。`
-        : '由能力档在建会话时钉住，会话内没有写口。',
-    },
-  ];
-}
 
 /** 换过 Agent 平台后，才给「在新平台上重开」（动作在危险操作卡里）。 */
 function canReopenOnNewAgent() {
   return detailAgent?.instanceForeign === true;
+}
+
+/**
+ * 「这个会话能用的工具」：求交结果（平台声明 ∩ 权限级别），默认折叠。
+ *
+ * 判定不在这里：`/api/sessions/<key>/profile` 的 `tools` 由 src/session/tools.mjs 算好，
+ * 页面只把三列摆出来：组 / 能用 / 用不了（原因写在 title 里）。
+ */
+function toolsCardHtml(tools) {
+  if (!tools || !Array.isArray(tools.groups) || !tools.groups.length) return '';
+  const tag = (item, cls = '') => `<span class="tag${cls ? ` ${cls}` : ''}"${item.reason ? ` title="${esc(item.reason)}"` : ''}>${esc(item.label)}</span>`;
+  const rows = tools.groups.map((group) => ({
+    cells: [
+      `<strong>${esc(group.label)}</strong>`,
+      group.available.length ? group.available.map((item) => tag(item)).join(' ') : '<span class="meta">全都用不了</span>',
+      group.unavailable.length ? group.unavailable.map((item) => tag(item, 'tag--warning')).join(' ') : '<span class="meta">—</span>',
+    ],
+  }));
+  return collapseHtml({
+    id: 'session-tools',
+    title: `这个会话能用的工具（${tools.total}）`,
+    body: `<p class="meta">${esc(tools.note || '')}</p>${dataTableHtml({
+      columns: [{ label: '工具组', width: '120px' }, { label: '能用' }, { label: '用不了', width: '220px' }],
+      rows,
+      pageSize: 10,
+      fit: true,
+    })}`,
+  });
+}
+
+/**
+ * 运行卡底部的一行结论：把四项互相解释的配置拼成一句，缺省写「未设置」。
+ * 只拼字符串，不新增字段：能力档的生效方式与受众读 `capabilities[]`，权限读后端下发的 effective。
+ */
+function runConclusion(data) {
+  const capabilities = Array.isArray(data.capabilities) ? data.capabilities : [];
+  const activeId = data.capability || data.defaultCapability || '';
+  const active = capabilities.find((item) => item.id === activeId) || null;
+  const capabilityText = active
+    ? `${active.label || active.id}（${registryLabel('apply', active.apply) || active.apply}${active.audience ? ` · ${AUDIENCE_LABEL[active.audience] ?? active.audience}` : ''}）`
+    : '无默认能力档';
+  const behaviorText = data.behavior === 'inherit'
+    ? (data.defaultBehavior || '未绑定')
+    : data.behavior === 'none' ? '不绑定' : (data.behavior || '未绑定');
+  const model = data.effectiveModel || null;
+  const modelText = model?.model
+    ? `${model.provider || '—'}/${model.model}${model.reasoning ? ` / ${model.reasoning}` : ''}`
+    : '未设置';
+  return `生效：能力档 ${capabilityText} · 行为 ${behaviorText} · 权限 ${permissionLevelLabel(data.permission?.effective) || '—'} · 模型 ${modelText}`;
 }
 
 function renderDetail(data) {
@@ -698,60 +673,45 @@ function renderDetail(data) {
     ['question', triggers.question], ['poke', triggers.poke],
   ].filter(([, on]) => on === true).map(([id]) => id);
   // 卡片单列排布；卡内的字段宿主交给 renderFields（两列），只读块与按钮行直接写 HTML。
-  const card = (title, meta, host, extra = '') => `<div class="detail-card">`
+  // 第三参是宿主数组：一张卡可以挂多个表单区（人格 + 提示、唤醒 + 准入）。
+  const card = (title, meta, hosts = [], extra = '') => `<div class="detail-card">`
     + `<h4>${esc(title)}</h4>`
     + (meta ? `<div class="meta">${esc(meta)}</div>` : '')
-    + (host ? `<div data-detail-form="${esc(host)}"></div>` : '')
+    + hosts.map((host) => `<div data-detail-form="${esc(host)}"></div>`).join('')
     + extra
     + '</div>';
 
   body.innerHTML = `
     <div class="session-detail-head">
-      <span class="session-detail-key">${esc(data.key)}</span>
-      ${detailDshLabel(data.dsh, data.sessionId)}
+      <span class="session-detail-key" title="${esc(data.key)}">${esc(data.displayName || data.key)}</span>
+      ${agentHealthTag(data.health, data.sessionId)}
       <span class="meta">${data.sessionId ? esc(data.sessionId) : '还没有 DSH 会话，下一条消息到达时会自动创建'}</span>
     </div>
     <div class="session-detail-grid">
-      ${card('显示名', '自定义名会同步写 DSH 侧栏标题；留空则用默认的「平台·类型 + ID」。', 'displayName')}
-      ${card('准入', '这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', 'access', '<div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
-      ${card('运行', '能力档决定装哪套预设与工具面；行为档案决定会话引擎；权限级别只过滤本会话能调用的平台工具。三项都默认跟随平台或全局。', 'run')}
-      ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
-      ${card('初始提示词', '', 'prompt')}
-      ${card('唤醒', '这里只改最常见的触发条件；合批窗口与投递预算由平台行为档案的 social-v2 决定，不在会话上。', 'wake', '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div>')}
-
-      <div class="detail-card">
-        <h4>Agent 平台与执行体</h4>
-        <div class="meta">会话绑在 Agent 平台的实例上；这一块是执行体侧的只读事实，改档在上面「运行」卡。</div>
-        <div data-detail-form="agent"></div>
-      </div>
-
-      <div class="detail-card">
-        <h4>记忆</h4>
-        <div class="meta">本机轻量记忆按会话隔离；这里只显示计数与清空入口，编辑在「记忆」页。</div>
-        <div class="detail-readonly" id="detailMemory"><span class="meta">读取中…</span></div>
-        <div class="detail-actions">
-          <button class="btn small danger" type="button" data-detail-clear-memory>清空本会话记忆</button>
-          <button class="btn small" type="button" data-detail-nav="memory">去记忆页</button>
-        </div>
-      </div>
-
-      <div class="detail-card">
-        <h4>定时任务</h4>
-        <div class="meta">指向这个会话的定时任务（只读）；增删改仍在「定时任务」页。</div>
-        <div class="detail-readonly" id="detailTasks"><span class="meta">读取中…</span></div>
-        <div class="detail-actions"><button class="btn small" type="button" data-detail-nav="scheduler">去定时任务</button></div>
-      </div>
-
-      <div class="detail-card detail-danger">
-        <h4>危险操作</h4>
-        <div class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话；换过 Agent 平台后可以用「在新平台上重开」把会话迁到新平台的实例。</div>
-        <div class="detail-actions">
-          <button class="btn small" type="button" data-detail-rebuild>重建 DSH 会话</button>
-          <button class="btn small danger" type="button" data-detail-reset>重置会话状态</button>
-          ${canReopenOnNewAgent() ? '<button class="btn small" type="button" data-detail-agent-reopen>在新 Agent 平台上重开</button>' : ''}
-        </div>
-        ${data.sessionId ? '' : '<div class="field-hint">还没有 DSH 会话：下一条消息到达时会自动创建；也可以现在重建一次。</div>'}
-      </div>
+      ${card('运行', '能力档决定装哪套预设与工具面；行为档案决定会话引擎；权限级别只过滤本会话能调用的平台工具。三项都默认跟随平台或全局。', ['run'],
+        `<p class="detail-conclusion">${esc(runConclusion(data))}</p>${toolsCardHtml(data.tools)}`)}
+      ${card('人格与提示', '人格决定它用谁的语气；初始提示词只在 AI 第一次进入这个会话时读一次。', ['persona', 'prompt'])}
+      ${card('唤醒与准入', '上面是触发条件；下面是这份全局名单，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', ['wake', 'access'],
+        '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div><div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
+      ${collapseHtml({
+        id: 'session-links',
+        title: '关联（记忆 · 定时任务）',
+        body: '<p class="meta">还有什么挂在这个会话上；清空与跳转都在这里。</p>'
+          + '<div class="detail-readonly" id="detailMemory"><span class="meta">读取中…</span></div>'
+          + '<div class="detail-actions"><button class="btn small danger" type="button" data-detail-clear-memory>清空本会话记忆</button><button class="btn small" type="button" data-detail-nav="memory">去记忆页</button></div>'
+          + '<div class="detail-readonly u-mt-12" id="detailTasks"><span class="meta">读取中…</span></div>'
+          + '<div class="detail-actions"><button class="btn small" type="button" data-detail-nav="scheduler">去定时任务</button></div>',
+      })}
+      ${collapseHtml({
+        id: 'session-danger',
+        title: '危险操作',
+        className: 'detail-danger',
+        body: '<p class="meta">重建会归档当前 DSH 会话并新建一个（上下文清空，人格/提示词/准入保留）；重置会清掉唤醒、未读、队列和审批，下一条消息重新建会话；换过 Agent 平台后可以用「在新平台上重开」把会话迁到新平台的实例。</p>'
+          + '<div class="detail-actions"><button class="btn small" type="button" data-detail-rebuild>重建 DSH 会话</button><button class="btn small danger" type="button" data-detail-reset>重置会话状态</button>'
+          + (canReopenOnNewAgent() ? '<button class="btn small" type="button" data-detail-agent-reopen>在新 Agent 平台上重开</button>' : '')
+          + '</div>'
+          + (data.sessionId ? '' : '<div class="field-hint">还没有 DSH 会话：下一条消息到达时会自动创建；也可以现在重建一次。</div>'),
+      })}
     </div>`;
 
   const formHost = (id) => body.querySelector(`[data-detail-form="${id}"]`);
@@ -759,10 +719,6 @@ function renderDetail(data) {
     + ` · 主动行为 ${accessModeLabel(access?.proactiveMode === 'deny' ? 'deny' : 'allow')}`;
   const personaHint = persona.resolved?.name && personaMode === 'inherit'
     ? `当前实际使用：${persona.resolved.name}` : '';
-
-  renderFields(formHost('displayName'), [
-    { name: 'detailDisplayName', type: 'text', label: '名称', span: 2, maxlength: 60, value: data.displayName || '', placeholder: '留空使用默认名' },
-  ], { columns: 2 });
 
   renderFields(formHost('access'), [
     {
@@ -871,8 +827,6 @@ function renderDetail(data) {
     },
   ], { columns: 2 });
 
-  renderFields(formHost('agent'), detailAgentFields(), { columns: 2 });
-
   bindCounters(body);
   body.querySelectorAll('select').forEach((el) => el.dispatchEvent(new Event('change', { bubbles: true })));
   syncDetailModelSelects(data.model?.model || data.effectiveModel?.model || '', data.model?.reasoning || '');
@@ -975,8 +929,8 @@ async function openDetail(key) {
   try {
     const [data, agent] = await Promise.all([
       api(`/api/sessions/${encodeURIComponent(key)}/profile`),
-      // Agent 平台那一块单独取：它读的是对端此刻的状态，与桥接档案不是同一份数据。
-      // 读不到只影响这一块（detailAgentFields 会写出重试提示），不能连带整个详情失败。
+      // Agent 平台实例归属单独取：它决定危险操作卡里要不要给「在新 Agent 平台上重开」。
+      // 读不到只当「没有换过平台」，不能连带整个详情失败。
       api(`/api/sessions/${encodeURIComponent(key)}/agent`).catch(() => null),
       ensureDetailCatalog(),
       ensurePersonaCatalog(),
@@ -994,8 +948,6 @@ async function openDetail(key) {
 function buildDetailPatch() {
   const data = detailCache || {};
   const patch = {};
-  const displayName = String(document.getElementById('detailDisplayName')?.value ?? '').trim();
-  if (displayName !== String(data.displayName || '')) patch.displayName = displayName;
 
   const capability = document.getElementById('detailCapability')?.value || '';
   if (capability !== (data.capability || '')) patch.capability = capability;
@@ -1090,9 +1042,12 @@ async function saveDetailAll() {
       return;
     }
     if (btn) btn.disabled = true;
+    let warnings = [];
     if (hasPatch) {
       const r = await api(`/api/sessions/${encodeURIComponent(detailKey)}/profile`, 'PATCH', patch);
       if (!r?.ok) throw new Error(r?.error || '保存失败');
+      // 目录不可用这类「存下来了但没校验」的提示不由服务端报错，得原样转给用户。
+      if (Array.isArray(r.warnings)) warnings = r.warnings;
     }
     if (wakeChanged) {
       const r = await api('/api/socialV2/wake-config', 'POST', { key: detailKey, config: wakeConfig });
@@ -1101,8 +1056,9 @@ async function saveDetailAll() {
     detailDirty = false;
     await refreshSessions();
     await openDetail(detailKey);
-    if (msg) msg.textContent = '已保存';
-    showConsoleToast('已保存');
+    const note = warnings.length ? `已保存（${warnings.join('；')}）` : '已保存';
+    if (msg) msg.textContent = warnings.length ? `⚠ ${note}` : note;
+    showConsoleToast(warnings.length ? `⚠ ${note}` : note);
   } catch (error) {
     if (msg) msg.textContent = `失败：${String(error?.message ?? error)}`;
   } finally {
@@ -1232,6 +1188,11 @@ export function init() {
   const overlay = document.getElementById('sessionRenameOverlay');
   if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
   wireModal(overlay, { onClose: () => { renameTarget = null; } });
+  document.getElementById('sessionRenameSave')?.addEventListener('click', () => { void saveRename(); });
+  document.getElementById('sessionRenameCancel')?.addEventListener('click', () => closeModal(overlay));
+  document.getElementById('sessionRenameInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); void saveRename(); }
+  });
 
   const detailOverlay = document.getElementById('sessionDetailOverlay');
   if (detailOverlay && detailOverlay.parentElement !== document.body) document.body.appendChild(detailOverlay);
@@ -1268,11 +1229,6 @@ export function init() {
 
   document.querySelectorAll('[data-sessions-tab]').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.sessionsTab));
-  });
-  document.getElementById('sessionRenameSave')?.addEventListener('click', saveRename);
-  document.getElementById('sessionRenameCancel')?.addEventListener('click', () => closeModal(overlay));
-  document.getElementById('sessionRenameInput')?.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') { event.preventDefault(); saveRename(); }
   });
   switchTab(activeTab);
 

@@ -25,7 +25,7 @@ import { parseOwnerCommand, ADMIN_HELP } from './admin/owner-commands.js';
 import './agent-side/builtin.mjs';
 
 // bridge.js 只 import 这一个模块（测试夹具按名字注入绑定，入口越少越不容易漂移）。
-export { normalizeMemberNotice, processMemberEvent, joinWakeInstruction } from './social/conversation-events.js';
+export { memberEventFromNotice, processMemberEvent, joinWakeInstruction } from './social/conversation-events.js';
 export { checkCrossConversation, queryPresence, queryActivity } from './social/cross-conversation.js';
 export { permissionCommandSucceeded, normalizeAgentPreset } from './agent-side/runtime-registry.mjs';
 export { createReconnectWatchdog } from './lib/ws-watchdog.mjs';
@@ -120,7 +120,7 @@ export function createBridgeExtensions({ cfg, stateDir, log, onPanic, onApproval
       return people.observeMessage({
         kind,
         conversationId: kind === 'group' ? id : null,
-        userId: event?.user_id ?? event?.sender?.user_id,
+        userId: event?.sender?.id,
         card: kind === 'group' ? (event?.sender?.card ?? '') : '',
         nickname: event?.sender?.nickname ?? '',
         directedAtSelf: !!directedAtSelf,
@@ -350,11 +350,10 @@ export function createBridgeExtensions({ cfg, stateDir, log, onPanic, onApproval
     normalizeConversationId,
   };
 }
-export { isNapCatVersionInfo, looksLikePathOnlyError, stickerTempBase, writeTempSticker, findFavByMd5, napcatAddOk } from './social/sticker-collect.js';
 export { CONVERSATION_RULE_LIMITS, validateOwnerConversationAccess, normalizeRules, addRule, removeRule, rulesPromptBlock, peekView, conversationRuleResultText, conversationRuleNoticeText } from './social/conversation-rules.js';
 export { OWNER_RELAY_DEFAULTS, ownerRelayConfig, validateOwnerRelay, createOwnerRelayLimiter, createOwnerRelayStore, ownerRelayPromptBlock, ownerRelayResultText, ownerRelayNoticeText } from './social/owner-relay.js';
 // 为什么这里直接 re-export 适配器文件而不是门面：`qqBackendLabel` / `qqBackendFromVersionInfo`
 // 是 0.1.x 的**公开导出名**，文件名本身也被 scripts/test-qq-backend-label.mjs 钉住；
-// 门面用的是中立名（describeBackend / readBackendInfo），不能凭空造出旧名字。
+// 门面用的是中立名（describeBackend / probeBackend），不能凭空造出旧名字。
 // 这是 bridge-extensions 作为「公开 API 聚合层」的唯一例外，B7 收敛控制台文案时一并处理。
 export { qqBackendFromVersionInfo, qqBackendLabel } from './user-side/adapters/qq/qq-backend-label.js';

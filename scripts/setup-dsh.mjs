@@ -3,7 +3,7 @@
 //
 // 等价于：node scripts/install-agent-platform.mjs dsh [profile]
 //
-// 之所以还留着这个名字：文档、控制台提示、src/presets/store.mjs 与一批测试都按
+// 之所以还留着这个名字：文档、控制台提示与一批测试都按
 // `node scripts/setup-dsh.mjs` 调用。实际安装逻辑已在
 // profiles/agent-platforms/dsh/adapters/install.mjs（DSH 平台适配器），
 // 产物生成在 profiles/agent-platforms/dsh/adapters/build.mjs。

@@ -11,6 +11,8 @@ import { accessState, normalizeAccessConfig } from '../src/session/access.mjs';
 // 配置 v2 的派生视图同样是剥掉 import 后的外部依赖；它是纯函数（入参是解析后的配置对象，
 // 不读盘），所以直接注入真模块即可，夹具配置照样能算出扁平视图。
 import { configViews } from '../src/config/platforms.mjs';
+// 工具面由目录推导：8 组 + 组内 op。vm 里剥掉了 import，这几个纯函数要注入。
+import { PLATFORM_TOOLS, TOOL_GROUPS, catalogEntry, describeToolGroups, toolGroup } from '../src/tools/catalog.mjs';
 
 function loadWebTools({ safeFetch, webSearch }) {
   const tools = new Map();
@@ -89,7 +91,10 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     .replace("const __dirname = path.dirname(fileURLToPath(import.meta.url));", "const __dirname = '/fixture/src';")
     .replace('await server.connect(new StdioServerTransport());', 'server.connect(new StdioServerTransport());');
   class McpServer {
-    constructor() { this.tool = (name, description, schema, callback) => tools.set(name, { schema, callback }); }
+    constructor() {
+      this.tool = () => {};
+      this.registerTool = (name, config, callback) => tools.set(name, { schema: config.inputSchema, callback });
+    }
     connect() {}
   }
   const fixtureFs = fixtureConfig === null ? fs : {
@@ -119,13 +124,16 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
     fs: fixtureFs,
     SENSITIVE_RE: { test: () => false },
     serializeModelData: (value) => JSON.stringify(value),
-    // 真实模块从能力预设推导注册面；vm 里剥掉了 import，用夹具的工具表代替。
+    // 真实模块从平台声明推导注册面；vm 里剥掉了 import，用夹具的工具表代替。
     platformFlags: () => (fixtureConfig?.tools ?? {}),
-    // 能力档目录按活动 Agent 平台算：上面的 platformFlags 已桩掉，这里只要不报错即可。
-    activeAgentPlatformId: () => 'dsh',
-    agentCapabilitiesDir: (id) => `/fixture/profiles/agent-platforms/${id}/capabilities`,
-    // 共用能力档目录（跨 Agent 平台直通档就是从这里读的）。
-    SHARED_CAPABILITIES_DIR: '/fixture/profiles/capabilities',
+    // 工具面住在平台声明（profiles/platforms/<id>/tools.yml）：vm 里用目录里的 QQ 声明代替读盘。
+    readPlatformTools: () => PLATFORM_TOOLS.map((tool) => ({ flag: tool.flag, names: tool.names })),
+    PLATFORMS_ROOT: '/fixture/profiles/platforms',
+    // 注册面由目录推导（8 组）；这些是纯函数，直接把真实现注入。
+    TOOL_GROUPS,
+    toolGroup,
+    catalogEntry,
+    describeToolGroups,
     // 会话 key 与准入：模块加载期就会跑 configureKeys，白名单判定用同一个 key 构造出口。
     configureKeys,
     platformOfConfig,
@@ -137,14 +145,14 @@ function loadSnowlumaTools(fetchImpl, fixtureConfig = null, httpImpl = null) {
   return async (name, arguments_ = {}) => {
     const tool = tools.get(name);
     assert.ok(tool, `tool ${name} should be registered`);
-    return tool.callback(z.object(tool.schema).parse(arguments_));
+    return tool.callback(await tool.schema.parseAsync(arguments_));
   };
 }
 
 // 回归（issue #24）：`qq_wait_for_messages` 以前走全局 fetch（undici 自带 300s headersTimeout），
 // 而沉睡前观察的预算就是 300s —— 第 301 秒必然 `fetch failed`，桥接侧却还在跑满预算占着
 // activeWaits，AI 只能重试烧 token。现在必须走 node:http 长轮询（没有默认响应超时）。
-test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', async () => {
+test('wait uses the node:http long-poll channel, not fetch', async () => {
   const { EventEmitter } = await import('node:events');
   const { PassThrough } = await import('node:stream');
   let requested = null;
@@ -171,7 +179,7 @@ test('qq_wait_for_messages uses the node:http long-poll channel, not fetch', asy
     null,
     fakeHttp
   );
-  const result = await callTool('qq_wait_for_messages', { key: 'group:1', token: 'fixture-token', timeoutMs: 300000, quietMs: 10000 });
+  const result = await callTool('read_messages', { op: 'wait_for_messages', key: 'group:1', token: 'fixture-token', timeoutMs: 300000, quietMs: 10000 });
   assert.notEqual(result.isError, true, result.content?.[0]?.text);
   assert.ok(requested, '必须真的发起 http.request');
   assert.equal(requested.path, '/api/socialV2/wait');
@@ -190,7 +198,7 @@ test('object-shaped bridge errors are rendered readably, not as [object Object]'
     { ok: false, error: { code: 'send/rejected', message: '消息含敏感信息，已阻止发送' } },
     { status: 200 },
   ));
-  const result = await callTool('qq_send_group_message', { groupId: '456', message: 'fixture' });
+  const result = await callTool('send', { op: 'send_group_message', groupId: '456', message: 'fixture' });
   assert.equal(result.isError, true);
   const text = String(result.content[0].text);
   assert.ok(!/\[object Object\]/.test(text), `错误文本不得是不可读的对象：${text}`);
@@ -205,7 +213,7 @@ test('a bridge 200 with ok:false is reported to the model as a failure', async (
     { ok: false, error: '消息含敏感信息，已阻止发送' },
     { status: 200 },
   ));
-  const result = await callTool('qq_send_group_message', { groupId: '456', message: 'fixture' });
+  const result = await callTool('send', { op: 'send_group_message', groupId: '456', message: 'fixture' });
   assert.equal(result.isError, true, 'ok:false 必须作为工具错误返回');
   assert.match(result.content[0].text, /阻止发送/);
 });
@@ -218,5 +226,18 @@ test('legacy token-less group read tools are not registered', async () => {
   const callTool = loadSnowlumaTools(async () => Response.json({ status: 'ok', retcode: 0, data: [] }));
   for (const name of ['qq_list_groups', 'qq_get_group_members', 'qq_get_group_history']) {
     await assert.rejects(callTool(name, {}), /should be registered/, `${name} 不应再注册`);
+  }
+});
+
+// 工具面是目录的 8 组：宿主名（qq_*）不再作为工具出现，组内动作走 op。
+test('tools/list exposes the eight catalogue groups only', async () => {
+  const callTool = loadSnowlumaTools(async () => Response.json({ status: 'ok', retcode: 0, data: [] }));
+  for (const name of ['read_messages', 'get_member', 'send', 'act', 'conversation_state', 'memory', 'slang', 'admin']) {
+    const error = await callTool(name, { op: 'no_such_op' }).then(() => null, (cause) => cause);
+    assert.ok(error, `${name} 应已注册`);
+    assert.doesNotMatch(String(error.message ?? error), /should be registered/, `${name} 应已注册`);
+  }
+  for (const name of ['qq_status', 'qq_get_unread_messages', 'qq_send_message', 'qq_mark_read']) {
+    await assert.rejects(callTool(name, {}), /should be registered/, `${name} 不应再作为工具注册`);
   }
 });

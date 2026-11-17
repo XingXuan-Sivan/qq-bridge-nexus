@@ -27,11 +27,20 @@ const AGENT_FIELDS = {
       span: 2,
       html: '<div id="agentProbeReadout"><span class="meta">读取中…</span></div>',
     },
+  ],
+};
+
+// 动作条排在模型控件之后：卡里先选平台、看它的模型，最后才是「刷新」「保存」。
+const AGENT_ACTIONS = {
+  fields: [
     {
       type: 'action',
       id: 'agentActions',
-      items: [{ id: 'agentSwitchBtn', label: '切换', variant: 'primary' }],
-      status: 'agentSwitchMsg',
+      items: [
+        { id: 'agentRefresh', label: '刷新' },
+        { id: 'agentSave', label: '保存', variant: 'primary' },
+      ],
+      status: 'agentMsg',
     },
   ],
 };
@@ -39,6 +48,7 @@ const AGENT_FIELDS = {
 export const CONFIG_FIELDS = {
   mode: OVERVIEW_FIELDS.mode,
   agent: AGENT_FIELDS,
+  agentActions: AGENT_ACTIONS,
   roleDefault: OVERVIEW_FIELDS.roleDefault,
   personaSettings: OVERVIEW_FIELDS.personaSettings,
   permission: OVERVIEW_FIELDS.permission,

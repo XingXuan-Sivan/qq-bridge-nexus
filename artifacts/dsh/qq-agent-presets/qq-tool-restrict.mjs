@@ -188,7 +188,7 @@ export const OPERATOR_DENY_TOOLS = Object.freeze([
  * 把 skipped 记下来，至少：
  *   · 启动时打一条汇总日志（不是 18 行噪音）；
  *   · 测试可以断言"假名数量在没有版本豁免的情况下为 0"；
- *   · nexus 的 qq_status 可以把它读出来给 owner 看。
+ *   · nexus 的 conversation_state（op=status） 可以把它读出来给 owner 看。
  */
 let lastReport = null
 

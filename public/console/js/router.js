@@ -74,11 +74,13 @@ export function refreshCurrentPage() {
 export function setSearchCloser(fn) { searchCloser = typeof fn === 'function' ? fn : () => {}; }
 
 // 导航分组从 DOM 推导，避免「页面表加了一页、面包屑忘了改」这种漂移。
+// 分组标题既可以是直接子元素，也可以在折叠容器（<details>）里：折叠起来不影响归属，
+// 里面的页面照样属于那一组（面包屑与搜索都要认得它们）。
 export const consolePageGroups = (() => {
   const groups = [];
   const byPage = {};
   let current = null;
-  document.querySelectorAll('#mainNav > *').forEach((el) => {
+  document.querySelectorAll('#mainNav .nav-label, #mainNav [data-view]').forEach((el) => {
     if (el.classList.contains('nav-label')) {
       current = { label: el.textContent.trim(), pages: [] };
       groups.push(current);
@@ -174,7 +176,8 @@ function applyRoute(page, sub, tab) {
 export function setConsolePage(page, { updateHash = true, focus = false, target = '', persist = true, skipGuard = false, sub = '', tab = '' } = {}) {
   if (!Object.hasOwn(consolePages, page)) page = 'overview';
   const nextSub = String(sub ?? '');
-  const nextTab = nextSub ? String(tab ?? '') : '';
+  // tab 不必依附 sub：页内分段只靠 tab 表达（如总览跳到「全局配置 › 行为与模型」的价目卡）。
+  const nextTab = String(tab ?? '');
   // 离开当前页（或同页换子段）前让页面自己确认（未保存修改）；返回 false 表示用户取消了这次切页。
   const routeChanged = page !== currentConsolePage || nextSub !== currentSub;
   if (!skipGuard && routeChanged && pageLeaveGuard
@@ -213,10 +216,12 @@ export function setConsolePage(page, { updateHash = true, focus = false, target 
   if (focus) {
     document.getElementById('mainContent').focus({ preventScroll: true });
     const targetId = target || 'mainContent';
-    const reveal = () => document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'instant' });
-    // 目标可能在尚未注入的页面片段里（如概览指标卡跳 #section-pending）：等片段加载完再滚。
-    if (document.getElementById(targetId)) reveal();
-    else void hydratePage(page).then(reveal);
+    // 目标可能在尚未注入的页面片段里，也可能落在还没被页面切出来的页内分段里：
+    // 等片段就绪（此时 applyRoute 注册的回调已先执行，标签已切好）再滚，
+    // 否则量到的是一个 hidden 容器，scrollIntoView 什么也不会做。
+    void hydratePage(page).then(() => {
+      requestAnimationFrame(() => document.getElementById(targetId)?.scrollIntoView({ block: 'start', behavior: 'instant' }));
+    });
   }
   return true;
 }
@@ -262,7 +267,11 @@ export function initRouter() {
   document.addEventListener('click', (event) => {
     const button = event.target.closest('[data-view]');
     if (!button) return;
-    setConsolePage(button.dataset.view, { focus: true, target: button.dataset.target });
+    setConsolePage(button.dataset.view, {
+      focus: true,
+      target: button.dataset.target,
+      tab: button.dataset.pageTab || '',
+    });
   });
   window.addEventListener('hashchange', () => {
     const route = parsePageHash(location.hash);

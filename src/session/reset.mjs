@@ -91,8 +91,8 @@ export function createSessionResetter(deps) {
     forgetAgentToken(key);
     socialV2.conversations.delete(key);
     seenForwardIds.delete(key);
-    // 按 key 记账的其余内存态（qq_wait_for_messages 的等待租约、发送失败标记、限流时间戳等）一并清掉：
-    // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 qq_wait_for_messages」）。
+    // 按 key 记账的其余内存态（read_messages（op=wait_for_messages） 的等待租约、发送失败标记、限流时间戳等）一并清掉：
+    // 以前漏了等待租约，重置后新会话仍被旧租约挡住最长 15 分钟（「该会话已有一个等待中的 read_messages（op=wait_for_messages）」）。
     forgetConversationCaches(key);
     // 「读到哪一版人格卡」也要忘：重置 = 新上下文，下一次唤醒必须重新把卡整段给一遍。
     // 与压缩（compact）后的处理一致——两处都是「上下文没了，卡得重读」。

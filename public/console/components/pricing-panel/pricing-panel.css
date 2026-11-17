@@ -1,0 +1,11 @@
+/* 价目表面板：模型行的标签排布与单价格子。
+   样式只作用在 .pricing-panel 里：面板挂在全局配置的卡片中，不带页面选择器。 */
+.pricing-panel .pricing-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-bottom:8px }
+.pricing-panel .pricing-head .tag, .pricing-panel .pricing-head .meta { margin:0 }
+.pricing-panel [data-pricing-status],
+.pricing-panel [data-pricing-policy],
+.pricing-panel [data-pricing-gap] { margin:0 0 6px }
+/* 单价格子是普通输入框：收窄到能装下 4 位小数，又不把表撑超宽。 */
+.pricing-panel .pricing-price-input { width:100%; min-width:0; padding:6px 8px; font-variant-numeric:tabular-nums }
+.pricing-panel .pricing-row-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px }
+.pricing-panel td .meta { font-size:11px }

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 // 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
 import { hasVoiceTool, skipVoiceTool, voiceToolDir, voiceToolPath } from './voice-tool-locator.mjs';
+import { catalogEntry } from '../src/tools/catalog.mjs';
 import { readConsoleSource } from './console-source.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -140,10 +141,10 @@ console.log('## qq-bridge 语音系统：MCP 工具与开关映射');
   const mcp = read('src/mcp-snowluma-safe.js');
   ok(mcp.includes("'qq_send_voice'"), '注册 qq_send_voice');
   ok(mcp.includes("'qq_list_voices'"), '注册 qq_list_voices');
-  ok(/qq_send_voice: 'sendVoice'/.test(mcp) && /qq_list_voices: 'sendVoice'/.test(mcp), '两个工具都受 sendVoice 开关控制');
+  ok(catalogEntry('qq_send_voice').flag === 'sendVoice' && catalogEntry('qq_list_voices').flag === 'sendVoice', '两个工具都受 sendVoice 开关控制');
   ok(/voice\?\.enabled !== false/.test(mcp), '注册期也检查 voice.enabled（关闭时不注册，省 token）');
   const bridge = read('src/bridge.js');
-  ok(/sendVoice: 'qq_send_voice \/ qq_list_voices'/.test(bridge), 'qq_get_prompt 的 toolMap 含语音工具');
+  ok(/stickerToolFlags/.test(bridge) && /TOOL_GROUPS/.test(bridge), 'qq_get_prompt 的可用工具按目录分组给出');
   ok(/['\"]sendVoice['\"]/.test(bridge), 'config API 的 toolFlags 含 sendVoice');
   const ex = JSON.parse(read('config.example.json'));
   // 这一段查的是**「出厂默认就该是关的」**这类契约 —— 权威声明是随仓库发布的
@@ -174,7 +175,7 @@ console.log('## qq-bridge 语音系统：控制台与 preset');
   ok(/api\/voice\/list/.test(html) && /api\/voice\/send/.test(html), '面板调用操作者端点');
   // 语音工具属于 QQ 平台话术（与认人、工具协议同层），不在能力档正文里。
   const preset = read(path.join('profiles', 'platforms', 'qq', 'prompt.md'));
-  ok(preset.includes('qq_send_voice') && preset.includes('qq_list_voices'), '平台提示词描述语音能力');
+  ok(preset.includes('op=send_voice') && preset.includes('op=list_voices'), '平台提示词描述语音能力');
   ok(/语音\*\*默认是关闭的\*\*/.test(preset), '平台提示词说明默认关闭');
   // 守卫的权威实现只有一份，在 qq-agent-presets bundle 里（能力档的 rows 以裸说明符引用它）。
   ok(read(path.join('artifacts/dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs')).includes("'mcp__snowluma__'"),

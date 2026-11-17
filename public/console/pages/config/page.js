@@ -4,7 +4,7 @@
 // 不自己重复实现状态读取，避免两套轮询互相覆盖。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
-import { getCurrentPage, onPageRefresh, setConsolePage, setPageLeaveGuard } from '../../js/router.js';
+import { getCurrentPage, onPageRefresh, onPageRoute, setConsolePage, setPageLeaveGuard } from '../../js/router.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { getSwitch, renderFields, setSelectOptions, setSwitch } from '../../components/form/form.js';
@@ -19,6 +19,8 @@ import { globalAccessSection, mountGlobalAccess, refreshGlobalAccess, saveGlobal
 import { initVoiceSection } from './voice-section.js';
 import { mountCompact, compactSection } from './compact.js';
 import { cardHtml } from '../../components/card/card.js';
+import { mountAgentModel } from '../../components/agent-model/agent-model.js';
+import { mountPricingPanel } from '../../components/pricing-panel/pricing-panel.js';
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 const $ = (id) => document.getElementById(id);
@@ -26,12 +28,14 @@ const requestStatusRefresh = () => document.dispatchEvent(new Event('console:ref
 // 页面级保存条：init() 里创建；模块级只是为了 refreshOverviewPage 也能看到它。
 let saveBar = null;
 let compactPanel = null;
+let pricingPanel = null;
 
 // 丢弃未保存的修改后，必须把控件恢复成服务端的值——只重置基线的话，用户切回来仍会看到刚才丢弃的编辑。
 // 重读完成后 saveBar.adoptIfPristine() 会用服务端值重拍基线（reset() 已清掉 touched 标记）。
 async function reloadConfigSections() {
   await Promise.allSettled([loadSecurity(), loadSendLimit(), loadRoleDefault(), loadPersonaSettings(), loadAgentSection(), loadPermission(), refreshGlobalAccess()]);
   compactPanel?.load();
+  void pricingPanel?.load();
   requestStatusRefresh();
   if (saveBar) saveBar.adoptIfPristine();
 }
@@ -347,11 +351,13 @@ const roleDefaultSection = {
   },
 };
 
-// ── Agent 平台（默认平台 / 当前运行 / 探活）─────────────────────────────────────
+// ── Agent 平台（默认平台 / 当前运行 / 探活 / 模型与思考强度）─────────────────
 // 配置面（`runtime.defaultAgent`）与运行期（`/api/status` 的 `agent`）是两个事实：
 // 换默认只落盘，本进程装配的 Agent 平台在重启前不变。
+// 模型控件与默认平台同住一张卡：下拉选哪个平台，下面就摆哪个平台的模型目录。
 const CONNECT_MODE_LABEL = { http: 'HTTP', stdio: 'stdio', remote: '远程' };
 let agentState = { runtime: null, status: null };
+let agentModel = null; // 当前挂着的模型控件句柄（换平台时先解绑再重挂）
 
 function agentEntries() {
   return (registryMeta().platforms ?? []).filter((item) => item.side === 'agent');
@@ -388,9 +394,39 @@ function renderAgentReadout() {
       : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`;
 }
 
+/**
+ * 模型与思考强度：跟着这张卡里选中的平台走。
+ *
+ * 不写死平台：平台由注册表条目决定；没声明 `models` 能力位时只少这段控件，
+ * 卡片本身（平台选择 / 当前运行 / 探活）照常可用。
+ * 控件 id 用 agentModel* 前缀，与平台详情里的 platformModel* 同名不撞。
+ */
+function syncAgentModelCard(agentId) {
+  const host = $('agentModelMount');
+  if (!host) return;
+  // 换平台等于换一份控件：先解绑上一份的委托，否则同一个宿主会多次触发保存。
+  agentModel?.destroy();
+  agentModel = null;
+  host.innerHTML = '';
+  const target = agentEntries().find((item) => item.id === agentId) ?? null;
+  if (!target || !(target.capabilities ?? []).includes('models')) return;
+  agentModel = mountAgentModel(host, {
+    agentId: target.id,
+    config: target.config ?? {},
+    prefix: 'agent',
+    // 卡片只有「刷新 / 保存」两个按钮，动作条由字段表统一出，组件不再自带一套。
+    actions: false,
+    toast: false,
+    onStatus: (text, kind) => setMsg('agentMsg', text, kind),
+    // 默认模型一换，价目表的匹配结论就变了（有价 / 待补价），所以当场重读一次。
+    onSaved: () => void pricingPanel?.load({ force: true }),
+  });
+}
+
+/** 重读这张卡：注册表条目、运行期事实与模型目录一起刷新；失败时返回 false（状态位已写好）。 */
 async function loadAgentSection() {
   const select = $('agentDefaultSelect');
-  if (!select) return;
+  if (!select) return false;
   try {
     const [runtime, status] = await Promise.all([
       api('/api/config/runtime'),
@@ -409,38 +445,79 @@ async function loadAgentSection() {
     }
     if (current) select.value = current;
     select.disabled = !entries.length;
-    const button = $('agentSwitchBtn');
-    if (button) button.disabled = !entries.length;
+    for (const id of ['agentSave', 'agentRefresh']) {
+      const button = $(id);
+      if (button) button.disabled = !entries.length;
+    }
     renderAgentReadout();
-    setMsg('agentSwitchMsg', '');
+    // 模型控件跟着这里选中的平台：配置面没选就退回当前在跑的那个。
+    syncAgentModelCard(select.value || runningAgentOf().id);
+    setMsg('agentMsg', '');
+    return true;
   } catch (error) {
-    setMsg('agentSwitchMsg', `读取 Agent 平台失败：${error?.message ?? error}`, 'err');
+    setMsg('agentMsg', `读取 Agent 平台失败：${error?.message ?? error}`, 'err');
+    return false;
   }
 }
 
-/** 切换默认 Agent 平台：只落盘，本进程不换装配；服务端已经先预检过。 */
-async function switchAgent() {
+/** 刷新这张卡：平台清单、运行期事实与模型目录一起重读（没保存的选择会被服务端值覆盖）。 */
+async function refreshAgentCard() {
+  const button = $('agentRefresh');
+  if (button) button.disabled = true;
+  setMsg('agentMsg', '刷新中…');
+  try {
+    if (!(await loadAgentSection())) return;
+    // 目录读口有 30 秒缓存：点「刷新」就是要拿这一次的结论，所以强制重读一遍。
+    await agentModel?.refresh({ announce: true });
+    setMsg('agentMsg', '已刷新');
+  } finally {
+    if (button) button.disabled = !agentEntries().length;
+  }
+}
+
+/**
+ * 保存这张卡：默认 Agent 平台与模型设置各走各的写口。
+ *
+ * 默认平台只落盘（服务端先预检探活），本进程不换装配；默认平台没变就不碰那个写口，
+ * 平台没声明 models 能力位时只保存默认平台。两个写口都失败 / 都取消时才回到未保存状态。
+ */
+async function saveAgent() {
   const wanted = $('agentDefaultSelect')?.value ?? '';
   if (!wanted) {
-    setMsg('agentSwitchMsg', '先选一个 Agent 平台', 'err');
+    setMsg('agentMsg', '先选一个 Agent 平台', 'err');
     return;
   }
-  const button = $('agentSwitchBtn');
-  if (button) button.disabled = true;
-  setMsg('agentSwitchMsg', '预检中…');
+  const buttons = ['agentSave', 'agentRefresh'].map((id) => $(id)).filter(Boolean);
+  buttons.forEach((button) => { button.disabled = true; });
+  setMsg('agentMsg', '保存中…');
   try {
+    const current = agentState.runtime?.runtime?.defaultAgent ?? '';
     const label = agentEntries().find((item) => item.id === wanted)?.label || wanted;
-    const r = await api('/api/config/runtime', 'POST', { defaultAgent: wanted });
-    if (!r?.ok) throw new Error(r?.error || '切换失败');
-    // 重读放在写状态位之前：loadAgentSection 会清掉上一次的状态文字。
+    let restart = false;
+    if (wanted !== current) {
+      const r = await api('/api/config/runtime', 'POST', { defaultAgent: wanted });
+      if (!r?.ok) throw new Error(r?.error || '默认 Agent 平台未保存');
+      restart = r.requiresRestart === true;
+    }
+    const saved = agentModel ? await agentModel.save() : { ok: true };
+    // 重读放在写状态位之前：loadAgentSection 会把上一次的状态文字清掉。
     await loadAgentSection();
-    setMsg('agentSwitchMsg', r.requiresRestart ? `已把默认 Agent 平台改为 ${label}，重启桥接后生效` : `${label} 已经是当前 Agent 平台`);
-    showConsoleToast(r.requiresRestart ? `已设为默认 Agent 平台 ${label}，重启桥接后生效` : `当前 Agent 平台就是 ${label}`);
+    if (!saved.ok) {
+      // 平台那一半已经落盘了：分开说，不把两个写口的结果混成一句。
+      const head = restart ? `默认 Agent 平台已改为 ${label}，重启桥接后生效；` : '';
+      setMsg('agentMsg', `${head}${saved.message || '模型设置未保存'}`, saved.canceled ? '' : 'err');
+      return;
+    }
+    const modelNote = saved.message ? `；${saved.message}` : '';
+    setMsg('agentMsg', restart
+      ? `已把默认 Agent 平台改为 ${label}，重启桥接后生效${modelNote}`
+      : `已保存${modelNote}`);
+    if (restart) showConsoleToast(`已设为默认 Agent 平台 ${label}，重启桥接后生效`);
   } catch (error) {
     // 失败保留用户选的那个值（他要的就是这个），只把原因写出来。
-    setMsg('agentSwitchMsg', `切换失败：${error?.message ?? error}`, 'err');
+    setMsg('agentMsg', `保存失败：${error?.message ?? error}`, 'err');
   } finally {
-    if (button) button.disabled = false;
+    buttons.forEach((button) => { button.disabled = false; });
   }
 }
 
@@ -481,10 +558,12 @@ const CONFIG_CARDS = {
     {
       id: 'section-agent',
       title: 'Agent 平台',
-      note: '切换后重启生效',
-      description: '桥接装配的 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）。'
-        + '这里改的是<b>默认 Agent 平台</b>：本进程仍装配原来那个，重启桥接后才换过去。',
-      body: '<div data-overview-fields="agent"></div>',
+      note: '默认平台重启生效 · 模型下一条消息生效',
+      description: '桥接装配的 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）与它的模型设置。'
+        + '改<b>默认 Agent 平台</b>只落盘，本进程仍装配原来那个，重启桥接后才换过去；'
+        + '模型选项跟着这里选中的平台走，平台没声明模型能力时只少这一段控件。',
+      body: '<div data-overview-fields="agent"></div><div id="agentModelMount"></div>'
+        + '<div data-overview-fields="agentActions"></div>',
     },
     {
       id: 'section-personabehavior',
@@ -505,6 +584,14 @@ const CONFIG_CARDS = {
       title: '上下文压缩',
       note: '保存后下一轮结束时生效',
       body: '<div data-config-compact></div>',
+    },
+    {
+      id: 'section-pricing',
+      title: '价目表',
+      note: '内置官方价 → 平台申报 → 本机覆盖',
+      description: '跟随全局配置里的默认模型：模型换了价目表就跟着换，不在这里选平台或模型。'
+        + '表里是空闲时段单价；高峰时段与倍数跟随平台声明的口径，本页只改单价。',
+      body: '<div data-config-pricing></div>',
     },
   ],
   configSecurityCards: [
@@ -623,11 +710,20 @@ export function init() {
   initVoiceSection();
   // 上下文压缩：从运行总览搬来，跟运行与模型放同一分区。
   compactPanel = mountCompact(document.querySelector('[data-config-compact]'));
+  // 价目表：跟随默认模型，没有平台 / 模型切换控件；改完单价账本按新表重算，所以顺手请页面重读用量。
+  pricingPanel = mountPricingPanel(document.querySelector('[data-config-pricing]'), {
+    onSaved: () => requestStatusRefresh(),
+  });
+  // 页内分段也是路由的一部分：总览的「价目表」按钮带 tab=runtime 跳过来，这里负责切到对应标签。
+  onPageRoute('config', ({ tab }) => { if (tab) showConfigSection(tab); });
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
 
-  // Agent 平台：换了默认只落盘，重启桥接后装配。
-  $('agentSwitchBtn')?.addEventListener('click', () => void switchAgent());
+  // Agent 平台：一张卡两个动作——「刷新」重读注册表 / 运行期 / 模型目录，「保存」落盘默认平台与模型。
+  $('agentRefresh')?.addEventListener('click', () => void refreshAgentCard());
+  $('agentSave')?.addEventListener('click', () => void saveAgent());
+  // 模型控件要跟着下拉走：换平台不用等保存就能先看到那家的模型设置。
+  $('agentDefaultSelect')?.addEventListener('change', () => syncAgentModelCard($('agentDefaultSelect')?.value ?? ''));
 
   // 手动静默：同一个按钮按当前状态开启或关闭
   $('silentToggle').addEventListener('click', async () => {

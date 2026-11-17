@@ -1,0 +1,191 @@
+/* 详情页版面：public/console/components/detail-panel/detail-panel.js
+   整页是一张大卡 —— 页头、结论句、标签条与面板都在卡里，卡外不留裸露的页面底色；
+   卡内按分区排，分区之间只用一条分隔线分层；分区里的短内容用带边框小卡。 */
+.detail-panel {
+  grid-column: 1 / -1;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-8);
+  min-width: 0;
+}
+
+/* ---- 卡内页头与标签条 ---- */
+/* 页头与结论句进到这里就是卡里的一段：它们自带的 grid-column 在卡内不再生效，
+   因为大卡本身不是网格容器。 */
+.detail-panel > .platform-promise {
+  margin: var(--space-5) 0 0;
+}
+
+/* 标签条自带下边框：它就是页头与面板之间那条分隔线。 */
+.detail-panel > .page-tabs {
+  margin: var(--space-6) 0 var(--space-7);
+}
+
+/* ---- 分区 ---- */
+.detail-body,
+.detail-section {
+  min-width: 0;
+}
+
+/* 分区之间用一条分隔线分层，不再各套一张卡、也不再叠卡间距。
+   分节容器（.detail-sections）里的多段同此一条：容器自己也是一个分区。 */
+.detail-body > * + *,
+.detail-sections > * + * {
+  margin-top: var(--space-7);
+  padding-top: var(--space-7);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.detail-sections {
+  min-width: 0;
+}
+
+.detail-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.detail-section-head > h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail-section-head > .row {
+  margin: 0;
+}
+
+.detail-section-note {
+  margin: 0 0 var(--space-5);
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+/* 键值网格自己没有外边距：它后面的动作条要自己让开一行。 */
+.detail-section > .kv-grid + .form-actions {
+  margin-top: var(--space-4);
+}
+
+/* ---- 带边框小卡 ---- */
+/* 同一行的小卡撑满行高：卡与卡之间高度一致，内容长短不再造成参差。 */
+.detail-panel-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-4);
+}
+
+/* 内容多的一组（药丸清单、带表单的卡）：单卡放宽，窄屏自动落到一列。 */
+.detail-panel-cards--wide {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.detail-panel-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-6);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.detail-panel-card h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail-panel-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.detail-panel-card-head h4 {
+  margin: 0;
+}
+
+.detail-panel-card .meta {
+  margin-bottom: 12px;
+}
+
+.detail-panel-card > :last-child {
+  margin-bottom: 0;
+}
+
+.detail-panel-card textarea {
+  min-height: 120px;
+}
+
+/* 数字卡：标签 / 数值 / 脚注竖排，与总览页 .metric 同一套读法。 */
+.detail-panel-card--metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-panel-card--metric > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.detail-panel-card--metric strong {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -.4px;
+}
+
+.detail-panel-card--metric strong.is-text {
+  font-size: 16px;
+}
+
+.detail-panel-card--metric small {
+  font-size: 11px;
+  color: var(--muted-soft);
+}
+
+/* ---- 大卡里再挂组件自己出的卡（能力档 / 行为档案）----
+   它们走的是 cardHtml，这里统一降成同一套小卡：不叠阴影，底色降一档。 */
+.detail-panel .card {
+  background: var(--surface);
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  padding: var(--space-6);
+}
+
+.detail-panel .card .card-head {
+  margin-bottom: var(--space-3);
+}
+
+.detail-panel .card .card-head > h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 大卡里的表单分组（行为档案的引擎分组）同样降一档：底色降到 surface，不叠卡的圆角与阴影。 */
+.detail-panel .form-section--card {
+  background: var(--surface);
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* 提示词卡自带 h2，就当分区标题用：与 .detail-section-head 同一字号。 */
+.detail-panel .prompt-card > h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.detail-panel .prompt-card > .meta {
+  margin: 0 0 var(--space-4);
+}

@@ -61,19 +61,22 @@ function privateMessage(overrides = {}) {
 /**
  * 假 WS 客户端：按 SDK 的真实分发语义实现订阅面 ——
  * `onMessage` 收全部消息，`onPrivateMessage` / `onGroupMessage` **各自只看自己那一类**
- * （如果两者都收全部，就测不出「同一个引用注册两次只剩一个」这类问题）。
+ * （如果两者都收全部，就测不出「同一个引用注册两次只剩一个」这类问题），
+ * `onNotice` 只收通知。`notice: false` 模拟不带 onNotice 的老 SDK。
  */
-function fakeClient({ sdk = 'onMessage' } = {}) {
-  const routes = new Map(); // handler → 接受的 message_type（null = 全部）
-  const subscribe = (handler, want = null) => {
-    routes.set(handler, want);
+function fakeClient({ sdk = 'onMessage', notice = true } = {}) {
+  const routes = new Map(); // handler → { want, kind }
+  const subscribe = (handler, route = {}) => {
+    routes.set(handler, { want: null, kind: 'message', ...route });
     return () => routes.delete(handler);
   };
   const client = {
     isConnected: true,
     push(event) {
-      for (const [handler, want] of [...routes]) {
-        if (want && event?.message_type !== want) continue;
+      for (const [handler, route] of [...routes]) {
+        if (route.kind === 'notice' && event?.post_type !== 'notice') continue;
+        if (route.kind === 'message' && event?.post_type === 'notice') continue;
+        if (route.want && event?.message_type !== route.want) continue;
         handler(event);
       }
     },
@@ -83,9 +86,10 @@ function fakeClient({ sdk = 'onMessage' } = {}) {
   };
   if (sdk === 'onMessage') client.onMessage = (handler) => subscribe(handler);
   else {
-    client.onPrivateMessage = (handler) => subscribe(handler, 'private');
-    client.onGroupMessage = (handler) => subscribe(handler, 'group');
+    client.onPrivateMessage = (handler) => subscribe(handler, { want: 'private' });
+    client.onGroupMessage = (handler) => subscribe(handler, { want: 'group' });
   }
+  if (notice) client.onNotice = (handler) => subscribe(handler, { kind: 'notice' });
   return client;
 }
 
@@ -94,7 +98,11 @@ test('群消息：会话、发送者、正文与时间都翻译成中立形状',
   assert.equal(unified.kind, 'message');
   assert.equal(unified.type, 'message.group');
   assert.deepEqual(unified.conversation, { type: 'group', id: '20001' });
-  assert.deepEqual(unified.sender, { id: '30001', name: '群名片' });
+  // 三个名字各有用处：name 是「该叫这个人什么」，card / nickname 进人物库，role 进群角色。
+  assert.deepEqual(unified.sender, { id: '30001', name: '群名片', card: '群名片', nickname: '群友' });
+  // 翻译层只给 id，name 由内核在校验时补全。
+  assert.deepEqual(unified.self, { id: '10000' });
+  assert.equal(unified.message.seq, '12');
   assert.equal(unified.message.id, '9001');
   assert.deepEqual(unified.message.segments, [{ type: 'text', data: { text: '在吗' } }]);
   // OneBot 的 time 是秒：统一事件用毫秒，与 Date.now() 同尺度。
@@ -109,7 +117,7 @@ test('私聊消息：type / 会话类型跟着 message_type 走', () => {
   const unified = oneBotToUnified(privateMessage());
   assert.equal(unified.type, 'message.private');
   assert.deepEqual(unified.conversation, { type: 'private', id: '30001' });
-  assert.deepEqual(unified.sender, { id: '30001', name: '好友' });
+  assert.deepEqual(unified.sender, { id: '30001', name: '好友', nickname: '好友' });
 });
 
 test('翻译产物能过内核的事件校验（与管线的契约对齐）', () => {
@@ -188,7 +196,7 @@ test('connect：订阅、投递、剔自己、close 退订、状态回调各就�
     onEvent: (event) => seen.push(event.conversation.id),
     onStatus: (status) => states.push(status.state),
   });
-  assert.equal(client.listeners, 1);
+  assert.equal(client.listeners, 2, '消息一条订阅 + 通知一条订阅');
   assert.deepEqual(states, ['open']);
 
   client.push(groupMessage());
@@ -212,7 +220,7 @@ test('connect：老 SDK 只有 onPrivateMessage/onGroupMessage 时同样能收',
   setOneBotClient(() => client);
   const seen = [];
   const handle = await connectOneBot({ onEvent: (event) => seen.push(event.type) });
-  assert.equal(client.listeners, 2);
+  assert.equal(client.listeners, 3, '私聊 + 群聊 + 通知');
   client.push(groupMessage());
   assert.deepEqual(seen, ['message.group']);
   await handle.close();
@@ -226,13 +234,52 @@ test('重复 connect 会先摘掉旧订阅：同一条消息不能投两遍', as
   const seen = [];
   const first = await connectOneBot({ onEvent: () => seen.push('first') });
   const second = await connectOneBot({ onEvent: () => seen.push('second') });
-  assert.equal(client.listeners, 1, '旧订阅必须已经摘掉');
+  assert.equal(client.listeners, 2, '旧订阅必须已经摘掉');
   client.push(groupMessage());
   assert.deepEqual(seen, ['second']);
   await first.close();
-  assert.equal(client.listeners, 1, '关旧句柄不能把新连接一起关掉');
+  assert.equal(client.listeners, 2, '关旧句柄不能把新连接一起关掉');
   await second.close();
   assert.equal(client.listeners, 0);
+});
+
+test('通知走同一条出口：拍一拍/入群翻成统一事件，自己拍的不进管线', async () => {
+  resetOneBotClient();
+  const client = fakeClient();
+  setOneBotClient(() => client);
+  const seen = [];
+  const states = [];
+  const handle = await connectOneBot({
+    onEvent: (event) => seen.push(event),
+    onStatus: (status) => states.push(status),
+  });
+  assert.deepEqual(states.map((s) => s.state), ['open']);
+
+  client.push({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', self_id: 10000, group_id: 20001, user_id: 30001, sender_id: 30001, target_id: 10000 });
+  client.push({ post_type: 'notice', notice_type: 'group_increase', group_id: 20001, user_id: 30002 });
+  await flush();
+  assert.deepEqual(seen.map((e) => e.type), ['notice.poke', 'notice.member.join']);
+  assert.deepEqual(seen[0].conversation, { type: 'group', id: '20001' });
+  assert.deepEqual(seen[0].notice.target, { id: '10000' });
+
+  // 自己拍的是我发出的事，不是收到的；六种之外的 notice_type 不进内核。
+  client.push({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', self_id: 10000, group_id: 20001, sender_id: 10000, target_id: 30001 });
+  client.push({ post_type: 'notice', notice_type: 'group_ban', group_id: 20001, user_id: 30002 });
+  await flush();
+  assert.equal(seen.length, 2);
+  await handle.close();
+});
+
+test('老 SDK 没有 onNotice：入站照常打开，状态里写明通知收不到', async () => {
+  resetOneBotClient();
+  const client = fakeClient({ notice: false });
+  setOneBotClient(() => client);
+  const states = [];
+  const handle = await connectOneBot({ onEvent: () => {}, onStatus: (status) => states.push(status) });
+  assert.equal(client.listeners, 1, '只有消息订阅');
+  assert.equal(states[0].state, 'open');
+  assert.match(states[0].detail, /没有 onNotice/);
+  await handle.close();
 });
 
 test('signal 已中止：不订阅、不投递', async () => {

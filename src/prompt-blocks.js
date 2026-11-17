@@ -25,8 +25,8 @@ export function blockFingerprint(text) {
 
 /** 没变时代替完整内容的一行。 */
 export const BLOCK_REFS = {
-  slang: '【群聊黑话表】和上次一样，没有变化（需要时用 qq_slang_query 查）。',
-  sticker: '【表情包】策略和常用表情都和上次一样（完整列表用 qq_list_stickers 查，没备注的先 qq_get_sticker_image 看图）。',
+  slang: '【群聊黑话表】和上次一样，没有变化（需要时用 slang（op=slang_query） 查）。',
+  sticker: '【表情包】策略和常用表情都和上次一样（完整列表用 act（op=list_stickers） 查，没备注的先 act（op=get_sticker_image） 看图）。',
 };
 
 function normalize(raw) {

@@ -1,6 +1,6 @@
 // 测试安全版 QQ MCP server：工具清单 + 二代工具令牌闸门 + 发送前的参数/引用校验
 //
-// 需要桥接与 OneBot 在线（qq_status 会真的去问 OneBot），所以不进 test:audit。
+// 需要桥接与 OneBot 在线（conversation_state 的 op=status 会真的去问 OneBot），所以不进 test:audit。
 // 默认模式没有落盘文件：与 bridge.js 的 defaultMode() 同口径 —— 当前用户平台条目的
 // `defaultBehavior` 解析出的行为档案引擎，engine=v2 即二代（reserved2）。
 //
@@ -76,23 +76,25 @@ try {
   const byName = new Map(tools.tools.map((tool) => [tool.name, tool]));
   console.log('工具:', [...byName.keys()].join(', '));
 
-  const status = await call('qq_status', {});
-  console.log('✅ qq_status:', textOf(status).slice(0, 150));
+  const status = await call('conversation_state', { op: 'status' });
+  console.log('✅ conversation_state（op=status）:', textOf(status).slice(0, 150));
 
-  // 二代工具一律把 key + token 声明成必填：漏掉任一个都不该退化成控制台会话。
-  const v2Tools = ['qq_get_prompt', 'qq_send_message', 'qq_wait_for_messages'];
-  const uncovered = v2Tools.filter((name) => {
-    const required = byName.get(name)?.inputSchema?.required ?? [];
-    return !(required.includes('key') && required.includes('token'));
+  // 会话类参数（key + token）必须出现在 schema 里：漏传 token 一律在调用期被拒，
+  // 不退化成控制台会话。
+  const tokenGuarded = ['read_messages', 'send'];
+  const uncovered = tokenGuarded.filter((name) => {
+    const props = byName.get(name)?.inputSchema?.properties ?? {};
+    return !('key' in props && 'token' in props);
   });
-  console.log('✅ 二代工具 key + token 必填:', uncovered.length ? `缺失 ✗ ${uncovered.join('、')}` : '全部 ✓');
+  console.log('✅ 会话工具声明 key + token:', uncovered.length ? `缺失 ✗ ${uncovered.join('、')}` : '全部 ✓');
 
-  const noToken = await call('qq_get_prompt', { key: 'group:123456789' });
-  console.log('🚫 无 token 的 qq_get_prompt:', verdict(noToken), textOf(noToken).slice(0, 120));
+  const noToken = await call('read_messages', { op: 'get_prompt', key: 'group:123456789' });
+  console.log('🚫 无 token 的 admin（op=get_prompt）:', verdict(noToken), textOf(noToken).slice(0, 120));
 
-  const sendSchema = JSON.stringify(byName.get('qq_send_group_message')?.inputSchema ?? {});
+  const sendSchema = JSON.stringify(byName.get('send')?.inputSchema ?? {});
   console.log('✅ replyToMessageId 参数:', sendSchema.includes('replyToMessageId') ? '存在 ✓' : '缺失 ✗');
-  console.log('✅ qq_reply 工具:', byName.has('qq_reply') ? '存在 ✓' : '缺失 ✗');
+  const sendOps = byName.get('send')?.inputSchema?.properties?.op?.enum ?? [];
+  console.log('✅ send 组含 op=reply:', sendOps.includes('reply') ? '存在 ✓' : '缺失 ✗');
 
   const agent = pickAgentSession();
   console.log('二代会话令牌:', agent ? agent.key : '未找到（只验证令牌闸门）');
@@ -100,21 +102,21 @@ try {
   if (agent) {
     // 同一个群 + 真令牌：令牌闸门放行后才轮得到下面的参数校验与引用解析。
     const base = { groupId: agent.groupId, message: '测试', token: agent.token };
-    const badId = await call('qq_send_group_message', { ...base, replyToMessageId: 'abc' });
+    const badId = await call('send', { op: 'send_group_message', ...base, replyToMessageId: 'abc' });
     console.log('🚫 非法引用 id(abc):', verdict(badId), textOf(badId).slice(0, 120));
 
-    const zeroId = await call('qq_send_group_message', { ...base, replyToMessageId: 0 });
+    const zeroId = await call('send', { op: 'send_group_message', ...base, replyToMessageId: 0 });
     console.log('🚫 非法引用 id(0):', verdict(zeroId), textOf(zeroId).slice(0, 120));
 
     // 真实 QQ 消息 id 可能是负数：负数应通过整数校验，再由「查不到这条消息」拒绝。
-    const missingId = await call('qq_send_group_message', { ...base, replyToMessageId: -123456789 });
+    const missingId = await call('send', { op: 'send_group_message', ...base, replyToMessageId: -123456789 });
     console.log('🚫 负 id 但消息不存在:', verdict(missingId), textOf(missingId).slice(0, 120));
 
-    const replyDenied = await call('qq_reply', { ...base, replyToMessageId: -123456789 });
-    console.log('🚫 qq_reply 负 id 但消息不存在:', verdict(replyDenied), textOf(replyDenied).slice(0, 120));
+    const replyDenied = await call('send', { op: 'reply', ...base, replyToMessageId: -123456789 });
+    console.log('🚫 op=reply 负 id 但消息不存在:', verdict(replyDenied), textOf(replyDenied).slice(0, 120));
   } else {
     // 没有令牌可用时，只剩令牌闸门本身可证：漏传 token 的发送必须被拒。
-    const noTokenSend = await call('qq_send_group_message', { groupId: 100003, message: '测试' });
+    const noTokenSend = await call('send', { op: 'send_group_message', groupId: 100003, message: '测试' });
     console.log(`🚫 无 token 发送（${MODE}）:`, verdict(noTokenSend), textOf(noTokenSend).slice(0, 120));
   }
 

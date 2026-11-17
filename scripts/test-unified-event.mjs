@@ -66,15 +66,29 @@ test('形状不合法逐条报错：kind / type / conversation / message', () =>
   assert.equal(validateUnifiedEvent(null, ORIGIN).ok, false);
 });
 
-test('非消息事件不需要 message；sender 可有可无', () => {
+test('非消息事件不需要 message；通知必须带 notice 与当事人', () => {
+  const noPayload = validateUnifiedEvent({
+    kind: 'notice',
+    type: 'notice.poke',
+    conversation: { type: 'private', id: '30001' },
+    actor: { id: '30001' },
+  }, ORIGIN);
+  assert.equal(noPayload.ok, false, '没带 notice 的通知是半成品');
+  assert.match(noPayload.errors.join('；'), /必须带 notice/);
+
   const notice = validateUnifiedEvent({
     kind: 'notice',
     type: 'notice.poke',
     conversation: { type: 'private', id: '30001' },
+    actor: { id: '30001', name: '好友' },
+    notice: { type: 'poke', target: { id: '30002' } },
   }, ORIGIN);
   assert.equal(notice.ok, true, notice.errors.join('；'));
   assert.equal(notice.event.message, null);
-  assert.equal(notice.event.sender, null);
+  assert.equal(notice.event.sender, null, '通知的当事人不叫 sender');
+  assert.deepEqual(notice.event.actor, { id: '30001', name: '好友' });
+  assert.deepEqual(notice.event.notice.target, { id: '30002' });
+  assert.deepEqual(notice.event.notice.detail, {}, '没给细节就是一个空包');
 });
 
 test('事件 id 单调递增，已有的 id 保留', () => {

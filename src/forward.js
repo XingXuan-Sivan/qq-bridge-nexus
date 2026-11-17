@@ -28,7 +28,7 @@ export function extractForwardIds(segments) {
   const out = [];
   for (const seg of segments) {
     if (!seg || typeof seg !== 'object' || seg.type !== 'forward') continue;
-    const id = forwardIdFromData(seg.data);
+    const id = sanitizeForwardId(seg.data?.id);
     if (id && !out.includes(id)) out.push(id);
   }
   return out;

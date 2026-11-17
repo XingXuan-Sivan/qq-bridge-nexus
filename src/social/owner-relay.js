@@ -13,7 +13,7 @@
 //   · 开关 socialV2.tools.ownerRelay 默认关闭；托付次数有上限；每次都记审计、私聊通知管理员；
 //   · 托付内容只放在内存里（不落盘），过期自动丢弃。
 //
-// 词汇：容器词用「会话」；工具名 `qq_ask_group_session` 与开关 `ownerRelay` 是 0.1.x 的公开面。
+// 词汇：容器词用「会话」；工具名 `admin（op=ask_group_session）` 与开关 `ownerRelay` 是 0.1.x 的公开面。
 
 import { key } from '../session/key.mjs';
 
@@ -52,7 +52,7 @@ export function ownerRelayConfig(raw = {}) {
  */
 export function validateOwnerRelay({ fromKey, tokenOk, isOwnerPrivateKey, isTargetAllowed, enabled, targetConversationId, instruction, maxChars }) {
   if (!tokenOk) return { ok: false, status: 403, error: 'agent token 无效或缺失' };
-  if (!enabled) return { ok: false, status: 403, error: '工具未启用：qq_ask_group_session（管理员需在控制台打开「托付会话」开关）' };
+  if (!enabled) return { ok: false, status: 403, error: '工具未启用：admin（op=ask_group_session）（管理员需在控制台打开「托付会话」开关）' };
   if (!isOwnerPrivateKey(fromKey)) return { ok: false, status: 403, error: '只有管理员本人的私聊会话可以托付其它会话' };
   const cid = String(targetConversationId ?? '').trim();
   if (!/^[1-9]\d{0,11}$/.test(cid)) return { ok: false, status: 400, error: 'targetConversationId 必须是会话 id（数字）' };

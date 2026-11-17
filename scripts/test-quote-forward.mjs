@@ -4,7 +4,7 @@
 //   ② 引用解析：等不到返回 pending 且不负缓存；后台完成后再查命中，并把被引用消息里的转发 id 登记到本会话；
 //      其它群的消息不登记、不返回；
 //   ③ 收消息：引用一条合并转发 → 这条消息带上被引用的转发 id；原消息慢时先放占位、不卡住整条消息；
-//   ④ AI 工具：消息详情对加载中的 id 明确说「稍后再查」；之后能用 qq_get_forward_msg 打开引用里的转发，第二次读走缓存；
+//   ④ AI 工具：消息详情对加载中的 id 明确说「稍后再查」；之后能用 read_messages（op=get_forward_msg） 打开引用里的转发，第二次读走缓存；
 //   ⑤ 接口平台：get_msg / get_forward_msg 用长超时，发送类动作仍按默认超时；
 //   ⑥ 源码约束：发送引用时「加载中」不算确认归属。
 import test from 'node:test';
@@ -65,7 +65,7 @@ test('① 模块：等待上限、慢取缓存、占位文字、合并 id', asyn
   assert.equal(calls, 3, '负缓存过期后重试');
   gates[2].resolve(null);
 
-  assert.match(pendingReplyText('12345'), /\[引用消息 id=12345（原消息加载较慢，稍后可用 qq_get_message_detail 查看这个 id）\]/);
+  assert.match(pendingReplyText('12345'), /\[引用消息 id=12345（原消息加载较慢，稍后可用 read_messages（op=get_message_detail） 查看这个 id）\]/);
   assert.ok(!pendingReplyText('1<script>').includes('<'), 'id 只保留安全字符');
   assert.deepEqual(mergeForwardIds(['a', 'b'], ['b', '', null, 'c'], undefined), ['a', 'b', 'c']);
   assert.ok(REPLY_INGEST_WAIT_MS <= 5000, '收消息时最多等几秒');
@@ -77,10 +77,12 @@ test('② 引用解析：等不到返回 pending；后台完成后命中并登�
   try {
     const release = new Map();
     let getCalls = 0;
-    h.bot.getMessage = (id, opts) => {
+    // 引用原文走动作面的 message.get，落到网关就是 get_msg：夹具在这里接管回执与时序。
+    h.bot.request = (action, params, opts) => {
+      assert.equal(action, 'get_msg');
       getCalls += 1;
       assert.ok(opts?.timeoutMs >= 100_000, '后台用长超时去取');
-      return new Promise((resolve) => release.set(String(id), resolve));
+      return new Promise((resolve) => release.set(String(params.message_id), (data) => resolve({ status: 'ok', retcode: 0, data })));
     };
     const waitRelease = async (id) => { for (let i = 0; i < 100 && !release.has(id); i += 1) await sleep(1); return release.get(id); };
     const first = await h.resolveReplyInfo('group', GROUP, '1001', null, { waitMs: 20 });
@@ -130,7 +132,7 @@ test('③④ 收消息不被慢引用卡住；之后 AI 能查详情并打开引
   try {
     h.setMode('reserved2');
     // 快的引用：这条消息直接带上被引用转发的 id
-    h.bot.getMessage = async (id) => forwardMsg(Number(id));
+    h.bot.request = async (action, params) => ({ status: 'ok', retcode: 0, data: forwardMsg(Number(params.message_id)) });
     await h.handleIncoming('group', GROUP, groupEvent(5001, 3001, '这个转发太好笑了'), h.cfg);
     const st = h.getSocialV2State(`qq:group:${GROUP}`);
     const fast = st.unread.find((m) => String(m.messageId) === '5001');
@@ -140,7 +142,9 @@ test('③④ 收消息不被慢引用卡住；之后 AI 能查详情并打开引
 
     // 慢的引用：最多等几秒就放占位，不卡住整条消息
     let releaseSlow;
-    h.bot.getMessage = (id) => new Promise((resolve) => { releaseSlow = () => resolve(forwardMsg(Number(id))); });
+    h.bot.request = (action, params) => new Promise((resolve) => {
+      releaseSlow = () => resolve({ status: 'ok', retcode: 0, data: forwardMsg(Number(params.message_id)) });
+    });
     const t0 = Date.now();
     await h.handleIncoming('group', GROUP, groupEvent(5002, 3002, '最难绷'), h.cfg);
     const spent = Date.now() - t0;
@@ -236,6 +240,6 @@ test('⑥ 源码约束：发送引用时「加载中」不算确认归属；收�
   assert.match(v, /return info\?\.pending \? null : info;/);
   const target = src.slice(src.indexOf('async function resolveReplyTargetV2('), src.indexOf('// 判断当前消息是否“引用/回复了机器人自己”'));
   assert.ok(!/await resolveReplyInfo\(/.test(target), '发送引用只走 verifiedReplyInfo');
-  assert.match(src, /resolveReplyInfo\(kind, id, k, event\.self_id, \{ waitMs: REPLY_INGEST_WAIT_MS \}\)/);
-  assert.match(src, /isQuoteTargetSelf\(event\.message \?\? \[\], kind, id, event\.self_id, resolveReply\)/, '判断引用自己复用同一次解析');
+  assert.match(src, /resolveReplyInfo\(kind, id, k, event\.self\?\.id, \{ waitMs: REPLY_INGEST_WAIT_MS \}\)/);
+  assert.match(src, /isQuoteTargetSelf\(segments, kind, id, event\.self\?\.id, resolveReply\)/, '判断引用自己复用同一次解析');
 });

@@ -3,7 +3,8 @@
 // QQ 动作闸门全部跑在桥接进程内，而 OneBot 的 HTTP 接口可被本机任意进程调用 ⇒
 // 「仿真会话拿不到 shell」是分层安全模型唯一的真边界。
 //
-// 本文件从真实 preset 文件解析组成，断言守卫被挂载、restrict 名单覆盖每个已知危险工具。
+// 本文件从生成产物（presets/<id>.patch.yml）解析插件行，断言守卫被挂载、
+// restrict 名单覆盖每个已知危险工具。能力档只声明意图，行由渲染层编译，产物就是 DSH 加载的那份。
 // 名单与分组一律**从守卫导入**，不在本文件手抄。
 //
 // 唯一的豁免是 RUNTIME_INJECTOR_TOOLS（dev_* 运行时注入器，静态扫不到），并受两条约束：
@@ -14,11 +15,14 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { collectDshToolNames as collectDshToolNamesShared } from './dsh-tool-names.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CAPABILITIES_DIR = path.join(ROOT, 'profiles', 'agent-platforms', 'dsh', 'capabilities');
-/** 守卫的权威实现（能力档的 rows 以裸说明符指向它）。 */
+/** 编译后的预设补丁（能力档的意图 + 渲染层 → 插件行）。 */
+const PRESETS_DIR = path.join(ROOT, 'artifacts', 'dsh', 'qq-agent-presets', 'presets');
+/** 守卫的权威实现（产物里的守卫行以裸说明符指向它）。 */
 const GUARD_FILE = path.join(ROOT, 'artifacts', 'dsh', 'qq-agent-presets', 'qq-tool-restrict.mjs');
 
 /** 仿真模式使用的 preset（不允许有任何本地执行能力）。 */
@@ -40,10 +44,21 @@ function readCapability(id) {
   return { file, yml: fs.readFileSync(file, 'utf8') };
 }
 
+/** 预设编译出来的插件行（结构：patch → insert[0].config.plugins）。 */
+function readPresetRows(id) {
+  readCapability(id);
+  const file = path.join(PRESETS_DIR, `${id}.patch.yml`);
+  assert.ok(fs.existsSync(file), `${id} 的产物存在（${path.relative(ROOT, file)}）`);
+  const patch = parseYaml(fs.readFileSync(file, 'utf8'));
+  const rows = patch?.[0]?.insert?.[0]?.config?.plugins;
+  assert.ok(Array.isArray(rows) && rows.length > 0, `${id} 的产物应含插件行`);
+  return rows;
+}
+
 /**
  * 导入守卫实现。
  *
- * 导入的是 bundle 里的权威那份——能力档的 rows 用它当裸说明符，DSH 实际加载的也是它，
+ * 导入的是 bundle 里的权威那份——产物里的守卫行用它当裸说明符，DSH 实际加载的也是它，
  * 因此这里测的就是生产件本身（C4 起不再有 per-preset 的 re-export 壳）。
  */
 async function guardFor(id) {
@@ -73,26 +88,27 @@ async function applyGuard(id) {
 }
 
 // ---------------------------------------------------------------------------
-test('模拟会话的能力档都挂了工具守卫（否则 L7 没有任何载体）', () => {
+test('模拟会话的产物都挂了工具守卫（否则 L7 没有任何载体）', () => {
   for (const id of SIMULATION_PRESETS) {
-    const { yml } = readCapability(id);
-    assert.match(
-      yml,
-      /qq-tool-restrict/,
-      `${id} 必须挂载 qq-tool-restrict（L7 的落点），否则本地工具会随全局层继承进来`,
+    const guard = readPresetRows(id).find((row) => row.id === 'qq-tool-restrict');
+    assert.ok(
+      guard,
+      `${id} 的产物必须挂载 qq-tool-restrict（L7 的落点），否则本地工具会随全局层继承进来`,
     );
-    // C4 起源里就写 bundle 裸说明符：子行 name 按 profile 目录解析，相对名一定会装不上。
-    assert.match(yml, /qq-agent-presets\/qq-tool-restrict\.mjs/, `${id} 的守卫要用 bundle 裸说明符`);
+    // 起源里就写 bundle 裸说明符：子行 name 按 profile 目录解析，相对名一定会装不上。
+    assert.equal(
+      guard.name, 'qq-agent-presets/qq-tool-restrict.mjs',
+      `${id} 的守卫要用 bundle 裸说明符`,
+    );
   }
 });
 
-test('模拟会话的能力档不得挂载 tool-web 的 search/fetch', () => {
+test('模拟会话的产物不得打开 tool-web 的 search/fetch', () => {
   for (const id of SIMULATION_PRESETS) {
-    const { yml } = readCapability(id);
-    const webRow = /id:\s*tool-web[\s\S]{0,200}/.exec(yml);
-    assert.ok(webRow, `${id} 应有 tool-web 条目`);
-    assert.match(webRow[0], /search:\s*false/, `${id}: tool-web.search 必须为 false`);
-    assert.match(webRow[0], /fetch:\s*false/, `${id}: tool-web.fetch 必须为 false`);
+    const web = readPresetRows(id).find((row) => row.id === 'tool-web');
+    assert.ok(web, `${id} 的产物应有 tool-web 条目`);
+    assert.equal(web.config?.search, false, `${id}: tool-web.search 必须为 false`);
+    assert.equal(web.config?.fetch, false, `${id}: tool-web.fetch 必须为 false`);
   }
 });
 
@@ -246,16 +262,14 @@ test('封闭 agent 的能力档在创建后必须与仿真能力档明确区分'
     return;
   }
   for (const id of present) {
-    const { yml } = readCapability(id);
-    assert.match(yml, /qq-tool-restrict/, `${id} 也应挂守卫（用于 QQ 动作可见性）`);
-    // 与仿真能力档的关键区别：封闭 agent 必须能拿到本地工具 ⇒
-    // 它的守卫不得把本地执行工具写进 restrict 名单。
-    const guard = fs.readFileSync(GUARD_FILE, 'utf8');
-    for (const tool of ['pwsh', 'read', 'write']) {
-      assert.ok(
-        !new RegExp(`['"]${tool}['"]`).test(guard),
-        `${id}: 封闭 agent 需要本地工具，守卫不应把 "${tool}" 列入 restrict`,
-      );
-    }
+    // 与仿真能力档的区别不在于「挂不挂守卫」（守卫是渲染层的结构行，两者都有），
+    // 而在于喂给守卫的权限档：封闭 agent 必须拿到 operator，否则默认白名单会把本地工具全隐藏。
+    const rows = readPresetRows(id);
+    const guard = rows.find((row) => row.id === 'qq-tool-restrict');
+    assert.ok(guard, `${id} 也应挂守卫（用于 QQ 动作可见性）`);
+    assert.equal(
+      guard.config?.profile, 'operator',
+      `${id}: 封闭 agent 需要本地工具 ⇒ 守卫必须拿到 operator 权限档，实际 ${JSON.stringify(guard.config)}`,
+    );
   }
 });

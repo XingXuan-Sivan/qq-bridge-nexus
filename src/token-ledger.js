@@ -26,9 +26,12 @@ import path from 'node:path';
 import {
   ZERO_BUCKETS,
   addBuckets,
+  costOfBuckets,
   isPeakAt,
   normalizeUsage,
   priceUsage,
+  ratesAtTier,
+  tierAt,
   totalTokensOf
 } from './model-prices.js';
 
@@ -64,8 +67,8 @@ export function pickBucketMs(windowMs, maxBuckets) {
  * @param {object} options
  * @param {string} options.file           JSONL 落盘路径
  * @param {(msg: string, err?: unknown) => void} [options.log]
- * @param {object|null} [options.priceTable] 平台申报的价目表（`priceTableFromCatalog()` 的结果）；
- *                                       未申报时为 null，此时只计 token、不计价
+ * @param {() => (object|null)} [options.getPriceTable] 取当前生效的价目表（`priceTableFromCatalog()` 的结果）；
+ *                                       每次取用时重新取，换表即重算历史金额。未申报时为 null，此时只计 token、不计价
  * @param {(sessionId: string) => (string|undefined)} [options.resolveKey] 运行期 sessionId → 会话 key 解析
  * @param {number} [options.maxLines]     日志行数上限，超出即压缩重写
  * @param {() => number} [options.now]
@@ -73,7 +76,7 @@ export function pickBucketMs(windowMs, maxBuckets) {
 export function createTokenLedger({
   file,
   log = () => {},
-  priceTable = null,
+  getPriceTable = () => null,
   resolveKey,
   maxLines = 20000,
   now = () => Date.now()
@@ -95,6 +98,26 @@ export function createTokenLedger({
   /** sessionId -> 被淘汰（只剩累计值、无法再拆到某一轮）的采样汇总 */
   const evicted = new Map();
   let evictedDirty = false;
+
+  /**
+   * 淘汰聚合里按「模型 × 档位」存的桶。
+   *
+   * 为什么不是存金额：价目可能在记账之后才补上（平台申报、本机覆盖、换了个默认模型），
+   * 金额必须跟其它读取路径一样**在读取时**按当前表重算，否则这批历史花费永远停在
+   * 「当时没有价目」的 0 元上 —— 这就是后补价目追不回来的唯一缺口。
+   */
+  function priceBucketsOf(raw) {
+    const out = {};
+    for (const [model, groups] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+      if (!groups || typeof groups !== 'object') continue;
+      const entry = {};
+      for (const tier of ['peak', 'off']) {
+        if (groups[tier]) entry[tier] = normalizeUsage(groups[tier]);
+      }
+      if (Object.keys(entry).length) out[model] = entry;
+    }
+    return out;
+  }
   /** sessionId -> 最近一次活动时间 */
   const sessionSeen = new Map();
   /** 落盘行数（含被覆盖的旧采样），用于决定何时压缩 */
@@ -135,13 +158,16 @@ export function createTokenLedger({
         sessionId: sid,
         key: record.key,
         buckets,
-        cost: Number(record.cost) || 0,
-        byTier: {
+        // 逐模型 × 档位的桶：金额读取时重算（后补价目能追溯）。
+        priceBuckets: priceBucketsOf(record.pb),
+        // 旧格式的淘汰行只落了冻结金额、没有模型维度：这部分数据无法再拆，只能原样保留。
+        legacy: record.pb ? null : {
+          cost: Number(record.cost) || 0,
           peak: Number(record.peak) || 0,
-          off: Number(record.off) || 0
+          off: Number(record.off) || 0,
+          unpriced: record.unpriced === true,
+          unpricedTokens: Number(record.unpricedTokens) || 0
         },
-        unpriced: record.unpriced === true,
-        unpricedTokens: Number(record.unpricedTokens) || 0,
         dropped: Number(record.dropped) || 0,
         maxSeq: Number.isFinite(Number(record.maxSeq)) ? Number(record.maxSeq) : -1
       });
@@ -261,8 +287,11 @@ export function createTokenLedger({
     for (const e of evicted.values()) {
       out.push({
         k: 'evict', t: sessionSeen.get(e.sessionId) ?? 0, sid: e.sessionId, key: e.key,
-        b: e.buckets, cost: e.cost, peak: e.byTier.peak, off: e.byTier.off,
-        unpriced: e.unpriced, unpricedTokens: e.unpricedTokens, dropped: e.dropped, maxSeq: Number(e.maxSeq) >= 0 ? Number(e.maxSeq) : -1
+        b: e.buckets,
+        pb: e.priceBuckets,
+        // 旧格式的冻结金额只在没有模型维度时落盘；新记录一笔都不存。
+        ...(e.legacy ?? {}),
+        dropped: e.dropped, maxSeq: Number(e.maxSeq) >= 0 ? Number(e.maxSeq) : -1
       });
     }
     try {
@@ -287,11 +316,13 @@ export function createTokenLedger({
    * 那么一旦条数越过上限，**之后每一条采样**都会触发一次整文件同步重写（多 MB 的
    * JSONL 写在 QQ 事件路径上），而且内存会一直涨。所以压缩必须真的丢东西。
    *
-   * 关键：**丢明细不能丢总量**。被淘汰的采样先把桶累加进 `evicted`（连同它自己那一次的
-   * 计价结果），读取时照样算进权威累计；只是这些旧回合不再能拆到具体某一轮，控制台会
+   * 关键：**丢明细不能丢总量**。被淘汰的采样先把桶累加进 `evicted`（按「模型 × 档位」分桶），
+   * 读取时照样算进权威累计；只是这些旧回合不再能拆到具体某一轮，控制台会
    * 把它归进「未逐轮归属」。这样即使某个会话还没有投影基线，总量也依然精确。
    */
   function evictOldestSamples() {
+    // 价目表在**读取时**取：换成新的表（本机覆盖改价）后，历史金额也跟着重算。
+    const priceTable = getPriceTable();
     const overflow = samples.size - maxLines;
     if (overflow <= 0) return 0;
     const ordered = [...samples.entries()].sort((a, b) => a[1].t - b[1].t);
@@ -302,10 +333,8 @@ export function createTokenLedger({
         sessionId: sample.sessionId,
         key: sample.key,
         buckets: { ...ZERO_BUCKETS },
-        cost: 0,
-        byTier: { peak: 0, off: 0 },
-        unpriced: false,
-        unpricedTokens: 0,
+        priceBuckets: {},
+        legacy: null,
         dropped: 0,
         // 被淘汰采样里最大的 seq：一旦更新的投影基线覆盖到它，这些桶就已经包含在
         // 基线里了，再相加就是重复计费（见 evictionCovered()）。
@@ -316,19 +345,45 @@ export function createTokenLedger({
       if (Number.isFinite(sampleSeq) && sampleSeq >= 0) {
         acc.maxSeq = Math.max(Number(acc.maxSeq) >= 0 ? Number(acc.maxSeq) : -1, sampleSeq);
       }
-      const charge = chargeOf(priceUsage(sample.buckets, { model: sample.model, at: sample.t || now(), table: priceTable }));
-      acc.cost += charge.amount;
-      if (charge.tier) acc.byTier[charge.tier] += charge.amount;
-      else {
-        acc.unpriced = true;
-        acc.unpricedTokens += totalTokensOf(sample.buckets);
-      }
+      // 档位必须在这里定下：读取时只知道「这条属于高峰 / 空闲」，不再知道它几点发生。
+      const model = String(sample.model ?? '');
+      const tier = tierAt(model, sample.t || now(), priceTable) ?? 'off';
+      const groups = acc.priceBuckets[model] ?? (acc.priceBuckets[model] = {});
+      groups[tier] = addBuckets(groups[tier] ?? ZERO_BUCKETS, sample.buckets);
       acc.dropped += 1;
       if (sample.key) acc.key = sample.key;
       evicted.set(sample.sessionId, acc);
       evictedDirty = true;
     }
     return overflow;
+  }
+
+  /**
+   * 被淘汰聚合的金额：逐「模型 × 档位」按**当前价目**重算。
+   * 旧格式的冻结值（没有模型维度）只能原样加上，无法再拆。
+   */
+  function evictedAmount(entry) {
+    const table = getPriceTable();
+    let cost = entry.legacy?.cost ?? 0;
+    const byTier = { peak: entry.legacy?.peak ?? 0, off: entry.legacy?.off ?? 0 };
+    let unpriced = entry.legacy?.unpriced ?? false;
+    let unpricedTokens = entry.legacy?.unpricedTokens ?? 0;
+    for (const [model, groups] of Object.entries(entry.priceBuckets)) {
+      for (const tier of ['peak', 'off']) {
+        const buckets = groups[tier];
+        if (!buckets) continue;
+        const rates = ratesAtTier(model, tier, table);
+        if (!rates) {
+          unpriced = true;
+          unpricedTokens += totalTokensOf(buckets);
+          continue;
+        }
+        const amount = costOfBuckets(buckets, rates).total;
+        cost += amount;
+        byTier[tier] += amount;
+      }
+    }
+    return { cost, byTier, unpriced, unpricedTokens };
   }
 
   /**
@@ -460,6 +515,7 @@ export function createTokenLedger({
    * `seq > 基线 seq` 的采样算进「权威累计」，避免和基线重复计费。
    */
   function buildIndex() {
+    const priceTable = getPriceTable();
     const index = new Map();
     for (const s of samples.values()) {
       let entry = index.get(s.sessionId);
@@ -526,6 +582,7 @@ export function createTokenLedger({
 
   /** 把一个会话的索引项 + 投影基线合成「会话视图」。 */
   function sessionView(key, sessionIds, index) {
+    const priceTable = getPriceTable();
     const view = {
       key,
       sessionIds,
@@ -549,16 +606,18 @@ export function createTokenLedger({
       const entry = index.get(sid) ?? null;
       const rawGone = evicted.get(sid) ?? null;
       const gone = evictionCovered(rawGone) ? null : rawGone;
+      // 被淘汰的聚合不存金额，只存「模型 × 档位」的桶：金额在读取时按当前价目算。
+      const goneAmount = gone ? evictedAmount(gone) : null;
       const liveBuckets = entry?.liveBuckets ?? { ...ZERO_BUCKETS };
       const cumulative = addBuckets(base?.buckets ?? ZERO_BUCKETS, gone?.buckets ?? ZERO_BUCKETS);
       const total = addBuckets(cumulative, liveBuckets);
       view.buckets = addBuckets(view.buckets, total);
 
-      let cost = (entry?.liveCost ?? 0) + (gone?.cost ?? 0);
-      view.byTier.peak += (entry?.liveByTier.peak ?? 0) + (gone?.byTier.peak ?? 0);
-      view.byTier.off += (entry?.liveByTier.off ?? 0) + (gone?.byTier.off ?? 0);
-      view.unpriced ||= (entry?.unpriced ?? false) || (gone?.unpriced ?? false);
-      view.unpricedTokens += (entry?.unpricedTokens ?? 0) + (gone?.unpricedTokens ?? 0);
+      let cost = (entry?.liveCost ?? 0) + (goneAmount?.cost ?? 0);
+      view.byTier.peak += (entry?.liveByTier.peak ?? 0) + (goneAmount?.byTier.peak ?? 0);
+      view.byTier.off += (entry?.liveByTier.off ?? 0) + (goneAmount?.byTier.off ?? 0);
+      view.unpriced ||= (entry?.unpriced ?? false) || (goneAmount?.unpriced ?? false);
+      view.unpricedTokens += (entry?.unpricedTokens ?? 0) + (goneAmount?.unpricedTokens ?? 0);
       if (base) {
         const charge = chargeOf(priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable }));
         cost += charge.amount;
@@ -607,8 +666,69 @@ export function createTokenLedger({
     return ids;
   }
 
+  /**
+   * 逐模型的价目覆盖清单。
+   *
+   * 账本按「模型 × 档位」落盘，所以任何历史用量在换了价目表之后都能重新计价 ——
+   * 前提是表里真有这个模型。这里把账本里出现过的模型逐个列出来并标好是否已定价：
+   * 控制台据此说明「哪个模型还缺价目」，补上之后金额立刻重算，不需要重新记一遍账。
+   *
+   * 口径与 summary() 一致：投影基线整体计、只把 seq > 基线 seq 的采样算成逐轮、
+   * 被淘汰的聚合按「模型 × 档位」重算，已被基线覆盖的淘汰桶不再相加。
+   */
+  function coverage() {
+    const priceTable = getPriceTable();
+    const acc = new Map();
+    const touch = (rawModel) => {
+      const model = String(rawModel ?? '').trim();
+      if (!acc.has(model)) {
+        const declared = priceTable?.models?.[model] ?? null;
+        acc.set(model, {
+          model,
+          label: declared?.label ?? (model || '未标注模型'),
+          tokens: 0,
+          cost: 0,
+          unpricedTokens: 0,
+          priced: Boolean(declared)
+        });
+      }
+      return acc.get(model);
+    };
+    const addTokens = (row, buckets) => {
+      const tokens = totalTokensOf(buckets);
+      row.tokens += tokens;
+      if (!row.priced) row.unpricedTokens += tokens;
+      return tokens;
+    };
+    for (const base of baselines.values()) {
+      const row = touch(base.model);
+      addTokens(row, base.buckets);
+      if (row.priced) row.cost += chargeOf(priceUsage(base.buckets, { model: base.model, at: base.t || now(), table: priceTable })).amount;
+    }
+    for (const s of samples.values()) {
+      const base = baselines.get(s.sessionId);
+      if (base && !(s.seq > base.seq)) continue;
+      const row = touch(s.model);
+      addTokens(row, s.buckets);
+      if (row.priced) row.cost += chargeOf(priceUsage(s.buckets, { model: s.model, at: s.t || now(), table: priceTable })).amount;
+    }
+    for (const e of evicted.values()) {
+      if (evictionCovered(e)) continue;
+      for (const [model, groups] of Object.entries(e.priceBuckets)) {
+        const row = touch(model);
+        for (const [tier, buckets] of Object.entries(groups)) {
+          if (!addTokens(row, buckets) || !row.priced) continue;
+          const rates = ratesAtTier(model, tier, priceTable);
+          if (rates) row.cost += costOfBuckets(buckets, rates).total;
+        }
+      }
+    }
+    return [...acc.values()].sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
+  }
+
   /** 汇总：全局 + 每个会话。 */
   function summary({ limit = 200 } = {}) {
+    const priceTable = getPriceTable();
     const index = buildIndex();
     const byKey = new Map();
     for (const sid of allSessionIds()) {
@@ -682,12 +802,15 @@ export function createTokenLedger({
         avgCostPerTurn: totals.turns > 0 ? totals.cost / totals.turns : 0,
         avgCostPerStep: totals.steps > 0 ? totals.cost / totals.steps : 0
       },
-      conversations: conversations.slice(0, Math.max(1, Math.min(500, Number(limit) || 200)))
+      conversations: conversations.slice(0, Math.max(1, Math.min(500, Number(limit) || 200))),
+      // 账本里出现过的模型各自缺不缺价目：控制台用它提示「还差哪个模型」。
+      models: coverage()
     };
   }
 
   /** 单会话明细：汇总 + 逐轮（新的在前）。 */
   function conversation(key, { turnLimit = 200 } = {}) {
+    const priceTable = getPriceTable();
     if (typeof key !== 'string' || !key) return null;
     const sids = [];
     for (const sid of allSessionIds()) {
@@ -721,6 +844,7 @@ export function createTokenLedger({
    * 桶宽阶梯与选择规则在模块级（`BUCKET_LADDER_MS` / `pickBucketMs`），离线 fixture 复用同一份。
    */
   function series({ hours = 24, maxBuckets = 48, at } = {}) {
+    const priceTable = getPriceTable();
     const endAt = Number.isFinite(Number(at)) ? Number(at) : now();
     const windowHours = Math.min(24 * 90, Math.max(1, Number(hours) || 24));
     const windowMs = windowHours * 60 * 60 * 1000;
@@ -765,7 +889,7 @@ export function createTokenLedger({
     let ledgerBuckets = { ...ZERO_BUCKETS };
     for (const e of evicted.values()) {
       if (evictionCovered(e)) continue; // 已被投影基线覆盖：再加一次就是重复计费
-      ledgerCost += Number(e.cost) || 0;
+      ledgerCost += evictedAmount(e).cost;
       ledgerBuckets = addBuckets(ledgerBuckets, e.buckets);
     }
     for (const base of baselines.values()) {
@@ -851,6 +975,7 @@ export function createTokenLedger({
 
   /** 最近采样流水（实时观察用，按时间倒序）。 */
   function recent(limit = 50) {
+    const priceTable = getPriceTable();
     const n = Math.max(1, Math.min(500, Number(limit) || 50));
     const all = [...samples.values()].sort((a, b) => b.t - a.t);
     const out = [];
@@ -875,6 +1000,7 @@ export function createTokenLedger({
   }
 
   function stats() {
+    const priceTable = getPriceTable();
     return {
       file,
       journalLines,
@@ -923,6 +1049,7 @@ export function createTokenLedger({
     series,
     recent,
     stats,
+    coverage,
     reset,
     compact,
     hasSession: (sid) => baselines.has(sid) || sessionSeen.has(sid),

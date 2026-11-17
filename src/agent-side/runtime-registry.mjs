@@ -243,7 +243,7 @@ export function agentPlatformPeerPermissions(id = '', ctx = {}) {
 /**
  * 该平台认领哪些提示注入通道（能力档 `runtime.prompt` 的取值）。
  *
- * 未声明时只给 `tool`：没有注入通道的执行体只能靠 `qq_get_prompt` 拉取提示词，
+ * 未声明时只给 `tool`：没有注入通道的执行体只能靠 `admin（op=get_prompt）` 拉取提示词，
  * 这是直通模式下唯一不会说谎的兜底。
  */
 export function agentPlatformPromptChannels(id = '', ctx = {}) {

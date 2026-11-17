@@ -167,12 +167,19 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     // 夹具只拷被启动的文件，漏带它子进程 import 就会失败（表现为 MCP Connection closed）。
     await fs.mkdir(path.join(fixture, 'src', 'config'));
     await fs.copyFile(path.join(ROOT, 'src', 'config', 'platforms.mjs'), path.join(fixture, 'src', 'config', 'platforms.mjs'));
-    // 工具注册面从能力预设推导（capabilities/store.mjs + tools/catalog），子进程只有 fixture/src，
-    // 依赖模块也要一起带上。
+    // 工具注册面从平台声明推导（platforms/index.mjs + tools/catalog），子进程只有 fixture/src，
+    // 依赖模块也要一起带上（prompt-compose 是平台声明读取的依赖）。
     await fs.mkdir(path.join(fixture, 'src', 'capabilities'));
     await fs.mkdir(path.join(fixture, 'src', 'tools'));
+    await fs.mkdir(path.join(fixture, 'src', 'platforms'));
+    await fs.mkdir(path.join(fixture, 'src', 'runtime'));
+    // 模型目录会把模型级峰谷归一（价目三层里的申报面）；平台声明表直接 import 它。
+    await fs.mkdir(path.join(fixture, 'src', 'pricing'));
+    await fs.copyFile(path.join(ROOT, 'src', 'pricing', 'policy.mjs'), path.join(fixture, 'src', 'pricing', 'policy.mjs'));
     await fs.copyFile(path.join(ROOT, 'src', 'capabilities', 'store.mjs'), path.join(fixture, 'src', 'capabilities', 'store.mjs'));
     await fs.copyFile(path.join(ROOT, 'src', 'tools', 'catalog.mjs'), path.join(fixture, 'src', 'tools', 'catalog.mjs'));
+    await fs.copyFile(path.join(ROOT, 'src', 'platforms', 'index.mjs'), path.join(fixture, 'src', 'platforms', 'index.mjs'));
+    await fs.copyFile(path.join(ROOT, 'src', 'runtime', 'prompt-compose.mjs'), path.join(fixture, 'src', 'runtime', 'prompt-compose.mjs'));
     await fs.mkdir(path.join(fixture, 'src', 'profiles'), { recursive: true });
     await Promise.all(['paths.mjs', 'factory.mjs'].map((name) =>
       fs.copyFile(path.join(ROOT, 'src', 'profiles', name), path.join(fixture, 'src', 'profiles', name))));
@@ -187,75 +194,85 @@ test('MCP validates/forwards read watermarks and wait purposes against an isolat
     client = new Client({ name: 'qq-model-view-test', version: '1.0.0' });
     await client.connect(transport);
     const listed = await client.listTools();
-    for (const name of ['qq_mark_read', 'qq_set_wake_config']) {
-      const schema = listed.tools.find((tool) => tool.name === name).inputSchema;
-      assert.equal(schema.properties.throughSeq.type, 'integer');
-      assert.equal(schema.properties.throughSeq.minimum, 0);
-      assert.equal(schema.properties.throughSeq.maximum, Number.MAX_SAFE_INTEGER);
-      assert.equal(schema.required.includes('throughSeq'), false);
-    }
-    const waitSchema = listed.tools.find((tool) => tool.name === 'qq_wait_for_messages').inputSchema;
+    // 工具面是目录的 8 组：一组一个 MCP 工具，组内动作走 op，宿主名（qq_*）不再出现。
+    assert.deepEqual(listed.tools.map((tool) => tool.name).sort(),
+      ['act', 'admin', 'conversation_state', 'get_member', 'memory', 'read_messages', 'send', 'slang']);
+    const stateSchema = listed.tools.find((tool) => tool.name === 'conversation_state').inputSchema;
+    assert.deepEqual(stateSchema.properties.op.enum, ['status', 'social_state', 'mark_read', 'set_wake_config']);
+    assert.equal(stateSchema.properties.throughSeq.type, 'integer');
+    assert.equal(stateSchema.properties.throughSeq.minimum, 0);
+    assert.equal(stateSchema.properties.throughSeq.maximum, Number.MAX_SAFE_INTEGER);
+    assert.equal(stateSchema.required.includes('throughSeq'), false);
+    const waitSchema = listed.tools.find((tool) => tool.name === 'read_messages').inputSchema;
     assert.deepEqual(waitSchema.properties.purpose.enum, ['messages', 'reply']);
     assert.equal(waitSchema.required.includes('purpose'), false);
     const common = { key: 'group:123', token: 'fixture-token' };
-    const read = await client.callTool({ name: 'qq_get_unread_messages', arguments: common });
+    const call = (group, op, args = {}) => client.callTool({ name: group, arguments: { op, ...args } });
+    const read = await call('read_messages', 'get_unread_messages', common);
     const readText = read.content.find((part) => part.type === 'text').text;
     const data = JSON.parse(readText);
     assert.equal(data.readThroughSeq, 21);
     assert.equal('plain' in data.messages[0], false);
     assert.equal(readText, JSON.stringify(data));
 
-    await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq: 0, limit: 100 } });
+    await call('read_messages', 'get_unread_messages', { ...common, afterSeq: 0, limit: 100 });
     assert.equal(new URL(requests.at(-1).url, 'http://fixture').searchParams.get('afterSeq'), '0');
-    await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq: 21 } });
+    await call('read_messages', 'get_unread_messages', { ...common, afterSeq: 21 });
     assert.equal(new URL(requests.at(-1).url, 'http://fixture').searchParams.get('afterSeq'), '21');
     for (const afterSeq of [-1, 1.5, '21', Number.MAX_SAFE_INTEGER + 1]) {
       const before = requests.length;
-      const invalid = await client.callTool({ name: 'qq_get_unread_messages', arguments: { ...common, afterSeq } });
+      const invalid = await call('read_messages', 'get_unread_messages', { ...common, afterSeq });
       assert.equal(invalid.isError, true);
       assert.equal(requests.length, before);
     }
 
     // Omission preserves the old wait contract, while reply explicitly selects
     // the short pre-reply quiet window. Both travel through the real MCP schema.
-    await client.callTool({ name: 'qq_wait_for_messages', arguments: common });
+    await call('read_messages', 'wait_for_messages', common);
     assert.equal(requests.at(-1).url, '/api/socialV2/wait');
     assert.deepEqual(requests.at(-1).body, { key: common.key });
     assert.equal(requests.at(-1).token, common.token);
     for (const purpose of ['messages', 'reply']) {
-      await client.callTool({ name: 'qq_wait_for_messages', arguments: {
+      await call('read_messages', 'wait_for_messages', {
         ...common, purpose, timeoutMs: 30000, quietMs: 10000, minNewMessages: 1
-      } });
+      });
       assert.deepEqual(requests.at(-1).body, {
         key: common.key, purpose, timeoutMs: 30000, minNewMessages: 1, quietMs: 10000
       });
     }
     for (const purpose of ['sleep', '', 1, null]) {
       const before = requests.length;
-      const invalid = await client.callTool({ name: 'qq_wait_for_messages', arguments: { ...common, purpose } });
+      const invalid = await call('read_messages', 'wait_for_messages', { ...common, purpose });
       assert.equal(invalid.isError, true);
       assert.equal(requests.length, before, `invalid wait purpose ${purpose} must not reach the API`);
     }
 
-    await client.callTool({ name: 'qq_mark_read', arguments: { ...common, throughSeq: 21 } });
+    await call('conversation_state', 'mark_read', { ...common, throughSeq: 21 });
     assert.equal(requests.at(-1).url, '/api/socialV2/mark-read');
     assert.deepEqual(requests.at(-1).body, { key: common.key, throughSeq: 21 });
     assert.equal(requests.at(-1).token, common.token);
 
-    await client.callTool({ name: 'qq_set_wake_config', arguments: { ...common, config: { mode: 'diving' }, throughSeq: 0 } });
+    await call('conversation_state', 'set_wake_config', { ...common, config: { mode: 'diving' }, throughSeq: 0 });
     assert.equal(requests.at(-1).url, '/api/socialV2/wake-config');
     assert.deepEqual(requests.at(-1).body, { key: common.key, config: { mode: 'diving' }, throughSeq: 0 });
-    await client.callTool({ name: 'qq_set_wake_config', arguments: { ...common, config: { mode: 'active' } } });
+    await call('conversation_state', 'set_wake_config', { ...common, config: { mode: 'active' } });
     assert.deepEqual(requests.at(-1).body, { key: common.key, config: { mode: 'active' } });
 
     for (const value of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '21']) {
       const before = requests.length;
-      for (const name of ['qq_mark_read', 'qq_set_wake_config']) {
-        const invalid = await client.callTool({ name, arguments: { ...common, throughSeq: value, ...(name === 'qq_set_wake_config' ? { config: {} } : {}) } });
+      for (const [op, extra] of [['mark_read', {}], ['set_wake_config', { config: {} }]]) {
+        const invalid = await call('conversation_state', op, { ...common, throughSeq: value, ...extra });
         assert.equal(invalid.isError, true);
       }
       assert.equal(requests.length, before, `invalid throughSeq ${value} must not reach the API`);
     }
+
+    // 组内缺参由 required 表在调用期拦住，不进 HTTP。
+    const beforeMissing = requests.length;
+    const missing = await call('conversation_state', 'set_wake_config', common);
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /缺少必需参数：config/);
+    assert.equal(requests.length, beforeMissing);
   } finally {
     if (client) await client.close();
     api.closeAllConnections();

@@ -43,8 +43,8 @@ test('① 模块', () => {
     assert.ok(!fs.readFileSync(file, 'utf8').includes('黑话'), '不存内容');
     assert.equal(createBlockTracker({ file, now: () => t }).decide(GROUP, 's1', 'sticker', 'X').full, false, '重启后读回');
     assert.equal(blockFingerprint('a'), blockFingerprint('a'));
-    assert.match(BLOCK_REFS.slang, /qq_slang_query/);
-    assert.match(BLOCK_REFS.sticker, /qq_list_stickers/);
+    assert.match(BLOCK_REFS.slang, /slang（op=slang_query）/);
+    assert.match(BLOCK_REFS.sticker, /act（op=list_stickers）/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

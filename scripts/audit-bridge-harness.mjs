@@ -53,8 +53,6 @@ import { createMcpRuntime } from '../src/extensions/mcp-runtime.mjs';
 import { createPresetPolicy } from '../src/extensions/preset-policy.mjs';
 import { createExtensionHub } from '../src/extensions/hub.mjs';
 import { ensureHubToken, hubTokenMatches } from '../src/extensions/hub-token.mjs';
-// P3 预设编辑器：bridge 直接 import，夹具按同名补回。
-import { createPresetStore, validateAgentYaml } from '../src/presets/store.mjs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import * as behaviorProfileLib from '../src/behaviors/index.mjs';
 import * as behaviorTypeLib from '../src/behaviors/types.mjs';
@@ -72,8 +70,10 @@ import { loadSessionState, saveSessionState } from '../src/session/store.mjs';
 // 会话档案目录（P1）：bridge 直接 import，夹具剥 import 后按同名补回。
 import { applyPatch, createProfile, createSessionDirectoryWriter, loadSessionDirectory, normalizeProfile } from '../src/session/directory.mjs';
 import { createAccessConfig, normalizeAccessConfig, normalizeAccessEntries, resolveAccess, resolveAccessSummary, wakeAccessAxis } from '../src/session/access.mjs';
-import { createCapabilityStore, capabilityAllowsFlag, visiblePlatformFlags, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
-import { listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
+import { createCapabilityStore, platformFlags, normalizeCapability, CAPABILITY_RUNTIME_DEFAULTS } from '../src/capabilities/store.mjs';
+import { listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, readAgentPlatformTools, PLATFORM_TOOL_RISKS } from '../src/platforms/index.mjs';
+// 会话工具卡（S6）：/profile 的 tools 字段由它算，夹具剥 import 后要按同名补回。
+import { sessionToolsCard } from '../src/session/tools.mjs';
 // 配置 v2（C2）：bridge.js 在 loadConfig 里做迁移与派生视图，夹具剥 import 后要按同名补回。
 // P2 又进了三个：写口按 id 打补丁要用扁平条目，切换默认执行体要用 setActivePlatform，
 // 「改完要不要重启」靠端点白名单判定 —— 都是纯函数，用真实现。
@@ -86,7 +86,10 @@ import { AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformE
 import {
   buildSendCall,
   describeBackend,
-  readBackendInfo,
+  probeBackend,
+  callAction,
+  supportsAction,
+  configureUserPlatformInbound,
   sendAction as dispatchSend,
   configureUserPlatformBackend,
   transportRegistry,
@@ -112,7 +115,7 @@ import * as platformPromptLib from '../src/user-side/prompt.mjs';
 import { DSH_AGENT_CAPABILITIES, createDshPort } from '../src/agent-side/adapters/dsh/port.mjs';
 import { createDshHealth } from '../src/agent-side/adapters/dsh/health.mjs';
 import { normalizePermissionConfig, normalizeSessionPermission, resolvePermission, PERMISSION_LABEL, PERMISSION_LEVELS, SESSION_PERMISSIONS } from '../src/session/permission.mjs';
-import { capabilityCovers, toolCatalogSnapshot } from '../src/tools/catalog.mjs';
+import { capabilityCovers, toolCatalogSnapshot, TOOL_GROUPS, opNamesOf } from '../src/tools/catalog.mjs';
 import { createAdapterRegistry } from '../src/platforms/adapter-registry.mjs';
 
 import { migrateAccessModel, summarizeAccessConfig } from '../src/session/access-migrate.mjs';
@@ -128,10 +131,11 @@ import { resolveConnectionUpdate } from '../src/upstream/snowluma-conn-update.mj
 import { buildCommandsPayload } from '../src/commands/payload.mjs';
 import { createPromptBlockRegistry, PROMPT_BLOCK_ID_RE } from '../src/plugins/prompt-blocks.mjs';
 import * as tokenLedger from '../src/token-ledger.js';
+// 价目表的本机覆盖层与内置官方价（S8）：bridge.js 直接 import，夹具剥掉 import 后按同名补回。
+// 目录由 bridge 自己拼（ROOT 在 VM 里已指向 temp），所以这里用真实现即可。
+import { createPricingStore } from '../src/pricing/store.mjs';
+import { withBuiltin } from '../src/pricing/builtins.mjs';
 import * as voiceLib from '../src/send-voice-lib.js';
-import * as presetPrompt from '../src/preset-prompt.js';
-// 仿真提示词的初始版本：bridge 直接 import，夹具剥掉 import 后要补回同名符号。
-import * as presetDefaults from '../src/preset-defaults.js';
 import * as stateAcl from '../src/state-acl.mjs';
 import * as bridgeExt from '../src/bridge-extensions.js';
 import * as memoryRegistry from '../src/memory/registry.mjs';
@@ -147,6 +151,9 @@ import * as schedulingBatching from '../src/scheduling/batching.mjs';
 import * as schedulingPacing from '../src/scheduling/pacing.mjs';
 import * as schedulingCursor from '../src/scheduling/cursor.mjs';
 import * as schedulingPolicy from '../src/scheduling/policy.mjs';
+// 入站报文 → 统一事件：夹具按 OneBot 报文写用例，翻译与校验走的就是适配器与管线的同一套实现。
+import { oneBotToUnified } from '../src/user-side/adapters/qq/inbound.mjs';
+import { validateUnifiedEvent } from '../src/user-side/event.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 export async function bridgeHarness({ config = {}, savedState, files = {}, globals = {}, botRequest = null, behavior = {}, platformTools = {}, capabilities = [],
@@ -196,11 +203,16 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     source.config = merge(source.config ?? {}, patch);
     fs.writeFileSync(file, stringifyYaml(source));
   }
-  // 注册面由能力预设的平台工具表推导，测试要开某个工具就改预设，而不是往 config.tools 塞键。
+  // 注册面由平台声明推导，测试要开某个工具就改声明里的 defaultOff，而不是往 config.tools 塞键。
   if (Object.keys(platformTools).length) {
-    const file = path.join(temp, 'profiles/agent-platforms/dsh/capabilities/chat.yml');
+    const file = path.join(temp, 'profiles/platforms/qq/tools.yml');
     const doc = parseYaml(fs.readFileSync(file, 'utf8'));
-    doc.tools = { ...(doc.tools ?? {}), platform: { ...(doc.tools?.platform ?? {}), ...platformTools } };
+    for (const tool of doc.tools ?? []) {
+      const flag = String(tool.flag ?? tool.id ?? '');
+      if (!Object.hasOwn(platformTools, flag)) continue;
+      if (platformTools[flag] === true) delete tool.defaultOff;
+      else tool.defaultOff = true;
+    }
     fs.writeFileSync(file, stringifyYaml(doc));
   }
   // 自定义能力档：写进同一个 Agent 平台的 capabilities 目录，内置档继续只读。
@@ -312,20 +324,20 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
       return { base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+k3ioAAAAASUVORK5CYII=' };
     }
     async fetchFaceEntity(id) { calls.faces.push(id); return null; }
-    // get_msg：引用原文解析（resolveReplyInfo → replyRawCache）走的是这个口。
-    // 只提供时序与「能取到一条消息」；归属校验用的字段一律不给，于是内容仍然被拒，
-    // 与真网关取不到归属时的结果一致。fetchDelay.get_msg 用来把这条请求拖慢。
-    async getMessage(messageId) {
-      calls.messages = calls.messages ?? [];
-      calls.messages.push(messageId);
-      const delayMs = Number(fetchDelay?.get_msg ?? 0);
-      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
-      return { message_id: Number(messageId), message: [{ type: 'text', data: { text: 'fixture-quoted' } }] };
-    }
     async request(action, params) {
       // botRequest：按动作名模拟网关回执（例如 NapCat 与 SnowLuma 对 add_custom_face 的不同行为）
       calls.requests = calls.requests ?? [];
       calls.requests.push({ action, params });
+      // get_msg：引用原文解析（resolveReplyInfo → replyRawCache → message.get）走这个动作。
+      // 只提供时序与「能取到一条消息」；归属校验用的字段一律不给，于是内容仍然被拒，
+      // 与真网关取不到归属时的结果一致。fetchDelay.get_msg 用来把这条请求拖慢。
+      if (action === 'get_msg' && typeof botRequest !== 'function') {
+        calls.messages = calls.messages ?? [];
+        calls.messages.push(params?.message_id);
+        const delayMs = Number(fetchDelay?.get_msg ?? 0);
+        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return { status: 'ok', retcode: 0, data: { message_id: params?.message_id, message: [{ type: 'text', data: { text: 'fixture-quoted' } }] } };
+      }
       if (typeof botRequest === 'function') return botRequest(action, params);
       return { status: 'ok', retcode: 0, data: [{ emoji_id: 'fixture-sticker', url: 'https://public.invalid/sticker' }] };
     }
@@ -352,16 +364,19 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   // 切片锚点：入站接管的第一行（C3 起不再是 bot.onPrivateMessage —— 收消息改经
   // 统一入站管线，这一行之后全是连接与订阅，夹具不需要那一段）。
   source = source.replace('  configureUserPlatformInbound(() => bot);', `
+  // 夹具不跑连接层，但动作（拍一拍/拉历史/存表情）同样要拿到这条连接：
+  // 必须在 return 之前注入，否则 provider 永远停在默认的「没有客户端」。
+  configureUserPlatformInbound(() => bot);
   return {
     ensureSession, ensureSlangLearnerSession, resolvePresetName, deliverPrompt, drainPromptQueue,
-    sendToQQ, sendStickerV2, collectStickerV2, handleIncoming, startConsoleServer, cfg, state, api, promptQueues,
+    sendToQQ, sendStickerV2, collectStickerV2, handleIncoming, startConsoleServer, cfg, state, api: fixtureAgentClient, promptQueues,
     getSocialV2State, appendSocialV2Message, recordSentMessagesV2, localMemory,
     buildWakePromptV2, buildWakeSnapshotV2, sendWakePromptV2, socialV2,
     trackTurnEvent, replayPendingWakeReasonsV2,
     collectors, setupSleepTimerV2,
     getInitialPrompt, setInitialPrompt, loadInitialPrompts, formatInitialPromptV2,
     initialPrompts, initialPromptMaxChars,
-    extractMediaFromSegments, segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
+    segmentsToText, fetchOneBotImage, fetchMediaData, resolveMediaList,
     resolveReplyInfo, seenForwardIds, forwardRawCache,
     reconcileSessionPolicies, recordSentMessagesV2,
     scheduler, scheduledNotes, handleRemindCommand, silence, scheduledSilenceFor, silenceTick, shouldBlockSilentReply,
@@ -389,7 +404,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 提示注入四条：通道解析、首轮前缀的「带过没有」、记账与档案写入。
     // 投递路径（deliverPrompt / ensureSession）在切片点之外，测试用它们直接钉语义。
     platformPromptTextFor, promptInjectedFor, markPromptInjected, ensureSessionProfile,
-    ext, handleMemberNotice, reconcileConversationMembers, sendOwnerDirect, tryHandleApprovalReply, looksLikeAdminChannelText,
+    ext, handleNoticeEvent, handleMemberNotice, reconcileConversationMembers, sendOwnerDirect, tryHandleApprovalReply, looksLikeAdminChannelText,
     voiceCfg, voiceLibrary, resolveVoicePathForV2, resolveVoicePathForOperator,
     voiceBudgetCheck, sendVoiceV2, sendVoiceForV2, assertOutboundAuditOk,
     // 引擎由「会话行为 → 平台条目 defaultBehavior」决定：旧用例用 setMode 切引擎，
@@ -406,12 +421,12 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     setPresets(value) { dshPresetIds = value; dshDefaultPreset = 'standard'; },
     resetEpoch() { sessionEpoch++; },
   };
-  configureUserPlatformInbound(() => bot);`);
+`);
   const timers = new Set();
   const context = vm.createContext({
     fs, os, path, http, crypto, fileURLToPath, URL, Buffer, AbortSignal, AsyncLocalStorage,
     // bridge.js 的 `import YAML from 'yaml'` 在 VM 里被剥掉，必须按同名补回：
-    // 预设编辑器读/写能力档（readPresetCapability / writePresetRows）全走这个默认导出。
+    // 能力档读写（capabilityStore / normalizeCapability）全走这个默认导出。
     YAML,
     // 行为档案、行为类型、引擎定义与出厂副本：bridge 直接 import，夹具剥 import 后按同名补回。
     listBehaviorFiles: behaviorProfileLib.listBehaviorFiles,
@@ -441,7 +456,7 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 能力档目录跟着活动 Agent 平台走；真实现按模块级 AGENT_PLATFORMS_ROOT 拼，
     // 这里改成 temp 版本，读写的仍然是夹具复制过去的 capabilities。
     agentCapabilitiesDir: (id) => path.join(temp, 'profiles', 'agent-platforms', String(id), 'capabilities'),
-    // 预设编辑器读能力档时要归一（C4 起 preset 正文住在 rows 段）。
+    // 能力档的读写要归一（只保留意图字段，插件行由平台的渲染层生成）。
     normalizeCapability,
     // 能力档 runtime 段的缺省值（旧会话/未迁移方案按它处理）与提示通道查询。
     CAPABILITY_RUNTIME_DEFAULTS,
@@ -454,17 +469,18 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     ...schedulingCursor,
     ...schedulingPolicy,
     ...platformPromptLib,
-    listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, PLATFORM_TOOL_RISKS,
+    listAgentPlatformDirs, listPlatforms, loadPlatform, readPlatformTools, readAgentPlatformTools, PLATFORM_TOOL_RISKS,
+    sessionToolsCard,
     // 配置 v2（C2）：迁移、读归一与派生视图都是纯函数，用真实现。
     AGENT_ENDPOINT_KEYS, CONFIG_VERSION, USER_TRANSPORT_KEYS, flatPlatformEntry, migrateConfig, patchPlatformConfig, platformViews, platformsForWrite, readPlatforms, setActivePlatform, userInstances,
     // `platforms.active` 的落地要真注册表；VM 里没有装配内置平台，桩掉。
     // 激活语义（fail-closed、可用 id 列表）由 scripts/test-platform-activate.mjs 覆盖。
     activatePlatforms: () => {},
-    // 发送调用构造与后端称呼（B5）：bridge.js 只经门面调用，夹具剥 import 后按门面名补回。
-    buildSendCall, describeBackend, readBackendInfo,
+    // 发送调用构造、后端身份探测与动作执行（B5 / S2）：bridge.js 只经门面调用，夹具剥 import 后按门面名补回。
+    buildSendCall, describeBackend, probeBackend, callAction, supportsAction,
     // 统一出站与插件平台（B6）：sendAction 在 bridge 里改名 dispatchSend，
     // 因为 bridge 自己有个同名包装（先过 onOutbound 再落到这里）。
-    dispatchSend, configureUserPlatformBackend, transportRegistry,
+    dispatchSend, configureUserPlatformBackend, configureUserPlatformInbound, transportRegistry,
     // 平台元数据与发送目标解析（B7）：都是纯注册表查询，真实现即可。
     userPlatformMetadata, resolveSendTarget, agentPlatformMetadata,
     activeUserPlatformId,
@@ -482,13 +498,15 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
     // 当前执行体 id：与上面的 runtimeStub 同一份事实（真实现会建连接层句柄，夹具不需要）。
     agentRuntimeId: () => runtimeStub.id,
     // 假对端本身：测试直接改它的方法（h.api.sessions.prompt = …）来模拟服务端行为。
-    api,
-    SnowLumaWebSocketClient: FakeBot, text: (s) => s,
+    // 不叫 `api`：bridge 里早就没有这个全局了（执行体调用面是 agentPort / agentEvents），
+    // 一旦把 `api` 当作 vm 全局注入，源码里遗留的 `api.xxx` 在夹具里能跑、实盘却 ReferenceError。
+    fixtureAgentClient: api,
+    SnowLumaWebSocketClient: FakeBot,
     // bridge.js 从 src/http/security.mjs 导入（夹具会剥掉 import），这里给同名常量。
     SECURITY_HEADERS,
     ...markdown, ...sensitive, ...wait, ...safeFetch, ...forward, ...slang, ...sticker, ...stickerLimits,
     ...modelPrices, ...dshModel, ...quoteForward, ...roleCard, ...tokenLedger,
-    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...voiceLib, ...stateAcl, ...presetPrompt, ...presetDefaults, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
+    createScheduler, parseRemindCommand, REMIND_HELP, formatTaskList, createScheduledNoteStore, scheduledPromptBlock, scheduledDirectPrompt, buildSkipNotice, describeInstant, createSilenceSchedule, peakPresetRanges, describeRange, DIRECT_PASS_MS, ...roleRefreshLib, ...stickerDescribeLib, ...webImageLib, ...tokenGuardLib, ...promptBlocksLib, ...autoCompactLib, ...defaultRolesLib, ...backfillLib, ...rolePerKeyLib, ...manualSilenceLib, ...voiceLib, ...stateAcl, ...bridgeExt, ...memoryRegistry, ...memoryDefaults, ...memoryIngest, ...memoryLocalStore,
     // 插件内核与人格解析在 VM 里桩掉：这个夹具只验证 bridge.js 的接线与主链，不加载真插件、不连 soulkit。
     // 命令注册表用真实现（纯内存、无 IO），命令迁移后的行为才能在 VM 里验证。
     createPersonaResolver,
@@ -517,10 +535,12 @@ export async function bridgeHarness({ config = {}, savedState, files = {}, globa
   PERMISSION_LEVELS,
   SESSION_PERMISSIONS,
     createCapabilityStore,
-    capabilityAllowsFlag,
-    visiblePlatformFlags,
+    createPricingStore,
+    withBuiltin,
     platformFlags,
     capabilityCovers,
+    TOOL_GROUPS,
+    opNamesOf,
     createAdapterRegistry,
     toolCatalogSnapshot,
     migrateAccessModel,
@@ -547,8 +567,6 @@ createExtensionCatalog,
     createMcpRuntime,
     createPresetPolicy,
     createExtensionHub,
-    createPresetStore,
-    validateAgentYaml,
     ensureHubToken,
     hubTokenMatches,
     formatKey,
@@ -610,8 +628,25 @@ createExtensionCatalog,
   const bridge = await context.auditReady;
   bridge.setPresets(['standard', 'chat', 'chat-v2', 'readonly', 'workspace', 'full']);
   bridge.setReady(true);
-  return { ...bridge, calls, temp, agentEvents: eventsPlane, agentApprovals: approvals, agentPort: agentPortStub, async close() {
-    for (const timer of timers) clearTimeout(timer);
-    fs.rmSync(temp, { recursive: true, force: true });
-  } };
+  // 用例按 OneBot 报文写（与真网关同形），翻译与校验由适配器 + 入站管线做 ——
+  // 这正是线上的那条路径（connect() 的 accept → pipeline.emit → deliver）。业务体只吃统一事件。
+  const incomingOf = (raw) => {
+    const checked = validateUnifiedEvent(oneBotToUnified(raw), { platform: 'qq' });
+    if (!checked.ok) throw new Error(`夹具的入站报文不合法：${checked.errors.join('；')}`);
+    return checked.event;
+  };
+  const handleIncomingRaw = (kind, id, raw, cfg, opts) => bridge.handleIncoming(kind, id, incomingOf(raw), cfg, opts);
+  return {
+    ...bridge,
+    handleIncoming: handleIncomingRaw,
+    calls,
+    temp,
+    agentEvents: eventsPlane,
+    agentApprovals: approvals,
+    agentPort: agentPortStub,
+    async close() {
+      for (const timer of timers) clearTimeout(timer);
+      fs.rmSync(temp, { recursive: true, force: true });
+    },
+  };
 }

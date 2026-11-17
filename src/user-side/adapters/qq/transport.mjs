@@ -39,7 +39,15 @@ function resolveBackend() {
   const httpUrl = String(raw.httpUrl || DEFAULT_HTTP_URL).replace(/\/+$/, '');
   const accessToken = String(raw.accessToken || '');
   const fetchImpl = typeof raw.fetch === 'function' ? raw.fetch : globalThis.fetch;
-  return { httpUrl, accessToken, fetchImpl };
+  // stickerTempDir：NapCat 的 add_custom_face 只收本地路径，临时文件放哪由配置决定
+  // （macOS 的 QQ 沙盒读不到系统临时目录）。它是后端的事，不是内核的事。
+  const stickerTempDir = String(raw.stickerTempDir || '').trim();
+  return { httpUrl, accessToken, fetchImpl, stickerTempDir };
+}
+
+/** 当前后端配置快照（动作层要用 stickerTempDir，不想再复制一份 provider）。 */
+export function oneBotBackend() {
+  return resolveBackend();
 }
 
 /**

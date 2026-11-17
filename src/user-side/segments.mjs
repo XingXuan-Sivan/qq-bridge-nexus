@@ -35,6 +35,16 @@ const CAPABILITY_OF = Object.freeze({
 });
 
 /**
+ * 某个段需要哪项能力（`null` = 文本，任何平台都有）。
+ *
+ * 注册表用它在「声明了哪些能力」与「内核认识的段」之间求交，算出平台详情页那句
+ * 「能发什么 / 不支持什么」——不在控制台另维一份段与能力的对应表。
+ */
+export function segmentCapability(type) {
+  return CAPABILITY_OF[String(type ?? '')] ?? null;
+}
+
+/**
  * 缺能力时的文本替身。
  * `null` = 直接丢掉（引用没有文本语义）；数组 = 一条或多条文本段。
  */

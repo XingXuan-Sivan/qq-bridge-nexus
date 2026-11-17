@@ -65,6 +65,9 @@ function skip(layer, label, why) {
  * 块注释正则会在删掉行注释之前就先从那两个字符一路吃到下一个块注释结尾，把整段代码当注释
  * 删掉（0.2.0 的 bridge.js 实测被删掉 34 万字符），依赖它的断言于是**静默假通过**。
  * 同理不能直接删字符串里的两个斜杠（`http://` 会被削成 `http:`）。
+ *
+ * 块注释换成**同样多的换行**（单行注释换成空格）：删掉注释内容但不挪行号，
+ * 调用方才能把命中位置报成 `文件:行号`。
  */
 const stripComments = (src) => {
   // `/` 紧跟这些字符时是正则字面量的开头（而不是除号）。
@@ -85,11 +88,14 @@ const stripComments = (src) => {
       while (i < len && src[i] !== '\n') i += 1;
       continue;
     }
-    // 块注释：删到配对的结尾两个字符，用一个空格占位免得把两侧 token 粘在一起。
+    // 块注释：删到配对的结尾两个字符。换行数量原样保留，否则后面所有行号都会上移；
+    // 单行块注释换成一个空格，免得把两侧 token 粘在一起。
     if (ch === '/' && next === '*') {
       const end = src.indexOf('*/', i + 2);
-      i = end === -1 ? len : end + 2;
-      out += ' ';
+      const stop = end === -1 ? len : end + 2;
+      const breaks = src.slice(i, stop).split('\n').length - 1;
+      out += breaks ? '\n'.repeat(breaks) : ' ';
+      i = stop;
       continue;
     }
     // 字符串 / 模板字符串：原样保留（里面的斜杠都不是注释）。
@@ -205,10 +211,17 @@ function candidateBaseUrls() {
   return [...new Set(list)];
 }
 
-/** 从能力档的 rows 段里取出一行（C4 起预设正文与工具面同一份文件）。 */
+/** 能力档的意图经 DSH 渲染层编译出的行（渲染是编译，源不再是文件里的 rows）。 */
+const { createCapabilityStore } = await import(pathToFileURL(path.join(ROOT, 'src/capabilities/store.mjs')).href);
+const dshRenderLayer = await import(pathToFileURL(path.join(ROOT, 'profiles/agent-platforms/dsh/adapters/render.mjs')).href);
+const DSH_RENDER_CONFIG = YAML.parse(fs.readFileSync(path.join(ROOT, 'profiles/agent-platforms/dsh/render.yml'), 'utf8'));
+const dshCapabilities = createCapabilityStore({ root: path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities') });
+
 function readPresetRow(id) {
-  const f = path.join(ROOT, 'profiles/agent-platforms/dsh/capabilities', `${id}.yml`);
-  return YAML.parse(fs.readFileSync(f, 'utf8')).rows.find((r) => r.id === 'persona');
+  const capability = dshCapabilities.get(id);
+  if (!capability) throw new Error(`缺少能力档 profiles/agent-platforms/dsh/capabilities/${id}.yml`);
+  const { rows } = dshRenderLayer.renderPresetRows(capability, DSH_RENDER_CONFIG);
+  return rows.find((row) => row.id === 'persona');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -330,6 +343,11 @@ if (want('repo')) {
   check('repo', 'bridge.js 默认模型为 deepseek-flash', /model:\s*'deepseek-flash'/.test(bridgeCode));
   check('repo', 'bridge.js 不再有「无参创建会话」兜底', !/sessions\.create\(\{\}\)/.test(bridgeCode));
   check('repo', 'bridge.js 含 preset 清单/默认 preset 解析', bridgeSrc.includes('resolvePresetName') && bridgeSrc.includes('refreshPresetList'));
+  // 执行体客户端从 P6 起只有 agentPort（调用面）与 agentEvents（订阅面）。还写 `api.xxx` 的是重构漏网的旧引用：
+  // 夹具曾把 `api` 当 vm 全局注入，这类引用在离线测试里能跑、一到实盘就 ReferenceError（唤醒投递失败）。
+  check('repo', 'bridge.js 不引用已退役的执行体全局 api', !/(^|[^.\w$])api\s*\./.test(bridgeCode));
+  const harnessSrc = fs.readFileSync(path.join(ROOT, 'scripts/audit-bridge-harness.mjs'), 'utf8');
+  check('repo', '桥接夹具不把 api 注入成 vm 全局（否则会掩盖上面的漏网引用）', !/^\s+api,\s*$/m.test(harnessSrc), 'context 里应当用 fixtureAgentClient 之类的显式别名');
 
   // 安全不变量：群聊/仿真会话在 preset 缺失时必须 fail-closed。
   // 旧实现会在 preset 不在 DSH 清单里时静默回退到 DSH 默认 preset（standard，含 bash/
@@ -378,8 +396,11 @@ if (want('repo')) {
   // 内核只经两道门面问平台；具体协议与传输实现住在 src/*-side/adapters/<id>/。
   // 这条不变式一破，src/ 就会重新长出「认识 DSH 的客户端」与「认识 OneBot 的发送函数」。
   const userFacade = fs.readFileSync(path.join(ROOT, 'src/user-side/user-platform.mjs'), 'utf8');
-  check('repo', '用户侧门面导出中立名（buildSendCall / describeBackend / readBackendInfo）',
-    ['buildSendCall', 'describeBackend', 'readBackendInfo'].every((n) => new RegExp(`export function ${n}\\(`).test(userFacade)));
+  check('repo', '用户侧门面导出中立名（buildSendCall / describeBackend / probeBackend）',
+    ['buildSendCall', 'describeBackend', 'probeBackend'].every((n) => new RegExp(`export function ${n}\\(`).test(userFacade)));
+  // 动作面的内核入口：bridge 不认识 group_poke / get_group_msg_history，只知道 12 个中立动作名。
+  check('repo', '用户侧门面导出动作入口（callAction / supportsAction）',
+    ['callAction', 'supportsAction'].every((n) => new RegExp(`export function ${n}\\(`).test(userFacade)));
   const agentRuntimeSource = fs.readFileSync(path.join(ROOT, 'src/agent-side/runtime.mjs'), 'utf8');
   check('repo', 'Agent 侧连接层只经 agentRuntime()，契约成员集中声明',
     /export const RUNTIME_MEMBERS = Object\.freeze\(/.test(agentRuntimeSource)
@@ -402,6 +423,23 @@ if (want('repo')) {
     })
     .map(([f]) => f);
   check('repo', 'adapters/ 外的内核模块不 import 具体平台实现', adapterImporters.length === 0, adapterImporters.join(', '));
+
+  // ── 1d-3b. 平台方言只在适配器（S0）────────────────────────────────────
+  // 内核读 `event.ext.raw` 就等于按 OneBot 的字段形状写业务逻辑；写 `bot.request(...)`
+  // 就等于把 NapCat 的私有动作名往业务层搬。两者都不是风格问题：前者让「加一个用户
+  // 平台」变成逐个字段溯源，后者让对端升级的错误只能等到运行期才暴露。
+  // 适配器自己必须写平台名词（它就是那层），所以范围排除 src/user-side/adapters/**。
+  const dialectHits = (pattern) => [...srcCode]
+    .filter(([f]) => !f.startsWith('src/user-side/adapters/'))
+    .flatMap(([f, code]) => code.split('\n')
+      .map((line, i) => (pattern.test(line) ? `${f}:${i + 1}` : null))
+      .filter(Boolean));
+  const rawReads = dialectHits(/\bext\s*\??\.\s*raw\b/);
+  check('repo', '内核不读 event.ext.raw（正文走统一事件字段）', rawReads.length === 0,
+    `${rawReads.length} 处：${rawReads.join(', ')}`);
+  const oneBotCalls = dialectHits(/\bbot\s*\.\s*(?:raw|request|send[A-Za-z]*)\s*\(/);
+  check('repo', '内核不调 bot.raw / bot.request / bot.send*（动作走适配器词表）', oneBotCalls.length === 0,
+    `${oneBotCalls.length} 处：${oneBotCalls.join(', ')}`);
 
   // ── 1d-4. 调用面归 port（C5）─────────────────────────────────────────────
   // 上一段守的是「不 import 适配器」；这一段守「不隔着门面直接调平台 RPC」。
@@ -498,6 +536,7 @@ if (want('repo')) {
     ...srcFiles.map((file) => path.relative(ROOT, file).replace(/\\/g, '/'))
       .filter((rel) => rel.startsWith('src/agent-side/')),
     'scripts/test-agent-port.mjs', 'scripts/test-agent-port-tck.mjs', 'scripts/test-acp-port.mjs',
+    'scripts/test-acp-capability-intent.mjs',
     'scripts/test-agent-provider.mjs', 'scripts/test-passthrough-plan.mjs',
     'scripts/setup-dsh.mjs', 'scripts/install-agent-platform.mjs', 'scripts/build-artifacts.mjs',
     'scripts/agent-platform-adapters.mjs',

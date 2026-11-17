@@ -1,10 +1,10 @@
 // 搜图并发送（管理员私聊专用，默认关闭）：「找一张 xxx 的图发我」。
 //
 // 流程（三个工具，桥接把关）：
-//   1. qq_search_images(query)：桥接去 Bing 图片搜索（严格安全搜索），只把候选的「编号 + 标题 + 来源网站」给 AI；
+//   1. send（op=search_images）(query)：桥接去 Bing 图片搜索（严格安全搜索），只把候选的「编号 + 标题 + 来源网站」给 AI；
 //      原图地址只留在桥接里，AI 拿不到、也不能自己填网址或本地路径。
-//   2. qq_preview_image(n)：桥接下载这张候选的缩略图交给 AI 看（要求当前模型能看图），并记下「看过」。
-//   3. qq_send_web_image(n)：只能发**本次搜索里看过的**候选；桥接用安全下载（DNS 固定、逐跳校验、只连公网、
+//   2. send（op=preview_image）(n)：桥接下载这张候选的缩略图交给 AI 看（要求当前模型能看图），并记下「看过」。
+//   3. send（op=send_web_image）(n)：只能发**本次搜索里看过的**候选；桥接用安全下载（DNS 固定、逐跳校验、只连公网、
 //      限大小与像素、校验文件头）取原图，失败时退回缩略图，再按图片消息发出。
 // 只放行管理员私聊、二代仿真、带会话令牌的调用；搜索与发送各有每小时上限。
 // 搜索词会发给 Bing（与 web_search 一样，属于数据出机）。
@@ -109,7 +109,7 @@ export function imageCandidatesText(query, list) {
   return [
     `「${query}」的图片候选（共 ${list.length} 张）：`,
     ...list.map((c) => `${c.n}. ${c.title}（来源：${c.site || '未知'}）`),
-    '想发哪张，先用 qq_preview_image 看一眼，确认内容对、合适，再用 qq_send_web_image 发；看着不对就换一张或换个词重搜。',
+    '想发哪张，先用 send（op=preview_image） 看一眼，确认内容对、合适，再用 send（op=send_web_image） 发；看着不对就换一张或换个词重搜。',
   ].join('\n');
 }
 

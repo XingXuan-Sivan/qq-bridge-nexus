@@ -97,37 +97,36 @@ export function isCommandLike(text) {
   return false;
 }
 
-/** 消息纯文字（只看 text 段，用来判断是不是命令）。 */
-export function plainTextOf(message) {
-  if (typeof message === 'string') return message;
-  if (!Array.isArray(message)) return '';
-  return message.filter((s) => s?.type === 'text').map((s) => String(s.data?.text ?? '')).join('');
+/** 消息纯文本（统一事件已由段拼出，不带引用原文），用来判断是不是命令。 */
+export function plainTextOf(event) {
+  const text = event?.message?.text;
+  return typeof text === 'string' ? text : '';
 }
 
 /**
  * 从历史消息里挑出要补收的。
- * @param {object[]} messages 历史接口返回的消息（OneBot 消息事件格式，time 单位秒）
+ * @param {object[]} events history.get 返回的统一事件（time 已是毫秒）
  * @param {{ key, since, now, selfId, seen, config }} opts
  * @returns {{ items: object[], skippedCommands: object[] }} items 按时间先后；每条带 ageMs / tooOld
  */
-export function selectBackfill(messages, { key, since, now = Date.now(), selfId, seen, config } = {}) {
+export function selectBackfill(events, { key, since, now = Date.now(), selfId, seen, config } = {}) {
   const c = normalizeBackfillConfig(config);
   const from = Number(since) - c.lookbackMs;
   const maxAgeMs = c.maxAgeMinutes * 60_000;
   const items = [];
   const skippedCommands = [];
   const uniq = new Set();
-  for (const m of Array.isArray(messages) ? messages : []) {
-    const t = Number(m?.time) * 1000;
+  for (const event of Array.isArray(events) ? events : []) {
+    const t = Number(event?.time);
     if (!Number.isFinite(t) || t < from || t > now + 60_000) continue;
-    const self = selfId ?? m?.self_id;
-    if (self != null && String(m?.user_id ?? m?.sender?.user_id ?? '') === String(self)) continue; // 自己发的
-    const id = m?.message_id ?? m?.real_id;
-    if (id != null && (uniq.has(String(id)) || seen?.has(key, id))) continue; // 已经处理过 / 重复
-    if (id != null) uniq.add(String(id));
+    const self = selfId ?? event?.self?.id;
+    if (self != null && String(event?.sender?.id ?? '') === String(self)) continue; // 自己发的
+    const id = event?.message?.id;
+    if (id && (uniq.has(String(id)) || seen?.has(key, id))) continue; // 已经处理过 / 重复
+    if (id) uniq.add(String(id));
     const ageMs = Math.max(0, now - t);
-    const item = { event: m, timeMs: t, ageMs, tooOld: ageMs > maxAgeMs };
-    if (isCommandLike(plainTextOf(m?.message ?? m?.raw_message))) skippedCommands.push(item);
+    const item = { event, timeMs: t, ageMs, tooOld: ageMs > maxAgeMs };
+    if (isCommandLike(plainTextOf(event))) skippedCommands.push(item);
     else items.push(item);
   }
   items.sort((a, b) => a.timeMs - b.timeMs);

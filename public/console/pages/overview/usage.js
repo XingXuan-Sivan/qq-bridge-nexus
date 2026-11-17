@@ -269,7 +269,11 @@ function renderUsageConversations(r) {
     box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">其中 ' + usageMoney(totals.unattributedCost, sym) + ' 来自更早的回合：它们只剩累计值（在逐轮快照窗口之外），无法再拆到具体某一轮。</div>');
   }
   if (totals.unpriced) {
-    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">⚠️ 有 ' + usageNum(totals.unpricedTokens) + ' token 来自没申报价目的模型：这部分只计 token、不计价（价目由该 Agent 平台的 agent-platform.yml 里的 modelCatalog 声明）。</div>');
+    // 只有 token 没有价目的模型：把名字列出来，并指向补价的那张卡（补完账本会重算）。
+    const names = (r.models ?? []).filter((m) => !m.priced).map((m) => m.label || m.model).filter(Boolean);
+    box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">⚠️ 有 ' + usageNum(totals.unpricedTokens) + ' token 没有价目'
+      + (names.length ? '（' + esc(names.join('、')) + '）' : '')
+      + '：这部分只计 token、不计价。到「全局配置 › 行为与模型 › 价目表」补上单价，金额会立即重算。</div>');
   }
   // 会话名直接跳到「会话与审批」，并把搜索框预填成这个 key。
   box.querySelectorAll('[data-open-session]').forEach((link) => link.addEventListener('click', (ev) => {
@@ -381,44 +385,14 @@ function renderUsageRecent(r) {
   });
 }
 
-function renderUsagePrices(pt) {
-  const box = document.getElementById('usagePrices');
-  if (!pt || !pt.models) {
-    box.dataset.usageSig = 'no-price';
-    box.textContent = '（这个 Agent 平台没申报价目：花费只报 token，不做估算）';
-    return;
-  }
-  const sym = pt.symbol || '¥';
-  const tier = pt.nowTier;
-  const rows = Object.entries(pt.models).map(([name, m]) => {
-    // 单价与货币符号都是平台声明的内容，统一走 esc()。
-    const price = (v) => esc(sym + (Number.isFinite(Number(v)) ? Number(v) : (v ?? '')));
-    return {
-      cells: [
-        '<code>' + esc(name) + '</code><div class="meta">' + esc(m.label) + '</div>',
-        price(m.off?.cacheHit),
-        price(m.off?.cacheMiss),
-        price(m.off?.output),
-      ],
-    };
-  });
-  const windows = (pt.peakWindows ?? [])
-    .map(([a, b]) => `${String(a).padStart(2, '0')}:00-${String(b).padStart(2, '0')}:00`)
-    .join('、');
-  const weekdayText = (pt.peakWeekdays ?? []).length === 5 ? '周一至周五' : '平台申报的固定几天';
-  const sig = 'prices:' + String(pt.version) + ':' + (tier?.tier || '');
-  const changed = usageTable(box, {
-    sig,
-    columns: [{ label: '模型', width: 300 }, { label: '缓存命中', width: 140 }, { label: '缓存未命中', width: 160 }, { label: '输出', width: 120 }],
-    rows,
-    pager: false,
-    meta: '价目表版本 ' + (pt.version || '未标注') + ' ｜ 高峰时段 ' + weekdayText
-      + (windows ? ' ' + windows : '')
-      + '，单价 ×' + (pt.peakMultiplier ?? 1) + '（法定节假日除外，已内置 ' + pt.holidayCount + ' 天假期）',
-    empty: '（价目表为空）',
-  });
-  if (!changed) return;
-  box.insertAdjacentHTML('beforeend', '<div class="meta u-p-8-10">上表为<b>空闲时段</b>单价（' + esc(pt.currency || 'CNY') + ' / ' + usageNum(pt.unit) + ' token）。当前时刻属于 <b>' + (tier ? esc(tier.tierLabel) : '—') + '</b>。</div>');
+// ── 价目匹配状态 ────────────────────────────────────────────────
+// 价目表只在「全局配置 › 行为与模型」的最后一张卡里维护；这里只把结果画在状态行：
+// 默认模型有价 → 显示「每 3 秒自动同步」；没有 → 变灰，提示去补一条。
+function paintPricingStatus(msg, pricing) {
+  if (!pricing || pricing.priced) { setMsg(msg, '每 3 秒自动同步', 'ok'); return; }
+  setMsg(msg, pricing.model
+    ? `价目表未匹配默认模型「${pricing.model}」 · 点「价目表」补一条`
+    : '还没选默认模型 · 点「价目表」配置价目', 'info');
 }
 
 async function refreshUsage() {
@@ -441,10 +415,9 @@ async function refreshUsage() {
     document.getElementById('metricUsagePerTurnHint').textContent =
       `${usageNum(t.turns)} 轮 ｜ ${usageNum(t.steps)} 步 ｜ 当前${r.nowTier?.tier === 'peak' ? '高峰' : '空闲'}时段`;
     renderUsageConversations(r);
-    renderUsagePrices(r.priceTable ? { ...r.priceTable, nowTier: r.nowTier } : null);
     if (!usageSelectedKey) usageSelectedKey = String((r.conversations || [])[0]?.key ?? '');
     if (usageSelectedKey) refreshUsageTurns();
-    setMsg(msg, '每 3 秒自动同步', 'ok');
+    paintPricingStatus(msg, r.pricing);
   } catch (error) {
     setMsg(msg, `❌ 读取失败：${error?.message || '未知错误'}`, 'err');
   }
@@ -498,8 +471,6 @@ function renderUsageFields() {
 
 export function init() {
   renderUsageFields();
-  // 标题旁的小字提示原先是 index.html 里的 data-note；片段化后在这里补（与 app.js 对静态 section 的做法一致）。
-  document.querySelector('#section-usage-summary h2')?.setAttribute('data-note', '每 3 秒自动同步');
 
   document.getElementById('usageChartControls').addEventListener('click', (ev) => {
     const hoursBtn = ev.target.closest('[data-usage-hours]');
@@ -546,7 +517,12 @@ export function init() {
   });
 
   // 用量看板只在运行总览可见时轮询：既保证「实时」，又不让其它页白白多打两份接口。
-  setInterval(() => { if (getCurrentPage() !== 'overview') return; refreshUsage(); refreshUsageChart(); refreshUsageRecent(); }, 3000);
+  setInterval(() => {
+    if (getCurrentPage() !== 'overview') return;
+    refreshUsage();
+    refreshUsageChart();
+    refreshUsageRecent();
+  }, 3000);
 
   onPageRefresh('overview', () => setTimeout(() => refreshUsagePage(), 0));
   // 首次进入时片段刚注入，延后一拍再刷，避免在 DOM / 样式就绪前空转。

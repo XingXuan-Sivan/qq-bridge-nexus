@@ -9,7 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createPeopleRegistry, normalizeQQ } from '../src/social/people.js';
 import { buildPersonView, noteVisibleIn, renderPeopleBlock, effectivePolicyBetween } from '../src/social/memory-policy.js';
-import { normalizeMemberNotice, processMemberEvent } from '../src/social/conversation-events.js';
+import { memberEventFromNotice, processMemberEvent } from '../src/social/conversation-events.js';
+import { validateUnifiedEvent } from '../src/user-side/event.mjs';
+import { noticeToUnified } from '../src/user-side/adapters/qq/inbound.mjs';
 import { checkCrossConversation, queryPresence, queryActivity } from '../src/social/cross-conversation.js';
 import { createJsonStore } from '../src/lib/json-store.js';
 
@@ -81,7 +83,7 @@ test('名片里的控制字符/零宽字符/换行被清理（防提示注入换
 
 test('首次部署：已有成员只标 listed，不是新人；之后的加入才算新人', () => {
   const { reg, clock } = registry();
-  const base = reg.reconcileConversation(G1, [{ user_id: Number(ALICE), card: 'Alice' }, { user_id: Number(BOB), nickname: 'bob' }]);
+  const base = reg.reconcileConversation(G1, [{ id: Number(ALICE), card: 'Alice' }, { id: Number(BOB), nickname: 'bob' }]);
   assert.equal(base.baseline, true);
   assert.equal(base.missedJoins, 0);
   assert.equal(reg.getPerson(ALICE).acquaintance, 'listed');
@@ -123,9 +125,9 @@ test('入群分类：陌生人 / 别处认识的熟人 / 退群回归；重复�
 
 test('成员对账：漏掉的加入/离开只记录，source=reconcile', () => {
   const { reg, clock } = registry();
-  reg.reconcileConversation(G1, [{ user_id: ALICE }, { user_id: BOB }]);
+  reg.reconcileConversation(G1, [{ id: ALICE }, { id: BOB }]);
   clock.t += 1000;
-  const r = reg.reconcileConversation(G1, [{ user_id: ALICE }, { user_id: CAROL }]);
+  const r = reg.reconcileConversation(G1, [{ id: ALICE }, { id: CAROL }]);
   assert.equal(r.baseline, false);
   assert.equal(r.missedJoins, 1);
   assert.equal(r.missedLeaves, 1);
@@ -301,38 +303,44 @@ test('旧版 memberImpressions 迁移：唯一映射才导入，歧义进人工�
   assert.equal(again.skipped, true, '同一会话只迁移一次');
 });
 
+/**
+ * OneBot 通知报文 → 成员事件：走真实链路（适配器翻译 → 内核校验 → 业务规整）。
+ * 「字段改名后两端还对得上」正是这条回归要钉的东西，不能绕开其中任一段。
+ */
+const memberEvent = (raw) => memberEventFromNotice(validateUnifiedEvent(noticeToUnified(raw), { platform: 'qq' }).event);
+
 test('入群事件：notice 规整（ID 为 number，user_id=0 丢弃）', () => {
-  const ev = normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'invite', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(BOB), time: 1700000000, self_id: 99999999 });
+  const ev = memberEvent({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'invite', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(BOB), time: 1700000000, self_id: 99999999 });
   assert.equal(ev.kind, 'join');
   assert.equal(ev.conversationId, G1);
   assert.equal(ev.operatorId, BOB);
-  assert.equal(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G1), user_id: 0 }), null);
-  assert.equal(normalizeMemberNotice({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', group_id: 1, user_id: 1 }), null);
-  assert.equal(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_card', group_id: Number(G1), user_id: Number(ALICE), card_new: 'N', card_old: 'O' }).kind, 'card');
+  assert.equal(memberEvent({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G1), user_id: 0 }), null);
+  assert.equal(memberEvent({ post_type: 'notice', notice_type: 'notify', sub_type: 'poke', group_id: 1, user_id: 1 }), null);
+  assert.equal(memberEvent({ post_type: 'notice', notice_type: 'group_card', group_id: Number(G1), user_id: Number(ALICE), card_new: 'N', card_old: 'O' }).kind, 'card');
 });
 
 test('入群事件处理：熟人入新会话 → 唤醒文本带分类；白名单外的会话忽略；机器人自己加入不唤醒', async () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', conversationId: G1, userId: ALICE, card: 'Alice' });
   const deps = { people: reg, continuity: {}, conversationAllowed: (g) => g === G1 || g === G2, fetchMember: async () => ({ card: '小爱' }) };
-  const r = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'approve', group_id: Number(G2), user_id: Number(ALICE), time: 5 }), deps);
+  const r = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'approve', group_id: Number(G2), user_id: Number(ALICE), time: 5 }), deps);
   assert.equal(r.wake, true);
   assert.equal(r.wakeReason, 'memberJoin:knownElsewhere');
   assert.ok(r.streamText.includes('小爱'));
   assert.ok(!r.streamText.includes('Alice'), '事件文本不带别的会话的名片');
-  const outside = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G3), user_id: Number(BOB) }), deps);
+  const outside = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G3), user_id: Number(BOB) }), deps);
   assert.equal(outside.handled, false);
   assert.equal(reg.getPerson(BOB), null, '白名单外的会话不建档');
-  const self = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G2), user_id: 99999999, self_id: 99999999 }), deps);
+  const self = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G2), user_id: 99999999, self_id: 99999999 }), deps);
   assert.equal(self.wake, false);
-  const dup = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'approve', group_id: Number(G2), user_id: Number(ALICE), time: 5 }), deps);
+  const dup = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_increase', sub_type: 'approve', group_id: Number(G2), user_id: Number(ALICE), time: 5 }), deps);
   assert.equal(dup.wake, false, '重复事件不重复唤醒');
 });
 
 test('入群事件处理：QQ 接口失败时按无名片处理，不中断', async () => {
   const { reg } = registry();
   const logs = [];
-  const r = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G1), user_id: Number(CAROL), time: 9 }), {
+  const r = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_increase', group_id: Number(G1), user_id: Number(CAROL), time: 9 }), {
     people: reg, continuity: {}, conversationAllowed: () => true, fetchMember: async () => { throw new Error('timeout'); }, log: (m) => logs.push(m),
   });
   assert.equal(r.wakeReason, 'memberJoin:stranger');
@@ -343,10 +351,10 @@ test('退群默认不唤醒；撤回只记录不复述', async () => {
   const { reg } = registry();
   reg.observeMessage({ kind: 'group', conversationId: G1, userId: ALICE, card: 'Alice' });
   const deps = { people: reg, continuity: {}, conversationAllowed: () => true };
-  const leave = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_decrease', sub_type: 'kick', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(BOB), time: 7 }), deps);
+  const leave = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_decrease', sub_type: 'kick', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(BOB), time: 7 }), deps);
   assert.equal(leave.wake, false);
   assert.ok(leave.streamText.includes('移出'));
-  const recall = await processMemberEvent(normalizeMemberNotice({ post_type: 'notice', notice_type: 'group_recall', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(ALICE), message_id: 5 }), deps);
+  const recall = await processMemberEvent(memberEvent({ post_type: 'notice', notice_type: 'group_recall', group_id: Number(G1), user_id: Number(ALICE), operator_id: Number(ALICE), message_id: 5 }), deps);
   assert.equal(recall.wake, false);
   assert.equal(recall.streamText, undefined);
 });

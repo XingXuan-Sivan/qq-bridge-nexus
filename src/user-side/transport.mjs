@@ -17,7 +17,7 @@ import { userPlatform } from './runtime-registry.mjs';
 
 const ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
-/** @type {Map<string, {id: string, owner: string, label: string, conversationTypes: string[], capabilities: string[], limits: object, send: Function, close: Function|null, instance: object|null}>} */
+/** @type {Map<string, {id: string, owner: string, label: string, conversationTypes: string[], capabilities: string[], actions: string[], limits: object, send: Function, connect: Function|null, actionHandler: Function|null, instance: object|null}>} */
 const transports = new Map();
 
 /**
@@ -26,6 +26,9 @@ const transports = new Map();
  * @param {object} definition
  * @param {string} definition.id           平台 id（会成为会话 key 里的平台段）
  * @param {string[]} [definition.capabilities]
+ * @param {string[]} [definition.actions]     敢接的动作用名（见 src/user-side/actions.mjs）；
+ *        不声明等于这个平台做不到那些事，内核按表格降级或报 capability_unsupported
+ * @param {Function} [definition.actionHandler] async ({ name, params }) => 回执
  * @param {string[]} [definition.conversationTypes] 本平台真正有的会话类型（控制台据此限制
  *        表单选项；不声明时控制台不限制，但发送能不能成仍由实现决定）
  * @param {object} [definition.limits]    分条与格式限制（chunkChars / markdown …）
@@ -69,6 +72,17 @@ export function registerTransport(definition, owner) {
   const capabilities = Array.isArray(definition?.capabilities)
     ? [...new Set(definition.capabilities.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean))]
     : (Array.isArray(instance?.capabilities) ? [...new Set(instance.capabilities.map((item) => String(item ?? '').trim().toLowerCase()).filter(Boolean))] : []);
+  // 动作与回执：插件平台也可以接管内核的动作（例如用自己的协议实现拍一拍）。
+  // 只声明、不实现等于撒谎，所以两者必须成对出现；不声明就是「做不到」。
+  const actionHandler = typeof definition?.actionHandler === 'function'
+    ? definition.actionHandler
+    : (typeof instance?.actionHandler === 'function' ? instance.actionHandler.bind(instance) : null);
+  const rawActions = Array.isArray(definition?.actions)
+    ? definition.actions
+    : (Array.isArray(instance?.actions) ? instance.actions : []);
+  const actions = actionHandler
+    ? [...new Set(rawActions.map((item) => String(item ?? '').trim()).filter(Boolean))]
+    : [];
   // 会话类型与限制同理：定义上没写就看 create() 的产物。这两项只影响控制台的表单与
   // 提示，不参与发送判定，所以缺省是空而不是报错（插件不必为了能被列出而声明它们）。
   const conversationTypes = [...new Set(
@@ -83,9 +97,11 @@ export function registerTransport(definition, owner) {
     label: String(definition?.label ?? '').trim() || id,
     conversationTypes,
     capabilities,
+    actions,
     limits,
     send,
     connect,
+    actionHandler,
     instance,
     close: typeof instance?.close === 'function' ? () => instance.close() : null,
   };
@@ -125,12 +141,13 @@ export function unregisterTransportsByOwner(owner) {
 
 /** 控制台 / 健康检查用：插件注册的平台清单。 */
 export function listTransports() {
-  return [...transports.values()].map(({ id, owner, label, conversationTypes, capabilities, limits, connect }) => ({
+  return [...transports.values()].map(({ id, owner, label, conversationTypes, capabilities, actions, limits, connect }) => ({
     id,
     owner,
     label,
     conversationTypes: [...conversationTypes],
     capabilities: [...capabilities],
+    actions: [...actions],
     limits: { ...limits },
     // 能不能收消息 = 有没有 connect()。这里只给布尔值，函数不进返回值
     // （这份对象会原样进 `/api/platforms/registry`）。

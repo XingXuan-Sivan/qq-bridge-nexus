@@ -6,7 +6,8 @@
 //   · 这个会话该怎么构造发送调用 → buildSendCall
 //   · 一条消息该怎么发给这个平台   → send
 //   · 这个平台收到报文后怎么变成统一事件 → connect（C3 的入站契约）
-//   · 这条 get_version_info 回执背后是哪个后端 → readBackendInfo / describeBackend
+//   · 内核要平台做的那 12 件事      → actions / actionHandler（§3.2 的动作词表）
+//   · 这条 get_version_info 回执背后是哪个后端 → probeBackend / describeBackend
 //
 // 为什么要把「构造发送调用」留在适配器里：OneBot v11 只有 send_group_msg /
 // send_private_msg 两个动作，参数名（group_id / user_id）与 id 必须是数字都是
@@ -18,19 +19,22 @@
 import { oneBotSendCall, ONEBOT_CONVERSATIONS } from './onebot.mjs';
 import { qqBackendLabel, qqBackendFromVersionInfo } from './qq-backend-label.js';
 import { sendOneBotAction, setOneBotBackend, resetOneBotBackend } from './transport.mjs';
+import { setOneBotClient, resetOneBotClient } from './connection.mjs';
+import { actions, actionHandler, probeBackend } from './actions.mjs';
 import { toOneBotSegments } from './segments.mjs';
 import {
   connectOneBot,
   isSelfMessage,
+  noticeToUnified,
   oneBotSegmentsToNeutral,
   oneBotToUnified,
-  resetOneBotClient,
-  setOneBotClient,
 } from './inbound.mjs';
 
 export { oneBotSendCall, ONEBOT_CONVERSATIONS, qqBackendLabel, qqBackendFromVersionInfo };
 export { sendOneBotAction, setOneBotBackend, resetOneBotBackend, toOneBotSegments };
-export { connectOneBot, isSelfMessage, oneBotSegmentsToNeutral, oneBotToUnified, resetOneBotClient, setOneBotClient };
+export { setOneBotClient, resetOneBotClient };
+export { actions, actionHandler, probeBackend };
+export { connectOneBot, isSelfMessage, noticeToUnified, oneBotSegmentsToNeutral, oneBotToUnified };
 
 export const id = 'qq';
 export const label = 'QQ';
@@ -71,25 +75,13 @@ export const send = sendOneBotAction;
 /**
  * 中立的入站实现（C3）：`connect({signal, onEvent, onStatus}) → {close}`。
  *
- * 只负责「报文 → 统一事件」这一段；校验、准入、会话映射、唤醒在
- * src/user-side/inbound.mjs 的管线上，本平台不重复判断。
+ * 只负责「报文 → 统一事件」这一段（消息与通知共用同一条出口）；校验、准入、
+ * 会话映射、唤醒在 src/user-side/inbound.mjs 的管线上，本平台不重复判断。
  */
 export const connect = connectOneBot;
 
-/**
- * 入站事件里带 `ext.raw`（OneBot 原始报文）。
- *
- * 桥接的业务体（引用解析、合并转发、媒体下载）仍按这个形状读，所以只有声明了
- * 这一位的平台，它的消息才能直接进唤醒 —— 没声明的平台只能进到准入与会话映射，
- * 管线会把「业务体没有入口」作为丢弃原因公开出来，不假装已处理。
- */
-export const rawEvent = true;
-
 /** 中立的「后端该怎么称呼」。实现见 qq-backend-label.js。 */
 export const describeBackend = qqBackendLabel;
-
-/** 中立的「回执背后是哪个后端」。实现见 qq-backend-label.js。 */
-export const readBackendInfo = qqBackendFromVersionInfo;
 
 /** 控制台与静态校验用的描述（B7 会把它变成 /api/platforms 的响应）。 */
 export function describe() {
@@ -98,6 +90,7 @@ export function describe() {
     label,
     conversationTypes: [...conversationTypes],
     capabilities: [...capabilities],
+    actions: [...actions],
     limits: { ...limits },
   };
 }

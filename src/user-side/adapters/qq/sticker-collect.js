@@ -1,13 +1,15 @@
-// AI 收藏表情的后端适配（纯逻辑 + 受控临时文件），桥接负责接线。
+// 收藏表情的后端差异（NapCat 与 SnowLuma 的 add_custom_face 不是同一个东西）。
 //
-// SnowLuma：add_custom_face 接受 `file: base64://…`，回执带 emoji_id；备注用 modify_custom_face。—— 桥接原样保留。
-// NapCat（v4.18.38 源码核对，packages/napcat-onebot/action/extends/CustomFace.ts）：
-//   · add_custom_face 的 file **必须是本地文件路径**（先 stat 再读文件），base64:// 会报 ENAMETOOLONG；
-//   · 回执是 QQ 原生返回值，不含 emoji_id —— 收藏后按 MD5 在 fetch_custom_face_detail 列表里找到它；
-//   · 备注用 set_custom_face_desc { emoji_id(emoId), res_id, md5, desc }。
+// 两个网关同名不同语义：
+//   · SnowLuma：`file` 接受 `base64://…`，回执带 emoji_id，备注用 modify_custom_face；
+//   · NapCat：`file` **必须是本地文件路径**（先 stat 再读文件），base64:// 会报
+//     ENAMETOOLONG；回执是 QQ 原生返回值、不含 emoji_id —— 收藏后要按 MD5 在
+//     收藏列表里找回它，备注用 set_custom_face_desc。
+// 这条差异只属于 QQ，所以整份逻辑住在这个目录：换平台时它跟着 QQ 一起消失。
 //
-// 安全边界不变：交给网关的路径只会是**桥接自己新建**的临时文件（随机名、0600、内容是桥接已校验过的图片字节），
-// 调用结束立即删除；消息里的原始 url/file、AI 给的任何路径都不会交给网关。
+// 安全边界：交给网关的路径只会是**本文件自己新建**的临时文件（随机名、0600、
+// 内容是调用方已校验过的图片字节），调用结束立即删除；消息里的原始 url/file、
+// AI 给的任何路径都不会交给网关。
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -20,15 +22,15 @@ export function isNapCatVersionInfo(data) {
   return /napcat/i.test(s);
 }
 
-/** 本次失败是否是「把 base64:// 当成本地路径」那一类（只在这种情况下才换 NapCat 路径重试）。 */
+/** 本次失败是否是「把 base64:// 当成本地路径」那一类（只在这种情况下才换路径重试）。 */
 export function looksLikePathOnlyError(res) {
   const t = String(res?.wording ?? res?.message ?? res?.msg ?? '');
   return /ENAMETOOLONG|ENOENT|no such file|stat\b/i.test(t);
 }
 
 /**
- * 临时文件放哪：显式配置 > macOS 上 QQ 的沙盒容器 tmp（NapCat 跑在 QQ 进程里，App Store 版 QQ 有沙盒，
- * 读不到系统临时目录）> 系统临时目录。
+ * 临时文件放哪：显式配置 > macOS 上 QQ 的沙盒容器 tmp（NapCat 跑在 QQ 进程里，
+ * App Store 版 QQ 有沙盒，读不到系统临时目录）> 系统临时目录。
  */
 export function stickerTempBase({ configured = '', platform = process.platform, home = os.homedir(), exists = fs.existsSync } = {}) {
   if (configured) return path.resolve(String(configured));

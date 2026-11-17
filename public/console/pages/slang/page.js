@@ -292,7 +292,7 @@ function loadSlangConfig() {
 const SLANG_INTRO_CARD = {
   title: '群聊黑话 / 网络用语库',
   actions: '<span class="form-actions-status" id="slangMsg"></span>',
-  description: 'DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>qq_slang_submit</code> 主动提交陌生词。'
+  description: 'DSH 会从群聊中自动提取疑似黑话候选；二代仿真模式下 AI 也可用 <code>slang（op=slang_submit）</code> 主动提交陌生词。'
     + '候选可批量送 DSH 深度联网研究，研究结果回到控制台由你删改修正后转正；'
     + '确认后的词条会写入「黑话提示词」，注入一代/二代 AI 的聊天上下文，成为 AI 可查询和使用的记忆。',
 };

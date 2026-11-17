@@ -126,7 +126,7 @@ test('连接层接线：留空自动识别时，DSH 不可用期间定期重新�
 });
 
 test('preset：不再使用 DSH 0.2.1 不认的提示词变量（cwd）', () => {
-  // 源侧：能力档（含 rows 段里的预设正文）。
+  // 源侧：能力档（预设正文在 render.yml 的 persona 段，两边都不许出现 {{cwd}}）。
   for (const name of fs.readdirSync(new URL('../profiles/agent-platforms/dsh/capabilities/', import.meta.url))) {
     if (!name.endsWith('.yml')) continue;
     const f = new URL(`../profiles/agent-platforms/dsh/capabilities/${name}`, import.meta.url);

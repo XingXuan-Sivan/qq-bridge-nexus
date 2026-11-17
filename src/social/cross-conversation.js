@@ -1,4 +1,4 @@
-// 跨会话能力（默认关闭，开关 socialV2.tools.crossGroup / 工具 qq_cross_group_query）：
+// 跨会话能力（默认关闭，开关 socialV2.tools.crossGroup / 工具 admin（op=cross_group_query））：
 //   在一个会话里，经**显式授权**查询另一个会话的成员关系与活跃度。
 //
 // 原则：
@@ -11,7 +11,7 @@
 //     AI 天然无法往别的会话发消息；owner 代发走管理通道的 /say 命令。
 //   · 每次查询都写审计日志（调用方负责）。
 //
-// 有意保留的旧词：配置键 `crossGroup` 与工具名 `qq_cross_group_query` 是 0.1.x 的公开面，
+// 有意保留的旧词：配置键 `crossGroup` 与工具名 `admin（op=cross_group_query）` 是 0.1.x 的公开面，
 // 白名单 `allow.groups` 里存的是平台上的会话地址（QQ 群号）。改名会让老配置静默失效。
 
 import { isGroupKey, parseKey } from '../session/key.mjs';

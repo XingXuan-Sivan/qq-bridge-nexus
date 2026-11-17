@@ -1,34 +1,46 @@
 version: 1
+# Agent 侧工具目录：这台执行体提供哪些插件模块，每个模块承担哪个效果。
+# `effects` 是能力档能声明的效果名（词表在 docs/CAPABILITY_CONTRACT.md §3.4.2）；
+# 一个模块可以承担多个效果（tool-fs 同时提供 fs.read 与 fs.write）。
+# 模块 id 是插件目录里的稳定名字，效果名是中立词 —— 能力档只写效果，不写模块。
 modules:
   - id: tool-fs
     label: 文件读写
     risk: write
     desc: 读写工作区里的文件
+    effects: [fs.read, fs.write]
   - id: tool-fs-search
     label: 文件检索
     risk: read
     desc: 按名字或内容在工作区里查找文件
+    effects: [fs.search]
   - id: tool-pwsh
     label: 执行命令
     risk: exec
     desc: 执行 PowerShell 命令
+    effects: [shell.exec]
   - id: tool-jobs
     label: 后台任务
     risk: exec
     desc: 启动、查看和结束后台任务
+    effects: [jobs.manage]
   - id: tool-web
     label: 联网搜索/抓取
     risk: read
     desc: 搜索网页并抓取正文
+    effects: [web.access]
   - id: tool-ask-user
     label: 向用户提问
     risk: read
     desc: 需要确认时向用户发问并等待回答
+    effects: [user.ask]
   - id: tool-todo
     label: 任务列表
     risk: read
     desc: 维护多步骤任务的进度清单
+    effects: [todo.manage]
   - id: qq-approval-gate
     label: 审批闸门
     risk: admin
     desc: 高风险操作的确认与放行
+    effects: [approval.gate]

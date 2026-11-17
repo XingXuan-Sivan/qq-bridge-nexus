@@ -1,29 +1,28 @@
-/* 平台页：清单是两个折叠组里的卡片网格，详情是同页二级路由（#platforms/<side>:<id>）。
-   下面全部是 page.js / platform-detail.js 生成内容的样式。 */
+/* 平台页：清单是一张卡片墙（卡内按 plain 折叠分组），详情是同页二级路由
+   （#platforms/<side>:<id>）。下面全部是 page.js / platform-detail.js 生成内容的版式，
+   控件本身的外观一律来自组件。 */
 
-/* 详情铺满网格：页头（components/detail-head）、标签条、面板三块都是 main .grid
-   的直接网格项。.page-tabs 自带 grid-column:1/-1（css/components.css），这里只管面板。 */
-.platform-detail { display: contents; }
-
-/* 标签条在页面里：.page-tabs 的默认外边距是给页首用的，这里收窄。 */
-.platform-detail .page-tabs {
-  margin: 14px 0 16px;
-  flex-wrap: wrap;
+/* 诊断块只在有错误时出现：出现时与工具栏拉开一点距离。 */
+#platformDiagnostics:not(:empty) {
+  margin: 4px 0 6px;
 }
-.platform-detail .page-tab { padding: 8px 14px; }
 
-/* 面板分段：每一段由 platform-detail.js 生成一张 card，本层只负责它们的间距。 */
-.platform-stack {
-  grid-column: 1 / -1;
+/* 详情页的一句话结论：页头之下、标签条之上。句子由注册表下发（platform-detail.js 不拼
+   「能发 / 不能发」），这里只管排版；它自己和页头、标签条一样都在 detail-panel 大卡里。 */
+.platform-promise {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+/* 行为档案的字段分组：每组一张小卡（引擎下发 card 分组），竖排并留出统一间距。 */
+.platform-detail .behavior-groups {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
-  min-width: 0;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
 }
-
-/* 行为档案的字段分组直接铺开（不额外套一层容器），分组本身仍是卡片式 fieldset。 */
-.platform-detail .behavior-groups { display: contents; }
-.platform-detail .behavior-groups .form-section--card { margin: 0; }
 
 /* 能力面板里成排的 id / 工具名：排成可换行的代码片，别挤成一串。 */
 .platform-detail .cap-tool-names,
@@ -33,3 +32,19 @@
   gap: 6px;
 }
 .platform-detail .cap-tool-names code { font-size: 11px; }
+
+/* 能力分组的药丸：名字给人看，id 给排错用，两者同一行但不同分量。 */
+.platform-detail .cap-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-chip);
+  border-radius: 999px;
+  background: var(--surface-chip);
+  font-size: 12px;
+}
+.platform-detail .cap-pill code {
+  color: var(--muted);
+  font-size: 11px;
+}

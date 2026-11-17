@@ -1,17 +1,17 @@
 // 管理员私聊的跨会话能力（默认关闭，开关 socialV2.tools.ownerGroupAccess）：
-//   ① 只读查看白名单会话：最近消息 + 该会话的记忆摘要 + 长期规则（qq_owner_peek_group）；
-//   ② 给会话设长期规则（qq_owner_group_rule）：由**桥接**写进目标会话的记忆（ownerRules 字段），
+//   ① 只读查看白名单会话：最近消息 + 该会话的记忆摘要 + 长期规则（admin（op=owner_peek_group））；
+//   ② 给会话设长期规则（admin（op=owner_group_rule））：由**桥接**写进目标会话的记忆（ownerRules 字段），
 //      每次唤醒目标会话时注入，会话自己的记忆工具改不动、清不掉。
 //
 // 不改变的边界：
 //   · 只有管理员本人私聊（private:<ownerId>）的令牌能用；目标只能是当前模式允许范围（白名单）内的会话；
-//   · 只读：查看不会标记目标会话的已读进度，也不能代目标会话发言 —— 在会话里说话仍然走托付（qq_ask_group_session）；
+//   · 只读：查看不会标记目标会话的已读进度，也不能代目标会话发言 —— 在会话里说话仍然走托付（admin（op=ask_group_session））；
 //   · 规则是「说话习惯」类的长期约束，不能改模式、权限或任何安全设置（那些只能走管理通道命令）；
 //   · 每次查看、增删规则都记审计。
 //
 // 本模块只放纯逻辑（校验、规则增删、提示词文案、只读视图），桥接负责接线。
 //
-// 词汇：容器词用「会话」（conversation）；工具名 `qq_owner_group_rule` / `qq_owner_peek_group`
+// 词汇：容器词用「会话」（conversation）；工具名 `admin（op=owner_group_rule）` / `admin（op=owner_peek_group）`
 // 与开关 `ownerGroupAccess` 是 0.1.x 的公开面，保持不变。
 
 import { key } from '../session/key.mjs';

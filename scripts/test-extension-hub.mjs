@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { createExtensionHub, HubError } from '../src/extensions/hub.mjs';
 import { normalizePresetPolicy } from '../src/extensions/preset-policy.mjs';
 
+// 策略就是能力档本身：顶层 mcp / skills 段（不再包一层 extensions）。
 const policyOpen = normalizePresetPolicy({
-  extensions: { mcp: { allow: ['*'], tools: { allow: ['*'] } }, skills: { allow: ['*'] } },
+  mcp: { allow: ['*'], tools: { allow: ['*'] } }, skills: { allow: ['*'] },
 });
 const policyEchoOnly = normalizePresetPolicy({
-  extensions: { mcp: { allow: ['demo'], tools: { allow: ['echo'], deny: [] } }, skills: { allow: [] } },
+  mcp: { allow: ['demo'], tools: { allow: ['echo'], deny: [] } }, skills: { allow: [] },
 });
 
 function setup() {

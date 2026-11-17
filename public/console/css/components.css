@@ -637,6 +637,48 @@ tr:last-child td {
   outline-offset:2px
 }
 
+/* 键值网格：public/console/components/key-value/key-value.js */
+.kv-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px 30px;
+  margin:0
+}
+.kv-grid--1 {
+  grid-template-columns:minmax(0,1fr)
+}
+.kv-grid--3 {
+  grid-template-columns:repeat(3,minmax(0,1fr))
+}
+.kv-grid__row {
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  gap:2px 10px;
+  align-items:baseline;
+  min-width:0;
+  padding-bottom:9px;
+  border-bottom:1px solid var(--border-subtle)
+}
+.kv-grid__row--wide {
+  grid-column:1/-1
+}
+.kv-grid dt {
+  margin:0;
+  font-size:12px;
+  color:var(--muted);
+  white-space:nowrap
+}
+.kv-grid dd {
+  margin:0;
+  min-width:0;
+  font-size:13px;
+  line-height:1.5;
+  overflow-wrap:anywhere
+}
+.kv-grid dd .meta {
+  margin-top:2px
+}
+
 /* 消息弹窗较小宽度：public/console/components/message-box/message-box.js */
 .modal--sm {
   width:min(420px, calc(100vw - 32px))
@@ -716,6 +758,25 @@ tr:last-child td {
   grid-column:1 / -1;
   border-bottom:1px solid var(--card-border);
   margin:22px 0 18px
+}
+/* 二级详情页的公共骨架：页头 / 标签条 / 面板三块都是 main .grid 的直接网格项。
+   页面自己的根节点仍可带自己的类名（.platform-detail 等），这里只管铺满与间距。 */
+.detail-view {
+  display:contents
+}
+.detail-view .page-tabs {
+  margin:14px 0 16px;
+  flex-wrap:wrap
+}
+.detail-view .page-tab {
+  padding:8px 14px
+}
+.detail-stack {
+  grid-column:1 / -1;
+  display:flex;
+  flex-direction:column;
+  gap:var(--space-6);
+  min-width:0
 }
 .slang-tab,.page-tab {
   border:0;
@@ -1037,7 +1098,7 @@ tr:last-child td {
     overflow-x:auto;
     overflow-y:visible;
     padding-bottom:6px;
-    /* 横向滚动的导航不能把 19 项的 min-content 作为整页宽度往上顶 */
+    /* 横向滚动的导航不能把 14 项的 min-content 作为整页宽度往上顶 */
     min-width:0
   }
   .nav-label,.sidebar-bottom,.nav-icon,.nav-note,.nav-count {
@@ -1490,7 +1551,43 @@ tr:last-child td {
 .settings-group[open] summary {
   background:var(--surface-open)
 }
-/* 折叠面板里再套一层的小折叠（如「高级」）：分隔线 + 收起自带箭头，内容与外层左对齐 */
+/* 非卡片折叠（collapseHtml 的 plain）：去掉外框与底色，只留一行可点的小标题。
+   用在卡片内部的分类分组，以及详情页的附注段（原始声明这类）。 */
+.settings-group.is-plain {
+  border:0;
+  border-radius:0;
+  background:none;
+  margin-top:0;
+  overflow:visible;
+  content-visibility:visible
+}
+.settings-group.is-plain summary {
+  min-height:34px;
+  padding:6px 26px 6px 0;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.02em;
+  color:var(--muted)
+}
+.settings-group.is-plain[open] summary {
+  background:none;
+  border-bottom:1px solid var(--border-subtle);
+  border-radius:0
+}
+.settings-group.is-plain summary::after {
+  right:4px;
+  margin-top:-4px;
+  width:6px;
+  height:6px
+}
+.settings-group.is-plain .settings-content {
+  padding:12px 0 0
+}
+/* 相邻的 plain 分组（卡内分类）之间留出层次，不靠每页自己加间距。 */
+.settings-group.is-plain + .settings-group.is-plain {
+  margin-top:18px
+}
+/* 折叠面板里再套一层的小折叠：分隔线 + 收起自带箭头，内容与外层左对齐 */
 .settings-sub {
   border-top:1px dashed var(--border-subtle);
   margin-top:10px;

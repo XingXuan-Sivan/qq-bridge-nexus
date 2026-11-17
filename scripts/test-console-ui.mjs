@@ -44,10 +44,27 @@ let browser;
 const results = [];
 const errors = [];
 const blockedRequests = [];
+// 用例失败时弹窗往往还开着，后面每个用例都会卡在「拦截点击」上：收尾先把遗留遮罩关掉，
+// 让失败只影响它自己。
+let activePage = null;
+function closeStrayOverlays() {
+  if (!activePage) return Promise.resolve();
+  return activePage.evaluate(() => {
+    for (const overlay of document.querySelectorAll('.modal-overlay.open')) {
+      overlay.querySelector('[data-modal-close]')?.click();
+      overlay.classList.remove('open');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+  }).catch(() => {});
+}
 async function test(name, fn) {
   const start = Date.now();
   try { await fn(); results.push({ name, ok: true, durationMs: Date.now() - start }); console.log(`PASS ${name}`); }
-  catch (error) { results.push({ name, ok: false, error: error.message, durationMs: Date.now() - start }); console.error(`FAIL ${name}: ${error.message}`); }
+  catch (error) {
+    results.push({ name, ok: false, error: error.message, durationMs: Date.now() - start });
+    console.error(`FAIL ${name}: ${error.message}`);
+    await closeStrayOverlays();
+  }
 }
 
 try {
@@ -61,6 +78,7 @@ try {
     return route.abort('blockedbyclient');
   });
   const page = await context.newPage();
+  activePage = page;
   page.setDefaultTimeout(8000);
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -83,6 +101,13 @@ try {
   // 所以这里先逐页 hydrate 一遍，后面「全量 legacy ID 都在」以及按 id 取元素才有东西可取。
   await page.waitForFunction(() => document.querySelectorAll('#mainNav [data-view]').length > 0);
   const allPages = await page.evaluate(() => [...document.querySelectorAll('#mainNav [data-view]')].map(node => node.dataset.view));
+  // 导航的初始形态要在逐页 hydrate 前断言。
+  await test('Navigation ships three flat groups', async () => {
+    assert.deepEqual(await page.$$eval('#mainNav .nav-label', (nodes) => nodes.map((node) => node.textContent.trim())),
+      ['管理', '聊天行为', '扩展'], '导航按三组排列');
+    assert.equal(await page.locator('#mainNav details').count(), 0, '导航不再用折叠分组');
+    assert.equal(await page.locator('#mainNav [data-view]').count(), 14, '三组下仍是 14 个入口');
+  });
   async function hydrate(view) {
     await page.evaluate(v => { if (location.hash !== `#${v}`) location.hash = `#${v}`; }, view);
     // 片段 HTML 到位 ≠ 页面可用：字段由 fields.js 的规格在 init() 里渲染（router 在 init 之后打 pageReady）。
@@ -273,6 +298,14 @@ try {
     // 插件详情是二级页：整卡可点，地址栏落到 #plugins/<id>。
     await page.click('#pluginsList [data-tile-id="demo-plugin"]');
     await page.waitForFunction(() => location.hash === '#plugins/demo-plugin');
+    // 与平台详情同构：概览 → 配置 → 审计，默认落在概览。
+    assert.deepEqual(await page.$$eval('[data-plugin-tab]', (nodes) => nodes.map((node) => node.dataset.pluginTab)),
+      ['overview', 'config', 'audit'], '插件详情三页：概览 / 配置 / 审计');
+    assert.equal(await page.locator('[data-plugin-tab="overview"].active').count(), 1, '默认落在概览');
+    assert.equal(await page.locator('[data-plugins-view="detail"] .detail-panel').count(), 1, '插件详情整页是一张大卡');
+    assert.equal(await page.locator('[data-plugins-view="detail"] .detail-panel > .detail-head').count(), 1, '页头也在这张卡里');
+    assert.equal(await page.locator('[data-plugin-panel-body] .detail-panel-card--metric').count(), 3, '调用统计是三张小卡');
+    await page.click('[data-plugin-tab="config"]');
     await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
     assert.equal(await page.locator('#cfg__baseUrl').inputValue(), 'http://127.0.0.1:3110');
     assert.equal(await page.locator('#cfg__timeoutMs').inputValue(), '1200');
@@ -340,8 +373,8 @@ try {
     const restored = await clickWrite('#platformConfigSave', '/api/platforms/registry/user/qq/config', 'PATCH');
     assert.equal(restored.defaultBehavior, 'social-v2', '改回去再存一次，不影响后面的用例');
 
-    // 行为档案是用户平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
-    await page.click('[data-platform-tab="behaviors"]');
+    // 行为档案是用户平台的子资源：在「平台 › 话术与行为」里改，不再有独立整页。
+    await page.click('[data-platform-tab="voice"]');
     await page.waitForSelector('#behaviorTable [data-behavior-edit="social-v1"]', { timeout: 5000 });
     await page.click('#behaviorTable [data-behavior-edit="social-v1"]');
     await page.waitForFunction(() => document.getElementById('behaviorFormLabel')?.value === '一代仿真默认行为');
@@ -353,41 +386,133 @@ try {
     assert.equal(body?.data?.config?.contextWindow, 25);
   });
 
-  await test('Platform detail merges behavior prompt into one save', async () => {
+  await test('Platform detail keeps the behavior panel and the prompt card apart', async () => {
     await openPlatform('user:qq');
-    await page.click('[data-platform-tab="behaviors"]');
+    await page.click('[data-platform-tab="voice"]');
     await reveal('#behaviorFormSave');
     assert.equal(await page.locator('#behaviorPromptSave').count(), 0, '提示词卡不再有独立保存按钮');
-    // 平台话术只在另一个标签里；行为标签里不应再出现它。
-    assert.equal(await page.locator('#platformPromptCard').count(), 0, '行为标签不再混入平台话术卡');
+    // 平台话术与行为档案同在「话术与行为」，但各自有自己的宿主与保存路径。
+    assert.equal(await page.locator('#platformPromptCard').count(), 1, '平台话术卡在「话术与行为」里');
     await page.waitForSelector('#behaviorPromptCard .prompt-card-body', { timeout: 5000 });
     assert.ok(await page.locator('#behaviorPromptCard [data-prompt-edit], #behaviorPromptCard [data-prompt-save]').count() > 0, '提示词卡有编辑/保存按钮');
+    // 版式跟能力页同一套：面板自己出两段分区（清单 / 内容），分区里不再套一层卡。
+    assert.deepEqual(await page.$$eval('#platformBehaviorsHost .detail-section-head h2', (nodes) => nodes.map((node) => node.textContent.trim())),
+      ['档案清单', '档案内容'], '行为档案按两段分区排，与能力页同构');
+    assert.equal(await page.locator('#platformBehaviorsHost .card').count(), 0, '分区里不再套一层卡');
+    const groupGap = await page.$eval('#behaviorFormPanel', (el) => parseFloat(getComputedStyle(el).rowGap) || 0);
+    assert.ok(groupGap > 0, `字段分组之间留出间距（${groupGap}px）`);
   });
 
-  await test('Platform detail voice tab owns the prompt card', async () => {
+  await test('Platform detail splits the prompt card and the tool table across two tabs', async () => {
     await openPlatform('user:qq');
     await page.click('[data-platform-tab="voice"]');
     await page.waitForSelector('#platformPromptCard .prompt-card-body', { timeout: 5000 });
     assert.equal(await page.locator('#platformSave').count(), 0, '平台话术卡不再自带独立保存按钮');
     assert.ok(await page.locator('#platformPromptCard [data-prompt-edit]').count() > 0, '平台提示词卡有编辑按钮');
+    await page.click('[data-platform-tab="capabilities"]');
+    await page.waitForSelector('[data-platform-panel-body] [data-table]', { timeout: 5000 });
     assert.ok(await page.locator('[data-platform-panel-body] [data-table]').count() > 0, '平台工具走表格组件');
+    assert.equal(await page.locator('#platformPromptCard').count(), 0, '话术卡只在「话术与行为」里');
   });
 
   await test('Platforms page lists both sides and hides the clean diagnostics card', async () => {
     await navigate('platforms');
     await page.waitForSelector('[data-tile-id="user:qq"]', { timeout: 5000 });
-    // 两侧平台都列在折叠分组的卡片网格里；诊断为空时汇总卡不占地方（fixture 的 diagnostics: []）。
+    // 整页是一张非折叠的清单卡：工具栏 + 两个普通下拉分组，分类不以卡片形式出现。
+    assert.equal(await page.locator('#platformHost [data-platform-view="list"] > .card').count(), 1, '清单只有一张非折叠卡');
+    assert.equal(await page.locator('#platformHost details.settings-group:not(.is-plain)').count(), 0, '清单里不再有折叠卡片');
+    assert.equal(await page.locator('#platformToolbar [data-table-search]').count(), 1, '清单带搜索');
+    assert.equal(await page.locator('#platformToolbar [data-table-refresh]').count(), 1, '清单带刷新');
+    // 诊断为空时那一块是空的（fixture 的 diagnostics: []）。
+    assert.equal(await page.locator('#platformDiagnostics [data-table]').count(), 0, '没有诊断时不渲染诊断表');
     assert.equal(await page.locator('[data-tile-id="user:qq"]').count(), 1, '用户平台在清单里');
     assert.equal(await page.locator('[data-tile-id="user:wx"]').count(), 1, '第二条用户实例也在清单里');
     assert.equal(await page.locator('[data-tile-id="agent:dsh"]').count(), 1, 'Agent 平台在清单里');
     assert.equal(await page.locator('[data-tile-id="agent:acp"]').count(), 1, '第二个 Agent 平台也在清单里');
-    assert.equal(await page.locator('#platformDiagnosticsCard').count(), 0, '没有诊断时不渲染诊断卡');
     assert.equal(await page.locator('[data-platform-list] .tile--interactive').count(), 4, '每条注册的平台都是一张可点的卡片');
-    assert.equal(await page.locator('#platformGroup-user, #platformGroup-agent').count(), 2, '两侧各一个折叠分组');
+    assert.equal(await page.locator('#platformGroup-user, #platformGroup-agent').count(), 2, '两侧各一个分类分组');
+    assert.equal(await page.locator('#platformGroup-user.is-plain, #platformGroup-agent.is-plain').count(), 2, '分组是普通下拉栏，不是卡片');
     // 条目徽标挂在卡片上：停用的实例不该看起来像在跑。
     const wx = page.locator('[data-tile-id="user:wx"]');
     assert.equal(await wx.locator('.tag').filter({ hasText: '已停用' }).count(), 1, '停用的实例在清单里标出');
     assert.equal(await page.locator('[data-tile-id="user:qq"] .tag').filter({ hasText: '已接管' }).count(), 1, '在跑的实例标出入站结论');
+  });
+
+  await test('Platform detail answers its questions with four tabs and one conclusion', async () => {
+    await openPlatform('user:qq');
+    // 页头那句话由注册表算好下发：前端不拼「能收能发 / 能发几种段」。
+    const promise = (await page.textContent('[data-platform-view="detail"] .platform-promise')).trim();
+    assert.match(promise, /^能收能发；能发 \d+ 种段；/, `结论行从能力事实开头：${promise}`);
+    assert.deepEqual(await page.$$eval('[data-platform-tab]', (nodes) => nodes.map((node) => node.dataset.platformTab)),
+      ['overview', 'config', 'capabilities', 'voice'], '用户平台：概览 / 配置 / 能力 / 话术与行为');
+    assert.equal(await page.locator('[data-platform-tab="overview"].active').count(), 1, '默认落在概览');
+    assert.equal(await page.locator('[data-platform-tab="advanced"]').count(), 0, '不再有「高级」标签');
+
+    // 概览：整页一张大卡（页头与标签条也在卡里），卡内按「运行状态 / 资产」两段排；资产是四张小卡。
+    assert.equal(await page.locator('[data-platform-view="detail"] .detail-panel').count(), 1, '整页是一张大卡');
+    assert.equal(await page.locator('[data-platform-view="detail"] .detail-panel > .detail-head').count(), 1, '页头就在这张卡里，卡外不留裸露底色');
+    assert.equal(await page.locator('[data-platform-view="detail"] .detail-panel > .page-tabs').count(), 1, '标签条也在卡里');
+    assert.deepEqual((await page.$$eval('[data-platform-panel-body] .detail-section-head h2', (nodes) => nodes.map((node) => node.textContent.trim()))).slice(0, 2),
+      ['运行状态', '资产'], '概览按两段排，不再一段一张卡');
+    assert.equal(await page.locator('[data-platform-panel-body] .detail-panel-card--metric').count(), 4, '资产的四项是四张小卡');
+    // 同一行的小卡高度由网格拉伸决定：内容长短不再造成参差（逐行比对，不假设一行能摆下四张）。
+    const cardRows = await page.$$eval('[data-platform-panel-body] .detail-panel-card--metric', (nodes) => {
+      const byRow = new Map();
+      for (const node of nodes) {
+        const box = node.getBoundingClientRect();
+        const key = Math.round(box.top);
+        byRow.set(key, [...(byRow.get(key) ?? []), Math.round(box.height)]);
+      }
+      return [...byRow.values()];
+    });
+    assert.ok(cardRows.every((heights) => new Set(heights).size === 1), `同一行的小卡等高：${JSON.stringify(cardRows)}`);
+    assert.equal(await page.locator('[data-platform-panel-body] [data-table]').count(), 0, '概览不用表格');
+
+    await page.click('[data-platform-tab="capabilities"]');
+    await page.waitForSelector('[data-platform-panel-body] [data-table]', { timeout: 5000 });
+    // 能力页只摆结论：一组一张带边框小卡，工具表另起一段。
+    assert.deepEqual((await page.$$eval('[data-platform-panel-body] .detail-section-head h2', (nodes) => nodes.map((node) => node.textContent.trim()))).slice(0, 2),
+      ['能力清单', '平台工具'], '能力页按「能力清单 / 平台工具」两段排');
+    assert.deepEqual((await page.$$eval('[data-platform-panel-body] .detail-panel-card h4', (nodes) => nodes.map((node) => node.textContent.trim()))).slice(0, 3),
+      ['发送能力', '接收能力', '不支持的消息段'], '能力清单按组摆结论');
+    assert.ok(await page.locator('[data-platform-panel-body] .cap-pill').count() > 0, '每项是一条药丸（名字 + id）');
+    // 能不能做是平台声明的事实，不是控制台能改的开关：结论里没有勾选框。
+    assert.equal(await page.locator('[data-platform-panel-body] .cap-pill-row input, [data-platform-panel-body] .cap-pill-row select, [data-platform-panel-body] .cap-pill-row [role="switch"]').count(), 0, '能力清单只读');
+    const sources = await page.$$eval('[data-platform-panel-body] .detail-panel-card-head .tag', (nodes) => nodes.map((node) => node.textContent.trim()));
+    assert.ok(sources.includes('内核段表 ∩ 平台声明') && sources.includes('平台声明'), `来源标签也由注册表给：${[...new Set(sources)].join('/')}`);
+  });
+
+  await test('Agent platform keeps the declaration matrix folded inside capabilities', async () => {
+    await openPlatform('agent:dsh');
+    assert.match(await page.textContent('[data-platform-view="detail"] .platform-promise'), /^能装预设或直通；话术走/,
+      'Agent 结论行由它自己的声明拼出');
+    assert.deepEqual(await page.$$eval('[data-platform-tab]', (nodes) => nodes.map((node) => node.dataset.platformTab)),
+      ['overview', 'config', 'capabilities'], 'Agent 平台没有话术页');
+    await page.click('[data-platform-tab="capabilities"]');
+    await page.waitForSelector('[data-platform-panel-body] [data-table]', { timeout: 5000 });
+    assert.deepEqual((await page.$$eval('[data-platform-panel-body] .detail-panel-card h4', (nodes) => nodes.map((node) => node.textContent.trim()))).slice(0, 4),
+      ['生效方式', '提示注入', '效果', '对端权限档'], '能力标签给四组结论');
+    assert.equal(await page.locator('[data-platform-panel-body] .cap-pill-row input, [data-platform-panel-body] .cap-pill-row select').count(), 0, 'Agent 侧结论同样只读');
+
+    // 五列能力位矩阵降级到「能力 › 原始声明」，且默认折叠：主标签不拿它占地方。
+    const raw = page.locator('details[data-collapse-id="platform-raw-agent-dsh"]');
+    await raw.waitFor({ state: 'attached', timeout: 5000 });
+    assert.equal(await raw.getAttribute('open'), null, '原始声明默认折叠');
+    assert.match(await raw.locator(':scope > summary').textContent(), /原始声明/, '折叠标题说明这是原始声明');
+    await raw.locator(':scope > summary').click();
+    assert.equal(await raw.getAttribute('open'), '', '点开后展开');
+    const rawText = await raw.textContent();
+    assert.match(rawText, /能力位/, '展开后是逐条能力位');
+    assert.match(rawText, /应用方式/);
+    assert.match(rawText, /对端权限档/);
+  });
+
+  await test('Navigation highlights the page a deep link lands on', async () => {
+    assert.equal(await page.locator('#mainNav [data-view]').count(), 14, '三组下仍是 14 个入口');
+    // 扁平分组不会再展开任何容器：深链落在「全局配置」时高亮项应当在侧边栏里直接可见。
+    await navigate('config');
+    assert.equal(await page.locator('#mainNav [data-view="config"].active').count(), 1, '导航高亮当前页');
+    assert.ok(await page.locator('#mainNav [data-view="config"]').isVisible(), '高亮项在侧边栏里可见');
   });
 
   await test('Platform detail restores from a deep link and steps back', async () => {
@@ -467,20 +592,90 @@ try {
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
   });
 
+  await test('Session detail folds the tool intersection and says why each tool is missing', async () => {
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key="group:100003"]');
+    await page.click('#sessionList [data-manage-key="group:100003"]');
+    const card = page.locator('#sessionDetailBody details[data-collapse-id="session-tools"]');
+    await card.waitFor({ state: 'attached', timeout: 5000 });
+    assert.equal(await card.getAttribute('open'), null, '工具卡默认折叠');
+    assert.match(await card.locator(':scope > summary').textContent(), /这个会话能用的工具（\d+）/, '卡头写出可用数量');
+    await card.locator(':scope > summary').click();
+    const text = await card.textContent();
+    // 结论行写出来源：平台声明 ∩ 权限级别（求交在后端算，前端只摆版式）。
+    assert.match(text, /平台声明（QQ）[\s\S]*权限「/, `结论行写出求交来源：${text.slice(0, 80)}`);
+    assert.ok(await card.locator('[data-table]').count() >= 1, '工具卡用表格组件摆三列');
+    const reasons = await card.locator('.tag--warning[title]').evaluateAll((nodes) => nodes.map((node) => node.title));
+    assert.ok(reasons.length > 0, '用不了的工具挂上原因');
+    assert.ok(reasons.every((reason) => /平台没有声明|默认关闭|权限/.test(reason)), `原因口径统一：${[...new Set(reasons)].join(' / ')}`);
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+  });
+
+  await test('Session detail is three cards with a run conclusion and folded danger', async () => {
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key="group:123456789"]');
+    await page.click('#sessionList [data-manage-key="group:123456789"]');
+    await page.waitForSelector('#detailCapability');
+    // 三张常驻卡按「影响它说话的程度」排；关联与危险操作是折叠卡，不算常驻卡。
+    assert.deepEqual(await page.$$eval('#sessionDetailBody .session-detail-grid > .detail-card > h4', (nodes) => nodes.map((node) => node.textContent.trim())),
+      ['运行', '人格与提示', '唤醒与准入'], '详情只剩三张常驻卡 + 两张折叠卡');
+    assert.equal(await page.locator('#detailDisplayName').count(), 0, '显示名不再有表单字段');
+    const links = page.locator('#sessionDetailBody details[data-collapse-id="session-links"]');
+    const danger = page.locator('#sessionDetailBody details[data-collapse-id="session-danger"]');
+    assert.equal(await links.count(), 1, '关联是一张折叠卡');
+    assert.equal(await danger.count(), 1, '危险操作是一张折叠卡');
+    assert.equal(await links.getAttribute('open'), null, '关联默认收起');
+    assert.equal(await danger.getAttribute('open'), null, '危险操作默认收起');
+    // 执行体与对端权限档不在会话里复述：正文只在「平台 › 该 Agent 平台 › 能力」。
+    assert.equal(await page.locator('#sessionDetailBody [data-detail-form="agent"]').count(), 0, '详情不再挂执行体只读卡');
+    const conclusion = await page.locator('#sessionDetailBody .detail-conclusion').textContent();
+    assert.match(conclusion, /^生效：能力档 Agent · 只读（.+仅主人私聊）/, `结论行从当前生效档取：${conclusion}`);
+    assert.match(conclusion, /· 行为 social-v2 · 权限 工作区读写 · 模型 deepseek-official\/deepseek-flash \/ max$/, `四项都写出来：${conclusion}`);
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+  });
+
+  await test('Session list rename writes the display name through the rename modal', async () => {
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-rename-key="group:100003"]');
+    await page.click('#sessionList [data-rename-key="group:100003"]');
+    await page.waitForSelector('#sessionRenameInput');
+    assert.equal(await page.locator('#sessionRenameInput').inputValue(), '', '每次都从当前显示名开始改');
+    await page.fill('#sessionRenameInput', '开发群');
+    assert.deepEqual(await clickWrite('#sessionRenameSave', '/api/session/rename', 'POST'),
+      { key: 'group:100003', title: '开发群' }, '改名只交 key 与 title');
+    await page.waitForFunction(() => document.querySelector('#sessionList [data-manage-key="group:100003"]')?.closest('tr')?.textContent.includes('开发群'));
+  });
+
   await test('Capability file contracts', async () => {
-    // 能力档是 Agent 平台的资产：只有声明了能力档的 Agent 平台才有「能力」标签。
+    // 能力档是 Agent 平台的资产：编辑器在「能力」里，和结论分组同页但不混排。
     await openPlatform('agent:dsh');
     await page.click('[data-platform-tab="capabilities"]');
     await page.waitForSelector('#platformCapabilityList [data-cap-edit]', { timeout: 5000 });
     await page.click('#platformCapabilityList [data-cap-edit]');
     await page.waitForSelector('#platformCapabilityEditor #capabilityLabel', { timeout: 5000 });
-    // 平台工具表分页展示，先用搜索把 sendPoke 筛出来再勾选。
-    const search = page.locator('#capEditorPlatform [data-table-search]');
+    // 效果表：能力档只声明「要什么」，每一行写出当前执行体里承担它的模块与可装结论。
+    await page.waitForFunction(
+      () => document.querySelectorAll('#capEditorEffects tbody tr').length === 3,
+      null, { timeout: 5000 },
+    );
+    const effectTexts = await page.$$eval('#capEditorEffects tbody tr', (rows) => rows.map((row) => row.textContent));
+    assert.ok(effectTexts.some((text) => text.includes('web.access') && text.includes('tool-web') && text.includes('可装')),
+      'web.access 由 tool-web 承担，标为可装');
+    assert.equal(await page.locator('#capEditorEffects tbody input').count(), 0, '效果表只读：没有勾选框');
+    // 执行体工具面：模块清单来自 dsh/tools.yml（8 个模块），同样只读 —— 会话能用到哪一档由权限级别收紧。
+    await page.waitForFunction(
+      () => document.querySelectorAll('#capEditorAgent tbody tr').length === 8,
+      null, { timeout: 5000 },
+    );
+    assert.equal(await page.locator('#capEditorAgent tbody input').count(), 0, '工具面归执行体声明，能力档里不再勾选');
+    const search = page.locator('#capEditorAgent [data-table-search]');
     await search.waitFor({ state: 'visible', timeout: 5000 });
-    await search.fill('sendPoke');
-    await page.waitForSelector('#platformCapabilityEditor [data-cap-platform="sendPoke"]', { state: 'attached' });
+    await search.fill('pwsh');
+    await page.waitForFunction(() => {
+      const rows = [...document.querySelectorAll('#capEditorAgent tbody tr')].filter((row) => !row.hidden);
+      return rows.length === 1 && rows[0].textContent.includes('tool-pwsh');
+    }, null, { timeout: 5000 });
     assert.equal(await page.locator('#capabilityLabel').getAttribute('readonly'), '', '内置能力的名称只读');
-    await page.click('[data-cap-platform="sendPoke"]');
     const [response] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === '/api/runtime/capabilities/chat' && r.request().method() === 'PATCH'),
       page.click('#capabilitySave'),
@@ -488,12 +683,11 @@ try {
     assert.equal(response.status(), 200, 'PATCH /api/runtime/capabilities/chat should succeed');
     const body = fixture.requests.at(-1)?.body ?? {};
     assert.equal(body.label, '聊天 Agent', '内置名称保持原值');
-    assert.equal(body.tools?.platform?.sendPoke, false, '取消勾选的平台工具要写成 false');
-    assert.equal(body.tools?.platform?.sendMessage, true, '其余平台工具保持 true');
-    assert.equal(body.tools?.agent, undefined, 'Agent 模块由预设定，不再随能力保存');
-    assert.equal(body.safety, undefined, '安全补充字段已删除，不再提交');
-    assert.equal(body.tools?.visible, undefined, '可见集不再直接提交，由能力文件推导');
-    assert.equal(body.sandbox, undefined, '沙箱不再由能力预设承载');
+    assert.deepEqual(body.mcp, { allow: ['*'], tools: { allow: ['*'], deny: [] } }, 'MCP 授权原样写回，通配不收窄');
+    assert.deepEqual(body.skills, { allow: ['*'] }, '技能授权原样写回');
+    assert.equal(body.tools, undefined, '工具面归执行体声明，能力档不再提交');
+    assert.equal(body.effects, undefined, '效果是意图，不在这个面板改');
+    assert.equal(body.runtime, undefined, '生效方式只在基本信息卡里明示，不随保存提交');
   });
 
   await test('Agent platform becomes the default executor only after a successful probe', async () => {
@@ -749,8 +943,9 @@ try {
   // 这里会多发两次 GET，所以放在契约基线比对之后。
   await test('Plugin detail restores from a deep link and steps back', async () => {
     await navigate('plugins');
-    await page.evaluate(() => { location.hash = '#plugins/demo-plugin'; });
+    await page.evaluate(() => { location.hash = '#plugins/demo-plugin/config'; });
     await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
+    assert.equal(await page.locator('[data-plugin-tab="config"].active').count(), 1, '深链还原到配置标签');
     assert.match(await page.textContent('[data-plugins-view="detail"] .detail-head-main h3'), /演示插件/, '页头写出插件名');
     await page.evaluate(() => history.back());
     await page.waitForSelector('[data-plugins-view="list"]:not([hidden])', { timeout: 5000 });
@@ -885,11 +1080,18 @@ try {
     await navigate('overview');
     await page.waitForFunction(() => (document.getElementById('usageConversations')?.textContent || '').includes('group:123456789'));
 
-    // 四张表统一由表格组件渲染（工具栏 / 分页都在组件内）
+    // 三张表统一由表格组件渲染（工具栏 / 分页都在组件内）
     assert.equal(await page.locator('#usageConversations [data-table]').count(), 1, '按会话表应使用表格组件');
     assert.equal(await page.locator('#usageConversations [data-pager]').count(), 1, '按会话表应带分页');
     assert.equal(await page.locator('#usageRecent [data-table]').count(), 1, '最近流水应使用表格组件');
-    assert.equal(await page.locator('#usagePrices [data-table]').count(), 1, '价目表应使用表格组件');
+
+    // 价目表不在总览页：这里只剩一个跳转按钮，夹在「刷新」与「清空账本」之间，样式与刷新一致。
+    const actionButtons = await page.$$eval('#section-usage-summary [data-usage-fields="actions"] button',
+      (nodes) => nodes.map((node) => ({ id: node.id, cls: node.className })));
+    assert.deepEqual(actionButtons.map((b) => b.id), ['usageRefresh', 'usagePricingJump', 'usageClear'], '价目表按钮在刷新与清空账本之间');
+    assert.equal(actionButtons[1].cls, actionButtons[0].cls, '价目表按钮与刷新按钮同一样式');
+    // 默认模型有价目：状态行照旧提示自动同步（没匹配上时才变成灰色提示）。
+    await page.waitForFunction(() => document.getElementById('usageMsg')?.textContent.includes('每 3 秒自动同步'));
 
     // 下钻逐轮：会话选择器就在工具栏里，选中即加载（不再有「加载」按钮）
     await page.selectOption('#usageTurns [data-filter="key"]', 'group:123456789');
@@ -904,9 +1106,108 @@ try {
     // 会话筛选与逐轮表同步
     assert.equal(await page.inputValue('#usageTurns [data-filter="key"]'), 'group:123456789', '筛选器应跟随选中的会话');
 
-    // 实时流水与价目表
+    // 实时流水
     assert.match(await page.textContent('#usageRecent'), /group:123456789|private:100001/, '最近流水应列出采样');
-    assert.match(await page.textContent('#usagePrices'), /deepseek-flash/, '价目表应列出模型单价');
+  });
+
+  // 价目表：跟着全局配置里的默认模型匹配，没有平台 / 模型切换，峰谷口径只读，改价只落差异。
+  // 这段带写请求，所以放在契约基线比对之后。
+  if (!original) await test('Pricing card follows the default model and only writes price overrides', async () => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await navigate('overview');
+    await page.waitForFunction(() => document.getElementById('usageMsg')?.textContent.includes('每 3 秒自动同步'));
+    const costBefore = (await page.textContent('#metricUsageCost')).trim();
+
+    // 总览「价目表」按钮 → 「全局配置 › 行为与模型」的最后一张卡（切标签 + 滚动都由路由负责）。
+    await page.click('#usagePricingJump');
+    await page.waitForFunction(() => location.hash.startsWith('#config'));
+    await page.waitForFunction(() => document.querySelector('[data-config-section="runtime"]')?.classList.contains('active'));
+    await page.waitForFunction(() => {
+      const card = document.getElementById('section-pricing');
+      if (!card) return false;
+      const top = card.getBoundingClientRect().top;
+      return top >= -2 && top < 200;
+    }, null, { timeout: 5000 });
+
+    const card = '#section-pricing';
+    assert.match(await page.textContent(card), /价目表/, '最后一张卡是价目表');
+    assert.match(await page.textContent(`${card} [data-pricing-agent]`), /DSH/, '平台自动取活动 Agent 平台');
+    assert.match(await page.textContent(`${card} [data-pricing-model]`), /deepseek-flash/, '模型自动取全局配置里的默认模型');
+    assert.equal(await page.locator(`${card} [data-pricing-table] [data-table]`).count(), 1, '价目表用表格组件渲染');
+    assert.equal(await page.locator(`${card} [data-pricing-table] [data-table-search]`).count(), 1, '工具栏带搜索');
+    assert.equal(await page.locator(`${card} [data-pricing-table] [data-table-refresh]`).count(), 1, '工具栏带刷新');
+    assert.equal(await page.locator(`${card} [data-price-policy]`).count(), 0, '高峰时段没有编辑入口');
+    assert.equal(await page.locator(`${card} [data-pricing-scope]`).count(), 0, '不再有平台 / 模型的手动切换');
+
+    // 默认模型命中申报价：结论行、来源与峰谷口径都只读展示。
+    assert.match(await page.textContent(`${card} [data-pricing-status]`), /已匹配「DeepSeek-V4\.1-Flash」的价目/);
+    assert.match(await page.textContent(`${card} [data-pricing-source]`), /平台申报/);
+    const flashRow = `${card} [data-price-row="deepseek-flash"]`;
+    assert.equal(await page.inputValue(`${flashRow} [data-price-key="output"]`), '4', '输入框回填申报的输出价');
+    assert.match(await page.textContent(flashRow), /工作日 09:00–12:00、14:00–18:00 ×2/, '峰谷列只展示口径');
+    assert.match(await page.textContent(`${card} [data-pricing-policy]`), /高峰时段跟随当前口径.*本页只改单价/, '口径提示写明只读');
+
+    // 账本里出现过、表里没有的模型：单独一行，并说清楚已经记了多少 token。
+    const gapRow = `${card} [data-price-row="deepseek-chat-0715"]`;
+    assert.match(await page.textContent(gapRow), /待补价目/, '没有价目的模型标出来');
+    assert.match(await page.textContent(gapRow), /账本已记 51\.2k token/, '说明这部分 token 已经记着');
+    assert.match(await page.textContent(`${card} [data-pricing-gap]`), /deepseek-chat-0715/);
+
+    // 给它补上单价：只提交这个模型与改过的字段（没改的字段回落申报）。
+    await page.fill(`${gapRow} [data-price-key="cacheMiss"]`, '2');
+    await page.fill(`${gapRow} [data-price-key="output"]`, '8');
+    const [saved] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'PUT'),
+      page.click(`${card} #pricingSave`),
+    ]);
+    assert.equal(saved.status(), 200);
+    assert.deepEqual(fixture.requests.at(-1)?.body, { models: { 'deepseek-chat-0715': { cacheMiss: 2, output: 8 } } }, '只提交补价的那个模型');
+    await page.waitForFunction(() => document.getElementById('pricingSaveMsg')?.textContent.includes('已保存覆盖（1 个模型）'));
+    await page.waitForFunction(() => (document.querySelector('#section-pricing [data-pricing-source]')?.textContent || '').includes('本机覆盖'));
+    assert.doesNotMatch(await page.textContent(gapRow), /待补价目/, '补价后这一行不再缺价');
+
+    // 已经记着的 token 按新表重算：总览的总花费与缺价提示当场变化，不需要重新记账。
+    await navigate('overview');
+    await page.waitForFunction((prev) => (document.getElementById('metricUsageCost')?.textContent || '').trim() !== prev, costBefore, { timeout: 5000 });
+    assert.match((await page.textContent('#metricUsageCost')).trim(), /^¥\d/, '补价后总花费仍是金额');
+    assert.doesNotMatch(await page.textContent('#usageConversations'), /没有价目/, '补价后不再提示缺价');
+
+    // 恢复申报：删掉本机覆盖，金额与缺价提示一起回到原样。
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    // 确认框由测试的 init 脚本同步点掉，所以监听必须先于触发器落地。
+    const resetPromise = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'DELETE');
+    await page.click(`${card} #pricingReset`);
+    const reset = await resetPromise;
+    assert.equal(reset.status(), 200);
+    await page.waitForFunction(() => (document.querySelector('#section-pricing [data-pricing-source]')?.textContent || '').includes('平台申报'));
+    assert.equal(await page.inputValue(`${gapRow} [data-price-key="output"]`), '', '恢复后这一行又回到没有价目');
+    assert.match(await page.textContent(gapRow), /待补价目/);
+    await navigate('overview');
+    await page.waitForFunction((prev) => (document.getElementById('metricUsageCost')?.textContent || '').trim() === prev, costBefore, { timeout: 5000 });
+
+    // 另一侧：默认模型换成没价目的模型 → 同步那行换成灰色提示，卡片直说没匹配上。
+    await fetch(`${fixture.url}/__fixture/pricing`, { method: 'POST', body: JSON.stringify({ defaultModel: 'deepseek-chat-0715' }) });
+    try {
+      await navigate('overview');
+      await page.waitForFunction(() => /价目表/.test(document.getElementById('usageMsg')?.textContent || ''), null, { timeout: 6000 });
+      const hint = await page.evaluate(() => ({ text: document.getElementById('usageMsg').textContent, cls: document.getElementById('usageMsg').className }));
+      assert.doesNotMatch(hint.text, /每 3 秒自动同步/, '缺价时不再盖着「自动同步」说一切正常');
+      assert.match(hint.text, /deepseek-chat-0715/, '提示点名没价的那个模型');
+      assert.match(hint.text, /价目表/, '提示引导去配价目表');
+      assert.equal(hint.cls, 'meta', '提示是灰色说明（不用成功 / 错误态）');
+
+      await page.click('#usagePricingJump');
+      await page.waitForFunction(() => (document.querySelector('#section-pricing [data-pricing-status]')?.textContent || '').includes('价目表里没有'));
+      assert.match(await page.textContent(`${card} [data-pricing-status]`), /价目表里没有「deepseek-chat-0715」/, '卡片直说默认模型没匹配上');
+      assert.equal(await page.locator(`${card} [data-price-row="deepseek-chat-0715"]`).count(), 1, '没匹配上时默认模型也占一行，就地可补价');
+      assert.equal(await page.inputValue(`${gapRow} [data-price-key="output"]`), '', '没价目时单价框是空的，不显示一个假 0');
+      assert.equal(await page.inputValue(`${flashRow} [data-price-key="output"]`), '4', '其他模型的价目不受影响');
+    } finally {
+      await fetch(`${fixture.url}/__fixture/pricing`, { method: 'POST', body: JSON.stringify({ defaultModel: 'deepseek-flash' }) });
+    }
+    await navigate('overview');
+    await page.waitForFunction(() => document.getElementById('usageMsg')?.textContent.includes('每 3 秒自动同步'));
   });
 
   if (!original) await test('Token usage trend chart renders bars, tiers and range/metric switching', async () => {
@@ -1266,6 +1567,52 @@ try {
     await page.waitForFunction(() => document.getElementById('platformModelProvider')?.value === 'deepseek-official' && document.getElementById('platformModel')?.value === 'deepseek-flash');
   });
 
+  if (!original) await test('平台模型卡：实时目录不可用时按声明清单铺选项，保存成功并回 warning', async () => {
+    const control = await fetch(`${fixture.url}/__fixture/model-catalog`, { method: 'POST', body: JSON.stringify({ down: true }) });
+    assert.equal((await control.json()).down, true);
+    try {
+      await openPlatform('agent:dsh');
+      await page.click('[data-platform-tab="config"]');
+      await page.waitForSelector('#platformModelMount #platformModelProvider', { timeout: 5000 });
+      // 目录有 30 秒缓存（上一条用例刚读过）：必须先点「刷新」拿到这一次的结论。
+      await page.click('#platformModelRefresh');
+      await page.waitForFunction(() => /声明清单/.test(document.getElementById('platformModelNotices')?.textContent || ''), null, { timeout: 5000 });
+      // 提供方是实时目录的概念（声明面没有这一维）：保持原值并置灰；模型与档位按声明清单铺。
+      assert.equal(await page.locator('#platformModelProvider').isDisabled(), true, '没有实时目录时提供方不可改');
+      assert.equal(await page.locator('#platformModelProvider').inputValue(), 'deepseek-official', '提供方保持原值');
+      assert.equal(await page.locator('#platformModel').isDisabled(), false, '模型按声明清单可选');
+      assert.deepEqual(await page.locator('#platformModel option').evaluateAll((nodes) => nodes.map((node) => node.value)),
+        ['deepseek-flash', 'deepseek-v4-pro'], '模型选项来自 platform 声明的 modelCatalog');
+      assert.deepEqual(await page.locator('#platformModelEffort option').evaluateAll((nodes) => nodes.map((node) => node.value)),
+        ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], '档位按声明清单的全集铺，不再只给 3 个内置档');
+      assert.match(await page.textContent('#platformModelNotices'), /声明清单[\s\S]*保存时不校验/);
+      // 保存成功后状态位要带上服务端的 warning（否则界面分不清「校验过了」与「根本没校」）。
+      await page.evaluate(() => {
+        window.__modelMsg = [];
+        const target = document.getElementById('platformModelMsg');
+        new MutationObserver(() => window.__modelMsg.push(target.textContent)).observe(target, { childList: true, characterData: true, subtree: true });
+      });
+      await page.locator('#platformModel').selectOption('deepseek-v4-pro');
+      await page.locator('#platformModelEffort').selectOption('high');
+      const savedPromise = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/platforms/registry/agent/dsh/config' && r.request().method() === 'PATCH');
+      await page.click('#platformModelSave');
+      const saved = await savedPromise;
+      assert.equal(saved.status(), 200, '目录不可用不阻塞保存');
+      assert.deepEqual(saved.request().postDataJSON(), { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'high', vision: 'auto' });
+      assert.deepEqual((await saved.json()).warnings, ['模型未校验：目录不可用']);
+      await page.waitForFunction(() => (window.__modelMsg || []).some((text) => /模型未校验/.test(text)), null, { timeout: 5000 });
+      // 改回原值，别把演示目录的状态留给后面的用例。
+      await page.waitForFunction(() => document.getElementById('platformModel')?.value === 'deepseek-v4-pro');
+      await page.locator('#platformModel').selectOption('deepseek-flash');
+      await page.locator('#platformModelEffort').selectOption('max');
+      const backPromise = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/platforms/registry/agent/dsh/config' && r.request().method() === 'PATCH');
+      await page.click('#platformModelSave');
+      assert.equal((await backPromise).status(), 200);
+    } finally {
+      await fetch(`${fixture.url}/__fixture/model-catalog`, { method: 'POST', body: JSON.stringify({ down: false }) });
+    }
+  });
+
   await test('Form component: typed values, depends, cross-field validation, switch and reset', async () => {
     await page.goto(`${fixture.url}/console/components/form/demo.html`);
     await page.waitForFunction(() => Boolean(window.__demoForm));
@@ -1322,34 +1669,33 @@ try {
     await page.waitForSelector('#metricSessions');
   });
 
-  // P5：会话详情的「Agent 平台与执行体」是只读事实：能力档的生效方式、注入通道、
-  // 对端权限档都由能力档的 runtime 段决定；这里没有改档写口，改档走「运行」卡。
-  if (!original) await test('会话详情：Agent 平台与执行体只读展示能力档声明面', async () => {
+  // P5：执行体与对端权限档的正文只在「平台 › 该 Agent 平台 › 能力」；
+  // 会话详情只保留「换过平台才给重开」这一条依赖 /agent 的行为。
+  if (!original) await test('会话详情不再复述执行体与对端权限档', async () => {
     await navigate('sessions');
     await page.waitForSelector('#sessionList [data-manage-key="private:100001"]');
     await page.click('#sessionList [data-manage-key="private:100001"]');
-    const agentCard = page.locator('#sessionDetailBody [data-detail-form="agent"]');
-    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('DeepSeek Harness'));
-    let text = await agentCard.textContent();
-    assert.match(text, /直通 · 主人/, '会话显式挂的能力档写在卡上');
-    assert.match(text, /直通（不装预设）/, '生效方式来自能力档 runtime');
-    assert.match(text, /系统提示/, '话术按能力档声明的 system 通道注入');
-    assert.match(text, /这套能力档不钉对端档位/, '直通档不声明对端权限档');
-    assert.equal(await page.locator('#detailAgentPreset, [data-detail-agent-revert]').count(), 0, '没有改档写口与「改回」按钮');
+    await page.waitForSelector('#detailCapability');
+    assert.equal(await page.locator('#sessionDetailBody [data-detail-form="agent"]').count(), 0, '详情不再挂执行体只读卡');
+    // 会话里只留一句指路：正文（工具面、对端权限档、注入方式）在平台的能力页。
+    assert.match(await page.locator('#sessionDetailBody').textContent(),
+      /对端权限档、注入方式）在「平台 › 该 Agent 平台 › 能力」/, '会话把对端权限档指回平台 › 能力');
     assert.equal(await page.locator('.detail-danger [data-detail-agent-reopen]').count(), 0, '实例没换过就不给重开按钮');
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
 
-    // 声明了对端权限档的只读档：当前档位现读现写，钉住的基线同时写出来（会话内不可改）。
-    await page.click('#sessionList [data-manage-key="group:123456789"]');
-    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('Agent · 只读'));
-    text = await agentCard.textContent();
-    assert.match(text, /装预设/, 'preset 档的生效方式是装预设');
-    assert.match(text, /read-only/, '对端权限档现读现写');
-    assert.match(text, /建会话时钉住的是 read-only/, '钉住的基线写出来，且会话内不可改');
-    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+    // 正文那座只读面（注入通道 / 对端权限档）在平台的「能力 › 原始声明」里。
+    await openPlatform('agent:dsh');
+    await page.click('[data-platform-tab="capabilities"]');
+    const raw = page.locator('[data-platform-panel-body] details[data-collapse-id="platform-raw-agent-dsh"]');
+    await raw.waitFor({ state: 'attached', timeout: 5000 });
+    assert.equal(await raw.getAttribute('open'), null, '原始声明默认折叠');
+    await raw.locator(':scope > summary').click();
+    const matrix = await raw.textContent();
+    assert.match(matrix, /提示注入通道/, '注入通道在平台的「能力」里读');
+    assert.match(matrix, /对端权限档/, '对端权限档在平台的「能力」里读');
   });
 
-  if (!original) await test('全局配置：Agent 平台卡区分配置面与运行期，切换默认平台只落盘', async () => {
+  if (!original) await test('全局配置：Agent 平台一张卡管默认平台与模型，按钮只有刷新与保存', async () => {
     await navigate('config');
     await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.options.length >= 2);
     // 前面的用例可能已经把默认平台改成 acp：这里跟着当前值走，结束时换回原来那个。
@@ -1359,30 +1705,54 @@ try {
     assert.match(running, /DeepSeek Harness/);
     assert.match(running, /连接方式 HTTP/);
     assert.match(running, /已就绪/);
-    // 模型与思考强度只属于平台详情的「配置」标签：全局配置页不再有模型卡。
-    assert.equal(await page.locator('#platformModelMount, #dshProviderSelect, #section-dsh').count(), 0, '全局配置页不再有模型卡');
+    // 本进程恒装配 dsh；前面的用例可能把配置面改成了别的，待重启提示只在两者不一致时出现。
+    const runningId = (await page.locator('#agentRunningReadout code').textContent()).trim();
+    // 一张卡：平台选择与模型控件同属 #section-agent，不再拆出第二张「模型与思考强度」。
+    assert.equal(await page.locator('#section-agent-model').count(), 0, '不再拆出单独的模型卡');
+    assert.equal(await page.locator('#section-agent #agentModelMount').count(), 1, '模型控件住在同一张卡里');
+    // 卡片动作只有两个，名字就是「刷新」「保存」。
+    const cardButtons = await page.locator('#section-agent .form-actions button')
+      .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()));
+    assert.deepEqual(cardButtons, ['刷新', '保存'], '默认平台与模型共用一个动作条');
+    assert.equal(await page.locator('#platformModelMount, #dshProviderSelect, #section-dsh').count(), 0, '全局配置页没有平台详情那份模型卡');
+    await page.selectOption('#agentDefaultSelect', 'dsh');
+    await page.waitForSelector('#agentModelMount #agentModelProvider', { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('agentModelProvider')?.options.length > 1);
+    assert.equal(await page.locator('#agentModelProvider').inputValue(), 'deepseek-official', '回填该平台自己的配置');
+    assert.equal(await page.locator('#agentModel').inputValue(), 'deepseek-flash');
+    // 没声明 models 能力位的平台：只少模型控件，卡片与两个按钮都还在。
+    await page.selectOption('#agentDefaultSelect', 'acp');
+    await page.waitForFunction(() => !document.getElementById('agentModelProvider'));
+    assert.equal(await page.locator('#section-agent').isVisible(), true, '没有模型能力时卡片本身不消失');
+    assert.equal(await page.locator('#agentSave').isVisible(), true, '没有模型可配时保存仍然可用');
+    await page.selectOption('#agentDefaultSelect', initial);
 
-    // 先归位到运行中的 dsh：这条用例只验证「切到另一个 → 待重启」，不依赖前面的用例怎么收场。
-    if (initial !== 'dsh') {
-      await page.selectOption('#agentDefaultSelect', 'dsh');
-      await clickWrite('#agentSwitchBtn', '/api/config/runtime');
-      await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.value === 'dsh');
-      // 「当前运行」那一行在选出值之后才重写：等它把上一个用例留下的「待重启」提示抹掉。
-      await page.waitForFunction(() => !/配置面已改为/.test(document.getElementById('agentRunningReadout')?.textContent || ''));
+    // 保存只改一半也能收场：先切到另一个平台写盘，再换回来。
+    const other = initial === 'dsh' ? 'acp' : 'dsh';
+    const saveAgentCard = async (agentId) => {
+      await page.selectOption('#agentDefaultSelect', agentId);
+      const written = page.waitForRequest((r) => new URL(r.url()).pathname === '/api/config/runtime' && r.method() === 'POST');
+      await page.click('#agentSave');
+      assert.deepEqual((await written).postDataJSON(), { defaultAgent: agentId }, '保存把配置面的默认平台写盘');
+    };
+
+    await saveAgentCard(other);
+    await page.waitForFunction((value) => (document.getElementById('agentMsg')?.textContent || '')
+      .includes('已把默认 Agent 平台改为') && document.getElementById('agentDefaultSelect')?.value === value, other);
+    const switched = await page.locator('#agentRunningReadout').textContent();
+    if (other === runningId) {
+      assert.doesNotMatch(switched, /配置面已改为/, '写回正在跑的那个平台就没有待重启提示');
+    } else {
+      assert.match(switched, new RegExp(`配置面已改为 ${other}，重启后生效`));
+      assert.match(switched, /DeepSeek Harness/, `本进程仍在跑 ${runningId}`);
     }
 
-    await page.selectOption('#agentDefaultSelect', 'acp');
-    assert.deepEqual(await clickWrite('#agentSwitchBtn', '/api/config/runtime'), { defaultAgent: 'acp' });
-    await page.waitForFunction(() => (document.getElementById('agentSwitchMsg')?.textContent || '').includes('已把默认 Agent 平台改为 ACP 执行体'));
-    const switched = await page.locator('#agentRunningReadout').textContent();
-    assert.match(switched, /配置面已改为 acp，重启后生效/);
-    assert.match(switched, /DeepSeek Harness/, '本进程仍在跑 dsh');
-
     // 收拾现场：恢复进入本用例前的配置面，别把「待重启」状态改了。
-    await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.value === 'acp');
-    await page.selectOption('#agentDefaultSelect', initial);
-    assert.deepEqual(await clickWrite('#agentSwitchBtn', '/api/config/runtime'), { defaultAgent: initial });
-    await page.waitForFunction((value) => document.getElementById('agentDefaultSelect')?.value === value, initial);
+    await saveAgentCard(initial);
+    await page.waitForFunction((value) => {
+      const text = document.getElementById('agentMsg')?.textContent || '';
+      return document.getElementById('agentDefaultSelect')?.value === value && /^已/.test(text);
+    }, initial);
   });
 
   if (artifacts) {

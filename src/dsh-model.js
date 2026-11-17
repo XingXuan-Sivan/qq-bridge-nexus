@@ -208,7 +208,7 @@ export function mediaTextParts(mediaList, modelLabel = '') {
   });
 }
 
-/** 不能看图时，工具查询图片（qq_get_message_images / 转发内图片）返回的条目：只有文字，不带 data。 */
+/** 不能看图时，工具查询图片（read_messages（op=get_message_images） / 转发内图片）返回的条目：只有文字，不带 data。 */
 export function mediaTextEntries(mediaList, modelLabel = '') {
   const list = Array.isArray(mediaList) ? mediaList : [];
   const who = modelLabel ? `当前模型 ${modelLabel}` : '当前模型';

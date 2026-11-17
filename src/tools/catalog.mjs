@@ -1,18 +1,23 @@
 // 工具目录：平台工具与 Agent 工具的唯一定义处。
 //
-// 配置只有两处，职责不重叠：
-//   · 目录条目描述「这个工具是什么、来自哪一端、风险等级、默认是否注册」；
-//   · 能力预设只存 tools.platform（平台工具白名单，必须显式写全）；
-//   · 注册开关由各能力预设的白名单求并集推导，config.json 不保存工具开关。
+// 两个层次，职责不重叠：
+//   · TOOL_GROUPS —— 模型可见的 **8 个中立工具**；换平台不改这一层；
+//   · PLATFORM_TOOLS —— 组内的单项（flag）。一个 flag 对应若干宿主工具名（qq_*）。
+//     flag 仍只是登记与权限判定的单位，宿主名只用于解析旧名与报错文案。
 //
-// 目录本身是只读投影，不存配置。宿主工具名（qq_get_unread_messages 等）保留在
-// names 里，便于报错文案与旧配置迁移。
+// 目录本身是只读投影，不存配置：发哪些工具由平台声明（profiles/platforms/<id>/tools.yml）
+// 决定，能用到哪一档由会话权限级别（src/session/permission.mjs）收紧。
+//
+// Agent 侧的工具模块**不在这里**：它属于当前执行体，由 `profiles/agent-platforms/<id>/tools.yml`
+// 声明（`readAgentPlatformTools()`），快照时并进 `entries`。写死在内核里会让「换执行体」
+// 只换了名字、没换工具面。
 
 /** 风险等级（越往后越危险）。 */
 export const TOOL_RISKS = Object.freeze(['read', 'send', 'state', 'write', 'exec', 'admin']);
 
 /** 平台侧（QQ 桥接提供的工具）。flag 即能力预设 tools.platform 的键，也是推导注册开关时的键。 */
 export const PLATFORM_TOOLS = Object.freeze([
+  { flag: 'status', label: '机器人登录状态', names: ['qq_status'], risk: 'read' },
   { flag: 'getPrompt', label: '读取提示词', names: ['qq_get_prompt'], risk: 'read' },
   { flag: 'getUnread', label: '读取未读消息', names: ['qq_get_unread_messages'], risk: 'read' },
   { flag: 'getRecent', label: '读取最近消息', names: ['qq_get_recent_messages'], risk: 'read' },
@@ -51,17 +56,92 @@ export const PLATFORM_TOOLS = Object.freeze([
   { flag: 'schedule', label: '定时任务', names: ['qq_schedule_create', 'qq_schedule_list', 'qq_schedule_update', 'qq_schedule_delete'], risk: 'admin' },
 ]);
 
-/** Agent 侧工具模块（装进 DSH 预设的插件行）。只用于展示与预设生成，不在桥接里逐调用拦截。 */
-export const AGENT_MODULES = Object.freeze([
-  { id: 'tool-fs', label: '文件读写', risk: 'write', desc: '读写工作区里的文件' },
-  { id: 'tool-fs-search', label: '文件检索', risk: 'read', desc: '按名字或内容在工作区里查找文件' },
-  { id: 'tool-pwsh', label: '执行命令', risk: 'exec', desc: '执行 PowerShell 命令' },
-  { id: 'tool-jobs', label: '后台任务', risk: 'exec', desc: '启动、查看和结束后台任务' },
-  { id: 'tool-web', label: '联网搜索/抓取', risk: 'read', desc: '搜索网页并抓取正文' },
-  { id: 'tool-ask-user', label: '向用户提问', risk: 'read', desc: '需要确认时向用户发问并等待回答' },
-  { id: 'tool-todo', label: '任务列表', risk: 'read', desc: '维护多步骤任务的进度清单' },
-  { id: 'qq-approval-gate', label: '审批闸门', risk: 'admin', desc: '高风险操作的确认与放行' },
+/** 可被会话权限与能力预设收紧的平台工具（副作用类；读类只受平台声明的注册结果控制）。 */
+export const CAPABILITY_GATED_RISKS = Object.freeze(['send', 'state', 'admin']);
+
+/**
+ * 模型可见的 8 个中立工具：`id` 是模型看到的工具名，`covers` 是它背后的平台 flag。
+ * 平台声明里没写的 flag 就是「这个平台做不到」，由 `describeToolGroups()` 写进描述。
+ */
+const TOOL_GROUP_DEFS = Object.freeze([
+  {
+    id: 'read_messages',
+    label: '读消息',
+    note: '读取会话里的消息：未读、最近、我发过的、单条详情、图片、合并转发，以及等新消息。',
+    covers: ['getUnread', 'getRecent', 'getMyRecent', 'getMessageDetail', 'getImages', 'getForwardMsg', 'waitMessages'],
+  },
+  {
+    id: 'get_member',
+    label: '看成员',
+    note: '查看群成员活跃度与群友档案（可读可记）。',
+    covers: ['getActiveMembers', 'personProfile'],
+  },
+  {
+    id: 'send',
+    label: '发消息',
+    note: '向会话发送消息（段数组入参：文本、@、引用、图片、表情、语音、网图）。',
+    covers: ['sendGroup', 'sendPrivate', 'reply', 'sendBurst', 'sendMessage', 'sendSticker', 'sendVoice', 'webImage'],
+  },
+  {
+    id: 'act',
+    label: '做动作',
+    note: '消息之外的动作：拍一拍、收藏表情、写表情备注、查看收藏。',
+    covers: ['sendPoke', 'collectSticker', 'setStickerRemark', 'stickerNote', 'listStickers', 'getStickerImage'],
+  },
+  {
+    id: 'conversation_state',
+    label: '会话状态',
+    note: '查看机器人登录状态与会话状态、标记已读、调整唤醒配置。',
+    covers: ['status', 'socialState', 'markRead', 'setWakeConfig'],
+  },
+  {
+    id: 'memory',
+    label: '本机记忆',
+    note: '本机轻量记忆：写入、查询、召回、删除。',
+    covers: ['memory'],
+  },
+  {
+    id: 'slang',
+    label: '黑话',
+    note: '查群黑话，或提交新候选。',
+    covers: ['slangQuery', 'slangSubmit'],
+  },
+  {
+    id: 'admin',
+    label: '管理端',
+    note: '管理端动作：反馈、跨群、owner 群权限、代为转达、定时任务、读提示词、自画像。',
+    covers: ['feedback', 'crossGroup', 'ownerGroupAccess', 'ownerRelay', 'schedule', 'getPrompt', 'getSelfImage'],
+  },
 ]);
+
+/** 组内动作名：op 就是宿主名去掉平台前缀（qq_send_message → send_message）；一个 flag 可以有多条宿主名。 */
+export function opNamesOf(tool) {
+  return (tool.names ?? []).map((name) => String(name).replace(/^qq_/, ''));
+}
+
+/**
+ * 由 flag 定义推出 8 组：风险取组内最高的一档（组只是模型侧的词表，判定仍按 flag）。
+ * 组里引用了不存在的 flag 会在模块加载期直接抛错 —— 那是目录自己的笔误，不该留到运行期。
+ */
+export const TOOL_GROUPS = Object.freeze(TOOL_GROUP_DEFS.map((group) => {
+  const ops = group.covers
+    .map((flag) => PLATFORM_TOOLS.find((tool) => tool.flag === flag))
+    .filter(Boolean);
+  const unknown = group.covers.filter((flag) => !ops.some((tool) => tool.flag === flag));
+  if (unknown.length) throw new Error(`工具组 ${group.id} 引用了不在目录里的 flag：${unknown.join('、')}`);
+  const risk = ops.reduce((worst, tool) => (TOOL_RISKS.indexOf(tool.risk) > TOOL_RISKS.indexOf(worst) ? tool.risk : worst), 'read');
+  return Object.freeze({
+    id: group.id,
+    label: group.label,
+    note: group.note,
+    covers: Object.freeze([...group.covers]),
+    ops: Object.freeze(ops.map((tool) => Object.freeze({ flag: tool.flag, label: tool.label, risk: tool.risk, names: tool.names }))),
+    names: Object.freeze(ops.flatMap((tool) => tool.names)),
+    risk,
+    gated: CAPABILITY_GATED_RISKS.includes(risk),
+    alwaysAllowed: !CAPABILITY_GATED_RISKS.includes(risk),
+  });
+}));
 
 /**
  * 权限级别 → 允许的风险类别。
@@ -84,49 +164,85 @@ export const LEVEL_ASKS = Object.freeze({
   full: Object.freeze([]),
 });
 
-/** 可被能力预设按会话收紧的平台工具（副作用类；读类只受平台工具表的注册结果控制）。 */
-export const CAPABILITY_GATED_RISKS = Object.freeze(['send', 'state', 'admin']);
-
-/** 工具来源两侧（平台 = QQ 桥接；Agent = DSH 运行时）。 */
+/** 工具来源两侧（平台 = 用户侧平台；Agent = 执行体运行时）。 */
 export const TOOL_SIDES = Object.freeze(['platform', 'agent']);
 
 /**
- * 统一目录条目。平台工具以 flag 为 id，Agent 模块以 module id 为 id。
- * `gated` = 能力预设可以收紧；读类恒 false（只受平台工具表的注册结果控制）。
- * `alwaysAllowed` 是这句话的正面表述，供生成器与 UI 直接读。
+ * 统一目录条目（内置部分）：平台侧以 8 个组的 id 为 id（组内的 flag 列在 `flags`）。
+ * `gated` = 会话权限与能力预设可以收紧；读类组恒 false。
+ * `flag` 只有经旧名或 flag 反查时才填，直接按组 id 取到的是 null。
+ * Agent 侧的条目由 `toolCatalogSnapshot()` 从活动执行体的 tools.yml 并入。
  */
 export const CATALOG_ENTRIES = Object.freeze([
-  ...PLATFORM_TOOLS.map((tool) => Object.freeze({
-    id: tool.flag,
-    flag: tool.flag,
-    label: tool.label,
-    names: tool.names,
+  ...TOOL_GROUPS.map((group) => Object.freeze({
+    id: group.id,
+    flag: null,
+    group: group.id,
+    label: group.label,
+    names: group.names,
+    flags: group.covers,
     side: 'platform',
-    provider: 'qq',
+    provider: 'platform',
     source: 'builtin',
-    risk: tool.risk,
-    gated: CAPABILITY_GATED_RISKS.includes(tool.risk),
-    alwaysAllowed: !CAPABILITY_GATED_RISKS.includes(tool.risk),
-  })),
-  ...AGENT_MODULES.map((module) => Object.freeze({
-    id: module.id,
-    label: module.label,
-    side: 'agent',
-    provider: 'dsh',
-    source: 'builtin',
-    risk: module.risk,
-    desc: module.desc ?? '',
-    gated: true,
-    alwaysAllowed: false,
+    risk: group.risk,
+    gated: group.gated,
+    alwaysAllowed: group.alwaysAllowed,
+    desc: group.note,
   })),
 ]);
 
-/** 目录条目（id → 条目）。 */
+/**
+ * 平台侧目录条目（组 id → 条目）。旧名仍可解析：宿主工具名（qq_send_message）与组内 flag
+ * 都落到它所属的那一组，并把命中的 flag / 宿主名一并带出来。
+ *
+ * Agent 侧的模块条目不在静态表里（它跟着执行体变），要看拼好的全集请用 `toolCatalogSnapshot()`。
+ */
 export function catalogEntry(id) {
   const value = String(id ?? '');
-  return CATALOG_ENTRIES.find((entry) => entry.id === value
-    || entry.flag === value
-    || (entry.names ?? []).includes(value)) ?? null;
+  const direct = CATALOG_ENTRIES.find((entry) => entry.id === value);
+  if (direct) return direct;
+  for (const entry of CATALOG_ENTRIES) {
+    const group = TOOL_GROUPS.find((item) => item.id === entry.id);
+    const op = group?.ops.find((item) => item.flag === value || item.names.includes(value));
+    if (op) return { ...entry, flag: op.flag, name: op.names.includes(value) ? value : op.names[0] ?? null };
+  }
+  return null;
+}
+
+/** 组 id / 组内 flag / 宿主工具名 → 所属的组（用于注册期过滤与报错文案）。 */
+export function toolGroup(id) {
+  const value = String(id ?? '');
+  return TOOL_GROUPS.find((group) => group.id === value
+    || group.covers.includes(value)
+    || group.names.includes(value)) ?? null;
+}
+
+/**
+ * 工具描述：由本平台声明的工具项生成（输入是 profiles/platforms/<id>/tools.yml 读出的那份）。
+ * 声明里没有的 flag 就是「这个平台做不到」，写进描述让模型别去试。
+ */
+export function describeToolGroups(declared = []) {
+  const flags = new Set((Array.isArray(declared) ? declared : [])
+    .map((item) => String(item?.flag ?? ''))
+    .filter(Boolean));
+  return TOOL_GROUPS.map((group) => {
+    const supported = group.ops.filter((op) => flags.has(op.flag));
+    const missing = group.ops.filter((op) => !flags.has(op.flag));
+    const parts = [group.note];
+    if (supported.length) parts.push(`本平台支持：${supported.map((op) => op.label).join('、')}。`);
+    if (missing.length) {
+      parts.push(supported.length
+        ? `不支持：${missing.map((op) => op.label).join('、')}。`
+        : '本平台不支持这组能力，调用会得到 capability_unsupported。');
+    }
+    return Object.freeze({
+      id: group.id,
+      label: group.label,
+      description: parts.join(''),
+      supported: supported.map((op) => op.flag),
+      missing: missing.map((op) => op.flag),
+    });
+  });
 }
 
 /**
@@ -171,6 +287,20 @@ export function platformToolMap(value = false) {
   return Object.fromEntries(PLATFORM_TOOLS.map((tool) => [tool.flag, value]));
 }
 
+/**
+ * 平台声明的注册开关：声明了就是「这个平台有」，`defaultOff` 的不默认注册。
+ * 这是工具面唯一的开关来源（能力档不再保存 tools.platform）。
+ */
+export function declaredToolFlags(declared = []) {
+  const flags = {};
+  for (const item of Array.isArray(declared) ? declared : []) {
+    const flag = String(item?.flag ?? '').trim();
+    if (!flag) continue;
+    flags[flag] = item.defaultOff !== true;
+  }
+  return flags;
+}
+
 /** flag → 目录条目。 */
 export function platformTool(flag) {
   return PLATFORM_TOOLS.find((tool) => tool.flag === flag) ?? null;
@@ -202,16 +332,28 @@ export function capabilityCovers(flag) {
   return CAPABILITY_GATED_RISKS.includes(platformToolRisk(flag));
 }
 
-/** 供控制台展示的目录快照。 */
-export function toolCatalogSnapshot() {
+/**
+ * 供控制台展示的目录快照：组是模型看到的，platform 是组内的单项（带所属组），
+ * agent 是**当前执行体**声明的模块（来自它的 tools.yml，由调用方读好传进来）。
+ *
+ * 执行体由 `agentPlatform` 指定，并作为 agent 条目的 `provider` —— 换成 ACP，
+ * 控制台看到的模块名与 provider 就跟着变，回不到写死的那份。
+ */
+export function toolCatalogSnapshot({ agentPlatform = '', agentTools = [] } = {}) {
+  const agent = Array.isArray(agentTools) ? agentTools : [];
   return {
     risks: TOOL_RISKS,
     levels: Object.keys(LEVEL_ALLOWS),
     levelAllows: LEVEL_ALLOWS,
     levelAsks: LEVEL_ASKS,
     gatedRisks: CAPABILITY_GATED_RISKS,
-    platform: PLATFORM_TOOLS.map((tool) => ({ ...tool, gated: capabilityCovers(tool.flag) })),
-    agent: AGENT_MODULES.map((module) => ({ ...module })),
-    entries: CATALOG_ENTRIES,
+    groups: TOOL_GROUPS.map((group) => ({ ...group })),
+    platform: PLATFORM_TOOLS.map((tool) => ({
+      ...tool,
+      group: toolGroup(tool.flag)?.id ?? '',
+      gated: capabilityCovers(tool.flag),
+    })),
+    agent,
+    entries: catalogFromAdapters({ agent, agentProvider: agentPlatform || 'agent' }),
   };
 }

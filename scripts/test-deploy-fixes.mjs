@@ -69,6 +69,10 @@ test('③ 会话重置清掉等待租约：forgetConversationCaches 连归一后
   const block = (marker, endMarker) => { const i = src.indexOf(marker); assert.ok(i > 0, marker); return src.slice(i, src.indexOf(endMarker, i)); };
   assert.match(block("url.pathname === '/api/session/reset'", 'archived: oldSessionId'), /resetSession\(key, \{ notify: false \}\)/, '控制台 / 控制中心的「重置会话」走同一份序列，且不发群回执');
   assert.match(block("url.pathname === '/api/socialV2/reset'", 'saveState();'), /forgetConversationCaches\(key\);/, '二代仿真全量重置');
+  // 全量重置也要退订：执行体客户端早就换成了 agentEvents，引用旧全局 `api` 只会在实盘 ReferenceError。
+  assert.match(block("url.pathname === '/api/socialV2/reset'", 'saveState();'), /agentEvents\.forget\(sid\);/, '二代仿真全量重置要退订事件流');
+  // 清空工作区会把映射整表清掉，之前不退订，遗留的 follow 让每次重连都重放整份快照。
+  assert.ok(block("url.pathname === '/api/workspace/reset'", 'archivedCount, stoppedCount').includes('agentEvents.forget(sid)'), '清空工作区前先退订事件流');
   // QQ 里的 /reset 也是同一个 resetSession（内置命令的 session.reset 由桥接注入），
   // 所以等待租约清理只有一份实现，三个入口不会各自漂移。
   const builtinDeps = src.slice(src.indexOf('const builtinCommandDeps = {'), src.indexOf('for (const definition of createBuiltinCommands('));

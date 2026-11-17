@@ -27,7 +27,7 @@ const CHART_HTML = `<div class="row usage-chart-controls" id="usageChartControls
 <div class="usage-chart" id="usageChart">加载中…</div>
 <div class="usage-legend">
   <span><i class="off"></i>空闲时段</span>
-  <span><i class="peak"></i>高峰时段（单价 ×2）</span>
+  <span><i class="peak"></i>高峰时段</span>
   <span><i class="mixed"></i>跨时段</span>
 </div>
 <div class="meta u-mt-6" id="usageChartNote"></div>`;
@@ -42,11 +42,7 @@ const RECENT_HTML = collapseHtml({
   body: '<div class="settings-content"><div id="usageRecent">（空）</div></div>',
 });
 
-const PRICES_HTML = collapseHtml({
-  id: 'usage-prices',
-  title: '当前生效的价目表',
-  body: '<div class="settings-content"><div id="usagePrices">读取中…</div></div>',
-});
+// 价目表已搬到「全局配置 › 行为与模型」的最后一张卡；这里只留跳转按钮（样式与刷新一致）。
 
 export const USAGE_FIELDS = {
   summary: { html: SUMMARY_HTML },
@@ -56,6 +52,13 @@ export const USAGE_FIELDS = {
         type: 'action',
         items: [
           { id: 'usageRefresh', label: '刷新', small: true },
+          // 价目表只在未匹配到默认模型时提示补价；按钮始终可点，方便随时去核价。
+          {
+            id: 'usagePricingJump',
+            label: '价目表',
+            small: true,
+            attrs: { 'data-view': 'config', 'data-page-tab': 'runtime', 'data-target': 'section-pricing' },
+          },
           { id: 'usageClear', label: '清空账本', variant: 'danger', small: true },
         ],
         status: 'usageMsg',
@@ -67,5 +70,4 @@ export const USAGE_FIELDS = {
   conversations: { html: CONVERSATIONS_HTML },
   turnsBody: { html: TURNS_BODY_HTML },
   recent: { html: RECENT_HTML },
-  prices: { html: PRICES_HTML },
 };

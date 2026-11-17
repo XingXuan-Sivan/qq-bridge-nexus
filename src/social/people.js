@@ -379,7 +379,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
    * 首次（该会话没有 baselineAt）：所有人只标 listed，**不当作新人**、不触发任何唤醒。
    * 之后：名单里有、记录里没有的 → 记为成员（source=reconcile，漏掉的入群事件，不唤醒）；
    *       记录里是成员、名单里没有的 → 记为 left（source=reconcile）。
-   * @param {Array<{user_id, card?, nickname?, join_time?}>} members
+   * @param {Array<{id, card?, nickname?}>} members
    */
   function reconcileConversation(conversationId, members, { selfId = null } = {}) {
     const cid = normalizeConversationId(conversationId);
@@ -392,7 +392,7 @@ export function createPeopleRegistry({ file, now = Date.now, log = () => {}, ded
     let added = 0;
     let missedJoins = 0;
     for (const m of members) {
-      const qq = normalizeQQ(m?.user_id);
+      const qq = normalizeQQ(m?.id);
       if (!qq || (selfId != null && qq === String(selfId))) continue;
       present.add(qq);
       const { p } = ensurePerson(qq, at);

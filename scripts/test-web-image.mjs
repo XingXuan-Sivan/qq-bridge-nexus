@@ -166,7 +166,7 @@ test('③ 闸门：默认关闭；只认管理员私聊 + 二代仿真 + 有效�
   }, { vision: 'no' });
 
   const mcp = fs.readFileSync(new URL('../src/mcp-snowluma-safe.js', import.meta.url), 'utf8');
-  assert.match(mcp, /if \(cfg\.tools\?\.webImage === true\) \{\s*\n\s*server\.tool\(\s*\n\s*'qq_search_images'/, 'MCP 只在开关为 true 时注册');
+  assert.match(mcp, /if \(cfg\.tools\?\.webImage === true\) \{\s*\n\s*defineOp\(\s*\n\s*'qq_search_images'/, 'MCP 只在开关为 true 时注册');
 });
 
 test('④ 网关回执超时：结果未知，提示 AI 先问再重发', async () => {

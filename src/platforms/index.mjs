@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 import { normalizePromptVars } from '../runtime/prompt-compose.mjs';
+import { normalizePricingPolicy } from '../pricing/policy.mjs';
 
 export const PLATFORM_TOOL_RISKS = ['read', 'write', 'send', 'state', 'exec', 'admin'];
 
@@ -116,6 +117,8 @@ function normalizeModelCatalog(raw) {
         cacheWrite: num(given.cacheWrite),
         output: num(given.output),
       };
+      // 模型级口径：只写要偏离平台声明的那几项，没写就回落平台（含「显式空窗口 = 全天同价」）。
+      const policy = normalizePricingPolicy(item?.pricingPolicy);
       return {
         id,
         label: String(item?.label ?? id).trim() || id,
@@ -123,6 +126,7 @@ function normalizeModelCatalog(raw) {
         vision: item?.vision === true,
         // 四个桶一个都没写 = 不报单价，界面显示「未声明」而不是拿兜底价猜。
         pricing: Object.values(pricing).some((rate) => rate !== null) ? pricing : null,
+        pricingPolicy: Object.keys(policy).length ? policy : null,
       };
     })
     .filter(Boolean);
@@ -146,28 +150,6 @@ function normalizeModelCatalog(raw) {
   return models.length || efforts.length ? catalog : null;
 }
 
-/** 计费口径：货币、单位、峰谷倍数与窗口（平台商业条款；节假日表是日历事实，不在这里）。 */
-function normalizePricingPolicy(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const windows = (Array.isArray(raw.peakWindows) ? raw.peakWindows : [])
-    .map((item) => (Array.isArray(item) && item.length === 2 ? item.map(Number) : null))
-    .filter((item) => item && item.every(Number.isFinite) && item[0] >= 0 && item[1] <= 24 && item[0] < item[1]);
-  const weekdays = (Array.isArray(raw.peakWeekdays) ? raw.peakWeekdays : [])
-    .map(Number)
-    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
-  const unit = Number(raw.unit);
-  const peakMultiplier = Number(raw.peakMultiplier);
-  return {
-    version: String(raw.version ?? '').trim(),
-    currency: String(raw.currency ?? '').trim() || 'CNY',
-    symbol: String(raw.symbol ?? '').trim() || '¥',
-    unit: Number.isFinite(unit) && unit > 0 ? unit : 1e6,
-    peakMultiplier: Number.isFinite(peakMultiplier) && peakMultiplier > 0 ? peakMultiplier : 1,
-    peakWindows: windows,
-    peakWeekdays: weekdays,
-  };
-}
-
 /**
  * Agent 平台声明目录：profiles/agent-platforms/<id>/ 是唯一源。
  *
@@ -176,8 +158,9 @@ function normalizePricingPolicy(raw) {
  * src/agent-side/builtin.mjs）。这类目录在统一注册表里报 `profile_only`，
  * 而不是凭空消失。
  *
- * 能力档（capabilities/）是唯一真源：C4 起一份能力档同时带着工具面（tools）、
- * 预设元信息（preset）与预设正文（rows），不再有并列的 agents/ 目录。
+ * 平台目录里装两样与执行体强相关的东西：`capabilities/`（意图层，跨平台可读）与
+ * `tools.yml`（本执行体提供哪些模块、各承担哪个效果）。插件名、行序与人格文案
+ * 不在这里，那是 `adapters/render.yml` 的事。
  */
 export function listAgentPlatformDirs({ root } = {}) {
   if (!root || !fs.existsSync(root)) return [];
@@ -202,4 +185,28 @@ export function listAgentPlatformDirs({ root } = {}) {
         configSchema: meta.configSchema ?? null,
       };
     });
+}
+
+/**
+ * Agent 侧工具声明：`profiles/agent-platforms/<id>/tools.yml` 的 `modules`。
+ *
+ * 每个模块声明自己承担哪些**效果**（`fs.read` / `shell.exec` …），能力档只写效果、不写模块 id；
+ * 控制台的 Agent 工具表与构建期的渲染层都读这一份。目录缺失或没写 `modules` 时给空数组 ——
+ * 空的执行体不是错误，它的工具面就是空的。
+ */
+export function readAgentPlatformTools({ root, id } = {}) {
+  if (!root || !id) return [];
+  const file = path.join(root, String(id), 'tools.yml');
+  if (!fs.existsSync(file)) return [];
+  const data = readYaml(file) ?? {};
+  const modules = Array.isArray(data.modules) ? data.modules : [];
+  return modules
+    .map((module) => ({
+      id: String(module.id ?? ''),
+      label: String(module.label ?? ''),
+      desc: String(module.desc ?? ''),
+      risk: String(module.risk ?? 'read'),
+      effects: (Array.isArray(module.effects) ? module.effects : []).map(String).filter(Boolean),
+    }))
+    .filter((module) => module.id && PLATFORM_TOOL_RISKS.includes(module.risk));
 }

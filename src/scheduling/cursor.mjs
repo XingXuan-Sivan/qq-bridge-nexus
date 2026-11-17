@@ -1,7 +1,7 @@
 // 游标与收尾判据：判断「这一轮到底处理到哪」。
 //
 // 判据只有三个状态，且顺序固定：
-//   explicitAck  已带水位回执（qq_mark_read / qq_set_wake_config 的 throughSeq）  → 终态，永不补发
+//   explicitAck  已带水位回执（conversation_state（op=mark_read） / conversation_state（op=set_wake_config） 的 throughSeq）  → 终态，永不补发
 //   unreadStill  那条消息还在未读缓冲里                                          → 必须补发
 //   overflowed   被缓冲上限挤出、模型从未被展示过                                 → 记溢出，不假装处理过
 //

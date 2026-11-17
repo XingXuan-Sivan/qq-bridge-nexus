@@ -4,12 +4,12 @@ import { api, bootstrapConsoleToken } from './api.js';
 import { showConsoleToast, applyPageA11y } from './ui.js';
 import { consolePages, getCurrentPage, initRouter, refreshCurrentPage, setConsolePage, setSearchCloser } from './router.js';
 import { setMsg } from '../components/message/message.js';
-import { loadPlatforms, platformLabel } from './registry.js';
+import { loadPlatforms, listPlatforms, platformsLoaded } from './registry.js';
 
 bootstrapConsoleToken();
 // 平台注册表（B7 / C7）预热：页面渲染不等网络，先把两侧平台的平台名、会话类型与上限拉回本地。
 // 失败时静默（后半启动阶段端点可能还不在），页面本身有「只显示会话里出现过的平台」的降级。
-void loadPlatforms();
+void loadPlatforms().then(() => renderUserPlatformMetric());
 
 // 上游静默时长的人话渲染：只用于 SnowLuma 健康提示（秒 / 分钟 / 小时）。
 function fmtAgoMs(ms) {
@@ -111,9 +111,33 @@ async function refreshSessionMetrics() {
   } catch {}
 }
 
+/**
+ * 「用户平台」格：已连接的用户侧平台条数。
+ *
+ * 判据是注册表里每条实例的入站结论（`inboundState.state === 'open'`，即这条实例真的在收），
+ * 不是「默认出站实例是哪个」：多装一条实例时这一格跟着变，也不认识任何具体平台名。
+ * 悬停落出明细：哪几条在收、总共有几条。
+ */
+function renderUserPlatformMetric() {
+  const el = document.getElementById('metricPlatform');
+  if (!el) return;
+  if (!platformsLoaded()) {
+    el.textContent = '—';
+    el.title = '平台注册表读取中';
+    return;
+  }
+  const platforms = listPlatforms('user');
+  const connected = platforms.filter((item) => String(item.inboundState?.state ?? '').trim().toLowerCase() === 'open');
+  el.textContent = String(connected.length);
+  el.title = platforms.length
+    ? `${connected.length} / ${platforms.length} 条用户实例已接管`
+      + (connected.length ? `：${connected.map((item) => item.label || item.id).join('、')}` : '')
+    : '注册表里没有用户平台';
+}
+
 function updateOverview(status, modeLabel) {
   // 这里写的节点有的常驻 index.html，有的只在 overview 片段里；逐个判空。
-  // Agent 平台与用户平台都由状态投影给出（`agent` / `platform`），控制台不认识具体平台名。
+  // Agent 平台读状态投影的身份；用户平台读注册表里各条实例的入站结论（见 renderUserPlatformMetric）。
   const agent = status.agent ?? {};
   const agentLabel = agent.label || 'Agent 平台';
   const connection = document.getElementById('statusText');
@@ -128,8 +152,7 @@ function updateOverview(status, modeLabel) {
   }
   const agentHint = document.getElementById('metricAgentHint');
   if (agentHint) agentHint.textContent = connectModeText(agent) + ' · ' + (agent.ready ? '已连接' : '未连接');
-  const platformEl = document.getElementById('metricPlatform');
-  if (platformEl) platformEl.textContent = status.platform ? platformLabel(status.platform, 'user') : '—';
+  renderUserPlatformMetric();
   renderUpstreamHealth(status.snowluma);
   const mode = document.getElementById('metricMode');
   if (mode) mode.textContent = modeLabel;

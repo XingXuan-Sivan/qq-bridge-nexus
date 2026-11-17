@@ -40,7 +40,7 @@ export const RUNTIME_APPLY = Object.freeze(['preset', 'passthrough']);
  *
  * DSH 的 `sessions/create` 没有 system prompt 参数，因此只能用 `prefix`：首轮唤醒把
  * 平台话术作为前缀带进去一次，后续唤醒不再重复；`tool` 是兜底——让模型自己去调
- * `qq_get_prompt`。不在这里声明 `system`，桥接才会如实报 `passthrough_degraded`。
+ * `admin（op=get_prompt）`。不在这里声明 `system`，桥接才会如实报 `passthrough_degraded`。
  */
 export const RUNTIME_PROMPT = Object.freeze(['prefix', 'tool']);
 

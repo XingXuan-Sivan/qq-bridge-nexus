@@ -3,72 +3,15 @@
 # 直通 = 不装环境、不装预设、不套沙箱，只做「追加」：提示注入、会话编排、平台工具。
 # 它和 full / workspace 是同一类档位（同一套接口、同样可以被会话随便选），
 # 唯一差别是不改执行体的环境 —— 会话跑在该 Agent 平台「手动新建一个会话」时的默认环境里。
-# MCP 不在追加之列：四个 MCP 服务器由安装期写进执行体自己的配置
-# （`adapters/install.mjs` 的 `# === qq-bridge MCP BEGIN ===` 区块），与 preset 无关，
-# 所以不装 preset 也不会丢 MCP。
-# 因此本档没有 rows，也不产 artifacts/dsh/qq-agent-presets/presets/direct.patch.yml。
+# 所以 effects 留空：不声明效果就没有插件行要渲染，工具面交给执行体自己。
+# 扩展授权也留空（= 全部拒绝）：四个 MCP 服务器由安装期写进执行体自己的配置
+# （`adapters/install.mjs` 的 `# === qq-bridge MCP BEGIN ===` 区块），与预设无关，
+# 不装预设也不会丢 MCP。
 
 version: 1
 id: direct
 label: 直通
 note: 不装环境，用 Agent 平台现成的会话环境、工具与权限；只附加本平台工具
-tools:
-  platform:
-    getPrompt: true
-    getUnread: true
-    getRecent: true
-    getMyRecent: true
-    getMessageDetail: true
-    getImages: true
-    getForwardMsg: true
-    getActiveMembers: true
-    waitMessages: true
-    socialState: true
-    listStickers: true
-    getStickerImage: true
-    getSelfImage: true
-    personProfile: true
-    memory: true
-    slangQuery: true
-    slangSubmit: true
-    markRead: true
-    setWakeConfig: true
-    stickerNote: true
-    setStickerRemark: false
-    collectSticker: true
-    sendGroup: true
-    sendPrivate: true
-    reply: true
-    sendBurst: true
-    sendMessage: true
-    sendPoke: true
-    sendSticker: true
-    sendVoice: false
-    webImage: false
-    feedback: true
-    crossGroup: true
-    ownerGroupAccess: false
-    ownerRelay: false
-    schedule: true
-  agent:
-    # host = 「不指定工具清单」，用对端全部。它不是「拿到全部工具」的保证：
-    # 工具面由对端决定，桥接在直通下给不出工具级硬边界（只能过滤经由桥接的调用）。
-    host: true
-  mcp:
-    # 没有 rows 就没有 `qq-tool-restrict` 行，这份工具面不会被渲染成保留名单：
-    # 直通下经由桥接的 MCP 调用由执行体自身的配置与 Hub 授权决定，这里只记录口径。
-    - server: '*'
-      tools: '*'
-  skills:
-    - '*'
 runtime:
   apply: passthrough
   prompt: system
-  # 投递侧 deny 名单（可选）。直通下它不是硬边界，只拦「经由桥接」的调用。
-  narrow: []
-preset:
-  name: 直通
-  description: 不装 preset 与沙箱，直接使用 Agent 平台的会话环境、工具与权限档。
-  order: 20
-  behavior: none
-rows: []

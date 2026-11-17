@@ -27,10 +27,18 @@ console.log('## 视图 / 页面契约');
 const views = [...new Set([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 const pages = [...new Set([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 ok(JSON.stringify(views) === JSON.stringify(pages), 'data-view 与 data-page 一一对应', `${views.length} 个：${views.join(', ')}`);
-// 管理两页的读取顺序：先定全局默认，再看平台接得对不对。
-const manageOrder = ['config', 'platforms'].map((view) => html.indexOf(`data-view="${view}"`));
-ok(manageOrder.every((at) => at > 0) && manageOrder.every((at, i) => i === 0 || at > manageOrder[i - 1]),
-  '管理导航按「全局配置 → 平台配置」排列');
+// 导航按「管理 / 聊天行为 / 扩展」三组排列，组内顺序固定。
+const navHtml = html.slice(html.indexOf('<nav id="mainNav">'), html.indexOf('</nav>'));
+const groupLabels = [...navHtml.matchAll(/class="nav-label"[^>]*>([^<]+)</g)].map((m) => m[1]);
+ok(JSON.stringify(groupLabels) === JSON.stringify(['管理', '聊天行为', '扩展']),
+  '导航按三组排列', groupLabels.join(' → '));
+const navOrder = [...navHtml.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]);
+ok(JSON.stringify(navOrder) === JSON.stringify([
+  'overview', 'sessions', 'config', 'platforms', 'operations',
+  'prompt-blocks', 'persona', 'memory', 'slang', 'scheduler',
+  'plugins', 'skills', 'mcp', 'behaviors'
+]), '导航顺序固定', navOrder.join(', '));
+ok(!/nav-group/.test(navHtml), '导航不再用折叠分组');
 
 console.log('## JS 语法');
 // 控制台脚本已全部外置为 ES 模块，index 里不再有内联 <script>，
@@ -152,8 +160,15 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   ok(!/splitViewHtml|splitItemHtml/.test(platformsJs), '平台页不再用 split-view 组件');
   const detailPath = path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js');
   const detailJs = fs.existsSync(detailPath) ? fs.readFileSync(detailPath, 'utf8') : '';
-  // 标签由「这一侧真有的资产」推出来：不是按平台 id 写死分支。
-  ok(/assets\?\.capabilityProfiles \?\? \[\]\)\.length/.test(detailJs) && /assets\?\.behaviors \?\? \[\]\)\.length/.test(detailJs), '详情标签按资产有无给（能力 / 行为）');
+  // 标签固定（不按资产增减）：概览 / 配置 / 能力，用户平台多一页话术与行为。
+  // 资产只决定「能力」与「话术与行为」里要不要挂面板 —— 没有「高级」这个筐。
+  ok(/TABS_COMMON = Object\.freeze\(\[[\s\S]{0,160}?id: 'overview'[\s\S]{0,160}?id: 'config'[\s\S]{0,160}?id: 'capabilities'/.test(detailJs)
+    && /TAB_VOICE = Object\.freeze\(\{ id: 'voice'/.test(detailJs)
+    && /side === 'user' \? \[\.\.\.TABS_COMMON, TAB_VOICE\] : TABS_COMMON/.test(detailJs),
+    '平台详情固定三页，用户平台多一页话术与行为');
+  ok(!/advancedHtml|id: 'advanced'/.test(detailJs), '不再有「高级」标签：资产各自落在能力与话术里');
+  ok(/assets\?\.capabilityProfiles \?\? \[\]\)\.length/.test(detailJs)
+    && /assets\?\.behaviors \?\? \[\]\)\.length/.test(detailJs), '能力档与行为档案按有无决定要不要挂面板');
   ok(!/id === 'qq'|id === 'dsh'/.test(detailJs), '详情不按平台 id 分支');
   const behaviorsPath = path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'behaviors-panel.js');
   const behaviorsJs = fs.existsSync(behaviorsPath) ? fs.readFileSync(behaviorsPath, 'utf8') : '';
@@ -166,23 +181,115 @@ console.log('## P5：能力档的声明面（应用方式 / 注入通道 / 对�
   ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /peerPermissions/.test(detailText),
     '平台详情的能力位矩阵写出注入通道与对端权限档支持面');
   const sessionsText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
-  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染 Agent 平台与执行体');
-  ok(/APPLY_LABEL/.test(sessionsText) && /AUDIENCE_LABEL/.test(sessionsText), '生效方式与受众标签跟能力档同一套取值（会话里不另存一份）');
-  ok(!/'POST', \{ preset \}|data-detail-agent-revert|AUTHORITY_LABEL/.test(sessionsText), '对端权限档只读：没有改档写口与「改回」按钮');
+  // 执行体与对端权限档只在「平台 › 该 Agent 平台 › 能力」里读：会话详情不再复述一份只读卡。
+  ok(!/detailAgentFields|promptChannelHtml/.test(sessionsText), '会话详情不再渲染执行体与对端权限卡（正文在平台 › 能力）');
+  ok(/instanceForeign === true/.test(sessionsText) && /data-detail-agent-reopen/.test(sessionsText),
+    '会话仍读 instanceForeign：换过 Agent 平台才在危险操作里给「在新平台上重开」');
+  ok(/registryLabel\('apply'/.test(sessionsText) && /AUDIENCE_LABEL/.test(sessionsText), '生效方式与受众标签跟能力档同一套取值（会话里不另存一份）');
+  ok(!/'POST', \{ preset \}|data-detail-agent-revert|data-detail-form="agent"/.test(sessionsText), '没有对端权限档的改档写口与「改回」按钮');
   const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
   const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
   ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「Agent 平台」卡：默认平台 + 当前运行');
-  ok(/hasModels/.test(detailText) && /capabilities \?\? \[\]\)\.includes\('models'\)/.test(detailText),
-    '模型与思考强度卡挂在平台详情，按该平台声明的 models 能力位门控');
-  ok(/loadModelCatalog/.test(detailText) && /platformModelSave/.test(detailText),
-    '模型卡的选项来自平台模型目录读口，写走平台配置写口');
-  ok(!/applyAgentGates|dshModelUnsupported/.test(configText), '全局配置页不再保留模型卡与它的门控');
-  ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), 'Agent 平台字段走 fields 规格（不手写控件）');
-  ok(/fixtureSessionAgent\(/.test(fixture) && /peerPermission/.test(fixture), '离线夹具实现会话 /agent（能力档 + 对端权限档只读）');
+  const modelCardText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'agent-model', 'agent-model.js'), 'utf8');
+  ok(/hasModels/.test(detailText) && /mountAgentModel\(/.test(detailText),
+    '平台详情按该平台声明的 models 能力位决定要不要挂模型卡');
+  ok(/mountAgentModel\(/.test(configText) && /capabilities \?\? \[\]\)\.includes\('models'\)/.test(configText),
+    '全局配置的模型卡跟着选中的 Agent 平台走，同样按 models 能力位门控（不写死平台）');
+  ok(/export function mountAgentModel\(/.test(modelCardText) && /loadModelCatalog/.test(modelCardText)
+    && /\/api\/platforms\/registry\/agent\/\$\{encodeURIComponent\(id\)\}\/config/.test(modelCardText),
+    '模型卡只有一份实现：选项来自平台模型目录读口，写走平台配置写口');
+  ok(!/applyAgentGates|dshModelUnsupported/.test(configText), '全局配置页不再有平台专用的模型门控');
+  ok(/agentDefaultSelect/.test(configFields) && /id: 'agentRefresh'/.test(configFields) && /id: 'agentSave'/.test(configFields),
+    'Agent 平台字段走 fields 规格：动作只有刷新与保存');
+  ok(!/section-agent-model/.test(configText) && /id="agentModelMount"/.test(configText),
+    '模型控件与默认平台同住一张卡（不再拆第二张卡）');
+  ok(/fixtureSessionAgent\(/.test(fixture) && /instanceForeign/.test(fixture), '离线夹具实现会话 /agent（带换过平台的实例标记）');
   const permissionLevels = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'permission-levels.js'), 'utf8');
   ok(/PERMISSION_LEVELS = \['read-only', 'workspace-write', 'full-ask', 'full'\]/.test(permissionLevels),
     '权限级别的四档与后端 PERMISSION_LEVELS 一致');
   ok(/fillPermissionOptions/.test(configText), '全局配置页优先用后端下发的 levels / labels 铺权限选项');
+}
+console.log('## S6：平台详情按三问三标签（结论由接口下发）');
+{
+  const detailJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
+  ok(/const TABS_COMMON = Object\.freeze\(\[[\s\S]{0,160}?\{ id: 'overview', label: '概览' \}[\s\S]{0,160}?\{ id: 'config', label: '配置' \}[\s\S]{0,160}?\{ id: 'capabilities', label: '能力' \},?\s*\]\)/.test(detailJs)
+    && /const TAB_VOICE = Object\.freeze\(\{ id: 'voice', label: '话术与行为' \}\)/.test(detailJs),
+    '平台详情按概览 / 配置 / 能力三页（两侧同构），用户平台多一页话术与行为');
+  ok(/item\.promise\?\.text/.test(detailJs) && !/能收能发|只能发不能收/.test(detailJs), '一句话结论由注册表下发（前端不拼「能收能发」）');
+  ok(/promise\?\.groups/.test(detailJs), '能力标签的清单用注册表下发的分组（前端不重算支持面）');
+  ok(/rawDeclarationHtml\(/.test(detailJs) && /capabilityMatrix\(item\)/.test(detailJs), '原始声明降级到「能力 › 原始声明」');
+  ok(/collapseHtml\(\{[\s\S]{0,200}?title: '原始声明'/.test(detailJs), '原始声明默认折叠（不默认展开）');
+  const registryJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'registry.js'), 'utf8');
+  ok(!/CAPABILITY_LABEL = Object\.freeze/.test(registryJs), '控制台不再维护第二张能力位中文表');
+  ok(/meta\.labels/.test(registryJs) && /export function registryLabel/.test(registryJs), '中文名从注册表快照的 labels 读');
+  const sessionsJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
+  ok(/这个会话能用的工具（\$\{tools\.total\}）/.test(sessionsJs)
+    && /collapseHtml\(\{[\s\S]{0,200}?id: 'session-tools'/.test(sessionsJs), '会话页的工具卡是求交结果，默认折叠');
+  ok(!/platformToolAllowedAt|declaredToolFlags/.test(sessionsJs), '求交在 /profile 里算，页面不重复判定');
+  const sessionTools = fs.readFileSync(path.join(ROOT, 'src', 'session', 'tools.mjs'), 'utf8');
+  const bridgeJs = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+  ok(/export function sessionToolsCard/.test(sessionTools) && /sessionToolsCard\(/.test(bridgeJs),
+    '求交只一份：src/session/tools.mjs，桥接与夹具都调它');
+}
+console.log('## S7：会话详情三张常驻卡与 /profile 读口收口');
+{
+  const sessionsJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
+  ok(/function runConclusion\(data\)/.test(sessionsJs) && /生效：能力档/.test(sessionsJs) && /未设置/.test(sessionsJs),
+    '运行卡底部一行结论：能力档 / 行为 / 权限 / 模型，缺省写未设置');
+  ok(/hosts\.map\(\(host\) =>/.test(sessionsJs), 'card() 的第三参是宿主数组（一张卡可挂多个表单区）');
+  ok(/\['persona', 'prompt'\]/.test(sessionsJs) && /\['wake', 'access'\]/.test(sessionsJs),
+    '人格 + 提示、唤醒 + 准入各合成一张卡');
+  ok(!/detailDisplayName/.test(sessionsJs), '显示名不再有表单字段（改走列表行的重命名弹窗）');
+  ok(/data-rename-key/.test(sessionsJs) && /\/api\/session\/rename/.test(sessionsJs), '列表行提供唯一的改名入口');
+  ok(/collapseHtml\(\{[\s\S]{0,200}?id: 'session-links'/.test(sessionsJs), '关联（记忆 · 定时任务）降级成折叠卡');
+  ok(/collapseHtml\(\{[\s\S]{0,200}?id: 'session-danger'[\s\S]{0,120}?className: 'detail-danger'/.test(sessionsJs),
+    '危险操作默认收起，并带自己的样式钩子');
+  ok(/agentHealthTag\(data\.health/.test(sessionsJs) && /agentHealthTag\(entry\.health, entry\.sessionId\)/.test(sessionsJs)
+    && !/detailDshLabel|dshCell|function healthCell/.test(sessionsJs),
+    '健康度统一叫 health，列表行与详情头部共用 agentHealthTag');
+  ok(!/data-detail-form="agent"/.test(sessionsJs) && /平台 › 该 Agent 平台 › 能力/.test(sessionsJs),
+    '对端权限档只在平台的「能力」里解释：会话详情不再挂第二份只读卡');
+
+  const bridgeJs = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+  ok(/health: getDshHealth\(key, sessionId\)/.test(bridgeJs) && !/dsh: getDshHealth/.test(bridgeJs),
+    '/profile 与列表下发 health');
+  ok(!/presets: dshPresetIds\.slice\(\)/.test(bridgeJs), '读口不再下发 presets');
+  ok(/isDefault: entry\.id === DECLARED_DEFAULT_CAPABILITY/.test(bridgeJs) && /apply: \(entry\.runtime/.test(bridgeJs),
+    'capabilities[] 每项自带 isDefault 与 apply');
+  ok(/effectiveModel: profileModelOf\(key\) \?\? platformModelView\(\)/.test(bridgeJs)
+    && /const platformModelView = \(\) =>/.test(bridgeJs), '生效模型：会话值 → 平台配置 → null');
+  ok(/warnings\.push\('模型未校验：目录不可用'\)/.test(bridgeJs), '模型目录不可用时按原值保存并带 warning');
+
+  const fixture = fs.readFileSync(path.join(ROOT, 'scripts', 'console-ui-fixture.mjs'), 'utf8');
+  ok(!/dsh: \{ label: 'DSH 已连接' \}/.test(fixture) && /health: \{ key, status: 'online'/.test(fixture),
+    '离线夹具的会话档案只给 health');
+}
+console.log('## S9：模型目录不可用时按声明面兜底');
+{
+  // 模型卡只有一份实现（components/agent-model）：平台详情与全局配置都只是挂载它。
+  const modelCardJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'agent-model', 'agent-model.js'), 'utf8');
+  ok(/const declaredModels = \(\) => \(catalog\?\.declared\?\.models \?\? \[\]\)/.test(modelCardJs),
+    '声明面的模型清单单独成函数：目录读不到时它是唯一选项来源');
+  ok(!/模型与档位暂时改不了/.test(modelCardJs), '不再写「暂时改不了」：模型与档位确实能改');
+  ok(/按平台的声明清单铺/.test(modelCardJs) && /保存时不校验/.test(modelCardJs),
+    '提示条说明选项来自声明清单、保存不校验');
+  ok(/effortEntries\(declaredCatalog\?\.efforts\)\.length/.test(modelCardJs) && /effortEntries\(declaredCatalog\?\.effortFallback\)/.test(modelCardJs),
+    '档位下拉：模型声明的档位 → 声明全集 → 内置档依次回落');
+  ok(!/modelSelect\.disabled = !providers\.length/.test(modelCardJs), '模型下拉不再因为读不到实时目录而置灰');
+  ok(/providerSelect\.disabled = !providers\.length/.test(modelCardJs), '提供方是实时目录的概念：读不到时保持原值并置灰');
+  const detailJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
+  ok(/platformModel/.test(detailJs) && !/declaredModelCatalog/.test(detailJs),
+    '平台详情不再自带模型卡实现：只给挂载点与 id 前缀');
+
+  const bridgeJs = fs.readFileSync(path.join(ROOT, 'src', 'bridge.js'), 'utf8');
+  ok(/registry, \.\.\.\(warnings\.length \? \{ warnings \} : \{\}\)/.test(bridgeJs),
+    '平台配置写口把模型未校验的 warning 随响应下发');
+  ok(/\['provider', 'model', 'reasoningEffort'\]\.some\(\(key\) => key in fields\)/.test(bridgeJs),
+    '只改看图能力不报「模型未校验」');
+
+  const fixtureJs = fs.readFileSync(path.join(ROOT, 'scripts', 'console-ui-fixture.mjs'), 'utf8');
+  ok(/\/__fixture\/model-catalog/.test(fixtureJs) && /state\.modelCatalogDown/.test(fixtureJs),
+    '离线夹具可演「实时目录读不到」（与真实现同一条 200 + error 口径）');
 }
 // C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
 // 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。
@@ -312,8 +419,11 @@ ok(!/pluginDetailOverlay|wireModal|document\.body\.appendChild/.test(pluginsPage
 ok(/onPageRoute\('plugins'/.test(pluginsPageJs) && /setConsolePage\('plugins', \{ sub:/.test(pluginsPageJs),
   '插件详情由子路由 #plugins/<id> 驱动（返回写空 sub）');
 ok(/interactive: true/.test(pluginsPageJs), '清单卡片整卡可点进详情');
-ok(/cardHtml\(/.test(pluginDetailJs) && /dataTableHtml\(/.test(pluginDetailJs) && /detailHeadHtml\(/.test(pluginDetailJs),
-  '详情每一段是一张卡，属性表用表格组件，页头用 detail-head');
+ok(/detailPanelHtml\(/.test(pluginDetailJs) && /detailSectionHtml\(/.test(pluginDetailJs) && /detailCardsHtml\(/.test(pluginDetailJs)
+  && /keyValueHtml\(/.test(pluginDetailJs) && /detailHeadHtml\(/.test(pluginDetailJs),
+  '详情页是一张大卡：卡内按分区排，计数与短字段走小卡 / 键值网格，页头用 detail-head');
+ok(/const TABS = Object\.freeze\(\[[\s\S]{0,200}?id: 'overview'[\s\S]{0,200}?id: 'config'[\s\S]{0,200}?id: 'audit'/.test(pluginDetailJs)
+  && !/id: 'advanced'/.test(pluginDetailJs), '插件详情按概览 / 配置 / 审计三页（没有「高级」）');
 
 console.log('## 组件层（3.2）');
 const componentDir = path.join(ROOT, 'public', 'console', 'components');

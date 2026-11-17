@@ -6,14 +6,18 @@
 // 为什么查询是同步的：页面首屏渲染不等网络。app.js 启动时预热一次，页面拿到的是
 // 上一次的快照；空快照的降级是「只显示数据里出现过的平台」，不会把页面挂住。
 // 加载失败时保留旧快照 —— 控制台在半启动（平台还没装配）时也要能渲染。
+//
+// 中文名不在这里维护：注册表快照带一张 `labels`（能力位 / 段 / 效果 / 生效方式 /
+// 提示注入 / 会话类型），平台详情的那句结论也是后端算好的。前端多一张表就会出现
+// 「接口说 qq 支持视频、界面说它不支持」这类自相矛盾，插件新增 id 还得改前端。
 
 import { api } from './api.js';
 
-let meta = { active: { user: '', agent: '' }, platforms: [], diagnostics: [], summary: null };
+let meta = { active: { user: '', agent: '' }, platforms: [], diagnostics: [], summary: null, labels: {} };
 let loaded = false;
 let inflight = null;
 
-/** 当前快照 `{ active: {user,agent}, platforms, diagnostics, summary }`。 */
+/** 当前快照 `{ active: {user,agent}, platforms, diagnostics, summary, labels }`。 */
 export function registryMeta() {
   return meta;
 }
@@ -38,6 +42,7 @@ export async function loadPlatforms({ force = false } = {}) {
           platforms: res.platforms,
           diagnostics: Array.isArray(res.diagnostics) ? res.diagnostics : [],
           summary: res.summary ?? null,
+          labels: res.labels && typeof res.labels === 'object' ? res.labels : {},
         };
         loaded = true;
       }
@@ -153,21 +158,9 @@ export function platformFilterOptions(seenIds = [], { allLabel = '全部平台',
   return [{ value: 'all', label: allLabel }, ...ids.map((id) => ({ value: id, label: platformLabel(id, side) }))];
 }
 
-/** 内核语义的会话类型 → 中文。平台自有类型不在这里登记，原样显示。 */
-const TYPE_LABEL = Object.freeze({
-  group: '群聊',
-  private: '私聊',
-  direct: '私聊',
-  temp: '临时会话',
-  channel: '频道',
-  thread: '帖子',
-  live: '直播',
-});
-
 /** 会话类型的中文名；未知类型原样返回（插件新增类型不需要先登记就能显示）。 */
 export function conversationTypeLabel(type) {
-  const key = String(type ?? '').trim().toLowerCase();
-  return TYPE_LABEL[key] || key;
+  return registryLabel('conversations', type);
 }
 
 /** 类型标签的色调：多方会话绿、一对一蓝、其余中性。 */
@@ -226,38 +219,20 @@ export function platformLimits(platformId, side = 'user') {
 }
 
 /** 能力名 → 中文。没登记的能力原样显示：插件扩展能力不需要改前端。 */
-const CAPABILITY_LABEL = Object.freeze({
-  group: '群聊',
-  direct: '私聊',
-  temp: '临时会话',
-  mention: '@ 提醒',
-  reply: '引用回复',
-  recall: '撤回',
-  poke: '拍一拍',
-  image: '图片',
-  voice: '语音',
-  video: '视频',
-  file: '文件',
-  sticker: '表情',
-  forward: '合并转发',
-  'member-list': '成员列表',
-  'member-info': '成员详情',
-  ext: '平台私有段',
-  // Agent 平台能力位（AgentPort 契约）：两侧同名时不冲突，名字本来就不同。
-  session: '会话',
-  rename: '改名',
-  permission: '权限',
-  models: '模型',
-  settings: '设置',
-  workspace: '工作区',
-  compact: '压缩',
-  maintenance: '维护',
-  events: '事件流',
-});
-
 export function capabilityLabel(name) {
-  const key = String(name ?? '').trim().toLowerCase();
-  return CAPABILITY_LABEL[key] || key;
+  return registryLabel('capabilities', name);
+}
+
+/** 后端下发的标签表（`capabilities` / `segments` / `effects` / `apply` / `prompt` / `conversations`）。 */
+export function registryLabels() {
+  return meta.labels ?? {};
+}
+
+/** 某张表里的中文名；表里没有就原样回 id（插件新增的 id 也能显示）。 */
+export function registryLabel(table, id) {
+  const key = String(id ?? '').trim().toLowerCase();
+  if (!key) return '';
+  return registryLabels()[table]?.[key] ?? String(id).trim();
 }
 
 /** 一排能力标签的文案（逗号分隔），用于卡片上的「平台能力」一行。 */

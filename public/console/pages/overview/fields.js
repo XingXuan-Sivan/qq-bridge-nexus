@@ -3,11 +3,12 @@
 import { permissionLevelOptions } from '../../js/permission-levels.js';
 
 // 五格指标：「Agent 平台 / 用户平台 / 会话模式 / 会话 / 待处理」。
-// 前两格读状态投影里的平台身份与上游健康，标题写死的是「位置」而不是某个平台名——
-// 换 Agent 平台或换用户平台时格子仍成立。`.is-text` 是文本格的字号修饰（数值格保持大字号）。
+// 前两格读的是「位置」而不是某个平台名：Agent 平台读状态投影的身份，用户平台读注册表里
+// 各条实例的入站结论（已连接几条）。标题写死的是位置，换平台时格子仍成立。
+// `.is-text` 是文本格的字号修饰；用户平台格放的是条数，保持数值格的大字号。
 const METRICS_HTML = `<div class="overview-summary" id="overviewSummaryMetrics">
   <div class="metric"><span>Agent 平台</span><strong id="metricAgent" class="is-text">读取中</strong><small id="metricAgentHint">等待连接层响应</small></div>
-  <div class="metric"><span>用户平台</span><strong id="metricPlatform" class="is-text">读取中</strong><small id="metricUpstream">等待上游健康上报</small></div>
+  <div class="metric"><span>用户平台</span><strong id="metricPlatform">读取中</strong><small id="metricUpstream">等待上游健康上报</small></div>
   <div class="metric"><span>会话模式</span><strong id="metricMode" class="is-text">—</strong><small id="metricRole">正在读取默认行为</small></div>
   <button class="metric metric-link" data-view="sessions"><span>已建立会话</span><strong id="metricSessions">—</strong><small>查看会话映射 <span aria-hidden="true">↗</span></small></button>
   <button class="metric metric-link" data-view="sessions" data-target="section-pending"><span>待处理请求</span><strong id="metricPending">—</strong><small>提问与工具审批 <span aria-hidden="true">↗</span></small></button>
@@ -48,7 +49,7 @@ const MANUAL_SILENCE_STAGES = [
 const SILENCE_RANGES = `<div class="silence-block">
   <div id="silenceRanges"></div>
   <div class="meta" id="silenceUpcoming">—</div>
-  <div class="meta" id="silencePeakNote">高峰时段：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「令牌与花费」的价目表）</div>
+  <div class="meta" id="silencePeakNote">高峰时段：北京时间工作日 09:00–12:00、14:00–18:00，单价 ×2（取自「全局配置 › 行为与模型 › 价目表」）</div>
   <div class="meta" id="silenceMsg" role="status"></div>
 </div>`;
 

@@ -1,43 +1,47 @@
-// 成员事件（入群/退群/改名片/撤回）：把平台的成员通知规整成中性事件，
+// 成员事件（入群/退群/改名片/撤回）：把统一事件里的成员类通知规整成中性事件，
 // 并生成给二代会话的「事件提示」。
 //
-// 载荷形状（已对照 SnowLuma 1.14.22 源码 packages/onebot/src/event-converter/to-notice.ts 核实）：
-//   group_increase  { group_id, user_id, operator_id, sub_type: approve|invite, time, self_id }
-//   group_decrease  { group_id, user_id, operator_id, sub_type: leave|kick|kick_me|disband }
-//   group_card      { group_id, user_id, card_new, card_old }   ← SnowLuma 由「下一条消息的名片变化」派生，
-//                                                                 不是 QQ 实时推送；冷缓存时不会发
-//   group_recall    { group_id, user_id, operator_id, message_id }
-// ID 全部是 number；无法解析的 UID 会变成 0（这里一律丢弃）。
-// SnowLuma 不重放离线期间的事件，断线期间的入群/退群会**丢失** —— 由 reconcileConversation 的
-// 成员名单对账兜底（只记录，不唤醒）。
+// 入参是内核的**统一事件**（kind=notice），不是厂商报文：`notice_type` → 中立词的
+// 那张表在平台适配器里（src/user-side/adapters/qq/inbound.mjs），这里只认三个中立位：
+//   · notice.target.id  当事人（进群/退群/改名片的人，撤回消息的作者）
+//   · actor.id          操作者（批准、踢人、撤回的人；系统自动处理时没有）
+//   · notice.ref        撤回指向的消息
+//
+// SnowLuma 不重放离线期间的事件，断线期间的入群/退群会**丢失** —— 由
+// reconcileConversation 的成员名单对账兜底（只记录，不唤醒）。
 // 同一事件可能重复投递（部分推送 seq=0 时 SnowLuma 的去重会放行）—— 由 people.js 的指纹 +
 // 逻辑去重处理。
 //
-// 入站的 `group_id` 是**协议字段**（OneBot 的 wire format），不改名；规整之后对内一律叫
-// `conversationId` —— 那是社交模型的容器词汇，别的平台不应该被迫叫「群」。
+// 对内一律叫 `conversationId` —— 那是社交模型的容器词汇，别的平台不应该被迫叫「群」。
 
 import { normalizeConversationId, normalizeQQ, cleanDisplayName } from './people.js';
 import { conversationRecordable } from './conversation-config.js';
 
-/** 规整一条 notice；不是我们关心的类型返回 null。 */
-export function normalizeMemberNotice(event) {
-  if (!event || event.post_type !== 'notice') return null;
-  const type = String(event.notice_type ?? '');
-  const conversationId = normalizeConversationId(event.group_id);
-  const userId = normalizeQQ(event.user_id);
+/**
+ * 统一事件（kind=notice）→ 成员事件；不是成员类通知返回 null。
+ *
+ * 规整后对内只用一个词：`conversationId` / `userId` / `operatorId` / `selfInvolved`。
+ */
+export function memberEventFromNotice(event) {
+  if (!event || event.kind !== 'notice') return null;
+  const type = String(event.notice?.type ?? '');
+  const conversationId = normalizeConversationId(event.conversation?.id);
+  const userId = normalizeQQ(event.notice?.target?.id);
+  if (!conversationId || !userId) return null;
+  const detail = event.notice?.detail ?? {};
   const base = {
     conversationId,
     userId,
-    operatorId: normalizeQQ(event.operator_id),
-    subType: String(event.sub_type ?? ''),
+    operatorId: normalizeQQ(event.actor?.id),
+    subType: String(detail.subType ?? ''),
+    // 统一事件的 time 是毫秒（与 Date.now() 同尺度）；people.js 的去重指纹按这个值算。
     time: Number.isFinite(Number(event.time)) ? Number(event.time) : null,
-    selfId: event.self_id != null ? String(event.self_id) : null,
+    selfInvolved: detail.selfInvolved === true,
   };
-  if (!conversationId || !userId) return null;
-  if (type === 'group_increase') return { kind: 'join', ...base };
-  if (type === 'group_decrease') return { kind: 'leave', ...base };
-  if (type === 'group_card') return { kind: 'card', ...base, cardNew: String(event.card_new ?? ''), cardOld: String(event.card_old ?? '') };
-  if (type === 'group_recall') return { kind: 'recall', ...base, messageId: event.message_id != null ? String(event.message_id) : null };
+  if (type === 'member.join') return { kind: 'join', ...base };
+  if (type === 'member.leave') return { kind: 'leave', ...base };
+  if (type === 'member.card') return { kind: 'card', ...base, cardNew: String(detail.cardNew ?? ''), cardOld: String(detail.cardOld ?? '') };
+  if (type === 'recall') return { kind: 'recall', ...base, messageId: event.notice?.ref?.messageId != null ? String(event.notice.ref.messageId) : null };
   return null;
 }
 
@@ -50,7 +54,7 @@ const CATEGORY_TEXT = {
 
 /**
  * 处理一条已规整的成员事件。
- * @param {object} ev       normalizeMemberNotice 的结果
+ * @param {object} ev       memberEventFromNotice 的结果
  * @param {object} deps
  * @param {object} deps.people          people.js 实例
  * @param {object} deps.continuity      config.continuity
@@ -62,8 +66,9 @@ const CATEGORY_TEXT = {
 export async function processMemberEvent(ev, { people, continuity = {}, conversationAllowed, fetchMember = null, log = () => {} }) {
   if (!ev) return { handled: false, wake: false };
   if (!conversationAllowed(ev.conversationId)) return { handled: false, wake: false };
-  // 自己进群/被踢：不当成「有人入群」，只记一笔。
-  if (ev.selfId && ev.userId === ev.selfId) {
+  // 自己进群/被踢：不当成「有人入群」，只记一笔。`selfInvolved` 由适配器算（只有它
+  // 知道本账号是哪个 id），内核不再拿一个 self_id 去做比较。
+  if (ev.selfInvolved) {
     log(`会话 ${ev.conversationId} 的成员事件涉及机器人自身（${ev.kind}/${ev.subType}），只记录不唤醒`);
     return { handled: true, wake: false };
   }

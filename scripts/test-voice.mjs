@@ -14,6 +14,7 @@ import {
   AUDIO_EXTS, describeAudio, formatBytes, formatDuration,
   inspectAudio, isAudioFile, listAudioFiles, parseTargetKey, resolveAudioSource
 } from '../src/send-voice-lib.js';
+import { catalogEntry } from '../src/tools/catalog.mjs';
 // 独立发语音工具在仓库上一级（不在本仓库里）：位置解析与"不在时怎么跳过"走共享口径。
 import { hasVoiceTool, skipVoiceTool, voiceToolPath } from './voice-tool-locator.mjs';
 import { readConsoleSource } from './console-source.mjs';
@@ -146,8 +147,9 @@ console.log('## MCP 工具与 bridge 路由');
   const mcp = fs.readFileSync(path.join(ROOT, 'src', 'mcp-snowluma-safe.js'), 'utf8');
   ok(mcp.includes("'qq_send_voice'"), 'MCP 注册 qq_send_voice');
   ok(mcp.includes("'qq_list_voices'"), 'MCP 注册 qq_list_voices');
-  ok(mcp.includes("qq_send_voice: 'sendVoice'"), 'qq_send_voice 受 sendVoice 开关控制');
-  ok(mcp.includes("qq_list_voices: 'sendVoice'"), 'qq_list_voices 受 sendVoice 开关控制');
+  // 开关归属以目录为准；工具本身是 send 组里的一个 op。
+  ok(catalogEntry('qq_send_voice').flag === 'sendVoice', 'qq_send_voice 受 sendVoice 开关控制');
+  ok(catalogEntry('qq_list_voices').flag === 'sendVoice', 'qq_list_voices 受 sendVoice 开关控制');
   const voiceBlock = mcp.slice(mcp.indexOf("'qq_send_voice'"), mcp.indexOf("'qq_list_voices'"));
   ok(voiceBlock.includes('/api/socialV2/send-voice'), 'qq_send_voice 调 /api/socialV2/send-voice');
   ok(!voiceBlock.includes("绝对路径的音频"), 'qq_send_voice 不暴露绝对路径参数');
@@ -201,8 +203,8 @@ console.log('## 平台提示词已描述语音能力（否则 AI 不知道自己
 {
   // 语音工具属于 QQ 平台话术：写进能力档会与平台提示词重复两份，所以钉在 prompt.md。
   const preset = fs.readFileSync(path.join(ROOT, 'profiles', 'platforms', 'qq', 'prompt.md'), 'utf8');
-  ok(preset.includes('qq_send_voice'), '平台提示词提到 qq_send_voice');
-  ok(preset.includes('qq_list_voices'), '平台提示词提到 qq_list_voices');
+  ok(preset.includes('op=send_voice'), '平台提示词提到 send（op=send_voice）');
+  ok(preset.includes('op=list_voices'), '平台提示词提到 send（op=list_voices）');
   ok(preset.includes('verified=true'), '平台提示词说明 verified=true 的语义');
   ok(/不要假装发了语音/.test(preset), '平台提示词禁止假装发语音');
   // 守卫的权威实现只有一份，在 qq-agent-presets bundle 里（能力档的 rows 以裸说明符引用它）。

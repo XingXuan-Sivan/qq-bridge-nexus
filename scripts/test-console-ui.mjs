@@ -18,7 +18,7 @@ const original = args.includes('--original');
 const acceptContracts = args.includes('--accept-contracts');
 const record = args.includes('--record-baseline') || acceptContracts;
 const artifacts = args.find(x => x.startsWith('--artifacts='))?.slice('--artifacts='.length);
-const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'operations', 'platforms', 'plans'];
+const views = ['overview', 'config', 'sessions', 'persona', 'plugins', 'skills', 'mcp', 'behaviors', 'slang', 'memory', 'scheduler', 'operations', 'platforms'];
 const retiredIds = new Set(existsSync(join(here, 'console-ui-retired-ids.json'))
   ? JSON.parse((await readFile(join(here, 'console-ui-retired-ids.json'), 'utf8')).replace(/^\uFEFF/, ''))
   : []);
@@ -322,20 +322,23 @@ try {
     assert.ok(rows.length > 0, 'expected at least one action row on config');
   });
 
-  await test('默认运行方案挂在用户平台条目上，行为档案在平台详情', async () => {
+  await test('默认行为挂在用户平台条目上，行为档案在平台详情', async () => {
     await hydrate('config');
     assert.equal(await page.locator('[data-config-section="behavior"]').count(), 0);
-    // 默认方案不是全局配置项：它按用户平台（实例）各一份，字段在平台详情 › 配置里。
-    assert.equal(await page.locator('#runtimeDefaultSelect').count(), 0, '全局配置不再有默认方案下拉');
+    // 默认行为不是全局配置项：它按用户平台（实例）各一份，字段在平台详情 › 配置里。
+    assert.equal(await page.locator('#runtimeDefaultSelect').count(), 0, '全局配置不再有默认行为下拉');
 
     await openPlatform('user:qq');
     await page.click('[data-platform-tab="config"]');
-    await page.waitForSelector('#platformDefaultPlan', { timeout: 5000 });
-    await page.waitForFunction(() => document.getElementById('platformDefaultPlan')?.options.length >= 2);
-    assert.equal(await page.locator('#platformDefaultPlan').inputValue(), 'social-v2', '下拉回填条目上的默认方案');
-    await page.selectOption('#platformDefaultPlan', 'chat');
+    await page.waitForSelector('#platformDefaultBehavior', { timeout: 5000 });
+    await page.waitForFunction(() => document.getElementById('platformDefaultBehavior')?.options.length >= 2);
+    assert.equal(await page.locator('#platformDefaultBehavior').inputValue(), 'social-v2', '下拉回填条目上的默认行为');
+    await page.selectOption('#platformDefaultBehavior', 'social-v1');
     const patch = await clickWrite('#platformConfigSave', '/api/platforms/registry/user/qq/config', 'PATCH');
-    assert.equal(patch.defaultPlan, 'chat', '默认方案随条目保存一起提交');
+    assert.equal(patch.defaultBehavior, 'social-v1', '默认行为随条目保存一起提交');
+    await page.selectOption('#platformDefaultBehavior', 'social-v2');
+    const restored = await clickWrite('#platformConfigSave', '/api/platforms/registry/user/qq/config', 'PATCH');
+    assert.equal(restored.defaultBehavior, 'social-v2', '改回去再存一次，不影响后面的用例');
 
     // 行为档案是用户平台的子资源：在「平台 › 详情 › 行为」里改，不再有独立整页。
     await page.click('[data-platform-tab="behaviors"]');
@@ -348,14 +351,6 @@ try {
     const body = fixture.requests.filter((r) => r.method === 'PUT' && r.path.includes('/api/config/behaviors/')).at(-1)?.body;
     assert.equal(body?.data?.kind, 'social-v1');
     assert.equal(body?.data?.config?.contextWindow, 25);
-  });
-
-  await test('Plans page keeps no switch control', async () => {
-    await navigate('plans');
-    await page.waitForSelector('#planSummary', { timeout: 5000 });
-    // 方案切换卡已删除：全局只保留「默认方案」（在全局配置），会话可单独覆盖。
-    assert.equal(await page.locator('#planSwitch, #planDefaultSelect').count(), 0, '方案页不再有切换控件');
-    assert.equal(await page.locator('#runtimeSwitch, #runtimePlan').count(), 0, '旧方案切换控件已随 pages/runtime 删除');
   });
 
   await test('Platform detail merges behavior prompt into one save', async () => {
@@ -451,25 +446,25 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('上次探活通过'), null, { timeout: 5000 });
   });
 
-  await test('Plans page editor contracts', async () => {
-    await navigate('plans');
-    await page.click('#planNew');
-    await page.waitForSelector('#planEditor .modal', { timeout: 5000 });
-    await page.fill('#planEditId', 'my-agent');
-    await page.fill('#planEditLabel', '我的 Agent');
-    // 方案不绑用户平台，默认跟随全局 Agent 平台；钉具体 id 只在需要时（下拉只列声明了能力档的平台）。
-    assert.equal(await page.locator('#planEditPlatform').count(), 0, '用户侧平台字段已从方案里移除');
-    assert.deepEqual(await page.$$eval('#planEditAgentPlatform option', (nodes) => nodes.map((node) => node.value)), ['auto', 'dsh']);
-    assert.equal(await page.locator('#planEditAgentPlatform').inputValue(), 'auto', '新建方案默认 auto');
-    assert.equal(await page.locator('#runtimeEditAgent').count(), 0, '旧 runtime 编辑器 id 已随 pages/runtime 删除');
-    await page.selectOption('#planEditTools', 'chat');
-    await page.selectOption('#planEditBehavior', 'social-v2');
-    await page.selectOption('#planEditAudience', 'owner');
-    await page.fill('#planEditNote', '带人格进群');
-    assert.deepEqual(await clickWrite('#planEditSave', '/api/plans'), {
-      id: 'my-agent', label: '我的 Agent', agentPlatform: 'auto',
-      capability: 'chat', behavior: 'social-v2', audience: 'owner', note: '带人格进群',
-    });
+  await test('Session detail run card saves capability / behavior / permission', async () => {
+    await navigate('sessions');
+    await page.waitForSelector('#sessionList [data-manage-key="group:100003"]');
+    await page.click('#sessionList [data-manage-key="group:100003"]');
+    await page.waitForSelector('#detailCapability');
+    // 三项都默认跟随：能力档空 = 平台默认，行为 inherit = 平台默认，权限 inherit = 全局默认。
+    assert.equal(await page.locator('#detailCapability').inputValue(), '');
+    assert.equal(await page.locator('#detailBehavior').inputValue(), 'inherit');
+    assert.equal(await page.locator('#detailPermission').inputValue(), 'inherit');
+    assert.deepEqual(await page.$$eval('#detailCapability option', (nodes) => nodes.map((node) => node.value)),
+      ['', 'chat', 'chat-v2', 'readonly', 'direct'], '能力档选项来自平台声明的能力档');
+    assert.ok((await page.locator('#detailCapability option').first().textContent()).includes('跟随平台默认'), '空值写明是平台默认');
+    await page.selectOption('#detailCapability', 'chat');
+    await page.selectOption('#detailBehavior', 'social-v1');
+    await page.selectOption('#detailPermission', 'read-only');
+    assert.deepEqual(await clickWrite('#sessionDetailSave', '/api/sessions/group%3A100003/profile', 'PATCH'), {
+      capability: 'chat', behavior: 'social-v1', permission: 'read-only',
+    }, '只提交改过的三项，不混入其它字段');
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
   });
 
   await test('Capability file contracts', async () => {
@@ -505,7 +500,7 @@ try {
     await openPlatform('agent:acp');
     await page.waitForSelector('#platformSetDefault', { timeout: 5000 });
     const body = await clickWrite('#platformSetDefault', '/api/config/runtime');
-    assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交 Agent 平台 id，不夹带默认方案');
+    assert.deepEqual(body, { defaultAgent: 'acp' }, '设为默认只提交 Agent 平台 id，不夹带其它配置');
     // 切换只落盘：本进程仍装配 dsh，于是「待重启」同时出现在详情与清单，外加一条可复查的诊断。
     await page.waitForFunction(() => document.querySelector('[data-platform-panel-body]')?.textContent.includes('已设为默认，重启后生效'), null, { timeout: 5000 });
     assert.equal(await page.locator('#platformSetDefault').count(), 0, '已设为默认的平台不再显示同一个按钮');
@@ -623,8 +618,8 @@ try {
     await page.waitForFunction(() => /已保存/.test(document.getElementById('globalAccessSaveMsg')?.textContent || ''));
   });
 
-  // 会话弹窗的权限档位必须与全局配置页同一套措辞；full 档只在总开关打开时出现。
-  await test('Session permission levels mirror global wording and hide full until enabled', async () => {
+  // 会话弹窗的权限档位必须与全局配置页同一套措辞：四档都来自后端，不再有总开关与限时授权。
+  await test('Session permission levels mirror global wording', async () => {
     await navigate('sessions');
     await page.waitForSelector('#sessionList [data-manage-key]');
     await page.locator('#sessionList [data-manage-key]').first().click();
@@ -633,33 +628,23 @@ try {
       value: node.value,
       label: node.textContent.trim(),
     })));
-    let options = await readOptions();
-    assert.deepEqual(options.map((o) => o.value), ['inherit', 'read-only', 'workspace-write', 'full-ask'], '总开关关闭时不应出现 full 档');
-    assert.ok(options.every((o) => o.label !== 'inherit'), '不应出现裸 inherit 选项');
-    assert.match(options[0].label, /跟随全局（当前：只读（read-only））/);
-    assert.match(options[3].label, /完全访问 · 每次确认（qq-full-ask）/);
+    const sessionOptions = await readOptions();
+    assert.deepEqual(sessionOptions.map((o) => o.value), ['inherit', 'read-only', 'workspace-write', 'full-ask', 'full'], '四档全部可选，inherit 排在最前');
+    assert.match(sessionOptions[0].label, /^跟随全局（当前：工作区读写）$/, 'inherit 项的文案带生效档');
+    assert.deepEqual(sessionOptions.slice(1).map((o) => o.label), ['只读', '工作区读写', '完全访问 · 每次确认', '完全访问'], '档位措辞与后端 PERMISSION_LABEL 一致');
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
 
     await navigate('config');
     await page.locator('[data-config-section="security"]').click();
-    // 全局配置页的「默认级别」同样按总开关算档位：关着没有 full，打开后补上，选中值不被冲掉。
-    const defaultOptions = () => page.locator('#permissionDefault option').evaluateAll((nodes) => nodes.map((node) => node.value));
-    await page.waitForFunction(() => document.getElementById('permissionDefault')?.options.length >= 3);
-    assert.deepEqual(await defaultOptions(), ['read-only', 'workspace-write', 'full-ask'], '总开关关闭时「默认级别」也没有 full 档');
-    await check('permissionAllowFull', true);
+    // 全局默认级别用后端下发的 levels / labels 铺选项：页面不自带第二份档位表。
     await page.waitForFunction(() => document.getElementById('permissionDefault')?.options.length === 4);
-    assert.deepEqual(await defaultOptions(), ['read-only', 'workspace-write', 'full-ask', 'full'], '总开关打开后 full 档出现在下拉里');
-    assert.equal(await page.locator('#permissionDefault').inputValue(), 'read-only', '重算选项不改变当前选中值');
-    assert.deepEqual(await saveBarWrite('/api/config/permission'), { default: 'read-only', allowFull: true, fullTtlMin: 30 });
-
-    await navigate('sessions');
-    await page.waitForSelector('#sessionList [data-manage-key]');
-    await page.locator('#sessionList [data-manage-key]').first().click();
-    await page.waitForSelector('#detailPermission');
-    options = await readOptions();
-    assert.equal(options.at(-1).value, 'full', '总开关打开后应出现 full 档');
-    assert.match(options.at(-1).label, /完全访问 · 短时授权（danger-full-access）/);
-    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
+    const defaultOptions = await page.locator('#permissionDefault option').evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()));
+    assert.deepEqual(defaultOptions, ['只读', '工作区读写', '完全访问 · 每次确认', '完全访问'], '全局默认级别用同一套标签');
+    assert.equal(await page.locator('#permissionDefault').inputValue(), 'read-only', '回填当前默认级别');
+    assert.equal(await page.locator('#permissionAllowFull, #permissionTtl').count(), 0, '总开关与限时授权已随权限模型删除');
+    // 改一级再存：保存条只在确有未保存修改时才可点。
+    await page.locator('#permissionDefault').selectOption('workspace-write');
+    assert.deepEqual(await saveBarWrite('/api/config/permission'), { default: 'workspace-write' }, '写口径只有 default 一项');
   });
 
   // state/ 的 ACL 收紧需要管理员权限，未提权时桥接会明确报告 hardened:false。
@@ -774,22 +759,22 @@ try {
     await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
   });
 
-  // 会话详情：“运行方案”要写出全局方案的名字（不能只有一个破折号）；
+  // 会话详情的「运行」卡要写出平台默认行为（不能只显示一个破折号）；
   // “人格”下拉每次打开都重读目录——人格页新建卡后回来立刻能看到，不需要刷新页面。
   // 这段带写请求，所以必须放在契约基线比对之后。
-  await test('Session detail shows the active plan label and re-reads the persona catalog', async () => {
+  await test('Session detail shows the platform default behavior and re-reads the persona catalog', async () => {
     const openDetail = async () => {
       await navigate('sessions');
       await page.waitForSelector('#sessionList [data-manage-key]');
       await page.locator('#sessionList [data-manage-key]').first().click();
-      await page.waitForSelector('#detailPlan');
+      await page.waitForSelector('#detailBehavior');
     };
     const closeDetail = () => page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
     const personaNames = () => page.locator('#detailPersonaName option').allTextContents();
 
     await openDetail();
-    const planLabel = await page.locator('#detailPlan option').first().textContent();
-    assert.match(planLabel, /跟随平台默认（当前：聊天）/, '跟随项要写出平台默认方案的名字，不能只显示一个破折号');
+    const behaviorLabel = await page.locator('#detailBehavior option').first().textContent();
+    assert.match(behaviorLabel, /跟随平台默认（当前：social-v2）/, '跟随项要写出平台默认行为，不能只显示一个破折号');
     const before = await personaNames();
     await closeDetail();
 
@@ -1337,75 +1322,31 @@ try {
     await page.waitForSelector('#metricSessions');
   });
 
-  // P5：直通运行期把「谁能改权限档」摆到界面上。管理员私聊走直通方案（权限归 Agent 平台），
-  // 群聊走「聊天」（桥接钉档）——两种权威都要能从同一个详情里读出来。
-  if (!original) await test('会话详情：Agent 平台与权限按权威分两态，直通会话改档后漂移消失', async () => {
-    // 会话 key 里带冒号，请求路径里是百分号编码的：比对前先解回来。
-    const pathOf = (url) => decodeURIComponent(new URL(url).pathname);
+  // P5：会话详情的「Agent 平台与执行体」是只读事实：能力档的生效方式、注入通道、
+  // 对端权限档都由能力档的 runtime 段决定；这里没有改档写口，改档走「运行」卡。
+  if (!original) await test('会话详情：Agent 平台与执行体只读展示能力档声明面', async () => {
     await navigate('sessions');
     await page.waitForSelector('#sessionList [data-manage-key="private:100001"]');
     await page.click('#sessionList [data-manage-key="private:100001"]');
-    await page.waitForSelector('#detailAgentPreset');
     const agentCard = page.locator('#sessionDetailBody [data-detail-form="agent"]');
+    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('DeepSeek Harness'));
     let text = await agentCard.textContent();
-    assert.match(text, /DeepSeek Harness/, 'Agent 平台名字要写出来');
-    assert.match(text, /权限档：Agent 平台自身/, '直通档的权限权威是 Agent 平台自身');
+    assert.match(text, /直通 · 主人/, '会话显式挂的能力档写在卡上');
+    assert.match(text, /直通（不装预设）/, '生效方式来自能力档 runtime');
     assert.match(text, /系统提示/, '话术按能力档声明的 system 通道注入');
-    assert.match(text, /漂移：对端现在是 default/, '桥接基线与对端现值不一致要写出来');
-    assert.deepEqual(await page.locator('#detailAgentPreset option').evaluateAll((nodes) => nodes.map((node) => node.value)), ['read-only', 'workspace-write', 'default'], '档位目录来自 Agent 平台');
-    assert.equal(await page.locator('#detailAgentPreset').inputValue(), 'default');
-
-    const [written] = await Promise.all([
-      page.waitForResponse((r) => pathOf(r.url()) === '/api/sessions/private:100001/permission' && r.request().method() === 'POST'),
-      page.selectOption('#detailAgentPreset', 'workspace-write'),
-    ]);
-    assert.equal(written.status(), 200);
-    assert.deepEqual(fixture.requests.at(-1)?.body, { preset: 'workspace-write' }, '改档只提交目标档位');
-    await page.waitForFunction(() => document.getElementById('detailAgentPreset')?.value === 'workspace-write');
-    text = await agentCard.textContent();
-    assert.equal(/漂移/.test(text), false, '写后核对一致，漂移结论应消失');
-    assert.equal(await page.locator('.detail-danger [data-detail-agent-reopen]').count(), 1, 'Agent 平台权威给出「在新 Agent 平台上重开」，且归入危险操作卡');
-    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
-
-    // 群聊走桥接钉档：只读展示生效档位，没有改档下拉，也不给重开按钮。
-    await page.click('#sessionList [data-manage-key="group:123456789"]');
-    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('桥接钉档'));
-    const bridgeText = await agentCard.textContent();
-    assert.match(bridgeText, /桥接权威：这一档由桥接钉住并自动改回/);
-    assert.equal(await page.locator('#detailAgentPreset').count(), 0, '桥接权威不给改档下拉');
+    assert.match(text, /这套能力档不钉对端档位/, '直通档不声明对端权限档');
+    assert.equal(await page.locator('#detailAgentPreset, [data-detail-agent-revert]').count(), 0, '没有改档写口与「改回」按钮');
     assert.equal(await page.locator('.detail-danger [data-detail-agent-reopen]').count(), 0, '实例没换过就不给重开按钮');
     await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
-  });
 
-  if (!original) await test('方案页：应用方式 / 权限权威只读展示，改能力档跳到平台的能力标签', async () => {
-    await navigate('plans');
-    await page.waitForSelector('#planCard [data-plan-edit="agent-direct"]');
-    const table = await page.locator('#planCard').textContent();
-    assert.match(table, /应用方式/);
-    assert.match(table, /权限权威/);
-    assert.match(table, /不做工具级限制/, '直通方案行要标记不做工具级限制');
-    assert.match(table, /Agent 平台自身/);
-    assert.match(table, /桥接钉档/);
-
-    await page.click('#planCard [data-plan-edit="agent-direct"]');
-    await page.waitForSelector('#planRuntimeSummary');
-    let summary = await page.locator('#planRuntimeSummary').textContent();
-    assert.match(summary, /应用方式 直通（不装预设）/);
-    assert.match(summary, /权限权威 Agent 平台自身/);
-    // 换能力档：只读块跟着重画，但不往保存体里加字段。
-    await page.selectOption('#planEditTools', 'chat');
-    summary = await page.locator('#planRuntimeSummary').textContent();
-    assert.match(summary, /应用方式 装预设/);
-    assert.match(summary, /权限权威 桥接钉档/);
-
-    await page.selectOption('#planEditTools', 'direct');
-    await page.locator('[data-plan-cap-jump]').click();
-    // 跳转直接落到「平台 › 能力」二级页：sub 与 tab 一起写进地址栏。
-    await page.waitForFunction(() => location.hash === '#platforms/agent:dsh/capabilities');
-    await page.waitForSelector('[data-platform-tab="capabilities"].active');
-    await page.waitForSelector('#platformCapabilityList [data-cap-edit]');
-    assert.equal(await page.locator('#planEditor').count(), 0, '跳转前先关掉方案编辑器');
-    assert.match(await page.textContent('[data-platform-view="detail"] .detail-head-main h3'), /DeepSeek Harness/, '能力档属于声明它的平台');
+    // 声明了对端权限档的只读档：当前档位现读现写，钉住的基线同时写出来（会话内不可改）。
+    await page.click('#sessionList [data-manage-key="group:123456789"]');
+    await page.waitForFunction(() => (document.querySelector('#sessionDetailBody [data-detail-form="agent"]')?.textContent || '').includes('Agent · 只读'));
+    text = await agentCard.textContent();
+    assert.match(text, /装预设/, 'preset 档的生效方式是装预设');
+    assert.match(text, /read-only/, '对端权限档现读现写');
+    assert.match(text, /建会话时钉住的是 read-only/, '钉住的基线写出来，且会话内不可改');
+    await page.locator('#sessionDetailOverlay [data-modal-close]').first().click();
   });
 
   if (!original) await test('全局配置：Agent 平台卡区分配置面与运行期，切换默认平台只落盘', async () => {

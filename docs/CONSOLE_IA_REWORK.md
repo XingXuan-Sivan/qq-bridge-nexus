@@ -1,6 +1,7 @@
 # 控制台 IA 重构与平台配置归一
 
 > 状态：**B1–B4 已落地**，本文的结论即当前实现。
+> **运行方案层已退役**：§1.1 与 §5 记录的「默认运行方案三级链 + config v3」已被「能力档 + 行为档案 + 平台条目 `defaultBehavior`（config v4）」取代；`/api/plans`、`profiles/plans/`、`pages/plans/` 均已删除。§5 保留为批次记录，现状以 [PROFILES_MODEL.md](PROFILES_MODEL.md) §1.3、[CONSOLE.md](CONSOLE.md) §9 为准。
 > 范围：`public/console/**`、`src/bridge.js` 的平台注册表与配置端点、`src/config/platforms.mjs`、`src/agent-side/**`、`profiles/agent-platforms/**`、`config.json` 结构版本、`docs/**`。
 > 前置阅读：`CONSOLE.md`（组件与门禁）、`CONSOLE_FORMS.md`（页面骨架与控件工厂）、`CONSOLE_FORM_LESSONS.md`（踩坑记录）、`PLATFORM_UNIFICATION.md`（平台模型）、`PROFILES_MODEL.md`（配置分层）。
 > 本文只写**结论与边界**，不复述既有规格；与既有文档冲突时以本文为准，并在同一批里改掉旧文档的对应段落。
@@ -9,7 +10,7 @@
 
 1. **界面 IA**：平台配置与插件改为「卡片网格 + 独立二级页」，MCP 保留左右分栏并收紧两栏细节。
 2. **平台专有配置归一**：模型目录 / 思考强度 / 压缩策略 / 价目表由 Agent 平台自描述，核心与全局配置页不再认识具体平台。
-3. **默认运行方案**：由「全局一个」改为「按用户平台各一个」，只影响该平台新建会话。
+3. **默认运行方案**：由「全局一个」改为「按用户平台各一个」，只影响该平台新建会话（**此项已随运行方案层退役**，现为条目级 `defaultBehavior`）。
 4. **细节三项**：`full` 档缺失、人格块可关、直通档去特例。
 
 ---
@@ -269,7 +270,9 @@ modelCatalog:
 
 ---
 
-## 5. 默认运行方案：三级链
+## 5. 默认运行方案：三级链（已退役，保留为批次记录）
+
+> 现状：平台条目只有 `defaultBehavior`（`CONFIG_VERSION = 4`，见 `docs/guides/CONFIGURATION.md`），会话档案只有 `capability` / `behavior` / `permission`。本节的小节标题与代码块不再对应当前实现。
 
 ### 5.1 解析链
 

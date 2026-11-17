@@ -323,7 +323,7 @@ qq-bridge-nexus/       # fork 后的仓库目录名（上游仓库名为 dsh-qq�
     release/            # 发布说明与发布流程
     （design/ research/ audits/ 是本地开发文档，不随仓库发布）
   audio/                # 语音库（自己建，不入库）：把准备好的音频放这里，AI 可作 QQ 语音发出（用法见 docs/guides/VOICE.md）
-  profiles/             # 配置的唯一源（四轴：应用方式 / 工具面 / 权限权威 / 行为）：platforms/ agent-platforms/<id>/{capabilities,adapters}/ plans/ schemas/
+  profiles/             # 配置的唯一源（四轴：应用方式 / 工具面 / 权限权威 / 行为）：platforms/ agent-platforms/<id>/{capabilities,adapters}/ schemas/
   artifacts/<agent平台>/  # 由该平台适配器生成的产物（当前只有 dsh/）
     dsh/qq-agent-presets  # 预设 bundle（patch 由 npm run build:artifacts 生成，setup-dsh.mjs 装进 DSH）
   plugins/              # 桥接运行时插件目录（用户插件放这里；示例 plugins/soulkit-persona）

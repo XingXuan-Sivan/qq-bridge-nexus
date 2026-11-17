@@ -88,7 +88,7 @@ export const MEMORY_FIELDS = {
     { name: 'memToolRecall', type: 'switch', label: 'qq_memory_recall', onLabel: '开', offLabel: '关', hint: '让 AI 主动翻旧事；默认开。' },
     { name: 'memToolNote', type: 'switch', label: 'qq_memory_note', onLabel: '开', offLabel: '关', hint: '让 AI 主动记一句话；默认关，写回落在本机轻量记忆（soulkit 只读）。' },
     { name: 'memToolLocal', type: 'switch', label: '本机轻量记忆工具', onLabel: '开', offLabel: '关', hint: 'qq_memory_append / query / remove / clear 四个工具的总开关。' },
-    { name: 'memHandover', type: 'switch', label: '切 agent 时带上私聊记忆', onLabel: '开', offLabel: '关', hint: '切到 closed-agent 时，把管理员私聊里的记录交给 agent；不含任何群。' },
+    { name: 'memHandover', type: 'switch', label: '切 agent 时带上私聊记忆', onLabel: '开', offLabel: '关', hint: '切到仿真模式时，把管理员私聊里的记录交给 agent；不含任何群。' },
     { type: 'action', items: [{ id: 'memToolsSave', label: '保存工具设置' }], status: 'memToolsMsg' },
   ],
   ingest: [

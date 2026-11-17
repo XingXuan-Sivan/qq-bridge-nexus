@@ -2,7 +2,7 @@
 
 > 一条会话最终怎么跑由**四轴**决定：应用方式 / 工具面 / 权限权威 / 行为（定义与各轴取值见
 > [EXECUTION_BODY_GENERALIZATION.md](EXECUTION_BODY_GENERALIZATION.md) §3.1）。轴是语义分类，§一 的表才是**取值存在哪**：
-> 从 2026-11-12 起，桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力档 / 运行方案 → 会话权限级别**。
+> 桥接的“配置”只剩一条主链：**用户侧平台 → 行为档案 / Agent 平台 → 能力档 → 会话权限级别**。
 > 旧的 `config/behaviors/`、`config/platform/`、`dsh/agent-presets/` 三处存储已删除，没有兼容层。
 > 本文只描述现状；历史设计文档见文末“相关文档”。
 >
@@ -23,10 +23,10 @@
 | **应用方式** `apply` | `preset` / `passthrough` | 要不要在 Agent 平台上装一套预设（能力档 `rows` → bundle patch） | 能力档 `runtime.apply` |
 | **工具面** `tools` | 平台工具 / Agent 模块 / MCP / 技能，再按会话权限级别收窄 | 发什么工具给模型 | 能力档 `tools` 段 + 会话 `permission` |
 | **权限权威** `permission` | `bridge` / `agent` | 对端权限档由谁定、谁回钉 | 能力档 `runtime.permission` |
-| **行为** `behavior` | `none` / `social-v1` / `social-v2` … | 回合怎么被驱动、话术风格 | 方案 `behavior` → `profiles/platforms/<id>/behaviors/` |
+| **行为** `behavior` | `none` / `social-v1` / `social-v2` … | 回合怎么被驱动、话术风格 | 会话档案 `behavior` → `profiles/platforms/<id>/behaviors/`；缺省取用户平台条目的 `defaultBehavior` |
 
 四个轴互不推导。`direct`（`apply: passthrough`）**不装预设**，但它仍有工具面（宿主环境自带的）、仍有权限权威（`agent`，桥接只告警 + 给「改回」）、仍挑一个行为档案（`none`）——
-「直通」只说明应用方式，不等于「没有方案」。
+「直通」只说明应用方式，不等于「没有能力档」。
 
 ### 1.2 存储分层
 
@@ -36,28 +36,26 @@
 | **行为引擎 / 行为档案**（behavior） | 在这个平台上“怎么表现”（一代仿真 / 二代仿真 / 别的风格） | 引擎 `profiles/behavior-engines/<engine>.yml`（字段清单 + 默认值）；档案 `profiles/platforms/<id>/behaviors/*.yml`（`config` 是保存时的全量快照） | 引擎定义由系统提供，档案作者只改取值与文案（内置两份，可增删）；在「平台 › 详情 › 行为」里改，没有整页 |
 | **Agent 平台**（agent platform） | AI 跑在哪个 Agent 运行时（当前 DSH 与 ACP） | `profiles/agent-platforms/<id>/` | 系统给 `AgentPort` 契约，具体工具 / 能力档 / 产物由该平台目录提供 |
 | **能力档**（capability） | 四个轴里的前三个：这个 Agent 平台里“能拿到什么”+“怎么生效”+“预设长什么样”——平台工具、Agent 模块、MCP、技能、生效方式（`runtime`）、预设元信息与插件行 | `profiles/agent-platforms/<id>/capabilities/*.yml`（工具面 / 生效方式 / 预设元信息 / 插件行同居一文件） | 内置六条（`chat` / `chat-v2` / `readonly` / `workspace` / `full` / `direct`），可克隆 / 新建；`.defaults/` 有副本即为内置 |
-| **运行方案**（plan） | 把“能力档 + 行为档案 + 受众（+ 可选 Agent 平台）”组合成一个可切换的档位 | `profiles/plans/*.yml`（`order` 决定控制台顺序） | 内置七条，可克隆成自定义方案 |
 | **权限级别** | 具体会话最终能用能力档里的哪些工具 | 会话档案 `state/sessions/<platform>/<kind>/<id>.json` 的 `permission`（`inherit` = 跟随全局 `config.json` 的 `permission.default`） | 会话级，不落在档案里 |
 
-关系一句话：**方案 = 能力档 + 行为档案 + 受众**，需要时再加一个 Agent 平台（`agentPlatform`，缺省 `auto` 跟随 `platforms.active.agent`）。
-方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id；C4 起方案不再有 `agent` 字段
-（能力档 id 就是该平台的 preset id），所以“换能力档”不会再把“换预设”忘在后面。
-方案与能力档决定“拿到哪些能力”，会话权限级别再决定“实际能用哪些”。
+关系一句话：**能力档**决定“拿到哪些能力”，会话档案的 `behavior` 决定“怎么表现”，会话权限级别再决定“实际能用哪些”。
+三项都能按会话单独选，缺省值由两端给：能力档缺省取 Agent 平台申报的 `defaultCapability`，
+行为缺省取该**用户平台条目**的 `defaultBehavior`（空 = 不挂行为，纯聊天）。
+没有「运行方案」这一层：它原先只是「能力档 + 行为档案 + 受众」的组合壳，退役后每一项都由会话档案直接持有。
 
-### 1.3 默认解析链（三层）
+### 1.3 默认解析链（两层）
 
-会话没有单独选方案时，按下面的顺序取值，第一处有值即停：
+会话档案不写某一项时，按下面的顺序取值，第一处有值即停：
 
-| 顺位 | 键 | 作用 |
-| --- | --- | --- |
-| 会话 | `state/sessions/<platform>/<kind>/<id>.json` 的 `planId` | 单会话覆盖（`null` = 没选） |
-| 用户平台 | `config.json` 的 `platforms.users.<id>.defaultPlan`（空串 = 没设） | 该平台新建会话的默认 |
-| 内置常量 | `DEFAULT_PLAN_ID`（`social-v2`） | 兜底默认 |
+| 项 | 会话档案 | 平台条目 / 平台申报 | 兜底 |
+| --- | --- | --- | --- |
+| 能力档 `capability` | `state/sessions/<platform>/<kind>/<id>.json` 的 `capability`（空 = 跟随平台默认） | Agent 平台 `agent-platform.yml` 的 `defaultCapability` | 没有能力档 = 纯聊天，权限恒只读 |
+| 行为 `behavior` | 同档案的 `behavior`（`inherit` / `none` / 档案 id） | 用户平台条目 `config.json` 的 `platforms.users.<id>.defaultBehavior`（空 = 不挂行为） | 聊天模式（不挂行为） |
+| 权限级别 `permission` | 同档案的 `permission`（`inherit` / 四档之一） | 全局 `config.json` 的 `permission.default` | `read-only` |
 
-中间那层是**条目级键**，与 `enabled` 同级、不进 `options`：它描述的是「这个平台新建的会话用哪套方案」，
+默认行为是**条目级键**，与 `enabled` 同级、不进 `options`：它描述「这个平台新建的会话挂哪份行为档案」，
 不是全局唯一值。会话 key 的首段就是用户平台 id，所以「按平台」不需要额外索引。
-条目上申报的方案文件被删时依次回退内置方案、目录首项。
-没有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口，更没有全局默认方案配置项。
+没有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。
 
 ---
 
@@ -103,11 +101,7 @@ profiles/
 │       ├── tools.yml             # 空（工具由 ACP 对端决定）
 │       ├── capabilities/README.md
 │       └── adapters/runtime.mjs
-├── plans/
-│   ├── .defaults/                # 出厂副本（还原用）
-│   ├── chat.yml                  # 内置七条：chat / social-v1 / social-v2 / direct /
-│   └── …                         #   agent-readonly / agent-workspace / agent-full
-└── schemas/                      # 五份 JSON Schema（platform / agent-platform / behavior / capability / plan）
+└── schemas/                      # 四份 JSON Schema（platform / agent-platform / behavior / capability）
 
 artifacts/                        # 各 Agent 平台的产物根（目录名 = agent 平台 id）
 └── dsh/
@@ -213,31 +207,7 @@ extensions:                                           # 可选：外部 MCP/技�
 - 能力档目录跟着活动 Agent 平台走（`agentCapabilitiesDir(platforms.active.agent)`，即 `profiles/agent-platforms/<id>/capabilities/`）。
   `createCapabilityStore()` / `platformFlags()` / 预设出厂副本都要求调用方传 root，不内置任何平台 id：缺目录直接报错，
   免得下一家平台的能力档被默默读成别家的。
-
-### 运行方案 `plans/<id>.yml`
-
-```yaml
-version: 1
-id: social-v2
-label: 二代仿真
-order: 30               # 控制台排列顺序：内置 10/20/…，自定义缺省 900
-agentPlatform: auto     # 缺省 auto = 跟随默认 Agent 平台
-behavior: social-v2
-capability: chat-v2      # 能力档 id（同时就是预设 id）
-audience: access
-note: …
-```
-
-- 内置七条：`chat`、`social-v1`、`social-v2`、`direct`、`agent-readonly`、`agent-workspace`、`agent-full`；有出厂副本的就是内置，只能克隆，不能改/删。
-- 方案**不绑用户平台**：平台话术与行为档案本来就按平台走，方案只引用它们的 id。旧文件里的 `platform` 字段读时忽略并
-  报 `plan_warn`，保存时不再写出——不需要手工迁移。
-- `agentPlatform` 缺省 `auto`（跟随 `platforms.active.agent`），写具体 id 表示「这套方案必须跑在该 Agent 平台上」；
-  内置方案全部 `auto`，否则切换默认 Agent 平台后会被拉回旧平台。
-- 方案里**没有独立的 `agent` 字段**（C4 起）：能力档 id 就是预设 id，`capability` 一个字段说清「用哪套预设」；
-  引用完整性（能力档是否存在、`preset` 档是否有 rows、Agent 平台是否认领该 `apply`）由 `validatePlanReferences()` 判。
-- `behavior` 只存档案名；引用的档案不存在时加载侧告警并退化为“无档案”，不阻断消息处理。
-- 方案解析：会话单独设置的方案优先，没设就用会话所在**用户平台条目**上的 `platforms.users.<id>.defaultPlan`，仍没设才回退内置 `social-v2`；不再有 `state/runtime.json` 运行时指针，也没有全局「切换方案」接口。切换/提级权限仍走管理通道的 TOTP，与方案无关。
-- 「内置」= 目录里同时存在 `<id>.yml` 与 `.defaults/<id>.yml`：有副本的就是内置（只能克隆、可以重置），没有副本的就是自定义（只能删）。方案、能力档、行为档案、平台话术同一套判定；控制台的重置按钮只对内置项出现，点击即把副本复制回正式文件。
+- 「内置」= 目录里同时存在 `<id>.yml` 与 `.defaults/<id>.yml`：有副本的就是内置（只能克隆、可以重置），没有副本的就是自定义（只能删）。能力档、行为档案、平台话术同一套判定；控制台的重置按钮只对内置项出现，点击即把副本复制回正式文件。
 
 ### 平台 / Agent 平台
 
@@ -260,17 +230,16 @@ C2b 起两侧多了两个**声明面**字段（详见 [PLATFORM_UNIFICATION.md](
 | 行为档案读写 | `src/behaviors/index.mjs`：`loadBehaviorProfiles` / `normalizeBehavior` / `resolveBehavior` / `readBehaviorDocument` / `writeBehaviorData` / `duplicateBehavior` / `removeBehaviorFile` |
 | 平台话术 | `src/user-side/prompt.mjs`：`readPlatformPrompt` / `writePlatformPrompt` / `restorePlatformPrompt` / `renderPlatformText` |
 | 能力档 | `src/capabilities/store.mjs`：`createCapabilityStore` / `normalizeRuntime` / `CAPABILITY_RUNTIME_DEFAULTS` / `CAPABILITY_APPLY` / `visiblePlatformFlags` / `platformFlags` / `capabilityAllowsFlag` |
-| 运行方案 | `src/runtime/plans.mjs`：`createPlanStore`（list/get/save/remove/clone）/ `normalizePlan` / `planWarnings` / `validatePlanReferences` / `findPlan` / `legacyModeOfPlan` |
 | 出厂副本 | `src/profiles/factory.mjs`：`hasFactory`（是否内置）/ `listFactoryIds` / `readFactoryText` / `copyFactory`（目录名 `.defaults`） |
 | 行为引擎 | `src/behaviors/engines.mjs`：`listEngines` / `getEngine` / `engineFields` / `groupDefaults` / `materialize` / `flattenConfig` / `buildConfig` / `validateConfig` |
-| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `BEHAVIOR_ENGINES_ROOT` / `PLANS_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
-| 模式持久化 | `src/runtime/mode-store.mjs`：`createModeStore` / `createLocalModeFileBackend`（`state/mode.json`）/ `createDshModeBackend`（DSH `qq-mode` 命名空间）。只负责存取，模式语义（别名归一、级别、提权判定）仍在 `bridge.js` |
+| 目录常量 | `src/profiles/paths.mjs`：`PROFILES_ROOT` / `PLATFORMS_ROOT` / `AGENT_PLATFORMS_ROOT` / `BEHAVIOR_ENGINES_ROOT` / `SCHEMAS_ROOT` / `agentPlatformDir(id)` |
+| 平台话术渲染 | `src/runtime/prompt-compose.mjs`：`DEFAULT_PROMPT_VARS` / `PROMPT_VAR_KEYS` / `normalizePromptVars` / `renderPlatformPrompt` |
 | 平台适配器发现 | `scripts/agent-platform-adapters.mjs`：`ADAPTER_KINDS` / `adapterFile` / `listAgentPlatforms` / `loadAdapter` / `normalizeArtifactFiles`。**约定优于声明**：只看 `profiles/agent-platforms/<id>/adapters/<kind>.mjs` 存不存在，不读 `agent-platform.yml` |
 | 产物构建调度 | `scripts/build-artifacts.mjs`：`buildArtifacts({targets, check})`。遍历平台 → 调 `planArtifacts()` → 校验路径/去重 → 写盘；`--check` 只比对不写（漂移即非零退出） |
 | 产物安装调度 | `scripts/install-agent-platform.mjs`：`installAgentPlatform({agentPlatform, profile})`。**先 build 再 install**，避免装到旧产物 |
 | 运行期适配器 `runtime.mjs` | `profiles/agent-platforms/<id>/adapters/runtime.mjs` 是**声明面**：能力、权限映射、preset 清单、`applies` / `promptChannels` 等纯常量与纯函数，**不得 import `src/`**（否则声明面反向依赖内核，构建期无法单独打包）。协议面（RPC 客户端、鉴权、事件解包）在 `src/agent-side/adapters/<id>/`，由 `src/agent-side/builtin.mjs` 用 `createRuntime` 字段与声明面拼装后注册；内核只经 `src/agent-side/runtime.mjs` 的 `agentRuntime()` 调用（B4 / B5 / C6.5） |
 
-自检：`node scripts/check-profiles.mjs`（六条资源契约：引擎定义可解析、平台四件套、类型文件只允许 `label/platform/engine/fields`、行为档案 `config` 是引擎字段的全量快照、出厂副本成对且只放文案、能力档工具面写全所有平台工具 flag、方案 `order` 显式唯一且不写 `builtin`、旧目录不得存在）。
+自检：`node scripts/check-profiles.mjs`（六条资源契约：引擎定义可解析、平台四件套、类型文件只允许 `label/platform/engine/fields`、行为档案 `config` 是引擎字段的全量快照、出厂副本成对且只放文案、能力档工具面写全所有平台工具 flag 且 `audience` 合法、旧目录不得存在）。
 产物链路自检：`npm run verify:artifacts`（产物未漂移）、`npm run test:artifact-pipeline`（发现/校验/幂等/mock 平台隔离）。
 
 ### 适配器契约（P1）
@@ -329,11 +298,11 @@ export function normalizeAgentPreset(name) {}
 | `dsh/agent-presets/agent-*`（能力产物） | `profiles/agent-platforms/dsh/capabilities/*.yml`（不再有产物） |
 | `dsh/agent-presets/qq-*`（DSH preset 源） | `profiles/agent-platforms/dsh/capabilities/<id>.yml` 的 `preset` + `rows` 段 |
 | `profiles/agent-platforms/dsh/agents/<id>/`（C4 前的预设目录） | 同上，能力档 id 就是预设 id；`assets/default-presets/**` 同时删除 |
-| `config.json` 的 `behavior.default` | `profiles/plans/chat.yml` 的 `behavior: none` |
-| `config.json` 的 `runtime.plans[]` | `profiles/plans/*.yml` |
+| `config.json` 的 `behavior.default` | 用户平台条目的 `defaultBehavior`（空 = 不挂行为） |
+| `config.json` 的 `runtime.plans[]` | 已删除：能力档与行为档案直接记在会话档案里，不再有方案层 |
 | `config.json` 的 `tools`（38 键） | 能力档 `tools.platform` 并集 |
 | `config.json` 的 `role.maxInjectChars` / `limits.personaInjectChars` | `config.promptBlocks['core-persona'].maxChars`（注入块页） |
-| 方案里的 `platform`（用户侧平台绑定）与 `agent` | 方案不绑平台：`platform` 读时忽略 + `plan_warn`、保存时丢弃；`agent` 在 C4 起已并入 `capability` |
+| `profiles/plans/*.yml`（运行方案整层） | 已删除：能力档进会话档案的 `capability`、行为档案进 `behavior`，受众由能力档 `audience` 承担 |
 
 启动时桥接会把 `behavior.default`、`runtime.plans`、`role.maxInjectChars`、`limits.personaInjectChars` 从 `config.json` 里清掉并写回（日志会说明）。
 

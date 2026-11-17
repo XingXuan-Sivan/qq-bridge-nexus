@@ -291,7 +291,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved, platformI
       <div class="platform-stack">
         ${cardHtml({
     title: '基本信息',
-    description: `能力档 <code>${esc(draft.id)}</code>：保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；方案引用与工具清单立即生效。`,
+    description: `能力档 <code>${esc(draft.id)}</code>：保存后写回 <code>${platformDir}/${esc(draft.id)}.yml</code>；会话引用与工具清单立即生效。`,
     body: `<div class="form-stack" id="capabilityEditorFields"></div>
           <div class="form-actions">
             <button class="btn primary" type="button" id="capabilitySave">保存</button>
@@ -319,7 +319,7 @@ export function createCapabilityPanel({ listHost, editorHost, onSaved, platformI
       </div>`;
     renderFields(editorHost.querySelector('#capabilityEditorFields'), [
       { name: 'capabilityLabel', type: 'text', label: '名称', value: draft.label },
-      { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选方案的人看的说明，不进提示词。' },
+      { name: 'capabilityNote', type: 'text', label: '备注', value: draft.note, hint: '给选能力档的人看的说明，不进提示词。' },
     ], { columns: 1, layout: 'inline' });
     if (draft.builtin) {
       for (const id of ['capabilityLabel', 'capabilityNote']) {

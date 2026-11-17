@@ -5,7 +5,8 @@
 > [PLATFORM_DECOUPLING.md](PLATFORM_DECOUPLING.md) 的 B0–B8 已完成（本方案不推翻，只补齐 B8 之后的缺口）；
 > [AGENT_PLATFORM_EVOLUTION.md](AGENT_PLATFORM_EVOLUTION.md) 的 P2「中立 Agent IR」**触发条件已满足**（要接第二个 Agent 平台），纳入本方案 C4。
 >
-> 最后更新：2026-11-14（0.2.0 定版后首份方案）
+> 最后更新：2026-11-17（标注运行方案层退役）。
+> **运行方案层已退役**：`profiles/plans/**`、`src/runtime/plans.mjs`、`/api/plans*`、`pages/plans/`、会话档案的 `planId` 已全部删除；能力档进会话档案 `capability`、行为档案进 `behavior`，用户平台条目只有条目级 `defaultBehavior`（配置 `CONFIG_VERSION = 4`）。文中涉及方案的部分保留为批次记录，现状以 [PROFILES_MODEL.md](PROFILES_MODEL.md) 为准。
 > 实施时按 §九 的批次走，不要凭记忆重构。
 
 ---
@@ -349,7 +350,7 @@ git grep -nE "\bapi\.(sessions?|workspace|settings|respond|stopSessionWork|callU
 | 旧标签 | 权威存储 | 去向 | 理由 |
 | --- | --- | --- | --- |
 | **平台** | `profiles/platforms/<id>/` + 运行期注册表 | → 一级「平台」页的**列表 + 详情** | 它本来就该是独立页面，不该藏在"档案"里 |
-| **运行方案** | `profiles/plans/*.yml` | → 一级「方案」页（`pages/runtime/` 改名 `pages/plans/`，路由 id `plans`） | 方案是**跨平台组合**，不属于任何单个平台 |
+| **运行方案** | `profiles/plans/*.yml` | **已退役**：原计划进一级「方案」页；现已删除，能力档 / 行为档案分别在平台详情的能力与行为标签里改 | 会话只引用能力档与行为档案，没有跨平台的「组合壳」了 |
 | **行为档案** | `profiles/platforms/<id>/behaviors/` | → 平台详情 → 「行为」标签（仅用户侧平台有） | 档案是平台的**子资源**，靠平台过滤天然收窄 |
 | **能力预设** | `profiles/agent-platforms/<id>/capabilities/` | → 平台详情 → 「能力」标签（仅 Agent 侧有） | 同上是子资源；与 `agents/` 合并后名字只剩一套 |
 
@@ -388,7 +389,7 @@ P2/P3 再加运行期事实：`configured`（配置面选的是哪条，与 `act
 | `GET /api/platforms/registry` | 统一读（平台页、会话页下拉、方案页共用） |
 | `PATCH /api/platforms/registry/:side/:id/config` | 写配置（按 `configSchema` 校验） |
 | `POST /api/platforms/registry/agent/:id/probe` | 探活（只有 Agent 侧；用户侧看条目的 `inboundState`，不另做探活） |
-| `GET /api/plans` / `POST /api/plans[/:id]` | 方案 CRUD（原 `/api/runtime/plans`） |
+| `GET /api/plans` / `POST /api/plans[/:id]` | **已删除**：方案层退役，会话直接改 `capability` / `behavior`（`PATCH /api/sessions/<key>/profile`） |
 
 ### 7.5 可检测（诊断码）
 

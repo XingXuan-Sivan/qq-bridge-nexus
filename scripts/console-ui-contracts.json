@@ -26,7 +26,22 @@
       "viaPlatform": false,
       "silenceWarnMs": 600000,
       "enabled": true,
-      "defaultPlan": "chat"
+      "defaultBehavior": "social-v1"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/platforms/registry/user/qq/config",
+    "body": {
+      "account": "",
+      "httpUrl": "http://127.0.0.1:3000",
+      "wsUrl": "ws://127.0.0.1:3001",
+      "accessToken": "",
+      "followDiscoveredEndpoint": true,
+      "viaPlatform": false,
+      "silenceWarnMs": 600000,
+      "enabled": true,
+      "defaultBehavior": "social-v2"
     }
   },
   {
@@ -90,7 +105,7 @@
       "viaPlatform": false,
       "silenceWarnMs": 600000,
       "enabled": true,
-      "defaultPlan": "chat"
+      "defaultBehavior": "social-v2"
     }
   },
   {
@@ -111,16 +126,12 @@
     "body": {}
   },
   {
-    "method": "POST",
-    "path": "/api/plans",
+    "method": "PATCH",
+    "path": "/api/sessions/group%3A100003/profile",
     "body": {
-      "id": "my-agent",
-      "label": "我的 Agent",
-      "agentPlatform": "auto",
       "capability": "chat",
-      "behavior": "social-v2",
-      "audience": "owner",
-      "note": "带人格进群"
+      "behavior": "social-v1",
+      "permission": "read-only"
     }
   },
   {
@@ -282,9 +293,7 @@
     "method": "POST",
     "path": "/api/config/permission",
     "body": {
-      "default": "read-only",
-      "allowFull": true,
-      "fullTtlMin": 30
+      "default": "workspace-write"
     }
   },
   {

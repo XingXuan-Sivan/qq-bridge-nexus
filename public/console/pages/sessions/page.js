@@ -4,13 +4,12 @@
 // 数据来源只有两个接口：/api/sessions（会话清单，已含平台/模式/人格/未读/最近唤醒）与 /api/pending。
 // 会话 key 形如 `qq:group:123`、`qq:private:456`：平台前缀用于筛选，页面不假设只有一个平台。
 import { api } from '../../js/api.js';
-import { setMsg } from '../../components/message/message.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { closeModal, openModal, wireModal } from '../../components/modal/modal.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { bindCounters, bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { getCurrentPage, onPageRefresh } from '../../js/router.js';
-import { permissionLevelLabel, permissionLevelOptions } from '../../js/permission-levels.js';
+import { permissionLevelLabel } from '../../js/permission-levels.js';
 import { SESSIONS_FIELDS } from './fields.js';
 import { cardHtml } from '../../components/card/card.js';
 // 平台名、会话类型与上限都从运行期元数据读（B7）：这里是唯一一处「页面认识平台」的地方，
@@ -27,7 +26,6 @@ import {
 
 const MODE_LABEL = {
   chat: '聊天模式',
-  'closed-agent': '封闭 Agent',
   reserved: '一代仿真',
   reserved2: '二代仿真',
 };
@@ -48,9 +46,7 @@ function kindPill(entry) {
 
 function modeCell(entry) {
   if (!entry.mode) return '<span class="meta">—</span>';
-  const label = MODE_LABEL[entry.mode] || entry.mode;
-  const level = entry.mode === 'closed-agent' && entry.level ? ` <span class="meta">${esc(entry.level)}</span>` : '';
-  return `${esc(label)}${level}`;
+  return esc(MODE_LABEL[entry.mode] || entry.mode);
 }
 
 function personaCell(entry) {
@@ -530,13 +526,6 @@ async function ensurePersonaCatalog() {
   return detailPersonas;
 }
 
-/** 「跟随全局（当前：…）」里的方案名：后端给整份定义，这里兼容只给 id 的旧写法。 */
-function planLabelOf(plan) {
-  if (!plan) return '';
-  if (typeof plan === 'string') return plan;
-  return plan.label || plan.id || '';
-}
-
 /** 人格卡在会话里的存储值：本地卡写名字，外部卡写 `provider:id`。 */
 function personaUidOf(item) {
   if (!item) return '';
@@ -606,16 +595,18 @@ function syncDetailModelSelects(preferredModel = '', preferredReasoning = '') {
 }
 
 const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
-const AUTHORITY_LABEL = { bridge: '桥接钉档', agent: 'Agent 平台自身' };
+/** 能力档的生效方式与受众：与能力档 yml 的 runtime 段同一套取值。 */
+const APPLY_LABEL = { preset: '装预设', passthrough: '直通（不装预设）' };
+const AUDIENCE_LABEL = { owner: '仅主人私聊', access: '按准入' };
 
-/** 提示注入通道：降级（方案要 system 但 Agent 平台没有）只说事实，不把降级当配置生效。 */
+/** 提示注入通道：降级（能力档要 system 但 Agent 平台没有）只说事实，不把降级当配置生效。 */
 function promptChannelHtml(channel) {
   if (!channel) return '<span class="meta">未声明</span>';
   const channelId = channel.channel || '';
   const label = PROMPT_CHANNEL_LABEL[channelId] || channelId || '—';
   const tag = `<span class="tag${channel.degraded ? ' tag--warning' : ''}">${esc(label)}</span>`;
   const requested = channel.requested && channel.requested !== channelId
-    ? ` <span class="meta">方案要求 ${esc(PROMPT_CHANNEL_LABEL[channel.requested] || channel.requested)}</span>`
+    ? ` <span class="meta">能力档要求 ${esc(PROMPT_CHANNEL_LABEL[channel.requested] || channel.requested)}</span>`
     : '';
   const reason = channel.degraded
     ? `<div class="meta">${esc(channel.reason || 'Agent 平台没有这个通道，已降级')}</div>`
@@ -624,9 +615,9 @@ function promptChannelHtml(channel) {
 }
 
 /**
- * 「Agent 平台与权限」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
- * 权限档按权威分两态：桥接权威只读展示生效级别；Agent 平台权威才给下拉，且写后由后端回读核对。
- * 「在新平台上重开」是危险动作，放在弹窗的危险操作卡里（见 renderDetail），与本卡分开。
+ * 「Agent 平台与执行体」的字段（§8.3）：一条 `/agent` 给全，页面不再为了凑一块去打四个接口。
+ * 这一块全部只读：能改的能力档 / 行为档案 / 权限级别都在上面的「运行」卡里，
+ * 对端权限档由能力档在建会话时钉住，会话内没有写口。
  */
 function detailAgentFields() {
   const agent = detailAgent;
@@ -637,10 +628,11 @@ function detailAgentFields() {
     }];
   }
   const platform = agent.agentPlatform || {};
+  const capability = agent.capability || null;
   const permission = agent.permission || {};
-  const authority = permission.authority === 'agent' ? 'agent' : 'bridge';
-  const drift = permission.drift || null;
-  const fields = [
+  const peer = permission.peer || null;
+  const pin = permission.peerPin || null;
+  return [
     {
       name: 'detailAgentInstance', type: 'custom', label: 'Agent 平台', span: 2,
       html: `<strong>${esc(platform.label || platform.id || '—')}</strong>`
@@ -653,56 +645,37 @@ function detailAgentFields() {
         : '会话绑在这个实例上；换 Agent 平台后旧会话不会自动迁移。',
     },
     {
-      name: 'detailAgentPlan', type: 'custom', label: '方案', span: 2,
-      html: (agent.plan
-        ? `${esc(agent.plan.label || agent.plan.id)}${agent.plan.capability ? ` <span class="meta">${esc(agent.plan.capability)}</span>` : ''}`
-        : '<span class="meta">跟随全局方案</span>')
-        + ` <span class="tag${authority === 'agent' ? ' tag--warning' : ''}">权限档：${esc(AUTHORITY_LABEL[authority])}</span>`,
-      hint: '应用方式与权限权威都来自能力档的 runtime 段；换方案用上面的「运行 › 运行方案」。',
+      name: 'detailAgentCapability', type: 'custom', label: '生效能力档', span: 2,
+      html: capability
+        ? `<strong>${esc(capability.label || capability.id)}</strong> <code>${esc(capability.id)}</code>`
+          + ` <span class="tag">${esc(APPLY_LABEL[capability.apply] || capability.apply || '—')}</span>`
+          + ` <span class="tag">${esc(AUDIENCE_LABEL[capability.audience] || capability.audience || '—')}</span>`
+        : '<span class="meta">没有匹配的能力档：纯聊天会话，权限恒只读</span>',
+      hint: '生效方式、受众与对端权限档都来自能力档的 runtime 段；换档用上面的「运行 › 能力档」。',
     },
     {
       name: 'detailAgentPrompt', type: 'custom', label: '提示注入', span: 2,
       html: promptChannelHtml(agent.promptChannel),
       hint: '这是平台话术进会话的方式；降级只记一条审计，不改变对端配置。',
     },
+    {
+      name: 'detailAgentPeer', type: 'custom', label: '对端权限档', span: 2,
+      html: !permission.peerPermission
+        ? '<span class="meta">这套能力档不钉对端档位</span>'
+        : peer?.readable
+          ? `<code>${esc(peer.preset)}</code>`
+            + (peer.text ? ` <span class="meta">${esc(peer.text)}</span>` : '')
+          : `<span class="meta">读不出来：${esc(peer?.reason || '对端没有返回档位')}（不等于没改过）</span>`,
+      hint: pin?.preset
+        ? `建会话时钉住的是 ${pin.preset}${pin.at ? `（${whenText(pin.at)}）` : ''}；会话内不可改。`
+        : '由能力档在建会话时钉住，会话内没有写口。',
+    },
   ];
-  if (authority === 'agent') {
-    fields.push({
-      name: 'detailAgentPreset', type: 'select', label: '权限档', span: 2,
-      value: permission.current || '',
-      placeholder: permission.readable ? '' : '读不出来（不等于没改过）',
-      disabled: !(permission.options || []).length,
-      options: (permission.options || []).map((item) => ({ value: item.value, label: item.name || item.value })),
-      hint: [
-        permission.readable ? '' : `对端档位读不出来：${permission.reason || '返回格式不符'}`,
-        permission.catalogError ? `档位目录读取失败：${permission.catalogError}` : '',
-        permission.setAt ? `最近核对 ${whenText(permission.setAt)}` : '还没经桥接改过（没有写入基线）',
-      ].filter(Boolean).join('；'),
-    });
-  } else {
-    fields.push({
-      name: 'detailAgentPresetReadonly', type: 'custom', label: '权限档', span: 2,
-      html: `<strong>${esc(permissionLevelLabel(permission.current))}</strong>`
-        + (permission.grantActive ? ' <span class="tag tag--warning">full 短时授权中</span>' : ''),
-      hint: '桥接权威：这一档由桥接钉住并自动改回；改档用上面的「运行 › 权限级别」。',
-    });
-  }
-  const actions = [
-    drift
-      ? `<span class="tag tag--warning">漂移：对端现在是 ${esc(drift.actual)}</span>`
-        + `<button class="btn small" type="button" data-detail-agent-revert="${esc(drift.expected)}">改回 ${esc(drift.expected)}</button>`
-      : '',
-    '<span class="form-actions-status" id="detailAgentMsg" role="status"></span>',
-  ].filter(Boolean).join('');
-  fields.push({ name: 'detailAgentActions', type: 'custom', span: 2, html: `<div class="form-actions">${actions}</div>` });
-  return fields;
 }
 
-/** 换过平台、或权限权威本来就归 Agent 平台时，才给「在新平台上重开」（动作在危险操作卡里）。 */
+/** 换过 Agent 平台后，才给「在新平台上重开」（动作在危险操作卡里）。 */
 function canReopenOnNewAgent() {
-  const agent = detailAgent;
-  if (!agent) return false;
-  return agent.permission?.authority === 'agent' || agent.instanceForeign === true;
+  return detailAgent?.instanceForeign === true;
 }
 
 function renderDetail(data) {
@@ -741,14 +714,14 @@ function renderDetail(data) {
     <div class="session-detail-grid">
       ${card('显示名', '自定义名会同步写 DSH 侧栏标题；留空则用默认的「平台·类型 + ID」。', 'displayName')}
       ${card('准入', '这份名单是全局总闸门，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', 'access', '<div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
-      ${card('运行', '默认跟随全局模式；单独指定后只影响这个会话。closed-agent 不能按会话切换。', 'run')}
+      ${card('运行', '能力档决定装哪套预设与工具面；行为档案决定会话引擎；权限级别只过滤本会话能调用的平台工具。三项都默认跟随平台或全局。', 'run')}
       ${card('人格', '继承=跟随全局当前人格；指定=这个会话固定用一张卡；关闭=不挂卡。', 'persona')}
       ${card('初始提示词', '', 'prompt')}
       ${card('唤醒', '这里只改最常见的触发条件；合批窗口与投递预算由平台行为档案的 social-v2 决定，不在会话上。', 'wake', '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div>')}
 
       <div class="detail-card">
-        <h4>Agent 平台与权限</h4>
-        <div class="meta">会话绑在 Agent 平台的实例上；权限档归谁由运行方案的能力档决定。</div>
+        <h4>Agent 平台与执行体</h4>
+        <div class="meta">会话绑在 Agent 平台的实例上；这一块是执行体侧的只读事实，改档在上面「运行」卡。</div>
         <div data-detail-form="agent"></div>
       </div>
 
@@ -798,36 +771,45 @@ function renderDetail(data) {
     },
   ], { columns: 2 });
 
+  // 能力档与行为档案的选项：空 / inherit 表示「跟随平台默认」，下拉里把当前默认写进提示。
+  const capabilities = Array.isArray(data.capabilities) ? data.capabilities : [];
+  const capabilityLabelOf = (id) => (id ? (capabilities.find((c) => c.id === id)?.label || id) : '');
+  const defaultCapabilityLabel = capabilityLabelOf(data.defaultCapability) || '无默认能力档';
+  const behaviors = Array.isArray(data.behaviors) ? data.behaviors : [];
+  // 权限档位与措辞都以后端下发为准，页面不自带一份拷贝。
+  const permissionOptions = [
+    { value: 'inherit', label: `跟随全局（当前：${permissionLevelLabel(data.permission?.effective)}）` },
+    ...(data.permission?.options || [])
+      .filter((item) => item.value !== 'inherit')
+      .map((item) => ({ value: item.value, label: item.name || item.value })),
+  ];
+
   renderFields(formHost('run'), [
     {
-      name: 'detailPlan', type: 'select', label: '运行方案', value: data.planId || '',
+      name: 'detailCapability', type: 'select', label: '能力档', value: data.capability || '',
       options: [
-        { value: '', label: `跟随平台默认（当前：${planLabelOf(data.defaultPlan) || '—'}）` },
-        ...(Array.isArray(data.plans) ? data.plans : []).map((p) => ({ value: p.id, label: p.label || p.id })),
+        { value: '', label: `跟随平台默认（当前：${defaultCapabilityLabel}）` },
+        ...capabilities.map((c) => ({
+          value: c.id,
+          label: `${c.label || c.id}${c.audience === 'owner' ? '（仅主人私聊）' : ''}`,
+        })),
       ],
-      hint: '方案决定能力预设、行为档案与受众；模型与人格在下面单独设置。',
+      hint: '空着就是平台默认能力档；正文（工具面、对端权限档、注入方式）在「平台 › 该 Agent 平台 › 能力」。',
+    },
+    {
+      name: 'detailBehavior', type: 'select', label: '行为档案', value: data.behavior || 'inherit',
+      options: [
+        { value: 'inherit', label: `跟随平台默认（当前：${data.defaultBehavior || '未设置'}）` },
+        { value: 'none', label: '不绑定行为' },
+        ...behaviors.map((id) => ({ value: id, label: id })),
+      ],
+      hint: '行为档案决定会话引擎与调度参数；平台默认行为在「平台 › 用户平台 › 配置」里改。',
     },
     {
       name: 'detailPermission', type: 'select', label: '权限级别',
       value: data.permission?.value || 'inherit',
-      // 档位与措辞跟全局配置页共用一份；full 在总开关打开时可选，当前值本来就是 full 时也保留。
-      options: [
-        { value: 'inherit', label: `跟随全局（当前：${permissionLevelLabel(data.permission?.effective)}）` },
-        ...permissionLevelOptions({ allowFull: data.permission?.fullAllowed === true, current: data.permission?.value }),
-      ],
-      hint: data.permission?.grantActive
-        ? `full 授权已生效，到期后自动回落 qq-full-ask；当前实际：${permissionLevelLabel(data.permission?.effective)}`
-        : '只读 / 工作区读写 / 完全访问 · 每次确认；full 档需总开关打开并单独授权。',
-    },
-    {
-      name: 'detailFullActions', type: 'custom', span: 2,
-      html: '<div class="form-actions">'
-        + (data.permission?.grantActive
-          ? '<button class="btn btn-ghost" id="detailFullRevoke" type="button">收回 full 授权</button>'
-          : (data.permission?.fullAllowed
-            ? '<button class="btn" id="detailFullGrant" type="button">授权 full（限时）</button>'
-            : '<span class="meta">full 档未开放：先在「全局配置 › 权限级别」打开总开关。</span>'))
-        + '<span class="form-actions-status" id="detailFullMsg" role="status"></span></div>',
+      options: permissionOptions,
+      hint: `当前生效：${permissionLevelLabel(data.permission?.effective)}；只决定本会话能调用哪些平台工具。`,
     },
     {
       name: 'detailModelProvider', type: 'select', label: '模型', value: data.model?.provider || '',
@@ -1015,8 +997,11 @@ function buildDetailPatch() {
   const displayName = String(document.getElementById('detailDisplayName')?.value ?? '').trim();
   if (displayName !== String(data.displayName || '')) patch.displayName = displayName;
 
-  const planId = document.getElementById('detailPlan')?.value || '';
-  if (planId !== (data.planId || '')) patch.planId = planId;
+  const capability = document.getElementById('detailCapability')?.value || '';
+  if (capability !== (data.capability || '')) patch.capability = capability;
+
+  const behavior = document.getElementById('detailBehavior')?.value || 'inherit';
+  if (behavior !== (data.behavior || 'inherit')) patch.behavior = behavior;
 
   const permission = document.getElementById('detailPermission')?.value || 'inherit';
   if (permission !== (data.permission?.value || 'inherit')) patch.permission = permission;
@@ -1153,29 +1138,6 @@ async function detailReset() {
   }
 }
 
-/**
- * 直通下改对端权限档（§7.6）：写口自己会回读核对，这里只负责发请求与重画。
- * 失败时一定重画：界面上不能留下一个「看起来已经改了」的档位。
- */
-async function writeAgentPermission(preset) {
-  if (!detailKey || !preset) return;
-  const key = detailKey;
-  const msg = document.getElementById('detailAgentMsg');
-  if (msg) msg.textContent = '写入中…';
-  try {
-    const r = await api(`/api/sessions/${encodeURIComponent(key)}/permission`, 'POST', { preset });
-    if (!r?.ok) throw new Error(r?.error || '写入失败');
-    detailAgent = r;
-    renderDetail(detailCache || { key });
-    showConsoleToast(`对端权限档已改为 ${r.permission?.current || preset}`);
-  } catch (error) {
-    const text = String(error?.message ?? error);
-    renderDetail(detailCache || { key });
-    setMsg('detailAgentMsg', `改档失败：${text}`, 'err');
-    showConsoleToast(`改档失败：${text}`);
-  }
-}
-
 /** 换过 Agent 平台后把会话在新实例上重开：归档旧会话并新建一个，历史不迁移。 */
 async function detailAgentReopen() {
   if (!detailKey) return;
@@ -1280,33 +1242,8 @@ export function init() {
 
   document.getElementById('sessionDetailBody')?.addEventListener('input', () => { if (!detailRendering) detailDirty = true; });
   document.getElementById('sessionDetailBody')?.addEventListener('change', () => { if (!detailRendering) detailDirty = true; });
-  // 对端权限档下拉选完即写（直通权威下）：写入不是整页保存的一部分，
-  // 也不能被渲染期的「联动 change」触发——detailRendering 期间一律忽略。
-  document.getElementById('sessionDetailBody')?.addEventListener('change', (event) => {
-    if (detailRendering) return;
-    if (!event.target.matches('#detailAgentPreset')) return;
-    void writeAgentPermission(event.target.value);
-  });
   document.getElementById('sessionDetailSave')?.addEventListener('click', () => { void saveDetailAll(); });
 
-  // full 短时授权：POST/DELETE 都走控制台接口，成功后重读详情让下拉与按钮状态同步。
-  document.getElementById('sessionDetailBody')?.addEventListener('click', async (event) => {
-    const grant = event.target.closest('#detailFullGrant');
-    const revoke = event.target.closest('#detailFullRevoke');
-    if ((!grant && !revoke) || !detailKey) return;
-    event.preventDefault();
-    const key = detailKey;
-    try {
-      if (grant) await api(`/api/sessions/${encodeURIComponent(key)}/permission/full`, 'POST', { ttlMin: 0 });
-      else await api(`/api/sessions/${encodeURIComponent(key)}/permission/full`, 'DELETE');
-      setMsg('detailFullMsg', grant ? '已授权：到期自动收回' : '已收回授权', 'ok');
-      const fresh = await api(`/api/sessions/${encodeURIComponent(key)}/profile`);
-      if (fresh?.ok !== false) { detailCache = fresh; renderDetail(fresh); }
-      window.dispatchEvent(new CustomEvent('console:refresh-status'));
-    } catch (error) {
-      setMsg('detailFullMsg', `操作失败：${error?.message ?? error}`, 'err');
-    }
-  });
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
     if (event.target.closest('[data-open-global-access]')) {
       if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
@@ -1320,8 +1257,6 @@ export function init() {
     }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
-    const agentRevert = event.target.closest('[data-detail-agent-revert]');
-    if (agentRevert) { void writeAgentPermission(agentRevert.dataset.detailAgentRevert || ''); return; }
     if (event.target.closest('[data-detail-agent-reopen]')) { void detailAgentReopen(); return; }
     if (event.target.closest('[data-detail-clear-memory]')) { void detailClearMemory(); return; }
     const nav = event.target.closest('[data-detail-nav]');

@@ -1,6 +1,6 @@
 # Agent 平台适配层（AGENT_PLATFORM_EVOLUTION）
 
-> **状态**：P0 目录迁移、P1 build/install 分离、P3 模式持久化 —— **已落地**；
+> **状态**：P0 目录迁移、P1 build/install 分离、P3 平台话术渲染 —— **已落地**；
 > P2「中立 Agent IR」—— **已移交**，不再单独实施（见下方“P2 已移交”）。
 >
 > 最后更新：2026-11-14（补状态衔接；正文内容仍为 2026-11-13 版）。
@@ -101,17 +101,14 @@ export async function install({ repoRoot, profile, env, log }) {
 调度层刻意**只依赖 Node 内置模块、不 import `src/`**：离线夹具只要拷 `scripts/` 子集 + `profiles/` 整棵就能跑
 （`scripts/test-audit-setup.mjs` 依赖这一点）。
 
-### 2.4 模式持久化（P3）
+### 2.4 平台话术渲染（P3）
 
-`src/runtime/mode-store.mjs` 把「模式存哪、怎么读、怎么写」收成两个 backend：
+`src/runtime/prompt-compose.mjs` 是 `src/runtime/` 里唯一的东西：把 `profiles/platforms/<id>/prompt.md` 的 `{platform}` / `{displayName}` / `{owner}` 占位符渲成实际取值。
 
-| backend | 介质 | 语义 |
-| --- | --- | --- |
-| `local-file` | `state/mode.json` | 始终写，作为远端不可用时的兜底 |
-| `dsh-settings` | DSH `qq-mode` 命名空间 | 尽力而为；`skipped: true` 表示「没有远端后端」而不是失败 |
-
-边界很清楚：**store 只管存取**。模式别名归一、级别判定、提权（TOTP）仍然在 `bridge.js`，
-因为那是业务语义，不是存储细节。`bridge.js` 不再自己拼 `state/mode.json` 的读写（有断言钉住）。
+- 变量真源是 `profiles/platforms/<id>/platform.yml` 的 `vars`；插件经 `adapters:provide` 注册的同 id 适配器可以覆盖它。
+- 白名单 `PROMPT_VAR_KEYS`（`platform` / `displayName` / `owner`）由声明面与插件共用一份 —— 两边各加键就会出现「某条路径渲了、另一条没渲」的分歧。
+- 未知占位符原样保留，作者能一眼看到拼错。
+- 纯渲染：不读配置、不改行列表、不落盘。平台话术只在运行期注入一次（`core-platform-prompt` 块）。
 
 ### 2.5 验收标准（已通过）
 
@@ -231,5 +228,5 @@ platformSpecific:       # 逃生舱：原样注入某个平台，不做翻译
 | --- | --- |
 | 2026-11-13 | P0：`dsh-bundles/` → `artifacts/dsh/`（代码与脚本里的引用全部替换，文档中只保留本搬迁记录） |
 | 2026-11-13 | P1：build/install 拆进 `profiles/agent-platforms/dsh/adapters/`；新增三个调度脚本；`setup-dsh.mjs`、`build-agent-preset-patches.mjs` 降级为兼容薄壳 |
-| 2026-11-13 | P3：`src/runtime/mode-store.mjs`（local-file + dsh-settings 两个 backend） |
+| 2026-11-13 | P3：`src/runtime/mode-store.mjs`（local-file + dsh-settings 两个 backend）；运行方案层退役时整层删除，`src/runtime/` 只剩平台话术渲染 |
 | 2026-11-13 | 删除死字段 `agent-platform.yml` 的 `artifacts:`；新增 `test-artifact-pipeline.mjs` 与三条 npm scripts |

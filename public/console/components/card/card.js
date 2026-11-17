@@ -1,7 +1,7 @@
 // 卡片骨架：header / body / footer，header 与 footer 可选。
 // 静态页仍保留 <section class="card span-all"> 结构，但统一由这里生成，避免每页手写。
 //
-// 用法：host.innerHTML = cardHtml({ title: '运行方案', description: '…', actions: '<button …>', body: '…' })
+// 用法：host.innerHTML = cardHtml({ title: '能力档', description: '…', actions: '<button …>', body: '…' })
 
 const TEXT_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => TEXT_ESCAPES[c]);

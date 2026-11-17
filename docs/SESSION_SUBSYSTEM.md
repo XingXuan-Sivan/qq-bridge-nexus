@@ -1,7 +1,7 @@
 # 会话子系统（模型 / 准入 / 迁移 / 分阶段计划）
 
-状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 多管理员已实现（控制台仍单 token owner，见 D18）；准入已收敛为「两态单源」（见 §4、D19）；P4 运行方案（`planId`）与 P5 Agent 平台 / 权限档读写已实现（见 §5.4–§5.5）**。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
-关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「会话可固定运行模式」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
+状态：**P0、P1 已实现；P2a（运行模式 + 预设）已实现；P2b 模型部分与主动检查点方案 A 已实现；P3 多管理员已实现（控制台仍单 token owner，见 D18）；准入已收敛为「两态单源」（见 §4、D19）；P4 会话固定档位与 P5 Agent 平台 / 权限档已实现（见 §5.4–§5.5）**。原「运行方案」层已整层退役：会话档案直接持有 `capability` 与 `behavior`，平台条目只剩条目级 `defaultBehavior`。P0 的 DSH 健康度/重建入口先落在会话表；P1 详情做成宽弹窗而非独立子页（见 D13/D14），档案 schema 并入 `src/session/directory.mjs`（见 D15）；方案 B（AI 跨会话工具）列入后续计划（D17）。
+关系：替代 `PARITY.md` D-3 的「会话页 = 列表 + 改标题 + 清理」范围；把「全局唯一运行模式」改成「每个会话自己选能力档与行为档案」。差异见 `PLAN_DEVIATIONS.md` D7–D15；未完成项见 `STATUS.md` #16。
 
 涉及：`state/sessions/` 档案目录、`src/session/`、`src/bridge.js` 的会话/准入/DSH 生命周期、控制台「会话与审批」页、访问与安全页、人格页与二代仿真页里按会话的入口、管理员模型。
 
@@ -14,7 +14,7 @@
 1. **覆盖不污染全局**：会话级配置只在该会话生效，任何读取失败都回落全局默认，绝不把会话值写回全局配置。
 2. **准入只有一个真相**：被动/主动的判定只读 `state/sessions/defaults.json` 的两份名单；会话档案里不再有准入字段，也不再有自己的允许/拒绝状态。
 3. **两态即语义**：每个轴只有 `allow`（白名单：默认拒绝、名单内允许）与 `deny`（黑名单：默认允许、名单内拒绝）两种模式；没有 `off`，也没有「显式拒绝优先」。管理命令、审批与 owner 私聊走独立通道，不受名单影响。
-4. **运行模式不是过滤器**：`chat` / `reserved` / `reserved2` 是会话实际跑哪套仿真；`closed-agent` 是全局引擎（不 owner 排他，「谁能用」由运行方案 `audience` 决定），不开放给会话级。
+4. **模式是行为档案的投影，不是过滤器**：`chat` / `reserved` / `reserved2` 由会话挂的 `behavior`（档案自己声明 `engine: v1|v2`）算出，会话只引用行为档案、不能直接挑模式。能力档 `audience: owner` 的会话只给主人与管理员私聊用（`capabilityBlocks`），准入轴仍是第二道闸门。
 5. **DSH 实例可丢弃**：任何 RPC 返回 `session/not-found` 只允许「退役 → 重建 → 重试一次」；不允许无限重建，也不允许静默不回复。
 6. **迁移一次、无旧读**：成功后删除旧文件与旧键，正式版本没有兼容读分支、没有 `.bak`、没有双写。
 7. **服务端校验权限**：owner/管理员边界在 HTTP 层校验；控制台隐藏按钮只是体验，不是授权。
@@ -25,11 +25,11 @@
 | --- | --- |
 | 准入轴 | 被动、主动两根独立轴；每根轴一条全局名单，模式二选一：白名单（默认拒绝）或黑名单（默认允许） |
 | 迁移默认 | 完全保持现状：按旧默认选模式（旧默认 deny → 白名单，旧默认 allow → 黑名单），再把升级当次实际允许/拒绝的会话写成名单；不保留每会话三态 |
-| 运行模式 | 会话可固定方案（P4 起 `planId`）；closed-agent 是全局引擎、不开放会话级，「谁能用」由方案 `audience` 决定 |
-| 覆盖范围 | P1：显示名、准入（只读全局名单成员关系）、人格、提示词、唤醒、记忆清空、DSH 状态；P2：运行模式、预设、模型；P4：运行方案；P5：Agent 平台与权限（直通下的对端档位） |
+| 运行模式 | 会话挂哪份行为档案（`inherit` 取用户平台条目的 `defaultBehavior`）；模式本身不单独存盘 |
+| 覆盖范围 | P1：显示名、准入（只读全局名单成员关系）、人格、提示词、唤醒、记忆清空、DSH 状态；P2：行为档案（模式与预设）、模型；P4：能力档；P5：Agent 平台与权限（对端档位只读） |
 | 存储与迁移 | 一次性迁到 `state/sessions/` 目录（`defaults.json` + 每会话文件）；正式版本无旧文件、旧键、兼容读、`.bak` |
 | 清空上下文 | 拆成「重建 DSH 会话」与「重置会话状态」两个动作 |
-| 多管理员 | owner + 管理员两级；管理员不能改全局模式/权限/管理员名单 |
+| 多管理员 | owner + 管理员两级；管理员不能改全局权限/管理员名单 |
 | 控制台多账号 | 本轮不做；P3 只做服务端身份与权限，控制台登录仍视为 owner |
 
 ## 2. 术语
@@ -37,13 +37,13 @@
 | 术语 | 含义 |
 | --- | --- |
 | 会话（session） | 一个 QQ 群或私聊，key 形如 `qq:group:123` / `qq:private:456` |
-| 会话档案（profile） | 这个会话的配置：显示名、准入、运行模式、人格、提示词、唤醒、模型、DSH 预算等 |
+| 会话档案（profile） | 这个会话的配置：显示名、能力档、行为档案、权限级别、人格、提示词、唤醒、模型、DSH 预算等 |
 | 绑定（binding） | 会话 → Agent 平台的会话引用 `{ instance, sessionId }` + 建会话时的策略指纹；运行态，不是配置 |
-| 运行模式 | `chat`（聊天）/ `reserved`（一代仿真）/ `reserved2`（二代仿真）；会话可固定，也可跟随全局 |
+| 运行模式 | `chat`（聊天）/ `reserved`（一代仿真）/ `reserved2`（二代仿真）；由所挂行为档案的 `engine` 算出，不是会话上的独立字段 |
 | 被动 | 入站消息触发的回复（被 @、私聊、群内按策略参与） |
 | 主动 | bot 自己发起：主动发言、定时任务、AI 向其它会话发送、主动唤醒 |
 | owner | `config.json.ownerQQ`，唯一最高权限 |
-| 管理员 | `config.json.admins[]`，按 capability 授权，不能改全局模式/权限/管理员名单 |
+| 管理员 | `config.json.admins[]`，按 capability 授权，不能改全局权限/管理员名单 |
 
 ## 3. 数据模型
 
@@ -79,22 +79,21 @@ state/sessions/
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "key": "qq:group:100000003",
   "displayName": "技术闲聊群",
-  "mode": "inherit",
-  "planId": null,
+  "capability": "chat-v2",
+  "behavior": "social-v2",
   "persona": { "mode": "inherit", "name": null },
   "prompt": { "initialText": "", "updatedAt": 0 },
   "wake": { "config": null },
   "model": null,
-  "presetId": null,
   "permission": "inherit",
   "permissionMirror": null,
   "binding": {
     "agentRef": { "instance": "dsh", "sessionId": "session-…" },
     "workspaceId": "workspace-…",
-    "fingerprint": "reserved2|chat-v2|…",
+    "fingerprint": "[\"reserved2\",\"chat-v2\"]",
     "status": "online",
     "checkedAt": 0,
     "createdAt": 0
@@ -108,16 +107,15 @@ state/sessions/
 
 - `defaults.passive/proactive`：每轴一条全局名单；`{mode:'allow'|'deny', entries:[key]}`。`allow` = 白名单，`deny` = 黑名单；`entries` 是唯一准入数据，会话档案里没有第二份。
 - `defaults.migratedAt`：迁移提交点；0 表示旧来源仍有效、迁移未提交，非 0 表示目录已是唯一真相，启动只做旧源清理。
-- `mode`：`inherit` / `chat` / `reserved` / `reserved2`；不允许 `closed-agent`。有 `planId` 时以方案为准（§5.1），`mode` 只在迁移期读。
-- `planId`：会话固定的运行方案（`profiles/plans/<id>.yml`）；`null` = 跟随所在用户平台的默认方案（`config.json` 的 `platforms.users.<id>.defaultPlan`，仍为空则内置 `social-v2`）。
+- `capability`：会话选的能力档（`profiles/agent-platforms/<id>/capabilities/<id>.yml`）；`null` = 跟随 Agent 平台在 `agent-platform.yml` 里申报的 `defaultCapability`。
+- `behavior`：`inherit`（用所在用户平台条目的 `defaultBehavior`）/ `none`（不挂行为，纯聊天）/ 行为档案 id（`profiles/platforms/<id>/behaviors/<id>.yml`）。运行模式由它算出来（§5.1），存档里不再有 `mode`。
 - `persona`：`inherit`（按全局三层解析）/ `off`（本会话不挂卡）/ `card`（指定角色卡名）。
 - `prompt.initialText`：首次唤醒时注入一次的会话背景；空串表示没有。
 - `wake.config`：会话级唤醒配置；`null` 表示按推荐值/全局默认。
-- `model`：`null` 表示跟随全局；否则 `{provider, model, reasoning}`，保存前按 DSH 目录校验。
-- `presetId`：`null` 表示按运行模式推导；否则必须是预设安全清单里的 id。直通方案（`runtime.apply: passthrough`）不装预设，这个字段不参与生效值。
-- `permission`：`inherit` / `read-only` / `workspace-write` / `full-ask` / `full`；`inherit` = 跟随 `config.permission.default`。方案的能力档为 `bridge` 权威时它是生效值；`agent`（直通）时只是档案里的记录，真正生效的档位在对端，见 §5.5。
-- `permissionMirror`：桥接最后一次代改成功的对端档位 `{preset, at}`；只用来判断「对端已被外部改过」（漂移），不参与生效值计算，没写过就是 `null`。
-- **`promptInjected`**：`{sessionId, at}`，提示注入标记——`runtime.prompt: prefix` 的方案在这条对端会话上已经带过平台话术。它是运行态：换对端会话自然重来一次，删档时一起消失。
+- `model`：`null` 表示跟随全局；否则 `{provider, model, reasoning}`，保存前按 Agent 平台目录校验。
+- `permission`：`inherit` / `read-only` / `workspace-write` / `full-ask` / `full`；`inherit` = 跟随 `config.permission.default`。它只过滤本会话能调用哪些平台工具；对端权限档不归它管，见 §5.5。
+- `permissionMirror`：建会话时钉住的对端档位 `{preset, at}`（`pinSessionPeerPermission` 写入）；只做漂移核对的基线，不参与生效值计算，没钉过就是 `null`。
+- **`promptInjected`**：`{sessionId, at}`，提示注入标记——能力档 `runtime.prompt: prefix` 在这条对端会话上已经带过平台话术。它是运行态：换对端会话自然重来一次，删档时一起消失。
 - `binding`：运行态；`status` 取 `online` / `missing` / `unknown`；`fingerprint` 是建会话时的策略指纹，用于判断「需要重建」。放在同一文件里，删除档案即删除绑定，不留孤儿文件。
 - `binding.agentRef`：`{ instance, sessionId }`，`instance` 是**产生这个 id 的 Agent 平台**（`dsh` / 未来的 `acp:claude`）。只存 id 的话，换平台后同一个字符串在另一个平台可能恰好存在，映射会「意外命中」，两个平台的上下文串在一起；不存在则每条消息撞 404，看起来像「会话易失」。老档案的 `binding.sessionId`（裸 id）读入时归一成 `agentRef`，`instance` 留空，平台装好后由 `sessions.normalizeAll()` 补记并落盘（只补空值，不覆盖已明确的归属）。内存里 `state.sessions[key]` 也是这个形状，读写一律经 `src/session/registry.mjs`。
 - `key` 必须与文件路径完全一致（`platform/kind/id` 拼回 `key`）；不一致视为文件损坏，不进内存。
@@ -237,35 +235,26 @@ resolve(axis, key):
 ### 5.1 有效运行模式
 
 ```
-effectiveMode(key):
-  if profile.planId:
-      plan = sessionPlanOf(key)
-      return planMode(plan) ?? currentMode   # 行为 kind → reserved/reserved2，能力档 → chat/closed-agent
-  return resolveEffectiveMode(currentMode, profile.mode)  # 全局方案 + 老档案的 mode 覆盖
-
-planMode(plan):                      # 引擎由行为决定，聊天 / Agent 由能力档决定
-  behaviorId = plan.behavior == 'inherit' ? 'none' : plan.behavior
-  engine = engineOfKind(behaviorKindOf(behaviorId))   # 行为类型的 engine：v1 / v2 / 空
-  engine == 'v2' ? 'reserved2'
-  engine == 'v1' ? 'reserved'
-  legacyModeOfPlan({ ...plan, behavior: 'none' })     # 能力档带权限级别 → 'closed-agent'，其余 'chat'
+behaviorFor(key) = 档案 behavior 不是 inherit ? 它 : 用户平台条目的 defaultBehavior（空 = 不挂）
+effectiveMode(key) = modeOfBehavior(behaviorFor(key))
+modeOfBehavior: engine 'v2' → reserved2；engine 'v1' → reserved；其余 → chat
 ```
 
-- `currentMode` 是**当前运行用户平台的默认方案**的投影，不单独存盘：改那个平台的默认方案就是改它，没有第二个开关（P4/P5）。
-- **closed-agent 不是 owner 排他**：它是全局引擎，覆盖不能把它盖回 chat/仿真；「哪些会话真的能用」由方案 `audience` 判定（`audience:'owner'` 只给管理员私聊，见 `planAudienceBlocks`），准入轴仍是第二道闸门。
-- 行为与工具解耦后可以组合出「Agent 工具 + 仿真行为 + 任意受众」，因此 `legacyModeOfPlan` 采用**行为优先**投影（`social-v2`→`reserved2`、`social-v1`→`reserved`、带权限级别的能力档（`readonly` / `workspace` / `full`）→`closed-agent`、其余 `chat`）。
-- 会话级方案/模式改变会改变预设、提示词结构、记忆块与模型默认值，必须进入执行指纹（见 5.3）。
+- 会话只有两个入口：档案的 `behavior`（`inherit` = 跟随）与用户平台条目上的 `defaultBehavior`（`platforms.users.<id>`，条目级键，不进 `options`，也不是适配器字段）。
+- 模式不单独存盘，没有「全局唯一运行模式」这回事；看一个会话跑什么，看它挂的行为档案。
+- 能力档 `audience: owner` 的会话只给主人与管理员私聊用（`capabilityBlocks`）；`audience: access` 的会话仍需过准入轴第二道闸门。
+- 能力档或行为档案变了会改变预设、提示词结构、记忆块与模型默认值，必须进入执行指纹（见 5.3）。
 
 ### 5.2 预设与模型
 
-- 预设：`runtime.apply: passthrough` 的方案**不装预设**（`modePreset()` 直接返回空，`direct` 是唯一一条直通档）；否则 `profile.presetId` → 由有效模式推导（chat / reserved → `chat`，reserved2 → `chat-v2`；closed-agent 由级别映射 `AGENT_PRESET_FOR_LEVEL`）。保存前校验安全清单。
-- 方案不提供预设：能力档 id 就是 Agent 平台的 preset id（`plan.capability`），「用哪套能力」在方案里说清，「装不装预设」由能力档的 `runtime.apply` 决定。
-- 模型：`profile.model` 优先；否则用 `cfg.dsh` 全局默认。校验 provider/model 是否在 DSH 目录中；不在则拒绝保存并提示。
-- 会话级模型/预设保存后不保证当前 DSH 会话立刻换模型：下一次唤醒前按指纹判断重建；UI 明示「下次唤醒生效」。
+- 预设：`runtime.apply: passthrough` 的能力档**不装预设**（`modePreset()` 直接返回空，`direct` 是唯一一条直通档）；其余情况按能力档由 Agent 平台的 build 适配器渲染，会话不再单独存 `presetId`。
+- 能力档 id 与 Agent 平台预设 id 同名：会话只引用能力，不另写 preset 名。
+- 模型：`profile.model` 优先；否则用 `cfg.agentPlatform` 全局默认。校验 provider/model 是否在 Agent 平台的模型目录中；不在则拒绝保存并提示。
+- 会话级模型保存后不保证当前会话立刻换模型：下一次唤醒前按指纹判断重建；UI 明示「下次唤醒生效」。
 
 ### 5.3 执行指纹与重建
 
-指纹输入（顺序固定、可读）：`effectiveMode | presetId | provider/model/reasoning | persona 目标与内容哈希 | closed-agent level | 工具集版本`。
+指纹输入（顺序固定、可读）：`JSON.stringify([effectiveMode, preset, model?])`——未指定会话级模型时不写空值进指纹，避免升级后旧绑定因数组长度变化被重建一次。
 
 - `ensureChatModel` 的「已应用」缓存只用于省 RPC，**不再用于判断会话是否存活**。
 - 指纹变化 → 退役旧绑定 → 新建 DSH 会话 → 写入新指纹。
@@ -288,23 +277,24 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 
 ### 5.5 Agent 平台与权限（对端档位）
 
-两个端点，都只给控制台（带 `x-agent-token` 的请求一律 403——AI 不能自己提权，也不能把权限面读走）：
+一个端点，只给控制台（带 `x-agent-token` 的请求一律 403——AI 不能自己提权，也不能把权限面读走）：
 
 | 端点 | 作用 |
 | --- | --- |
-| `GET /api/sessions/<key>/agent` | 会话详情「Agent 平台与权限」块的唯一数据源：Agent 平台实例与 `instanceForeign`、方案（id / label / audience / capability / `apply` / `authority` / `prompt`）、能力档、`promptChannel`、权限块。一条请求给全，页面不用为凑一块打四个接口 |
-| `POST /api/sessions/<key>/permission`（`{ preset }`） | 直通（`runtime.permission: agent`）下替用户改对端档位 |
+| `GET /api/sessions/<key>/agent` | 会话详情「Agent 平台与执行体」块的唯一数据源：Agent 平台实例与 `instanceForeign`、能力档（id / label / `audience` / `apply` / `peerPermission` / `prompt`）、行为档案引用、`promptChannel`、权限块。一条请求给全，页面不用为凑一块打四个接口；非 GET 一律 405 |
 
-`permission.authority` 两态，决定这一块读什么、能不能写：
+**会话内没有改档写口**：对端权限档由能力档的 `runtime.peerPermission` 在**建会话时钉一次**（`pinSessionPeerPermission`，写不进去就丢弃这条会话）；要换档就是换能力档，让绑定按指纹重建。
 
-| 权威 | 来源 | 读 | 写 |
-| --- | --- | --- | --- |
-| `bridge` | 能力档 `runtime.permission: bridge`（缺省） | `current` 是桥接四级（只读 / 工作区读写 / 完全访问·每次确认 / 完全访问·短时授权）算出来的生效档 | 409「当前方案的权限档由桥接管理：改档请用会话档案里的「权限级别」」——这里放开也会在下一个回合被钉回去，等于给一个假开关 |
-| `agent` | 能力档 `runtime.permission: agent`（`direct`） | `current` 是对端**此刻**的档位；读不出来就 `readable: false` + `reason`，不拿档案里的旧值充数 | 可写，但先过三道闸：`FORBIDDEN_PERMISSION_PRESETS`（`danger-full-access` 的审批策略是 `never`）列表里不列、写口 403；写完**回读核对**，`current !== preset` 记 `permission.write_failed` 并按 502 返回；成功后写 `permissionMirror = {preset, at}` 并记 `permission.change` 审计 |
+`permission` 段分三个来源，读和写分得很开：
 
-- **漂移只标记、不自动改回**：`permission.drift = {expected, actual, at}` 出现在「对端当前档位 ≠ 桥接上次写入的档位」时，界面给「改回」；不做后台守护去回钉——权限档归 Agent 平台时它自己有界面，桥接只做陈述。
-- **写前提**：会话还没建立时报「先发一条消息再改档」；Agent 平台没声明 `permission` 能力位时同样拒绝。`full` 不走这个写口：它由桥接侧级别授权（`config.permission.allowFull` + 限时授权）管，见 §6。
-- **重开**：会话建在**别的 Agent 平台实例**上（`instanceForeign`）时，这块提示「跟随建会话时的实例」并给「在新 Agent 平台上重开」（归档旧会话 + 新建，历史不跟过去）；`authority: agent` 时也总是可重开。
+| 字段 | 来源 | 说明 |
+| --- | --- | --- |
+| `value` / `effective` / `options` / `labels` | 会话档案 `permission` | 桥接侧四档级别（只读 / 工作区读写 / 完全访问·每次确认 / 完全访问）；写口是 `PATCH /api/sessions/<key>/profile` 的 `permission`。它只过滤本会话能调用哪些平台工具，不碰对端 |
+| `peer` | Agent 平台**此刻**的实际档位 | 只读。读不出来就 `readable: false` + `reason`，不拿档案里的旧值充数；能力档没声明 `peerPermission` 时连读都不读（`null` = 由对端决定） |
+| `peerPin` | 档案 `permissionMirror` | 建会话时钉住的那一档 + 时间，是漂移核对的基线 |
+
+- **漂移由后台钉回，不靠用户点**：每 60 秒核对一次「`peerPin` 与对端此刻档位」，不一致就记 `permission.drift` 审计并按能力档重新钉；钉不回去就 `panicAllSessions()` 把全会话降只读并私聊告警。对端界面能改档，所以基线必须有自动守卫。
+- **重开**：会话建在**别的 Agent 平台实例**上（`instanceForeign`）时，这块提示「跟随建会话时的实例」并给「在新 Agent 平台上重开」（归档旧会话 + 新建，历史不跟过去）。
 
 ## 6. 会话可覆盖配置
 
@@ -321,12 +311,12 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 | 记忆 | 只读计数、清空本会话；provider/预算/工具仍全局 |
 | DSH 状态 | 在线/缺失/未建；重建；轮换 agentToken |
 
-**P2（运行模式与模型）**
+**P2（行为档案与模型）**
 
 | 项 | 行为 |
 | --- | --- |
-| 运行方案 | 会话固定 `planId`（P4 起）；旧 `mode` 仅迁移期兼容，closed-agent 不出现在会话级 |
-| DSH 预设 | `inherit`（按模式推导）/ 安全清单内指定 |
+| 行为档案 | `inherit`（用平台条目的 `defaultBehavior`，下拉写出当前值）/ `none`（不挂行为）/ 指定档案 id |
+| 引擎与预设 | 不单独选：模式由行为档案的 `engine` 算出，预设由能力档的 `apply` / `rows` 决定 |
 | 模型 | `inherit` / 指定 provider + model + 思考强度 |
 | 定时任务 | 详情页只读列出指向本会话的任务；不在此改任务 |
 
@@ -334,13 +324,13 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 
 | 项 | 行为 |
 | --- | --- |
-| Agent 平台与权限 | 一条 `GET /api/sessions/<key>/agent` 给全（§5.5）：Agent 平台实例、方案的应用方式 / 权限权威 / 提示注入通道、能力档；建在旧实例上时给「在新 Agent 平台上重开」 |
-| 对端权限档 | 只在 `runtime.permission: agent` 下可写（`POST .../permission`），选完即写，不属于整页保存；`bridge` 权威下这一项是只读文案 |
-| 权限级别 | `PATCH .../profile` 的 `permission`：`inherit` = 跟随 `config.permission.default`；`full` 需先开总开关再限时授权 |
+| Agent 平台与执行体 | 一条 `GET /api/sessions/<key>/agent` 给全（§5.5）：Agent 平台实例、生效能力档（应用方式 / 受众 / 对端档位 / 提示注入通道）、对端权限档与钉住基线；建在旧实例上时给「在新 Agent 平台上重开」 |
+| 对端权限档 | 只读：由能力档在建会话时钉住，会话内没有写口；漂移由后台核对后重钉（§5.5） |
+| 权限级别 | `PATCH .../profile` 的 `permission`：`inherit` = 跟随 `config.permission.default`；四档（只读 / 工作区读写 / 完全访问·每次确认 / 完全访问），不再有总开关与限时授权 |
 
-**明确仍全局**：回复风格与分条参数、静默时段/免打扰、上下文压缩阈值、记忆 provider 与预算、AI 工具总开关、closed-agent 权限级别（P3 起按管理员配置）。
+**明确仍全局**：回复风格与分条参数、静默时段/免打扰、上下文压缩阈值、记忆 provider 与预算、AI 工具总开关。
 
-说明：用户最初写的「允许模式」是笔误，实际是**运行模式**；本轮不引入「每会话可选哪些模式」的过滤器概念。
+说明：用户最初写的「允许模式」是笔误，实际是**运行模式**；运行模式是行为档案的投影，会话页没有、也不需要「模式」这个下拉。
 
 ## 7. DSH 生命周期
 
@@ -377,10 +367,10 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 
 数据源：档案目录（每个档案含 `binding`）∪ 现有 `conversations`（已知会话）的并集；没有 DSH 映射的会话也要显示，状态 `未建`。
 
-列：会话（显示名 + key）/ 平台 / 类型 / 被动 / 主动 / 运行模式 / 人格 / 模型 / DSH / 未读 / 最近活动 / 操作。
+列：会话（显示名 + key）/ 模式 / 准入（被动 · 主动）/ 人格 / DSH / 未读 / 最近唤醒 / 操作。模式是有效值的投影（由行为档案算出），只展示不可选。
 
-- 工具栏：搜索、平台/类型/被动/主动/运行模式/DSH 筛选、刷新、新增会话。
-- 行操作：管理（进详情）、清空上下文（重置状态）、删除档案。
+- 工具栏：搜索（会话、模式、人格）、平台/类型筛选、刷新、「清空所有会话」。
+- 行操作：管理（进详情）、删除档案。
 - 批量：先不做批量改准入；等真实使用反馈再评估。
 
 ### 8.2 详情弹窗
@@ -393,11 +383,11 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 
 1. 显示名：自定义名同步写 DSH 侧栏标题，留空用默认名。
 2. 准入：被动 / 主动两个勾选，改的是全局名单（§4）；卡底给「调整全局准入」。
-3. 运行：运行方案（`planId`，首项是「跟随全局（当前：…）」）、权限级别（`inherit` / 三档；`full` 需先开总开关再限时授权，并给收回按钮）、模型 / 具体模型 / 思考强度。
+3. 运行：能力档（首项是「跟随平台默认（当前：…）」）、行为档案（`inherit` / `none` / 指定档案）、权限级别（`inherit` + 四档）、模型 / 具体模型 / 思考强度。
 4. 人格：来源 `inherit` / `off` / `card`，卡名必须在本地角色库中。
 5. 初始提示词：首次唤醒注入一次。
 6. 唤醒：常用触发条件；合批窗口与投递预算归平台行为档案（见 `MESSAGE_PACING.md` §6），会话上只读展示两档剩余 token、暂存与未读溢出条数。
-7. Agent 平台与权限（P5）：见 §5.5——Agent 平台实例、方案的应用方式 / 权限权威 / 提示注入通道、能力档、对端档位与漂移；直通权威下改档即写，桥接权威下只读并指向「运行」卡的权限级别。
+7. Agent 平台与执行体（P5）：见 §5.5——Agent 平台实例、生效能力档（应用方式 / 受众 / 对端档位 / 提示注入）、对端档位与钉住基线；整块只读，换档去「运行」卡换能力档。
 8. 记忆：计数、清空本会话、去记忆页。
 9. 定时任务：只读列出指向本会话的任务，给「去定时任务」。
 10. 危险操作：重建 DSH 会话 / 重置会话状态（后果文案分开写，§7.4）；删除档案在列表行。
@@ -413,7 +403,7 @@ planMode(plan):                      # 引擎由行为决定，聊天 / Agent �
 
 - owner：全部。
 - 管理员：按 capability；没有 `sessions` 权限时列表只读、详情页不出现保存按钮。
-- 控制台是单 token，本轮不改：控制台请求一律按 owner 处理；管理员只在 QQ 侧获得能力（审批、命令、通知、closed-agent），控制台多账号另立项。
+- 控制台是单 token，本轮不改：控制台请求一律按 owner 处理；管理员只在 QQ 侧获得能力（审批、命令、通知），控制台多账号另立项。
 
 ## 9. 迁移与回滚
 
@@ -443,13 +433,13 @@ key 不符合目录字符集时：迁移**中止并列出全部非法 key**，�
 ```json
 "ownerQQ": "1000000002",
 "admins": [
-  { "qq": "123456789", "name": "副管理员", "caps": ["approve", "sessions", "scheduler", "memory"], "maxLevel": "L2", "notify": true, "exemptPassive": true }
+  { "qq": "123456789", "name": "副管理员", "caps": ["approve", "sessions", "scheduler", "memory"], "notify": true, "exemptPassive": true }
 ]
 ```
 
-- owner 永远拥有全部 caps 与 L3；管理员不能改 `currentMode`、closed-agent 权限、管理员名单、控制台令牌。
-- 审批：同一会话内任一有 `approve` 的管理员可答复；通知 owner + `notify=true` 的管理员（去重）；审计写 actor QQ。
-- closed-agent：只允许 owner/管理员私聊；每人 `maxLevel` 限制可开启级别；owner 可降级/回收。
+- 能力位只有 `ADMIN_CAPS`（`approve` / `sessions` / `scheduler` / `memory`）这四项；不要携带级别——命令自己能跑由命令自己申报的权限档（all / admin / owner）决定。
+- owner 永远拥有全部 caps；管理员不能改全局权限、管理员名单、控制台令牌。
+- 审批：同一会话内任一有 `approve` 的管理员可答复；通知 owner + `notify=true` 的管理员（去重）；审计写 actor 地址。
 - 管理员私聊被动默认豁免；可关。
 - 审计与活动日志：涉及管理动作的行加 `actor`；控制台展示操作者。
 

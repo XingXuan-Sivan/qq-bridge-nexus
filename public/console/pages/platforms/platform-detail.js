@@ -43,8 +43,8 @@ const APPLY_KIND_LABEL = { preset: '装预设', passthrough: '直通（不装预
 const PROMPT_CHANNEL_LABEL = { none: '不注入', system: '系统提示', prefix: '首轮前缀', tool: '工具拉取' };
 /** 条目开关在表单里的字段名：它不是 configSchema 的字段，由页面自己读。 */
 const ENABLED_FIELD = 'platformEnabled';
-/** 默认运行方案在表单里的字段名：同样不是 configSchema 的字段（用户平台条目级）。 */
-const DEFAULT_PLAN_FIELD = 'platformDefaultPlan';
+/** 条目级默认行为：同样不是 configSchema 的字段（只用户平台有）。 */
+const DEFAULT_BEHAVIOR_FIELD = 'platformDefaultBehavior';
 /** 配置表单的挂载点：两侧共用同一个 id（同一时刻只挂一个平台），字面量只写一处。 */
 const CONFIG_MOUNT = '<div id="platformConfigMount"></div>';
 /** 模型卡的挂载点：只有声明了 models 能力位的 Agent 平台才有这张卡。 */
@@ -95,7 +95,8 @@ function capabilityMatrix(item) {
     ],
   }];
   if (item.side !== 'agent') return rows;
-  const declared = (list, labels) => tagsOf(list ?? [], (name) => `<span class="tag">${esc(labels[name] ?? name)}</span>`);
+  // 没有中文名的取值原样显示：对端权限档是平台自己的预设名，控制台不另维护一份表。
+  const declared = (list, labels = {}) => tagsOf(list ?? [], (name) => `<span class="tag">${esc(labels[name] ?? name)}</span>`);
   rows.push({ cells: ['应用方式', declared(item.applies, APPLY_KIND_LABEL)] });
   rows.push({ cells: ['提示注入通道', declared(item.promptChannels, PROMPT_CHANNEL_LABEL)] });
   // 对端权限档：取值域由平台声明；空表示「由对端决定」，建立会话后现读现校。
@@ -307,41 +308,27 @@ function mountConfig(item) {
       onLabel: '开',
       offLabel: '关',
     });
-    // 默认方案：这条平台新建的会话用哪套（条目级，与配置选项不同层）。
+    // 条目级默认行为：会话的行为档案选「跟随平台默认」时用它，空 = 不挂行为（聊天模式）。
     fields.push({
-      name: DEFAULT_PLAN_FIELD,
       type: 'select',
-      label: '默认运行方案',
-      value: item.defaultPlan || '',
-      options: [],
-      hint: '这个平台新建、且没单独指定方案的会话用它；某个会话要换方案，在「会话与审批 › 详情」里单独指定。',
+      name: DEFAULT_BEHAVIOR_FIELD,
+      label: '默认行为',
+      value: item.defaultBehavior || '',
+      options: [
+        { value: '', label: '不设置（聊天模式）' },
+        ...(item.assets?.behaviors ?? []).map((id) => ({ value: id, label: id })),
+      ],
+      hint: '会话的行为档案选「跟随平台默认」时读它；行为档案正文在「行为」标签里改。',
     });
   }
   fields.push(...schemaFields(item.configSchema, item.config ?? {}));
   renderFields(host, fields, { columns: 1 });
   bindSwitches(host);
-  if (item.side === 'user') void fillDefaultPlanOptions(item);
   // 动作条不参与取值：保存按钮与状态位跟在最后一个字段后面（与插件详情同构）。
   host.insertAdjacentHTML('beforeend', inlineActions({
     items: [{ id: 'platformConfigSave', label: '保存配置', variant: 'primary' }],
     status: 'platformConfigMsg',
   }));
-}
-
-/** 默认运行方案下拉：选项来自方案目录；空值 = 不设置，回退内置方案。 */
-async function fillDefaultPlanOptions(item) {
-  const select = root?.querySelector(`#${DEFAULT_PLAN_FIELD}`);
-  if (!select) return;
-  let plans = [];
-  try {
-    plans = (await api('/api/plans'))?.plans ?? [];
-  } catch (error) {
-    setStatus('platformConfigMsg', `方案目录读取失败：${error?.message ?? error}`);
-  }
-  setSelectOptions(select, [
-    { value: '', label: '不设置（回退内置方案）' },
-    ...plans.map((plan) => ({ value: plan.id, label: plan.label || plan.id })),
-  ], item.defaultPlan || '');
 }
 
 // ── 模型与思考强度（Agent 平台，声明了 models 能力位才有） ────────────────────
@@ -575,7 +562,7 @@ function voiceHtml(item) {
     <div class="prompt-card" id="platformPromptCard"></div>
     ${cardHtml({
     title: '平台工具',
-    description: '这一层工具由平台适配器提供；某套能力档能用哪些，在「方案」页的能力档里勾。',
+    description: '这一层工具由平台适配器提供；某套能力档能用哪些，在对应 Agent 平台详情的「能力」里勾。',
     body: tools.length
       ? dataTableHtml({
         columns: [{ label: '工具' }, { label: '工具名', width: '180px' }, { label: '说明' }, { label: '风险', width: '90px' }, { label: '默认', width: '90px' }],
@@ -638,7 +625,7 @@ function capabilitiesHtml(item) {
   return `
     ${cardHtml({
     title: '能力档',
-    description: `这套 Agent 平台声明了 ${count} 套能力档：方案里的「能力档」字段就是从这里选。能力档的正文（工具可见集、MCP 与技能范围）在 <code>profiles/agent-platforms/${esc(item.id)}/capabilities/</code>。`,
+    description: `这套 Agent 平台声明了 ${count} 套能力档：会话详情里的「能力档」就是从这里选。能力档的正文（工具可见集、MCP 与技能范围）在 <code>profiles/agent-platforms/${esc(item.id)}/capabilities/</code>。`,
     body: '<div id="platformCapabilityList"></div>',
   })}
     <!-- 编辑器里的每一段自己是一张 card；这里只给宿主，不再包一层。 -->
@@ -727,8 +714,8 @@ async function saveCurrentConfig() {
   if (entry.side === 'user') {
     const el = host?.querySelector(`[data-field="${ENABLED_FIELD}"]`);
     if (el) patch.enabled = getSwitch(el);
-    const planSelect = host?.querySelector(`#${DEFAULT_PLAN_FIELD}`);
-    if (planSelect) patch.defaultPlan = planSelect.value;
+    const behaviorSelect = host?.querySelector(`#${DEFAULT_BEHAVIOR_FIELD}`);
+    if (behaviorSelect) patch.defaultBehavior = behaviorSelect.value;
   }
   setStatus('platformConfigMsg', '保存中…');
   try {

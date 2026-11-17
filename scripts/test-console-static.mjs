@@ -27,10 +27,10 @@ console.log('## 视图 / 页面契约');
 const views = [...new Set([...html.matchAll(/data-view="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 const pages = [...new Set([...html.matchAll(/data-page="([a-z0-9-]+)"/g)].map((m) => m[1]))].sort();
 ok(JSON.stringify(views) === JSON.stringify(pages), 'data-view 与 data-page 一一对应', `${views.length} 个：${views.join(', ')}`);
-// 管理三页的读取顺序：先定全局默认，再看平台接得对不对，最后选方案。
-const manageOrder = ['config', 'platforms', 'plans'].map((view) => html.indexOf(`data-view="${view}"`));
+// 管理两页的读取顺序：先定全局默认，再看平台接得对不对。
+const manageOrder = ['config', 'platforms'].map((view) => html.indexOf(`data-view="${view}"`));
 ok(manageOrder.every((at) => at > 0) && manageOrder.every((at, i) => i === 0 || at > manageOrder[i - 1]),
-  '管理导航按「全局配置 → 平台配置 → 运行方案」排列');
+  '管理导航按「全局配置 → 平台配置」排列');
 
 console.log('## JS 语法');
 // 控制台脚本已全部外置为 ES 模块，index 里不再有内联 <script>，
@@ -101,7 +101,10 @@ ok(/parsePageHash\(location\.hash\)/.test(html) && /readStoredPage\(\)/.test(htm
 ok(/export function parsePageHash\(hash\)/.test(html) && /export function onPageRoute\(page, fn\)/.test(html), '页面子路由：parsePageHash 与 onPageRoute 由路由器导出');
 // 删页只允许「一次性重定向」：别名表就是全部兼容面，不允许长成第二套页面表。
 ok(/const PAGE_ALIASES = Object\.freeze\(\{[\s\S]{0,300}?behavior: 'platforms'[\s\S]{0,300}?\}\)/.test(html), '旧页面 id 走一次性别名表（#behavior → #platforms）');
-ok(!/reference: 'mcp',[\s\S]{0,80}?plans:/.test(html), '别名表只登记已删页，不新增跳转');
+const aliasBlock = html.match(/const PAGE_ALIASES = Object\.freeze\(\{([\s\S]*?)\}\);/)?.[1] ?? '';
+const aliasTargets = [...aliasBlock.matchAll(/:\s*'([a-z0-9-]+)'/g)].map((m) => m[1]);
+ok(aliasTargets.length > 0 && aliasTargets.every((id) => views.includes(id)), '别名表只登记已删页，目标都是现行页面', aliasTargets.join(' / ') || '没有别名');
+ok(!views.includes('plans'), '运行方案页已退役（#plans 只走一次性别名）');
 ok(/addEventListener\('hashchange'/.test(html) && /addEventListener\('popstate'/.test(html), 'hashchange 与 popstate 都监听');
 ok(/function renderBreadcrumb\(page\)/.test(html) && /class="crumb-link"/.test(html) && /href="#overview"/.test(html), '面包屑父级是可点的链接');
 ok(!/id="breadcrumbPage"/.test(html), '旧的纯文本面包屑 id 已移除');
@@ -110,7 +113,7 @@ ok(/\.search-results \{[\s\S]{0,240}?position:fixed/.test(html), '搜索候选�
 
 console.log('## 页面片段（运行总览 / 技能 / MCP / 管理行为 / 访问 / 二代仿真 / 一代仿真 / 黑话词库 / 定时任务 / 用量与花费 / 人格与角色 / 调试与运维 / 会话与审批）');
 const pageDirs = consolePageDirs(ROOT);
-const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks', 'platforms', 'plans'];
+const pilotIds = ['plugins', 'skills', 'mcp', 'behaviors', 'config', 'slang', 'scheduler', 'persona', 'operations', 'sessions', 'overview', 'prompt-blocks', 'platforms'];
 for (const id of pilotIds) {
   const page = pageDirs.find((entry) => entry.id === id);
   ok(!!page && !!page.html && !!page.css && !!page.js, `pages/${id}/ 有 page.html + page.css + page.js`);
@@ -125,9 +128,10 @@ for (const id of pilotIds) {
   ok(new RegExp(`id="section-${id}" data-page="${id}"[^>]*>\\s*(?:<!--[\\s\\S]*?-->\\s*)?<\\/section>`).test(html), `index.html 的 #section-${id} 已清空（只留容器）`);
 }
 
-console.log('## C7：界面 IA（平台页 + 方案页）');
-ok(!pageDirs.some((entry) => entry.id === 'behavior'), 'pages/behavior/ 已删除（四标签拆成平台页与方案页）');
-ok(!pageDirs.some((entry) => entry.id === 'runtime'), 'pages/runtime/ 已删除（运行方案独立成 pages/plans/）');
+console.log('## C7：界面 IA（平台页）');
+ok(!pageDirs.some((entry) => entry.id === 'behavior'), 'pages/behavior/ 已删除（四标签拆成平台页）');
+ok(!pageDirs.some((entry) => entry.id === 'runtime'), 'pages/runtime/ 已删除（配置搬进平台详情）');
+ok(!pageDirs.some((entry) => entry.id === 'plans'), 'pages/plans/ 已删除（能力档在平台详情里选，会话只选用哪套）');
 ok(!fs.existsSync(path.join(ROOT, 'public', 'console', 'components', 'platform-panel')), 'components/platform-panel/ 已删除（清单并入平台页）');
 // 「平台清单」只能有一个数据源：页面不再自己打 /api/platforms/registry（口径在 js/registry.js）。
 // 只认真实的 api(...) 调用——注释里提到端点是解释，不是第二份实现。
@@ -155,27 +159,16 @@ ok(registryCallers.length === 0, '页面源码里没有第二处平台注册表�
   const behaviorsJs = fs.existsSync(behaviorsPath) ? fs.readFileSync(behaviorsPath, 'utf8') : '';
   ok(/platformOfBehavior\(item\) === platformId/.test(behaviorsJs), '行为档案按所属平台过滤（档案是平台的子资源）');
 
-  const plansJs = pageDirs.find((entry) => entry.id === 'plans')?.js;
-  const plansText = plansJs ? fs.readFileSync(plansJs, 'utf8') : '';
-  ok(/capabilityProfiles/.test(plansText) && !/'dsh'/.test(plansText), '方案页不再硬编码 Agent 平台（只挑声明了能力档的）');
-  ok(/agentPlatform: el\('planEditAgentPlatform'\)/.test(plansText), '方案保存时 Agent 平台取自下拉，不是写死的值');
-  ok(!/planEditPlatform|platform: el\('planEdit/.test(plansText) && !/plan\.platform/.test(plansText), '方案页不再有用户侧平台字段（方案不绑平台）');
 }
-console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 / 权限权威）');
+console.log('## P5：能力档的声明面（应用方式 / 注入通道 / 对端权限档）');
 {
-  const plansText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plans', 'page.js'), 'utf8');
-  ok(/APPLY_LABEL/.test(plansText) && /AUTHORITY_LABEL/.test(plansText), '方案页的生效方式标签与能力档同源（不在方案里另存一份）');
-  ok(/不做工具级限制/.test(plansText), '直通方案行明显不做工具级限制');
-  ok(/planRuntimeSummary/.test(plansText) && /data-plan-cap-jump/.test(plansText), '方案编辑器的生效方式只读块带「改能力档」');
-  ok(/setConsolePage\('platforms', \{ sub: `agent:\$\{platformId\}`, tab: 'capabilities' \}\)/.test(plansText),
-    '「改能力档」直接跳到声明这套档的平台能力页');
   const detailText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'platforms', 'platform-detail.js'), 'utf8');
   ok(/capabilityMatrix/.test(detailText) && /promptChannels/.test(detailText) && /peerPermissions/.test(detailText),
-    '平台详情的能力位矩阵写出注入通道与权限权威支持面');
+    '平台详情的能力位矩阵写出注入通道与对端权限档支持面');
   const sessionsText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'sessions', 'page.js'), 'utf8');
-  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染 Agent 平台与权限');
-  ok(/\/permission`, 'POST', \{ preset \}/.test(sessionsText), 'Agent 平台权威只提交目标档位（不混进整页保存）');
-  ok(/data-detail-agent-revert/.test(sessionsText), '漂移结论带「改回」按钮');
+  ok(/detailAgentFields/.test(sessionsText) && /promptChannelHtml/.test(sessionsText), '会话详情用一条 /agent 数据渲染 Agent 平台与执行体');
+  ok(/APPLY_LABEL/.test(sessionsText) && /AUDIENCE_LABEL/.test(sessionsText), '生效方式与受众标签跟能力档同一套取值（会话里不另存一份）');
+  ok(!/'POST', \{ preset \}|data-detail-agent-revert|AUTHORITY_LABEL/.test(sessionsText), '对端权限档只读：没有改档写口与「改回」按钮');
   const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
   const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
   ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「Agent 平台」卡：默认平台 + 当前运行');
@@ -185,12 +178,11 @@ console.log('## P5：直通运行期的声明面（应用方式 / 注入通道 /
     '模型卡的选项来自平台模型目录读口，写走平台配置写口');
   ok(!/applyAgentGates|dshModelUnsupported/.test(configText), '全局配置页不再保留模型卡与它的门控');
   ok(/agentDefaultSelect/.test(configFields) && /agentSwitchBtn/.test(configFields), 'Agent 平台字段走 fields 规格（不手写控件）');
-  ok(/fixtureSessionAgent\(/.test(fixture) && /agentMirror/.test(fixture), '离线夹具实现会话 /agent 与权限写口（含漂移）');
+  ok(/fixtureSessionAgent\(/.test(fixture) && /peerPermission/.test(fixture), '离线夹具实现会话 /agent（能力档 + 对端权限档只读）');
   const permissionLevels = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'permission-levels.js'), 'utf8');
-  ok(/permissionLevelOptions\(\{ allowFull = false, current = '' \} = \{\}\)/.test(permissionLevels),
-    '权限档选项按「允许 full + 当前值」算：关掉总开关也不会把已存的 full 藏起来');
-  ok(/syncPermissionDefaultOptions/.test(configText) && /setSelectOptions/.test(configText),
-    '全局配置页在「允许 full」翻转后就地重算默认级别下拉');
+  ok(/PERMISSION_LEVELS = \['read-only', 'workspace-write', 'full-ask', 'full'\]/.test(permissionLevels),
+    '权限级别的四档与后端 PERMISSION_LEVELS 一致');
+  ok(/fillPermissionOptions/.test(configText), '全局配置页优先用后端下发的 levels / labels 铺权限选项');
 }
 // C7 起没有「静态页 / 片段页」两种渲染方式：每页的 DOM 都在 pages/<id>/page.html，
 // 由路由器按需注入。所以这里断言的是「没有任何页面被登记成静态页」。

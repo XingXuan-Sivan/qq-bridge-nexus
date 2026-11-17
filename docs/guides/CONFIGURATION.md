@@ -4,15 +4,15 @@
 
 原版字段（`allow/deny`、`social*`、`slang` 等）的说明见 [../../README.md](../../README.md)「安装与配置」，含义未变。
 
-**平台配置（当前 v3）**：所有「用哪个平台、它怎么连」都收在 `config.json` 的 `platforms` 段里，
+**平台配置（当前 v4）**：所有「用哪个平台、它怎么连」都收在 `config.json` 的 `platforms` 段里，
 旧版顶层键 `platform.*` / `snowluma.*` / `dsh.*` 在首次启动时**一次性迁移并删除**（迁移前备份
-`config.json.bak-<YYYYMMDD-HHmm>`，之后不再读旧键）。v2 → v3 只做一件事：把旧的全局默认运行方案
-`runtime.defaultPlan` 写到当时活动的用户平台条目上（`platforms.users.<id>.defaultPlan`），并删掉旧键。
+`config.json.bak-<YYYYMMDD-HHmm>`，之后不再读旧键）。v2/v3 → v4 只做一件事：把旧的默认运行方案
+（`runtime.defaultPlan` / `platforms.users.<id>.defaultPlan`）换成条目级默认行为 `platforms.users.<id>.defaultBehavior`，并删掉旧键。
 
 ```jsonc
 "platforms": {
   "active": { "user": "qq", "agent": "dsh" },      // 用哪个平台；不可用时启动直接报错并列出已注册 id
-  "users":  { "qq":  { "account": "", "enabled": true, "defaultPlan": "social-v2", "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
+  "users":  { "qq":  { "account": "", "enabled": true, "defaultBehavior": "social-v2", "transport": { /* 连接参数 */ }, "options": { /* 行为选项 */ } } },
   "agents": { "dsh": { "endpoint":  { /* 地址与鉴权 */ }, "options": { /* 模型与行为选项 */ } } }
 }
 ```
@@ -46,10 +46,10 @@ Agent 侧可以同时存多条平台的配置：`agents` 里每条都有自己�
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `true` | 条目级开关。`false` 的实例启动时直接跳过装配（不连接、不收消息），控制台标「已停用」 |
-| `defaultPlan` | `""` | 条目级默认运行方案（`profiles/plans/<id>.yml` 的 id）。这个平台新建、且没单独指定方案的会话用它；空串 = 回退内置 `social-v2` |
+| `defaultBehavior` | `""` | 条目级默认行为（`profiles/platforms/<id>/behaviors/<id>.yml` 的 id）。这个平台新建、且档案里行为为 `inherit` 的会话挂它；空串 = 不挂行为（纯聊天） |
 | `account` | `""` | 账号名；空串 = 该平台的默认账号，会话 key 里也就不带 `@` 段 |
 
-- **`defaultPlan` 也不是平台的选项**：与 `enabled` 同级，不进 `transport` / `options`，也不在 `configSchema` 里。它由写口单独校验（只认方案目录里真有的 id），页面把它排在配置表单的条目开关旁边；Agent 侧没有这个字段，写口直接 400。
+- **`defaultBehavior` 也不是平台的选项**：与 `enabled` 同级，不进 `transport` / `options`，也不在 `configSchema` 里。它由写口单独校验（只认行为档案目录里真有的 id，`none` = 不挂），页面把它排在配置表单的条目开关旁边；Agent 侧没有这个字段，写口直接 400。
 - **`enabled` 不是平台的选项**：它不进 `transport` / `options`，也不在 `configSchema` 里 —— 控制台把它排在
   配置表单首位，保存时与平台字段一起提交；校验只针对平台字段，所以配置本身不合规时也能先把实例停掉。
 - **翻开关要重启**：装配只发生在启动期，改 `enabled` 不会断开已经连上的实例，写口固定回 `requiresRestart: true`。

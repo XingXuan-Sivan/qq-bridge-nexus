@@ -38,7 +38,7 @@ export const ACCESS_FIELDS = {
         type: 'text',
         label: '所有者地址',
         placeholder: '留空 = 不设所有者',
-        hint: '所有者全局唯一、拥有最高权限，可执行管理命令 / 审批 / 进入 closed-agent；管理员列表按人配权限，只在各自私聊生效。留空表示没有所有者（fail-closed）。填法：裸 id（如 123456）或完整地址（如 qq@napcat:private:123456）；裸 id 按当前平台与账号解释。',
+        hint: '所有者全局唯一、拥有最高权限，可执行管理命令与审批；管理员列表按人配权限，只在各自私聊生效。留空表示没有所有者（fail-closed）。填法：裸 id（如 123456）或完整地址（如 qq@napcat:private:123456）；裸 id 按当前平台与账号解释。',
         span: 2,
       },
       {

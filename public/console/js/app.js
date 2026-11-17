@@ -77,10 +77,10 @@ function connectModeText(agent) {
 async function refresh() {
   try {
     const s = await api('/api/status');
-    // 运行方案与权限级别由「运行方案」页负责切换；这里只把当前生效值投影到概览指标。
-    const modeLabel = s.mode === 'reserved' ? '一代仿真模式' : s.mode === 'reserved2' ? '二代仿真模式' : s.mode === 'closed-agent' ? '封闭 Agent' : '聊天模式';
-    // P5 起总览显示方案名（方案是唯一入口）；旧模式名只在方案缺失时兜底。
-    updateOverview(s, s.planLabel || (s.mode === 'closed-agent' && s.level ? `${modeLabel}（${s.level}）` : modeLabel));
+    // 会话模式是「没有单独绑定行为档案的会话」用的引擎：
+    // 由当前用户平台条目级的默认行为决定，没设就是聊天模式（见 bridge 的 defaultMode）。
+    const modeLabel = s.mode === 'reserved' ? '一代仿真' : s.mode === 'reserved2' ? '二代仿真' : '聊天模式';
+    updateOverview(s, modeLabel);
     const activityEl = document.getElementById('activity');
     if (activityEl) activityEl.textContent = s.activity || '（空）';
     renderSendLimitHits(s.sendLimit);
@@ -132,9 +132,9 @@ function updateOverview(status, modeLabel) {
   if (platformEl) platformEl.textContent = status.platform ? platformLabel(status.platform, 'user') : '—';
   renderUpstreamHealth(status.snowluma);
   const mode = document.getElementById('metricMode');
-  if (mode) mode.textContent = modeLabel.replace('模式', '');
+  if (mode) mode.textContent = modeLabel;
   const role = document.getElementById('metricRole');
-  if (role) role.textContent = '角色 · ' + (status.role || '默认人格');
+  if (role) role.textContent = '默认行为 · ' + (status.defaultBehavior || '未设置');
   const access = document.getElementById('accessSummary');
   if (access) access.textContent = '所有者 ' + (status.owner?.id ?? status.ownerQQ ?? '未设置') + ' · ' + (status.allowGroups || []).length + ' 个白名单群 · ' + (status.allowPrivate || []).length + ' 位白名单好友';
   const updated = document.getElementById('lastUpdated');

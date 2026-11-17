@@ -1788,14 +1788,14 @@ function loadConfig() {
   {
     const configFile = path.join(ROOT, 'config.json');
     const stored = readConfigObject(configFile).permission;
+    // 只剩 default 一项：旧文件里的 allowFull / fullTtlMin 也靠这一次写回删掉。
     const sameAsStored = stored && typeof stored === 'object'
-      && stored.default === cfg.permission.default
-      && stored.allowFull === cfg.permission.allowFull
-      && stored.fullTtlMin === cfg.permission.fullTtlMin;
+      && Object.keys(stored).length === 1
+      && stored.default === cfg.permission.default;
     if (!sameAsStored) {
       try {
         atomicWriteJson(configFile, { ...readConfigObject(configFile), permission: cfg.permission });
-        log(`权限配置已归一化到 config.json：${cfg.permission.default} / 完全访问 ${cfg.permission.allowFull ? '开' : '关'} / 临时授权 ${cfg.permission.fullTtlMin} 分钟`);
+        log(`权限配置已归一化到 config.json：${cfg.permission.default}`);
       } catch (error) {
         log(`⚠️ 权限配置写回 config.json 失败：${error?.message ?? error}`);
       }

@@ -1,6 +1,0 @@
-/* 方案页：页面本身只是宿主（.page-stack = display:contents），
-   卡片由 page.js 生成，这里只补摘要徽标那一行。 */
-.plans-page #planSummary {
-  flex-wrap: wrap;
-  gap: 8px;
-}

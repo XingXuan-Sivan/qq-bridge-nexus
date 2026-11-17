@@ -1,6 +1,6 @@
 # Agent 平台通用化与运行方案重构（EXECUTION_BODY_GENERALIZATION）
 
-> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）、P2 已落地（配置多实例与默认 Agent 平台 §5.2 / §8.2）；P3 起各批未做。
+> 状态：**实施中**——P0 全部落地（连接层下沉 §4.1、事件面/审批引用/用量账本归一 §4.4、ACP 事件流出口与 TCK §4.2）、P1 已落地（Agent 侧插件化 §4.3）、P2 已落地（配置多实例与默认 Agent 平台 §5.2 / §8.2）；P4/P5/P6 已落地（能力档 `runtime` 段、直通运行期、文档收口），P3 部分落地。**运行方案层已退役**：`profiles/plans/**`、`src/runtime/plans.mjs`、`/api/plans*`、`pages/plans/` 与会话档案 `planId` 已删除，文中「方案」部分只作批次记录；现状以 [PROFILES_MODEL.md](PROFILES_MODEL.md) 为准。
 > 本文是 [PLATFORM_UNIFICATION.md](PLATFORM_UNIFICATION.md) C6.5 缺口的落地设计，
 > 也是「可换 Agent 平台」在运行时第一次成立的地方。
 > 版本口径：0.2.0；分支 `feat/execution-body`（自 `feat/platform-unification` 的 C10 起）。
@@ -499,7 +499,7 @@ POST /api/sessions/:key/permission  { preset }
 | 变更 | 内容 |
 | --- | --- |
 | 新增卡片「Agent 平台」 | 当前默认 Agent 平台下拉（来源 `/api/platforms/registry` 的 agent 侧）+ 连接方式徽标（http / stdio / remote）+ 探活结果 + 「切换」；切换前预检、失败提示保留原值 |
-| 既有「人格与行为」卡 | 默认运行方案控件已退役（`#runtimeDefaultSelect` 与全局默认方案卡均删）；它现在是用户平台条目的 `defaultPlan`，在「平台 › 详情 › 配置」里改 |
+| 既有「人格与行为」卡 | 默认运行方案控件已退役（`#runtimeDefaultSelect`、全局默认方案卡、条目级 `defaultPlan` 均删）；它现在是用户平台条目的 `defaultBehavior`，在「平台 › 详情 › 配置」里改 |
 | 既有「DSH 模型与思考强度」卡 | 已落地（B3）：模型与思考强度搬到 Agent 平台详情页，标题用该平台的 `label`，选项来自平台声明的 `modelCatalog`；全局配置页不再有这张卡 |
 
 ### 8.2 平台配置 › Agent 侧详情

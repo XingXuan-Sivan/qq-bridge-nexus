@@ -40,14 +40,16 @@ async function reloadConfigSections() {
 // 只有「改完该整页一起保存」的表单才注册到这里；表格型数据（管理员、定时静默、
 // 工具开关、行为档案）单独保存，不跟页面级保存绑在一起——否则一项失败就得全部重来。
 /**
- * 默认级别下拉：full 档随「允许 full」与当前值出现/收起（选项算法在 js/permission-levels.js）。
- * 不传 `current` 时沿用下拉现选的值，供开关翻转后重算。
+ * 默认级别下拉：档位与措词以后端 `levels` / `labels` 为准（与「会话详情 › 权限级别」同一套）。
+ * 读不到下发字段时回退到 js/permission-levels.js 的静态文案。
  */
-function syncPermissionDefaultOptions(current) {
+function fillPermissionOptions(levels, labels, current) {
   const select = document.getElementById('permissionDefault');
   if (!select) return;
-  const allowFull = getSwitch(document.getElementById('permissionAllowFull')) === true;
-  setSelectOptions(select, permissionLevelOptions({ allowFull, current: current ?? select.value }));
+  const options = Array.isArray(levels) && labels
+    ? levels.map((level) => ({ value: level, label: labels[level] || level }))
+    : permissionLevelOptions();
+  setSelectOptions(select, options, current ?? select.value);
 }
 
 async function loadPermission() {
@@ -55,12 +57,7 @@ async function loadPermission() {
     const r = await api('/api/config/permission');
     if (r.ok === false) throw new Error(r.error || '读取失败');
     const p = r.permission ?? {};
-    const allow = document.getElementById('permissionAllowFull');
-    if (allow) setSwitch(allow, p.allowFull === true);
-    // 先按「总开关 + 存着的值」重算档位再回填：总开关关着时，已存的 full 也要能显示出来。
-    syncPermissionDefaultOptions(p.default || 'read-only');
-    const ttl = document.getElementById('permissionTtl');
-    if (ttl) ttl.value = String(p.fullTtlMin || 30);
+    fillPermissionOptions(r.levels, r.labels, p.default || 'read-only');
     setMsg('permissionMsg', '');
     if (saveBar) saveBar.adoptIfPristine();
   } catch (error) {
@@ -86,11 +83,7 @@ const sendLimitSection = {
 const permissionSection = {
   id: 'permission',
   label: '权限级别',
-  read: () => ({
-    default: document.getElementById('permissionDefault')?.value || 'read-only',
-    allowFull: getSwitch(document.getElementById('permissionAllowFull')) === true,
-    fullTtlMin: Math.round(Number(document.getElementById('permissionTtl')?.value) || 30),
-  }),
+  read: () => ({ default: document.getElementById('permissionDefault')?.value || 'read-only' }),
   save: async (value) => {
     const r = await api('/api/config/permission', 'POST', value);
     if (r.ok === false) return { ok: false, message: r.error || '保存失败' };
@@ -518,7 +511,7 @@ const CONFIG_CARDS = {
     {
       title: '所有者与管理员',
       description: '按会话的准入（被动 / 主动、黑名单）已迁到「会话与审批」页，每行点「管理」直接改；这里保留所有者与管理员列表。'
-        + '<strong>所有者</strong>（owner）按地址识别（平台 + 账号 + id），全局唯一、拥有最高权限，可在自己的私聊里审批、进入 closed-agent；'
+        + '<strong>所有者</strong>（owner）按地址识别（平台 + 账号 + id），全局唯一、拥有最高权限，可在自己的私聊里审批；'
         + '<strong>管理员</strong>是另一组按人配置的权限，只在各自私聊生效。',
       body: '<div data-access-fields="whitelist"></div>',
     },
@@ -526,9 +519,8 @@ const CONFIG_CARDS = {
       id: 'section-permission',
       title: '权限级别',
       note: '保存后立即生效',
-      description: '级别到 Agent 平台预设只有一份映射：只读 → read-only、工作区读写 → workspace-write、'
-        + '完全访问 · 每次确认 → qq-full-ask、完全访问 · 短时授权 → danger-full-access。'
-        + 'full 档只有总开关打开、且该会话拿到一次性授权时才真的钉上去。',
+      description: '级别只决定本会话能调用哪些桥接平台工具：会话没有能力档时恒只读，改级别不需要重建执行体会话。'
+        + '执行体自己的权限档由能力档的 runtime 段在建会话时钉住，与这里无关。',
       body: '<div data-overview-fields="permission"></div>',
     },
     {
@@ -636,10 +628,6 @@ export function init() {
 
   // Agent 平台：换了默认只落盘，重启桥接后装配。
   $('agentSwitchBtn')?.addEventListener('click', () => void switchAgent());
-  // 权限档：full 档随「允许 full」出现/收起。开关由 bindSwitches 在父容器上翻转，等它切完再读。
-  document.getElementById('permissionAllowFull')?.addEventListener('click', () => {
-    requestAnimationFrame(() => syncPermissionDefaultOptions());
-  });
 
   // 手动静默：同一个按钮按当前状态开启或关闭
   $('silentToggle').addEventListener('click', async () => {

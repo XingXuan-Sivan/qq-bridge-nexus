@@ -70,14 +70,23 @@ function ensureKinds() {
 function renderBehaviorTable(items) {
   const tableHost = host?.querySelector('#behaviorTable');
   if (!tableHost) return;
+  // usedBy 是后端给的两个引用面：显式挂了它的会话 + 把它设为默认行为的用户平台。
+  const usedByHtml = (value) => {
+    const used = value && typeof value === 'object' ? value : {};
+    const sessions = Array.isArray(used.sessions) ? used.sessions : [];
+    const platforms = Array.isArray(used.platforms) ? used.platforms : [];
+    if (!sessions.length && !platforms.length) return '<span class="meta">没被引用</span>';
+    return [
+      ...sessions.map((key) => `<code>${esc(key)}</code>`),
+      ...platforms.map((pid) => `<span class="meta">${esc(pid)}（默认行为）</span>`),
+    ].join(' ');
+  };
   const rows = items.map((item) => ({
     attrs: { 'data-filter-kind': item.kind || '' },
     cells: [
       `<code>${esc(item.id)}</code><div class="meta">${esc(item.label || '')}</div>`,
       `<span class="meta">${esc(typeOf(item)?.label || item.kind || '?')}</span>`,
-      Array.isArray(item.usedBy) && item.usedBy.length
-        ? item.usedBy.map((id) => `<code>${esc(id)}</code>`).join(' ')
-        : '<span class="meta">未被方案引用</span>',
+      usedByHtml(item.usedBy),
       `<div class="row-actions">
         <button class="btn small" type="button" data-behavior-edit="${esc(item.id)}">编辑</button>
         <button class="btn small" type="button" data-behavior-clone="${esc(item.id)}">克隆</button>
@@ -210,7 +219,7 @@ function openArchiveModal({ mode, source = null }) {
   const title = mode === 'create' ? '新建行为档案' : mode === 'clone' ? '克隆行为档案' : '删除行为档案';
   const fieldsId = `behaviorArchiveFields${mode}`;
   const body = mode === 'delete'
-    ? `<div class="form-stack" id="${fieldsId}"></div><div class="meta">删除会先备份到 <code>state/behavior-backups/</code>；被运行方案引用时不允许删除。</div>`
+    ? `<div class="form-stack" id="${fieldsId}"></div><div class="meta">删除会先备份到 <code>state/behavior-backups/</code>；被会话或平台默认行为引用时不允许删除。</div>`
     : `<div class="form-stack" id="${fieldsId}"></div>`;
   const footer = `<button class="btn" type="button" data-modal-close>取消</button><button class="btn ${mode === 'delete' ? 'danger' : 'primary'}" type="button" id="behaviorArchiveSave">${mode === 'delete' ? '删除' : '保存'}</button>`;
   document.body.insertAdjacentHTML('beforeend', modalHtml({ id: overlayId, title, body, footer }));
@@ -270,7 +279,7 @@ function markup() {
   return `
     ${cardHtml({
     title: '档案清单',
-    description: '档案是资源，被运行方案的行为字段引用；改名不影响引用，删除前先确认没有被方案使用。',
+    description: '档案是资源：会话可以显式挂它，用户平台可以把它设为默认行为；改名不影响引用，删除前先确认没被引用。',
     body: '<div data-behavior-fields="list"></div>',
   })}
     ${cardHtml({

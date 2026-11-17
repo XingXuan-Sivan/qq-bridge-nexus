@@ -66,7 +66,7 @@ public/console/
 ### 2.2 数据新鲜度
 
 - **下拉 / 候选列表不做模块级永久缓存**：人格、平台、能力档这类可在别处增删的目录，**每次打开弹窗都重拉**（如 `pages/sessions/page.js` 的 `ensurePersonaCatalog()`）；拉取失败沿用上一次结果，别让下拉突然空掉。拿到一次就永不失效，会表现为「在人格页新建了卡，回会话详情看不到，必须刷页面」。
-- **「跟随平台默认（当前：…）」必须写出可读名字**：后端直接给整份定义（`/api/sessions/<key>` 的 `defaultPlan`），页面侧再兜一层（`planLabelOf()`：字符串就用它，对象取 `label || id`）——不允许出现只有一个破折号的选项。
+- **「跟随平台默认（当前：…）」必须写出可读名字**：后端把整份定义一起给（`/api/sessions/<key>` 的 `defaultBehavior` 与 `behaviors[]`、`defaultCapability` 与 `capabilities[]`），页面侧再兜一层（取不到就用 id）——不允许出现只有一个破折号的选项。
 - 缓存只给「不常变且自己维护生命周期」的东西（参考组件里的单飞与 TTL 写法）；目录类数据一律现取。
 
 ### 2.3 页面子路由
@@ -236,8 +236,8 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 改样式可以，这些不能动：
 
 - **每个 DOM id 存在且唯一**（`scripts/test-console-ui.mjs` 的 `Legacy config IDs remain present and every DOM ID is unique`）。
-- **27 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×2、`POST /api/plans`、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`×2（连接参数与条目级 `defaultPlan` 各一条）、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
-- **基线是改造前的快照**：录制时控制台仍是 `scripts/fixtures/console.before.html` 那一版，所以基线只认「改造前就有的写口」。改造后新加的写口（例如 `POST /api/sessions/<key>/permission`）不进基线——它们要有自己的专项用例，并由夹具的 `unknownRequests` 兜住「调了没人认领的路线」。
+- **28 条写载荷契约原样**（`scripts/console-ui-contracts.json`，逐条比对 `method` + `path` + `body`）：`POST /api/config/runtime`×2、`PUT /api/config/behaviors/<id>`、`PATCH /api/runtime/capabilities/<id>`、`PATCH /api/platforms/registry/user/<id>/config`×3（连接参数、条目级 `defaultBehavior` 与回填各一条）、`PATCH /api/platforms/registry/agent/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe`、`PATCH /api/sessions/<key>/profile`、`POST /api/roles/create`、`POST /api/personas/default`、`POST /api/config/role-default`、`POST /api/role-mode`×2、`POST /api/whitelist`、`POST /api/security`×2、`PATCH /api/access`、`POST /api/config/permission`、`POST /api/config/send-limit`、`POST /api/slang`、`POST /api/slang/demo-candidate/confirm`、`POST /api/slang/config`、`POST /api/test-send`、`POST /api/console/notify-ai`、`POST /api/plugins/<id>/test`、`DELETE /api/extensions/mcp/<id>`。
+- **基线是改造前的快照**：录制时控制台仍是 `scripts/fixtures/console.before.html` 那一版，所以基线只认「改造前就有的写口」。改造后新加的写口不进基线（每条都有专项用例），由夹具的 `unknownRequests` 兜住「调了没人认领的路线」。
 - 15 个导航目标（`consolePages` 的键）全部可达、轮询不清草稿；移动/平板无文档级横向溢出；深色模式跟随系统偏好；`prefers-reduced-motion` 关装饰动画。
 
 契约确实变了才重录：`node scripts/test-console-ui.mjs --accept-contracts`，并在提交信息里写明原因。
@@ -249,9 +249,9 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | 门禁 | 覆盖什么 |
 | --- | --- |
 | `node scripts/test-console-static.mjs` | 结构约定：页面必须用 `tableHtml`、不许手写 `className='meta ok\|err'`、组件导出齐全、`input.search-box` 唯一定义、页面搜索框带 `type` |
-| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、27 条写载荷契约基线、几何与分页、移动端无横向溢出 |
+| `PLAYWRIGHT_MODULE=playwright-core npm run test:console-ui` | 浏览器回归：点得动、请求发得出、28 条写载荷契约基线、几何与分页、移动端无横向溢出 |
 | `npm run test:audit` | 全量脚本回归（提交前必跑） |
-| 截图 | 视觉一致性：`sessions` / `platforms` / `plans` / `persona` / `overview` 三档（1440 / 1180 / 760） |
+| 截图 | 视觉一致性：`sessions` / `platforms` / `persona` / `overview` 三档（1440 / 1180 / 760） |
 
 新增组件时同时补：导出函数断言、共享样式断言、至少一个页面迁移。
 
@@ -283,7 +283,7 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 
 ---
 
-## 9. Agent 平台 / 方案 / 权限的界面口径（P2–P5）
+## 9. Agent 平台 / 能力档 / 权限的界面口径（P2–P5）
 
 这四块界面共用一条规矩：**值从哪来写清、写口只有一个**。四轴与存储分层见
 [PROFILES_MODEL.md](PROFILES_MODEL.md) §1.1 / §1.2，两级权限权威见
@@ -292,21 +292,20 @@ tileHtml({ id, title, icon, badges, description, tags, error, actions, body, int
 | 界面 | 数据源 | 写口 | 口径 |
 | --- | --- | --- | --- |
 | 平台页（清单 + 二级页） | `GET /api/platforms/registry`（用户平台与 Agent 平台同一份响应，清单与详情共用这一份快照） | `PATCH /api/platforms/registry/<side>/<id>/config`、`POST /api/platforms/registry/agent/<id>/probe` | 清单是「诊断汇总（仅有 error 时出现）+ 用户平台 / Agent 平台两个折叠组 + 卡片网格」，路由 `#platforms/<side>:<id>[/<tab>]` 进二级页；平台名、能力位、上限、`configSchema` 全从注册表取，页面不写死；探活结论写回注册表条目，不另存一份 |
-| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户平台一行「能力位」；Agent 平台四行「能力位 / 应用方式 / 提示注入通道 / 权限权威支持面」。空项给「—」；权限权威支持面由 `canPinPermission` 决定（能钉档给两种，否则只有「Agent 平台自身」） |
+| 平台›概览：能力位矩阵 | 注册表条目（同上） | 无（只读） | 用户平台一行「能力位」；Agent 平台四行「能力位 / 应用方式 / 提示注入通道 / 对端权限档」。空项给「—」；对端权限档是平台声明的取值域（`peerPermissions`），空即「由对端决定」，不另维护一份「平台支持什么」的表 |
 | 平台›能力（能力档） | `GET /api/runtime/capabilities` + 注册表的 `assets.capabilityProfiles` | `PATCH /api/runtime/capabilities/<id>` | 一个能力档同时是预设源、工具面、`runtime` 四段（`apply` / `prompt` / `permission` / `narrow`）的住处；「这档属于哪个 Agent 平台」由注册表回答 |
-| 运行方案页 | `GET /api/plans` + `GET /api/runtime/capabilities` + `GET /api/config/behaviors` | `POST /api/plans`（新建与更新同一个口）、`DELETE /api/plans/<id>`、`POST /api/runtime/plans/<id>/reset` | 列表给「应用方式」「权限权威」两列只读；编辑器顶部 `#planRuntimeSummary` 跟着能力档重画，**不往保存体里加字段**；`[data-plan-cap-jump]` 先关编辑器，再 `setConsolePage('platforms', { sub: 'agent:<id>', tab: 'capabilities' })` 直接落到那个平台的能力页 |
-| 会话详情›Agent 平台与权限 | `GET /api/sessions/<key>/agent` | `POST /api/sessions/<key>/permission` | 一次取全：Agent 平台名字、权限权威、权限档现值、桥接基线、漂移、注入通道。`agent` 权威给改档下拉，并把「在新 Agent 平台上重开」放进危险操作卡（与重建 / 重置同处，不单开区块）；`bridge` 权威只读，写明「由桥接钉住并自动改回」；禁用档（`danger-full-access`）选项里不列、写口 403 |
+| 会话详情›Agent 平台与权限 | `GET /api/sessions/<key>/agent` + `GET /api/sessions/<key>/profile` | 无（只读）；级别走 `PATCH /api/sessions/<key>/profile` | `/agent` 一次给全：Agent 平台名字、能力档、注入通道、对端权限档与钉档记录，全是只读——没有改档写口，对端档位由能力档在建会话时钉住。桥接侧的权限级别在运行卡里选，与能力档、行为档案同一次保存 |
 | 全局配置›运行（Agent 平台卡） | `GET /api/config/runtime` + `GET /api/status` + 注册表 | `POST /api/config/runtime` | 选默认 Agent 平台只落盘：`#agentDefaultSelect` + `#agentSwitchBtn` 写配置面，`#agentRunningReadout` 同时写「配置面已改为 X，重启后生效」与「本进程仍在跑 Y」 |
-| 平台›配置（默认运行方案） | 注册表条目的 `defaultPlan` + `GET /api/plans`（方案清单） | `PATCH /api/platforms/registry/user/<id>/config` | 字段 `#platformDefaultPlan`，首项「不设置（回退内置方案）」，与条目开关一起保存；只对用户平台出现（Agent 平台侧一律 400）。它描述「这个平台新建、且没单独指定方案的会话用哪套」，不提供全局开关 |
-| 会话详情›运行方案 | `GET /api/sessions/<key>` 的 `planId` / `plans` / `defaultPlan` | `PATCH /api/sessions/<key>`（`planId`） | 下拉首项写「跟随平台默认（当前：<方案名>）」，名字由后端的 `defaultPlan` 给（整份定义），不许只剩一个破折号 |
-| 运行总览›指标格「当前运行方案」 | `GET /api/status` 的 `planId` / `planLabel` | 无（只读） | 格子里是**当前运行用户平台**的默认方案，不是全局值；全局默认方案卡已删 |
-| 全局配置›权限级别 | `GET /api/config/permission`（连 `levels` / `labels` / `ttlOptions` 一起给） | `POST /api/config/permission` | 全局级别是「没单独设置权限的会话」的默认；默认下拉的档位由 `permissionLevelOptions({ allowFull, current })` 算：`allowFull` 开着才给 `full`，关着但当前值本来就是 `full` 时也保留（否则下拉显示空白）。开关翻转后就地重算（`setSelectOptions`，不重建控件）；要 full 还得在会话里换一次性授权（`/api/sessions/<key>/permission/full`） |
+| 平台›配置（条目级默认行为） | 注册表条目的 `defaultBehavior` + `assets.behaviors` | `PATCH /api/platforms/registry/user/<id>/config` | 字段 `#platformDefaultBehavior`，首项「不设置（聊天模式）」，与条目开关一起保存；只对用户平台出现。它描述「这个平台新建、且行为档案选『跟随平台默认』的会话挂哪份档案」，不提供全局开关 |
+| 会话详情›运行卡（能力档 / 行为 / 权限） | `GET /api/sessions/<key>/profile` 的 `capability` / `defaultCapability` / `capabilities` / `behavior` / `defaultBehavior` / `behaviors` / `permission` | `PATCH /api/sessions/<key>/profile` | 三个下拉的首项都写「跟随平台默认（当前：…）」，不许只剩一个破折号；能力档空 = 平台默认，行为 `inherit` = 平台条目默认，权限 `inherit` = 全局默认。只提交改过的项，不混入其它字段 |
+| 运行总览›指标格「会话模式」 | `GET /api/status` 的 `defaultBehavior` / `platform` | 无（只读） | 格子里是**当前运行用户平台**的默认行为，不是全局值；全局默认行为卡不存在 |
+| 全局配置›权限级别 | `GET /api/config/permission`（`levels` / `labels` 一起给） | `POST /api/config/permission` | 四档全部可选，标签与后端 `PERMISSION_LABEL` 逐字一致；没有总开关、没有限时授权，写口径只有 `default` 一项 |
 
 三条落地细节：
 
 - **一次取全**：会话详情不为「Agent 平台 / 权限 / 漂移 / 通道」发四个请求，`/agent` 一条给全；平台清单与二级页共用一份注册表快照，切标签不重拉。
-- **写口只有一个**：权限档只走 `/permission`（不混进会话 PATCH），默认 Agent 平台只走 `/api/config/runtime`（不混进平台配置），能力档只走 `/capabilities/<id>`。同一个值出现第二个写口就是缺陷。
-- **失败写在块内**：写后回读不一致、桥接权威拦截（409）、禁用档（403）都在块内联报错，不弹全局 toast、不静默改回。
+- **写口只有一个**：会话的三项运行参数（能力档 / 行为档案 / 权限级别）只走 `PATCH /api/sessions/<key>/profile`，默认 Agent 平台只走 `POST /api/config/runtime`（不混进平台配置），能力档只走 `/api/runtime/capabilities/<id>`，条目级默认行为只走平台条目配置。同一个值出现第二个写口就是缺陷。
+- **失败写在块内**：写后回读不一致、写口拒绝（409）都在块内联报错，不弹全局 toast、不静默改回。
 
 ---
 

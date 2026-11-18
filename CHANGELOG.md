@@ -4,7 +4,7 @@
 `0.1.0` 是本仓库**首个自有版本基线**；在此之前的上游时期版本号（v0.3.0 – v1.1.2）与本仓库版本线无关，
 原始记录存档于 [docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md](docs/release/legacy/CHANGELOG-v0.3.0-v1.1.2.md)。
 
-## 0.3.0 —— 2026-11-17
+## 0.3.0 —— 2026-11-18
 
 内核与平台彻底分家：入站事件、出站动作、工具面、能力档四处都不再认识具体平台；
 控制台的平台配置、会话详情、价目卡按「声明面能回答的问题」重排。
@@ -41,20 +41,31 @@
 - **全局配置›Agent 平台（默认平台 + 模型）**：模型卡搬进 `components/agent-model`（`mountAgentModel`，控件 id 带前缀），平台详情与全局配置挂同一个实现。全局配置把模型控件并进「Agent 平台」一张卡，动作条只有「刷新」「保存」：保存先写默认平台（没变就不碰），再写模型设置；平台没声明 `models` 能力位时只少这段控件——不写死 `dsh`，也没有平台专用门控。
 - **运行总览›用户平台**：格子里从「某个平台名」改成**已连接的用户侧实例条数**（`inboundState.state === 'open'`），`title` 写「x / y 条已接管：名称」；副行仍是上游健康摘要。
 - **会话工具卡**：`这个会话能用的工具（N）` 默认折叠，求交只在 `src/session/tools.mjs` 算一次，读口与夹具同源。
+- **全局配置›Agent 平台（探活）**：卡里的「当前运行」「探活」两行只读去掉，默认平台与模型控件之外只剩一条动作条「刷新 / 探活 / 保存」；探活复用平台详情页同一个写口（`POST /api/platforms/registry/agent/<id>/probe`），只把结论写进状态位，不改任何配置。换默认平台的后果写在选择框提示里（只落盘、重启后装配）。
+- **模型与思考强度›提示条上移**：目录状态、第三方提供方、关思考、看图降级这四条提示原来排在四行下拉之后（卡片底部），现在排在表单最前；`alert` 组件新可选 `boxed: true`（`.alert--boxed`，整圈边框的说明卡，与人格页 `.layer-note` 同一观感），模型卡这四处都改用它。
+- **插件卡片动作条**：停用前面加「配置」，点了直接落详情页的配置标签（`#plugins/<id>/config`）；卸载改用项目自带的红边危险按钮（`btn small danger`，与表格操作栏的删除同一样式）。
+- **插件详情页头加状态动作**：`detail-head` 新可选 `actions` 槽（不传时页头不变）；插件详情右上角补齐「启用 / 停用」「重载」「卸载」三颗按钮，与清单卡片同一组接口，操作完就地重画。页头不再重复「已加载 / v0.1.0」徽标——状态与版本在「基本信息」里。
+- **插件「启用状态」区块移除**：配置标签页不再有写 `plugins.json` 的开关。启停本身就是配置态：`POST /api/plugins/:id/enable|disable` 先把 `plugins.<id>.enabled` 写回配置再改运行态，落盘失败就不动运行态；`PATCH /api/plugins/settings` 不再接受 `plugins.<id>.enabled`（只剩 `persona.provider` 需要重启）。
+- **会话详情›唤醒与准入卡重排**：两个表单并成一张栅格（模式与关键词同行、触发与允许整行、末尾「额度」只读一行写完两档 token / 暂存 / 未读溢出），半栏换行与两块栅格无间距相接的问题一并解决；卡底「调整全局准入」按钮移除，卡头说明改为指路「配置 › 准入」。
+- **详情页头动作行不回顶**：`detail-head` 只有 `actions`、没有 `badges` 时走 `.detail-head-aside--solo`，动作行留在标题那一行，不跟着页头行上移。
 
 ### 价目与模型目录
 
 - **价目表 state 化**：三层 —— 内置官方价（`src/pricing/builtins.mjs`，与官方一致：人民币、百万 token 计价，工作日 09–12 与 14–18 高峰 ×2；含 DeepSeek-V4.1-Flash 与 DeepSeek-V4-Pro 的 id 别名）→ 平台 `modelCatalog` 申报（申报优先，缺单价补内置价并标 `origin: 'builtin'`）→ `state/pricing/<agent>.yml` 本机覆盖（只存与申报不同的单价，写前备份到 `state/platform-backups/pricing/<agent>/`）。`GET` / `PUT` / `DELETE /api/pricing`，保存后热刷新 —— 账本里的历史金额立即按新表重算，不是「只影响以后」。表**只为全局配置里的默认模型匹配**（平台 + 模型取自 `platforms.active.agent` / `platforms.agents.<id>.model`，不接受 `?agent=`，也不猜「现在哪个模型在跑」）。单价只含空白 = 没填（`Number('  ')` 会得到 0）；新增申报里没有的模型必须同时给 `cacheMiss` 与 `output`，否则保存即报错。
 - **价目卡搬家**：从运行总览搬到「全局配置 › 模型与行为」的最后一张卡（`components/pricing-panel`），没有平台 / 模型切换控件；运行总览「花费概览」在刷新与清空账本之间加同款「价目表」按钮（`data-page-tab="runtime"`）跳到这张卡；默认模型没匹配到价目时，那行「每 3 秒自动同步」换成灰色提示，引导去补价目。读口不可用（比如桥接进程还是没这条路由的旧版本，回 404 JSON）时状态位直接写「价目表读取失败」，不再把空的 JSON 画成「0 个模型」的空表。工具栏的「添加模型」加一行空白（模型 id 可编辑），保存时才写进本机层，用于补申报里没有的 id；本机层里有条目的行带「移除覆盖」（保存时不再提交它就算撤掉，不需要额外的删除接口）。原「恢复申报」改名「还原默认价目」：删 `state/pricing/<agent>.yml`，改过的单价与手动添加的模型一起撤回申报 + 内置官方价。
 - **覆盖率**：账本读口新增 `coverage()`（`{ model, label, tokens, cost, unpricedTokens, priced }`）。没价的模型只计 token、金额显示「—」（不估算、不拿别的模型兜底）；账本里出现过但表里没有的模型在价目卡里列成空格子（「账本已记 N token，没算钱」），补上单价后历史金额当场重算（含被压缩聚合的部分），跨重启可复现。
-- **模型级峰谷只在声明面**：`modelCatalog.models[].pricingPolicy` 按模型定高峰窗口与高峰日 —— 没写的组回落平台口径，显式空数组 = 全天同价，所以「这个模型没有空闲时段」与「空闲时段跟平台不同」都能表达。本机覆盖层不写 `pricingPolicy` / `policy`（`normalizeLocalPricing()` 直接丢弃），价目卡的峰谷列只读、只有一行「跟随当前口径」的提示 —— 口径若随读表时刻变化，历史金额就不可复现。
+- **模型级峰谷**：`modelCatalog.models[].pricingPolicy` 按模型定高峰窗口与高峰日 —— 没写的组回落平台口径，显式空数组 = 全天同价，所以「这个模型没有空闲时段」与「空闲时段跟平台不同」都能表达。本机层可逐组覆盖：`state/pricing/<agent>.yml` 的 `models.<id>.policy` 接 `peakMultiplier` / `peakWindows` / `peakWeekdays`，只盖写了的组，没写的组回落模型级申报 → 平台申报 → 内置口径；货币与单位仍只在声明面。`normalizePriceEntry()` 对不合法的窗口 / 0 倍报错，不静默丢弃。账本照旧按当前表重算历史金额 —— 「口径归声明面、本机不能改」的旧结论撤销。
+- **价目表›高峰时段可改**：最后一列是「操作」（`.row-actions` + `btn small`，与定时任务页同一套）：正式行「编辑高峰」+「移除」（本机层有这条时才出），草稿行「编辑高峰」+「移除」。弹窗里时段用 `time` 组件（与定时任务同一条时间选择器，按整点、起点早于终点、跨夜拆两段）、星期用 `checkboxGroup`、倍数用 `numberField`，行壳用 `fieldRowHtml`；确定后表格当场显示「周一 10:00–12:00 ×1.8」并标「本机口径」，保存时随单价一起提交。`th` / `td` 改为垂直居中。
+- **提交只写差异**：价目补丁只提交「本机已存的键 + 用户敲过的键」，继承值（申报价 / 内置价 / 缺省按未命中价）不再固化成覆盖；已有 `policy` 的行随行带上，不会因为保存一次就把高峰口径洗掉。
+- **价目表列宽**：标签与模型 id 同行后，模型列降到 250，省出的宽度给「高峰时段」（一句话口径不再折成三行）。
 - **模型目录降级**：实时目录读不到时，模型下拉按平台声明的 `modelCatalog.models` 铺、档位按「实时模型 → 声明模型 → 声明全集 → `effortFallback`」四级回落；提供方（只有实时目录才有这一维）保持原值并置灰。写口照存并回 `warnings: ['模型未校验：目录不可用']`，不再 400 / 503，同时递增 `modelSelectionEpoch` 让已有会话下一条消息重新选模型。平台没声明 `modelCatalog` 时保留原值，保存照常成功。
 
 ### 门禁
 
 - `scripts/test-audit.mjs` 从串行 `spawnSync` 改为并发（默认 4，`--jobs`、`--only`、`--list`），全量脚本 **132/132** 从数分钟降到 ≈77s。
-- 新增 `scripts/test-pricing.mjs`（56 条：三层合并 / 只存差异 / 空白=未填 / 新增必须两价 / 本机丢弃峰谷口径 / 备份 / 安全 id / 坏 YAML）、`scripts/test-user-actions.mjs`、`scripts/test-inbound-body-fields.mjs`（入站正文契约的唯一定义）、`scripts/test-acp-capability-intent.mjs`；删除 `test-preset-store` / `test-preset-prompt`（`src/presets/` 与预设编辑器、仿真提示词同批删除）。
-- `test-console-ui` 45 → **54** 条（导航三组、平台详情四页与能力药丸、Agent 矩阵默认折叠在能力页、会话详情三张常驻卡 + 两张折叠卡、会话工具卡与原因、价目卡跟随默认模型 / 先记账后补价 / 总览「价目表」跳转与灰色提示、全局配置模型卡跟随选中的 Agent 平台、模型目录不可用时按声明清单铺选项）；契约基线 29 条未改。
+- 新增 `scripts/test-pricing.mjs`（56 条：三层合并 / 只存差异 / 空白=未填 / 新增必须两价 / 备份 / 安全 id / 坏 YAML）、`scripts/test-user-actions.mjs`、`scripts/test-inbound-body-fields.mjs`（入站正文契约的唯一定义）、`scripts/test-acp-capability-intent.mjs`；删除 `test-preset-store` / `test-preset-prompt`（`src/presets/` 与预设编辑器、仿真提示词同批删除）。
+- 补门禁：`test-pricing` 加本机口径覆盖（整组盖窗口、空窗口生效、只写星期回落、非法窗口 / 0 倍报错、`effective()` 重算峰谷）；`test-console-static` 同步会话唤醒与准入共用一张表单、页头动作行不回顶两条断言；`test-plugin-kernel` 断言启停会写回 `plugins.json` 且 settings 不再写插件条目；`verify-persona-config` 改读渲染层编译出的 persona 行（能力档已是意图层，文件里不再有 `rows`）。
+- `test-console-ui` 45 → **56** 条（导航三组、平台详情四页与能力药丸、Agent 矩阵默认折叠在能力页、会话详情三张常驻卡 + 两张折叠卡、会话工具卡与原因、价目卡跟随默认模型 / 先记账后补价 / 总览「价目表」跳转与灰色提示、全局配置模型卡跟随选中的 Agent 平台、模型目录不可用时按声明清单铺选项；另加高峰弹窗（初值回填、加删时段、只留周一、倍数 1.8、PUT body 带 `policy`）、Agent 卡「刷新 / 探活 / 保存」与探活请求、插件卡「配置」直达配置标签 + danger 卸载 + 详情页头三颗状态按钮）；契约基线 29 条未改。
 - `verify-adaptation --layer repo` 新增两条断言（`bot.*` 直达 = 0、`ext.raw` 读取 = 0），**105 通过 / 0 失败**；`check-profiles.mjs` 新增「类型只能写 `label/platform/engine/fields`」「能力档不写 `tools.platform`」「声明里的 flag 必须在目录里」。
 
 ## 0.2.1 —— 2026-11-16

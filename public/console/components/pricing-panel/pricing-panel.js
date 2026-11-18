@@ -245,6 +245,18 @@ export function mountPricingPanel(host, { onSaved } = {}) {
     paintTable();
   }
 
+  /** 读不到快照时不画空表：留白表会让人以为是「这个平台没有模型」。 */
+  function renderFailure(message) {
+    view = null;
+    el.agent.textContent = '—';
+    el.model.textContent = '—';
+    el.source.innerHTML = '';
+    setMsg(el.status, `价目表读取失败：${message}`, 'err');
+    el.policy.textContent = '';
+    el.gap.hidden = true;
+    el.table.innerHTML = '';
+  }
+
   // ── 交互 ─────────────────────────────────────────────────────────────────
   /** 单价补丁：与申报价相同的字段不提交，空字段不提交（= 回落申报）。 */
   function pricingPatch() {
@@ -322,9 +334,12 @@ export function mountPricingPanel(host, { onSaved } = {}) {
     if (!force && busy()) return;
     loading = true;
     try {
-      render(await api('/api/pricing'));
+      const snapshot = await api('/api/pricing');
+      // 老进程 / 代理缺路由时回的是 404 JSON：当成快照画就会变成「0 个模型」的假象。
+      if (snapshot?.ok !== true) throw new Error(snapshot?.error || '接口没有返回价目');
+      render(snapshot);
     } catch (error) {
-      setMsg(el.status, `价目表读取失败：${error?.message || '未知错误'}`, 'err');
+      renderFailure(error?.message || '未知错误');
     } finally {
       loading = false;
     }

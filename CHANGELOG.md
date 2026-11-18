@@ -45,7 +45,7 @@
 ### 价目与模型目录
 
 - **价目表 state 化**：三层 —— 内置官方价（`src/pricing/builtins.mjs`，与官方一致：人民币、百万 token 计价，工作日 09–12 与 14–18 高峰 ×2；含 DeepSeek-V4.1-Flash 与 DeepSeek-V4-Pro 的 id 别名）→ 平台 `modelCatalog` 申报（申报优先，缺单价补内置价并标 `origin: 'builtin'`）→ `state/pricing/<agent>.yml` 本机覆盖（只存与申报不同的单价，写前备份到 `state/platform-backups/pricing/<agent>/`）。`GET` / `PUT` / `DELETE /api/pricing`，保存后热刷新 —— 账本里的历史金额立即按新表重算，不是「只影响以后」。表**只为全局配置里的默认模型匹配**（平台 + 模型取自 `platforms.active.agent` / `platforms.agents.<id>.model`，不接受 `?agent=`，也不猜「现在哪个模型在跑」）。单价只含空白 = 没填（`Number('  ')` 会得到 0）；新增申报里没有的模型必须同时给 `cacheMiss` 与 `output`，否则保存即报错。
-- **价目卡搬家**：从运行总览搬到「全局配置 › 模型与行为」的最后一张卡（`components/pricing-panel`），没有平台 / 模型切换控件；运行总览「花费概览」在刷新与清空账本之间加同款「价目表」按钮（`data-page-tab="runtime"`）跳到这张卡；默认模型没匹配到价目时，那行「每 3 秒自动同步」换成灰色提示，引导去补价目。
+- **价目卡搬家**：从运行总览搬到「全局配置 › 模型与行为」的最后一张卡（`components/pricing-panel`），没有平台 / 模型切换控件；运行总览「花费概览」在刷新与清空账本之间加同款「价目表」按钮（`data-page-tab="runtime"`）跳到这张卡；默认模型没匹配到价目时，那行「每 3 秒自动同步」换成灰色提示，引导去补价目。读口不可用（比如桥接进程还是没这条路由的旧版本，回 404 JSON）时状态位直接写「价目表读取失败」，不再把空的 JSON 画成「0 个模型」的空表。
 - **覆盖率**：账本读口新增 `coverage()`（`{ model, label, tokens, cost, unpricedTokens, priced }`）。没价的模型只计 token、金额显示「—」（不估算、不拿别的模型兜底）；账本里出现过但表里没有的模型在价目卡里列成空格子（「账本已记 N token，没算钱」），补上单价后历史金额当场重算（含被压缩聚合的部分），跨重启可复现。
 - **模型级峰谷只在声明面**：`modelCatalog.models[].pricingPolicy` 按模型定高峰窗口与高峰日 —— 没写的组回落平台口径，显式空数组 = 全天同价，所以「这个模型没有空闲时段」与「空闲时段跟平台不同」都能表达。本机覆盖层不写 `pricingPolicy` / `policy`（`normalizeLocalPricing()` 直接丢弃），价目卡的峰谷列只读、只有一行「跟随当前口径」的提示 —— 口径若随读表时刻变化，历史金额就不可复现。
 - **模型目录降级**：实时目录读不到时，模型下拉按平台声明的 `modelCatalog.models` 铺、档位按「实时模型 → 声明模型 → 声明全集 → `effortFallback`」四级回落；提供方（只有实时目录才有这一维）保持原值并置灰。写口照存并回 `warnings: ['模型未校验：目录不可用']`，不再 400 / 503，同时递增 `modelSelectionEpoch` 让已有会话下一条消息重新选模型。平台没声明 `modelCatalog` 时保留原值，保存照常成功。

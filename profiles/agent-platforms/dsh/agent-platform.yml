@@ -18,17 +18,23 @@ runtime: adapters/runtime.mjs
 modelCatalog:
   # pricing 里写的是**空闲时段**单价；高峰时段 = 空闲 × pricingPolicy.peakMultiplier。
   # 桶与 DSH 报的 token 桶一一对应（互不重叠）：命中 / 未命中 / 写缓存 / 输出。
-  # 只列在售模型：账本按模型 id 取价，已下架的 id（deepseek-v4-flash、
-  # deepseek-v4-flash-vision-exp、deepseek-pro）留在这里只会让默认列表变脏。
-  # 旧的调用记录若要继续算钱，用控制台价目卡的「添加模型」写进本机覆盖层。
   models:
     - id: deepseek-flash
       label: DeepSeek-V4.1-Flash
       contextWindow: 1000000
       vision: true
       pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
+    - id: deepseek-v4-flash
+      label: DeepSeek-V4.1-Flash（旧模型名）
+      pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
+    - id: deepseek-v4-flash-vision-exp
+      label: DeepSeek-V4.1-Flash（视觉实验名）
+      pricing: { cacheHit: 0.02, cacheMiss: 1, cacheWrite: 1, output: 4 }
     - id: deepseek-v4-pro
-      label: DeepSeek-V4-Pro
+      label: DeepSeek-V4-Pro-0813
+      pricing: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
+    - id: deepseek-pro
+      label: DeepSeek-V4-Pro-0813（旧模型名）
       pricing: { cacheHit: 0.15, cacheMiss: 4.5, cacheWrite: 4.5, output: 13.5 }
   # 计费口径（平台的商业条款）：货币、单位、峰谷倍数与窗口。
   # 节假日表不在这里 —— 它是日历事实、与平台无关，留在 src/model-prices.js。

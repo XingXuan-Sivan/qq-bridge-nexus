@@ -6,9 +6,30 @@
  *
  * 约定：文本框的 id 就是业务 id，页面照常读它的 value（HH:mm）；
  * 隐藏的原生输入用 data-time-native="<业务 id>" 关联，不参与表单读取。
+ *
+ * 标记由 timeFieldHtml() 出：调用方不要再自己拼 .time-field / 时钟按钮 / 隐藏原生输入，
+ * 否则组件升级时各处手写的那份会落在后面。
  */
+import { esc } from '../../js/ui.js';
 
 const HHMM = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+
+const CLOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
+
+/**
+ * 时间字段的标记（配 initTimeFields 用）。
+ * @param {{id:string, value?:string, label?:string, attrs?:object}} options
+ *   attrs 落在可见文本框上（例如 `{'data-sil': 'start'}`），用来给行内控件挂业务标记。
+ */
+export function timeFieldHtml({ id, value = '', label = '时间', attrs = {} } = {}) {
+  const extra = Object.entries(attrs).map(([name, val]) => ` ${esc(name)}="${esc(String(val))}"`).join('');
+  return '<span class="time-field">'
+    + `<input type="text" class="time-field-text" id="${esc(id)}" value="${esc(value)}"`
+    + ` placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="${esc(label)}"${extra}>`
+    + `<button type="button" class="time-field-btn btn-icon" aria-label="选择${esc(label)}">${CLOCK}</button>`
+    + `<input type="time" data-time-native="${esc(id)}" tabindex="-1" aria-hidden="true">`
+    + '</span>';
+}
 
 function nativeFor(text) {
   const id = text?.id;

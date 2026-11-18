@@ -310,6 +310,7 @@ try {
     assert.equal(await page.locator('#cfg__baseUrl').inputValue(), 'http://127.0.0.1:3110');
     assert.equal(await page.locator('#cfg__timeoutMs').inputValue(), '1200');
     assert.equal(await page.locator('#pluginConfigTest').count(), 1, '配置区应有测试按钮');
+    assert.equal(await page.locator('#pluginPersistMount').count(), 0, '配置页不再有单独「启用状态」区块');
     await page.click('#pluginConfigTest');
     await page.waitForTimeout(250);
     const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
@@ -320,6 +321,16 @@ try {
     await page.click('[data-detail-back]');
     await page.waitForFunction(() => location.hash === '#plugins');
     assert.equal(await page.locator('[data-plugins-view="detail"]').isHidden(), true, '返回后回到清单');
+    // 卡片动作条：配置在最前、卸载是项目自带的红边危险按钮。
+    assert.equal(await page.locator('#pluginsList [data-plugin-config="demo-plugin"]').count(), 1, '卡片上应有「配置」按钮');
+    assert.match(await page.getAttribute('#pluginsList [data-plugin-action="uninstall"]', 'class'), /\bdanger\b/, '卸载用红边危险按钮');
+    // 点「配置」直接落详情页的配置标签。
+    await page.click('#pluginsList [data-plugin-config="demo-plugin"]');
+    await page.waitForFunction(() => location.hash === '#plugins/demo-plugin/config');
+    await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
+    assert.equal(await page.locator('[data-plugin-tab="config"].active').count(), 1, '「配置」落到配置标签');
+    await page.click('[data-detail-back]');
+    await page.waitForFunction(() => location.hash === '#plugins');
   });
 
 
@@ -954,6 +965,22 @@ try {
     await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) #cfg__baseUrl', { timeout: 5000 });
   });
 
+  // 插件详情页头带完整的插件状态动作：启停 / 重载 / 卸载；与清单卡片同一组接口。
+  await test('Plugin detail header carries the state actions and posts them', async () => {
+    await navigate('plugins');
+    await page.evaluate(() => { location.hash = '#plugins/demo-plugin'; });
+    await page.waitForSelector('[data-plugins-view="detail"]:not([hidden]) .detail-head-actions', { timeout: 5000 });
+    assert.deepEqual(await page.$$eval('[data-plugin-state]', (nodes) => nodes.map((node) => node.dataset.pluginState)),
+      ['disable', 'reload', 'uninstall'], '页头三颗按钮：停用 / 重载 / 卸载');
+    assert.match(await page.getAttribute('[data-plugin-state="uninstall"]', 'class'), /\bdanger\b/, '卸载用红边危险按钮');
+    await page.click('[data-plugin-state="disable"]');
+    await page.waitForSelector('[data-plugin-state="enable"]', { timeout: 5000 });
+    const recorded = await (await fetch(`${fixture.url}/__fixture/requests`)).json();
+    assert.ok(recorded.requests.some((entry) => entry.method === 'POST' && entry.path === '/api/plugins/demo-plugin/disable'),
+      '点停用应 POST /api/plugins/demo-plugin/disable');
+    assert.equal(await page.locator('[data-plugin-state="uninstall"]').count(), 1, '状态变了按钮不丢');
+  });
+
   // 会话详情的「运行」卡要写出平台默认行为（不能只显示一个破折号）；
   // “人格”下拉每次打开都重读目录——人格页新建卡后回来立刻能看到，不需要刷新页面。
   // 这段带写请求，所以必须放在契约基线比对之后。
@@ -1110,7 +1137,8 @@ try {
     assert.match(await page.textContent('#usageRecent'), /group:123456789|private:100001/, '最近流水应列出采样');
   });
 
-  // 价目表：跟着全局配置里的默认模型匹配，没有平台 / 模型切换，峰谷口径只读，改价只落差异。
+  // 价目表：跟着全局配置里的默认模型匹配，没有平台 / 模型切换；单价在格子里改，
+  // 高峰口径走「操作 › 编辑高峰」的弹窗，写进本机覆盖层。
   // 这段带写请求，所以放在契约基线比对之后。
   if (!original) await test('Pricing card follows the default model and only writes price overrides', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -1136,7 +1164,8 @@ try {
     assert.equal(await page.locator(`${card} [data-pricing-table] [data-table]`).count(), 1, '价目表用表格组件渲染');
     assert.equal(await page.locator(`${card} [data-pricing-table] [data-table-search]`).count(), 1, '工具栏带搜索');
     assert.equal(await page.locator(`${card} [data-pricing-table] [data-table-refresh]`).count(), 1, '工具栏带刷新');
-    assert.equal(await page.locator(`${card} [data-price-policy]`).count(), 0, '高峰时段没有编辑入口');
+    assert.equal(await page.locator(`${card} [data-price-row="deepseek-flash"] [data-price-peak]`).count(), 1, '高峰时段有编辑入口（操作列）');
+    assert.equal(await page.locator(`${card} [data-price-row="deepseek-flash"] .row-actions`).count(), 1, '操作列用表格统一的 .row-actions');
     assert.equal(await page.locator(`${card} [data-pricing-scope]`).count(), 0, '不再有平台 / 模型的手动切换');
 
     // 默认模型命中申报价：结论行、来源与峰谷口径都只读展示。
@@ -1145,7 +1174,7 @@ try {
     const flashRow = `${card} [data-price-row="deepseek-flash"]`;
     assert.equal(await page.inputValue(`${flashRow} [data-price-key="output"]`), '4', '输入框回填申报的输出价');
     assert.match(await page.textContent(flashRow), /工作日 09:00–12:00、14:00–18:00 ×2/, '峰谷列只展示口径');
-    assert.match(await page.textContent(`${card} [data-pricing-policy]`), /高峰时段跟随当前口径.*本页只改单价/, '口径提示写明只读');
+    assert.match(await page.textContent(`${card} [data-pricing-policy]`), /平台申报的高峰口径.*「操作」里单独改/, '口径提示写明可以按模型覆盖');
 
     // 账本里出现过、表里没有的模型：单独一行，并说清楚已经记了多少 token。
     const gapRow = `${card} [data-price-row="deepseek-chat-0715"]`;
@@ -1236,7 +1265,35 @@ try {
     assert.match(await page.textContent(addedRow), /本机覆盖/, '新增的模型标本机覆盖');
     assert.equal(await page.locator(draft).count(), 0, '保存后草稿行变成正式行');
 
-    // 行内「移除覆盖」：整段写入时这条不在补丁里，就等于撤掉。
+    // 高峰口径：弹窗里用项目的时间组件与复选框组改，确定后表格当场显示，保存时随单价一起提交。
+    await page.click(`${addedRow} [data-price-peak]`);
+    await page.waitForSelector('#pricingPeakOverlay.open');
+    assert.equal(await page.locator('#pricingPeakOverlay .time-field-text').count(), 4, '初值回填平台申报的两段（时间组件：开始 + 结束）');
+    assert.equal(await page.locator('#pricingPeakOverlay input[name="pricingPeakWeekdays"]').count(), 7, '星期是一组可多选的复选框');
+    // 清掉旧的两段，再添一段 10:00–12:00；星期只留周一，倍数 1.8。
+    while (await page.locator('#pricingPeakOverlay [data-peak-del]').count()) {
+      await page.click('#pricingPeakOverlay [data-peak-del] >> nth=0');
+    }
+    await page.click('#pricingPeakOverlay [data-peak-add]');
+    await page.fill('#pricingPeakOverlay .time-field-text >> nth=0', '10:00');
+    await page.fill('#pricingPeakOverlay .time-field-text >> nth=1', '12:00');
+    for (const day of ['2', '3', '4', '5']) await page.uncheck(`#pricingPeakOverlay input[name="pricingPeakWeekdays"][value="${day}"]`);
+    await page.fill('#pricingPeakOverlay #pricingPeakMultiplier', '1.8');
+    await page.click('#pricingPeakOverlay [data-peak-apply]');
+    assert.equal(await page.locator('#pricingPeakOverlay.open').count(), 0, '确定后弹窗关闭');
+    assert.match(await page.textContent(addedRow), /周一 10:00–12:00 ×1\.8/, '表格当场显示新高口径');
+    assert.match(await page.textContent(addedRow), /本机口径/, '本机改过的口径有标记，不与申报混在一起');
+    const [withPeak] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'PUT'),
+      page.click(`${card} #pricingSave`),
+    ]);
+    assert.equal(withPeak.status(), 200);
+    assert.deepEqual(fixture.requests.at(-1)?.body, {
+      models: { 'deepseek-pro-legacy': { cacheMiss: 4.5, output: 13.5, policy: { peakWindows: [[10, 12]], peakWeekdays: [1], peakMultiplier: 1.8 } } },
+    }, '口径随单价一起提交（policy）');
+    await page.waitForFunction(() => document.getElementById('pricingSaveMsg')?.textContent.includes('已保存覆盖'));
+
+    // 行内「移除」：整段写入时这条不在补丁里，就等于撤掉。
     await page.click(`${addedRow} [data-price-drop="deepseek-pro-legacy"]`);
     const [dropped] = await Promise.all([
       page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'PUT'),
@@ -1732,36 +1789,46 @@ try {
     assert.match(matrix, /对端权限档/, '对端权限档在平台的「能力」里读');
   });
 
-  if (!original) await test('全局配置：Agent 平台一张卡管默认平台与模型，按钮只有刷新与保存', async () => {
+  if (!original) await test('全局配置：Agent 平台一张卡管默认平台与模型，动作是刷新 / 探活 / 保存', async () => {
     await navigate('config');
     await page.waitForFunction(() => document.getElementById('agentDefaultSelect')?.options.length >= 2);
     // 前面的用例可能已经把默认平台改成 acp：这里跟着当前值走，结束时换回原来那个。
     const initial = await page.locator('#agentDefaultSelect').inputValue();
     assert.ok(['dsh', 'acp'].includes(initial), `默认 Agent 平台应来自注册表，实际 ${initial}`);
-    const running = await page.locator('#agentRunningReadout').textContent();
-    assert.match(running, /DeepSeek Harness/);
-    assert.match(running, /连接方式 HTTP/);
-    assert.match(running, /已就绪/);
-    // 本进程恒装配 dsh；前面的用例可能把配置面改成了别的，待重启提示只在两者不一致时出现。
-    const runningId = (await page.locator('#agentRunningReadout code').textContent()).trim();
+    // 运行期事实不再单占一行只读：换默认的后果写在选择框提示里，当下连通结论交给「探活」。
+    assert.equal(await page.locator('#agentRunningReadout').count(), 0, '卡片里没有「当前运行」只读行');
     // 一张卡：平台选择与模型控件同属 #section-agent，不再拆出第二张「模型与思考强度」。
     assert.equal(await page.locator('#section-agent-model').count(), 0, '不再拆出单独的模型卡');
     assert.equal(await page.locator('#section-agent #agentModelMount').count(), 1, '模型控件住在同一张卡里');
-    // 卡片动作只有两个，名字就是「刷新」「保存」。
+    // 动作条三个按钮，探活排在刷新后面且同一档样式。
     const cardButtons = await page.locator('#section-agent .form-actions button')
       .evaluateAll((nodes) => nodes.map((node) => node.textContent.trim()));
-    assert.deepEqual(cardButtons, ['刷新', '保存'], '默认平台与模型共用一个动作条');
+    assert.deepEqual(cardButtons, ['刷新', '探活', '保存'], '一处动作条：刷新 / 探活 / 保存');
+    assert.equal(await page.locator('#agentProbe').getAttribute('class'),
+      await page.locator('#agentRefresh').getAttribute('class'), '探活与刷新同一档样式');
     assert.equal(await page.locator('#platformModelMount, #dshProviderSelect, #section-dsh').count(), 0, '全局配置页没有平台详情那份模型卡');
     await page.selectOption('#agentDefaultSelect', 'dsh');
     await page.waitForSelector('#agentModelMount #agentModelProvider', { timeout: 5000 });
     await page.waitForFunction(() => document.getElementById('agentModelProvider')?.options.length > 1);
     assert.equal(await page.locator('#agentModelProvider').inputValue(), 'deepseek-official', '回填该平台自己的配置');
     assert.equal(await page.locator('#agentModel').inputValue(), 'deepseek-flash');
-    // 没声明 models 能力位的平台：只少模型控件，卡片与两个按钮都还在。
+
+    // 探活：问一次选中的平台，只把结论写进状态位（与平台详情页同一个写口）。
+    const [probed] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/platforms/registry/agent/dsh/probe'),
+      page.click('#agentProbe'),
+    ]);
+    assert.equal(probed.request().method(), 'POST', '探活走 POST .../probe');
+    assert.equal(probed.status(), 200);
+    await page.waitForFunction(() => (document.getElementById('agentMsg')?.textContent || '').includes('探活通过'));
+    assert.equal(await page.locator('#agentProbe').isEnabled(), true, '探活完按钮恢复可用');
+    assert.equal(await page.locator('#agentSave').isEnabled(), true, '探活不会把保存留在禁用态');
+
+    // 没声明 models 能力位的平台：只少模型控件，卡片与三个按钮都还在。
     await page.selectOption('#agentDefaultSelect', 'acp');
     await page.waitForFunction(() => !document.getElementById('agentModelProvider'));
     assert.equal(await page.locator('#section-agent').isVisible(), true, '没有模型能力时卡片本身不消失');
-    assert.equal(await page.locator('#agentSave').isVisible(), true, '没有模型可配时保存仍然可用');
+    assert.equal(await page.locator('#agentProbe').isVisible(), true, '没有模型可配时探活仍然可用');
     await page.selectOption('#agentDefaultSelect', initial);
 
     // 保存只改一半也能收场：先切到另一个平台写盘，再换回来。
@@ -1776,13 +1843,7 @@ try {
     await saveAgentCard(other);
     await page.waitForFunction((value) => (document.getElementById('agentMsg')?.textContent || '')
       .includes('已把默认 Agent 平台改为') && document.getElementById('agentDefaultSelect')?.value === value, other);
-    const switched = await page.locator('#agentRunningReadout').textContent();
-    if (other === runningId) {
-      assert.doesNotMatch(switched, /配置面已改为/, '写回正在跑的那个平台就没有待重启提示');
-    } else {
-      assert.match(switched, new RegExp(`配置面已改为 ${other}，重启后生效`));
-      assert.match(switched, /DeepSeek Harness/, `本进程仍在跑 ${runningId}`);
-    }
+    assert.match(await page.locator('#agentMsg').textContent(), /重启桥接后生效/, '换默认只落盘，提示里写明要重启');
 
     // 收拾现场：恢复进入本用例前的配置面，别把「待重启」状态改了。
     await saveAgentCard(initial);

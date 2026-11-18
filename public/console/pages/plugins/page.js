@@ -1,7 +1,7 @@
 // 插件页：清单（三张卡）+ 二级详情页（#plugins/<id>）。
 //
-// 清单只放摘要与运行期动作（启停 / 重载 / 卸载）：点卡片进详情改配置、写落盘开关、看审计。
-// 路由：#plugins 是清单，#plugins/<id> 是某个插件的详情。两个视图都常驻本页 DOM，
+// 清单只放摘要与插件动作（配置 / 启停 / 重载 / 卸载）：点「配置」直接落详情页的配置标签，
+// 点卡片进概览。路由：#plugins 是清单，#plugins/<id>[/<tab>] 是某个插件的详情。两个视图都常驻本页 DOM，
 // 切子段只切显隐 —— 来回切不会丢掉清单的滚动位置。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
@@ -27,7 +27,7 @@ function listCardsHtml() {
   return [
     cardHtml({
       title: '桥接插件',
-      description: '可以启用 / 停用 / 重载单个插件；这两个开关只改本次运行，不改 <code>plugins.json</code>——改配置或想永久生效仍需重启桥接（文件监听见路线图 P2c）。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。',
+      description: '可以启用 / 停用 / 重载单个插件，启用状态会写回配置、重启后保持；改配置进卡片上的「配置」。插件放在 <code>plugins/&lt;id&gt;/</code>，设计与权限见 <code>docs/PLUGIN_KERNEL.md</code>；首个示例是 <code>soulkit-persona</code>（人格 provider，默认关闭）。',
       body: `<div data-plugins-fields="toolbar"></div>
       <div data-plugins-fields="list"></div>`,
     }),
@@ -165,7 +165,7 @@ async function refreshPlugins() {
           failures ? tag(`失败 ${failures}`, { type: 'danger' }) : '',
         ],
         error: plugin.error || '',
-        actions: `${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button>`,
+        actions: `<button class="btn small" data-plugin-config="${esc(plugin.id)}" title="打开这个插件的配置标签页">配置</button>${toggle}<button class="btn small" data-plugin-action="reload" data-plugin-id="${esc(plugin.id)}">重载</button><button class="btn small danger" data-plugin-action="uninstall" data-plugin-id="${esc(plugin.id)}">卸载</button>`,
         interactive: true,
       });
     }).join('');
@@ -260,9 +260,9 @@ async function installPluginFromPath() {
 
 // ── 事件与入口 ──────────────────────────────────────────────────────────────
 
-function openPlugin(id) {
+function openPlugin(id, tab = '') {
   if (!id) return;
-  setConsolePage('plugins', { sub: id });
+  setConsolePage('plugins', { sub: id, tab });
 }
 
 function onClick(event) {
@@ -272,6 +272,9 @@ function onClick(event) {
     runPluginAction(action.dataset.pluginId, action.dataset.pluginAction, action);
     return;
   }
+  // 卡片上的「配置」直接落到详情页的配置标签：换子路由后由 onPageRoute 挂详情。
+  const configButton = event.target.closest('[data-plugin-config]');
+  if (configButton) { openPlugin(configButton.dataset.pluginConfig, 'config'); return; }
   const tile = event.target.closest('[data-tile-id]');
   // 卡片里的按钮自己处理点击，不把整卡当跳转。
   if (tile?.dataset.tileId && !event.target.closest('button, a')) openPlugin(tile.dataset.tileId);

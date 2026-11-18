@@ -89,6 +89,27 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
   };
   const persistErrorText = () => (typeof saveConfig === 'function' ? '写入 config.json 的 plugins 段失败' : `写入 ${PLUGIN_CONFIG_FILE} 失败`);
 
+  /**
+   * 把单个插件的启用状态写回配置（plugins.<id>.enabled）。
+   * 启停本身就是配置态：控制台点一次就跨重启生效，不再另设「写入 plugins.json」的开关。
+   * 已经是目标值时不动文件（缺省 true，所以刚装好的插件停用一次才会出现条目）。
+   * @returns {{ ok: boolean, changed?: boolean, error?: string }}
+   */
+  function persistEnabled(id, enabled) {
+    const raw = serializeConfig(config);
+    if ((raw.plugins?.[id]?.enabled !== false) === enabled) return { ok: true, changed: false };
+    raw.plugins[id] = { ...(raw.plugins[id] ?? {}), enabled };
+    const { config: next, warnings } = normalizeConfig(raw);
+    if (warnings.length) return { ok: false, error: warnings.join('；') };
+    try {
+      persist(next);
+    } catch (error) {
+      return { ok: false, error: `${persistErrorText()}：${error?.message ?? error}` };
+    }
+    Object.assign(config, next);
+    return { ok: true, changed: true };
+  }
+
   const auditFile = path.join(stateDir, 'plugin-audit.jsonl');
   const audit = createAuditLog({
     file: auditFile,
@@ -117,8 +138,6 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
   const entries = [];
   const entryById = new Map();
   const hookIndex = new Map(KNOWN_HOOKS.map((hook) => [hook, []]));
-  // 运行态开关：只在本次进程内有效；没有记录时以 plugins.json 的 plugins.<id>.enabled 为准。
-  const runtimeEnabled = new Map();
   // 管理动作串行化：reload 期间不能让另一个 reload/enable 插进来，否则 hookIndex 会被写乱。
   let queue = Promise.resolve();
 
@@ -347,9 +366,8 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
     // 旧权限名（send:qq）已被归一成正式名，但插件作者应当改：只在加载时打一次日志，不阻断加载。
     for (const note of checked.deprecations ?? []) logLine(`⚠️ [plugins] ${dirName}：${note}`);
 
-    const runtime = runtimeEnabled.get(dirName);
-    const enabled = runtime !== undefined ? runtime : config.plugins[dirName]?.enabled !== false;
-    if (!enabled) {
+    // 启用状态只有一份：配置里的 plugins.<id>.enabled（启停动作会先把它写回去）。
+    if (config.plugins[dirName]?.enabled === false) {
       return { ok: true, status: 'disabled', manifest, hooks: [], personas: [], memories: [], dispose: null };
     }
 
@@ -1067,7 +1085,6 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       if (index >= 0) entries.splice(index, 1);
       entryById.delete(id);
     }
-    runtimeEnabled.delete(id);
     const relativeTrash = trashPath ? path.relative(rootDir, trashPath) : null;
     audit.append('uninstall', { plugin: id, detail: relativeTrash });
     logLine(`[plugins] 已卸载 ${id}${relativeTrash ? `（移到 ${relativeTrash}）` : ''}`);
@@ -1124,16 +1141,19 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       });
     },
 
-    /** 启用：只改本次进程的运行态，不写 plugins.json。 */
+    /** 启用：先把 plugins.<id>.enabled 写回配置，再构建实例；落盘失败就不动运行态。 */
     enable(id) {
       const key = String(id);
       return withLock(async () => {
         if (!config.enabled) return { ok: false, error: '插件内核已在 plugins.json 中禁用' };
-        runtimeEnabled.set(key, true);
+        const persisted = persistEnabled(key, true);
+        if (!persisted.ok) return { ok: false, error: persisted.error };
         const existing = entryById.get(key);
         if (existing?.status === 'active') return { ok: true, plugin: summarize(existing) };
         const desc = await buildInstance(key);
         if (!desc.ok) {
+          // 构建失败就把持久值退回去：一次失败不该让插件在重启后仍被当成「已启用」。
+          if (persisted.changed) persistEnabled(key, false);
           audit.append('enable-failed', { plugin: key, error: desc.error });
           return { ok: false, error: desc.error };
         }
@@ -1146,13 +1166,14 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       });
     },
 
-    /** 停用：只改本次进程的运行态，不写 plugins.json。 */
+    /** 停用：同样先写回配置，再拆实例。 */
     disable(id) {
       const key = String(id);
       return withLock(async () => {
         const existing = entryById.get(key);
         if (!existing) return { ok: false, error: `插件不存在: ${key}` };
-        runtimeEnabled.set(key, false);
+        const persisted = persistEnabled(key, false);
+        if (!persisted.ok) return { ok: false, error: persisted.error };
         await disposeEntry(existing);
         existing.status = 'disabled';
         existing.updatedAt = isoNow();
@@ -1173,8 +1194,9 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
 
     /**
      * 控制台改配置：只接受白名单字段（watch / filters.inbound / limits / install.enabled /
-     * persona.provider / plugins.<id>.enabled），校验失败整份不落盘。
-     * 生效边界：watch、filters、limits、install 立即生效；persona.provider 与插件 enabled 需重启。
+     * persona.provider），校验失败整份不落盘。
+     * 生效边界：watch、filters、limits、install 立即生效；persona.provider 需重启。
+     * 插件启停不从这里走：enable/disable 自己写 plugins.<id>.enabled。
      */
     /**
      * 写单个插件的 config（plugins.json → plugins.<id>.config）。
@@ -1234,12 +1256,6 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
       }
       if (isPlainObject(patch.install) && patch.install.enabled !== undefined) raw.install.enabled = patch.install.enabled;
       if (isPlainObject(patch.persona) && patch.persona.provider !== undefined) raw.persona.provider = patch.persona.provider;
-      if (isPlainObject(patch.plugins)) {
-        for (const [id, entry] of Object.entries(patch.plugins)) {
-          if (!isPlainObject(entry) || entry.enabled === undefined) continue;
-          raw.plugins[id] = { ...(raw.plugins[id] ?? { config: {} }), enabled: entry.enabled };
-        }
-      }
 
       const { config: next, warnings } = normalizeConfig(raw);
       if (warnings.length) return { ok: false, error: warnings.join('；'), warnings };
@@ -1256,7 +1272,7 @@ export async function createPluginKernel({ rootDir, stateDir, log, config: initi
         if (config.watch) startWatching();
         else stopWatching();
       }
-      const restartRequired = Boolean(patch.persona || patch.plugins);
+      const restartRequired = Boolean(patch.persona);
       audit.append('settings', { detail: Object.keys(patch).join(',') });
       return { ok: true, config: serializeConfig(config), restartRequired, warnings: [] };
     },

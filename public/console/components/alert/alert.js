@@ -1,5 +1,7 @@
 // 提示条（Alert）：页面级/表单级的说明、警告与错误。
 // 结构对齐 Element Plus：图标 + 标题 + 描述，可带关闭按钮。
+// 两种形态：默认只有左侧一条竖色条；boxed: true 换成整圈边框的说明卡，
+// 适合「整段说明要先读」的场合（如模型卡里的目录状态、看图降级）。
 //
 // 关闭状态的持久化：
 //   persist: 'local' | 'session' | 'none'（默认 'local'）
@@ -33,9 +35,11 @@ function writeDismissed(set) {
 /**
  * @param {{
  *   id?: string, type?: 'info'|'success'|'warning'|'danger',
- *   title?: string, description?: string, closable?: boolean,
+ *   title?: string, description?: string, closable?: boolean, boxed?: boolean,
  *   persist?: 'local'|'session'|'none', actions?: string, className?: string
  * }} spec
+ *   `boxed`：整圈边框 + 卡片底（说明卡观感），适合「整段说明要先读」的提示；
+ *   不传则是默认形态，只有左侧一条竖向色条。
  */
 export function alertHtml({
   id = '',
@@ -46,12 +50,14 @@ export function alertHtml({
   html = '',
   hidden = false,
   closable = false,
+  boxed = false,
   persist = 'local',
   actions = '',
   className = '',
 } = {}) {
   const tone = ['success', 'warning', 'danger'].includes(type) ? type : 'info';
-  const classes = ['alert', `alert--${tone}`, closable ? 'alert--closable' : '', className].filter(Boolean).join(' ');
+  const classes = ['alert', `alert--${tone}`, boxed ? 'alert--boxed' : '', closable ? 'alert--closable' : '', className]
+    .filter(Boolean).join(' ');
   const attrs = [
     `class="${classes}"`,
     'role="status"',

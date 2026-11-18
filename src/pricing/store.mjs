@@ -8,12 +8,14 @@
 //   3. 本机覆盖 —— 本文件。操作者为同一个平台改价或补一个平台还没申报的模型，
 //      不影响申报面，也不影响别的 Agent 平台。
 //
-// 本地层**只存单价差异**：按模型 id 扁平写四个单价，没写的字段回落申报价；申报里没有的 id
+// 本地层**只存差异**：按模型 id 扁平写四个单价，没写的字段回落申报价；申报里没有的 id
 // 就是本地新增。所以「恢复平台申报」= 删掉这个文件，不需要迁移账本 —— 金额是读取时
 // 按采样重算的，换表即重算历史。
 //
-// 峰谷口径不在这里：它只属于声明面（内置官方口径 + 平台申报），本机覆盖改不了。
-// 否则同一条用量会因“谁在什么时间读”而变价，账本里的历史金额就不可复现了。
+// 峰谷口径也能逐模型覆盖（`policy`：高峰时段 / 星期 / 倍数），但只写「与申报不同」的那几组，
+// 没写的组回落模型级申报 → 平台申报 → 内置口径。覆盖的是「以后怎么算」，
+// 账本里只存采样与档位，所以改完仍是可复现的：历史金额按当前表重算，与改单价同一条语义。
+// 货币 / 单位不在覆盖范围内 —— 那是平台的商业条款，不是本机的计费选择。
 //
 // 校验口径与 priceTableFromCatalog 一致：缺「未命中」或「输出」单价的模型不进价目表
 // （只计 token、不算钱），本地新增模型必须同时给出这两项，否则写进去也只是看不见。
@@ -22,13 +24,16 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { atomicWriteFile } from '../lib/json-store.js';
 import { priceTableFromCatalog } from '../model-prices.js';
+import { normalizePricingPolicy } from './policy.mjs';
 
 /** Agent 平台 id 文法（与平台目录名同一条）：先落成文件名，得先挡住路径穿越。 */
 const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /** 四个计费桶，顺序即界面列序。 */
 export const PRICE_KEYS = Object.freeze(['cacheHit', 'cacheMiss', 'cacheWrite', 'output']);
+/** 本机层能覆盖的峰谷口径键：货币与单位属于平台条款，留在声明面。 */
+export const LOCAL_POLICY_KEYS = Object.freeze(['peakMultiplier', 'peakWindows', 'peakWeekdays']);
 
-const LOCAL_HEADER = '# 本机价目覆盖：按模型 id 覆盖或新增；没写的字段回落平台申报（profiles/agent-platforms/<id>/agent-platform.yml）。\n'
+const LOCAL_HEADER = '# 本机价目覆盖：按模型 id 覆盖单价或高峰口径；没写的字段回落平台申报（profiles/agent-platforms/<id>/agent-platform.yml）。\n'
   + '# 由控制台「全局配置 → 模型与行为 → 价目表」维护；删掉本文件即恢复平台申报。';
 
 function agentName(agent) {
@@ -45,8 +50,9 @@ function finite(value) {
 }
 
 /**
- * 单个模型的覆盖项：四个单价按需给，`label` 只在本地新增时有用。
+ * 单个模型的覆盖项：四个单价按需给，`label` 只在本地新增时有用，`policy` 是峰谷口径覆盖。
  * 给 null 表示「这一项不覆盖」（界面上清空的格子）。
+ * 口径写了但不合法时报错而不是静默丢弃：那是用户刚在弹窗里改的东西，默默不生效最难查。
  */
 export function normalizePriceEntry(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -61,6 +67,18 @@ export function normalizePriceEntry(raw) {
   }
   const label = String(raw.label ?? '').trim();
   if (label) out.label = label;
+  if ('policy' in raw && raw.policy !== null) {
+    if (typeof raw.policy !== 'object' || Array.isArray(raw.policy)) {
+      throw new Error(`高峰口径必须是对象：policy = ${JSON.stringify(raw.policy)}`);
+    }
+    const policy = {};
+    const normalized = normalizePricingPolicy(raw.policy);
+    for (const key of LOCAL_POLICY_KEYS) if (key in normalized) policy[key] = normalized[key];
+    if (!Object.keys(policy).length && Object.keys(raw.policy).length) {
+      throw new Error('高峰口径不合法：每个时段要「起点 < 终点」且是 0–24 的整点，星期取 1–7，倍数大于 0');
+    }
+    if (Object.keys(policy).length) out.policy = policy;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -103,8 +121,11 @@ export function mergeCatalog(declaredCatalog, local) {
   }
   for (const [id, override] of Object.entries(local.models)) {
     const base = merged.get(id) ?? { id, label: id, pricing: {} };
-    const { label, ...prices } = override;
-    merged.set(id, { ...base, label: label ?? base.label ?? id, pricing: { ...(base.pricing ?? {}), ...prices } });
+    const { label, policy, ...prices } = override;
+    const next = { ...base, label: label ?? base.label ?? id, pricing: { ...(base.pricing ?? {}), ...prices } };
+    // 口径按组盖：本机写了哪组就用本机的，没写的组仍回落申报 / 平台 / 内置。
+    if (policy) next.pricingPolicy = { ...(base.pricingPolicy ?? {}), ...policy };
+    merged.set(id, next);
   }
   return { ...declared, models: [...merged.values()] };
 }

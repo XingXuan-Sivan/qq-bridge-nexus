@@ -469,6 +469,44 @@ tr:last-child td {
   background:var(--pill-red-bg);
   color:var(--pill-red-fg)
 }
+/* 带框变体（boxed）：整圈边框 + 卡片底，与人格页的 .layer-note 同一种「说明卡」观感。
+   默认形态只有左侧一条竖色条，适合一行结论；一段要连着读完的说明用 boxed，
+   多条叠在表单上方时也有明确的边界。 */
+.alert--boxed {
+  padding:14px 16px;
+  border:1px solid var(--accent-border-soft);
+  border-radius:12px;
+  background:var(--accent-soft-bg);
+  color:var(--text-secondary);
+  margin:0 0 10px
+}
+.alert--boxed .alert-title {
+  font-size:13px;
+  color:var(--text-strong);
+  margin-bottom:4px
+}
+/* 多条堆在同一个容器里时，末条不再多留底边（栅格自身有间距）。 */
+.alert--boxed:last-child {
+  margin-bottom:0
+}
+.alert--boxed.alert--success {
+  border-color:var(--ok);
+  background:var(--pill-green-bg);
+  color:var(--pill-green-fg)
+}
+.alert--boxed.alert--warning {
+  border-color:var(--warn-border);
+  background:var(--warn-bg);
+  color:var(--warn-fg)
+}
+.alert--boxed.alert--warning .alert-title {
+  color:var(--warn-fg-strong)
+}
+.alert--boxed.alert--danger {
+  border-color:var(--danger-border);
+  background:var(--pill-red-bg);
+  color:var(--pill-red-fg)
+}
 .alert-body {
   flex:1;
   min-width:0

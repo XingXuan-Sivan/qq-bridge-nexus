@@ -3,24 +3,25 @@
 // 与平台详情同构：页头（components/detail-head）+ 标签页 + 一整张大卡（detail-panel），
 // 标签回答三个问题：
 //   概览  这个插件是什么（状态、版本、权限、钩子、入口）+ 调用计数 + 最近一次错误
-//   配置  configSchema 生成的表单与落盘开关
+//   配置  configSchema 生成的表单
 //   审计  内核记下的安装、卸载与配置写入
 // 数据来自 /api/plugins/<id>：清单只给摘要，审计与计数器只有这个接口才有。
-// 保存配置与落盘开关都写同一批端点；成功后只让清单刷新，本页不重挂——
-// 重挂会把状态位文案与用户刚敲的值一起冲掉。
+// 页头的状态动作条（启停 / 重载 / 卸载）与清单卡片同一组接口，操作后就地重画；
+// 写配置成功后只让清单刷新，本页不重挂——重挂会把状态位文案与用户刚敲的值一起冲掉。
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { api } from '../../js/api.js';
 import { detailHeadHtml } from '../../components/detail-head/detail-head.js';
 import { detailCardsHtml, detailPanelHtml, detailSectionHtml } from '../../components/detail-panel/detail-panel.js';
 import { keyValueHtml } from '../../components/key-value/key-value.js';
 import { tag } from '../../components/tag/tag.js';
-import { bindSwitches, getSwitch, inlineActions, renderFields } from '../../components/form/form.js';
+import { bindSwitches, inlineActions, renderFields } from '../../components/form/form.js';
 import { readSchemaPatch, schemaFields } from '../../components/form/schema.js';
-import { PERSIST_FIELDS, pluginStatusTag } from './fields.js';
+import { confirmBox } from '../../components/message-box/message-box.js';
+import { pluginStatusTag } from './fields.js';
 
 const BACK_LABEL = '返回插件清单';
 const CONFIG_MOUNT = '<div id="pluginConfigMount"></div>';
-const PERSIST_MOUNT = '<div id="pluginPersistMount"></div>';
+const STATE_LABELS = { enable: '启用', disable: '停用', reload: '重载', uninstall: '卸载' };
 
 /** 标签两侧同构：概览看「是什么」，配置改「写什么」，审计查「干过什么」。 */
 const TABS = Object.freeze([
@@ -99,20 +100,13 @@ function overviewHtml(item) {
 
 function configHtml(item) {
   const declared = Boolean(item.configSchema);
-  return [
-    detailSectionHtml({
-      title: '插件配置',
-      note: declared
-        ? '字段来自插件声明的 <code>configSchema</code>：保存后写入 <code>plugins.json</code> 并重载该插件。'
-        : '这个插件没有声明 <code>configSchema</code>：下面只展示 <code>plugins.json</code> 里的原始配置。',
-      body: CONFIG_MOUNT,
-    }),
-    detailSectionHtml({
-      title: '启用状态',
-      note: '这个开关写的是持久值：打开并保存后重启桥接仍然生效；只改本次运行请用清单卡片上的启用 / 停用。',
-      body: PERSIST_MOUNT,
-    }),
-  ].join('');
+  return detailSectionHtml({
+    title: '插件配置',
+    note: declared
+      ? '字段来自插件声明的 <code>configSchema</code>：保存后写入 <code>plugins.json</code> 并重载该插件。'
+      : '这个插件没有声明 <code>configSchema</code>：下面只展示 <code>plugins.json</code> 里的原始配置。',
+    body: CONFIG_MOUNT,
+  });
 }
 
 function auditHtml(item) {
@@ -131,8 +125,16 @@ function paintPanel() {
   else if (tab === 'config') {
     host.innerHTML = configHtml(plugin);
     mountConfig(plugin);
-    mountPersist(plugin);
   } else if (tab === 'audit') host.innerHTML = auditHtml(plugin);
+}
+
+/** 页头的状态动作条：与清单卡片同一组动作，操作后就地重画本页。 */
+function stateActionsHtml(item) {
+  const toggle = item.status === 'active'
+    ? '<button class="btn small" type="button" data-plugin-state="disable">停用</button>'
+    : '<button class="btn small" type="button" data-plugin-state="enable">启用</button>';
+  return `${toggle}<button class="btn small" type="button" data-plugin-state="reload">重载</button>`
+    + '<button class="btn small danger" type="button" data-plugin-state="uninstall">卸载</button>';
 }
 
 function shellHtml(item) {
@@ -144,7 +146,8 @@ function shellHtml(item) {
       title: item.name || item.id,
       code: item.id,
       meta: esc(item.description || '这个插件没有写说明。'),
-      badges: [pluginStatusTag(item.status), item.version ? tag(`v${item.version}`, { type: 'primary' }) : ''],
+      // 状态与版本已经在「基本信息」里，页头不再重复一份徽标。
+      actions: stateActionsHtml(item),
       backLabel: BACK_LABEL,
     })}
       <div class="page-tabs" role="tablist">
@@ -178,19 +181,6 @@ function mountConfig(item) {
   }));
 }
 
-/** 落盘开关：值来自 plugins.json 的 enabled（缺省算开）。 */
-function mountPersist(item) {
-  const host = root?.querySelector('#pluginPersistMount');
-  if (!host) return;
-  const checked = item.config?.enabled !== false;
-  renderFields(host, PERSIST_FIELDS.map((field) => ({ ...field, checked })), { columns: 1 });
-  bindSwitches(host);
-  host.insertAdjacentHTML('beforeend', inlineActions({
-    items: [{ id: 'pluginPersistSave', label: '保存启用状态', variant: 'primary' }],
-    status: 'pluginPersistMsg',
-  }));
-}
-
 /** 状态位文字写在该卡的动作条里；卡已被重画时什么也不做。 */
 function setStatus(id, text) {
   const el = root?.querySelector(`#${id}`);
@@ -220,16 +210,36 @@ async function saveConfig(testOnly) {
   }
 }
 
-async function savePersist() {
+/**
+ * 启停 / 重载 / 卸载：与清单卡片同一组接口。
+ * 成功后用响应里的摘要就地重画（不重拉详情、不跳路由），配置草稿与当前标签都保留。
+ */
+async function runStateAction(action, button) {
   if (!plugin) return;
-  const enabled = getSwitch(root?.querySelector('#pluginPersistEnabled'));
-  setStatus('pluginPersistMsg', '保存中…');
+  const id = plugin.id;
+  const label = STATE_LABELS[action] || action;
+  if (action === 'uninstall' && !(await confirmBox({ message: `卸载 ${id}？目录会移到 state/_trash，不会硬删。`, danger: true, confirmText: '卸载' }))) return;
+  if (button) button.disabled = true;
+  let data;
   try {
-    const data = await api('/api/plugins/settings', 'PATCH', { plugins: { [plugin.id]: { enabled } } });
-    setStatus('pluginPersistMsg', data?.restartRequired ? '已写入 plugins.json，重启后生效' : '已保存');
-    showConsoleToast('插件配置已写入 plugins.json');
+    data = action === 'uninstall'
+      ? await api(`/api/plugins/${encodeURIComponent(id)}`, 'DELETE')
+      : await api(`/api/plugins/${encodeURIComponent(id)}/${action}`, 'POST');
+    if (!data?.ok) throw new Error(data?.error || '未知错误');
+    showConsoleToast(`${id} 已${label}`);
   } catch (error) {
-    setStatus('pluginPersistMsg', `保存失败：${error?.message || '未知错误'}`);
+    if (button) button.disabled = false;
+    showConsoleToast(`${id} ${label}失败：${error?.message || '未知错误'}`);
+    return;
+  }
+  onChanged?.();
+  // 卸载后详情没有对象了，退回清单；其余动作推进状态并重画。
+  if (action === 'uninstall') { onBack?.(); return; }
+  if (data.plugin) {
+    plugin = { ...plugin, ...data.plugin };
+    paint(plugin);
+  } else {
+    await load(id);
   }
 }
 
@@ -244,9 +254,10 @@ function onClick(event) {
     if (next && next !== tab) onTab?.(next);
     return;
   }
+  const stateButton = event.target.closest('[data-plugin-state]');
+  if (stateButton) { void runStateAction(stateButton.dataset.pluginState, stateButton); return; }
   if (event.target.closest('#pluginConfigSave')) { void saveConfig(false); return; }
   if (event.target.closest('#pluginConfigTest')) { void saveConfig(true); return; }
-  if (event.target.closest('#pluginPersistSave')) void savePersist();
 }
 
 function paint(item) {

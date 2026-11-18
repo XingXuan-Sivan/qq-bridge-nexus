@@ -280,17 +280,21 @@ test('管理动作：disable / enable / reload / detail，重载失败保留旧�
   assert.ok(Array.isArray(detail.audit));
   assert.equal(kernel.detail('missing'), null);
 
-  // 停用：钩子不再调用，provider 也不再解析
+  // 停用：钩子不再调用，provider 也不再解析，并把 false 写回 plugins.json
   assert.equal((await kernel.disable('demo')).ok, true);
   assert.equal(kernel.status().plugins.find((p) => p.id === 'demo').status, 'disabled');
+  const afterDisable = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
+  assert.equal(afterDisable.plugins.demo.enabled, false, '停用会写回 plugins.json（重启后仍停用）');
   kernel.notify('onInbound', { key: 'g', text: 'disabled' });
   await sleep(80);
   assert.equal(fs.existsSync(stateFile('inbound')), false);
   assert.equal(kernel.personaResolve('group:123'), null);
 
-  // 启用：从磁盘重新加载
+  // 启用：从磁盘重新加载，同样写回 plugins.json
   assert.equal((await kernel.enable('demo')).ok, true);
   assert.equal(kernel.status().plugins.find((p) => p.id === 'demo').status, 'active');
+  const afterEnable = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
+  assert.equal(afterEnable.plugins.demo.enabled, true, '启用也会写回 plugins.json');
 
   // 重载：换一份实现，验证读到新版本、新行为
   await sleep(20);
@@ -587,23 +591,24 @@ test('设置接口：白名单字段校验、写回 plugins.json、watch 即时�
       watch: true,
       filters: { inbound: true },
       limits: { hookTimeoutMs: 1500 },
-      plugins: { demo: { enabled: false } },
     });
     assert.equal(ok.ok, true);
-    assert.equal(ok.restartRequired, true);
+    // 插件启停不从这里走：只有 persona.provider 会要求重启。
+    assert.equal(ok.restartRequired, false);
     const file = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
     assert.equal(file.watch, true);
     assert.equal(file.filters.inbound, true);
     assert.equal(file.limits.hookTimeoutMs, 1500);
-    assert.equal(file.plugins.demo.enabled, false);
+    assert.deepEqual(file.plugins, {}, 'settings 不再写插件条目');
     assert.equal(kernel.status().watch, true);
     assert.equal(kernel.status().watching, true);
 
-    // 不在白名单里的字段直接忽略：audit 不能被界面改掉。
-    const ignored = await kernel.updateSettings({ nope: 1, audit: { enabled: false } });
+    // 不在白名单里的字段直接忽略：audit 不能被界面改掉，plugins 段也不在这里写。
+    const ignored = await kernel.updateSettings({ nope: 1, audit: { enabled: false }, plugins: { demo: { enabled: false } } });
     assert.equal(ignored.ok, true);
     const file2 = JSON.parse(fs.readFileSync(path.join(root, 'plugins.json'), 'utf8'));
     assert.equal(file2.audit.enabled, true);
+    assert.equal(file2.plugins.demo, undefined, '启用状态改由 enable/disable 落盘');
   } finally {
     await kernel.shutdown();
     fs.rmSync(root, { recursive: true, force: true });

@@ -11,7 +11,7 @@
 // 7. 空覆盖 = 没有本机层：删文件、回落申报；
 // 8. 非法 agent id 不落到文件系统（防路径穿越），effective 退回申报表而不是抛错；
 // 9. 坏 YAML 报出文件名，不静默当成「没有覆盖」；
-// 10. 模型级峰谷只能由声明面给（本机层没有这个字段）；
+// 10. 模型级峰谷：声明面给，本机层能逐模型覆盖（只盖写了的组，没写的组回落）；
 // 11. 内置官方价是最底下那层：申报优先，没申报的模型用官方价。
 import fs from 'node:fs';
 import os from 'node:os';
@@ -89,7 +89,7 @@ assert(keptGroup.peakWindows[0][0] === 10, '合法的时段组整组保留');
 assert(Object.keys(normalizePricingPolicy(null)).length === 0 && Object.keys(normalizePricingPolicy([1])).length === 0, '非对象输入当作空口径');
 assert(Array.isArray(normalizePricingPolicy({ peakWindows: [] }).peakWindows), '显式空窗口保留（= 这个模型全天同价）');
 
-// ── 4b. 模型级峰谷（只能由声明面给） ──────────────────────────────────
+// ── 4b. 模型级峰谷（声明面给，本机层可逐模型覆盖） ──────────────────────
 const MON_10 = Date.parse('2026-03-02T10:00:00+08:00'); // 周一 10:00
 const MON_03 = Date.parse('2026-03-02T03:00:00+08:00'); // 周一 03:00
 const ownPeak = {
@@ -105,9 +105,22 @@ assert(ratesAt('m2', MON_10, ownTable).tier === 'off', '模型级窗口盖掉平
 assert(ratesAt('m2', MON_03, ownTable).tier === 'peak', '模型级窗口生效：该模型自己声明的高峰时段');
 assert(ratesAt('m1', MON_10, priceTableFromCatalog(DECLARED)).tier === 'peak', '没写模型级口径时仍按平台峰谷');
 assert(ownTable.models.m1.peak.peakWindows.length === 0 && ownTable.models.m2.peak.peakWindows[0][1] === 8, '模型级口径只盖写了的组，与单价分开存');
-// 本机覆盖只存单价：带 policy 字段的文档会被归一化丢弃，峰谷仍是声明面给的那份。
-const localWithPolicy = mergeCatalog(ownPeak, normalizeLocalPricing({ models: { m2: { output: 9, policy: { peakWindows: [] } } } }));
-assert(localWithPolicy.models[1].pricingPolicy.peakWindows[0][1] === 8, '本机层改不了模型级峰谷（声明面才是唯一来源）');
+// 本机覆盖与申报共用同一套判据：只盖写了的那组，没写的组回落下一层。
+const localPeak = mergeCatalog(ownPeak, normalizeLocalPricing({ models: { m2: { output: 9, policy: { peakWindows: [], peakWeekdays: [] } } } }));
+const localPeakTable = priceTableFromCatalog(localPeak);
+assert(localPeak.models[1].pricingPolicy.peakWindows.length === 0, '本机层能改模型级峰谷：整组盖掉申报的窗口');
+assert(localPeak.models[1].pricing.output === 9 && localPeak.models[1].pricingPolicy.peakWeekdays.length === 0, '单价与口径可以同时覆盖');
+assert(ratesAt('m2', MON_03, localPeakTable).tier === 'off', '本机空窗口立即生效：原来 00–08 的高峰不再算高峰');
+const partialPeak = mergeCatalog(ownPeak, normalizeLocalPricing({ models: { m2: { policy: { peakWeekdays: [3] } } } }));
+assert(partialPeak.models[1].pricingPolicy.peakWeekdays.join() === '3', '只写星期时窗口仍用申报的那组');
+assert(partialPeak.models[1].pricingPolicy.peakWindows[0][1] === 8, '没写的组回落模型级申报');
+// 写了不合法的口径要报错：用户刚在弹窗里改的东西默默不生效最难查。
+rejected = false;
+try { normalizePriceEntry({ policy: { peakWindows: [[20, 8]] } }); } catch { rejected = true; }
+assert(rejected, '起止颠倒的高峰时段被拒绕，不静默丢掉');
+rejected = false;
+try { normalizePriceEntry({ policy: { peakMultiplier: 0 } }); } catch { rejected = true; }
+assert(rejected, '0 倍的高峰口径被拒绕');
 
 // ── 4c. 内置官方价 ─────────────────────────────────────────
 const builtinOnly = priceTableFromCatalog(withBuiltin(null));
@@ -150,6 +163,14 @@ store.save('dsh', { models: { 'local-only': { label: '本地新增', cacheMiss: 
 const effective = store.effective('dsh', DECLARED);
 assert(effective.models['local-only']?.off.cacheMiss === 5 && effective.models['local-only'].off.cacheWrite === 5, '新增模型进价目表，缺写入价时按未命中价计');
 assert(effective.models.m1.off.output === 2, '整段写入：上一次提交里没出现的模型被取消覆盖');
+
+// 口径覆盖要跟着落盘，而且不需要同时改单价。
+store.save('dsh', { models: { m1: { output: 3 }, m2: { policy: { peakWindows: [[10, 12]], peakMultiplier: 1.8 } } } }, DECLARED);
+assert(store.readLocal('dsh').models.m2.policy.peakWindows[0][1] === 12, '本机层的 policy 与单价一起落盘');
+const localPeakEffective = store.effective('dsh', DECLARED);
+assert(localPeakEffective.models.m2.peak.peakWindows[0][0] === 10 && localPeakEffective.models.m2.peak.peakMultiplier === 1.8, 'effective() 用本机口径重算峰谷');
+assert(ratesAt('m2', Date.parse('2026-03-02T11:00:00+08:00'), localPeakEffective).tier === 'peak', '本机口径改完后 11:00 算高峰');
+assert(ratesAt('m2', Date.parse('2026-03-02T09:30:00+08:00'), localPeakEffective).tier === 'off', '申报的 09–12 窗口被整组盖掉：09:30 变成空闲');
 
 // 空覆盖 = 删文件
 const cleared = store.save('dsh', { models: {} }, DECLARED);

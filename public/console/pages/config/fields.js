@@ -3,7 +3,9 @@
 // 「Agent 平台」卡只属于全局配置（总览页不装配），所以它的字段写在这里。
 import { OVERVIEW_FIELDS } from '../overview/fields.js';
 
-// 默认 Agent 平台 + 当前运行 + 探活：配置面与运行期是两个事实，界面上分开写。
+// 默认 Agent 平台 + 模型设置：配置面与运行期是两个事实 —— 换默认只落盘，本进程仍装配原来那个，
+// 所以选择框的提示直接写明这一点；运行期状态不在这张卡里重复一遍，「探活」按钮给出
+// 当下的连通结论。
 const AGENT_FIELDS = {
   fields: [
     {
@@ -11,26 +13,12 @@ const AGENT_FIELDS = {
       type: 'select',
       label: '默认 Agent 平台',
       options: [],
-      hint: '下次启动桥接时装配它；当前运行的是下面这一行，改这里不影响本进程。',
-    },
-    {
-      name: 'agentRunningReadout',
-      type: 'custom',
-      label: '当前运行',
-      span: 2,
-      html: '<div id="agentRunningReadout"><span class="meta">读取中…</span></div>',
-    },
-    {
-      name: 'agentProbeReadout',
-      type: 'custom',
-      label: '探活',
-      span: 2,
-      html: '<div id="agentProbeReadout"><span class="meta">读取中…</span></div>',
+      hint: '下次启动桥接时装配它，改这里不影响本进程；模型设置写下去后下一条消息生效。',
     },
   ],
 };
 
-// 动作条排在模型控件之后：卡里先选平台、看它的模型，最后才是「刷新」「保存」。
+// 动作条排在模型控件之后：卡里先选平台、看它的模型，最后才是「刷新」「探活」「保存」。
 const AGENT_ACTIONS = {
   fields: [
     {
@@ -38,6 +26,7 @@ const AGENT_ACTIONS = {
       id: 'agentActions',
       items: [
         { id: 'agentRefresh', label: '刷新' },
+        { id: 'agentProbe', label: '探活' },
         { id: 'agentSave', label: '保存', variant: 'primary' },
       ],
       status: 'agentMsg',

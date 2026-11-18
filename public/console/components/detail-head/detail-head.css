@@ -23,3 +23,15 @@
 .detail-head-main .meta { margin: 0; }
 /* 返回清单是页头的一部分：在标题上方，与标题同列。 */
 .detail-back { margin-bottom: 10px; }
+/* 徽标与状态动作分两行：徽标在上（一行不换），动作在下（一行不换），都靠右。 */
+.detail-head-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+/* 只有动作、没有徽标时：动作行对齐标题（返回按钮的高度 + 它的下边距），不跟着页头行上移。 */
+.detail-head-aside--solo {
+  padding-top: calc(var(--control-h-sm, 32px) + 10px);
+}
+.detail-head-actions { flex-wrap: nowrap; }

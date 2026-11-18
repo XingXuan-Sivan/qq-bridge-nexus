@@ -22,17 +22,20 @@ import { confirmBox } from '../../components/message-box/message-box.js';
  * 在 host 里挂载模型设置（控件 + 可选动作条 + 提示条）。
  * @param {HTMLElement} host 挂载点（组件自己铺控件）
  * @param {{agentId: string, config?: object, prefix?: string, actions?: boolean, toast?: boolean,
- *   onStatus?: (text: string) => void, onSaved?: () => void}} options
+ *   noticesHost?: HTMLElement, onStatus?: (text: string) => void, onSaved?: () => void}} options
  *   config 是注册表条目里的那一份（provider / model / reasoningEffort / vision）；
  *   prefix 是控件 id 的命名空间（平台详情用 `platform`，全局配置用 `agent`，最终 id 为 `${prefix}Model*`）；
  *   actions 为 false 时不画「刷新 / 保存」动作条，由调用方在卡片级动作条里调 save() / refresh()；
+ *   noticesHost 是提示条的空位：不传就铺在控件最前面，传了就提到调用方指定的位置
+ *   （全局配置把「默认平台」排在控件之前，提示条需要停在整张卡的最上面）；
  *   onStatus 是状态文字的出口：不传就写组件自己的状态位，传了由调用方决定写到哪；
  *   onSaved 是写成功后的刷新回调（重拉注册表 / 重画宿主由调用方决定）。
  * @returns {{reload: () => Promise<void>, refresh: (options?: object) => Promise<void>,
  *   save: () => Promise<{ok: boolean, message?: string, canceled?: boolean}>, destroy: () => void} | null}
  */
 export function mountAgentModel(host, {
-  agentId, config = {}, prefix = 'agent', actions = true, toast = true, onStatus = null, onSaved = null,
+  agentId, config = {}, prefix = 'agent', actions = true, toast = true, noticesHost = null,
+  onStatus = null, onSaved = null,
 } = {}) {
   const id = String(agentId ?? '').trim().toLowerCase();
   if (!host || !id) return null;
@@ -88,7 +91,16 @@ export function mountAgentModel(host, {
       status: `${prefix}ModelMsg`,
     });
   }
-  FIELDS.push({ name: `${prefix}ModelNotices`, type: 'custom', span: 2, html: `<div id="${prefix}ModelNotices"></div>` });
+  // 提示条放在表单上方：这些都是「选之前就该知道」的事实（目录状态、第三方、关思考、看图降级），
+  // 跟在字段后面时会被四行下拉挤到卡片底部。默认铺在字段表首位；调用方另给位置时先占住那里。
+  const noticesMarkup = `<div id="${prefix}ModelNotices"></div>`;
+  let noticesEl = null;
+  if (noticesHost) {
+    noticesHost.innerHTML = noticesMarkup;
+    noticesEl = noticesHost.firstElementChild;
+  } else {
+    FIELDS.unshift({ name: `${prefix}ModelNotices`, type: 'custom', span: 2, html: noticesMarkup });
+  }
 
   /** 声明面里的模型清单：不用对端在线，目录读不到时它是唯一的选项来源。 */
   const declaredModels = () => (catalog?.declared?.models ?? []).filter((item) => item?.id);
@@ -167,14 +179,16 @@ export function mountAgentModel(host, {
 
   /** 提示条：目录状态、第三方提供方、关思考、看图降级——都是「改之前该知道」的事实。 */
   function renderNotices() {
-    const hostEl = control('Notices');
-    if (!hostEl) return;
-    hostEl.replaceChildren();
+    // 没传 noticesHost 时，空位是字段表画出来的，画完才拿得到。
+    noticesEl ??= control('Notices');
+    if (!noticesEl) return;
+    noticesEl.replaceChildren();
     const { provider, model } = selected();
     const vision = control('Vision')?.value ?? 'auto';
     const effort = control('Effort')?.value ?? '';
     if (catalog?.error) {
-      mountAlert(hostEl, {
+      mountAlert(noticesEl, {
+        boxed: true,
         type: 'warning',
         title: '实时目录不可用',
         description: declaredModels().length
@@ -183,28 +197,31 @@ export function mountAgentModel(host, {
       });
     }
     if ((catalog?.view?.failures ?? []).length) {
-      mountAlert(hostEl, {
+      mountAlert(noticesEl, {
+        boxed: true,
         type: 'info',
         title: '有提供方没读到',
         description: catalog.view.failures.map((item) => `${item.name || item.id}（${item.message || '未说明'}）`).join('、'),
       });
     }
     if (provider?.thirdParty) {
-      mountAlert(hostEl, {
+      mountAlert(noticesEl, {
+        boxed: true,
         type: 'warning',
         title: '第三方提供方',
         description: `${provider.name || provider.id} 不是平台自己的提供方：会话内容（群友消息、图片、人格卡、记忆）会发给它处理，切换前先确认它的隐私政策。`,
       });
     }
     if (effort === 'off') {
-      mountAlert(hostEl, { type: 'warning', title: '思考已关闭', description: '回复更快，但工具调用、读群判断和人格一致性可能变差。' });
+      mountAlert(noticesEl, { boxed: true, type: 'warning', title: '思考已关闭', description: '回复更快，但工具调用、读群判断和人格一致性可能变差。' });
     }
     // 看图能力：实时目录优先，读不到时用声明面的 `vision: true/false`。
     const selectedId = model?.id ?? String(saved.model ?? '');
     const declaredVision = declaredModels().find((item) => item.id === selectedId)?.vision === true;
     const sees = vision === 'yes' || (vision === 'auto' && (model?.vision === 'yes' || (!model && declaredVision)));
     if (!sees) {
-      mountAlert(hostEl, {
+      mountAlert(noticesEl, {
+        boxed: true,
         type: 'info',
         title: '图片会变成文字占位',
         description: vision === 'no'
@@ -329,6 +346,6 @@ export function mountAgentModel(host, {
     reload: () => refresh({ announce: true }),
     refresh: (options) => refresh(options),
     save,
-    destroy: () => { destroyed = true; abort.abort(); },
+    destroy: () => { destroyed = true; abort.abort(); noticesEl?.replaceChildren(); },
   };
 }

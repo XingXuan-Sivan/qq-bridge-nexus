@@ -329,7 +329,7 @@ span.time-field
 
 ### 列表页：卡片网格清单 + 二级详情页（2026-11-16 落地，`platforms` 与 `plugins` 为样板）
 
-「一屏看全 + 点进去改」的页面不再用左右分栏：清单页只放可点的卡片，改配置进二级页。两层都是 `.page-stack`，由页面自己切 `hidden`（清单留在 DOM 里，折叠组的展开状态不会因来回切而丢）。插件页没有折叠组：清单是三张卡（桥接插件 / 运行设置 / 安装插件），详情页是四张卡（属性 / 配置 / 启用状态 / 最近审计）。
+「一屏看全 + 点进去改」的页面不再用左右分栏：清单页只放可点的卡片，改配置进二级页。两层都是 `.page-stack`，由页面自己切 `hidden`（清单留在 DOM 里，折叠组的展开状态不会因来回切而丢）。插件页没有折叠组：清单是三张卡（桥接插件 / 运行设置 / 安装插件），详情页是一张大卡，卡内按「概览 / 配置 / 审计」三标签排。
 
 ```html
 <section class="page-stack">                 <!-- page.html：只留宿主 -->
@@ -449,7 +449,7 @@ span.time-field
 | 组件 | 入口 | 说明 |
 | --- | --- | --- |
 | 标签 | `tag/tag.js` | `tag(text, { type, size, title })`；`type` = default/primary/success/warning/danger/info。旧 `.pill*` 已删除，页面不再手写标签样式。 |
-| 提示条 | `alert/alert.js` | `alertHtml({ id, type, title, description, closable, persist })`；`persist` = local（刷新后仍关闭）/ session（本次会话）/ none。`hydrateAlerts(root)` 负责恢复关闭状态，`resetAlert(id)` 可重新显示。 |
+| 提示条 | `alert/alert.js` | `alertHtml({ id, type, title, description, closable, boxed, persist })`；`persist` = local（刷新后仍关闭）/ session（本次会话）/ none。`boxed: true` 是整圈边框的说明卡形态（`.alert--boxed`），默认只有左侧竖色条。`hydrateAlerts(root)` 负责恢复关闭状态，`resetAlert(id)` 可重新显示。 |
 | 浮层提示 | `message/message.js` | `toast({ type, title, message, duration })`；旧 `showConsoleToast` 保留为薄包装。`setMsg/clearMsg` 仍用于表单行内状态。 |
 | 折叠面板 | `collapse/collapse.js` | `collapseHtml({ id, title, body, open })`；页面级展开记忆由 `initGroups()` 统一负责（不要再用 `persist` 叠一套存储）。 |
 | 卡片 | `card/card.js` | `cardHtml({ id, title, note, description, actions, body, footer })`、`mountCard(host, spec)`。页面卡片一律由 JS 生成，`page.html` 只留容器与宿主。 |

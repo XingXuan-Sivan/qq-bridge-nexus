@@ -174,6 +174,21 @@ export function switchField({ id, label, checked = false, onLabel = '开', offLa
   return shell;
 }
 
+/**
+ * 一行「标签 + 控件」的字段壳：给动态拼出来的编辑行用（定时任务的时间规则、价目的高峰时段）。
+ * 与 fieldShell 同一套 .field-block / .field-row 标记，所以和静态字段逐行对齐；
+ * 不渲染错误行与字段 id —— 动态行自己按行持有控件。
+ * `label` / `hint` 原样插入，需要转义的调用方自己 esc（hint 里常带 <code>）。
+ * @param {{label:string, control:string, hint?:string, inline?:boolean}} options
+ *   inline：控件之间横排（时间范围、几个输入框），缺省让控件自己撑满控件列。
+ */
+export function fieldRowHtml({ label, control, hint = '', inline = false }) {
+  return `<div class="field-block"><div class="field-row">`
+    + `<span class="field-label">${label}</span>`
+    + `<div class="field-control${inline ? ' field-inline' : ''}">${control}</div>`
+    + `</div>${hint ? `<div class="field-notes"><p class="field-hint">${hint}</p></div>` : ''}</div>`;
+}
+
 /* 开关（switch 字段）渲染成 <button role="switch">，状态在 aria-checked 上，不在 .checked。
    页面如果没走 createForm，就必须用下面三个函数读写，否则会像 scheduler 那样：
    赋值 .checked 只加了个普通属性（视觉不变），读回来是 undefined（保存时把开关写坏）。 */

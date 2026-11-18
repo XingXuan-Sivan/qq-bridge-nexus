@@ -4,9 +4,9 @@ import { esc, showConsoleToast } from '../../js/ui.js';
 import { onPageRefresh } from '../../js/router.js';
 import { cardHtml } from '../../components/card/card.js';
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
-import { bindSwitches, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
+import { bindSwitches, fieldRowHtml, getSwitch, renderFields, setSwitch } from '../../components/form/form.js';
 import { initDateFields } from '../../components/date/date.js';
-import { initTimeFields } from '../../components/time/time.js';
+import { initTimeFields, timeFieldHtml } from '../../components/time/time.js';
 import { closeModal, modalHtml, openModal, wireModal } from '../../components/modal/modal.js';
 import { checkCellHtml, dataTableHtml, initDataTables, selectCellHtml } from '../../components/table/table.js';
 import { SCHED_FIELDS } from './fields.js';
@@ -195,20 +195,12 @@ function schedFieldsHtml(type, s = {}) {
     + `<button type="button" class="date-field-btn btn-icon" aria-label="选择${label}">${CAL}</button>`
     + `<input type="date" class="date-field-native" data-date-native="${id}" tabindex="-1" aria-hidden="true">`
     + `</span>`;
-  // 时间字段：同上，文本框可整段键入 HH:mm，时钟按钮调起原生面板。
-  const CLOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
-  const timeField = (id, value = '', label = '时间') => `<span class="time-field">`
-    + `<input type="text" class="time-field-text" id="${id}" value="${v(value)}" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="${label}">`
-    + `<button type="button" class="time-field-btn btn-icon" aria-label="选择${label}">${CLOCK}</button>`
-    + `<input type="time" data-time-native="${id}" tabindex="-1" aria-hidden="true">`
-    + `</span>`;
+  // 时间字段：同上，文本框可整段键入 HH:mm，时钟按钮调起原生面板（标记由时间组件出）。
+  const timeField = (id, value = '', label = '时间') => timeFieldHtml({ id, value, label });
   const times = (s.times || ['09:00']).join(', ');
   // 统一行结构：标签在左、控件在右，和 fields.js 渲染出来的行完全一致。
-  // 动态编辑器最容易写成「标签在上」，那样看起来和弹窗其它行不是一套表单。
-  const row = (label, control, hint = '') => `<div class="field-block"><div class="field-row">`
-    + `<span class="field-label">${label}</span>`
-    + `<div class="field-control field-inline">${control}</div>`
-    + `</div>${hint ? `<div class="field-notes"><p class="field-hint">${hint}</p></div>` : ''}</div>`;
+  // 标记由 fieldRowHtml 出，动态编辑器与价目表的高峰弹窗共用同一份。
+  const row = (label, control, hint = '') => fieldRowHtml({ label, control, hint, inline: true });
   const timesRow = row('时间', `<input type="text" id="sf_times" value="${v(times)}" placeholder="06:00, 22:00">`);
   const windowRow = (w) => row('时间段', timeField('sf_w0', (w || [])[0] ?? '09:00', '开始时间') + '<span class="field-unit">到</span>' + timeField('sf_w1', (w || [])[1] ?? '22:00', '结束时间'));
   switch (type) {

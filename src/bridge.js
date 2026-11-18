@@ -6148,7 +6148,7 @@ async function main() {
           }
           return;
         }
-        // 插件管理（P2a）：只改运行态，不写 plugins.json；配置改动仍需重启（或等文件监听）。
+        // 插件管理（P2a）：重载只换实例；单个插件的启停走下方 pluginAction（会把启用状态写回配置）。
         if (req.method === 'POST' && url.pathname === '/api/plugins/reload') {
           if (!plugins) { sendJson({ ok: false, error: '插件内核未启用' }, 400); return; }
           const result = await plugins.reloadAll();

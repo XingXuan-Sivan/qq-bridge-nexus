@@ -7,5 +7,20 @@
 .pricing-panel [data-pricing-gap] { margin:0 0 6px }
 /* 单价格子是普通输入框：收窄到能装下 4 位小数，又不把表撑超宽。 */
 .pricing-panel .pricing-price-input { width:100%; min-width:0; padding:6px 8px; font-variant-numeric:tabular-nums }
-.pricing-panel .pricing-row-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px }
+/* 标签与它说明的文字排在同一行：模型 id + 状态标签、高峰口径 + 本机口径。
+   单独占一行会多出一段高度，同一行的单价格子看着就像没对齐。 */
+.pricing-panel .pricing-model-head,
+.pricing-panel .pricing-peak-cell { display:flex; flex-wrap:wrap; align-items:center; gap:2px 6px }
+.pricing-panel .pricing-model-head .tag,
+.pricing-panel .pricing-peak-cell .tag { margin:0 }
 .pricing-panel td .meta { font-size:11px }
+/* 表体单元格垂直居中：一行里只有输入框与短文本，表格默认的顶对齐会让「高峰时段」
+   这类纯文本行浮在单价格子上方，看着和其它列错行。 */
+.pricing-panel .table-wrap th,
+.pricing-panel .table-wrap td { vertical-align:middle }
+
+/* 高峰口径弹窗：一段占一行（两个时间组件之间用「到」连接，删按钮跟在后面）。
+   弹窗挂在 body 上，不在 .pricing-panel 里，所以不带面板前缀。 */
+.pricing-peak-windows { display:flex; flex-direction:column; gap:8px; margin-bottom:8px }
+.pricing-peak-window { display:flex; flex-wrap:wrap; align-items:center; gap:8px }
+.pricing-peak-windows > .meta { margin:0 }

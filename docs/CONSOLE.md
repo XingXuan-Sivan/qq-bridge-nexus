@@ -161,13 +161,15 @@ tag(text, { type: 'default|primary|success|warning|danger|info', size: ''|'sm', 
 ### 4.4 提示条 `alert`
 
 ```js
-alertHtml({ id, elementId, type, title, description, html, hidden, closable, persist, actions, className })
+alertHtml({ id, elementId, type, title, description, html, hidden, closable, boxed, persist, actions, className })
 mountAlert(host, spec)
 hydrateAlerts(root)      // 隐藏已关闭项 + 绑定关闭按钮（幂等）
 dismissAlert(id, persist) / resetAlert(id)
 ```
 
 - 结构：图标 + 标题 + 描述 +（可选）操作；`closable` 时带关闭按钮。
+- `boxed: true` 换成整圈边框的说明卡（`.alert--boxed`），用于「整段说明要先读」的场合；
+  不传则只有左侧一条竖色条，适合一行结论。
 - 关闭状态记录在 `localStorage['qq-console:alert-dismissed']`（`persist:'session'` 用 sessionStorage）；`resetAlert(id)` 可恢复。
 - 复杂内容走 `html` 参数，`description` 只放纯文本。纯页面说明**不要**收敛成 Alert。
 

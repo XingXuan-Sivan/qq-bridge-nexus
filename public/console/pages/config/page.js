@@ -8,7 +8,7 @@ import { getCurrentPage, onPageRefresh, onPageRoute, setConsolePage, setPageLeav
 import { tzOptionsHtml, tzSet } from '../../js/timezone.js';
 import { setMsg } from '../../components/message/message.js';
 import { getSwitch, renderFields, setSelectOptions, setSwitch } from '../../components/form/form.js';
-import { initTimeFields } from '../../components/time/time.js';
+import { initTimeFields, timeFieldHtml } from '../../components/time/time.js';
 import { dataTableHtml, initDataTables } from '../../components/table/table.js';
 import { askLeaveWithUnsaved, createSaveDock } from '../../components/action-dock/save-dock.js';
 import { DOCK_ICONS } from '../../components/action-dock/action-dock.js';
@@ -130,7 +130,6 @@ let silenceDraft = [];
 
 // 时段行的三个小图标/开关片段：时间用项目自带的时间组件（文本框 + 时钟按钮 + 隐藏原生输入），
 // 启用与「跳过法定节假日」都用 role=switch（点击委托由 init() 里对 #section-overview 的 bindSwitches 负责）。
-const SILENCE_CLOCK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 const SILENCE_TRASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.6h10M6.3 4.6V3.1h3.4v1.5M4.9 4.6l.6 8.3h5l.6-8.3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function silenceSwitch(field, silKey, on, onLabel, offLabel) {
@@ -140,11 +139,7 @@ function silenceSwitch(field, silKey, on, onLabel, offLabel) {
 }
 
 function silenceTime(id, silKey, value, label) {
-  return `<span class="time-field">`
-    + `<input type="text" class="time-field-text" id="${id}" data-sil="${silKey}" value="${esc(value || '')}" placeholder="HH:mm" inputmode="numeric" autocomplete="off" aria-label="${esc(label)}">`
-    + `<button type="button" class="time-field-btn btn-icon" aria-label="选择${esc(label)}">${SILENCE_CLOCK}</button>`
-    + `<input type="time" data-time-native="${id}" tabindex="-1" aria-hidden="true">`
-    + '</span>';
+  return timeFieldHtml({ id, value, label, attrs: { 'data-sil': silKey } });
 }
 
 function readSilenceRows() {
@@ -351,11 +346,11 @@ const roleDefaultSection = {
   },
 };
 
-// ── Agent 平台（默认平台 / 当前运行 / 探活 / 模型与思考强度）─────────────────
+// ── Agent 平台（默认平台 / 探活 / 模型与思考强度）────────────────────────────
 // 配置面（`runtime.defaultAgent`）与运行期（`/api/status` 的 `agent`）是两个事实：
-// 换默认只落盘，本进程装配的 Agent 平台在重启前不变。
+// 换默认只落盘，本进程装配的 Agent 平台在重启前不变 —— 这一点写在选择框的提示里；
+// 当下的连通结论由动作条里的「探活」现场问一次。
 // 模型控件与默认平台同住一张卡：下拉选哪个平台，下面就摆哪个平台的模型目录。
-const CONNECT_MODE_LABEL = { http: 'HTTP', stdio: 'stdio', remote: '远程' };
 let agentState = { runtime: null, status: null };
 let agentModel = null; // 当前挂着的模型控件句柄（换平台时先解绑再重挂）
 
@@ -363,42 +358,16 @@ function agentEntries() {
   return (registryMeta().platforms ?? []).filter((item) => item.side === 'agent');
 }
 
+/** 本进程正在装配的 Agent 平台：配置面没选时，模型控件退回到它。 */
 function runningAgentOf() {
   return agentState.status?.agent ?? { id: '', label: '', mode: '', ready: false };
-}
-
-/** 把「当前运行」与「探活」两行填上：它们不属于任何表单字段，只是两个事实。 */
-function renderAgentReadout() {
-  const running = runningAgentOf();
-  const configured = agentState.runtime?.runtime?.defaultAgent ?? '';
-  const entry = agentEntries().find((item) => item.id === configured) ?? null;
-  const runningHost = $('agentRunningReadout');
-  if (runningHost) {
-    runningHost.innerHTML = [
-      `<span class="tag">${esc(running.label || running.id || '未知平台')}</span>`,
-      `<code>${esc(running.id || '')}</code>`,
-      `<span class="tag">连接方式 ${esc((CONNECT_MODE_LABEL[running.mode] ?? running.mode) || '未报告')}</span>`,
-      running.ready ? '<span class="tag tag--success">已就绪</span>' : '<span class="tag tag--danger">未就绪</span>',
-      configured && configured !== running.id
-        ? `<span class="tag tag--warning">配置面已改为 ${esc(configured)}，重启后生效</span>`
-        : '',
-    ].filter(Boolean).join(' ');
-  }
-  const probeHost = $('agentProbeReadout');
-  if (!probeHost) return;
-  const probe = entry?.probe ?? null;
-  probeHost.innerHTML = !probe
-    ? `<span class="meta">${esc(configured || '未设置')} 本次运行里还没探活过：在「平台 › 该 Agent 平台 › 概览」里点「探活」。</span>`
-    : probe.ok
-      ? `<span class="tag tag--success">上次探活通过</span><span class="meta">${esc(probe.at || '')}${probe.url ? ` · ${esc(probe.url)}` : ''}</span>`
-      : `<span class="tag tag--danger">上次探活未通过</span><span class="meta">${esc(probe.error || '未响应')}</span>`;
 }
 
 /**
  * 模型与思考强度：跟着这张卡里选中的平台走。
  *
  * 不写死平台：平台由注册表条目决定；没声明 `models` 能力位时只少这段控件，
- * 卡片本身（平台选择 / 当前运行 / 探活）照常可用。
+ * 卡片本身（平台选择 / 探活）照常可用。
  * 控件 id 用 agentModel* 前缀，与平台详情里的 platformModel* 同名不撞。
  */
 function syncAgentModelCard(agentId) {
@@ -414,9 +383,11 @@ function syncAgentModelCard(agentId) {
     agentId: target.id,
     config: target.config ?? {},
     prefix: 'agent',
-    // 卡片只有「刷新 / 保存」两个按钮，动作条由字段表统一出，组件不再自带一套。
+    // 卡片只有「刷新 / 探活 / 保存」三个按钮，动作条由字段表统一出，组件不再自带一套。
     actions: false,
     toast: false,
+    // 提示条提到整张卡最上面（在「默认平台」之前）：目录状态、看图降级要先读到。
+    noticesHost: $('agentNoticeMount'),
     onStatus: (text, kind) => setMsg('agentMsg', text, kind),
     // 默认模型一换，价目表的匹配结论就变了（有价 / 待补价），所以当场重读一次。
     onSaved: () => void pricingPanel?.load({ force: true }),
@@ -445,11 +416,10 @@ async function loadAgentSection() {
     }
     if (current) select.value = current;
     select.disabled = !entries.length;
-    for (const id of ['agentSave', 'agentRefresh']) {
+    for (const id of ['agentSave', 'agentRefresh', 'agentProbe']) {
       const button = $(id);
       if (button) button.disabled = !entries.length;
     }
-    renderAgentReadout();
     // 模型控件跟着这里选中的平台：配置面没选就退回当前在跑的那个。
     syncAgentModelCard(select.value || runningAgentOf().id);
     setMsg('agentMsg', '');
@@ -476,6 +446,32 @@ async function refreshAgentCard() {
 }
 
 /**
+ * 探活选中的平台：结论只写进状态位，不改任何配置。
+ * 写口与平台详情页同一个（`agentProbes` 记在服务端），所以两边点出来的结论一致。
+ */
+async function probeAgent() {
+  const wanted = $('agentDefaultSelect')?.value ?? '';
+  if (!wanted) {
+    setMsg('agentMsg', '先选一个 Agent 平台', 'err');
+    return;
+  }
+  const button = $('agentProbe');
+  if (button) button.disabled = true;
+  setMsg('agentMsg', '探活中…');
+  try {
+    const r = await api(`/api/platforms/registry/agent/${encodeURIComponent(wanted)}/probe`, 'POST', {});
+    if (!r?.ok) throw new Error(r?.error || '未知错误');
+    const ok = r.probe?.ok === true;
+    setMsg('agentMsg', ok ? `${wanted} 探活通过` : `${wanted} 探活未通过：${r.probe?.error || '未响应'}`, ok ? '' : 'err');
+    showConsoleToast(ok ? `${wanted} 探活通过` : `${wanted} 探活未通过`);
+  } catch (error) {
+    setMsg('agentMsg', `探活失败：${error?.message ?? error}`, 'err');
+  } finally {
+    if (button) button.disabled = !agentEntries().length;
+  }
+}
+
+/**
  * 保存这张卡：默认 Agent 平台与模型设置各走各的写口。
  *
  * 默认平台只落盘（服务端先预检探活），本进程不换装配；默认平台没变就不碰那个写口，
@@ -487,7 +483,7 @@ async function saveAgent() {
     setMsg('agentMsg', '先选一个 Agent 平台', 'err');
     return;
   }
-  const buttons = ['agentSave', 'agentRefresh'].map((id) => $(id)).filter(Boolean);
+  const buttons = ['agentSave', 'agentRefresh', 'agentProbe'].map((id) => $(id)).filter(Boolean);
   buttons.forEach((button) => { button.disabled = true; });
   setMsg('agentMsg', '保存中…');
   try {
@@ -561,9 +557,12 @@ const CONFIG_CARDS = {
       note: '默认平台重启生效 · 模型下一条消息生效',
       description: '桥接装配的 Agent 平台（<code>config.json</code> 的 <code>platforms.active.agent</code>）与它的模型设置。'
         + '改<b>默认 Agent 平台</b>只落盘，本进程仍装配原来那个，重启桥接后才换过去；'
+        + '「探活」现场问一次选中的平台，只写结论、不改配置；'
         + '模型选项跟着这里选中的平台走，平台没声明模型能力时只少这一段控件。',
-      body: '<div data-overview-fields="agent"></div><div id="agentModelMount"></div>'
-        + '<div data-overview-fields="agentActions"></div>',
+      // agentNoticeMount 是模型控件的提示条空位（目录状态 / 第三方 / 看图降级）：
+      // 放在「默认平台」之前，提示条就停在整张卡的最上面，不会被下拉挤到下面。
+      body: '<div id="agentNoticeMount"></div><div data-overview-fields="agent"></div>'
+        + '<div id="agentModelMount"></div><div data-overview-fields="agentActions"></div>',
     },
     {
       id: 'section-personabehavior',
@@ -590,7 +589,8 @@ const CONFIG_CARDS = {
       title: '价目表',
       note: '内置官方价 → 平台申报 → 本机覆盖',
       description: '跟随全局配置里的默认模型：模型换了价目表就跟着换，不在这里选平台或模型。'
-        + '表里是空闲时段单价；高峰时段与倍数跟随平台声明的口径，本页只改单价。',
+        + '表里是空闲时段单价；高峰时段、星期与倍数按行走「操作 › 编辑高峰」改，'
+        + '写进本机覆盖层，不动平台申报。',
       body: '<div data-config-pricing></div>',
     },
   ],
@@ -719,8 +719,10 @@ export function init() {
   // 时区下拉必须在 refreshSilence / tzSet 之前填好，否则 select.value 设不进去。
   $('silenceTz').innerHTML = tzOptionsHtml(false);
 
-  // Agent 平台：一张卡两个动作——「刷新」重读注册表 / 运行期 / 模型目录，「保存」落盘默认平台与模型。
+  // Agent 平台：一张卡三个动作——「刷新」重读注册表 / 运行期 / 模型目录，
+  // 「探活」现场问一次选中的平台，「保存」落盘默认平台与模型。
   $('agentRefresh')?.addEventListener('click', () => void refreshAgentCard());
+  $('agentProbe')?.addEventListener('click', () => void probeAgent());
   $('agentSave')?.addEventListener('click', () => void saveAgent());
   // 模型控件要跟着下拉走：换平台不用等保存就能先看到那家的模型设置。
   $('agentDefaultSelect')?.addEventListener('change', () => syncAgentModelCard($('agentDefaultSelect')?.value ?? ''));

@@ -1003,12 +1003,18 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
         },
         audit: [{ ts: '2026-11-09T04:00:01.000Z', event: 'config', plugin: 'demo-plugin' }],
       };
-      const pluginMatch = path.match(/^\/api\/plugins\/([a-z][a-z0-9-]+)(?:\/(config|test))?$/);
+      const pluginMatch = path.match(/^\/api\/plugins\/([a-z][a-z0-9-]+)(?:\/(config|test|enable|disable|reload))?$/);
       if (pluginMatch) {
         const [, pluginId, suffix] = pluginMatch;
-        if (method === 'GET' && !suffix && pluginId === 'demo-plugin') return json({ ok: true, plugin: demoPlugin });
+        if (pluginId !== 'demo-plugin') return json({ ok: false, error: '插件不存在' }, 404);
+        if (method === 'GET' && !suffix) return json({ ok: true, plugin: demoPlugin });
         if (method === 'PATCH' && suffix === 'config') return json({ ok: true, config: body?.config ?? {}, reloaded: true });
         if (method === 'POST' && suffix === 'test') return json({ ok: true, valid: true, config: body?.config ?? {} });
+        // 启停与重载回同一张摘要；状态跟着 action 变，页头按钮才看得出变化。
+        if (method === 'POST' && ['enable', 'disable', 'reload'].includes(suffix)) {
+          return json({ ok: true, plugin: { ...demoPlugin, status: suffix === 'disable' ? 'disabled' : 'active' } });
+        }
+        if (method === 'DELETE' && !suffix) return json({ ok: true, id: pluginId });
       }
       // 外部 MCP 的连接测试：弹窗里的草稿（/test）与已存条目的测试（/<id>/test）同一形状。
       if (method === 'POST' && /^\/api\/extensions\/mcp\/(?:[a-z0-9-]+\/)?test$/.test(path)) {
@@ -1705,7 +1711,7 @@ export async function startConsoleFixture({ port = 0, original = false, htmlPath
           case '/api/pricing': return json(pricingFixture(state));
         }
       }
-      // 价目覆盖：与真实现同为整段 PUT，但只收单价 —— 峰谷口径属于声明面，本机层改不了。
+      // 价目覆盖：与真实现同为整段 PUT，单价与峰谷口径（policy）一起收；没提交的模型 = 取消覆盖。
       if (method === 'PUT' && path === '/api/pricing') {
         try {
           const local = normalizeLocalPricing(body ?? {});

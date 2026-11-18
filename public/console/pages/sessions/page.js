@@ -691,8 +691,7 @@ function renderDetail(data) {
       ${card('运行', '能力档决定装哪套预设与工具面；行为档案决定会话引擎；权限级别只过滤本会话能调用的平台工具。三项都默认跟随平台或全局。', ['run'],
         `<p class="detail-conclusion">${esc(runConclusion(data))}</p>${toolsCardHtml(data.tools)}`)}
       ${card('人格与提示', '人格决定它用谁的语气；初始提示词只在 AI 第一次进入这个会话时读一次。', ['persona', 'prompt'])}
-      ${card('唤醒与准入', '上面是触发条件；下面是这份全局名单，会话内的勾选改的也是它。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝。管理命令和审批不受这里影响。', ['wake', 'access'],
-        '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div><div class="detail-actions detail-actions--indent"><button class="btn small" type="button" data-open-global-access>调整全局准入</button></div>')}
+      ${card('唤醒与准入', '上面是本会话的唤醒条件；下面是准入——勾选改的是全局名单，管理命令和审批不受这里影响。', ['wakeAccess'])}
       ${collapseHtml({
         id: 'session-links',
         title: '关联（记忆 · 定时任务）',
@@ -715,17 +714,11 @@ function renderDetail(data) {
     </div>`;
 
   const formHost = (id) => body.querySelector(`[data-detail-form="${id}"]`);
-  const accessHint = `被动行为 ${accessModeLabel(access?.passiveMode === 'deny' ? 'deny' : 'allow')}`
-    + ` · 主动行为 ${accessModeLabel(access?.proactiveMode === 'deny' ? 'deny' : 'allow')}`;
+  const accessHint = `当前：被动行为 ${accessModeLabel(access?.passiveMode === 'deny' ? 'deny' : 'allow')}`
+    + ` · 主动行为 ${accessModeLabel(access?.proactiveMode === 'deny' ? 'deny' : 'allow')}`
+    + '。白名单默认拒绝、名单内允许；黑名单默认允许、名单内拒绝；名单内容在「配置 › 准入」里改。';
   const personaHint = persona.resolved?.name && personaMode === 'inherit'
     ? `当前实际使用：${persona.resolved.name}` : '';
-
-  renderFields(formHost('access'), [
-    {
-      name: 'detailAccess', type: 'checkboxGroup', label: '允许', inline: true, columns: 2,
-      value: accessValue, options: ACCESS_AXES.map(([value, label]) => ({ value, label })), hint: accessHint,
-    },
-  ], { columns: 2 });
 
   // 能力档与行为档案的选项：空 / inherit 表示「跟随平台默认」，下拉里把当前默认写进提示。
   const capabilities = Array.isArray(data.capabilities) ? data.capabilities : [];
@@ -808,13 +801,19 @@ function renderDetail(data) {
     },
   ], { columns: 2 });
 
-  renderFields(formHost('wake'), [
+  // 唤醒与准入共用一张表单栅格：两段字段同一条标签列、同一个行距，勾选组整行铺满，
+  // 不再出现「半栏里换行」与「两块栅格无间距相接」的拥挤感。
+  renderFields(formHost('wakeAccess'), [
     {
       name: 'detailWakeMode', type: 'select', label: '模式', value: wake.mode === 'active' ? 'active' : 'diving',
       options: [{ value: 'diving', label: '潜水' }, { value: 'active', label: '活跃' }],
     },
     {
-      name: 'detailWakeTriggers', type: 'checkboxGroup', label: '触发', inline: true, columns: 2,
+      name: 'detailWakeKeywords', type: 'text', label: '关键词',
+      value: Array.isArray(triggers.keywords) ? triggers.keywords.join(', ') : '', placeholder: '逗号分隔',
+    },
+    {
+      name: 'detailWakeTriggers', type: 'checkboxGroup', label: '触发', span: 2, inline: true,
       value: wakeValue,
       options: [
         { value: 'atMention', label: '@ 唤醒' }, { value: 'nameMention', label: '名字唤醒' },
@@ -822,8 +821,13 @@ function renderDetail(data) {
       ],
     },
     {
-      name: 'detailWakeKeywords', type: 'text', label: '关键词', span: 2,
-      value: Array.isArray(triggers.keywords) ? triggers.keywords.join(', ') : '', placeholder: '逗号分隔',
+      name: 'detailAccess', type: 'checkboxGroup', label: '允许', span: 2, inline: true,
+      value: accessValue, options: ACCESS_AXES.map(([value, label]) => ({ value, label })), hint: accessHint,
+    },
+    {
+      // 额度是只读事实：两档剩余 token、暂存与未读溢出条数，值由 loadDetailScheduling 回填。
+      name: 'detailScheduling', type: 'custom', label: '额度', span: 2,
+      html: '<div class="detail-readonly" id="detailScheduling"><span class="meta">读取中…</span></div>',
     },
   ], { columns: 2 });
 
@@ -903,12 +907,13 @@ async function loadDetailScheduling(key) {
       // capacity 为 0 是「不限额」，不是「没额度」——两者写同一个 0 会让人以为被锁死。
       return capacity ? `${(Number(p.tokens) || 0).toFixed(1)}/${capacity}` : '不限';
     };
-    box.innerHTML = [
+    // 一行读完：两档剩余额度 + 暂存 + 溢出，标签与数字同一行、用「·」分隔。
+    box.innerHTML = `<span>${[
       ['direct', tokens('direct')],
       ['ambient', tokens('ambient')],
       ['暂存', String(Number(row.pendingWakeCount) || 0)],
       ['未读溢出', String(Number(row.overflowCount) || 0)],
-    ].map(([label, value]) => `<span><span class="meta">${label}</span> <strong>${esc(value)}</strong></span>`).join('');
+    ].map(([label, value]) => `${label} <strong>${esc(value)}</strong>`).join(' · ')}</span>`;
   } catch {
     box.innerHTML = '<span class="meta">调度状态读取失败</span>';
   }
@@ -1206,16 +1211,6 @@ export function init() {
   document.getElementById('sessionDetailSave')?.addEventListener('click', () => { void saveDetailAll(); });
 
   document.getElementById('sessionDetailBody')?.addEventListener('click', (event) => {
-    if (event.target.closest('[data-open-global-access]')) {
-      if (detailDirty && !window.confirm('详情里有未保存的改动，先去改全局准入？')) return;
-      closeModal(detailOverlay);
-      document.querySelector('[data-view="config"]')?.click();
-      setTimeout(() => {
-        document.querySelector('[data-config-section="access"]')?.click();
-        document.getElementById('accessPassiveEntries')?.focus();
-      }, 80);
-      return;
-    }
     if (event.target.closest('[data-detail-rebuild]')) { void detailRebuild(); return; }
     if (event.target.closest('[data-detail-reset]')) { void detailReset(); return; }
     if (event.target.closest('[data-detail-agent-reopen]')) { void detailAgentReopen(); return; }

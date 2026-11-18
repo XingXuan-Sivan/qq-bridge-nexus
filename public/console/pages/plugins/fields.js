@@ -1,4 +1,4 @@
-// 桥接插件：工具行、插件卡片列表、运行设置与安装两块设置，以及详情页的启用开关。
+// 桥接插件：工具行、插件卡片列表、运行设置与安装两块设置。
 // 页面只留三张卡的说明与宿主；控件全在这里生成，id 与迁移前保持一致（page.js 按 id 取值）。
 // 开关是 <button role="switch">，渲染后由页面统一 bindSwitches，读写走 getSwitch/setSwitch。
 import { tag } from '../../components/tag/tag.js';
@@ -40,10 +40,6 @@ const INSTALL_PATH_FIELDS = [
     items: [{ id: 'pluginInstallPathBtn', label: '从目录安装' }],
     status: 'pluginInstallMsg',
   },
-];
-
-export const PERSIST_FIELDS = [
-  { type: 'switch', name: 'pluginPersistEnabled', label: '写入 plugins.json', hint: '打开并保存后重启仍生效；只改本次运行请用清单卡片上的启用/停用。' },
 ];
 
 /** 插件状态的说法与配色：清单卡片与详情页头共用同一份。 */

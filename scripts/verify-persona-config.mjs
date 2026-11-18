@@ -9,6 +9,8 @@ import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import YAML from 'yaml';
 import { directoryModulesDir } from './dsh-package-source.mjs';
+import { createCapabilityStore } from '../src/capabilities/store.mjs';
+import { renderPresetRows } from '../profiles/agent-platforms/dsh/adapters/render.mjs';
 
 let persona = null;
 let degradeReason = '';
@@ -75,11 +77,19 @@ if (persona) {
 }
 
 // ── 仓库配置（始终执行）──────────────────────────────────────────────────────
+// 能力档是意图层（effects / runtime / …），行由 DSH 渲染层编译出来；这里断言的是
+// **渲染后**的 persona 行，也就是真正会写进 preset 的那一份（与产物一致）。
+const RENDER_CONFIG = YAML.parse(fs.readFileSync(path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/render.yml'), 'utf8'));
+const capabilities = createCapabilityStore({ root: path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/capabilities') });
 for (const preset of ['chat', 'chat-v2']) {
   const file = path.resolve(process.cwd(), 'profiles/agent-platforms/dsh/capabilities', `${preset}.yml`);
   console.log(`\n${preset} (${path.relative(process.cwd(), file)}):`);
-  const doc = YAML.parse(fs.readFileSync(file, 'utf8')).rows;
-  const row = doc.find((r) => r.id === 'persona');
+  const capability = capabilities.get(preset);
+  if (!capability) {
+    check('能力档可解析', () => { throw new Error(`读不到能力档 ${preset}.yml`); });
+    continue;
+  }
+  const row = renderPresetRows(capability, RENDER_CONFIG).rows.find((r) => r.id === 'persona');
 
   check('存在 persona 行', () => { if (!row) throw new Error('缺少 persona 行'); });
   if (!row) continue;

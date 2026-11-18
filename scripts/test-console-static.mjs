@@ -187,9 +187,12 @@ console.log('## P5：能力档的声明面（应用方式 / 注入通道 / 对�
     '会话仍读 instanceForeign：换过 Agent 平台才在危险操作里给「在新平台上重开」');
   ok(/registryLabel\('apply'/.test(sessionsText) && /AUDIENCE_LABEL/.test(sessionsText), '生效方式与受众标签跟能力档同一套取值（会话里不另存一份）');
   ok(!/'POST', \{ preset \}|data-detail-agent-revert|data-detail-form="agent"/.test(sessionsText), '没有对端权限档的改档写口与「改回」按钮');
+  ok(/formHost\('wakeAccess'\)/.test(sessionsText) && !/data-open-global-access/.test(sessionsText),
+    '唤醒与准入共用一张表单栅格，卡底不再挂「调整全局准入」跳转');
   const configText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
   const configFields = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'fields.js'), 'utf8');
-  ok(/section-agent/.test(configText) && /agentRunningReadout/.test(configText), '全局配置有「Agent 平台」卡：默认平台 + 当前运行');
+  ok(/section-agent/.test(configText) && /agentDefaultSelect/.test(configText) && !/agentRunningReadout/.test(configText),
+    '全局配置有「Agent 平台」卡：只留默认平台选择，不再单占一行「当前运行」');
   const modelCardText = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'agent-model', 'agent-model.js'), 'utf8');
   ok(/hasModels/.test(detailText) && /mountAgentModel\(/.test(detailText),
     '平台详情按该平台声明的 models 能力位决定要不要挂模型卡');
@@ -199,8 +202,13 @@ console.log('## P5：能力档的声明面（应用方式 / 注入通道 / 对�
     && /\/api\/platforms\/registry\/agent\/\$\{encodeURIComponent\(id\)\}\/config/.test(modelCardText),
     '模型卡只有一份实现：选项来自平台模型目录读口，写走平台配置写口');
   ok(!/applyAgentGates|dshModelUnsupported/.test(configText), '全局配置页不再有平台专用的模型门控');
-  ok(/agentDefaultSelect/.test(configFields) && /id: 'agentRefresh'/.test(configFields) && /id: 'agentSave'/.test(configFields),
-    'Agent 平台字段走 fields 规格：动作只有刷新与保存');
+  ok(/agentDefaultSelect/.test(configFields) && /id: 'agentRefresh'/.test(configFields)
+    && /id: 'agentProbe'/.test(configFields) && /id: 'agentSave'/.test(configFields)
+    && /label: '探活'/.test(configFields),
+    'Agent 平台字段走 fields 规格：动作是刷新 / 探活 / 保存');
+  ok(/\$\('agentProbe'\)\?\.addEventListener\('click'/.test(configText)
+    && /registry\/agent\/\$\{encodeURIComponent\(wanted\)\}\/probe/.test(configText),
+    '「探活」按钮复用平台详情的同一个探活写口，只写结论、不改配置');
   ok(!/section-agent-model/.test(configText) && /id="agentModelMount"/.test(configText),
     '模型控件与默认平台同住一张卡（不再拆第二张卡）');
   ok(/fixtureSessionAgent\(/.test(fixture) && /instanceForeign/.test(fixture), '离线夹具实现会话 /agent（带换过平台的实例标记）');
@@ -237,8 +245,8 @@ console.log('## S7：会话详情三张常驻卡与 /profile 读口收口');
   ok(/function runConclusion\(data\)/.test(sessionsJs) && /生效：能力档/.test(sessionsJs) && /未设置/.test(sessionsJs),
     '运行卡底部一行结论：能力档 / 行为 / 权限 / 模型，缺省写未设置');
   ok(/hosts\.map\(\(host\) =>/.test(sessionsJs), 'card() 的第三参是宿主数组（一张卡可挂多个表单区）');
-  ok(/\['persona', 'prompt'\]/.test(sessionsJs) && /\['wake', 'access'\]/.test(sessionsJs),
-    '人格 + 提示、唤醒 + 准入各合成一张卡');
+  ok(/\['persona', 'prompt'\]/.test(sessionsJs) && /\['wakeAccess'\]/.test(sessionsJs),
+    '人格 + 提示合成一张卡，唤醒 + 准入共用一张表单栅格');
   ok(!/detailDisplayName/.test(sessionsJs), '显示名不再有表单字段（改走列表行的重命名弹窗）');
   ok(/data-rename-key/.test(sessionsJs) && /\/api\/session\/rename/.test(sessionsJs), '列表行提供唯一的改名入口');
   ok(/collapseHtml\(\{[\s\S]{0,200}?id: 'session-links'/.test(sessionsJs), '关联（记忆 · 定时任务）降级成折叠卡');
@@ -424,6 +432,26 @@ ok(/detailPanelHtml\(/.test(pluginDetailJs) && /detailSectionHtml\(/.test(plugin
   '详情页是一张大卡：卡内按分区排，计数与短字段走小卡 / 键值网格，页头用 detail-head');
 ok(/const TABS = Object\.freeze\(\[[\s\S]{0,200}?id: 'overview'[\s\S]{0,200}?id: 'config'[\s\S]{0,200}?id: 'audit'/.test(pluginDetailJs)
   && !/id: 'advanced'/.test(pluginDetailJs), '插件详情按概览 / 配置 / 审计三页（没有「高级」）');
+const pluginFieldsJs = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'plugins', 'fields.js'), 'utf8');
+ok(!/pluginPersist|PERSIST_FIELDS/.test(pluginDetailJs + pluginFieldsJs)
+  && !/api\/plugins\/settings/.test(pluginDetailJs),
+  '插件配置页不再有单独的「启用状态」区块（启停本身就是配置态，自动落盘）');
+ok(/data-plugin-config="\$\{esc\(plugin\.id\)\}"[\s\S]{0,160}?\$\{toggle\}/.test(pluginsPageJs)
+  && /class="btn small danger" data-plugin-action="uninstall"/.test(pluginsPageJs),
+  '清单卡片：配置排在启停之前，卸载用项目自带的红边危险按钮');
+ok(/openPlugin\(configButton\.dataset\.pluginConfig, 'config'\)/.test(pluginsPageJs),
+  '卡片上的「配置」直接落到详情页的配置标签');
+ok(/data-plugin-state="disable"/.test(pluginDetailJs) && /data-plugin-state="reload"/.test(pluginDetailJs)
+  && /class="btn small danger" type="button" data-plugin-state="uninstall"/.test(pluginDetailJs),
+  '详情页头带完整的插件状态动作（停用 / 启用、重载、卸载）');
+ok(!/badges: \[pluginStatusTag/.test(pluginDetailJs),
+  '插件详情页头不再重复状态 / 版本徽标（基本信息里已有）');
+const detailHeadModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'detail-head', 'detail-head.js'), 'utf8');
+ok(/actions = ''/.test(detailHeadModule) && /detail-head-aside/.test(detailHeadModule),
+  'detail-head 提供可选的 actions 槽（不传时页头不变）');
+const detailHeadCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'components', 'detail-head', 'detail-head.css'), 'utf8');
+ok(/detail-head-aside--solo/.test(detailHeadModule) && /\.detail-head-aside--solo[\s\S]{0,80}?padding-top/.test(detailHeadCss),
+  '只有动作、没有徽标时动作行留在标题那一行，不跟着页头行上移');
 
 console.log('## 组件层（3.2）');
 const componentDir = path.join(ROOT, 'public', 'console', 'components');
@@ -453,7 +481,7 @@ for (const [file, exportsList] of Object.entries(componentApis)) {
   }
 }
 const sharedCss = fs.readFileSync(path.join(ROOT, 'public', 'console', 'css', 'components.css'), 'utf8');
-for (const selector of ['.tag {', '.tag--danger', '.alert {', '.message-stack {', '.card-foot {', '.modal--sm']) {
+for (const selector of ['.tag {', '.tag--danger', '.alert {', '.alert--boxed', '.message-stack {', '.card-foot {', '.modal--sm']) {
   ok(sharedCss.includes(selector), `components.css 定义 ${selector}`);
 }
 ok(!/^\.pill\b/m.test(sharedCss), 'components.css 不再定义 .pill（已彻底改名 .tag）');
@@ -461,6 +489,15 @@ ok(!/class="pill\b/.test([...fs.readdirSync(path.join(ROOT, 'public', 'console',
   .map((id) => path.join(ROOT, 'public', 'console', 'pages', id, 'page.html'))
   .filter((file) => fs.existsSync(file))
   .map((file) => fs.readFileSync(file, 'utf8')).join('\n')), '页面 html 不再手写 .pill');
+const agentModelModule = fs.readFileSync(path.join(componentDir, 'agent-model', 'agent-model.js'), 'utf8');
+const configPageSource = fs.readFileSync(path.join(ROOT, 'public', 'console', 'pages', 'config', 'page.js'), 'utf8');
+ok(/noticesHost = null/.test(agentModelModule)
+  && /FIELDS\.unshift\(\{ name: `\$\{prefix\}ModelNotices`/.test(agentModelModule)
+  && /mountAgentModel\(host, \{[\s\S]{0,300}?noticesHost: \$\('agentNoticeMount'\)/.test(configPageSource),
+  '模型卡的提示条在表单上方：默认铺在字段表首位，全局配置传到整张卡最上面');
+const noticeCalls = (agentModelModule.match(/mountAlert\(noticesEl, /g) ?? []).length;
+const boxedCalls = (agentModelModule.match(/boxed: true/g) ?? []).length;
+ok(noticeCalls > 0 && boxedCalls === noticeCalls, '模型卡的提示条全部用带框变体（boxed）');
 const uiModule = fs.readFileSync(path.join(ROOT, 'public', 'console', 'js', 'ui.js'), 'utf8');
 ok(!/function (simpleTable|renderTable)\(/.test(uiModule), 'ui.js 不再自带表格生成器（已搬到 components/table.js）');
 // 搜索框：外观只有一处（components/search-box），页面里每个搜索输入都必须写明 type="search"。

@@ -76,10 +76,6 @@
   flex-wrap: wrap;
   margin-top: 14px;
 }
-/* 卡片里上一行是字段时，动作按钮和控件左边缘对齐，而不是贴卡片左边。 */
-.detail-actions--indent {
-  padding-left: calc(var(--field-label-w, 148px) + var(--space-4, 20px));
-}
 .detail-readonly {
   display: flex;
   flex-wrap: wrap;

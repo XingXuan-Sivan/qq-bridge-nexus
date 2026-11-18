@@ -2,8 +2,8 @@
 //
 // 平台申报优先；申报里没有单价的模型用这里的官方价；本机覆盖（state/pricing/<agent>.yml）
 // 再叠在两者之上 —— 但本机只能改单价，峰谷口径只属于声明面（内置口径 + 平台申报）。
-// 账本按模型 id 取价，所以别名（聚合平台对同一个模型的另一种写法）与官方名同价并列，
-// 不另建映射表。
+// 账本按模型 id 取价，这里只列在售模型的官方 id：已下架的旧写法（deepseek-v4-flash、
+// deepseek-v4-flash-vision-exp、deepseek-pro）不再占默认列表，要算旧记录就在价目卡手动加一行。
 //
 // 单价口径：人民币 / 百万 token；`cacheHit` 是缓存命中输入价，`cacheMiss` 是未命中输入价，
 // `output` 是输出价，余额都是空闲时段的价格，高峰按 `peakMultiplier` 乘出来 ——
@@ -29,10 +29,7 @@ export const BUILTIN_CATALOG = Object.freeze({
   }),
   models: Object.freeze([
     { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash', pricing: V41_FLASH },
-    { id: 'deepseek-v4-flash', label: 'DeepSeek-V4.1-Flash', pricing: V41_FLASH },
-    { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek-V4.1-Flash', pricing: V41_FLASH },
     { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro', pricing: V4_PRO },
-    { id: 'deepseek-pro', label: 'DeepSeek-V4-Pro', pricing: V4_PRO },
   ]),
 });
 

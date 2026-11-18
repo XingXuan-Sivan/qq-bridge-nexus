@@ -1210,6 +1210,43 @@ try {
     await page.waitForFunction(() => document.getElementById('usageMsg')?.textContent.includes('每 3 秒自动同步'));
   });
 
+  // 手动加模型与撤覆盖：申报里没有的 id 只能靠本机层报价；整段写入让「移除」不需要额外接口。
+  if (!original) await test('Pricing card adds a model by hand and drops a local override', async () => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await navigate('config');
+    await page.locator('[data-config-section="runtime"]').click();
+    const card = '#section-pricing';
+    await page.waitForFunction(() => document.querySelectorAll('#section-pricing [data-price-row]').length >= 2);
+
+    // 「添加模型」先给一行空白：id 可编辑，单价等填，保存前不落盘。
+    await page.click(`${card} #pricingAdd`);
+    const draft = `${card} [data-price-draft]`;
+    assert.equal(await page.locator(draft).count(), 1, '点一下多一行草稿');
+    await page.fill(`${draft} [data-price-id]`, 'deepseek-pro-legacy');
+    await page.fill(`${draft} [data-price-key="cacheMiss"]`, '4.5');
+    await page.fill(`${draft} [data-price-key="output"]`, '13.5');
+    const [added] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'PUT'),
+      page.click(`${card} #pricingSave`),
+    ]);
+    assert.equal(added.status(), 200);
+    assert.deepEqual(fixture.requests.at(-1)?.body, { models: { 'deepseek-pro-legacy': { cacheMiss: 4.5, output: 13.5 } } }, '只提交新增那一行的单价');
+    const addedRow = `${card} [data-price-row="deepseek-pro-legacy"]`;
+    await page.waitForSelector(addedRow);
+    assert.match(await page.textContent(addedRow), /本机覆盖/, '新增的模型标本机覆盖');
+    assert.equal(await page.locator(draft).count(), 0, '保存后草稿行变成正式行');
+
+    // 行内「移除覆盖」：整段写入时这条不在补丁里，就等于撤掉。
+    await page.click(`${addedRow} [data-price-drop="deepseek-pro-legacy"]`);
+    const [dropped] = await Promise.all([
+      page.waitForResponse((r) => new URL(r.url()).pathname === '/api/pricing' && r.request().method() === 'PUT'),
+      page.click(`${card} #pricingSave`),
+    ]);
+    assert.equal(dropped.status(), 200);
+    assert.deepEqual(fixture.requests.at(-1)?.body, { models: {} }, '撤掉本机覆盖也要提交（否则撤不掉）');
+    assert.equal(await page.locator(addedRow).count(), 0, '撤掉后这一行不再出现');
+  });
+
   if (!original) await test('Token usage trend chart renders bars, tiers and range/metric switching', async () => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await navigate('overview');

@@ -1,10 +1,12 @@
 // 价目表面板：内置官方价 → 平台申报 → 本机覆盖。
 //
-// 这里只做两件事：看清「现在这张表」、改「与申报不同的单价」。所以：
+// 这里只做三件事：看清「现在这张表」、改「与申报不同的单价」、补「表里没有的模型」。所以：
 //   · 平台与模型都自动取（活动 Agent 平台 + 全局配置里的默认模型），没有切换控件；
 //   · 高峰时段只显示声明面的口径，不给编辑入口 —— 改口径就改平台申报，本机层只存单价；
 //   · 账本里出现过、表里却没有的模型会列成空格子：它们的 token 已经记着，
-//     补上单价后历史花费按新表重算，不需要重新记一遍账。
+//     补上单价后历史花费按新表重算，不需要重新记一遍账；
+//   · 平台没申报的模型用「添加模型」手写一行，落进本机覆盖层；
+//     「还原默认价目」把本机层整个撤掉，回到申报 + 内置官方价。
 import { api } from '../../js/api.js';
 import { esc, showConsoleToast } from '../../js/ui.js';
 import { dataTableHtml, initDataTables } from '../table/table.js';
@@ -22,6 +24,8 @@ const SOURCE_TAGS = {
   none: '<span class="tag tag--danger">没有价目</span>',
 };
 const SAVE_MSG_ID = 'pricingSaveMsg';
+/** 模型 id 会成为 state/pricing/<agent>.yml 的键：先挡住空白与奇怪符号。 */
+const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 function padHour(hour) {
   return `${String(hour).padStart(2, '0')}:00`;
@@ -92,6 +96,13 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   let view = null;      // 最近一次 /api/pricing 快照
   let dirty = false;    // 有未保存的单价改动
   let loading = false;
+  // 手动新增的模型行还只活在界面上：保存时随补丁一起写进本机覆盖层。
+  let drafts = [];
+  let draftSeq = 0;
+  // 界面上正在敲的值：重画表格（加一行、搜索、刷新）不能把没保存的输入丢掉。
+  const typedPrices = new Map();   // 行 key（模型 id 或草稿 key）→ 四个单价
+  const typedIds = new Map();      // 草稿 key → 模型 id
+  const dropped = new Set();       // 本次点「移除覆盖」的行：补丁里没有它就算撤掉
 
   // ── 行数据 ───────────────────────────────────────────────────────────────
   /** 表级口径（平台声明）：本地新增的模型没有自己的口径时按它显示。 */
@@ -145,8 +156,9 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   }
 
   function priceInput(row, key, unit) {
+    const value = typedPrices.get(row.id)?.[key] ?? row.value[key] ?? '';
     return `<input type="number" min="0" step="0.0001" class="pricing-price-input"`
-      + ` data-price-key="${key}" value="${esc(String(row.value[key] ?? ''))}"`
+      + ` data-price-key="${key}" value="${esc(String(value))}"`
       + ` aria-label="${esc(row.id)} ${PRICE_KEY_LABELS[key]}单价（${esc(unit)}）">`;
   }
 
@@ -155,13 +167,36 @@ export function mountPricingPanel(host, { onSaved } = {}) {
     const hint = usage && !row.priced
       ? `<div class="meta">账本已记 ${esc(tokensText(usage.tokens))} token，没算钱</div>`
       : '';
+    // 移除只给「本机层里有这一条」的行：申报里的模型删了下次读表又回来。
+    // 移除不是删文件，而是保存时不再提交它 —— 整段覆盖写入，少哪条就等于撤掉哪条。
+    const drop = view?.local?.models?.[row.id] && !row.isDefault
+      ? `<button type="button" class="btn small danger" data-price-drop="${esc(row.id)}"`
+        + ' title="删掉这一行的本机覆盖，保存后生效">移除覆盖</button>'
+      : '';
     return `<code>${esc(row.id)}</code><div class="meta">${esc(row.label)}</div>`
-      + `<div class="pricing-row-tags">${rowTags(row)}</div>${hint}`;
+      + `<div class="pricing-row-tags">${rowTags(row)}${drop}</div>${hint}`;
   }
 
-  function rowsHtml() {
+  /** 手动新增的一行：模型 id 可编辑，单价空着等填，保存时写进本机覆盖层。 */
+  function draftRow(draft, unit) {
+    const id = typedIds.get(draft.key) ?? '';
+    return {
+      attrs: { 'data-price-draft': draft.key },
+      cells: [
+        `<input type="text" class="pricing-price-input" data-price-id value="${esc(id)}"`
+          + ' placeholder="模型 id" aria-label="新增模型的 id">'
+          + '<div class="pricing-row-tags"><span class="tag tag--danger">新增待填</span></div>',
+        ...PRICE_KEYS.map((key) => `<input type="number" min="0" step="0.0001" class="pricing-price-input"`
+          + ` data-price-key="${key}" value="${esc(String(typedPrices.get(draft.key)?.[key] ?? ''))}"`
+          + ` aria-label="新增模型 ${PRICE_KEY_LABELS[key]}单价（${esc(unit)}）">`),
+        `<span class="meta">${esc(peakText(tablePeak()))}</span>`,
+      ],
+    };
+  }
+
+  function rowsHtml(base) {
     const unit = unitText(view?.table?.unit ?? 1e6);
-    return pricingRowsOf().map((row) => ({
+    const rows = base.map((row) => ({
       attrs: { 'data-price-row': row.id },
       cells: [
         modelCell(row),
@@ -169,6 +204,7 @@ export function mountPricingPanel(host, { onSaved } = {}) {
         `<span class="meta">${esc(peakText(row.peak))}</span>`,
       ],
     }));
+    return [...rows, ...drafts.map((draft) => draftRow(draft, unit))];
   }
 
   // ── 渲染 ─────────────────────────────────────────────────────────────────
@@ -202,7 +238,8 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   }
 
   function paintTable() {
-    const rows = rowsHtml();
+    const base = pricingRowsOf();
+    const rows = rowsHtml(base);
     el.table.innerHTML = dataTableHtml({
       columns: [
         { label: '模型', width: 320 },
@@ -216,11 +253,12 @@ export function mountPricingPanel(host, { onSaved } = {}) {
       pageSize: 20,
       search: { placeholder: '搜索模型' },
       refresh: true,
-      meta: `${rows.length} 个模型 · ${unitText(view?.table?.unit ?? 1e6)}`,
+      meta: `${base.length} 个模型 · ${unitText(view?.table?.unit ?? 1e6)}`,
       actions: inlineActions({
         items: [
+          { id: 'pricingAdd', label: '添加模型', small: true, attrs: { 'data-price-action': 'add' } },
           { id: 'pricingSave', label: '保存覆盖', variant: 'primary', small: true, attrs: { 'data-price-action': 'save' } },
-          { id: 'pricingReset', label: '恢复申报', variant: 'danger', small: true, attrs: { 'data-price-action': 'reset' } },
+          { id: 'pricingReset', label: '还原默认价目', variant: 'danger', small: true, attrs: { 'data-price-action': 'reset' } },
         ],
         status: SAVE_MSG_ID,
       }),
@@ -258,13 +296,28 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   }
 
   // ── 交互 ─────────────────────────────────────────────────────────────────
-  /** 单价补丁：与申报价相同的字段不提交，空字段不提交（= 回落申报）。 */
+  /**
+   * 单价补丁：与申报价相同的字段不提交，空字段不提交（= 回落申报）。
+   * 表里没出现的模型就等于取消覆盖，所以「移除覆盖」「不要把某行提交」都不需要额外的删除接口。
+   */
   function pricingPatch() {
     const declared = view?.declared?.models ?? {};
     const models = {};
-    el.table.querySelectorAll('tbody tr[data-price-row]').forEach((row) => {
-      const id = String(row.dataset.priceRow || '').trim();
-      if (!id) return;
+    const seen = new Set();
+    el.table.querySelectorAll('tbody tr[data-price-row], tbody tr[data-price-draft]').forEach((row) => {
+      const draftKey = row.dataset.priceDraft ?? '';
+      const id = (draftKey
+        ? String(row.querySelector('[data-price-id]')?.value ?? '')
+        : String(row.dataset.priceRow ?? '')).trim();
+      if (!id) {
+        if (draftKey) throw new Error('新增的那一行还没填模型 id');
+        return;
+      }
+      if (draftKey && !MODEL_ID_RE.test(id)) {
+        throw new Error(`模型 id 只能用字母、数字、点、下划线与连字符：${id}`);
+      }
+      if (seen.has(id)) throw new Error(`模型 id 重复：${id}`);
+      seen.add(id);
       const baseOff = declared[id]?.off ?? null;
       const entry = {};
       for (const key of PRICE_KEYS) {
@@ -275,9 +328,24 @@ export function mountPricingPanel(host, { onSaved } = {}) {
         if (baseOff && Number(baseOff[key]) === value) continue;
         entry[key] = value;
       }
+      // 申报里没有的模型要能算钱：缺「未命中」或「输出」就进不了价目表。
+      // 只对「真要写它」的行报错：账本里没价的旧行原样留着时，不该拦住保存。
+      if (!declared[id] && (entry.cacheMiss === undefined || entry.output === undefined)
+        && (draftKey || Object.keys(entry).length)) {
+        throw new Error(`新模型 ${id} 要同时填「未命中」与「输出」单价，否则算不了钱`);
+      }
       if (Object.keys(entry).length) models[id] = entry;
     });
     return { models };
+  }
+
+  /** 界面上的临时状态（草稿行、未保存的输入、待移除的覆盖）整体清掉。 */
+  function clearEdits() {
+    dirty = false;
+    drafts = [];
+    typedPrices.clear();
+    typedIds.clear();
+    dropped.clear();
   }
 
   function setSaveMsg(text, tone = '') {
@@ -288,8 +356,16 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   }
 
   async function save() {
-    const patch = pricingPatch();
-    if (!Object.keys(patch.models).length) {
+    let patch;
+    try {
+      patch = pricingPatch();
+    } catch (error) {
+      setSaveMsg(`❌ ${error?.message || '单价不完整'}`, 'err');
+      return;
+    }
+    const models = Object.keys(patch.models).length;
+    // 只点了「移除覆盖」也要提交：整段写入，这条不在补丁里就等于撤掉。
+    if (!models && !dropped.size) {
       setSaveMsg('单价与当前价目一致，没有需要保存的覆盖。');
       return;
     }
@@ -297,9 +373,9 @@ export function mountPricingPanel(host, { onSaved } = {}) {
     try {
       const r = await api('/api/pricing', 'PUT', patch);
       if (!r.ok) { setSaveMsg(`❌ ${r.error || '保存失败'}`, 'err'); return; }
-      dirty = false;
+      clearEdits();
       render(r);
-      setSaveMsg(`已保存覆盖（${Object.keys(patch.models).length} 个模型）`, 'ok');
+      setSaveMsg(models ? `已保存覆盖（${models} 个模型）` : '已撤掉本机覆盖', 'ok');
       showConsoleToast('价目已保存，账本按新表重算历史金额');
       onSaved?.();
     } catch (error) {
@@ -310,21 +386,21 @@ export function mountPricingPanel(host, { onSaved } = {}) {
   async function reset() {
     const agent = view?.agent || '';
     if (!(await confirmBox({
-      title: '恢复平台申报',
-      message: `删除 state/pricing/${agent || '<agent>'}.yml 的本机覆盖，改回平台申报价。\n账本里的 token 与调用流水不删，金额会按申报价重算。`,
-      confirmText: '恢复',
+      title: '还原默认价目',
+      message: `删除 state/pricing/${agent || '<agent>'}.yml 的本机覆盖：改过的单价与手动添加的模型一起撤回平台申报 + 内置官方价。\n账本里的 token 与调用流水不删，金额会按默认价重算。`,
+      confirmText: '还原',
       danger: true,
     }))) return;
-    setSaveMsg('恢复中…');
+    setSaveMsg('还原中…');
     try {
       const r = await api('/api/pricing', 'DELETE');
-      if (!r.ok) { setSaveMsg(`❌ ${r.error || '恢复失败'}`, 'err'); return; }
-      dirty = false;
+      if (!r.ok) { setSaveMsg(`❌ ${r.error || '还原失败'}`, 'err'); return; }
+      clearEdits();
       render(r);
-      setSaveMsg('已恢复平台申报', 'ok');
+      setSaveMsg('已还原默认价目', 'ok');
       onSaved?.();
     } catch (error) {
-      setSaveMsg(`❌ ${error?.message || '恢复失败'}`, 'err');
+      setSaveMsg(`❌ ${error?.message || '还原失败'}`, 'err');
     }
   }
 
@@ -337,6 +413,7 @@ export function mountPricingPanel(host, { onSaved } = {}) {
       const snapshot = await api('/api/pricing');
       // 老进程 / 代理缺路由时回的是 404 JSON：当成快照画就会变成「0 个模型」的假象。
       if (snapshot?.ok !== true) throw new Error(snapshot?.error || '接口没有返回价目');
+      clearEdits();
       render(snapshot);
     } catch (error) {
       renderFailure(error?.message || '未知错误');
@@ -351,13 +428,52 @@ export function mountPricingPanel(host, { onSaved } = {}) {
     return Boolean(active && panel.contains(active));
   }
 
+  /** 加一行空白的模型行，焦点落到 id 输入框；单价保留上一次输入，重画不丢。 */
+  function addDraft() {
+    const key = `draft-${++draftSeq}`;
+    drafts.push({ key });
+    paintTable();
+    // 分页是「只隐藏行」：刚加的那行可能在第二页，显式拉回当前页再聚焦。
+    const row = el.table.querySelector(`tbody tr[data-price-draft="${key}"]`);
+    if (row) {
+      row.hidden = false;
+      row.querySelector('[data-price-id]')?.focus();
+    }
+    dirty = true;
+    setSaveMsg('填好 id 与单价后点「保存覆盖」。');
+  }
+
   panel.addEventListener('input', (event) => {
-    if (event.target.closest('[data-price-row]')) dirty = true;
+    const row = event.target.closest('tr');
+    if (!row) return;
+    const draftKey = row.dataset.priceDraft ?? '';
+    const rowKey = draftKey || row.dataset.priceRow || '';
+    if (!rowKey) return;
+    const idInput = event.target.closest('[data-price-id]');
+    if (idInput) {
+      typedIds.set(rowKey, idInput.value);
+    } else {
+      const priceKey = event.target.closest('[data-price-key]')?.dataset.priceKey;
+      if (!priceKey) return;
+      const bucket = typedPrices.get(rowKey) ?? {};
+      bucket[priceKey] = event.target.value;
+      typedPrices.set(rowKey, bucket);
+    }
+    dirty = true;
   });
   panel.addEventListener('click', (event) => {
     const action = event.target.closest('[data-price-action]')?.dataset.priceAction;
-    if (action === 'save') void save();
+    if (action === 'add') void addDraft();
+    else if (action === 'save') void save();
     else if (action === 'reset') void reset();
+    const drop = event.target.closest('[data-price-drop]');
+    if (!drop) return;
+    const id = drop.dataset.priceDrop;
+    dropped.add(id);
+    typedPrices.delete(id);
+    drop.closest('tr')?.remove();
+    dirty = true;
+    setSaveMsg(`已移除「${id}」的本机覆盖：保存后生效。`);
   });
 
   void load({ force: true });
